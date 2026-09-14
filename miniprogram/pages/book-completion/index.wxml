@@ -1,7 +1,7 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="flow-context">
     <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 全书进度</text>
-    <button class="flow-context-action" bindtap="openBookHome">书稿首页</button>
+    <button class="flow-context-action ui-pressable" bindtap="openBookHome">‹ 书稿首页</button>
   </view>
 
   <narration-mode-picker id="supplement-narration-modes" selected="book_completion"
@@ -120,14 +120,20 @@
             class="revision-action ui-block-action ui-pressable"
             aria-role="button"
             bindtap="openBookRevision"
-          >{{revisionJob.proposal_phase === "plan_ready" ? "查看修改思路" : "查看修改预览"}}</view>
+          >
+            <text>{{revisionJob.proposal_phase === "plan_ready" ? "查看修改思路" : "查看修改预览"}}</text>
+            <text class="row-action-mark">›</text>
+          </view>
           <view
             wx:else
             class="revision-action ui-block-action ui-pressable {{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling || requiredBookIssues.length ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling || requiredBookIssues.length}}"
             bindtap="generateBookRevision"
-          >{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</view>
+          >
+            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</text>
+            <text class="row-action-mark">›</text>
+          </view>
         </view>
 
         <text
@@ -157,14 +163,14 @@
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
-      >返回书稿</view>
+      ><text>返回书稿</text><text class="row-action-mark">›</text></view>
       <view
         wx:if="{{canReviewBook}}"
         class="recheck-book-action ui-block-action ui-pressable {{checkingBook || bookReviewCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{checkingBook || bookReviewCancelling}}"
         bindtap="reviewBook"
-      >{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</view>
+      ><text>{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</text><text class="row-action-mark">›</text></view>
     </view>
 
     <view wx:if="{{bulkCheckVisible}}" class="completion-notice">
@@ -189,7 +195,7 @@
         aria-role="button"
         aria-disabled="{{recheckingAll || bulkCheckCancelling}}"
         bindtap="checkPendingChapters"
-      >{{recheckingAll ? "正在检查章节…" : bulkCheckActionText}}</view>
+      ><text>{{recheckingAll ? "正在检查章节…" : bulkCheckActionText}}</text><text class="row-action-mark">›</text></view>
     </view>
 
     <view
@@ -209,7 +215,7 @@
       <text class="chapter-headline">{{item.headline}}</text>
       <text class="chapter-detail">{{item.detail}}</text>
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
-        {{item.actionText}}
+        <text>{{item.actionText}}</text><text class="chapter-action-mark">›</text>
       </view>
     </view>
 
@@ -220,7 +226,7 @@
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
-      >返回书稿</view>
+      ><text>返回书稿</text><text class="row-action-mark">›</text></view>
     </view>
   </view>
 </view>

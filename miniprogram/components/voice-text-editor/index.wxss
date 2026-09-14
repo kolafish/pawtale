@@ -13,8 +13,8 @@
   align-items: center;
   gap: 12rpx;
   border-radius: 12rpx;
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent-strong);
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
   font-size: 23rpx;
   line-height: 34rpx;
 }
@@ -36,8 +36,8 @@
   width: 100%;
   min-height: 176rpx;
   padding: 18rpx 20rpx;
-  border-radius: 12rpx;
-  background: var(--ui-surface);
+  border-radius: var(--ui-radius-inner);
+  background: var(--ui-surface-soft);
   color: var(--ui-text-primary);
   box-shadow: var(--ui-control-shadow);
   font-size: 27rpx;
@@ -61,33 +61,35 @@
 
 .voice-text-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-  gap: 14rpx;
+  grid-template-columns: 1fr;
+  gap: 10rpx;
   margin-top: 14rpx;
 }
 
 .voice-action,
 .submit-action,
 .cancel-action {
-  min-height: 80rpx;
+  position: relative;
+  min-height: 88rpx;
+  padding: 0 54rpx 0 58rpx;
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 12rpx;
+  justify-content: flex-start;
+  border-radius: var(--ui-radius-control);
   font-size: 25rpx;
   font-weight: 700;
 }
 
 .voice-action,
 .cancel-action {
-  background: var(--ui-surface);
+  background: var(--ui-surface-soft);
   color: var(--ui-text-secondary);
-  box-shadow: var(--ui-control-shadow);
 }
 
 .submit-action {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
+  background: var(--ui-surface);
+  color: var(--ui-text-primary);
+  box-shadow: var(--ui-card-shadow);
 }
 
 .cancel-action {
@@ -97,6 +99,36 @@
 .voice-action.recording {
   background: var(--ui-danger-surface);
   color: var(--ui-danger-text);
+}
+
+.voice-action::before,
+.submit-action::before {
+  content: "";
+  position: absolute;
+  left: 24rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: var(--ui-text-muted);
+}
+
+.submit-action::before {
+  background: var(--ui-accent);
+  box-shadow: 0 0 0 8rpx var(--ui-accent-surface);
+}
+
+.voice-action.recording::before {
+  background: var(--ui-danger-text);
+}
+
+.voice-action::after,
+.submit-action::after {
+  content: "›";
+  position: absolute;
+  right: 22rpx;
+  color: var(--ui-text-muted);
+  font-size: 36rpx;
+  font-weight: 300;
 }
 
 .is-disabled {

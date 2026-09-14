@@ -1,7 +1,7 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{workspace ? workspace.chapter_title : "本章正文"}} · {{focusedSectionId ? "当前小节" : "当前一步"}}</text>
-    <button class="workspace-home-action" bindtap="openBookHome">书稿首页</button>
+    <button class="workspace-home-action ui-button" bindtap="openBookHome">书稿首页</button>
   </view>
 
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
@@ -25,14 +25,14 @@
       </view>
       <view
         wx:if="{{nextAction.actionText}}"
-        class="primary-action {{nextAction.disabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action ui-pressable {{nextAction.disabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
       <view
         wx:if="{{workspace.completion_summary.state === 'confirmed'}}"
-        class="structure-regenerate-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+        class="structure-regenerate-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{operationKind !== ''}}"
         bindtap="openSectionStructure"
@@ -98,7 +98,7 @@
           >图片与视频</view>
           <view
             wx:elif="{{workspace.draft_version_id && workspace.draft_content}}"
-            class="chapter-read-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+            class="chapter-read-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
             bindtap="openChapterPreview"
@@ -120,7 +120,7 @@
           />
         </view>
         <view
-          class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="structure-regenerate-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
           bindtap="regenerateSections"
@@ -146,7 +146,7 @@
           />
         </view>
         <view
-          class="rewrite-action {{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="rewrite-action ui-pressable {{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
@@ -162,7 +162,7 @@
         >
           <view
             wx:if="{{!focusedSectionId}}"
-            class="section-toggle"
+            class="section-toggle ui-pressable"
             data-id="{{item.id}}"
             aria-role="button"
             aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}的讲述和正文"
@@ -176,7 +176,7 @@
             <view class="section-heading-actions">
               <text
                 wx:if="{{!item.requires_user_assignment}}"
-                class="section-rename-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+                class="section-rename-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.id}}"
                 data-title="{{item.title}}"
                 data-version="{{item.version}}"
@@ -193,7 +193,7 @@
             </view>
             <text
               wx:if="{{!item.requires_user_assignment}}"
-              class="section-rename-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+              class="section-rename-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
               data-id="{{item.id}}"
               data-title="{{item.title}}"
               data-version="{{item.version}}"
@@ -207,7 +207,7 @@
               <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
               <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
                 <view
-                  class="section-material-open"
+                  class="section-material-open ui-pressable"
                   data-utterance-id="{{material.utterance_id}}"
                   aria-role="button"
                   aria-label="{{item.requires_user_assignment ? '编辑或删除' : '查看与修改'}}{{material.indexText}}"
@@ -229,7 +229,7 @@
                   bindchange="moveUnassignedMaterial"
                 >
                   <view
-                    class="material-assignment-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                    class="material-assignment-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                     aria-role="button"
                     aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                   >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
@@ -251,12 +251,12 @@
               />
               <view class="edit-actions">
                 <button
-                  class="secondary-action"
+                  class="secondary-action ui-button"
                   disabled="{{operationKind !== ''}}"
                   bindtap="cancelDraftSectionEdit"
                 >取消</button>
                 <button
-                  class="secondary-action strong"
+                  class="secondary-action strong ui-button"
                   loading="{{operationKind === 'save_draft_section'}}"
                   disabled="{{operationKind === 'save_draft_section'}}"
                   bindtap="saveDraftSectionEdit"
@@ -267,21 +267,21 @@
               <block wx:elif="{{item.hasDraft}}">
                 <view class="draft-section-actions">
               <view
-                class="draft-section-action {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.id) ? 'is-disabled' : ''}}"
+                class="draft-section-action ui-pressable {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.id) ? 'is-disabled' : ''}}"
                 data-id="{{item.id}}"
                 aria-role="button"
                 aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.id)}}"
                 bindtap="playDraftSection"
               >{{audioPhase === "preparing" && audioTarget === item.id ? "准备朗读…" : (audioPhase === "playing" && audioTarget === item.id ? "停止朗读" : "朗读")}}</view>
               <view
-                class="draft-section-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.id}}"
                 aria-role="button"
                 aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                 bindtap="startDraftSectionEdit"
               >手动修改</view>
               <view
-                class="draft-section-action regenerate {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action regenerate ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.id}}"
                 aria-role="button"
                 aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -300,7 +300,7 @@
 
               <view
                 wx:if="{{!focusedSectionId && item.mergeTargetId}}"
-                class="section-merge-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                class="section-merge-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-source-id="{{item.id}}"
                 data-source-title="{{item.title}}"
                 data-target-id="{{item.mergeTargetId}}"
@@ -336,7 +336,7 @@
             />
           </view>
           <view
-            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+            class="primary-action draft-recovery-action ui-pressable {{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== ''}}"
             bindtap="runDraftRecoveryAction"
@@ -350,7 +350,7 @@
 
       <view
         wx:if="{{!focusedSectionId && workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action confirm-chapter-action ui-pressable {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{!canConfirmChapter || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="confirmChapter"
@@ -359,7 +359,7 @@
       <view wx:if="{{!focusedSectionId && workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
         <text class="chapter-finished-title">本章已确认</text>
         <text class="chapter-finished-detail">正文已经收入书稿。仍可重新分组或手动合并小节；调整后本章会回到待生成状态，需要重新确认。</text>
-        <view class="primary-action" aria-role="button" bindtap="returnToBookFlow">返回全书进度</view>
+        <view class="primary-action ui-pressable" aria-role="button" bindtap="returnToBookFlow">返回全书进度</view>
       </view>
     </view>
   </block>

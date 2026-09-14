@@ -46,12 +46,26 @@
         {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContentAvailable ? "已生成书稿" : progressText}}
       </text>
       <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
+      <image
+        class="book-header-illustration"
+        src="/assets/memoir-book-header.png"
+        mode="aspectFit"
+        aria-hidden="true"
+      />
     </view>
     <view class="progress-actions">
-      <button wx:if="{{bookContentAvailable}}" class="primary-button small" bindtap="openBookReader">阅读全书</button>
-      <button class="ghost-button small" bindtap="openStory">后台整理进度</button>
-      <button class="ghost-button small" bindtap="openBookCompletion">查看待确认事项</button>
-      <button wx:if="{{bookContentAvailable}}" class="ghost-button small" data-action="preview" bindtap="openBookExportPage">导出与成书设置</button>
+      <button wx:if="{{bookContentAvailable}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
+        <text>阅读全书</text><text class="progress-action-mark">›</text>
+      </button>
+      <button class="ghost-button small progress-action" bindtap="openStory">
+        <text>后台整理进度</text><text class="progress-action-mark">›</text>
+      </button>
+      <button class="ghost-button small progress-action" bindtap="openBookCompletion">
+        <text>查看待确认事项</text><text class="progress-action-mark">›</text>
+      </button>
+      <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" data-action="preview" bindtap="openBookExportPage">
+        <text>导出与成书设置</text><text class="progress-action-mark">›</text>
+      </button>
     </view>
   </view>
 
@@ -100,7 +114,7 @@
       <text class="image-assets-entry-meta">{{imageAssetSummaryText}}</text>
       <text class="image-assets-entry-note">统一查看生成图片，选择章节插图或书末图录。</text>
     </view>
-    <text class="image-assets-entry-action">管理</text>
+    <text class="image-assets-entry-action">管理 <text class="image-assets-entry-mark">›</text></text>
   </view>
 
   <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">

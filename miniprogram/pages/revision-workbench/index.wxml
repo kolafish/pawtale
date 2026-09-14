@@ -34,23 +34,11 @@
 
   <block wx:elif="{{proposal}}">
     <view class="revision-intro ui-card ui-card-borderless">
-      <text class="revision-kicker">
-        {{proposal.phase === "plan_ready"
-          ? (scope === "chapter_section" ? "小节修改思路" : "书稿修改思路")
-          : (scope === "chapter_section" ? "小节修改预览" : "书稿修改预览")}}
-      </text>
-      <text class="revision-title">
-        {{proposal.phase === "plan_ready"
-          ? "先确认怎么改，再生成修改稿"
-          : (scope === "chapter_section" ? "确认前，当前小节不会改变" : "确认前，当前书稿不会改变")}}
-      </text>
+      <text class="revision-kicker">{{proposal.phase === "plan_ready" ? (scope === "chapter_section" ? "小节修改思路" : "书稿修改思路") : (scope === "chapter_section" ? "小节修改预览" : "书稿修改预览")}}</text>
+      <text class="revision-title">{{proposal.phase === "plan_ready" ? "先确认怎么改，再生成修改稿" : (scope === "chapter_section" ? "确认前，当前小节不会改变" : "确认前，当前书稿不会改变")}}</text>
       <text class="revision-summary">{{proposal.summary}}</text>
-      <text wx:if="{{proposal.phase === 'plan_ready'}}" class="revision-meta ui-tabular">
-        共 {{proposal.revision_plan ? proposal.revision_plan.items.length : 0}} 项修改安排
-      </text>
-      <text wx:else class="revision-meta ui-tabular">
-        {{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节{{metadataChanges.length ? "；成书信息 " + metadataChanges.length + " 项" : ""}}
-      </text>
+      <text wx:if="{{proposal.phase === 'plan_ready'}}" class="revision-meta ui-tabular">共 {{proposal.revision_plan ? proposal.revision_plan.items.length : 0}} 项修改安排</text>
+      <text wx:else class="revision-meta ui-tabular">{{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节{{metadataChanges.length ? "；成书信息 " + metadataChanges.length + " 项" : ""}}</text>
       <text wx:if="{{proposal.status === 'stale'}}" class="status-notice error">
         当前书稿已经变化，这版预览不能再确认，请返回后重新生成。
       </text>

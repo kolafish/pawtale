@@ -9,7 +9,7 @@
 
   <block wx:else>
     <view class="export-hero ui-card">
-      <view>
+      <view class="export-hero-copy">
         <text class="eyebrow">成书中心</text>
         <text class="hero-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
         <text class="hero-meta">
@@ -36,7 +36,7 @@
       <view class="preview-card ui-card">
         <view class="section-head">
           <text class="section-title">全书预览</text>
-          <button class="text-button reader-entry-action" bindtap="openBookReader">阅读与朗读</button>
+          <button class="text-button reader-entry-action ui-button" bindtap="openBookReader">阅读与朗读</button>
         </view>
 
         <view wx:if="{{bookPreviewTocItems.length}}" class="toc-list">
@@ -55,7 +55,7 @@
 
         <view class="preview-toggle-row">
           <text class="preview-count">{{bookPreviewChapters.length}} 章预览</text>
-          <button class="text-button" bindtap="toggleBookPreviewChapters">
+          <button class="text-button ui-button" bindtap="toggleBookPreviewChapters">
             {{bookPreviewChaptersExpanded ? "收起" : "展开"}}
           </button>
         </view>
@@ -96,7 +96,7 @@
 
       <view class="export-actions">
         <button
-          class="primary-button"
+          class="primary-button export-action-row ui-button"
           data-action="reading_pdf"
           data-format="pdf"
           data-layout="standard"
@@ -105,10 +105,15 @@
           bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
-          阅读版 PDF
+          <text class="export-action-mark">阅</text>
+          <view class="export-action-copy">
+            <text class="export-action-title">阅读版 PDF</text>
+            <text class="export-action-meta">适合手机与平板阅读</text>
+          </view>
+          <text class="export-action-arrow">›</text>
         </button>
         <button
-          class="ghost-button"
+          class="ghost-button export-action-row ui-button"
           data-action="print_pdf"
           data-format="pdf"
           data-layout="large_print"
@@ -117,10 +122,15 @@
           bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
-          打印版 PDF
+          <text class="export-action-mark">印</text>
+          <view class="export-action-copy">
+            <text class="export-action-title">打印版 PDF</text>
+            <text class="export-action-meta">更大字号与装订边距</text>
+          </view>
+          <text class="export-action-arrow">›</text>
         </button>
         <button
-          class="ghost-button"
+          class="ghost-button export-action-row ui-button"
           data-action="text"
           data-format="txt"
           loading="{{bookExportBusyTarget === 'book-export:txt:standard'}}"
@@ -128,13 +138,18 @@
           bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
-          导出文本
+          <text class="export-action-mark">文</text>
+          <view class="export-action-copy">
+            <text class="export-action-title">导出文本</text>
+            <text class="export-action-meta">方便复制与继续编辑</text>
+          </view>
+          <text class="export-action-arrow">›</text>
         </button>
       </view>
       <text class="export-action-hint">{{exportActionHintText}}</text>
 
       <view
-        class="settings-toggle"
+        class="settings-toggle ui-pressable"
         aria-role="button"
         aria-expanded="{{showBookSettings}}"
         bindtap="toggleBookSettings"
@@ -182,7 +197,7 @@
             bindinput="changeBookTitle"
           />
           <button
-            class="book-title-ai"
+            class="book-title-ai ui-button"
             loading="{{bookTitleSuggesting}}"
             disabled="{{bookTitleSuggesting || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}"
             bindtap="suggestBookTitles"
@@ -246,7 +261,7 @@
           <view class="book-metadata-label-row">
             <text class="book-metadata-label">前言</text>
             <button
-              class="book-editorial-generate"
+              class="book-editorial-generate ui-button"
               data-target="preface"
               loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
@@ -271,7 +286,7 @@
           <view class="book-metadata-label-row">
             <text class="book-metadata-label">后记</text>
             <button
-              class="book-editorial-generate"
+              class="book-editorial-generate ui-button"
               data-target="afterword"
               loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
@@ -296,7 +311,7 @@
           <view class="book-metadata-label-row">
             <text class="book-metadata-label">封底摘录</text>
             <button
-              class="book-editorial-generate"
+              class="book-editorial-generate ui-button"
               data-target="back_cover_quote"
               loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
@@ -467,7 +482,7 @@
             <text class="advanced-meta">当前书稿会保留，新版本完成后可在历史版本里查看。</text>
           </view>
           <button
-            class="ghost-button compact"
+            class="ghost-button compact ui-button"
             loading="{{generatingBook}}"
             disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}"
             bindtap="generateBook"
