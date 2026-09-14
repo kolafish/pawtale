@@ -2215,11 +2215,15 @@ test("voice chat automatically interrupts assistant playback when server speech 
       return this.running;
     },
   };
+  let releaseConsent;
+  let consentCalls = 0;
+  const consentReady = new Promise(resolve => { releaseConsent = resolve; });
   const cancelReasons = [];
   const startOptions = [];
   const page = loadVoiceChatPage({
     voiceAuthorizationExports: {
       readVoiceAuthorizationConsent: () => true,
+      ensureVoiceRecordingAuthorization: () => { consentCalls++; return consentReady; },
     },
   });
   const context = {
@@ -2283,6 +2287,11 @@ test("voice chat automatically interrupts assistant playback when server speech 
   monitorOptions.onBargeIn();
   await new Promise((resolve) => setImmediate(resolve));
 
+  assert.equal(context.data.recordingStarting, true);
+  assert.equal(page.startRecording.call(context, false), true);
+  assert.equal(consentCalls, 1);
+  releaseConsent({ id: "consent-1" });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(monitor.running, false);
   assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
@@ -3377,4 +3386,25 @@ test("a save confirmed while hidden reaches the host once on return", () => {
   page.definition.lifetimes.detached.call(context);
   context.exitSession(detail);
   assert.equal(context.events.length, 1);
+});
+
+test("capture failure during consent sync cannot reopen a truncated recording later", async () => {
+  let releaseConsent;
+  const consentReady = new Promise(resolve => { releaseConsent = resolve; });
+  const page = loadVoiceChatPage({ voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true } });
+  let starts = 0;
+  const context = { ...page, data: { ...page.data, status: "ready", voiceAuthorizationAgreed: true },
+    voiceStreaming: { hasClient: () => true, async stopBargeInMonitoring() {},
+      startRecording() { starts++; return true; } },
+    async syncVoiceAuthorizationForSession() { return consentReady; },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+  };
+  assert.equal(page.startRecording.call(context), true);
+  await Promise.resolve();
+  page.handleError.call(context, "录音准备超时，请点按钮重新录音", { kind: "recorder" });
+  const pending = context.recordingStartPromise;
+  releaseConsent(true);
+  assert.equal(await pending, false);
+  assert.equal(starts, 0);
+  assert.equal(context.data.recording, false);
 });

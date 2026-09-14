@@ -69,11 +69,7 @@ export interface VoiceChatAssistantPlaybackMethods {
 export interface VoiceChatAssistantPlaybackHost extends VoiceChatDataContext {
   runtime(): VoiceSessionRuntime;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
-  startRecordingAfterPrivacy(
-    autoTriggered?: boolean,
-    speakerRole?: MemoirSpeakerRole,
-    requestedGeneration?: number,
-  ): Promise<boolean>;
+  startRecording(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): boolean;
   tryStartAutoListenAfterTTS(): Promise<boolean>;
 }
 
@@ -481,7 +477,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       return;
     }
     try {
-      await this.startRecordingAfterPrivacy(false);
+      if (this.startRecording(false)) await this.runtime().recordingStartPromise;
     } finally {
       await this.runtime().voiceStreaming.stopBargeInMonitoring(true);
     }

@@ -192,7 +192,7 @@ async function assertNarrationModes(owner, id, selected) {
   assert.equal((await picker.data()).selected, selected);
   const checked = await picker.$$(".is-selected");
   assert.equal(checked.length, 1);
-  assert.equal(await checked[0].attribute("id"), `mode-${selected}`);
+  assert.equal(await checked[0].attribute("data-mode"), selected);
   return picker;
 }
 
@@ -327,9 +327,12 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await (await elementById(next, "voice-finish-action")).tap();
     await waitForPageData(host, data => !data.voiceEntry, "结束空讲述并收起");
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
+    await waitForPageData(host, data => !data.loading && !data.creatingVoice && !data.voiceEntry, "首页完成刷新");
     session.artifacts.mark("voice:human:start");
+    await session.miniProgram.pageScrollTo(0);
     const humanPicker = await elementById(host, "home-narration-modes");
     await (await elementById(humanPicker, "mode-human_interview")).tap();
+    await waitForPageData(host, data => data.selectedMode === "human_interview", "选择真人访谈");
     await (await elementById(host, "primary-voice-action")).tap();
     const human = await elementById(host, "voice-session");
     await waitForPageData(human, data => data.status === "ready" && data.showHumanRecordActions, "真人访谈就绪");
@@ -343,6 +346,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await (await elementById(human, "voice-finish-action")).tap();
     await waitForPageData(host, data => !data.voiceEntry, "真人访谈结束");
     session.artifacts.mark("voice:supplement:select");
+    await session.miniProgram.pageScrollTo(0);
     const supplementPicker = await elementById(host, "home-narration-modes");
     await (await elementById(supplementPicker, "mode-book_completion")).tap();
     await (await elementById(host, "primary-voice-action")).tap();

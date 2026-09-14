@@ -98,3 +98,19 @@ test("server unavailability leaves manual recording available", async t => {
   assert.equal(h.callbacks.errors.length, 1);
   assert.equal(h.client.socketOpen, true);
 });
+
+test("manual interruption awaits a stop already requested by playback cancellation", async t => {
+  const h = harness(t); h.start();
+  let release;
+  h.native.stop = () => { h.native.stops++; release = () => h.native.callbacks.stop(); };
+  const first = h.client.stopBargeInMonitoring();
+  let stopped = false;
+  const second = h.client.stopBargeInMonitoring().then(() => { stopped = true; });
+  await Promise.resolve();
+  assert.equal(stopped, false);
+  assert.equal(h.native.stops, 1);
+  release(); await Promise.all([first, second]);
+  assert.equal(h.client.startRecording(), true);
+  assert.equal(h.native.starts, 2);
+  h.native.stop = () => h.native.callbacks.stop();
+});

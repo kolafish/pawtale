@@ -308,6 +308,10 @@ export class MemoirStreamingAsrClient {
 
   startBargeInMonitoring(callbacks: BargeInCallbacks): boolean {
     if (!this.socketOpen || this.recording || this.bargeInMode || this.acceptingFrames) return false;
+    if (this.recorderResource.isBusy()) {
+      callbacks.onError("麦克风正在使用中");
+      return false;
+    }
     this.bargeInMode = "monitoring";
     this.bargeInId = `${this.recorderOwnerId}-${++this.bargeInSerial}`;
     this.bargeInCallbacks = callbacks;
@@ -320,7 +324,13 @@ export class MemoirStreamingAsrClient {
   async stopBargeInMonitoring(discardPending = false): Promise<void> {
     // During the automatic interrupt, cancelling playback must keep the same
     // recorder alive until consent sync and session.start have completed.
-    if (!this.bargeInMode || (this.bargeInMode === "pending" && !discardPending)) return;
+    if (!this.bargeInMode) {
+      // Playback cancellation can already have requested a native stop. A
+      // subsequent manual-recording request must await that same stop.
+      if (!this.recording) await this.recorderResource.stopAndWait(this.recorderOwnerId);
+      return;
+    }
+    if (this.bargeInMode === "pending" && !discardPending) return;
     this.sendJson({ type: "barge_in.stop", monitor_id: this.bargeInId });
     this.resetBargeIn();
     this.clearRecorderStartTimer();
@@ -628,6 +638,7 @@ export class MemoirStreamingAsrClient {
         }
         this.bargeInMode = "pending";
         this.sendJson({ type: "barge_in.stop", monitor_id: this.bargeInId });
+        if (!this.socketOpen) return;
         this.bargeInPrepareTimer = setTimeout(() => {
           this.failBargeIn("录音准备超时，请点按钮重新录音");
         }, BARGE_IN_PREPARE_TIMEOUT_MS);
