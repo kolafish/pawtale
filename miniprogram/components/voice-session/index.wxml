@@ -85,7 +85,7 @@
         <checkbox
           value="voice_authorization"
           checked="{{voiceAuthorizationAgreed}}"
-          color="#a84f43"
+          color="#b65d49"
         />
         <view class="voice-auth-copy">
           <text>我已阅读并同意</text>
@@ -178,6 +178,23 @@
     </view>
   </view>
 
+  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
+    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
+    <view
+      id="voice-primary-action"
+      class="{{micButtonClass}}"
+      bindtap="toggleRecording"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
+      aria-label="{{micButtonText}}"
+    >
+      <view class="mic-icon-shell">
+        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
+      <text class="mic-button-text">{{micButtonText}}</text>
+    </view>
+  </view>
+
   <view class="transcript-stage">
     <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
       {{stageStatusText}}
@@ -236,19 +253,4 @@
     </view>
   </view>
 
-  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
-    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
-    <view
-      id="voice-primary-action"
-      class="{{micButtonClass}}"
-      bindtap="toggleRecording"
-      aria-role="button"
-      aria-disabled="{{micButtonDisabled}}"
-    >
-      <view class="mic-icon-shell">
-        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
-      <text class="mic-button-text">{{micButtonText}}</text>
-    </view>
-  </view>
 </view>

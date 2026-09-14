@@ -1,10 +1,10 @@
 <view class="ui-page-shell {{homePageClass}}">
-  <view class="header">
+  <view class="header" hidden="{{voiceEntry}}">
     <view class="header-main">
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
       </view>
-      <view class="header-actions" hidden="{{voiceEntry}}">
+      <view class="header-actions">
       <button id="home-settings" size="mini" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
       <button size="mini" class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
         分享
@@ -18,6 +18,13 @@
   <view id="home-narration">
   <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}" bindexit="exitVoiceSession" />
   <view hidden="{{voiceEntry}}">
+  <view class="memory-quote-card" aria-label="每个人的生活里，都有值得被记住的故事">
+    <view class="memory-quote">
+      <text>每个人的生活里，</text>
+      <text>都有值得被记住的故事。</text>
+    </view>
+    <image class="memory-landscape" src="/assets/memoir-landscape.png" mode="aspectFit" aria-hidden="true" />
+  </view>
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
       <text class="panel-label">{{launchEyebrow}}</text>
@@ -33,12 +40,10 @@
       aria-role="button"
       aria-disabled="{{creatingVoice}}"
     >
-      <view class="voice-start-icon-shell">
-        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
       <view class="voice-start-copy">
         <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
       </view>
+      <text class="voice-start-arrow" aria-hidden="true">›</text>
     </view>
     <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
       {{launchSecondaryText}}
@@ -80,14 +85,12 @@
       aria-role="button"
       aria-disabled="{{creatingVoice}}"
     >
-      <view class="voice-start-icon-shell">
-        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
       <view class="voice-start-copy">
         <text class="voice-start-title">{{primaryVoiceButtonTitle}}</text>
+        <text class="voice-start-subtitle">{{voiceStartNoteText}}</text>
       </view>
+      <text class="voice-start-arrow" aria-hidden="true">›</text>
     </view>
-    <text class="voice-start-note">{{voiceStartNoteText}}</text>
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <view id="home-more-actions" class="more-actions-toggle" bindtap="toggleMoreActions"
         hover-class="ui-subtle-action-hover" aria-role="button" aria-expanded="{{showMoreActions}}"
@@ -117,7 +120,7 @@
         <checkbox
           value="voice_authorization"
           checked="{{voiceAuthorizationAgreed}}"
-          color="#a84f43"
+          color="#b65d49"
         />
         <view class="voice-auth-copy">
           <text>我已阅读并同意</text>
@@ -167,6 +170,8 @@
       bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
   </view>
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
-    <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration" loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">继续讲述</button>
+    <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration" loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">
+      <text>继续讲述</text><text class="continue-narration-arrow" aria-hidden="true">›</text>
+    </button>
   </view>
 </view>
