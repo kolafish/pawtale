@@ -1,4 +1,5 @@
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
+import { AUTO_STOP_SILENCE_MS, AUTO_STOP_MIN_RECORDING_MS } from "../../services/voice-activity-detector";
 import {
   ensureVoiceRecordingAuthorization,
 } from "../../services/voice-authorization";
@@ -144,7 +145,8 @@ Component({
           voiceSessionId: this.properties.voiceSessionId || `dictation-${token}`,
           gatewayUrl: this.properties.gatewayUrl,
           guidanceMode: "free_narration",
-          autoStopSilenceMs: 0,
+          autoStopSilenceMs: AUTO_STOP_SILENCE_MS,
+          minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
           noVoiceActivityTimeoutMs: 0,
           callbacks: {
             onStatus: (status) => {
