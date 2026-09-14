@@ -336,11 +336,18 @@ test("home selection is separate from start and all three direct modes create th
   } });
   const context = pageContext(page, { projectId: "p1", userId: "u1", hasProject: true, voiceAuthorizationAgreed: true });
   context.measureNarration = () => {};
+  assert.equal(context.data.showMoreActions, false, "starting does not require opening the mode choices");
   for (const mode of ["guided_interview", "free_narration", "human_interview"]) {
     const before = created.length;
+    context.toggleMoreActions();
+    assert.equal(context.data.showMoreActions, true);
     context.selectNarrationMode({ detail: { value: mode } });
     assert.equal(context.data.selectedMode, mode);
     assert.equal(created.length, before, "selecting a mode does not start a session");
+    context.toggleMoreActions();
+    assert.equal(context.data.showMoreActions, false);
+    assert.equal(context.data.selectedMode, mode, "collapsing choices preserves the selected mode");
+    assert.ok(context.data.currentGuidanceText.includes({ guided_interview: "引导访谈", free_narration: "自由讲述", human_interview: "真人访谈" }[mode]));
     await context.startPrimaryVoiceChat();
     assert.equal(created.at(-1).guidance_mode, mode === "human_interview" ? "free_narration" : mode);
     assert.equal(created.at(-1).interview_type, mode === "human_interview" ? "human_interview" : "ai_interview");

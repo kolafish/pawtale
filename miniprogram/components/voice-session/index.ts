@@ -101,6 +101,9 @@ Component({
     hide() { this.onHide(); },
   },
   methods: {
+  toggleNarrationModes() {
+    applyVoiceChatDataPatch(this, { showNarrationModes: !this.data.showNarrationModes });
+  },
   runtime() { return voiceSessionRuntime(this); },
   exitSession(detail: VoiceSessionExit) {
     const runtime = this.runtime();
