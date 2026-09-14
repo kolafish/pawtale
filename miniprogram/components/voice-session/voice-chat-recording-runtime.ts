@@ -1,10 +1,11 @@
+import type { VoiceSessionRuntime } from "./voice-session-runtime";
 import type {
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
-import { returnToStory } from "../../services/navigation";
+import type { VoiceSessionExit } from "./events";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { assistantTurnQueueItem } from "../../services/voice-assistant-turn-queue";
 import {
@@ -14,7 +15,6 @@ import {
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
-import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
   canRequestFollowUp,
   latestPersistedAssistantMessageId,
@@ -79,17 +79,8 @@ export interface VoiceChatRecordingRuntimeMethods {
 }
 
 export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
-  voiceStreaming: StreamingVoiceController;
-  gatewayConnectPromise: Promise<boolean> | null;
-  recordingStartPromise: Promise<boolean> | null;
-  recordingStartGeneration: number;
-  pageSuspended: boolean;
-  followUpRequestSerial: number;
-  consecutiveNoAnswerPrompts: number;
-  handledNoAnswerFrameCount: number;
-  autoListenPendingAfterPlayback: boolean;
-  noAnswerPromptInFlight: boolean;
-  noAnswerPromptRequestSerial: number;
+  runtime(): VoiceSessionRuntime;
+  exitSession(detail: VoiceSessionExit): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
@@ -109,21 +100,20 @@ type VoiceChatRecordingRuntimeContext = VoiceChatRecordingRuntimeHost
 export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   & ThisType<VoiceChatRecordingRuntimeContext> = {
   connectGateway(): Promise<boolean> {
-    if (!this.data.voiceSessionId) {
+    if (!this.data.voiceSessionId || this.runtime().pageSuspended || this.runtime().disposed) {
       return Promise.resolve(false);
     }
-    if (this.gatewayConnectPromise) {
-      return this.gatewayConnectPromise;
-    }
+    const pending = this.runtime().gatewayConnectPromise;
+    if (pending) return pending;
     const connectPromise = this.performConnectGateway().catch((error) => {
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.handleError(message, classifyVoiceClientConnectionError(message));
       return false;
     });
-    this.gatewayConnectPromise = connectPromise;
+    this.runtime().gatewayConnectPromise = connectPromise;
     void connectPromise.finally(() => {
-      if (this.gatewayConnectPromise === connectPromise) {
-        this.gatewayConnectPromise = null;
+      if (this.runtime().gatewayConnectPromise === connectPromise) {
+        this.runtime().gatewayConnectPromise = null;
       }
     });
     return connectPromise;
@@ -133,7 +123,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     applyVoiceChatDataPatch(this, { connecting: true, error: "" });
     let connected = false;
     try {
-      await this.voiceStreaming.connect({
+      await this.runtime().voiceStreaming.connect({
         voiceSessionId: this.data.voiceSessionId,
         guidanceMode: this.data.guidanceMode,
         currentGuidanceModule: this.data.currentGuidanceModule,
@@ -184,11 +174,11 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     ) {
       return false;
     }
-    if (this.recordingStartPromise) {
+    if (this.runtime().recordingStartPromise) {
       return true;
     }
     applyVoiceChatDataPatch(this, voiceRecordingStartRequestedPatch());
-    const requestGeneration = ++this.recordingStartGeneration;
+    const requestGeneration = ++this.runtime().recordingStartGeneration;
     const startPromise = this.startRecordingAfterPrivacy(
       autoTriggered,
       speakerRole,
@@ -198,10 +188,10 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       this.handleError(message, { kind: "recorder", code: "recorder_start_failed", message });
       return false;
     });
-    this.recordingStartPromise = startPromise;
+    this.runtime().recordingStartPromise = startPromise;
     void startPromise.finally(() => {
-      if (this.recordingStartPromise === startPromise) {
-        this.recordingStartPromise = null;
+      if (this.runtime().recordingStartPromise === startPromise) {
+        this.runtime().recordingStartPromise = null;
         applyVoiceChatDataPatch(this, { recordingStarting: false });
       }
     });
@@ -213,24 +203,24 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     speakerRole?: MemoirSpeakerRole,
     requestedGeneration?: number,
   ) {
-    const requestGeneration = requestedGeneration ?? ++this.recordingStartGeneration;
+    const requestGeneration = requestedGeneration ?? ++this.runtime().recordingStartGeneration;
     const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
     const parentMessageId = this.data.interviewType === "human_interview"
       ? ""
       : latestPersistedAssistantMessageId(this.data.transcriptLines);
     if (!autoTriggered) {
-      this.consecutiveNoAnswerPrompts = 0;
+      this.runtime().consecutiveNoAnswerPrompts = 0;
       this.cancelPendingNoAnswerPrompt(!interruptingAssistant);
     }
     if (interruptingAssistant) {
-      this.followUpRequestSerial += 1;
+      this.runtime().followUpRequestSerial += 1;
       this.cancelFollowUpTTS("interrupted_by_user");
       applyVoiceChatDataPatch(this, voiceAssistantInterruptedPatch());
     }
     await this.stopAssistantBargeInMonitor();
     if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
+      requestGeneration !== this.runtime().recordingStartGeneration
+      || this.runtime().pageSuspended
       || this.data.finishingSession
       || bookCompletionRoundFinished(this.data)
     ) {
@@ -240,8 +230,8 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       return false;
     }
     if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
+      requestGeneration !== this.runtime().recordingStartGeneration
+      || this.runtime().pageSuspended
       || this.data.finishingSession
       || bookCompletionRoundFinished(this.data)
     ) {
@@ -249,25 +239,25 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     }
     if (
       this.data.connecting
-      || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
+      || voiceClientUnavailableForRecording(this.runtime().voiceStreaming.hasClient(), this.data.status)
     ) {
       applyVoiceChatDataPatch(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       const connected = await this.connectGateway();
       if (
         !connected
-        || requestGeneration !== this.recordingStartGeneration
-        || this.pageSuspended
+        || requestGeneration !== this.runtime().recordingStartGeneration
+        || this.runtime().pageSuspended
         || this.data.finishingSession
         || bookCompletionRoundFinished(this.data)
-        || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
+        || voiceClientUnavailableForRecording(this.runtime().voiceStreaming.hasClient(), this.data.status)
       ) {
         applyVoiceChatDataPatch(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
         return false;
       }
     }
     if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
+      requestGeneration !== this.runtime().recordingStartGeneration
+      || this.runtime().pageSuspended
       || this.data.finishingSession
       || bookCompletionRoundFinished(this.data)
     ) {
@@ -285,7 +275,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     } else if (parentMessageId) {
       recordingOptions.parentMessageId = parentMessageId;
     }
-    const started = this.voiceStreaming.startRecording(recordingOptions);
+    const started = this.runtime().voiceStreaming.startRecording(recordingOptions);
     if (!started) {
       applyVoiceChatDataPatch(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
       return false;
@@ -293,7 +283,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     if (!interruptingAssistant) {
       this.cancelFollowUpTTS();
     }
-    this.handledNoAnswerFrameCount = -1;
+    this.runtime().handledNoAnswerFrameCount = -1;
     applyVoiceChatDataPatch(this, voiceRecordingStartedPatch(autoTriggered));
     trackAuditAction(
       "voice_chat.recording_start",
@@ -308,7 +298,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       return;
     }
     if (this.data.recording) {
-      this.voiceStreaming.stopRecording();
+      this.runtime().voiceStreaming.stopRecording();
       applyVoiceChatDataPatch(this, voiceRecordingStoppedPatch());
       return;
     }
@@ -323,23 +313,23 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   async tryStartAutoListenAfterTTS() {
-    if (this.data.interviewType === "human_interview" || this.pageSuspended) {
+    if (this.data.interviewType === "human_interview" || this.runtime().pageSuspended) {
       return false;
     }
     const gate = this.autoListenGateSnapshot();
-    if (!this.autoListenPendingAfterPlayback || !gate.canStart) {
+    if (!this.runtime().autoListenPendingAfterPlayback || !gate.canStart) {
       return false;
     }
-    this.autoListenPendingAfterPlayback = false;
+    this.runtime().autoListenPendingAfterPlayback = false;
     return this.startRecordingAfterPrivacy(true);
   },
 
   cancelPendingNoAnswerPrompt(clearLoading: boolean = true) {
-    this.noAnswerPromptRequestSerial += 1;
-    if (!this.noAnswerPromptInFlight) {
+    this.runtime().noAnswerPromptRequestSerial += 1;
+    if (!this.runtime().noAnswerPromptInFlight) {
       return;
     }
-    this.noAnswerPromptInFlight = false;
+    this.runtime().noAnswerPromptInFlight = false;
     if (clearLoading) {
       applyVoiceChatDataPatch(this, { followUpLoading: false });
     }
@@ -349,27 +339,27 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     if (this.data.interviewType === "human_interview") {
       return;
     }
-    if (this.noAnswerPromptInFlight || !this.data.voiceSessionId) {
+    if (this.runtime().noAnswerPromptInFlight || !this.data.voiceSessionId) {
       return;
     }
-    this.noAnswerPromptInFlight = true;
-    const requestSerial = this.noAnswerPromptRequestSerial + 1;
-    this.noAnswerPromptRequestSerial = requestSerial;
+    this.runtime().noAnswerPromptInFlight = true;
+    const requestSerial = this.runtime().noAnswerPromptRequestSerial + 1;
+    this.runtime().noAnswerPromptRequestSerial = requestSerial;
     const { attempt, autoListenAfterPlayback } = noAnswerPromptPlan(
-      this.consecutiveNoAnswerPrompts,
+      this.runtime().consecutiveNoAnswerPrompts,
       MAX_CONSECUTIVE_NO_ANSWER_PROMPTS,
     );
-    this.consecutiveNoAnswerPrompts = attempt;
+    this.runtime().consecutiveNoAnswerPrompts = attempt;
     applyVoiceChatDataPatch(this, noAnswerPromptStartPatch());
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
-      if (requestSerial !== this.noAnswerPromptRequestSerial) {
+      if (requestSerial !== this.runtime().noAnswerPromptRequestSerial) {
         return;
       }
       this.enqueueAssistantTurn(assistantTurnQueueItem(response, { autoListenAfterPlayback }));
       applyVoiceChatDataPatch(this, noAnswerPromptQueuedPatch(autoListenAfterPlayback));
     } catch (error) {
-      if (requestSerial !== this.noAnswerPromptRequestSerial) {
+      if (requestSerial !== this.runtime().noAnswerPromptRequestSerial) {
         return;
       }
       applyVoiceChatDataPatch(this, noAnswerPromptFailedPatch(
@@ -382,8 +372,8 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         error instanceof Error ? error.message : "小余确认生成失败",
       ));
     } finally {
-      if (requestSerial === this.noAnswerPromptRequestSerial) {
-        this.noAnswerPromptInFlight = false;
+      if (requestSerial === this.runtime().noAnswerPromptRequestSerial) {
+        this.runtime().noAnswerPromptInFlight = false;
         applyVoiceChatDataPatch(this, { followUpLoading: false });
       }
     }
@@ -393,12 +383,12 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     if (this.data.finishingSession) {
       return;
     }
-    this.recordingStartGeneration += 1;
+    this.runtime().recordingStartGeneration += 1;
     this.stopCompletionIssueRefresh();
     this.cancelFollowUpTTS();
     applyVoiceChatDataPatch(this, finishSessionStartPatch(this.data.recording));
     try {
-      if (this.voiceStreaming.hasClient()) await this.voiceStreaming.finishSession();
+      if (this.runtime().voiceStreaming.hasClient()) await this.runtime().voiceStreaming.finishSession();
       const saved = await this.refreshVoiceSessionSnapshot();
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");
@@ -407,19 +397,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
-      if (this.data.sessionGoal === "book_completion") {
-        wx.showModal({
-          title: "本次补充已保存",
-          content: "回答已经直接放回相关小章节。返回后重新整理本章，就能生成更新后的正文。",
-          confirmText: "返回本章",
-          showCancel: false,
-          success: () => {
-            wx.navigateBack({ delta: 1 });
-          },
-        });
-        return;
-      }
-      if (!this.pageSuspended) returnToStory(this.data.projectId, saved.utterances.length > 0);
+      this.exitSession(this.data.sessionGoal === "book_completion"
+        ? { destination: "completion", explainSaved: true }
+        : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0 });
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
@@ -435,13 +415,13 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   handleCaptureStats(stats: MemoirCaptureStats) {
     const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
     const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
-      && this.handledNoAnswerFrameCount === stats.frameCount;
+      && this.runtime().handledNoAnswerFrameCount === stats.frameCount;
     const { patch, shouldHandleNoAnswerAutoStop } = voiceCaptureStatsPatch(stats, {
       noAnswerPromptAlreadyHandled,
     });
     applyVoiceChatDataPatch(this, patch);
-    if (shouldHandleNoAnswerAutoStop && !this.pageSuspended) {
-      this.handledNoAnswerFrameCount = stats.frameCount;
+    if (shouldHandleNoAnswerAutoStop && !this.runtime().pageSuspended) {
+      this.runtime().handledNoAnswerFrameCount = stats.frameCount;
       void this.handleNoAnswerAutoStop();
     }
   },
@@ -492,12 +472,12 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     if (!result) {
       return;
     }
-    this.consecutiveNoAnswerPrompts = 0;
+    this.runtime().consecutiveNoAnswerPrompts = 0;
     this.cancelPendingNoAnswerPrompt();
     const completedBookAnswer = this.data.sessionGoal === "book_completion"
       && result.line.role === "user";
     if (completedBookAnswer) {
-      this.autoListenPendingAfterPlayback = false;
+      this.runtime().autoListenPendingAfterPlayback = false;
     }
     applyVoiceChatDataPatch(this, {
       ...result.patch,
@@ -524,7 +504,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       this.data.interviewType !== "human_interview"
       && event.message_id
       && event.turn_final !== false
-      && !this.pageSuspended
+      && !this.runtime().pageSuspended
     ) {
       void this.generateFollowUp(false);
     }

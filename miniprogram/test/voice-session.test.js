@@ -6,7 +6,8 @@ const {
   flushAsyncWork,
   mockMemoirApiModules,
   clearModule,
-  loadPageModule,
+  loadComponentModule,
+  componentContext,
   mockModule,
   unmockedAsync,
 } = require("./page-harness");
@@ -69,7 +70,7 @@ function loadVoiceChatPage({
     ...voiceApiExports,
   });
   clearModule("../services/story-growth-notice.ts");
-  clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
+  clearModule("../components/voice-session/voice-chat-completion-issue-runtime.ts");
   clearModule("../services/audio-playback.ts");
   mockModule("../services/tts-text-progress.ts", {
     splitTextByAudioPlaybackProgress: () => ({
@@ -192,10 +193,15 @@ function loadVoiceChatPage({
   });
   clearModule("../services/voice-assistant-turn-runtime.ts");
   clearModule("../services/voice-assistant-turn-queue.ts");
-  clearModule("../pages/voice-chat/voice-chat-assistant-playback.ts");
-  clearModule("../pages/voice-chat/voice-chat-recording-runtime.ts");
+  clearModule("../components/voice-session/voice-chat-assistant-playback.ts");
+  clearModule("../components/voice-session/voice-chat-recording-runtime.ts");
 
-  return loadPageModule("../pages/voice-chat/index.ts").page;
+  clearModule("../components/voice-session/voice-session-runtime.ts");
+  const { createVoiceSessionRuntime } = require("../components/voice-session/voice-session-runtime.ts");
+  const component = loadComponentModule("../components/voice-session/index.ts").component;
+  return { ...component.methods, ...createVoiceSessionRuntime(), data: component.data,
+    definition: component, events: [], runtime() { return this; },
+    triggerEvent(name, detail) { this.events.push({ name, detail }); } };
 }
 
 function installAutoEndingAudioContext() {
@@ -338,6 +344,7 @@ test("book completion return stops the backend session when websocket is absent"
         outcome: "answered",
       },
     },
+    refreshVoiceSessionSnapshot: async () => ({ session: { status: "stopped" } }),
     recordingStartGeneration: 0,
     voiceStreaming: {
       hasClient: () => false,
@@ -352,7 +359,8 @@ test("book completion return stops the backend session when websocket is absent"
   await page.finishCompletionRound.call(context);
 
   assert.deepEqual(stoppedSessions, ["voice-1"]);
-  assert.deepEqual(navigations, [{ delta: 1 }]);
+  assert.deepEqual(navigations, []);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion" } }]);
   assert.equal(context.data.finishingSession, false);
 });
 
@@ -933,9 +941,8 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   await flushAsyncWork();
-  const { consumeHomeStoryTarget } = require("../services/navigation.ts");
-  assert.deepEqual(consumeHomeStoryTarget(), { projectId: "project-1", narrationSaved: true });
-  assert.deepEqual(storyTabs, ["/pages/home/index"]);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: true } }]);
+  assert.deepEqual(storyTabs, []);
 });
 
 test("book completion finish explains that the answer is already in its section", async () => {
@@ -990,14 +997,8 @@ test("book completion finish explains that the answer is already in its section"
   await page.connectGateway.call(context);
   await page.finishSession.call(context);
 
-  assert.equal(modals.length, 1);
-  assert.equal(modals[0].title, "本次补充已保存");
-  assert.equal(
-    modals[0].content,
-    "回答已经直接放回相关小章节。返回后重新整理本章，就能生成更新后的正文。",
-  );
-  assert.equal(modals[0].confirmText, "返回本章");
-  assert.equal(modals[0].showCancel, false);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", explainSaved: true } }]);
+  assert.deepEqual(modals, []);
 });
 
 test("voice chat save action cancels a recording start that is still authorizing", async () => {
@@ -3235,6 +3236,7 @@ test("failed saving and finishing in the background never navigate away or claim
     };
     await context.finishSession();
     assert.deepEqual(routes, []);
+    assert.deepEqual(context.events, []);
     assert.equal(context.data.finishingSession, false);
     if (!suspended) {
       assert.deepEqual(errors, ["音频尚未保存"]);
@@ -3260,8 +3262,8 @@ test("a closed voice client returns home only when the persisted session confirm
     await context.finishSession();
     assert.equal(context.data.finishingSession, false);
     if (status === "stopped") {
-      assert.deepEqual(routes, ["/pages/home/index"]);
-      assert.equal(require("../services/navigation.ts").consumeHomeStoryTarget().narrationSaved, false);
+      assert.deepEqual(routes, []);
+      assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: false } }]);
       assert.equal(context.data.persistenceStateText, "已保存");
     } else {
       assert.deepEqual(routes, []);
@@ -3269,4 +3271,42 @@ test("a closed voice client returns home only when the persisted session confirm
       assert.equal(errors.length, 1);
     }
   }
+});
+
+test("detaching a voice component during hydration cannot connect or update a later instance", async () => {
+  let resolveSnapshot;
+  let connects = 0;
+  const page = loadVoiceChatPage({
+    voiceApiExports: { getMemoirVoiceSession: () => new Promise(resolve => { resolveSnapshot = resolve; }) },
+    voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true },
+    streamingExports: { MemoirStreamingAsrClient: class { async connect() { connects += 1; } close() {} } },
+  });
+  const first = componentContext(page.definition);
+  const second = componentContext(page.definition);
+  assert.notEqual(first.runtime(), second.runtime());
+  assert.notEqual(first.runtime().voiceStreaming, second.runtime().voiceStreaming);
+  const pending = first.onLoad({ voiceSessionId: "old-session" });
+  page.definition.lifetimes.detached.call(first);
+  resolveSnapshot({ session: { id: "old-session", project_id: "old-project", status: "created" }, messages: [], utterances: [] });
+  await pending;
+  assert.equal(connects, 0);
+  assert.equal(first.runtime().disposed, true);
+  assert.equal(first.data.projectId, "");
+  assert.equal(second.runtime().disposed, false);
+  assert.equal(second.data.voiceSessionId, "");
+  assert.deepEqual(first.events, []);
+});
+
+test("a consent response received after hiding the component cannot open its gateway", async () => {
+  const page = loadVoiceChatPage();
+  let resolveConsent;
+  let connects = 0;
+  const context = componentContext(page.definition, {}, { voiceSessionId: "voice-1" });
+  context.syncVoiceAuthorizationForSession = () => new Promise(resolve => { resolveConsent = resolve; });
+  context.connectGateway = async () => { connects += 1; return true; };
+  const pending = context.syncVoiceAuthorizationAndConnect();
+  page.definition.pageLifetimes.hide.call(context);
+  resolveConsent(true);
+  assert.equal(await pending, false);
+  assert.equal(connects, 0);
 });

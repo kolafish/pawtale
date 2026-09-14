@@ -14,7 +14,7 @@ const {
   voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
   voiceRecordingUnavailablePatch,
-} = require("../pages/voice-chat/voice-chat-recording-flow.ts");
+} = require("../components/voice-session/voice-chat-recording-flow.ts");
 
 test("voice recording flow detects when recorder must reconnect first", () => {
   assert.equal(voiceClientUnavailableForRecording(false, "ready"), true);

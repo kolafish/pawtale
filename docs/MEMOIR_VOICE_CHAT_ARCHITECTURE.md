@@ -198,7 +198,7 @@ TTS 播放失败不能删除已经完成的文字回复，但必须显式展示�
 
 ## 八、成书补讲
 
-成书补讲复用同一 voice-chat 页面和 assistant turn，只额外绑定：
+成书补讲复用同一 voice-session 组件和 assistant turn，只额外绑定：
 
 - `session_goal = book_completion`；
 - 当前 CompletionIssue；
@@ -241,7 +241,8 @@ VoiceUtterance
 小程序：
 
 ```text
-pages/voice-chat/                         # 实时访谈页面
+components/voice-session/                 # 实时访谈界面与实例级录音、播放生命周期
+pages/voice-chat/                         # 访谈入口参数与完成后的页面导航
 pages/transcripts/                        # Material 列表
 pages/transcript-detail/                  # 转写、音频和人工校正
 pages/book-completion/                    # 全书补全概览
