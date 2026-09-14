@@ -89,7 +89,6 @@ interface HomeData extends HomeStoryData {
   launchEyebrow: string;
   launchTitle: string;
   launchBody: string;
-  launchPrimaryText: string;
   launchSecondaryText: string;
   hasProject: boolean;
   selectedMode: NarrationMode;
@@ -174,7 +173,7 @@ function launchCopy(
   projectDisplayTitle: string,
 ): Pick<
   HomeData,
-  "showLaunchPanel" | "showReturnPrompt" | "launchEyebrow" | "launchTitle" | "launchBody" | "launchPrimaryText" | "launchSecondaryText"
+  "showLaunchPanel" | "showReturnPrompt" | "launchEyebrow" | "launchTitle" | "launchBody" | "launchSecondaryText"
 > {
   if (variant === "first_visit") {
     return {
@@ -183,7 +182,6 @@ function launchCopy(
       launchEyebrow: "聊出一本书",
       launchTitle: "我的故事，慢慢讲",
       launchBody: "不用写，不用想完整。说一段，小余帮您整理成一页。一段段讲下去，就慢慢成了一本书。",
-      launchPrimaryText: "今天先聊一段",
       launchSecondaryText: "先看看首页",
     };
   }
@@ -194,7 +192,6 @@ function launchCopy(
       launchEyebrow: "新的故事本",
       launchTitle: `${projectDisplayTitle || "这本回忆录"}，慢慢讲`,
       launchBody: "不用写，不用想完整。说一段，小余帮您整理成一页。一段段讲下去，就慢慢成了一本书。",
-      launchPrimaryText: "今天先聊一段",
       launchSecondaryText: "先看看首页",
     };
   }
@@ -204,7 +201,6 @@ function launchCopy(
     launchEyebrow: "",
     launchTitle: "",
     launchBody: "",
-    launchPrimaryText: "今天先聊一段",
     launchSecondaryText: "先看看首页",
   };
 }
@@ -330,7 +326,6 @@ definePage<HomeData>()({
     launchEyebrow: "",
     launchTitle: "",
     launchBody: "",
-    launchPrimaryText: "今天先聊一段",
     launchSecondaryText: "先看看首页",
     hasProject: false,
     selectedMode: "free_narration",

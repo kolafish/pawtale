@@ -8,7 +8,7 @@ const {
   restoreStorageEntries,
   shutdownE2ESession,
 } = require("../support/session");
-const { waitForPageData, waitForValue } = require("../support/wait");
+const { waitForCurrentPage, waitForPageData, waitForValue } = require("../support/wait");
 const {
   FIXTURE_ASSISTANT_TEXT,
   FIXTURE_USER_TEXT,
@@ -75,7 +75,7 @@ before(async () => {
   process.env.PAWTALE_E2E_PASSWORD ||= "fixture-password";
   process.env.PAWTALE_E2E_HTTP_BASE_URL = endpoints.httpBaseUrl;
   process.env.PAWTALE_E2E_WS_BASE_URL = endpoints.wsBaseUrl;
-  session = await launchE2ESession();
+  session = await launchE2ESession({ initialPage: "/pages/login/index" });
   session.artifacts.mark("voice:setup:session-launched");
   originalVoicePreferences = await captureStorageEntries(session.miniProgram, [
     AI_MODEL_STORAGE_KEY,
@@ -197,6 +197,7 @@ async function assertNarrationModes(owner, id, selected) {
 }
 
 test("deterministic voice journey records, transcribes, answers, and plays TTS", async () => {
+  let lastVoiceData;
   try {
     session.artifacts.mark("voice:page:open:start");
     const host = await session.miniProgram.reLaunch("/pages/home/index");
@@ -222,6 +223,8 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       30000,
     );
     assert.equal(ready.voiceAuthorizationAgreed, true);
+    assert.equal(ready.recoveryNotice, "");
+    assert.equal(ready.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
     await assertNarrationModes(page, "session-narration-modes", "free_narration");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
@@ -243,14 +246,18 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await (await elementById(page, "voice-primary-action")).tap();
     const completed = await waitForPageData(
       page,
-      (data) => data.followUpLoading === false
+      (data) => {
+        lastVoiceData = data;
+        return data.followUpLoading === false
         && data.followUpTTSLoading === false
+        && data.ttsProgressPercent === 100
         && data.transcriptLines.some(
           (line) => line.role === "user" && line.text === FIXTURE_USER_TEXT,
         )
         && data.transcriptLines.some(
           (line) => line.role === "assistant" && line.text === FIXTURE_ASSISTANT_TEXT,
-        ),
+        );
+      },
       "ASR final、LLM 回应和 TTS 播放完成",
       30000,
     );
@@ -310,7 +317,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(nextReady.liveText, "");
     assert.equal(nextReady.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
+    session.artifacts.mark("voice:guided:leave");
     await session.miniProgram.navigateTo("/pages/voice-authorization/index");
+    session.artifacts.mark("voice:guided:return");
     await session.miniProgram.navigateBack();
     assert.equal((await host.data()).voiceEntry.voiceSessionId, fixture.state.sessionId);
     assert.equal((await next.data()).recording, false);
@@ -318,6 +327,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await (await elementById(next, "voice-finish-action")).tap();
     await waitForPageData(host, data => !data.voiceEntry, "结束空讲述并收起");
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
+    session.artifacts.mark("voice:human:start");
     const humanPicker = await elementById(host, "home-narration-modes");
     await (await elementById(humanPicker, "mode-human_interview")).tap();
     await (await elementById(host, "primary-voice-action")).tap();
@@ -332,21 +342,27 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await waitForPageData(human, data => !data.recording && data.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), "真人讲述保存");
     await (await elementById(human, "voice-finish-action")).tap();
     await waitForPageData(host, data => !data.voiceEntry, "真人访谈结束");
+    session.artifacts.mark("voice:supplement:select");
     const supplementPicker = await elementById(host, "home-narration-modes");
     await (await elementById(supplementPicker, "mode-book_completion")).tap();
     await (await elementById(host, "primary-voice-action")).tap();
-    const supplement = await session.miniProgram.currentPage();
-    assert.equal(supplement.path, "pages/book-completion/index");
+    const supplement = await waitForCurrentPage(session.miniProgram, "pages/book-completion/index");
     await waitForPageData(supplement, data => !data.loading && !data.error, "书稿待补问题页");
     const supplementModes = await assertNarrationModes(supplement, "supplement-narration-modes", "book_completion");
     assert.equal(fixture.state.createdSessions, 3, "补充方式先选问题，不提前开录音会话");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-supplement.png") });
     await (await elementById(supplementModes, "mode-free_narration")).tap();
+    await waitForCurrentPage(session.miniProgram, "pages/home/index");
     await waitForPageData(host, data => data.selectedMode === "free_narration", "返回首页选择自由讲述");
     await assertNarrationModes(host, "home-narration-modes", "free_narration");
     assert.deepEqual(fixture.state.unexpectedRequests, []);
   } catch (error) {
     failed = true;
+    session.artifacts.events.push({ kind: "voice-diagnostics", value: {
+      data: lastVoiceData,
+      assistantEvents: fixture.state.assistantClientEvents,
+      gatewayEventTypes: fixture.state.gatewayClientEvents.map(event => event.type),
+    } });
     await session.artifacts.captureFailure(session.miniProgram, error);
     throw error;
   }

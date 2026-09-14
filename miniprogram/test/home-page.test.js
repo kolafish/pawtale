@@ -257,7 +257,6 @@ test("home view patch keeps first-screen template state simple", () => {
     launchEyebrow: "新的故事本",
     launchTitle: "爷爷的故事，慢慢讲",
     launchBody: "",
-    launchPrimaryText: "今天先聊一段",
     launchSecondaryText: "先看看首页",
     hasProject: true,
     selectedMode: "free_narration",
@@ -308,8 +307,6 @@ test("home start action identifies the selected narration mode", () => {
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
   assert.equal(free.primaryVoiceButtonTitle, "开始自由讲述");
-
-
 });
 
 test("home only shows project actions and voice consent after a usable project has loaded", () => {
@@ -1054,7 +1051,9 @@ test("home persists voice authorization checkbox changes", () => {
 test("home keeps an explicit choice through cached refresh and return, but resets for another account or project", async () => {
   let identity = { id: "u1", display_name: "作者", email: "author@test.invalid", active_project_id: "p1",
     active_project: { id: "p1", title: "回忆录", metadata_json: { memoir_profile: { default_guidance_mode: "free_narration" } } } };
-  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => identity } });
+  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => identity },
+    cacheExports: { readCachedMemoirHome: () => ({ payload: { identity, latest_transcript: null, server_revision: 1 } }) },
+  });
   const context = pageContext(page);
   context.measureNarration = () => {};
   await context.onShow();

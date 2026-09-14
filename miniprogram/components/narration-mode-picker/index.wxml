@@ -13,5 +13,5 @@
       <text wx:if="{{!compact}}" class="narration-option-description">{{item.description}}</text>
     </view>
   </view>
-  <text class="narration-picker-hint">{{locked ? '本次方式已确定，结束讲述后可切换。' : '选好方式，再点下方按钮开始。'}}</text>
+  <text class="narration-picker-hint">{{locked ? '本次方式已确定，结束讲述后可切换。' : '选好方式，再开始讲述。'}}</text>
 </view>
