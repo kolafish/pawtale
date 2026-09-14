@@ -459,20 +459,6 @@
   margin-top: 14rpx;
 }
 
-.home-workspace-actions {
-  margin-top: 20rpx;
-  padding-top: 24rpx;
-  border-top: 1rpx solid var(--ui-divider);
-}
-
-.home-workspace-heading {
-  display: block;
-  margin-bottom: 8rpx;
-  color: var(--ui-text-secondary);
-  font-size: 28rpx;
-  line-height: 42rpx;
-}
-
 .home-workspace-link {
   min-height: 44px;
   padding: 20rpx 8rpx;
@@ -600,7 +586,7 @@
 }
 
 .resume-ask-button.button-blocked,
-.home-workspace-actions.button-blocked {
+.home-workspace-link.button-blocked {
   opacity: 0.72;
 }
 
@@ -733,7 +719,6 @@
 }
 
 .home-page.large-text .current-guidance,
-.home-page.large-text .home-workspace-heading,
 .home-page.large-text .home-workspace-hint {
   font-size: 32rpx;
   line-height: 48rpx;

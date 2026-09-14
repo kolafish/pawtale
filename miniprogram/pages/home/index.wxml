@@ -100,31 +100,7 @@
       </view>
       <view wx:if="{{showMoreActions}}" class="more-actions-panel">
         <view
-          class="{{resumeAskButtonClass}}"
-          bindtap="startAlternateGuidance"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>{{alternateModeButtonTitle}}</text>
-          <text class="resume-action-hint">用这个方式开始新讲述</text>
-        </view>
-        <view
-          class="{{resumeAskButtonClass}}"
-          bindtap="startHumanInterview"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>人工访谈</text>
-          <text class="resume-action-hint">由家人分别记录问与答</text>
-        </view>
-      </view>
-
-      <view class="home-workspace-actions {{creatingVoice ? 'button-blocked' : ''}}">
-        <text class="home-workspace-heading">回顾与整理</text>
-        <view
-          class="home-workspace-link"
+          class="home-workspace-link {{creatingVoice ? 'button-blocked' : ''}}"
           bindtap="openNarrationOverview"
           hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
           aria-role="button"
@@ -138,18 +114,35 @@
           <text class="home-workspace-arrow" aria-hidden="true">›</text>
         </view>
         <view
-          class="home-workspace-link"
+          class="{{resumeAskButtonClass}}"
+          bindtap="startAlternateGuidance"
+          hover-class="{{resumeAskButtonHoverClass}}"
+          aria-role="button"
+          aria-disabled="{{creatingVoice}}"
+        >
+          <text>{{alternateModeButtonTitle}}</text>
+          <text class="resume-action-hint">用这个方式开始新讲述</text>
+        </view>
+        <view
+          class="{{resumeAskButtonClass}}"
           bindtap="openBookWorkspace"
-          hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
+          hover-class="{{resumeAskButtonHoverClass}}"
           aria-role="button"
           aria-label="打开书稿，查看章节进度和待补内容"
           aria-disabled="{{creatingVoice}}"
         >
-          <view class="home-workspace-copy">
-            <text class="home-workspace-title">整理书稿</text>
-            <text class="home-workspace-hint">打开书稿，查看章节和待补内容</text>
-          </view>
-          <text class="home-workspace-arrow" aria-hidden="true">›</text>
+          <text>整理书稿</text>
+          <text class="resume-action-hint">打开书稿，查看章节和待补内容</text>
+        </view>
+        <view
+          class="{{resumeAskButtonClass}}"
+          bindtap="startHumanInterview"
+          hover-class="{{resumeAskButtonHoverClass}}"
+          aria-role="button"
+          aria-disabled="{{creatingVoice}}"
+        >
+          <text>人工访谈</text>
+          <text class="resume-action-hint">由家人分别记录问与答</text>
         </view>
       </view>
     </view>

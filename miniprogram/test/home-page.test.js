@@ -222,7 +222,7 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
-      moreActionsToggleText: "其他讲述方式",
+      moreActionsToggleText: "更多操作",
       alternateModeButtonTitle: "让小余陪着问",
       showVoiceAuthorizationPanel: false,
     },
@@ -256,8 +256,8 @@ test("home primary CTA and alternate action follow the current project's guidanc
     ...baseData,
     showMoreActions: true,
   });
-  assert.equal(expanded.moreActionsToggleText, "收起其他讲述方式");
-  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述方式");
+  assert.equal(expanded.moreActionsToggleText, "收起更多操作");
+  assert.equal(expanded.moreActionsToggleAriaLabel, "收起讲述与书稿操作");
 });
 
 test("home only shows project actions and voice consent after a usable project has loaded", () => {
