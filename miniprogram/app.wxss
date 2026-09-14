@@ -29,6 +29,7 @@ page {
   --ui-radius-control: 18rpx;
   --ui-page-inline: 32rpx;
   --ui-font-editorial: "Songti SC", STSong, "Noto Serif CJK SC", serif;
+  --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx);
   --ui-card-shadow:
     0 0 0 1rpx rgba(54, 42, 34, 0.035),
     0 4rpx 12rpx rgba(63, 47, 37, 0.035),
@@ -104,10 +105,7 @@ image {
     var(--ui-fixed-action-top, 24rpx)
     var(--ui-fixed-action-inline, 32rpx)
     calc(var(--ui-fixed-action-bottom, 24rpx) + env(safe-area-inset-bottom));
-  background: var(
-    --ui-fixed-action-background,
-    linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx)
-  );
+  background: var(--ui-fixed-action-background);
 }
 
 .ui-button {
