@@ -29,14 +29,24 @@ VoiceSession
   → 下一轮或结束
 ```
 
-同一套语音技术链支持三类目标：
+界面固定提供四种讲述方式，名称和说明统一来自 `memoir-narration-mode.ts`：
 
-- `open_narration`：自由讲述，AI 以倾听和轻提示为主；
-- `guided_interview`：主题讲述，AI 根据话题地图选择候选方向；
-- `book_completion`：成书补讲，只围绕一个当前 CompletionIssue。
+| 讲述方式 | 用户怎么使用 | guidance_mode | interview_type | session_goal |
+| --- | --- | --- | --- | --- |
+| 自由讲述 | 按自己的节奏讲，AI 倾听与轻提示 | free_narration | ai_interview | open_narration |
+| 引导访谈 | AI 按人物、事件和话题提问 | guided_interview | ai_interview | open_narration |
+| 书稿补充 | 先选待补问题，再围绕该问题补讲 | guided_interview | ai_interview | book_completion |
+| 真人访谈 | 家人朋友提问，分别记录采访者和讲述者 | free_narration | human_interview | open_narration |
 
-`guidance_mode` 表达引导强度，`session_goal` 表达业务目标。两者不能混成一套
-隐式状态。
+四项是产品入口；`guidance_mode` 表达引导强度，`interview_type` 表达谁来访谈，
+`session_goal` 表达业务目标。保持现有三个显式字段，不将其混成新的后端状态。
+
+首页先选择、再开始，四项和选中标记始终完整展示。项目默认仅用于初次进入该用户/项目；
+同一范围的刷新、离页返回和结束讲述不覆盖已选方式。切换账号或项目重新读取对应默认。
+开始后按服务端会话字段标记本次方式，准备、录音、AI 回应、大字模式和保存阶段均保留
+四项；一轮内锁定方式，结束后再选择下一轮。真人转写复用普通内容区域，不用全屏层遮住方式。
+书稿补充必须先绑定待补问题，选择方式本身不创建会话。书稿问题列表保留同一四项入口，
+换成其他方式时回到首页选择；章节补讲的返回关系不变。
 
 ## 二、核心持久化
 

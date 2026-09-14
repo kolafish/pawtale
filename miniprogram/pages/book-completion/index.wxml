@@ -4,6 +4,9 @@
     <button class="flow-context-action" bindtap="openBookHome">书稿首页</button>
   </view>
 
+  <narration-mode-picker id="supplement-narration-modes" selected="book_completion"
+    large-text="{{largeTextEnabled}}" bindchange="selectNarrationMode" />
+
   <view class="page-intro">
     <text class="page-kicker">整理成书</text>
     <text class="page-title">{{headline}}</text>

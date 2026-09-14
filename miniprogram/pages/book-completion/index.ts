@@ -1,3 +1,4 @@
+import { isNarrationMode, type NarrationModeEvent } from "../../domain/memoir-narration-mode";
 import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
@@ -10,6 +11,7 @@ import {
 import {
   accessibilityPageClass,
   accessibilityPagePatch,
+  readLargeTextEnabled,
 } from "../../services/accessibility-settings";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
@@ -28,7 +30,7 @@ import {
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-book-completion-api";
-import { returnToBook, routeAuthError } from "../../services/navigation";
+import { returnToHomeNarrationMode, returnToBook, routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -82,6 +84,7 @@ function activeTaskProgress(title: string, detail: string): TaskProgressView {
 
 interface BookCompletionData {
   pageClass: string;
+  largeTextEnabled: boolean;
   projectId: string;
   projectTitle: string;
   loading: boolean;
@@ -437,6 +440,7 @@ definePage<BookCompletionData>()({
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
+    largeTextEnabled: readLargeTextEnabled(),
     projectId: "",
     projectTitle: "",
     loading: true,
@@ -479,7 +483,7 @@ definePage<BookCompletionData>()({
   },
 
   async onShow() {
-    this.setData(accessibilityPagePatch(PAGE_CLASS));
+    this.setData({ ...accessibilityPagePatch(PAGE_CLASS), largeTextEnabled: readLargeTextEnabled() });
     this.pageVisible = true;
     await this.loadOverview();
   },
@@ -497,6 +501,12 @@ definePage<BookCompletionData>()({
   async onPullDownRefresh() {
     await this.loadOverview();
     wx.stopPullDownRefresh();
+  },
+
+  selectNarrationMode({ detail }: NarrationModeEvent) {
+    if (this.data.projectId && isNarrationMode(detail.value) && detail.value !== "book_completion") {
+      returnToHomeNarrationMode(this.data.projectId, detail.value);
+    }
   },
 
   openBookHome() {

@@ -1,6 +1,6 @@
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
-import { guidanceModeLabel } from "../../services/memoir-project-profile";
+import { NARRATION_MODES, narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   MemoirGuidanceMode,
   MemoirInterviewType,
@@ -108,6 +108,7 @@ export interface VoiceChatData {
   storyGrowthNoticeActionText: string;
   progressNoticeTitle: string;
   progressNoticeDetail: string;
+  narrationMode: NarrationMode;
   topModeLabel: string;
   topSubtitle: string;
   topicTitleText: string;
@@ -149,7 +150,6 @@ export interface VoiceChatData {
   liveScrollTarget: string;
   liveScrollTop: number;
   liveTextEndId: string;
-  showHumanTranscriptOverlay: boolean;
   showCaptureStrip: boolean;
   captureStripClass: string;
   showLiveCharCount: boolean;
@@ -256,7 +256,8 @@ export function initialVoiceChatData(): VoiceChatData {
     storyGrowthNoticeActionText: "",
     progressNoticeTitle: "",
     progressNoticeDetail: "",
-    topModeLabel: guidanceModeLabel("free_narration"),
+    narrationMode: "free_narration",
+    topModeLabel: NARRATION_MODES.free_narration.label,
     topSubtitle: "按自己的节奏讲述",
     topicTitleText: "这段回忆",
     showHumanRecordActions: false,
@@ -297,7 +298,6 @@ export function initialVoiceChatData(): VoiceChatData {
     liveScrollTarget: "",
     liveScrollTop: 0,
     liveTextEndId: "live-text-end",
-    showHumanTranscriptOverlay: false,
     showCaptureStrip: true,
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
@@ -343,6 +343,7 @@ export function applyVoiceChatDataPatch(
 export type VoiceChatViewPatch = Pick<
   VoiceChatData,
   | "finishButtonText"
+  | "narrationMode"
   | "topModeLabel"
   | "topSubtitle"
   | "topicTitleText"
@@ -384,7 +385,6 @@ export type VoiceChatViewPatch = Pick<
   | "liveScrollTarget"
   | "liveScrollTop"
   | "liveTextEndId"
-  | "showHumanTranscriptOverlay"
   | "showCaptureStrip"
   | "captureStripClass"
   | "showLiveCharCount"
@@ -475,7 +475,6 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     && state.voiceAuthorizationAgreed;
   const showControlBar = !showHumanRecordActions && !completionRoundFinished;
   const showStageStatus = !isHumanInterview || Boolean(state.error);
-  const showHumanTranscriptOverlay = isHumanInterview && state.recording;
   const showCaptureStrip = (!isHumanInterview || state.recording)
     && !completionRoundFinished;
   let stageStatusText = "可以开始讲了";
@@ -592,10 +591,13 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     state.completionIssueError ? "error-state" : "",
     completionIssueStatus === "closed" ? "complete-state" : "",
   ].filter(Boolean).join(" ");
+  const narrationMode = narrationModeForSession({ guidance_mode: state.guidanceMode,
+    interview_type: state.interviewType, session_goal: state.sessionGoal });
   return {
+    narrationMode,
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
-    topModeLabel: isBookCompletion ? "书稿补充访谈" : (isHumanInterview ? "真人访谈" : guidanceModeLabel(state.guidanceMode)),
+    topModeLabel: NARRATION_MODES[narrationMode].label,
     topSubtitle: isBookCompletion
       ? "一次只补一个重点"
       : (isHumanInterview
@@ -650,7 +652,6 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     liveScrollTarget: state.liveScrollTarget,
     liveScrollTop: state.liveScrollTop,
     liveTextEndId: state.liveTextEndId,
-    showHumanTranscriptOverlay,
     showCaptureStrip,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),

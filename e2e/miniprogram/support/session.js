@@ -135,6 +135,7 @@ async function launchE2ESession(options = {}) {
     });
     artifacts.mark("setup:automator-launch:complete");
     artifacts.attach(miniProgram);
+    if (options.initialPage) await miniProgram.callWxMethod("reLaunch", { url: options.initialPage });
     await waitForCurrentPageReady(miniProgram);
     artifacts.mark("setup:first-page-ready");
     session = {

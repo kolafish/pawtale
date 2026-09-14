@@ -39,7 +39,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); },
   });
   mockModule("../services/navigation.ts", {
-    consumeHomeVoiceTarget: () => null,
+    consumeHomeVoiceTarget: () => null, consumeHomeNarrationMode: () => null,
     consumeHomeStoryTarget: () => { const target = navigationTarget; navigationTarget = null; return target; },
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => [401, 403].includes(error?.statusCode),

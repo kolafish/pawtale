@@ -1,0 +1,13 @@
+.narration-picker { margin: 16rpx 0 24rpx; }
+.narration-picker-title { display: block; margin-bottom: 14rpx; color: var(--ui-text-secondary); font-size: 28rpx; }
+.narration-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12rpx; }
+.narration-option { min-width: 0; min-height: 88rpx; padding: 18rpx; border-radius: 20rpx; background: var(--ui-surface); box-shadow: var(--ui-control-shadow); }
+.narration-option.is-selected { background: var(--ui-accent-surface); box-shadow: inset 0 0 0 2rpx var(--ui-accent); }
+.narration-option-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4rpx; color: var(--ui-text-primary); font-size: 30rpx; font-weight: 600; line-height: 1.45; }
+.narration-option-check { color: var(--ui-accent-strong); font-size: 24rpx; white-space: nowrap; }
+.narration-option-description { display: block; margin-top: 6rpx; color: var(--ui-text-secondary); font-size: 24rpx; line-height: 1.5; }
+.narration-picker-hint { display: block; margin-top: 12rpx; color: var(--ui-text-secondary); font-size: 24rpx; line-height: 1.5; }
+.narration-picker-large .narration-option-heading { font-size: 34rpx; }
+.narration-picker-large .narration-option-check,
+.narration-picker-large .narration-option-description,
+.narration-picker-large .narration-picker-hint { font-size: 28rpx; }

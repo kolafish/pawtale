@@ -257,7 +257,6 @@ test("home view patch keeps first-screen template state simple", () => {
     launchEyebrow: "新的故事本",
     launchTitle: "爷爷的故事，慢慢讲",
     launchBody: "",
-    launchPrimaryText: "今天先聊一段",
     launchSecondaryText: "先看看首页",
     hasProject: true,
     selectedMode: "free_narration",
@@ -274,8 +273,6 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
       voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
       showResumeActions: homeViewPatch(baseData).showResumeActions,
-      moreActionsToggleText: homeViewPatch(baseData).moreActionsToggleText,
-      alternateModeButtonTitle: homeViewPatch(baseData).alternateModeButtonTitle,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
@@ -283,18 +280,16 @@ test("home view patch keeps first-screen template state simple", () => {
       launchModeTagText: "新故事本",
       projectHeadingText: "爷爷的故事",
       projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
-      primaryVoiceButtonTitle: "随便讲一段",
+      primaryVoiceButtonTitle: "开始自由讲述",
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
-      moreActionsToggleText: "更多操作",
-      alternateModeButtonTitle: "老余引导访谈",
       showVoiceAuthorizationPanel: false,
     },
   );
 });
 
-test("home primary CTA and alternate action follow the current project's guidance mode", () => {
+test("home start action identifies the selected narration mode", () => {
   const { homeViewPatch } = loadHomePage().mod;
   const baseData = {
     ...loadHomePage().page.data,
@@ -307,24 +302,11 @@ test("home primary CTA and alternate action follow the current project's guidanc
     ...baseData,
     selectedMode: "guided_interview",
   });
-  assert.equal(guided.currentGuidanceText, "当前讲述方式：老余引导访谈");
-  assert.equal(guided.primaryVoiceButtonTitle, "老余引导访谈");
-  assert.equal(guided.voiceStartNoteText, "AI 按话题提问，帮助您展开回忆。");
-  assert.equal(guided.alternateModeButtonTitle, "自由讲述");
-  assert.equal(guided.alternateModeHintText, "按自己的节奏讲，想到哪里讲到哪里");
+  assert.equal(guided.primaryVoiceButtonTitle, "开始引导访谈");
+  assert.equal(guided.voiceStartNoteText, "AI 按人物、事件和话题提问，帮您展开回忆。");
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
-  assert.equal(free.currentGuidanceText, "当前讲述方式：自由讲述");
-  assert.equal(free.primaryVoiceButtonTitle, "随便讲一段");
-  assert.equal(free.alternateModeButtonTitle, "老余引导访谈");
-  assert.equal(free.alternateModeHintText, "AI 按话题提问，帮助您展开回忆");
-
-  const expanded = homeViewPatch({
-    ...baseData,
-    showMoreActions: true,
-  });
-  assert.equal(expanded.moreActionsToggleText, "收起更多操作");
-  assert.equal(expanded.moreActionsToggleAriaLabel, "收起讲述与书稿操作");
+  assert.equal(free.primaryVoiceButtonTitle, "开始自由讲述");
 });
 
 test("home only shows project actions and voice consent after a usable project has loaded", () => {
@@ -346,43 +328,27 @@ test("home only shows project actions and voice consent after a usable project h
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
 });
 
-test("home primary and alternate CTAs create sessions with their displayed guidance modes", async () => {
-  const createdModes = [];
-  global.wx = {
-    navigateTo() {},
-  };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      createMemoirVoiceSession: async (input) => {
-        createdModes.push(input.guidance_mode);
-        return { session: { id: `voice-${createdModes.length}` } };
-      },
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      selectedMode: "guided_interview",
-      projectId: "project-1",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  for (const mode of ["guided_interview", "free_narration"]) {
-    context.data.selectedMode = mode;
-    await page.startPrimaryVoiceChat.call(context);
+test("home selection is separate from start and all three direct modes create the displayed session", async () => {
+  const created = [];
+  global.wx = { pageScrollTo() {} };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: async input => { created.push(input); return { session: { id: `s${created.length}` } }; },
+  } });
+  const context = pageContext(page, { projectId: "p1", userId: "u1", hasProject: true, voiceAuthorizationAgreed: true });
+  context.measureNarration = () => {};
+  for (const mode of ["guided_interview", "free_narration", "human_interview"]) {
+    const before = created.length;
+    context.selectNarrationMode({ detail: { value: mode } });
+    assert.equal(context.data.selectedMode, mode);
+    assert.equal(created.length, before, "selecting a mode does not start a session");
+    await context.startPrimaryVoiceChat();
+    assert.equal(created.at(-1).guidance_mode, mode === "human_interview" ? "free_narration" : mode);
+    assert.equal(created.at(-1).interview_type, mode === "human_interview" ? "human_interview" : "ai_interview");
+    assert.equal(created.at(-1).session_goal, "open_narration");
+    context.selectNarrationMode({ detail: { value: "book_completion" } });
+    assert.equal(context.data.selectedMode, mode, "an active session keeps its own mode");
     context.data.voiceEntry = null;
-    await page.startAlternateGuidance.call(context);
-    context.data.voiceEntry = null;
-    assert.equal(context.data.selectedMode, mode, "starting an alternate session preserves the project default");
   }
-
-  assert.deepEqual(createdModes, ["guided_interview", "free_narration", "free_narration", "guided_interview"]);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -481,7 +447,6 @@ test("home refreshes guidance mode from current project on load", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.currentGuidanceText, "当前讲述方式：老余引导访谈");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
@@ -790,7 +755,8 @@ test("home daily actions create free narration and human interview sessions", as
 
   await page.startPrimaryVoiceChat.call(context);
   context.data.voiceEntry = null; // The prior component has completed and unmounted.
-  await page.startHumanInterview.call(context);
+  context.selectNarrationMode({ detail: { value: "human_interview" } });
+  await context.startPrimaryVoiceChat();
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
@@ -803,7 +769,7 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(context.data.voiceEntry.interviewType, "human_interview");
 });
 
-test("home opens project-scoped supplement questions before creating an interview or requiring microphone consent", () => {
+test("home opens project-scoped supplement questions before creating an interview or requiring microphone consent", async () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -826,18 +792,20 @@ test("home opens project-scoped supplement questions before creating an intervie
     },
   };
 
-  page.openBookSupplementInterview.call(context);
+  context.selectNarrationMode({ detail: { value: "book_completion" } });
+  await context.startPrimaryVoiceChat();
 
   const url = new URL(navigations[0], "https://miniprogram.test");
   assert.equal(navigations.length, 1);
   assert.equal(url.pathname, "/pages/book-completion/index");
   assert.equal(url.searchParams.get("projectId"), "project/1");
   assert.equal(url.searchParams.get("projectTitle"), "爷爷的故事");
-  assert.equal(context.data.selectedMode, "free_narration");
+  assert.equal(context.data.selectedMode, "book_completion");
   assert.equal(context.data.error, "");
 
   context.data.creatingVoice = true;
-  page.openBookSupplementInterview.call(context);
+  context.selectNarrationMode({ detail: { value: "book_completion" } });
+  await context.startPrimaryVoiceChat();
   page.openNarrationOverview.call(context);
   assert.equal(navigations.length, 1, "navigation waits for voice preparation to finish");
 });
@@ -1078,4 +1046,47 @@ test("home persists voice authorization checkbox changes", () => {
   assert.equal(savedValue, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
   assert.equal(context.data.error, "");
+});
+
+test("home keeps an explicit choice through cached refresh and return, but resets for another account or project", async () => {
+  let identity = { id: "u1", display_name: "作者", email: "author@test.invalid", active_project_id: "p1",
+    active_project: { id: "p1", title: "回忆录", metadata_json: { memoir_profile: { default_guidance_mode: "free_narration" } } } };
+  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => identity },
+    cacheExports: { readCachedMemoirHome: () => ({ payload: { identity, latest_transcript: null, server_revision: 1 } }) },
+  });
+  const context = pageContext(page);
+  context.measureNarration = () => {};
+  await context.onShow();
+  assert.equal(context.data.selectedMode, "free_narration");
+  for (const mode of ["guided_interview", "book_completion", "human_interview", "free_narration"]) {
+    context.selectNarrationMode({ detail: { value: mode } });
+    await context.loadHome(true);
+    context.onHide();
+    await context.onShow();
+    assert.equal(context.data.selectedMode, mode);
+  }
+  context.selectNarrationMode({ detail: { value: "human_interview" } });
+  identity = { ...identity, id: "u2" };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "free_narration");
+  identity = { ...identity, active_project_id: "p2", active_project: { ...identity.active_project, id: "p2",
+    metadata_json: { memoir_profile: { default_guidance_mode: "guided_interview" } } } };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "guided_interview");
+  context.onUnload();
+});
+
+test("returning from supplement selection applies the requested mode only to the matching project", async () => {
+  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => ({ id: "u1", display_name: "作者", email: "author@test.invalid", active_project_id: "p1", active_project: { id: "p1", title: "回忆录" } }) } });
+  const { returnToHomeNarrationMode } = require("../services/navigation.ts");
+  global.wx = { reLaunch() {} };
+  const context = pageContext(page);
+  context.measureNarration = () => {};
+  returnToHomeNarrationMode("p1", "human_interview");
+  await context.onShow();
+  assert.equal(context.data.selectedMode, "human_interview");
+  returnToHomeNarrationMode("other-project", "guided_interview");
+  await context.onShow();
+  assert.equal(context.data.selectedMode, "human_interview");
+  context.onUnload();
 });

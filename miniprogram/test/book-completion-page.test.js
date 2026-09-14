@@ -12,7 +12,7 @@ const {
   unmockedAsync,
 } = require("./page-harness");
 
-function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
+function loadBookCompletionPage({ voiceApiExports = {}, navigationExports = {} } = {}) {
   mockMemoirApiModules({
     getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
     enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),
@@ -25,6 +25,7 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", {
+    ...navigationExports,
     returnToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
     routeAuthError: () => false,
   });
@@ -924,4 +925,17 @@ test("unconfirmed readable chapters can review the book and stale manual decisio
   const review = bookReviewViewPatch(null, issues);
   assert.deepEqual(review.requiredBookIssues.map((issue) => issue.id), ["privacy"]);
   assert.deepEqual(review.optionalBookIssues, []);
+});
+
+
+test("supplement mode selection returns the chosen mode and project to home without creating a session", () => {
+  const targets = [];
+  const { page } = loadBookCompletionPage({ navigationExports: {
+    returnToHomeNarrationMode: (projectId, mode) => targets.push({ projectId, mode }),
+  } });
+  const context = pageContext(page, { projectId: "p1" });
+  for (const value of ["book_completion", "free_narration", "guided_interview", "human_interview"]) {
+    context.selectNarrationMode({ detail: { value } });
+  }
+  assert.deepEqual(targets, ["free_narration", "guided_interview", "human_interview"].map(mode => ({ projectId: "p1", mode })));
 });

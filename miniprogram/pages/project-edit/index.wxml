@@ -59,7 +59,8 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">讲述方式</text>
+      <text class="field-label ui-section-heading">AI 的默认引导方式</text>
+      <text class="mode-desc">仅设置 AI 的默认方式；四种讲述方式在首页选择。</text>
       <view class="mode-list">
         <view
           wx:for="{{guidanceOptions}}"
