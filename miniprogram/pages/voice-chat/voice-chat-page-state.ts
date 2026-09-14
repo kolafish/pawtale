@@ -1,5 +1,6 @@
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
+import { guidanceModeLabel } from "../../services/memoir-project-profile";
 import type {
   MemoirGuidanceMode,
   MemoirInterviewType,
@@ -255,8 +256,8 @@ export function initialVoiceChatData(): VoiceChatData {
     storyGrowthNoticeActionText: "",
     progressNoticeTitle: "",
     progressNoticeDetail: "",
-    topModeLabel: "AI 访谈",
-    topSubtitle: "小余陪您慢慢讲",
+    topModeLabel: guidanceModeLabel("free_narration"),
+    topSubtitle: "按自己的节奏讲述",
     topicTitleText: "这段回忆",
     showHumanRecordActions: false,
     showControlBar: true,
@@ -594,8 +595,12 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   return {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
-    topModeLabel: isBookCompletion ? (isHumanInterview ? "人工补访" : "补全成书") : (isHumanInterview ? "人工访谈" : "AI 访谈"),
-    topSubtitle: isBookCompletion ? "一次只补一个重点" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
+    topModeLabel: isBookCompletion ? "书稿补充访谈" : (isHumanInterview ? "真人访谈" : guidanceModeLabel(state.guidanceMode)),
+    topSubtitle: isBookCompletion
+      ? "一次只补一个重点"
+      : (isHumanInterview
+        ? "实时记录采访者和被访者"
+        : (state.guidanceMode === "guided_interview" ? "AI 按话题提问，帮助您展开回忆" : "按自己的节奏讲述")),
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
@@ -732,7 +737,7 @@ export function voiceChatSessionEntryPatch(options: {
     voiceAuthorizationAgreed: options.voiceAuthorizationAgreed,
     primaryActionText: options.voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     autoListenEnabled: !isHumanInterview,
-    autoListenStateText: isHumanInterview ? "人工访谈不自动追问" : "小余说完自动听",
+    autoListenStateText: isHumanInterview ? "真人访谈不自动追问" : "小余说完自动听",
     canRequestFollowUp: false,
   };
 }
