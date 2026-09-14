@@ -53,6 +53,10 @@ Component({
       this.triggerEvent("opentranscripts");
     },
 
+    openVoiceEdit() {
+      this.triggerEvent("voiceedit");
+    },
+
     openChapterManager() {
       this.triggerEvent("managechapters");
     },

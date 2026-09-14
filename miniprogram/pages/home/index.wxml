@@ -202,7 +202,7 @@
       </view>
     </view>
     <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && hasStories}}"
-      bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
+      bind:voiceedit="openVoiceEdit" bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
       bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
   </view>
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">

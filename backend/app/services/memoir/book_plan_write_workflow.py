@@ -413,6 +413,7 @@ async def _set_chapter_book_inclusion(
     project_id: str,
     plan: MemoirBookPlan,
     req: MemoirBookPlanStructureCommandRequest,
+    commit: bool = True,
 ) -> MemoirBookPlanResponse:
     if req.include_in_book is None:
         raise HTTPException(status_code=400, detail="缺少章节成书收录状态")
@@ -441,7 +442,7 @@ async def _set_chapter_book_inclusion(
     db.add(plan)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="structure")
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节收录状态保存失败")
@@ -488,6 +489,7 @@ async def _save_chapter_title(
     model: str | None = None,
     prompt_snapshot: str = "",
     structure_operation: str | None = None,
+    commit: bool = True,
 ) -> MemoirBookPlanResponse:
     now = datetime.now(UTC).isoformat()
     previous_title = chapter.title
@@ -520,7 +522,7 @@ async def _save_chapter_title(
     db.add(plan)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="structure")
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节标题保存失败")
@@ -685,6 +687,7 @@ async def apply_book_plan_structure_command(
     project_id: str,
     req: MemoirBookPlanStructureCommandRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirBookPlanResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
@@ -703,6 +706,7 @@ async def apply_book_plan_structure_command(
             title=req.title,
             updated_by=MemoirCreatedBy.USER,
             structure_operation=req.type,
+            commit=commit,
         )
 
     if req.type == "set_chapter_book_inclusion":
@@ -711,6 +715,7 @@ async def apply_book_plan_structure_command(
             project_id=project_id,
             plan=plan,
             req=req,
+            commit=commit,
         )
 
     chapters = _sorted_plan_chapters(plan)
@@ -763,7 +768,7 @@ async def apply_book_plan_structure_command(
     db.add(plan)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="structure")
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
