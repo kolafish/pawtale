@@ -151,6 +151,10 @@
 .finish-button {
   width: 156rpx;
   height: 80rpx;
+  margin: 0;
+  padding: 0 12rpx;
+  flex-shrink: 0;
+  white-space: nowrap;
   border-radius: 24rpx;
   background: var(--ui-surface);
   color: var(--ui-section-title);
@@ -1634,4 +1638,8 @@
   min-width: 76rpx;
   height: 46rpx;
   font-size: 22rpx;
+}
+.voice-chat-page.voice-session-embedded {
+  min-height: 0;
+  padding: 0;
 }

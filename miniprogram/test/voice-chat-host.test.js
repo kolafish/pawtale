@@ -9,7 +9,8 @@ test("voice page forwards entry and returns a completed supplement to its chapte
   const context = pageContext(loadPageModule("../pages/voice-chat/index.ts").page);
   const entry = { voiceSessionId: "voice-1", sessionGoal: "book_completion" };
   context.onLoad(entry);
-  assert.deepEqual(context.data.entry, entry);
+  assert.equal(context.data.entry.voiceSessionId, entry.voiceSessionId);
+  assert.equal(context.data.entry.sessionGoal, entry.sessionGoal);
   context.exitSession({ detail: { destination: "completion", explainSaved: true } });
   assert.equal(modals[0].title, "本次补充已保存");
   assert.equal(modals[0].confirmText, "返回本章");

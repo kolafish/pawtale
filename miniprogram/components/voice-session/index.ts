@@ -1,14 +1,11 @@
 import type {
-  MemoirGuidanceMode,
-  MemoirInterviewType,
-  MemoirSessionGoal,
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
 import { voiceSessionRuntime } from "./voice-session-runtime";
-import type { VoiceSessionExit } from "./events";
+import type { VoiceSessionEntry, VoiceSessionExit } from "./events";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
 import {
@@ -73,9 +70,7 @@ import {
 import {
   datasetString,
   queryChoice,
-  queryParam,
   type PageDatasetEvent,
-  type PageQuery,
 } from "../../services/page-input";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
@@ -92,16 +87,13 @@ interface OpeningTopicDataset {
 
 type OpeningTopicTapEvent = PageDatasetEvent<OpeningTopicDataset>;
 type SpeakerRoleTapEvent = PageDatasetEvent<{ role?: string }>;
-const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
-const INTERVIEW_TYPE_VALUES: readonly MemoirInterviewType[] = ["ai_interview", "human_interview"];
-const SESSION_GOAL_VALUES: readonly MemoirSessionGoal[] = ["open_narration", "book_completion"];
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
 Component({
-  properties: { entry: { type: Object, value: null } },
+  properties: { entry: { type: Object, value: null }, embedded: { type: Boolean, value: false } },
   data: initialVoiceChatData(),
   lifetimes: {
-    attached() { void this.onLoad(this.properties.entry as PageQuery); },
+    attached() { void this.onLoad(this.properties.entry as VoiceSessionEntry); },
     detached() { this.onUnload(); },
   },
   pageLifetimes: {
@@ -111,7 +103,14 @@ Component({
   methods: {
   runtime() { return voiceSessionRuntime(this); },
   exitSession(detail: VoiceSessionExit) {
-    if (!this.runtime().pageSuspended) this.triggerEvent("exit", detail);
+    const runtime = this.runtime();
+    if (runtime.disposed) return;
+    if (runtime.pageSuspended) {
+      runtime.pendingExit = detail;
+    } else {
+      runtime.pendingExit = null;
+      this.triggerEvent("exit", { ...detail, voiceSessionId: this.data.voiceSessionId });
+    }
   },
 
   completionIssues() {
@@ -145,15 +144,11 @@ Component({
     });
   },
 
-  async onLoad(query?: PageQuery) {
+  async onLoad(entry: VoiceSessionEntry) {
     if (this.data.voiceSessionId) return;
     this.refreshAccessibilitySettings();
-    const voiceSessionId = queryParam(query, "voiceSessionId");
-    const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
-    const interviewType = queryChoice(query, "interviewType", INTERVIEW_TYPE_VALUES, "ai_interview");
-    const sessionGoal = queryChoice(query, "sessionGoal", SESSION_GOAL_VALUES, "open_narration");
-    const currentGuidanceModule = queryParam(query, "module");
-    const projectTitle = queryParam(query, "projectTitle");
+    const { voiceSessionId, mode: guidanceMode = "free_narration", interviewType = "ai_interview",
+      sessionGoal = "open_narration", module: currentGuidanceModule = "", projectTitle = "" } = entry;
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
     applyVoiceChatDataPatch(this, voiceChatSessionEntryPatch({
       voiceSessionId,
@@ -186,6 +181,11 @@ Component({
     if (this.runtime().disposed) return;
     const wasSuspended = this.runtime().pageSuspended;
     this.runtime().pageSuspended = false;
+    const pendingExit = this.runtime().pendingExit;
+    if (pendingExit) {
+      this.exitSession(pendingExit);
+      return;
+    }
     this.startProgressNoticeWatch();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
@@ -295,6 +295,7 @@ Component({
   },
 
   startProgressNoticeWatch() {
+    if (this.properties.embedded) return;
     const projectId = this.data.projectId;
     if (this.runtime().pageSuspended || !projectId || this.runtime().progressNoticeWatcher.projectId === projectId) return;
     this.runtime().progressNoticeWatcher.start(projectId, (events) => {
@@ -412,6 +413,10 @@ Component({
     try {
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       if (this.runtime().disposed) return null;
+      const expectedProject = (this.properties.entry as VoiceSessionEntry | null)?.projectId;
+      if (expectedProject && expectedProject !== detail.session.project_id) {
+        throw new Error("这次讲述不属于当前回忆录，请重新进入。");
+      }
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
       await this.refreshCompletionIssue();

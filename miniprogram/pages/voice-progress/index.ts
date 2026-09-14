@@ -22,7 +22,7 @@ import {
   getMemoirVoiceProgress,
   listMemoirVoiceSessions,
 } from "../../services/memoir-voice-session-api";
-import { routeAuthError } from "../../services/navigation";
+import { returnToHomeVoice, routeAuthError } from "../../services/navigation";
 import { definePage } from "../../services/page-definition";
 import {
   datasetString,
@@ -60,6 +60,7 @@ interface OverviewData {
   loading: boolean;
   error: string;
   activeProjectId: string;
+  userId: string;
   projectTitle: string;
   progress: MemoirVoiceProgressResponse;
   sessions: VoiceSessionSummaryView[];
@@ -261,6 +262,7 @@ definePage<OverviewData>()({
     loading: false,
     error: "",
     activeProjectId: "",
+    userId: "",
     projectTitle: "",
     progress: EMPTY_PROGRESS,
     sessions: [],
@@ -292,6 +294,7 @@ definePage<OverviewData>()({
       if (!activeProjectId) {
         this.setData({
           activeProjectId: "",
+          userId: identity.id,
           projectTitle: "",
           progress: EMPTY_PROGRESS,
           sessions: [],
@@ -306,6 +309,7 @@ definePage<OverviewData>()({
       ]);
       this.setData({
         activeProjectId,
+        userId: identity.id,
         projectTitle: identity.active_project?.title || "当前回忆录",
         progress,
         sessions: sessionList.items.map(toSessionView),
@@ -333,13 +337,14 @@ definePage<OverviewData>()({
       });
       return;
     }
-    wx.navigateTo({
-      url: pageUrl("/pages/voice-chat/index", {
-        voiceSessionId: item.id,
-        mode: item.guidance_mode,
-        module: item.current_guidance_module,
-      }),
-    });
+    const entry = { voiceSessionId: item.id, projectId: item.project_id,
+      mode: item.guidance_mode, module: item.current_guidance_module || "",
+      interviewType: item.interview_type, sessionGoal: item.session_goal };
+    if (item.session_goal === "book_completion") {
+      wx.navigateTo({ url: pageUrl("/pages/voice-chat/index", entry) });
+    } else {
+      returnToHomeVoice({ userId: this.data.userId, projectId: item.project_id, entry });
+    }
   },
 
   chooseResolution(event: DatasetEvent) {
@@ -401,15 +406,11 @@ definePage<OverviewData>()({
       }, {
         projectId: this.data.activeProjectId,
       });
-      wx.navigateTo({
-        url: pageUrl("/pages/voice-chat/index", {
-          voiceSessionId: detail.session.id,
-          mode: "guided_interview",
-          interviewType: "ai_interview",
-          sessionGoal: "open_narration",
-          projectTitle: item.title,
-        }),
-      });
+      returnToHomeVoice({ userId: this.data.userId, projectId: this.data.activeProjectId, entry: {
+        voiceSessionId: detail.session.id, projectId: this.data.activeProjectId,
+        mode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration",
+        projectTitle: item.title,
+      } });
     } catch (error) {
       if (routeAuthError(error)) {
         return;

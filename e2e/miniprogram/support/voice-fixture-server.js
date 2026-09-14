@@ -13,11 +13,11 @@ function timestamp() {
   return "2026-08-25T00:00:00Z";
 }
 
-function initialAssistantMessage() {
+function initialAssistantMessage(sessionId = FIXTURE_SESSION_ID) {
   return {
     id: "e2e-opening-message",
     project_id: FIXTURE_PROJECT_ID,
-    voice_session_id: FIXTURE_SESSION_ID,
+    voice_session_id: sessionId,
     role: "assistant",
     content_text: "准备好了，您可以开始讲。",
     content_status: "final",
@@ -42,6 +42,8 @@ function createVoiceFixtureServer() {
     gatewayClientEvents: [],
     gatewayConnections: [],
     httpRequests: [],
+    createdSessions: 0,
+    sessionId: FIXTURE_SESSION_ID,
     sessionStatus: "created",
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
@@ -51,7 +53,7 @@ function createVoiceFixtureServer() {
   function sessionDetail() {
     return {
       session: {
-        id: FIXTURE_SESSION_ID,
+        id: state.sessionId,
         project_id: FIXTURE_PROJECT_ID,
         status: state.sessionStatus,
         guidance_mode: "free_narration",
@@ -95,9 +97,46 @@ function createVoiceFixtureServer() {
     const body = await requestBody(request);
     state.httpRequests.push({ method: request.method, path: url.pathname, body });
 
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/story-snapshot") {
+      const project = { id: FIXTURE_PROJECT_ID, title: "E2E 回忆录", metadata_json: {} };
+      respond(response, 200, {
+        server_revision: state.httpRequests.length,
+        identity: { id: "e2e-user", display_name: "测试作者", email: "fixture@example.invalid",
+          active_project_id: project.id, active_project: project, projects: [project] },
+        latest_transcript: null, chapters: [], growth_events: [],
+        book_issues: { review_count: 0, supplement_count: 0 },
+        book_readable: false, book_char_count: 0, book_chapter_count: 0, updated_at: timestamp(),
+        unassigned_image_count: 0, unassigned_video_count: 0,
+        progress: state.utterances.length ? {
+          project_id: FIXTURE_PROJECT_ID, status: "processing", stage: "organizing",
+          title: "正在整理这次讲述", detail: "讲述已保存，正在归入故事", can_retry: false,
+          material_count: state.utterances.length, pending_material_count: state.utterances.length,
+          needs_user_material_count: 0, readable_chapter_count: 0, total_chapter_count: 0,
+        } : null, automation_events: { items: [], total: 0, limit: 8 },
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/mobile/memoir/voice-sessions") {
+      state.createdSessions += 1;
+      state.sessionId = `${FIXTURE_SESSION_ID}-${state.createdSessions}`;
+      state.sessionStatus = "created";
+      state.messages = [initialAssistantMessage(state.sessionId)];
+      state.utterances = [];
+      respond(response, 200, sessionDetail());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/automation-events`) {
+      respond(response, 200, { items: [], total: 0, limit: 8 });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/draft-progress`) {
+      respond(response, 200, { status: "idle", title: "等待讲述", detail: "", can_retry: false });
+      return;
+    }
+
     if (
       request.method === "GET"
-      && url.pathname === `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}`
+      && url.pathname === `/api/mobile/memoir/voice-sessions/${state.sessionId}`
     ) {
       respond(response, 200, sessionDetail());
       return;
@@ -146,7 +185,7 @@ function createVoiceFixtureServer() {
     state.messages.push({
       id: FIXTURE_USER_MESSAGE_ID,
       project_id: FIXTURE_PROJECT_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       role: "user",
       content_text: FIXTURE_USER_TEXT,
       content_status: "final",
@@ -161,7 +200,7 @@ function createVoiceFixtureServer() {
     });
     state.utterances.push({
       id: FIXTURE_UTTERANCE_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       chat_message_id: FIXTURE_USER_MESSAGE_ID,
       audio_file_id: "e2e-user-audio",
       transcript_raw: FIXTURE_USER_TEXT,
@@ -182,7 +221,7 @@ function createVoiceFixtureServer() {
     state.messages.push({
       id: FIXTURE_ASSISTANT_MESSAGE_ID,
       project_id: FIXTURE_PROJECT_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       role: "assistant",
       content_text: FIXTURE_ASSISTANT_TEXT,
       content_status: "final",
@@ -260,7 +299,7 @@ function createVoiceFixtureServer() {
       persistAssistantTurn();
       const metadata = {
         turn_id: "e2e-turn",
-        voice_session_id: FIXTURE_SESSION_ID,
+        voice_session_id: state.sessionId,
       };
       send(webSocket, {
         ...metadata,
@@ -330,8 +369,8 @@ function createVoiceFixtureServer() {
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
-    const gatewayPath = `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}/gateway`;
-    const assistantPath = `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}/assistant-turn-stream`;
+    const gatewayPath = `/api/mobile/memoir/voice-sessions/${state.sessionId}/gateway`;
+    const assistantPath = `/api/mobile/memoir/voice-sessions/${state.sessionId}/assistant-turn-stream`;
     if (url.pathname !== gatewayPath && url.pathname !== assistantPath) {
       state.unexpectedRequests.push({ method: "WS", path: url.pathname });
       socket.destroy();
@@ -356,9 +395,11 @@ function createVoiceFixtureServer() {
       state.gatewayClientEvents.length = 0;
       state.gatewayConnections.length = 0;
       state.httpRequests.length = 0;
+      state.createdSessions = 0;
+      state.sessionId = FIXTURE_SESSION_ID;
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";
-      state.messages = [initialAssistantMessage()];
+      state.messages = [initialAssistantMessage(state.sessionId)];
       state.utterances = [];
     },
     async start() {

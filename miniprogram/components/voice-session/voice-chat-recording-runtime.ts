@@ -399,7 +399,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
       this.exitSession(this.data.sessionGoal === "book_completion"
         ? { destination: "completion", explainSaved: true }
-        : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0 });
+        : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0, finished: true });
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
