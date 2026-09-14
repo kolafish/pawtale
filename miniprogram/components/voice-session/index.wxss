@@ -1635,3 +1635,7 @@
   height: 46rpx;
   font-size: 22rpx;
 }
+.voice-chat-page.voice-session-embedded {
+  min-height: 0;
+  padding: 0;
+}

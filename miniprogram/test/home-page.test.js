@@ -6,6 +6,8 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   mockMemoirApiModules,
+  pageContext,
+  flushAsyncWork,
   loadPageModule,
   mockModule,
   clearModule,
@@ -92,8 +94,71 @@ function loadHomePage({
   });
 
   clearModule("../services/story-growth-notice.ts");
-  return loadPageModule("../pages/home/index.ts");
+  const loaded = loadPageModule("../pages/home/index.ts");
+  loaded.page.homeVisible = true;
+  return loaded;
 }
+
+test("home starts once and defers mounting a session created while hidden", async () => {
+  const creation = deferred();
+  let creates = 0;
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: () => { creates += 1; return creation.promise; },
+  } });
+  global.wx = { pageScrollTo() {} };
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true, voiceAuthorizationAgreed: true });
+  const pending = context.startPrimaryVoiceChat();
+  await flushAsyncWork();
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+  context.onHide();
+  creation.resolve({ session: { id: "s1" } });
+  await pending;
+  assert.equal(context.data.voiceEntry, null);
+  context.homeVisible = true;
+  context.openPendingVoiceSession();
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s1");
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+});
+
+test("home ignores consent and session responses for an account or project that changed", async () => {
+  for (const duringCreation of [false, true]) {
+    const pending = deferred();
+    let creates = 0;
+    const { page } = loadHomePage({
+      voiceAuthorizationExports: { syncVoiceAuthorizationConsent: () => duringCreation ? Promise.resolve() : pending.promise },
+      voiceApiExports: { createMemoirVoiceSession: () => { creates += 1; return pending.promise; } },
+    });
+    const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true, voiceAuthorizationAgreed: true });
+    const starting = context.startPrimaryVoiceChat();
+    await flushAsyncWork();
+    context.setData({ userId: "u2", projectId: "p2" });
+    pending.resolve({ session: { id: "old-session" } });
+    await starting;
+    assert.equal(creates, duringCreation ? 1 : 0);
+    assert.equal(context.data.voiceEntry, null);
+    assert.equal(context.voiceNavigationTarget, null);
+  }
+});
+
+test("home closes only the current confirmed session, then refreshes the story in place", async () => {
+  const { page } = loadHomePage();
+  const context = pageContext(page, { userId: "u1", projectId: "p1", voiceEntry: { voiceSessionId: "s2" } });
+  let refreshes = 0, storyViews = 0;
+  context.measureNarration = () => {};
+  context.loadHome = async () => { refreshes += 1; };
+  context.openStoryProgress = () => { storyViews += 1; };
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s1", narrationSaved: true, finished: true } });
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s2");
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s2", narrationSaved: false } });
+  assert.equal(storyViews, 1);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s2");
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s2", narrationSaved: false, finished: true } });
+  assert.equal(context.data.voiceEntry, null, "an empty but confirmed session can also close");
+  assert.equal(refreshes, 1);
+  assert.deepEqual(context.storyNavigationTarget, { projectId: "p1", narrationSaved: false });
+});
 
 test("mini program opens on the browseable home tab", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
@@ -309,7 +374,9 @@ test("home primary and alternate CTAs create sessions with their displayed guida
   for (const mode of ["guided_interview", "free_narration"]) {
     context.data.selectedMode = mode;
     await page.startPrimaryVoiceChat.call(context);
+    context.data.voiceEntry = null;
     await page.startAlternateGuidance.call(context);
+    context.data.voiceEntry = null;
     assert.equal(context.data.selectedMode, mode, "starting an alternate session preserves the project default");
   }
 
@@ -631,7 +698,8 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
+  assert.deepEqual(navigations, []);
+  assert.deepEqual(context.data.voiceEntry, { voiceSessionId: "voice/1", projectId: "project/1", mode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration", projectTitle: "爷爷的故事" });
   assert.equal(context.data.creatingVoice, false);
 });
 
@@ -676,7 +744,9 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
+  assert.deepEqual(navigations, []);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "voice/free");
+  assert.equal(context.data.voiceEntry.mode, "free_narration");
 });
 
 test("home daily actions create free narration and human interview sessions", async () => {
@@ -717,6 +787,7 @@ test("home daily actions create free narration and human interview sessions", as
   };
 
   await page.startPrimaryVoiceChat.call(context);
+  context.data.voiceEntry = null; // The prior component has completed and unmounted.
   await page.startHumanInterview.call(context);
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
@@ -726,7 +797,8 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(createdSessions[1].input.interview_type, "human_interview");
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
   assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
-  assert.equal(navigations.length, 2);
+  assert.equal(navigations.length, 0);
+  assert.equal(context.data.voiceEntry.interviewType, "human_interview");
 });
 
 test("home routes book organization through the book workspace without requiring microphone consent", () => {

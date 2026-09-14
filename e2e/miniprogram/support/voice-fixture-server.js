@@ -42,6 +42,7 @@ function createVoiceFixtureServer() {
     gatewayClientEvents: [],
     gatewayConnections: [],
     httpRequests: [],
+    createdSessions: 0,
     sessionStatus: "created",
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
@@ -94,6 +95,37 @@ function createVoiceFixtureServer() {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     const body = await requestBody(request);
     state.httpRequests.push({ method: request.method, path: url.pathname, body });
+
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/story-snapshot") {
+      const project = { id: FIXTURE_PROJECT_ID, title: "E2E 回忆录", metadata_json: {} };
+      respond(response, 200, {
+        server_revision: state.httpRequests.length,
+        identity: { id: "e2e-user", display_name: "测试作者", email: "fixture@example.invalid",
+          active_project_id: project.id, active_project: project, projects: [project] },
+        latest_transcript: null, chapters: [], growth_events: [],
+        book_issues: { review_count: 0, supplement_count: 0 },
+        book_readable: false, book_char_count: 0, book_chapter_count: 0, updated_at: timestamp(),
+        unassigned_image_count: 0, unassigned_video_count: 0,
+        progress: null, automation_events: { items: [], total: 0, limit: 8 },
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/voice-sessions`) {
+      state.createdSessions += 1;
+      state.sessionStatus = "created";
+      state.messages = [initialAssistantMessage()];
+      state.utterances = [];
+      respond(response, 200, sessionDetail());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/automation-events`) {
+      respond(response, 200, { items: [], total: 0, limit: 8 });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/draft-progress`) {
+      respond(response, 200, { status: "idle", title: "等待讲述", detail: "", can_retry: false });
+      return;
+    }
 
     if (
       request.method === "GET"
@@ -356,6 +388,7 @@ function createVoiceFixtureServer() {
       state.gatewayClientEvents.length = 0;
       state.gatewayConnections.length = 0;
       state.httpRequests.length = 0;
+      state.createdSessions = 0;
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";
       state.messages = [initialAssistantMessage()];

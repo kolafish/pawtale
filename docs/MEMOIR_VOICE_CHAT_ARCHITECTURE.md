@@ -85,6 +85,14 @@ created → listening ↔ speaking → stopped
 持久状态以后端为准。页面恢复、前后台切换或断线重连时，客户端重新读取
 VoiceSession 和消息，不根据客户端缓存的 UI 状态猜测服务端结果。
 
+首页只保存当前 VoiceSession 的入口参数，实时状态由 voice-session 组件实例持有。首页
+刷新不会重建当前组件；确认后端会话 stopped 后才收起。完成事件携带 session id，旧实例
+事件不能结束下一次讲述。账号或项目改变时卸载旧组件，停止录音、播放及轮询。
+
+组件卸载后保留其失效标记直到实例被回收，迟到的授权或会话响应不能重新连接。
+普通续讲和话题讲述通过用户、项目隔离的导航目标回到首页；章节补讲仍返回原章节。
+首页嵌入时由首页刷新故事进度，组件不再重复轮询进度通知。
+
 ## 四、录音与 Streaming ASR
 
 ### 4.1 开始录音
@@ -242,7 +250,8 @@ VoiceUtterance
 
 ```text
 components/voice-session/                 # 实时访谈界面与实例级录音、播放生命周期
-pages/voice-chat/                         # 访谈入口参数与完成后的页面导航
+pages/home/                               # 普通讲述原位展开、保存后刷新故事
+pages/voice-chat/                         # 章节补讲入口与返回原任务
 pages/transcripts/                        # Material 列表
 pages/transcript-detail/                  # 转写、音频和人工校正
 pages/book-completion/                    # 全书补全概览

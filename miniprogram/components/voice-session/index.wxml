@@ -1,4 +1,4 @@
-<view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}}">
+<view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}} {{embedded ? 'voice-session-embedded' : ''}}">
   <view class="top-bar">
     <view class="top-copy">
       <text class="mode-label">{{topModeLabel}}</text>
@@ -21,7 +21,7 @@
   </view>
 
   <view
-    wx:if="{{progressNoticeTitle || storyGrowthNoticeState !== 'hidden'}}"
+    wx:if="{{!embedded && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
     class="story-growth-bubble {{progressNoticeTitle ? 'ready' : storyGrowthNoticeState}}"
     aria-live="polite"
   >

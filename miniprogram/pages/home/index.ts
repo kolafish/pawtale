@@ -1,3 +1,4 @@
+import type { VoiceSessionEntry, VoiceSessionExitEvent } from "../../components/voice-session/events";
 import type {
   MemoirGuidanceMode,
   MemoirInterviewType,
@@ -32,6 +33,8 @@ import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
   consumeHomeStoryTarget,
+  consumeHomeVoiceTarget,
+  type HomeVoiceTarget,
   type HomeStoryTarget,
   navigateToMe,
   navigateToTranscripts,
@@ -66,6 +69,7 @@ type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
 interface HomeData extends HomeStoryData {
   loading: boolean;
   creatingVoice: boolean;
+  voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
   error: string;
   userId: string;
@@ -217,11 +221,11 @@ function launchCopy(
 }
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
-  const blocked = state.loading || state.creatingVoice;
+  const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
   const voiceStartButtonClass = blocked ? "voice-start-button button-blocked" : "voice-start-button";
   const voiceStartButtonHoverClass = blocked ? "none" : "voice-start-button-hover";
   return {
-    homePageClass: state.largeTextEnabled ? "home-page large-text" : "home-page",
+    homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
     launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
@@ -337,7 +341,7 @@ function applyHomeSnapshotData(
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
-    ...(changedProject ? { ...emptyHomeStoryData(), showContinueNarration: false } : {}),
+    ...(changedProject ? { ...emptyHomeStoryData(), showContinueNarration: false, voiceEntry: null } : {}),
     lastStoryHint: latestHint,
     lastStoryText: lastStoryText(latestHint),
     hasLastStoryHint: Boolean(latestHint),
@@ -354,6 +358,7 @@ definePage<HomeData>()({
   homeLaunchScope: "",
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
   storyNavigationTarget: null as HomeStoryTarget | null,
+  voiceNavigationTarget: null as HomeVoiceTarget | null,
   growthTracker: pageRuntime(() => new HomeGrowthTracker()),
   growthAnimationTimer: pageRuntime(() => new PollingTimer(800)),
   homeScrollTop: 0,
@@ -362,6 +367,7 @@ definePage<HomeData>()({
   data: {
     loading: false,
     creatingVoice: false,
+    voiceEntry: null,
     needsLogin: false,
     error: "",
     userId: "",
@@ -416,11 +422,13 @@ definePage<HomeData>()({
     this.homeVisible = true;
     this.homeLaunchScope = "";
     this.storyNavigationTarget = consumeHomeStoryTarget() ?? this.storyNavigationTarget;
+    this.voiceNavigationTarget = consumeHomeVoiceTarget() ?? this.voiceNavigationTarget;
     this.homeRefreshTimer.cancel();
     enableMiniProgramShareMenu();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
+    this.openPendingVoiceSession();
   },
 
   onHide() {
@@ -514,6 +522,7 @@ definePage<HomeData>()({
         setHomeData(this, {
           ...emptyHomeStoryData(),
           needsLogin: true,
+          voiceEntry: null,
           showContinueNarration: false,
           userId: "",
           displayName: "作者",
@@ -550,7 +559,7 @@ definePage<HomeData>()({
 
   onPageScroll(event: { scrollTop: number }) {
     this.homeScrollTop = event.scrollTop;
-    const showContinueNarration = this.data.hasProject && !this.data.needsLogin && event.scrollTop > this.narrationBottom;
+    const showContinueNarration = !this.data.voiceEntry && this.data.hasProject && !this.data.needsLogin && event.scrollTop > this.narrationBottom;
     if (showContinueNarration !== this.data.showContinueNarration) this.setData({ showContinueNarration });
   },
 
@@ -808,7 +817,7 @@ definePage<HomeData>()({
   },
 
   canStartVoiceChat(requireVoiceAuthorization = true) {
-    if (this.data.loading || this.data.creatingVoice) {
+    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry) {
       return false;
     }
     if (this.data.needsLogin) {
@@ -834,9 +843,11 @@ definePage<HomeData>()({
     if (!this.canStartVoiceChat()) {
       return;
     }
+    const { userId, projectId } = this.data;
     setHomeData(this, { creatingVoice: true, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
+      if (!this.homeVisible || userId !== this.data.userId || projectId !== this.data.projectId) return;
       await this.createAndOpenVoiceChat(mode, entry, interviewType, sessionGoal);
     } catch (error) {
       if (isAuthError(error)) {
@@ -858,6 +869,7 @@ definePage<HomeData>()({
     sessionGoal: MemoirSessionGoal,
     currentCompletionIssueId = "",
   ) {
+    const { userId, projectId } = this.data;
     const detail = await createMemoirVoiceSession({
       guidance_mode: mode,
       interview_type: interviewType,
@@ -876,7 +888,7 @@ definePage<HomeData>()({
         ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
       },
     }, {
-      projectId: this.data.projectId,
+      projectId,
     });
     trackAuditAction(
       "voice_chat.start",
@@ -887,19 +899,43 @@ definePage<HomeData>()({
         entry,
         launch_variant: this.data.launchVariant,
       },
-      { projectId: this.data.projectId, voiceSessionId: detail.session.id },
+      { projectId, voiceSessionId: detail.session.id },
     );
     if (entry === "home_launch") {
       this.dismissLaunchPanel();
     }
-    wx.navigateTo({
-      url: pageUrl("/pages/voice-chat/index", {
-        voiceSessionId: detail.session.id,
-        mode,
-        interviewType,
-        sessionGoal,
-        projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
-      }),
+    if (userId !== this.data.userId || projectId !== this.data.projectId) return;
+    this.voiceNavigationTarget = { userId, projectId, entry: {
+      voiceSessionId: detail.session.id, projectId, mode, interviewType, sessionGoal,
+      projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
+    } };
+    this.openPendingVoiceSession();
+  },
+
+  openPendingVoiceSession() {
+    const target = this.voiceNavigationTarget;
+    if (!this.homeVisible || !target) return;
+    this.voiceNavigationTarget = null;
+    if (target.userId !== this.data.userId || target.projectId !== this.data.projectId || this.data.needsLogin) return;
+    if (this.data.voiceEntry) return;
+    setHomeData(this, { voiceEntry: target.entry, showContinueNarration: false, narrationSaved: false }, () => {
+      wx.pageScrollTo({ selector: "#home-narration", duration: 250 });
     });
+  },
+
+  async exitVoiceSession({ detail }: VoiceSessionExitEvent) {
+    if (this.data.voiceEntry?.voiceSessionId !== detail.voiceSessionId || !this.homeVisible) return;
+    if (detail.destination === "story" && detail.projectId !== this.data.projectId) return;
+    if (detail.destination === "story" && !detail.finished) {
+      this.openStoryProgress();
+      return;
+    }
+    setHomeData(this, { voiceEntry: null }, () => this.measureNarration());
+    if (detail.destination === "transcripts") {
+      navigateToTranscripts();
+      return;
+    }
+    this.storyNavigationTarget = { projectId: this.data.projectId, narrationSaved: detail.destination === "story" && detail.narrationSaved };
+    await this.loadHome(true);
   },
 });

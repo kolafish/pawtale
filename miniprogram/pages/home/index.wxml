@@ -4,7 +4,7 @@
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
       </view>
-      <view class="header-actions">
+      <view class="header-actions" hidden="{{voiceEntry}}">
       <button id="home-settings" size="mini" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
       <button size="mini" class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
         分享
@@ -16,6 +16,8 @@
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view id="home-narration">
+  <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}" bindexit="exitVoiceSession" />
+  <view hidden="{{voiceEntry}}">
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
       <text class="panel-label">{{launchEyebrow}}</text>
@@ -174,6 +176,7 @@
 
   </view>
 
+  </view>
   <view id="home-story" class="home-story">
     <text wx:if="{{narrationSaved}}" class="home-saved-notice" aria-live="polite">这次讲述已保存。看看故事，也可以接着讲。</text>
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>

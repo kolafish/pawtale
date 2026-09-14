@@ -39,6 +39,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); },
   });
   mockModule("../services/navigation.ts", {
+    consumeHomeVoiceTarget: () => null,
     consumeHomeStoryTarget: () => { const target = navigationTarget; navigationTarget = null; return target; },
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => [401, 403].includes(error?.statusCode),
@@ -87,6 +88,20 @@ test("story keeps expansion while refreshing the same project", async () => {
   await context.loadHome();
   assert.equal(context.data.story.chapters[0].expanded, false);
   context.onHide();
+});
+
+test("refreshing the same home preserves its active voice entry; a project switch clears it", async () => {
+  let current = snapshot();
+  const { page } = loadStoryPage({ getSnapshot: async () => current });
+  const context = pageContext(page);
+  await context.loadHome();
+  const voiceEntry = { voiceSessionId: "s1", projectId: "project-1" };
+  context.setData({ voiceEntry });
+  await context.loadHome(true);
+  assert.equal(context.data.voiceEntry, voiceEntry);
+  current = snapshot({ identity: { ...current.identity, active_project_id: "project-2", active_project: { id: "project-2", title: "另一本" } } });
+  await context.loadHome(true);
+  assert.equal(context.data.voiceEntry, null);
 });
 
 test("story marks new sections and expands their chapter only when the reader asks", async () => {

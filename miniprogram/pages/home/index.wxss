@@ -889,3 +889,6 @@
 .large-text .home-review-text,
 .home-page.large-text .home-inline-action,
 .home-page.large-text .more-actions-toggle { font-size: 32rpx; }
+.home-page.is-narrating {
+  padding-bottom: calc(252rpx + env(safe-area-inset-bottom));
+}

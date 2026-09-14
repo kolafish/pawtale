@@ -200,7 +200,7 @@ function loadVoiceChatPage({
   const { createVoiceSessionRuntime } = require("../components/voice-session/voice-session-runtime.ts");
   const component = loadComponentModule("../components/voice-session/index.ts").component;
   return { ...component.methods, ...createVoiceSessionRuntime(), data: component.data,
-    definition: component, events: [], runtime() { return this; },
+    definition: component, properties: { entry: null, embedded: false }, events: [], runtime() { return this; },
     triggerEvent(name, detail) { this.events.push({ name, detail }); } };
 }
 
@@ -360,7 +360,7 @@ test("book completion return stops the backend session when websocket is absent"
 
   assert.deepEqual(stoppedSessions, ["voice-1"]);
   assert.deepEqual(navigations, []);
-  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion" } }]);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", voiceSessionId: "voice-1" } }]);
   assert.equal(context.data.finishingSession, false);
 });
 
@@ -941,7 +941,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   await flushAsyncWork();
-  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: true } }]);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: true, finished: true, voiceSessionId: "voice-1" } }]);
   assert.deepEqual(storyTabs, []);
 });
 
@@ -997,7 +997,7 @@ test("book completion finish explains that the answer is already in its section"
   await page.connectGateway.call(context);
   await page.finishSession.call(context);
 
-  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", explainSaved: true } }]);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", explainSaved: true, voiceSessionId: "voice-completion-1" } }]);
   assert.deepEqual(modals, []);
 });
 
@@ -3263,7 +3263,7 @@ test("a closed voice client returns home only when the persisted session confirm
     assert.equal(context.data.finishingSession, false);
     if (status === "stopped") {
       assert.deepEqual(routes, []);
-      assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: false } }]);
+      assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: false, finished: true, voiceSessionId: "voice-1" } }]);
       assert.equal(context.data.persistenceStateText, "已保存");
     } else {
       assert.deepEqual(routes, []);

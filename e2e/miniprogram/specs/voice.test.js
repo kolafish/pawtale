@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const path = require("node:path");
 const { after, before, test } = require("node:test");
 const {
   captureStorageEntries,
@@ -81,6 +82,8 @@ before(async () => {
     AI_MODEL_STORAGE_KEY,
     TTS_SETTINGS_STORAGE_KEY,
     VOICE_AUTHORIZATION_STORAGE_KEY,
+    "pawtale_home_launch_state",
+    "pawtale_accessibility_settings",
   ]);
   session.artifacts.mark("voice:setup:preferences-captured");
   await session.miniProgram.callWxMethod(
@@ -187,11 +190,13 @@ after(async () => {
 test("deterministic voice journey records, transcribes, answers, and plays TTS", async () => {
   try {
     session.artifacts.mark("voice:page:open:start");
-    const host = await session.miniProgram.reLaunch(
-      `/pages/voice-chat/index?voiceSessionId=${FIXTURE_SESSION_ID}`
-      + "&mode=free_narration&interviewType=ai_interview"
-      + "&sessionGoal=open_narration&projectTitle=E2E%20%E5%9B%9E%E5%BF%86%E5%BD%95",
-    );
+    const host = await session.miniProgram.reLaunch("/pages/home/index");
+    const home = await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
+    if (home.showLaunchPanel) await (await host.$(".launch-secondary-button")).tap();
+    await (await elementById(host, "primary-voice-action")).tap();
+    await waitForPageData(host, data => Boolean(data.voiceEntry), "首页原位展开讲述");
+    assert.deepEqual((await session.miniProgram.pageStack()).map(page => page.path), ["pages/home/index"]);
+    assert.equal(fixture.state.createdSessions, 1);
     const page = await elementById(host, "voice-session");
     const ready = await waitForPageData(
       page,
@@ -201,6 +206,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     );
     assert.equal(ready.voiceAuthorizationAgreed, true);
     session.artifacts.mark("voice:page:open:complete");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
 
     await (await elementById(page, "voice-primary-action")).tap();
     const recording = await waitForPageData(
@@ -213,6 +219,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     );
     assert.equal(recording.status, "listening");
     session.artifacts.mark("voice:asr:partial");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });
 
     await (await elementById(page, "voice-primary-action")).tap();
     const completed = await waitForPageData(
@@ -263,7 +270,28 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       activeGatewayEvents.at(-1)?.type,
       "session.stop",
     );
+    await waitForPageData(host, data => !data.voiceEntry && data.narrationSaved, "同一首页显示讲述已保存");
+    assert.deepEqual((await session.miniProgram.pageStack()).map(page => page.path), ["pages/home/index"]);
     session.artifacts.mark("voice:session:stopped");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-saved.png") });
+
+    await session.miniProgram.callWxMethod("setStorageSync", "pawtale_accessibility_settings", { largeTextEnabled: true, autoBargeInEnabled: false });
+    await host.callMethod("refreshAccessibilitySettings");
+    await (await elementById(host, "primary-voice-action")).tap();
+    const next = await elementById(host, "voice-session");
+    const nextReady = await waitForPageData(next, data => data.status === "ready", "第二次讲述就绪");
+    assert.equal(fixture.state.createdSessions, 2);
+    assert.equal(nextReady.largeTextEnabled, true);
+    assert.equal(nextReady.liveText, "");
+    assert.equal(nextReady.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
+    await session.miniProgram.navigateTo("/pages/voice-authorization/index");
+    await session.miniProgram.navigateBack();
+    assert.equal((await host.data()).voiceEntry.voiceSessionId, FIXTURE_SESSION_ID);
+    assert.equal((await next.data()).recording, false);
+    await (await elementById(next, "voice-finish-action")).tap();
+    await waitForPageData(host, data => !data.voiceEntry, "结束空讲述并收起");
+    assert.deepEqual(fixture.state.unexpectedRequests, []);
   } catch (error) {
     failed = true;
     await session.artifacts.captureFailure(session.miniProgram, error);

@@ -1,11 +1,20 @@
 import { definePage } from "../../services/page-definition";
-import type { PageQuery } from "../../services/page-input";
+import { queryParam, queryChoice, type PageQuery } from "../../services/page-input";
 import { redirectToTranscripts, returnToStory } from "../../services/navigation";
-import type { VoiceSessionExitEvent } from "../../components/voice-session/events";
+import type { VoiceSessionEntry, VoiceSessionExitEvent } from "../../components/voice-session/events";
 
-definePage<{ entry: PageQuery | null }>()({
+definePage<{ entry: VoiceSessionEntry | null }>()({
   data: { entry: null },
-  onLoad(entry: PageQuery = {}) { this.setData({ entry }); },
+  onLoad(query: PageQuery = {}) {
+    this.setData({ entry: {
+      voiceSessionId: queryParam(query, "voiceSessionId"),
+      projectTitle: queryParam(query, "projectTitle"),
+      module: queryParam(query, "module"),
+      mode: queryChoice(query, "mode", ["free_narration", "guided_interview"] as const, "free_narration"),
+      interviewType: queryChoice(query, "interviewType", ["ai_interview", "human_interview"] as const, "ai_interview"),
+      sessionGoal: queryChoice(query, "sessionGoal", ["open_narration", "book_completion"] as const, "open_narration"),
+    } });
+  },
   exitSession({ detail }: VoiceSessionExitEvent) {
     if (detail.destination === "story") {
       returnToStory(detail.projectId, detail.narrationSaved);
