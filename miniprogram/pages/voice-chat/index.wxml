@@ -1,1 +1,1 @@
-<voice-session wx:if="{{entry}}" entry="{{entry}}" bindexit="exitSession" />
+<voice-session id="voice-session" wx:if="{{entry}}" entry="{{entry}}" bindexit="exitSession" />

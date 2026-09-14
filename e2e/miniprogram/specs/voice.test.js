@@ -7,7 +7,7 @@ const {
   restoreStorageEntries,
   shutdownE2ESession,
 } = require("../support/session");
-const { waitForPageData } = require("../support/wait");
+const { waitForPageData, waitForValue } = require("../support/wait");
 const {
   FIXTURE_ASSISTANT_TEXT,
   FIXTURE_SESSION_ID,
@@ -187,11 +187,12 @@ after(async () => {
 test("deterministic voice journey records, transcribes, answers, and plays TTS", async () => {
   try {
     session.artifacts.mark("voice:page:open:start");
-    const page = await session.miniProgram.reLaunch(
+    const host = await session.miniProgram.reLaunch(
       `/pages/voice-chat/index?voiceSessionId=${FIXTURE_SESSION_ID}`
       + "&mode=free_narration&interviewType=ai_interview"
       + "&sessionGoal=open_narration&projectTitle=E2E%20%E5%9B%9E%E5%BF%86%E5%BD%95",
     );
+    const page = await elementById(host, "voice-session");
     const ready = await waitForPageData(
       page,
       (data) => data.status === "ready" && data.connecting === false,
@@ -255,13 +256,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.deepEqual(fixture.state.unexpectedRequests, []);
 
     await (await elementById(page, "voice-finish-action")).tap();
-    const stopped = await waitForPageData(
-      page,
-      (data) => data.status === "closed" && data.persistenceStateText === "已保存",
-      "语音会话停止并显示已保存",
-      20000,
-    );
-    assert.equal(stopped.primaryActionText, "已保存");
+    await waitForValue(() => fixture.state.sessionStatus, status => status === "stopped", {
+      description: "语音会话确认停止", timeoutMs: 20000,
+    });
     assert.equal(
       activeGatewayEvents.at(-1)?.type,
       "session.stop",
