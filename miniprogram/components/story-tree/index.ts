@@ -13,6 +13,7 @@ Component({
     story: { type: Object, value: emptyStoryViewData() },
     largeText: { type: Boolean, value: false },
     showSummary: { type: Boolean, value: true },
+    canVoiceEdit: { type: Boolean, value: false },
   },
 
   methods: {

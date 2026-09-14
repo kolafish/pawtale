@@ -21,7 +21,7 @@ export interface VoiceEditPreview {
 export function previewVoiceEdit(projectId: string, instruction: string): Promise<VoiceEditPreview> {
   return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string }>(
     memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction },
-    { timeoutProfile: "interactive", invalidatesSnapshots: false },
+    { timeoutProfile: "generation", invalidatesSnapshots: false },
   );
 }
 

@@ -92,7 +92,7 @@ test("a clarification without operations never enables execution", async () => {
   assert.equal(calls.applies.length, 0);
 });
 
-test("voice edit uses interactive preview, mutation writes and the shared model preference", async () => {
+test("voice edit gives the model a generation deadline, uses mutation writes and the shared preference", async () => {
   const calls = [];
   mockModule("../services/memoir-api-client.ts", {
     memoirAIRequest: async (...args) => { calls.push(["ai", ...args]); },
@@ -105,7 +105,7 @@ test("voice edit uses interactive preview, mutation writes and the shared model 
   await api.previewVoiceEdit("p1", "原话");
   await api.applyVoiceEdit("p1", "sig", []);
   assert.equal(calls[0][0], "ai");
-  assert.equal(calls[0][3].timeoutProfile, "interactive");
+  assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");
 });

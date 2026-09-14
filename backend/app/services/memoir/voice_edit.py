@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+
+import httpx
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -21,7 +24,7 @@ from app.schemas.memoir_voice_edit import (
 )
 from app.services.ai_calls import AIStructuredOutputError
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError, ai_error_metadata, ai_text_timeout_seconds, ai_user_error_message
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.access import load_memoir_project
@@ -126,11 +129,13 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     client = ai_client or get_ai_service(model)
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     timeout = ai_text_timeout_seconds(policy.timeout_profile)
+    system = SYSTEM_PROMPT + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
+    started = time.monotonic()
     try:
-        generated = await client.generate_structured(SYSTEM_PROMPT, payload, output_model=VoiceEditProposal, requested_model=model, temperature=0, max_tokens=policy.max_tokens, timeout=timeout, max_attempts=1)
-    except AIStructuredOutputError as exc:
-        logger.warning("voice_edit_invalid_output timeout=%s diagnostics=%s", timeout, exc.diagnostics)
-        raise HTTPException(502, "没有得到可用的修改结果，请重新说一下") from exc
+        generated = await client.generate_structured(system, payload, output_model=VoiceEditProposal, requested_model=model, temperature=0, max_tokens=policy.max_tokens, timeout=timeout, max_attempts=1)
+    except (AIStructuredOutputError, AIProviderTimeoutError, httpx.HTTPError) as exc:
+        logger.warning("voice_edit_failed diagnostics=%s", ai_error_metadata(exc, requested_model=model, provider=client.provider_name, resolved_model=client.model_name, timeout_seconds=timeout, elapsed_ms=round((time.monotonic() - started) * 1000)))
+        raise HTTPException(502, ai_user_error_message(exc, "没有得到可用的修改结果，请重新说一下")) from exc
     proposal = generated.value
     operations = _validated_operations(story, proposal.operations)
     uncertain = {ref for q in proposal.questions for ref in q.target_refs}

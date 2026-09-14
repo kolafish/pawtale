@@ -13,6 +13,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice_edit import VoiceEditOperation, VoiceEditProposal
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.memoir.voice_edit import _story
 from app.services.memoir.semantic_state import semantic_json_signature
 
@@ -24,8 +25,10 @@ class FakeAI(AITextServiceBase):
     def __init__(self, proposal):
         self.proposal = proposal
         self.inputs = []
+        self.system = ""
 
     async def _call_llm(self, system, user, **kwargs):
+        self.system = system
         self.inputs.append(json.loads(user))
         return json.dumps(self.proposal, ensure_ascii=False)
 
@@ -93,6 +96,8 @@ async def test_raw_speech_context_and_both_renames(client, test_db, monkeypatch,
     response, fake = await preview(client, monkeypatch, story, operations, instruction=raw)
     assert response.status_code == 200, response.text
     assert fake.inputs[0]["instruction"] == raw
+    schema = json.loads(fake.system.split("返回 JSON Schema：\n", 1)[1])
+    assert schema["properties"]["operations"]["type"] == "array"
     assert any("我又来测试了。我出生在八十年代" in m["raw"] for m in fake.inputs[0]["book_data"]["materials"])
     assert (await test_db.get(MemoirBookPlanChapter, story["chapters"][1])).title == "童年回忆"
     assert (await apply(client, story, response.json())).status_code == 200
@@ -182,6 +187,23 @@ async def test_no_edit_and_invalid_provider_array_do_not_write(client, test_db, 
     monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", lambda _: bad)
     response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": "删除测试录音"})
     assert response.status_code == 502
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+
+
+async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, test_db, monkeypatch, story):
+    class SlowAI(FakeAI):
+        calls = 0
+
+        async def _call_llm(self, system, user, **kwargs):
+            self.calls += 1
+            raise AIProviderTimeoutError(provider=self.provider_name, model=self.model_name, timeout_seconds=60)
+
+    fake = SlowAI(None)
+    monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", lambda _: fake)
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": "删除测试录音"})
+    assert response.status_code == 502
+    assert "模型处理超过" in response.json()["detail"]
+    assert fake.calls == 1
     assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
 
 
