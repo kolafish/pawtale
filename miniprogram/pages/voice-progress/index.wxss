@@ -40,7 +40,6 @@
 
 .summary-value {
   display: block;
-  color: var(--ui-text-primary);
   color: #42563e;
   font-size: 40rpx;
   font-weight: 800;
