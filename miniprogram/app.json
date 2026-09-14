@@ -23,9 +23,9 @@
   ],
   "window": {
     "navigationBarTitleText": "老余口述",
-    "navigationBarBackgroundColor": "#A84F43",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#F7F3EC"
+    "navigationBarBackgroundColor": "#F8F4EE",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F5F1EA"
   },
   "networkTimeout": {
     "request": 60000,
