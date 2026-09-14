@@ -16,8 +16,6 @@
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view id="home-narration">
-  <narration-mode-picker wx:if="{{!voiceEntry}}" id="home-narration-modes" selected="{{selectedMode}}"
-    disabled="{{loading || creatingVoice}}" large-text="{{largeTextEnabled}}" bindchange="selectNarrationMode" />
   <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}" bindexit="exitVoiceSession" />
   <view hidden="{{voiceEntry}}">
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
@@ -73,6 +71,7 @@
     <text wx:else class="project-title">{{projectHeadingText}}</text>
     <text class="project-meta">{{projectMetaText}}</text>
 
+    <text wx:if="{{showResumeActions}}" class="current-guidance">{{currentGuidanceText}}</text>
     <view
       id="primary-voice-action"
       class="{{voiceStartButtonClass}}"
@@ -89,14 +88,26 @@
       </view>
     </view>
     <text class="voice-start-note">{{voiceStartNoteText}}</text>
-    <view wx:if="{{showResumeActions}}" class="home-workspace-link {{creatingVoice ? 'button-blocked' : ''}}"
-      bindtap="openNarrationOverview" hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
-      aria-role="button" aria-label="打开讲述概览" aria-disabled="{{creatingVoice}}">
-      <view class="home-workspace-copy">
-        <text class="home-workspace-title">讲述概览</text>
-        <text class="home-workspace-hint">回顾聊过的话题和最近讲述</text>
+    <view wx:if="{{showResumeActions}}" class="resume-actions">
+      <view id="home-more-actions" class="more-actions-toggle" bindtap="toggleMoreActions"
+        hover-class="ui-subtle-action-hover" aria-role="button" aria-expanded="{{showMoreActions}}"
+        aria-label="{{showMoreActions ? '收起讲述与书稿操作' : '展开讲述与书稿操作'}}">
+        <text>{{showMoreActions ? '收起更多操作' : '更多操作'}}</text>
+        <text class="more-actions-chevron">{{showMoreActions ? '⌃' : '⌄'}}</text>
       </view>
-      <text class="home-workspace-arrow" aria-hidden="true">›</text>
+      <view wx:if="{{showMoreActions}}" class="more-actions-panel">
+        <view class="home-workspace-link {{creatingVoice ? 'button-blocked' : ''}}"
+          bindtap="openNarrationOverview" hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
+          aria-role="button" aria-label="打开讲述概览" aria-disabled="{{creatingVoice}}">
+          <view class="home-workspace-copy">
+            <text class="home-workspace-title">讲述概览</text>
+            <text class="home-workspace-hint">回顾聊过的话题和最近讲述</text>
+          </view>
+          <text class="home-workspace-arrow" aria-hidden="true">›</text>
+        </view>
+        <narration-mode-picker id="home-narration-modes" selected="{{selectedMode}}"
+          disabled="{{loading || creatingVoice}}" large-text="{{largeTextEnabled}}" bindchange="selectNarrationMode" />
+      </view>
     </view>
   </view>
 

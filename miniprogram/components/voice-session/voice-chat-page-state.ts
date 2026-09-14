@@ -109,6 +109,7 @@ export interface VoiceChatData {
   progressNoticeTitle: string;
   progressNoticeDetail: string;
   narrationMode: NarrationMode;
+  showNarrationModes: boolean;
   topModeLabel: string;
   topSubtitle: string;
   topicTitleText: string;
@@ -257,6 +258,7 @@ export function initialVoiceChatData(): VoiceChatData {
     progressNoticeTitle: "",
     progressNoticeDetail: "",
     narrationMode: "free_narration",
+    showNarrationModes: false,
     topModeLabel: NARRATION_MODES.free_narration.label,
     topSubtitle: "按自己的节奏讲述",
     topicTitleText: "这段回忆",

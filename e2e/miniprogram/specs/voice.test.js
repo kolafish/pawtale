@@ -115,6 +115,7 @@ before(async () => {
     },
   );
   session.artifacts.mark("voice:setup:model-settings-stored");
+  await session.miniProgram.callWxMethod("setStorageSync", "pawtale_accessibility_settings", { largeTextEnabled: false, autoBargeInEnabled: false });
   await session.miniProgram.mockWxMethod("getRecorderManager", deterministicRecorderManager);
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
@@ -187,12 +188,25 @@ after(async () => {
 });
 
 async function assertNarrationModes(owner, id, selected) {
+  if (id === "home-narration-modes" && !(await owner.data()).showMoreActions) {
+    await (await elementById(owner, "home-more-actions")).tap();
+    await waitForPageData(owner, data => data.showMoreActions, "展开原有更多操作入口");
+  }
+  if (id === "session-narration-modes") {
+    assert.equal((await owner.data()).showNarrationModes, false);
+    await (await elementById(owner, "session-mode-disclosure")).tap();
+    await waitForPageData(owner, data => data.showNarrationModes, "从现有方式标题展开四项");
+  }
   const picker = await elementById(owner, id);
   assert.equal((await picker.$$(".narration-option")).length, 4);
   assert.equal((await picker.data()).selected, selected);
   const checked = await picker.$$(".is-selected");
   assert.equal(checked.length, 1);
   assert.equal(await checked[0].attribute("id"), `mode-${selected}`);
+  if (id === "session-narration-modes") {
+    await (await elementById(owner, "session-mode-disclosure")).tap();
+    await waitForPageData(owner, data => !data.showNarrationModes, "收起四项继续讲述");
+  }
   return picker;
 }
 
@@ -203,6 +217,10 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const host = await session.miniProgram.reLaunch("/pages/home/index");
     const home = await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
     if (home.showLaunchPanel) await (await host.$(".launch-secondary-button")).tap();
+    assert.equal((await host.data()).showMoreActions, false);
+    assert.equal(await host.$("#home-narration-modes"), null);
+    assert.equal((await host.data()).currentGuidanceText, "当前讲述方式：自由讲述");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-modes-collapsed.png") });
     const homePicker = await assertNarrationModes(host, "home-narration-modes", "free_narration");
     for (const mode of ["guided_interview", "book_completion", "human_interview", "free_narration"]) {
       await (await elementById(homePicker, `mode-${mode}`)).tap();
@@ -211,6 +229,8 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       assert.equal(fixture.state.createdSessions, 0);
     }
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-home.png") });
+    await (await elementById(host, "home-more-actions")).tap();
+    await waitForPageData(host, data => !data.showMoreActions && data.selectedMode === "free_narration", "收起选择后沿用当前方式");
     await (await elementById(host, "primary-voice-action")).tap();
     await waitForPageData(host, data => Boolean(data.voiceEntry), "首页原位展开讲述");
     assert.deepEqual((await session.miniProgram.pageStack()).map(page => page.path), ["pages/home/index"]);
@@ -303,7 +323,8 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
 
     await session.miniProgram.callWxMethod("setStorageSync", "pawtale_accessibility_settings", { largeTextEnabled: true, autoBargeInEnabled: false });
     await host.callMethod("refreshAccessibilitySettings");
-    const guidedPicker = await elementById(host, "home-narration-modes");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-modes-large-collapsed.png") });
+    const guidedPicker = await assertNarrationModes(host, "home-narration-modes", "free_narration");
     await (await elementById(guidedPicker, "mode-guided_interview")).tap();
     await host.callMethod("loadHome", true);
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
