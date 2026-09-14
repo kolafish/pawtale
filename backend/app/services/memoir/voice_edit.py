@@ -69,6 +69,38 @@ async def _story(db: AsyncSession, project_id: str, *, lock: bool = False) -> di
     }
 
 
+def _operation_signature(story: dict, op: VoiceEditOperation) -> str:
+    """Check the selected edit's objects, not unrelated changes elsewhere in the book."""
+    kind = op.action.split("_", 1)[1]
+    sections = [s for s in story["sections"] if (
+        (kind == "chapter" and s["chapter_ref"] == op.target_ref)
+        or (kind == "section" and s["ref"] == op.target_ref)
+    )]
+    section_ids = {s["ref"] for s in sections}
+    memberships = [m for m in story["memberships"] if (
+        m["section_ref"] in section_ids
+        or (kind == "material" and m["material_ref"] == op.target_ref)
+    )]
+    material_ids = {m["material_ref"] for m in memberships}
+    if kind == "material":
+        material_ids.add(op.target_ref)
+    chapter_ids = {s["chapter_ref"] for s in sections}
+    if kind == "chapter":
+        chapter_ids.add(op.target_ref)
+    return semantic_json_signature({
+        "operation": op.model_dump(),
+        # Other edits can touch timestamps or renumber chapters. Operations use
+        # stable IDs, so neither change makes their selected targets stale.
+        "chapters": [{"ref": c["ref"], "title": c["title"], "included": c["included"]} for c in story["chapters"] if c["ref"] in chapter_ids],
+        "sections": sections,
+        "memberships": memberships,
+        "materials": [m for m in story["materials"] if m["ref"] in material_ids],
+        # Chapter operations concern its whole contents. Section/material edits
+        # preserve existing drafts and must not depend on another section's text.
+        "drafts": [d for d in story["drafts"] if kind == "chapter" and d["chapter_ref"] == op.target_ref],
+    })
+
+
 def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> list[VoiceEditOperation]:
     entities = {kind: {row["ref"]: row for row in story[kind + "s"]} for kind in ("chapter", "section", "material")}
     seen = set()
@@ -142,7 +174,8 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     if any(op.target_ref in uncertain for op in operations):
         raise HTTPException(422, "修改对象仍有歧义，请补充说明后再试")
     logger.info("voice_edit_preview timeout=%s diagnostics=%s", timeout, generated.response.diagnostics())
-    return VoiceEditPreviewResponse(signature=semantic_json_signature(story), operations=[_item(story, op) for op in operations], questions=[q.question for q in proposal.questions], reply=proposal.reply)
+    signatures = {op.target_ref: _operation_signature(story, op) for op in operations}
+    return VoiceEditPreviewResponse(signature=json.dumps(signatures), operations=[_item(story, op) for op in operations], questions=[q.question for q in proposal.questions], reply=proposal.reply)
 
 
 async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, req: VoiceEditApplyRequest) -> VoiceEditApplyResponse:
@@ -150,8 +183,15 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
     try:
         await db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
         story = await _story(db, project_id, lock=True)
-        if semantic_json_signature(story) != req.signature:
-            raise HTTPException(409, "故事内容已经变化，请重新查看修改结果；不要重复执行旧操作")
+        try:
+            signatures = json.loads(req.signature)
+        except json.JSONDecodeError:
+            signatures = None
+        if not isinstance(signatures, dict) or any(
+            signatures.get(op.target_ref) != _operation_signature(story, op)
+            for op in req.operations
+        ):
+            raise HTTPException(409, "要修改的内容或关联素材已经变化，请重新查看修改结果；不要重复执行旧操作")
         operations = _validated_operations(story, req.operations)
         for op in operations:
             if op.action in {"delete_chapter", "rename_chapter"}:

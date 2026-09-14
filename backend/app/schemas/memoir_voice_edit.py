@@ -51,7 +51,7 @@ class VoiceEditPreviewResponse(BaseModel):
 
 
 class VoiceEditApplyRequest(BaseModel):
-    signature: str = Field(min_length=64, max_length=64)
+    signature: str = Field(min_length=2, max_length=8192)
     operations: list[VoiceEditOperation] = Field(min_length=1, max_length=30)
 
 
