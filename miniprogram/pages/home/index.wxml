@@ -69,6 +69,7 @@
     <text wx:else class="project-title">{{projectHeadingText}}</text>
     <text class="project-meta">{{projectMetaText}}</text>
 
+    <text wx:if="{{showResumeActions}}" class="current-guidance">{{currentGuidanceText}}</text>
     <view
       id="primary-voice-action"
       class="{{voiceStartButtonClass}}"
@@ -85,8 +86,6 @@
       </view>
     </view>
     <text class="voice-start-note">{{voiceStartNoteText}}</text>
-
-
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <view
         class="more-actions-toggle"
@@ -100,21 +99,6 @@
         <text class="more-actions-chevron">{{showMoreActions ? "⌃" : "⌄"}}</text>
       </view>
       <view wx:if="{{showMoreActions}}" class="more-actions-panel">
-    <view
-      wx:if="{{hasProject}}"
-      class="narration-overview-link"
-      bindtap="openNarrationOverview"
-      hover-class="ui-subtle-action-hover"
-      aria-role="button"
-      aria-label="打开讲述概览"
-    >
-      <view class="narration-overview-copy">
-        <text class="narration-overview-title">讲述概览</text>
-        <text class="narration-overview-hint">回顾聊过的话题和最近讲述</text>
-      </view>
-      <text class="narration-overview-action">查看 ›</text>
-    </view>
-
         <view
           class="{{resumeAskButtonClass}}"
           bindtap="startAlternateGuidance"
@@ -123,17 +107,7 @@
           aria-disabled="{{creatingVoice}}"
         >
           <text>{{alternateModeButtonTitle}}</text>
-          <text class="resume-action-hint">换一种讲述方式</text>
-        </view>
-        <view
-          class="{{resumeAskButtonClass}} completion"
-          bindtap="openBookWorkspace"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>整理书稿</text>
-          <text class="resume-action-hint">查看章节进度和待补内容</text>
+          <text class="resume-action-hint">用这个方式开始新讲述</text>
         </view>
         <view
           class="{{resumeAskButtonClass}}"
@@ -144,6 +118,38 @@
         >
           <text>人工访谈</text>
           <text class="resume-action-hint">由家人分别记录问与答</text>
+        </view>
+      </view>
+
+      <view class="home-workspace-actions">
+        <text class="home-workspace-heading">回顾与整理</text>
+        <view
+          class="home-workspace-link"
+          bindtap="openNarrationOverview"
+          hover-class="ui-subtle-action-hover"
+          aria-role="button"
+          aria-label="打开讲述概览"
+          aria-disabled="{{creatingVoice}}"
+        >
+          <view class="home-workspace-copy">
+            <text class="home-workspace-title">讲述概览</text>
+            <text class="home-workspace-hint">回顾聊过的话题和最近讲述</text>
+          </view>
+          <text class="home-workspace-arrow" aria-hidden="true">›</text>
+        </view>
+        <view
+          class="home-workspace-link"
+          bindtap="openBookWorkspace"
+          hover-class="ui-subtle-action-hover"
+          aria-role="button"
+          aria-label="打开书稿，查看章节进度和待补内容"
+          aria-disabled="{{creatingVoice}}"
+        >
+          <view class="home-workspace-copy">
+            <text class="home-workspace-title">整理书稿</text>
+            <text class="home-workspace-hint">打开书稿，查看章节和待补内容</text>
+          </view>
+          <text class="home-workspace-arrow" aria-hidden="true">›</text>
         </view>
       </view>
     </view>
