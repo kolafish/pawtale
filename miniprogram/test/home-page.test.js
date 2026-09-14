@@ -222,8 +222,8 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
-      moreActionsToggleText: "其他讲述方式",
-      alternateModeButtonTitle: "让小余陪着问",
+      moreActionsToggleText: "更多操作",
+      alternateModeButtonTitle: "老余引导访谈",
       showVoiceAuthorizationPanel: false,
     },
   );
@@ -242,22 +242,24 @@ test("home primary CTA and alternate action follow the current project's guidanc
     ...baseData,
     selectedMode: "guided_interview",
   });
-  assert.equal(guided.currentGuidanceText, "当前讲述方式：小余陪着问");
-  assert.equal(guided.primaryVoiceButtonTitle, "让小余陪着问");
-  assert.equal(guided.voiceStartNoteText, "小余会从一件具体的事开始问起。");
-  assert.equal(guided.alternateModeButtonTitle, "我想自己讲");
+  assert.equal(guided.currentGuidanceText, "当前讲述方式：老余引导访谈");
+  assert.equal(guided.primaryVoiceButtonTitle, "老余引导访谈");
+  assert.equal(guided.voiceStartNoteText, "AI 按话题提问，帮助您展开回忆。");
+  assert.equal(guided.alternateModeButtonTitle, "自由讲述");
+  assert.equal(guided.alternateModeHintText, "按自己的节奏讲，想到哪里讲到哪里");
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
   assert.equal(free.currentGuidanceText, "当前讲述方式：自由讲述");
   assert.equal(free.primaryVoiceButtonTitle, "随便讲一段");
-  assert.equal(free.alternateModeButtonTitle, "让小余陪着问");
+  assert.equal(free.alternateModeButtonTitle, "老余引导访谈");
+  assert.equal(free.alternateModeHintText, "AI 按话题提问，帮助您展开回忆");
 
   const expanded = homeViewPatch({
     ...baseData,
     showMoreActions: true,
   });
-  assert.equal(expanded.moreActionsToggleText, "收起其他讲述方式");
-  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述方式");
+  assert.equal(expanded.moreActionsToggleText, "收起更多操作");
+  assert.equal(expanded.moreActionsToggleAriaLabel, "收起讲述与书稿操作");
 });
 
 test("home only shows project actions and voice consent after a usable project has loaded", () => {
@@ -412,7 +414,7 @@ test("home refreshes guidance mode from current project on load", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.currentGuidanceText, "当前讲述方式：小余陪着问");
+  assert.equal(context.data.currentGuidanceText, "当前讲述方式：老余引导访谈");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
@@ -729,7 +731,7 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(navigations.length, 2);
 });
 
-test("home routes book organization through the book workspace without requiring microphone consent", () => {
+test("home opens project-scoped supplement questions before creating an interview or requiring microphone consent", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -752,18 +754,20 @@ test("home routes book organization through the book workspace without requiring
     },
   };
 
-  page.openBookWorkspace.call(context);
+  page.openBookSupplementInterview.call(context);
 
-  const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
-  assert.deepEqual(navigations, ["/pages/book/index"]);
-  assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
+  const url = new URL(navigations[0], "https://miniprogram.test");
+  assert.equal(navigations.length, 1);
+  assert.equal(url.pathname, "/pages/book-completion/index");
+  assert.equal(url.searchParams.get("projectId"), "project/1");
+  assert.equal(url.searchParams.get("projectTitle"), "爷爷的故事");
   assert.equal(context.data.selectedMode, "free_narration");
   assert.equal(context.data.error, "");
 
   context.data.creatingVoice = true;
-  page.openBookWorkspace.call(context);
+  page.openBookSupplementInterview.call(context);
   page.openNarrationOverview.call(context);
-  assert.deepEqual(navigations, ["/pages/book/index"], "navigation waits for voice preparation to finish");
+  assert.equal(navigations.length, 1, "navigation waits for voice preparation to finish");
 });
 
 test("home opens narration overview without requiring microphone consent", () => {

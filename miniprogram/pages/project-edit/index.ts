@@ -14,7 +14,7 @@ import {
   updateMemoirProject,
 } from "../../services/memoir";
 import { markHomeLaunchProjectCreated } from "../../services/home-launch-state";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   datasetChoice,
   queryParam,
@@ -88,8 +88,8 @@ definePage<ProjectEditData>()({
       { value: "unspecified", label: "未填写" },
     ],
     guidanceOptions: [
-      { value: "free_narration", label: "自己慢慢讲" },
-      { value: "guided_interview", label: "小余陪着问" },
+      { value: "free_narration", label: guidanceModeLabel("free_narration") },
+      { value: "guided_interview", label: guidanceModeLabel("guided_interview") },
     ],
   },
 
