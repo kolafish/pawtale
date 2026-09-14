@@ -214,7 +214,10 @@ Component({
       ...(settings.autoBargeInEnabled ? {} : { autoListenStateText: "可以点按钮回答" }),
     });
     if (!settings.autoBargeInEnabled) {
-      void this.stopAssistantBargeInMonitor();
+      if (this.runtime().voiceStreaming.isBargeInMonitoring() && this.runtime().recordingStartPromise) {
+        this.runtime().recordingStartGeneration += 1;
+      }
+      void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
     }
   },
 
@@ -240,7 +243,7 @@ Component({
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose(reason);
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
-    void this.stopAssistantBargeInMonitor();
+    void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
     if (this.data.recordingStarting) {
       applyVoiceChatDataPatch(this, { recordingStarting: false });
     }
@@ -329,8 +332,10 @@ Component({
   async changeVoiceAuthorization(event: CheckboxChangeEvent) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
-    if (!agreed && this.runtime().voiceStreaming.hasClient() && this.data.recording) {
-      this.runtime().voiceStreaming.stopRecording();
+    if (!agreed) {
+      this.runtime().recordingStartGeneration += 1;
+      void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
+      if (this.data.recording) this.runtime().voiceStreaming.stopRecording();
     }
     applyVoiceChatDataPatch(this, voiceAuthorizationChangePatch(this.data, consent.agreed));
     if (agreed && this.data.voiceSessionId && !this.runtime().voiceStreaming.hasClient() && !this.data.connecting) {

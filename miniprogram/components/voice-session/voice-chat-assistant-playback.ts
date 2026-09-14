@@ -69,11 +69,7 @@ export interface VoiceChatAssistantPlaybackMethods {
 export interface VoiceChatAssistantPlaybackHost extends VoiceChatDataContext {
   runtime(): VoiceSessionRuntime;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
-  startRecordingAfterPrivacy(
-    autoTriggered?: boolean,
-    speakerRole?: MemoirSpeakerRole,
-    requestedGeneration?: number,
-  ): Promise<boolean>;
+  startRecording(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): boolean;
   tryStartAutoListenAfterTTS(): Promise<boolean>;
 }
 
@@ -406,10 +402,14 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
   async startAssistantBargeInMonitor(requestSerial: number) {
     if (
       this.data.recording
-      || bookCompletionRoundFinished(this.data)
+      || this.runtime().pageSuspended
+      || this.runtime().disposed
+      || !this.data.voiceAuthorizationAgreed
       || !this.data.autoBargeInEnabled
+      || requestSerial !== this.runtime().followUpRequestSerial
+      || bookCompletionRoundFinished(this.data)
       || !this.assistantTurnActiveForBargeIn()
-      || this.runtime().assistantBargeInMonitor.isRunning()
+      || this.runtime().voiceStreaming.isBargeInMonitoring()
     ) {
       if (!this.data.autoBargeInEnabled && this.assistantTurnActiveForBargeIn()) {
         applyVoiceChatDataPatch(this, { autoListenStateText: "可以点按钮回答" });
@@ -427,13 +427,18 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
     }
     if (
       this.data.recording
+      || this.runtime().pageSuspended
+      || this.runtime().disposed
+      || !this.data.voiceAuthorizationAgreed
+      || !this.data.autoBargeInEnabled
+      || requestSerial !== this.runtime().followUpRequestSerial
       || bookCompletionRoundFinished(this.data)
       || !this.assistantTurnActiveForBargeIn()
-      || this.runtime().assistantBargeInMonitor.isRunning()
+      || this.runtime().voiceStreaming.isBargeInMonitoring()
     ) {
       return;
     }
-    const started = this.runtime().assistantBargeInMonitor.start({
+    const started = this.runtime().voiceStreaming.startBargeInMonitoring({
       onBargeIn: () => {
         void this.handleAssistantBargeIn(requestSerial);
       },
@@ -453,7 +458,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
   },
 
   stopAssistantBargeInMonitor() {
-    return this.runtime().assistantBargeInMonitor.stopAndWait();
+    return this.runtime().voiceStreaming.stopBargeInMonitoring();
   },
 
   async handleAssistantBargeIn(requestSerial: number) {
@@ -463,17 +468,21 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       || bookCompletionRoundFinished(this.data)
       || !this.assistantTurnActiveForBargeIn()
     ) {
-      await this.stopAssistantBargeInMonitor();
+      await this.runtime().voiceStreaming.stopBargeInMonitoring(true);
       return;
     }
     applyVoiceChatDataPatch(this, {
       autoListenStateText: "听到您说话了",
     });
     if (!this.ensureVoiceAuthorization(false)) {
-      await this.stopAssistantBargeInMonitor();
+      await this.runtime().voiceStreaming.stopBargeInMonitoring(true);
       return;
     }
-    await this.startRecordingAfterPrivacy(false);
+    try {
+      if (this.startRecording(false)) await this.runtime().recordingStartPromise;
+    } finally {
+      await this.runtime().voiceStreaming.stopBargeInMonitoring(true);
+    }
   },
 
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {

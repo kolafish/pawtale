@@ -18,12 +18,14 @@ from app.services.memoir.editing_job_handlers import register_memoir_editing_job
 from app.services.memoir.editing_jobs import editing_worker_loop
 from app.services.memoir.share_video_jobs import share_video_worker_loop
 from app.services.ai_factory import UnsupportedAIModelError
+from app.services.asr.barge_in import load_barge_in_model
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_settings()
     await assert_runtime_schema(engine)
+    await asyncio.to_thread(load_barge_in_model)
     register_memoir_editing_job_handlers()
     settings = get_settings()
     stop_event: asyncio.Event | None = None

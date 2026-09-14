@@ -246,11 +246,14 @@ export type VoiceGatewayClientEvent =
       ai_model?: string;
       transcript_polish_level?: MemoirTranscriptPolishLevel;
     }
+  | { type: "barge_in.start" | "barge_in.stop"; monitor_id: string }
+  | { type: "barge_in.frame"; monitor_id: string; audio: string }
   | { type: "audio.frame"; audio: string }
   | { type: "audio.end" }
   | { type: "session.stop" };
 
 export interface VoiceGatewayServerEvent {
+  monitor_id?: string;
   type: string;
   state?: VoiceGatewayState;
   status?: string;

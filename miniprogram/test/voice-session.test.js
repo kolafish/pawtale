@@ -21,7 +21,6 @@ function loadVoiceChatPage({
   voiceChatAutoListenExports = {},
   assistantTurnStreamExports = {},
   streamingSpeechPlaybackExports = {},
-  voiceBargeInMonitorExports = {},
   ttsTextProgressExports = {},
   accessibilityExports = {},
 } = {}) {
@@ -35,6 +34,10 @@ function loadVoiceChatPage({
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
     MemoirStreamingAsrClient: streamingExports.MemoirStreamingAsrClient || class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
       async connect() {}
       close() {}
       startRecording() {
@@ -177,19 +180,6 @@ function loadVoiceChatPage({
       async destroy() {}
     },
     ...streamingSpeechPlaybackExports,
-  });
-  mockModule("../services/voice-barge-in-monitor.ts", {
-    VoiceBargeInMonitor: voiceBargeInMonitorExports.VoiceBargeInMonitor || class {
-      start() {
-        return true;
-      }
-      stop() {}
-      async stopAndWait() {}
-      isRunning() {
-        return false;
-      }
-    },
-    ...voiceBargeInMonitorExports,
   });
   clearModule("../services/voice-assistant-turn-runtime.ts");
   clearModule("../services/voice-assistant-turn-queue.ts");
@@ -361,6 +351,9 @@ test("book completion return stops the backend session when websocket is absent"
     refreshVoiceSessionSnapshot: async () => ({ session: { status: "stopped" } }),
     recordingStartGeneration: 0,
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => false,
     },
     stopCompletionIssueRefresh() {},
@@ -422,6 +415,9 @@ test("human interview record action starts the selected speaker in one tap", asy
       speakerRole: "narrator",
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
       startRecording(options) {
         startOptions.push(options);
@@ -472,6 +468,9 @@ test("human interview record action reconnects and starts the selected speaker w
       speakerRole: "narrator",
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => connected,
       async connect(options) {
         connectCalls += 1;
@@ -515,6 +514,10 @@ test("voice chat does not connect a stopped voice session", async () => {
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {
           connectCalls += 1;
         }
@@ -707,6 +710,10 @@ test("voice chat does not show microphone connecting while session refresh is pe
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         constructor(options) {
           this.options = options;
         }
@@ -775,6 +782,10 @@ test("voice chat reconnects on user start after a failed connect", async () => {
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         constructor(options) {
           this.options = options;
         }
@@ -832,6 +843,10 @@ test("voice chat does not auto reconnect when recorder start is not ready", asyn
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         constructor(options) {
           this.options = options;
         }
@@ -889,6 +904,10 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {}
         async finishSession() {
           finishCalls += 1;
@@ -969,6 +988,10 @@ test("book completion finish explains that the answer is already in its section"
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {}
         async finishSession() {}
         close() {}
@@ -1033,6 +1056,9 @@ test("voice chat save action cancels a recording start that is still authorizing
       status: "closed",
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => false,
       startRecording() {
         recorderStartCalls += 1;
@@ -1223,6 +1249,9 @@ test("voice chat stops active AI speech when the page is hidden", () => {
       },
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
       stopRecording() {
         stopRecordingCalls += 1;
@@ -1553,6 +1582,10 @@ test("voice chat uses conservative silence thresholds for automatic turn ending"
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         constructor(options) {
           connectOptions.push(options);
           this.options = options;
@@ -1595,6 +1628,10 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {}
         close() {}
         startRecording(options) {
@@ -1672,16 +1709,10 @@ test("voice chat waits for barge-in monitor recorder stop before auto-listen rec
       voiceAuthorizationAgreed: true,
       status: "ready",
     },
-    assistantBargeInMonitor: {
-      isRunning: () => false,
-      start: () => true,
-      stop() {},
-      stopAndWait() {
-        stopCalls += 1;
-        return monitorStopped;
-      },
-    },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      stopBargeInMonitoring() { stopCalls += 1; return monitorStopped; },
       hasClient: () => true,
       startRecording(options) {
         startOptions.push(options);
@@ -1715,6 +1746,10 @@ test("voice chat starts auto listening after AI audio playback ends when gateway
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {}
         close() {}
         startRecording() {
@@ -1773,6 +1808,10 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         constructor(options) {
           this.options = options;
         }
@@ -1957,6 +1996,9 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
     },
     setData(patch) {
@@ -2051,6 +2093,9 @@ test("voice chat mic interrupts active assistant turn and starts recording", asy
       },
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
       startRecording(options) {
         startOptions.push(options);
@@ -2133,6 +2178,9 @@ test("voice chat mic interrupts assistant turn before async recording checks fin
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
       startRecording(options) {
         startOptions.push(options);
@@ -2162,7 +2210,7 @@ test("voice chat mic interrupts assistant turn before async recording checks fin
   assert.equal(context.data.recording, true);
 });
 
-test("voice chat automatically interrupts assistant playback when local voice monitor fires", async () => {
+test("voice chat automatically interrupts assistant playback when server speech monitor fires", async () => {
   let monitorOptions = null;
   const monitor = {
     running: false,
@@ -2181,18 +2229,15 @@ test("voice chat automatically interrupts assistant playback when local voice mo
       return this.running;
     },
   };
+  let releaseConsent;
+  let consentCalls = 0;
+  const consentReady = new Promise(resolve => { releaseConsent = resolve; });
   const cancelReasons = [];
   const startOptions = [];
   const page = loadVoiceChatPage({
     voiceAuthorizationExports: {
       readVoiceAuthorizationConsent: () => true,
-    },
-    voiceBargeInMonitorExports: {
-      VoiceBargeInMonitor: class {
-        constructor() {
-          return monitor;
-        }
-      },
+      ensureVoiceRecordingAuthorization: () => { consentCalls++; return consentReady; },
     },
   });
   const context = {
@@ -2232,6 +2277,9 @@ test("voice chat automatically interrupts assistant playback when local voice mo
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => monitor.isRunning(),
+      startBargeInMonitoring: (options) => monitor.start(options),
+      stopBargeInMonitoring: () => monitor.stopAndWait(),
       hasClient: () => true,
       startRecording(options) {
         startOptions.push(options);
@@ -2253,6 +2301,11 @@ test("voice chat automatically interrupts assistant playback when local voice mo
   monitorOptions.onBargeIn();
   await new Promise((resolve) => setImmediate(resolve));
 
+  assert.equal(context.data.recordingStarting, true);
+  assert.equal(page.startRecording.call(context, false), true);
+  assert.equal(consentCalls, 1);
+  releaseConsent({ id: "consent-1" });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(monitor.running, false);
   assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
@@ -2260,7 +2313,7 @@ test("voice chat automatically interrupts assistant playback when local voice mo
   assert.equal(context.data.followUpTTSPlaying, false);
 });
 
-test("voice chat does not start local barge-in monitor when the setting is off", () => {
+test("voice chat does not start barge-in monitor when the setting is off", () => {
   let startCount = 0;
   const monitor = {
     start() {
@@ -2279,13 +2332,6 @@ test("voice chat does not start local barge-in monitor when the setting is off",
         largeTextEnabled: false,
         autoBargeInEnabled: false,
       }),
-    },
-    voiceBargeInMonitorExports: {
-      VoiceBargeInMonitor: class {
-        constructor() {
-          return monitor;
-        }
-      },
     },
   });
   const context = {
@@ -2325,9 +2371,9 @@ test("voice chat checks recorder privacy before passive barge-in monitoring", as
       voiceAuthorizationAgreed: true,
       followUpTTSPlaying: true,
     },
-    assistantBargeInMonitor: {
-      isRunning: () => false,
-      start() {
+    voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring() {
         startCount += 1;
         return true;
       },
@@ -2368,13 +2414,6 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
     voiceAuthorizationExports: {
       readVoiceAuthorizationConsent: () => true,
     },
-    voiceBargeInMonitorExports: {
-      VoiceBargeInMonitor: class {
-        constructor() {
-          return monitor;
-        }
-      },
-    },
   });
   const context = {
     ...page,
@@ -2412,6 +2451,9 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => monitor.isRunning(),
+      startBargeInMonitoring: (options) => monitor.start(options),
+      stopBargeInMonitoring: () => monitor.stopAndWait(),
       hasClient: () => false,
       startRecording() {
         throw new Error("startRecording should wait for reconnect");
@@ -2632,6 +2674,9 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
     },
     setData(patch) {
@@ -2709,6 +2754,9 @@ test("voice chat clears temporary streaming assistant state when the turn fails"
       stop() {},
     },
     voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
       hasClient: () => true,
     },
     setData(patch) {
@@ -3028,6 +3076,10 @@ test("voice chat ignores stale no-answer prompt after manual recording resumes",
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+
         async connect() {}
         close() {}
         startRecording(options) {
@@ -3243,7 +3295,10 @@ test("failed saving and finishing in the background never navigate away or claim
     const context = { ...page, pageSuspended: suspended,
       data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
       setData(patch) { this.data = {...this.data, ...patch}; },
-      voiceStreaming: {hasClient: () => true, finishSession: async () => { if (!suspended) throw Error("音频尚未保存"); }},
+      voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},hasClient: () => true, finishSession: async () => { if (!suspended) throw Error("音频尚未保存"); }},
       refreshVoiceSessionSnapshot: async () => {},
       stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
       handleError: message => errors.push(message),
@@ -3268,7 +3323,10 @@ test("a closed voice client returns home only when the persisted session confirm
     const context = { ...page, pageSuspended: false,
       data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
       setData(patch) { this.data = {...this.data, ...patch}; },
-      voiceStreaming: {hasClient: () => false},
+      voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},hasClient: () => false},
       refreshVoiceSessionSnapshot: async () => status ? {session:{status}, utterances:[]} : null,
       stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
       handleError: message => errors.push(message),
@@ -3293,7 +3351,11 @@ test("detaching a voice component during hydration cannot connect or update a la
   const page = loadVoiceChatPage({
     voiceApiExports: { getMemoirVoiceSession: () => new Promise(resolve => { resolveSnapshot = resolve; }) },
     voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true },
-    streamingExports: { MemoirStreamingAsrClient: class { async connect() { connects += 1; } close() {} } },
+    streamingExports: { MemoirStreamingAsrClient: class {
+      isBargeInMonitoring() { return false; }
+      startBargeInMonitoring() { return false; }
+      async stopBargeInMonitoring() {}
+ async connect() { connects += 1; } close() {} } },
   });
   const first = componentContext(page.definition);
   const second = componentContext(page.definition);
@@ -3338,4 +3400,40 @@ test("a save confirmed while hidden reaches the host once on return", () => {
   page.definition.lifetimes.detached.call(context);
   context.exitSession(detail);
   assert.equal(context.events.length, 1);
+});
+
+test("capture failure during consent sync cannot reopen a truncated recording later", async () => {
+  let releaseConsent;
+  const consentReady = new Promise(resolve => { releaseConsent = resolve; });
+  const page = loadVoiceChatPage({ voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true } });
+  let starts = 0;
+  const context = { ...page, data: { ...page.data, status: "ready", voiceAuthorizationAgreed: true },
+    voiceStreaming: { hasClient: () => true, async stopBargeInMonitoring() {},
+      startRecording() { starts++; return true; } },
+    async syncVoiceAuthorizationForSession() { return consentReady; },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+  };
+  assert.equal(page.startRecording.call(context), true);
+  await Promise.resolve();
+  page.handleError.call(context, "录音准备超时，请点按钮重新录音", { kind: "recorder" });
+  const pending = context.recordingStartPromise;
+  releaseConsent(true);
+  assert.equal(await pending, false);
+  assert.equal(starts, 0);
+  assert.equal(context.data.recording, false);
+});
+
+test("revoking voice consent while recorder privacy is pending never starts server monitoring", async () => {
+  let releasePrivacy;
+  const privacyReady = new Promise(resolve => { releasePrivacy = resolve; });
+  const page = loadVoiceChatPage({ wechatPrivacyExports: { ensureRecorderPrivacyAuthorization: () => privacyReady } });
+  let starts = 0;
+  const context = { ...page, data: { ...page.data, voiceAuthorizationAgreed: true, followUpTTSPlaying: true },
+    voiceStreaming: { isBargeInMonitoring: () => false, startBargeInMonitoring() { starts++; return true; } },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+  };
+  const pending = page.startAssistantBargeInMonitor.call(context, 0);
+  context.data.voiceAuthorizationAgreed = false;
+  releasePrivacy(); await pending;
+  assert.equal(starts, 0);
 });

@@ -510,6 +510,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   handleError(message: string, error?: VoiceChatErrorInfo) {
+    if (this.runtime().recordingStartPromise) {
+      this.runtime().recordingStartGeneration += 1;
+    }
     trackAuditAction(
       "voice_chat.error",
       {
