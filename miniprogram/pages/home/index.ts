@@ -92,6 +92,7 @@ interface HomeData extends HomeStoryData {
   launchSecondaryText: string;
   hasProject: boolean;
   selectedMode: NarrationMode;
+  currentGuidanceText: string;
   voiceAuthorizationAgreed: boolean;
   greetingText: string;
   launchModeTagText: string;
@@ -103,6 +104,7 @@ interface HomeData extends HomeStoryData {
   primaryVoiceButtonTitle: string;
   voiceStartNoteText: string;
   showResumeActions: boolean;
+  showMoreActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -125,6 +127,7 @@ type HomeViewPatch = Pick<
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
+  | "currentGuidanceText"
   | "voiceStartNoteText"
   | "showResumeActions"
   | "showVoiceAuthorizationPanel"
@@ -229,6 +232,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     voiceStartButtonClass: blocked ? "voice-start-button button-blocked" : "voice-start-button",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
+    currentGuidanceText: `当前讲述方式：${choice.label}`,
     voiceStartNoteText: state.loading ? "马上就好。"
       : state.needsLogin ? "先登录，再继续讲回忆。"
       : !state.hasProject ? "先起个名字，我再听您讲。"
@@ -329,6 +333,7 @@ definePage<HomeData>()({
     launchSecondaryText: "先看看首页",
     hasProject: false,
     selectedMode: "free_narration",
+    currentGuidanceText: "当前讲述方式：自由讲述",
     voiceAuthorizationAgreed: false,
     greetingText: "你好，作者",
     launchModeTagText: "第一次来",
@@ -340,6 +345,7 @@ definePage<HomeData>()({
     primaryVoiceButtonTitle: "创建回忆录",
     voiceStartNoteText: "先起个名字，我再听您讲。",
     showResumeActions: false,
+    showMoreActions: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
@@ -717,6 +723,10 @@ definePage<HomeData>()({
   selectNarrationMode({ detail }: NarrationModeEvent) {
     if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry || !isNarrationMode(detail.value)) return;
     setHomeData(this, { selectedMode: detail.value, error: "" }, () => this.measureNarration());
+  },
+
+  toggleMoreActions() {
+    setHomeData(this, { showMoreActions: !this.data.showMoreActions }, () => this.measureNarration());
   },
 
   async startPrimaryVoiceChat() {

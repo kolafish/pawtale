@@ -219,6 +219,20 @@ function installAutoEndingAudioContext() {
   };
 }
 
+test("viewing and collapsing narration modes preserves the current recording", () => {
+  const page = loadVoiceChatPage();
+  const context = { ...page, data: { ...page.data, guidanceMode: "guided_interview", recording: true, status: "listening" },
+    setData(patch) { this.data = { ...this.data, ...patch }; } };
+  assert.equal(context.data.showNarrationModes, false);
+  for (const expanded of [true, false]) {
+    context.toggleNarrationModes();
+    assert.equal(context.data.showNarrationModes, expanded);
+    assert.equal(context.data.narrationMode, "guided_interview");
+    assert.equal(context.data.recording, true);
+    assert.equal(context.data.status, "listening");
+  }
+});
+
 test("voice chat blocks recording before voice authorization consent", () => {
   const toasts = [];
   global.wx = {
