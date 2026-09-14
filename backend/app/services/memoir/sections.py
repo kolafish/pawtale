@@ -438,6 +438,7 @@ async def update_section(
     section_id: str,
     req: MemoirSectionUpdateRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirSectionCollectionResponse:
     await load_memoir_project(
         db,
@@ -474,8 +475,35 @@ async def update_section(
             project_id=project_id,
             section_ids={section.id},
         )
-        await db.commit()
+        await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
+
+
+async def delete_section(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    section_id: str,
+    commit: bool = True,
+) -> None:
+    await load_memoir_project(db, project_id, user_id)
+    section = await _load_section(db, project_id=project_id, section_id=section_id)
+    chapter = await _load_chapter(db, project_id=project_id, chapter_id=section.chapter_id)
+    await mark_section_digests_stale(db, project_id=project_id, section_ids={section.id})
+    await db.delete(section)
+    chapter.updated_at = utcnow_naive()
+    await db.flush()
+    draft = await db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter.id))
+    if draft:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = {**(draft.metadata_json or {}), "status_reason": "materials_deleted"}
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    if output:
+        invalidate_book_output(output)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await (db.commit() if commit else db.flush())
 
 
 async def reorder_sections(

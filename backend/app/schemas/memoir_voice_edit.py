@@ -1,0 +1,59 @@
+from typing import Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class VoiceEditOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["delete_chapter", "delete_section", "delete_material", "rename_chapter", "rename_section"]
+    target_ref: str = Field(min_length=1, max_length=80)
+    new_title: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def check_title(self) -> Self:
+        if self.new_title is not None:
+            self.new_title = self.new_title.strip()
+        if self.action.startswith("rename_") and not self.new_title:
+            raise ValueError("改名必须提供新标题")
+        if self.action.startswith("delete_") and self.new_title is not None:
+            raise ValueError("删除操作不能包含新标题")
+        return self
+
+
+class VoiceEditQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_refs: list[str] = Field(default_factory=list)
+    question: str
+
+
+class VoiceEditProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operations: list[VoiceEditOperation] = Field(default_factory=list, max_length=30)
+    questions: list[VoiceEditQuestion] = Field(default_factory=list, max_length=10)
+    reply: str
+
+
+class VoiceEditPreviewRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=2000)
+    ai_model: str | None = None
+
+
+class VoiceEditItem(VoiceEditOperation):
+    label: str
+    detail: str
+
+
+class VoiceEditPreviewResponse(BaseModel):
+    signature: str
+    operations: list[VoiceEditItem]
+    questions: list[str]
+    reply: str
+
+
+class VoiceEditApplyRequest(BaseModel):
+    signature: str = Field(min_length=64, max_length=64)
+    operations: list[VoiceEditOperation] = Field(min_length=1, max_length=30)
+
+
+class VoiceEditApplyResponse(BaseModel):
+    message: str

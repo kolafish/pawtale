@@ -1,0 +1,222 @@
+import json
+
+import pytest
+import pytest_asyncio
+from pydantic import ValidationError
+from sqlalchemy import select
+
+from app.models.memoir import (
+    MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlan,
+    MemoirBookPlanChapter, MemoirSection, MemoirSectionMaterial,
+    MemoirVoiceSession, MemoirVoiceUtterance,
+)
+from app.models.projects import Project
+from app.schemas.memoir_voice_edit import VoiceEditOperation, VoiceEditProposal
+from app.services.ai_base import AITextServiceBase
+from app.services.ai_timeouts import AIProviderTimeoutError
+from app.services.memoir.voice_edit import _story
+from app.services.memoir.semantic_state import semantic_json_signature
+
+
+class FakeAI(AITextServiceBase):
+    provider_name = "fixture"
+    model_name = "deepseek-v4-flash"
+
+    def __init__(self, proposal):
+        self.proposal = proposal
+        self.inputs = []
+        self.system = ""
+
+    async def _call_llm(self, system, user, **kwargs):
+        self.system = system
+        self.inputs.append(json.loads(user))
+        return json.dumps(self.proposal, ensure_ascii=False)
+
+
+@pytest_asyncio.fixture
+async def story(client, test_db):
+    uid = (await client.get("/api/auth/me")).json()["id"]
+    project = Project(title="我的回忆录", type="memoir", user_id=uid)
+    test_db.add(project)
+    await test_db.flush()
+    plan = MemoirBookPlan(project_id=project.id, status="confirmed")
+    session = MemoirVoiceSession(project_id=project.id)
+    test_db.add_all([plan, session])
+    await test_db.flush()
+    chapters, sections, materials = [], [], []
+    for i, title in enumerate(["测试录音", "童年回忆", "早晨日常"]):
+        chapter = MemoirBookPlanChapter(plan_id=plan.id, project_id=project.id, title=title, sort_order=i)
+        test_db.add(chapter)
+        await test_db.flush()
+        section = MemoirSection(chapter_id=chapter.id, project_id=project.id, title=title)
+        material = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw=["这是录音保存测试。", "我又来测试了。我出生在八十年代，奶奶带着我长大。", "今天早晨吃了粽子。"][i])
+        draft = MemoirBookChapterDraft(project_id=project.id, chapter_id=chapter.id)
+        test_db.add_all([section, material, draft])
+        await test_db.flush()
+        test_db.add_all([
+            MemoirSectionMaterial(project_id=project.id, section_id=section.id, utterance_id=material.id),
+            MemoirBookChapterDraftVersion(draft_id=draft.id, project_id=project.id, chapter_id=chapter.id, version=1, content=material.transcript_raw),
+        ])
+        chapters.append(chapter.id)
+        sections.append(section.id)
+        materials.append(material.id)
+    extra = MemoirSection(project_id=project.id, chapter_id=chapters[1], title="去外婆家的童年经历", sort_order=1)
+    test_db.add(extra)
+    await test_db.commit()
+    return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
+
+
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下"):
+    fake = FakeAI({"operations": operations, "questions": questions or [], "reply": "请看看这些修改。"})
+    requested = []
+
+    def factory(model):
+        requested.append(model)
+        return fake
+
+    monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", factory)
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash"})
+    assert requested == ["deepseek-v4-flash"]
+    return response, fake
+
+
+async def apply(client, story, preview_data, operations=None):
+    chosen = operations if operations is not None else [
+        {k: op[k] for k in ("action", "target_ref", "new_title")} for op in preview_data["operations"]
+    ]
+    return await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/apply", json={"signature": preview_data["signature"], "operations": chosen})
+
+
+async def test_raw_speech_context_and_both_renames(client, test_db, monkeypatch, story):
+    operations = [
+        {"action": "rename_chapter", "target_ref": story["chapters"][1], "new_title": "八十年代的童年"},
+        {"action": "rename_section", "target_ref": story["sections"][3], "new_title": "外婆家的快乐时光"},
+    ]
+    raw = "童年记忆这一张换一个名字，去外婆家的童年经历这个，小杰也换个名字。"
+    response, fake = await preview(client, monkeypatch, story, operations, instruction=raw)
+    assert response.status_code == 200, response.text
+    assert fake.inputs[0]["instruction"] == raw
+    schema = json.loads(fake.system.split("返回 JSON Schema：\n", 1)[1])
+    assert schema["properties"]["operations"]["type"] == "array"
+    assert any("我又来测试了。我出生在八十年代" in m["raw"] for m in fake.inputs[0]["book_data"]["materials"])
+    assert (await test_db.get(MemoirBookPlanChapter, story["chapters"][1])).title == "童年回忆"
+    assert (await apply(client, story, response.json())).status_code == 200
+    assert (await test_db.get(MemoirBookPlanChapter, story["chapters"][1])).title == "八十年代的童年"
+    assert (await test_db.get(MemoirSection, story["sections"][3])).title == "外婆家的快乐时光"
+    assert (await test_db.get(MemoirSection, story["sections"][1])).title == "童年回忆"
+    assert (await apply(client, story, response.json())).status_code == 409
+
+
+async def test_selected_deletion_combines_material_and_structure_atomically(client, test_db, monkeypatch, story):
+    ops = [
+        {"action": "delete_chapter", "target_ref": story["chapters"][0]},
+        {"action": "delete_section", "target_ref": story["sections"][0]},
+        {"action": "delete_material", "target_ref": story["materials"][0]},
+    ]
+    response, _ = await preview(client, monkeypatch, story, ops, questions=[{"target_refs": [story["materials"][1]], "question": "带有测试开场白的童年讲述是否保留？"}])
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert len(data["operations"]) == 2  # child removal is covered by the parent
+    assert "录音保存测试" in data["operations"][0]["detail"]
+    assert (await apply(client, story, data)).status_code == 200
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is None
+    assert await test_db.get(MemoirSection, story["sections"][0]) is None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][0]) is None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][1]) is not None
+    assert not (await test_db.scalars(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == story["chapters"][0]))).all()
+
+
+async def test_standalone_section_delete_preserves_material_and_other_sections(client, test_db, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_section", "target_ref": story["sections"][1]}])
+    assert (await apply(client, story, response.json())).status_code == 200
+    assert await test_db.get(MemoirSection, story["sections"][1]) is None
+    assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][1]) is not None
+    assert await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == story["materials"][1])) is None
+
+
+async def test_stale_membership_or_source_blocks_delete(client, test_db, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_chapter", "target_ref": story["chapters"][0]}])
+    material = await test_db.get(MemoirVoiceUtterance, story["materials"][0])
+    material.transcript_edited = "这是后来补充的重要回忆。"
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+
+
+async def test_failure_rolls_back_prior_renames_and_deletions(client, test_db, monkeypatch, story):
+    remaining = await test_db.get(MemoirBookPlanChapter, story["chapters"][1])
+    remaining.include_in_book = False
+    await test_db.commit()
+    before = semantic_json_signature(await _story(test_db, story["pid"]))
+    ops = [{"action": "rename_section", "target_ref": story["sections"][3], "new_title": "不能留下的改名"}]
+    ops += [{"action": "delete_chapter", "target_ref": story["chapters"][i]} for i in (0, 2)]
+    response, _ = await preview(client, monkeypatch, story, ops)
+    result = await apply(client, story, response.json())
+    assert result.status_code == 400, result.text
+    assert semantic_json_signature(await _story(test_db, story["pid"])) == before
+
+
+@pytest.mark.parametrize("action,target_kind", [("delete_chapter", "sections"), ("delete_material", "chapters"), ("rename_section", "materials")])
+async def test_wrong_entity_kind_is_rejected(client, monkeypatch, story, action, target_kind):
+    op = {"action": action, "target_ref": story[target_kind][0]}
+    if action.startswith("rename"):
+        op["new_title"] = "新名字"
+    response, _ = await preview(client, monkeypatch, story, [op])
+    assert response.status_code == 422
+
+
+async def test_foreign_project_and_uncertain_mutation_are_rejected(client, test_db, monkeypatch, story):
+    foreign = Project(title="别人的回忆", type="memoir")
+    test_db.add(foreign)
+    await test_db.commit()
+    response = await client.post(f"/api/memoir/projects/{foreign.id}/voice-edit/preview", json={"instruction": "删掉"})
+    assert response.status_code == 404
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": "foreign-material"}])
+    assert response.status_code == 422
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": story["materials"][1]}], questions=[{"target_refs": [story["materials"][1]], "question": "是否整条删除？"}])
+    assert response.status_code == 422
+
+
+async def test_no_edit_and_invalid_provider_array_do_not_write(client, test_db, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [], questions=[{"target_refs": [], "question": "您想修改哪部分？"}], instruction="那时候我常去外婆家。")
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    bad = FakeAI({"operations": '[{"action":"delete_chapter"}]', "questions": "[]", "reply": "已处理"})
+    monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", lambda _: bad)
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": "删除测试录音"})
+    assert response.status_code == 502
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+
+
+async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, test_db, monkeypatch, story):
+    class SlowAI(FakeAI):
+        calls = 0
+
+        async def _call_llm(self, system, user, **kwargs):
+            self.calls += 1
+            raise AIProviderTimeoutError(provider=self.provider_name, model=self.model_name, timeout_seconds=60)
+
+    fake = SlowAI(None)
+    monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", lambda _: fake)
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": "删除测试录音"})
+    assert response.status_code == 502
+    assert "模型处理超过" in response.json()["detail"]
+    assert fake.calls == 1
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+
+
+@pytest.mark.parametrize("data", [
+    {"action": "rename_chapter", "target_ref": "c", "new_title": "  "},
+    {"action": "delete_chapter", "target_ref": "c", "new_title": "新名"},
+    {"action": "execute_sql", "target_ref": "c"},
+])
+def test_operation_contract_rejects_unexecutable_actions(data):
+    with pytest.raises(ValidationError):
+        VoiceEditOperation.model_validate(data)
+
+
+def test_provider_string_arrays_are_not_interpreted_as_actions():
+    with pytest.raises(ValidationError):
+        VoiceEditProposal.model_validate({"operations": "[]", "questions": [], "reply": ""})

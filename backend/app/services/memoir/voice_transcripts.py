@@ -1265,6 +1265,8 @@ async def delete_voice_transcript(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
+    *,
+    commit: bool = True,
 ) -> None:
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
     await _ensure_voice_transcript_can_be_deleted(
@@ -1294,4 +1296,4 @@ async def delete_voice_transcript(
         message.transcript_version_id = None
         message.content_status = MemoirChatContentStatus.CORRECTED.value
 
-    await db.commit()
+    await (db.commit() if commit else db.flush())

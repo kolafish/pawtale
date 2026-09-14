@@ -703,6 +703,15 @@ definePage<HomeData>()({
     navigateToTranscripts();
   },
 
+  openVoiceEdit() {
+    if (!this.data.projectId) return;
+    if (this.data.voiceEntry) {
+      wx.showToast({ title: "请先结束当前讲述", icon: "none" });
+      return;
+    }
+    wx.navigateTo({ url: pageUrl("/pages/story-voice-edit/index", { projectId: this.data.projectId, projectTitle: this.data.projectTitle }) });
+  },
+
   openChapter(event: StoryTreeChapterEvent) {
     const { chapterId, sectionId } = event.detail;
     if (!this.data.projectId || !chapterId) {

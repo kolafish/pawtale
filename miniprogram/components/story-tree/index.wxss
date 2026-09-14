@@ -666,3 +666,12 @@
   .chapter-media-row { flex-wrap: wrap; }
   .chapter-media-title { flex-basis: 100%; }
 }
+.voice-edit-entry {
+  min-height: 80rpx;
+  display: flex;
+  align-items: center;
+  margin: 0 16rpx 0 auto;
+  background: transparent;
+  color: #8b493e;
+  font-size: 26rpx;
+}

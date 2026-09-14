@@ -1,0 +1,29 @@
+<view class="{{pageClass}}">
+  <view class="edit-intro">
+    <text class="edit-book">{{projectTitle || '当前回忆录'}}</text>
+    <text class="edit-title">说说你想怎么改</text>
+    <text class="edit-hint">直接说出要修改的内容，不用先找章节。</text>
+  </view>
+  <voice-text-editor value="{{instruction}}" gateway-url="{{gatewayUrl}}" maxlength="2000"
+    placeholder="比如：早晨日常这一章删掉，童年回忆帮我换个名字。"
+    submit-text="发送" busy-text="正在理解…" busy="{{loading}}" disabled="{{applying || !projectId}}"
+    bind:change="changeInstruction" bind:submit="submitInstruction" />
+  <view wx:if="{{error}}" class="ui-error-banner" aria-live="polite">{{error}}</view>
+  <view wx:if="{{preview}}" class="edit-result ui-card">
+    <text class="edit-reply">{{preview.reply}}</text>
+    <view wx:for="{{preview.questions}}" wx:key="*this" class="edit-question">{{item}}</view>
+    <text wx:if="{{preview.questions.length}}" class="edit-hint">可以继续说，补充到上面的要求里。</text>
+    <checkbox-group bindchange="selectOperations">
+      <label wx:for="{{items}}" wx:key="target_ref" class="edit-operation">
+        <checkbox value="{{item.target_ref}}" checked="{{item.selected}}" disabled="{{applying}}" color="#A84F43" />
+        <view class="edit-operation-copy">
+          <text class="edit-operation-title">{{item.label}}</text>
+          <text wx:if="{{item.detail}}" class="edit-detail">{{item.detail}}</text>
+        </view>
+      </label>
+    </checkbox-group>
+    <button wx:if="{{items.length}}" class="edit-apply ui-button" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">执行所选修改（{{selectedCount}}）</button>
+  </view>
+  <view wx:if="{{message}}" class="edit-result ui-card" aria-live="polite">{{message}}</view>
+  <button class="edit-back ui-button" bindtap="backToStory">回到故事</button>
+</view>

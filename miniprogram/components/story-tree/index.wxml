@@ -4,6 +4,7 @@
       <view class="timeline-mark"></view>
       <text>我的故事</text>
     </view>
+    <button wx:if="{{canVoiceEdit}}" class="voice-edit-entry ui-button" bindtap="openVoiceEdit" size="mini">语音编辑</button>
     <view
       class="transcript-list-entry ui-pressable"
       bindtap="openTranscripts"

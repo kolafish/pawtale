@@ -1,0 +1,18 @@
+.voice-edit-page { padding: 24rpx 30rpx 64rpx; }
+.edit-intro { padding: 24rpx 0 32rpx; }
+.edit-book, .edit-title, .edit-hint, .edit-reply, .edit-detail { display: block; }
+.edit-book { color: #8d7669; font-size: 26rpx; margin-bottom: 16rpx; }
+.edit-title { font-size: 40rpx; font-weight: 600; color: #382e28; margin-bottom: 16rpx; }
+.edit-hint, .edit-detail { color: #776b61; font-size: 28rpx; line-height: 1.7; }
+.edit-result { margin-top: 28rpx; padding: 28rpx; }
+.edit-reply, .edit-question { font-size: 30rpx; line-height: 1.75; white-space: pre-wrap; }
+.edit-question { margin-top: 16rpx; color: #8b493e; }
+.edit-operation { display: flex; align-items: flex-start; gap: 14rpx; padding: 24rpx 0; min-height: 80rpx; }
+.edit-operation-copy { min-width: 0; flex: 1; }
+.edit-operation-title { font-size: 30rpx; line-height: 1.65; overflow-wrap: anywhere; }
+.edit-detail { margin-top: 12rpx; white-space: pre-wrap; }
+.edit-apply { background: #a84f43; color: #fff; min-height: 88rpx; margin-top: 20rpx; }
+.edit-back { background: transparent; color: #8b493e; min-height: 88rpx; margin-top: 32rpx; }
+.large-text .edit-title { font-size: 46rpx; }
+.large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: 32rpx; }
+.large-text .edit-operation-title, .large-text .edit-reply, .large-text .edit-question { font-size: 36rpx; }
