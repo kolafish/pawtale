@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Literal, Protocol
 from starlette.websockets import WebSocketDisconnect
 
 from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
+from app.services.asr.barge_in import BargeInDetector
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ class VoiceGatewaySession:
         diagnostic_log_prefix: str = "streaming_asr_gateway",
         connection_id: str | None = None,
         diagnostics_context: dict[str, Any] | None = None,
+        barge_in_detector_factory: Callable[[], BargeInDetector] | None = None,
     ) -> None:
         self.client = client
         self.asr_client_factory = asr_client_factory
@@ -113,6 +115,9 @@ class VoiceGatewaySession:
         self._audio_bytes = 0
         self._asr_event_count = 0
         self._asr_final_count = 0
+        self._barge_in_factory = barge_in_detector_factory
+        self._barge_in_detector: BargeInDetector | None = None
+        self._barge_in_id: str | None = None
 
     async def run(self) -> None:
         self._log_diagnostic("session.ready")
@@ -183,7 +188,12 @@ class VoiceGatewaySession:
 
     async def _handle_client_message(self, message: dict[str, Any]) -> bool:
         message_type = message.get("type")
+        if isinstance(message_type, str) and message_type.startswith("barge_in."):
+            await self._handle_barge_in(message)
+            return False
         if message_type == "session.start":
+            self._barge_in_detector = None
+            self._barge_in_id = None
             await self._start_asr(message)
             return False
         if message_type == "audio.frame":
@@ -200,6 +210,46 @@ class VoiceGatewaySession:
         await self._send_error("unsupported_gateway_event", {"received_type": message_type})
         self._log_diagnostic("client.unsupported_event", level=logging.WARNING, received_type=message_type)
         return False
+
+    async def _handle_barge_in(self, message: dict[str, Any]) -> None:
+        monitor_id = message.get("monitor_id")
+        if not isinstance(monitor_id, str) or not 1 <= len(monitor_id) <= 80:
+            raise VoiceGatewayClientError("invalid_barge_in_monitor_id")
+        message_type = message["type"]
+        if message_type == "barge_in.stop":
+            if monitor_id == self._barge_in_id:
+                self._barge_in_detector = None
+                self._barge_in_id = None
+            return
+        if message_type == "barge_in.start":
+            if self._barge_in_factory is None or self._state != VoiceGatewayState.READY:
+                await self.client.send_json(self._event(
+                    "barge_in.error", monitor_id=monitor_id, error="barge_in_unavailable",
+                ))
+                return
+            self._barge_in_detector = await asyncio.to_thread(self._barge_in_factory)
+            self._barge_in_id = monitor_id
+            await self.client.send_json(self._event("barge_in.started", monitor_id=monitor_id))
+            return
+        if message_type != "barge_in.frame":
+            raise VoiceGatewayClientError("unsupported_barge_in_event")
+        if monitor_id != self._barge_in_id or self._barge_in_detector is None:
+            return  # Late frames from stopped playback cannot affect a newer monitor.
+        encoded = message.get("audio")
+        if not isinstance(encoded, str) or not 0 < len(encoded) <= 44000:
+            raise VoiceGatewayClientError("invalid_barge_in_audio")
+        try:
+            pcm = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise VoiceGatewayClientError("invalid_barge_in_audio") from exc
+        if not pcm or len(pcm) % 2 or len(pcm) > 32768:
+            raise VoiceGatewayClientError("invalid_barge_in_audio")
+        if await asyncio.to_thread(self._barge_in_detector.feed, pcm):
+            self._log_diagnostic("barge_in.speech", monitor_id=monitor_id)
+            await self.client.send_json(self._event(
+                "barge_in.speech", monitor_id=monitor_id,
+                start_ms=max(0, self._barge_in_detector.windows * 32 - 128 - 160),
+            ))
 
     async def _start_asr(self, message: dict[str, Any]) -> None:
         if self._state == VoiceGatewayState.LISTENING:

@@ -1,6 +1,5 @@
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
-import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import type { VoiceAssistantTurnRuntime } from "../../services/voice-assistant-turn-runtime";
 import type { AssistantTurnQueueItem } from "../../services/voice-assistant-turn-queue";
 import { VoiceAssistantTTSProgressRuntime } from "../../services/voice-assistant-tts-progress";
@@ -13,7 +12,6 @@ export function createVoiceSessionRuntime() {
   return {
     audioPlayback: new AudioPlaybackController(),
     voiceStreaming: new StreamingVoiceController(),
-    assistantBargeInMonitor: new VoiceBargeInMonitor(),
     assistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
     assistantTurnQueue: [] as AssistantTurnQueueItem[],
     assistantTurnQueueRunning: false,

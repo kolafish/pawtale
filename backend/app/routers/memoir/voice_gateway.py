@@ -21,6 +21,7 @@ from app.services.asr.capacity import (
     voice_gateway_capacity_manager,
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
+from app.services.asr.barge_in import BargeInDetector
 from app.services.asr.gateway import VoiceGatewaySession, VoiceGatewayStopReason
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
@@ -114,6 +115,7 @@ async def mobile_memoir_voice_gateway(
 
         gateway_session = VoiceGatewaySession(
             client=websocket,
+            barge_in_detector_factory=BargeInDetector,
             asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
                 current_user_id,
                 voice_session_id,

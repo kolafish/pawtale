@@ -211,7 +211,7 @@ Component({
       ...(settings.autoBargeInEnabled ? {} : { autoListenStateText: "可以点按钮回答" }),
     });
     if (!settings.autoBargeInEnabled) {
-      void this.stopAssistantBargeInMonitor();
+      void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
     }
   },
 
@@ -237,7 +237,7 @@ Component({
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose(reason);
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
-    void this.stopAssistantBargeInMonitor();
+    void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
     if (this.data.recordingStarting) {
       applyVoiceChatDataPatch(this, { recordingStarting: false });
     }

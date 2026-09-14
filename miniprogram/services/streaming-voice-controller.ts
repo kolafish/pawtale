@@ -3,6 +3,7 @@ import {
   type MemoirStreamingAsrCallbacks,
   type MemoirStreamingAsrOptions,
   type MemoirStartRecordingOptions,
+  type BargeInCallbacks,
 } from "./memoir-streaming-asr";
 import { sharedRecorderResource } from "./recorder-resource";
 
@@ -49,6 +50,18 @@ export class StreamingVoiceController {
 
   startRecording(options: MemoirStartRecordingOptions = {}): boolean {
     return this.client?.startRecording(options) || false;
+  }
+
+  isBargeInMonitoring(): boolean {
+    return this.client?.isBargeInMonitoring() || false;
+  }
+
+  startBargeInMonitoring(callbacks: BargeInCallbacks): boolean {
+    return this.client?.startBargeInMonitoring(callbacks) || false;
+  }
+
+  stopBargeInMonitoring(discardPending = false): Promise<void> {
+    return this.client?.stopBargeInMonitoring(discardPending) || Promise.resolve();
   }
 
   stopRecording(): void {
