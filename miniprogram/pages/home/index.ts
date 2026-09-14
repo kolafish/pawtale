@@ -890,6 +890,7 @@ definePage<HomeData>()({
     }, {
       projectId,
     });
+    if (userId !== this.data.userId || projectId !== this.data.projectId) return;
     trackAuditAction(
       "voice_chat.start",
       {
@@ -904,7 +905,6 @@ definePage<HomeData>()({
     if (entry === "home_launch") {
       this.dismissLaunchPanel();
     }
-    if (userId !== this.data.userId || projectId !== this.data.projectId) return;
     this.voiceNavigationTarget = { userId, projectId, entry: {
       voiceSessionId: detail.session.id, projectId, mode, interviewType, sessionGoal,
       projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
@@ -919,7 +919,7 @@ definePage<HomeData>()({
     if (target.userId !== this.data.userId || target.projectId !== this.data.projectId || this.data.needsLogin) return;
     if (this.data.voiceEntry) return;
     setHomeData(this, { voiceEntry: target.entry, showContinueNarration: false, narrationSaved: false }, () => {
-      wx.pageScrollTo({ selector: "#home-narration", duration: 250 });
+      wx.pageScrollTo({ scrollTop: 0, duration: 250 });
     });
   },
 

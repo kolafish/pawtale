@@ -8,6 +8,7 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
   onLoad(query: PageQuery = {}) {
     this.setData({ entry: {
       voiceSessionId: queryParam(query, "voiceSessionId"),
+      projectId: queryParam(query, "projectId"),
       projectTitle: queryParam(query, "projectTitle"),
       module: queryParam(query, "module"),
       mode: queryChoice(query, "mode", ["free_narration", "guided_interview"] as const, "free_narration"),

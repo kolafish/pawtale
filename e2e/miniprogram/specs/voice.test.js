@@ -11,7 +11,6 @@ const {
 const { waitForPageData, waitForValue } = require("../support/wait");
 const {
   FIXTURE_ASSISTANT_TEXT,
-  FIXTURE_SESSION_ID,
   FIXTURE_USER_TEXT,
   createVoiceFixtureServer,
 } = require("../support/voice-fixture-server");
@@ -212,7 +211,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const recording = await waitForPageData(
       page,
       (data) => data.recording === true
-        && data.captureFrameCount > 0
+        && fixture.state.activeGatewayClientEvents.some(event => event.type === "audio.frame")
         && data.liveText.includes("第一次坐火车"),
       "录音帧和 ASR partial 到达页面",
       20000,
@@ -287,7 +286,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
     await session.miniProgram.navigateTo("/pages/voice-authorization/index");
     await session.miniProgram.navigateBack();
-    assert.equal((await host.data()).voiceEntry.voiceSessionId, FIXTURE_SESSION_ID);
+    assert.equal((await host.data()).voiceEntry.voiceSessionId, fixture.state.sessionId);
     assert.equal((await next.data()).recording, false);
     await (await elementById(next, "voice-finish-action")).tap();
     await waitForPageData(host, data => !data.voiceEntry, "结束空讲述并收起");

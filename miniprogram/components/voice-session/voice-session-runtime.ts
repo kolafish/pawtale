@@ -7,6 +7,7 @@ import { VoiceAssistantTTSProgressRuntime } from "../../services/voice-assistant
 import { PollingTimer } from "../../services/polling-timer";
 import { StoryProgressWatcher } from "../../services/story-growth-notice";
 import type { VoiceChatCompletionIssueRuntime } from "./voice-chat-completion-issue-runtime";
+import type { VoiceSessionExit } from "./events";
 
 export function createVoiceSessionRuntime() {
   return {
@@ -36,6 +37,7 @@ export function createVoiceSessionRuntime() {
     storyGrowthTimer: new PollingTimer(3000),
     progressNoticeWatcher: new StoryProgressWatcher(),
     disposed: false,
+    pendingExit: null as VoiceSessionExit | null,
   };
 }
 

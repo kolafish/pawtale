@@ -309,7 +309,8 @@ definePage<OverviewData>()({
       ]);
       this.setData({
         activeProjectId,
-        userId: identity.id,        projectTitle: identity.active_project?.title || "当前回忆录",
+        userId: identity.id,
+        projectTitle: identity.active_project?.title || "当前回忆录",
         progress,
         sessions: sessionList.items.map(toSessionView),
         ...topicMapViewPatch(topicMap),

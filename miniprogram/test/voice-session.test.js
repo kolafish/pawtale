@@ -3310,3 +3310,18 @@ test("a consent response received after hiding the component cannot open its gat
   assert.equal(await pending, false);
   assert.equal(connects, 0);
 });
+
+test("a save confirmed while hidden reaches the host once on return", () => {
+  const page = loadVoiceChatPage();
+  const context = componentContext(page.definition, {}, { voiceSessionId: "s1", status: "closed" });
+  context.runtime().pageSuspended = true;
+  const detail = { destination: "story", projectId: "p1", narrationSaved: true, finished: true };
+  context.exitSession(detail);
+  assert.deepEqual(context.events, []);
+  page.definition.pageLifetimes.show.call(context);
+  page.definition.pageLifetimes.show.call(context);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { ...detail, voiceSessionId: "s1" } }]);
+  page.definition.lifetimes.detached.call(context);
+  context.exitSession(detail);
+  assert.equal(context.events.length, 1);
+});

@@ -103,7 +103,14 @@ Component({
   methods: {
   runtime() { return voiceSessionRuntime(this); },
   exitSession(detail: VoiceSessionExit) {
-    if (!this.runtime().pageSuspended) this.triggerEvent("exit", { ...detail, voiceSessionId: this.data.voiceSessionId });
+    const runtime = this.runtime();
+    if (runtime.disposed) return;
+    if (runtime.pageSuspended) {
+      runtime.pendingExit = detail;
+    } else {
+      runtime.pendingExit = null;
+      this.triggerEvent("exit", { ...detail, voiceSessionId: this.data.voiceSessionId });
+    }
   },
 
   completionIssues() {
@@ -174,6 +181,11 @@ Component({
     if (this.runtime().disposed) return;
     const wasSuspended = this.runtime().pageSuspended;
     this.runtime().pageSuspended = false;
+    const pendingExit = this.runtime().pendingExit;
+    if (pendingExit) {
+      this.exitSession(pendingExit);
+      return;
+    }
     this.startProgressNoticeWatch();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();

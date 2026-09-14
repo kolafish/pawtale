@@ -11,7 +11,7 @@
       disabled="{{finishingSession}}"
       bindtap="finishSession"
     >
-      {{finishButtonText}}
+      {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
     </button>
   </view>
 
