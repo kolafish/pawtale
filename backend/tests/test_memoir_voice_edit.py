@@ -258,14 +258,16 @@ async def test_legacy_preview_requires_refresh_without_writing(client, test_db, 
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
 
 
-async def test_stale_membership_or_source_blocks_delete(client, test_db, monkeypatch, story):
-    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_chapter", "target_ref": story["chapters"][0]}])
+@pytest.mark.parametrize("action,kind", [("delete_chapter", "chapters"), ("delete_material", "materials")])
+async def test_changed_source_blocks_delete(client, test_db, monkeypatch, story, action, kind):
+    response, _ = await preview(client, monkeypatch, story, [{"action": action, "target_ref": story[kind][0]}])
     material = await test_db.get(MemoirVoiceUtterance, story["materials"][0])
     material.transcript_edited = "这是后来补充的重要回忆。"
     await test_db.commit()
     result = await apply(client, story, response.json())
     assert result.status_code == 409
     assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][0]) is not None
 
 
 async def test_failure_rolls_back_prior_renames_and_deletions(client, test_db, monkeypatch, story):

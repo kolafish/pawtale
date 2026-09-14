@@ -8,6 +8,7 @@ import time
 import httpx
 
 from fastapi import HTTPException
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -184,10 +185,10 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
         await db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
         story = await _story(db, project_id, lock=True)
         try:
-            signatures = json.loads(req.signature)
-        except json.JSONDecodeError:
-            signatures = None
-        if not isinstance(signatures, dict) or any(
+            signatures = TypeAdapter(dict[str, str]).validate_json(req.signature)
+        except ValidationError:
+            signatures = {}
+        if any(
             signatures.get(op.target_ref) != _operation_signature(story, op)
             for op in req.operations
         ):
