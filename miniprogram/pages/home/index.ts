@@ -27,10 +27,7 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
-import {
-  guidanceModeLabel,
-  memoirProjectProfile,
-} from "../../services/memoir-project-profile";
+import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
@@ -90,7 +87,7 @@ interface HomeData extends HomeStoryData {
   launchSecondaryText: string;
   hasProject: boolean;
   selectedMode: MemoirGuidanceMode;
-  guidanceLabel: string;
+  currentGuidanceText: string;
   voiceAuthorizationAgreed: boolean;
   greetingText: string;
   launchModeTagText: string;
@@ -130,6 +127,7 @@ type HomeViewPatch = Pick<
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
+  | "currentGuidanceText"
   | "voiceStartNoteText"
   | "resumeAskButtonClass"
   | "resumeAskButtonHoverClass"
@@ -176,13 +174,6 @@ function lastStoryText(hint: string): string {
     return "";
   }
   return `上次您说到：${hint}${hint.endsWith("...") ? "" : "。"}`;
-}
-
-function guidancePatch(mode: MemoirGuidanceMode): Pick<HomeData, "selectedMode" | "guidanceLabel"> {
-  return {
-    selectedMode: mode,
-    guidanceLabel: guidanceModeLabel(mode),
-  };
 }
 
 function launchCopy(
@@ -250,6 +241,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
         ),
     voiceStartButtonClass,
     voiceStartButtonHoverClass,
+    currentGuidanceText: `当前讲述方式：${state.selectedMode === "guided_interview" ? "小余陪着问" : "自由讲述"}`,
     primaryVoiceButtonTitle: state.loading
       ? "正在加载"
       : (
@@ -295,8 +287,8 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
     showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
-    moreActionsToggleText: state.showMoreActions ? "收起其他方式" : "其他讲述与整理方式",
-    moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述与整理方式" : "展开其他讲述与整理方式",
+    moreActionsToggleText: state.showMoreActions ? "收起其他讲述方式" : "其他讲述方式",
+    moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述方式" : "展开其他讲述方式",
     alternateModeButtonTitle: state.selectedMode === "guided_interview" ? "我想自己讲" : "让小余陪着问",
     showVoiceAuthorizationPanel: state.hasProject
       && !state.needsLogin
@@ -352,7 +344,7 @@ function applyHomeSnapshotData(
     launchVariant,
     ...launchCopy(launchVariant, projectDisplayTitle),
     hasProject,
-    ...guidancePatch(profile.defaultGuidanceMode),
+    selectedMode: profile.defaultGuidanceMode,
   });
 }
 
@@ -391,7 +383,7 @@ definePage<HomeData>()({
     launchSecondaryText: "先看看首页",
     hasProject: false,
     selectedMode: "free_narration",
-    guidanceLabel: "慢慢讲",
+    currentGuidanceText: "当前讲述方式：自由讲述",
     voiceAuthorizationAgreed: false,
     greetingText: "你好，作者",
     launchModeTagText: "第一次来",
@@ -406,8 +398,8 @@ definePage<HomeData>()({
     resumeAskButtonHoverClass: "resume-ask-button-hover",
     showResumeActions: false,
     showMoreActions: false,
-    moreActionsToggleText: "其他讲述与整理方式",
-    moreActionsToggleAriaLabel: "展开其他讲述与整理方式",
+    moreActionsToggleText: "其他讲述方式",
+    moreActionsToggleAriaLabel: "展开其他讲述方式",
     alternateModeButtonTitle: "让小余陪着问",
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
@@ -536,7 +528,7 @@ definePage<HomeData>()({
           ...launchCopy("none", ""),
           hasProject: false,
           showMoreActions: false,
-          ...guidancePatch("free_narration"),
+          selectedMode: "free_narration",
         });
         return;
       }

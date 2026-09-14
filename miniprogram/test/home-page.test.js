@@ -196,7 +196,6 @@ test("home view patch keeps first-screen template state simple", () => {
     launchSecondaryText: "先看看首页",
     hasProject: true,
     selectedMode: "free_narration",
-    guidanceLabel: "慢慢讲",
     voiceAuthorizationAgreed: true,
   };
 
@@ -223,7 +222,7 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
-      moreActionsToggleText: "其他讲述与整理方式",
+      moreActionsToggleText: "其他讲述方式",
       alternateModeButtonTitle: "让小余陪着问",
       showVoiceAuthorizationPanel: false,
     },
@@ -242,18 +241,23 @@ test("home primary CTA and alternate action follow the current project's guidanc
   const guided = homeViewPatch({
     ...baseData,
     selectedMode: "guided_interview",
-    guidanceLabel: "小余陪着问",
   });
+  assert.equal(guided.currentGuidanceText, "当前讲述方式：小余陪着问");
   assert.equal(guided.primaryVoiceButtonTitle, "让小余陪着问");
   assert.equal(guided.voiceStartNoteText, "小余会从一件具体的事开始问起。");
   assert.equal(guided.alternateModeButtonTitle, "我想自己讲");
+
+  const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
+  assert.equal(free.currentGuidanceText, "当前讲述方式：自由讲述");
+  assert.equal(free.primaryVoiceButtonTitle, "随便讲一段");
+  assert.equal(free.alternateModeButtonTitle, "让小余陪着问");
 
   const expanded = homeViewPatch({
     ...baseData,
     showMoreActions: true,
   });
-  assert.equal(expanded.moreActionsToggleText, "收起其他方式");
-  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述与整理方式");
+  assert.equal(expanded.moreActionsToggleText, "收起其他讲述方式");
+  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述方式");
 });
 
 test("home only shows project actions and voice consent after a usable project has loaded", () => {
@@ -302,10 +306,14 @@ test("home primary and alternate CTAs create sessions with their displayed guida
     },
   };
 
-  await page.startPrimaryVoiceChat.call(context);
-  await page.startAlternateGuidance.call(context);
+  for (const mode of ["guided_interview", "free_narration"]) {
+    context.data.selectedMode = mode;
+    await page.startPrimaryVoiceChat.call(context);
+    await page.startAlternateGuidance.call(context);
+    assert.equal(context.data.selectedMode, mode, "starting an alternate session preserves the project default");
+  }
 
-  assert.deepEqual(createdModes, ["guided_interview", "free_narration"]);
+  assert.deepEqual(createdModes, ["guided_interview", "free_narration", "free_narration", "guided_interview"]);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -404,7 +412,7 @@ test("home refreshes guidance mode from current project on load", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.guidanceLabel, "小余陪着问");
+  assert.equal(context.data.currentGuidanceText, "当前讲述方式：小余陪着问");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
@@ -749,7 +757,13 @@ test("home routes book organization through the book workspace without requiring
   const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
   assert.deepEqual(navigations, ["/pages/book/index"]);
   assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
+  assert.equal(context.data.selectedMode, "free_narration");
   assert.equal(context.data.error, "");
+
+  context.data.creatingVoice = true;
+  page.openBookWorkspace.call(context);
+  page.openNarrationOverview.call(context);
+  assert.deepEqual(navigations, ["/pages/book/index"], "navigation waits for voice preparation to finish");
 });
 
 test("home opens narration overview without requiring microphone consent", () => {
