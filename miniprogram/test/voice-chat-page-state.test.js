@@ -15,7 +15,7 @@ const {
   voiceConnectionStatusPatch,
   voiceGatewayEventPatch,
   voiceSessionDetailPatch,
-} = require("../pages/voice-chat/voice-chat-page-state.ts");
+} = require("../components/voice-session/voice-chat-page-state.ts");
 
 test("recording level updates keep long history on the page without resending it", () => {
   const sent = [];

@@ -58,6 +58,7 @@ declare function Component<
       detached?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
     pageLifetimes?: {
+      show?(): void;
       hide?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
   },

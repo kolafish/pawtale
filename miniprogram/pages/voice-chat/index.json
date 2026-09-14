@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "语音聊天"
+  "navigationBarTitleText": "语音聊天",
+  "usingComponents": {
+    "voice-session": "/components/voice-session/index"
+  }
 }
