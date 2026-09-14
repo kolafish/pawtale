@@ -3422,3 +3422,18 @@ test("capture failure during consent sync cannot reopen a truncated recording la
   assert.equal(starts, 0);
   assert.equal(context.data.recording, false);
 });
+
+test("revoking voice consent while recorder privacy is pending never starts server monitoring", async () => {
+  let releasePrivacy;
+  const privacyReady = new Promise(resolve => { releasePrivacy = resolve; });
+  const page = loadVoiceChatPage({ wechatPrivacyExports: { ensureRecorderPrivacyAuthorization: () => privacyReady } });
+  let starts = 0;
+  const context = { ...page, data: { ...page.data, voiceAuthorizationAgreed: true, followUpTTSPlaying: true },
+    voiceStreaming: { isBargeInMonitoring: () => false, startBargeInMonitoring() { starts++; return true; } },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+  };
+  const pending = page.startAssistantBargeInMonitor.call(context, 0);
+  context.data.voiceAuthorizationAgreed = false;
+  releasePrivacy(); await pending;
+  assert.equal(starts, 0);
+});

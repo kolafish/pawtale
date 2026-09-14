@@ -404,6 +404,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       this.data.recording
       || this.runtime().pageSuspended
       || this.runtime().disposed
+      || !this.data.voiceAuthorizationAgreed
       || !this.data.autoBargeInEnabled
       || requestSerial !== this.runtime().followUpRequestSerial
       || bookCompletionRoundFinished(this.data)
@@ -428,6 +429,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       this.data.recording
       || this.runtime().pageSuspended
       || this.runtime().disposed
+      || !this.data.voiceAuthorizationAgreed
       || !this.data.autoBargeInEnabled
       || requestSerial !== this.runtime().followUpRequestSerial
       || bookCompletionRoundFinished(this.data)

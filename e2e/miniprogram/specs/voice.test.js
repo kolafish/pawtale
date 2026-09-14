@@ -114,8 +114,10 @@ before(async () => {
       book: { voice: "", speedRatio: 1 },
     },
   );
+  await session.miniProgram.callWxMethod("setStorageSync", "pawtale_accessibility_settings", {
+    largeTextEnabled: false, autoBargeInEnabled: true,
+  });
   session.artifacts.mark("voice:setup:model-settings-stored");
-  await session.miniProgram.callWxMethod("setStorageSync", "pawtale_accessibility_settings", { largeTextEnabled: false, autoBargeInEnabled: false });
   await session.miniProgram.mockWxMethod("getRecorderManager", deterministicRecorderManager);
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
@@ -187,14 +189,20 @@ after(async () => {
   }
 });
 
+async function tapBoundAction(element) {
+  // Exercise the WXML binding without Developer Tools' coordinate-based tap,
+  // which can target a different row after large-text layout or page scrolling.
+  await element.trigger("tap");
+}
+
 async function assertNarrationModes(owner, id, selected) {
   if (id === "home-narration-modes" && !(await owner.data()).showMoreActions) {
-    await (await elementById(owner, "home-more-actions")).tap();
+    await tapBoundAction(await elementById(owner, "home-more-actions"));
     await waitForPageData(owner, data => data.showMoreActions, "展开原有更多操作入口");
   }
   if (id === "session-narration-modes") {
     assert.equal((await owner.data()).showNarrationModes, false);
-    await (await elementById(owner, "session-mode-disclosure")).tap();
+    await tapBoundAction(await elementById(owner, "session-mode-disclosure"));
     await waitForPageData(owner, data => data.showNarrationModes, "从现有方式标题展开四项");
   }
   const picker = await elementById(owner, id);
@@ -204,7 +212,7 @@ async function assertNarrationModes(owner, id, selected) {
   assert.equal(checked.length, 1);
   assert.equal(await checked[0].attribute("data-mode"), selected);
   if (id === "session-narration-modes") {
-    await (await elementById(owner, "session-mode-disclosure")).tap();
+    await tapBoundAction(await elementById(owner, "session-mode-disclosure"));
     await waitForPageData(owner, data => !data.showNarrationModes, "收起四项继续讲述");
   }
   return picker;
@@ -223,15 +231,15 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-modes-collapsed.png") });
     const homePicker = await assertNarrationModes(host, "home-narration-modes", "free_narration");
     for (const mode of ["guided_interview", "book_completion", "human_interview", "free_narration"]) {
-      await (await elementById(homePicker, `mode-${mode}`)).tap();
+      await tapBoundAction(await elementById(homePicker, `mode-${mode}`));
       await waitForPageData(host, data => data.selectedMode === mode, "首页方式选中");
       await assertNarrationModes(host, "home-narration-modes", mode);
       assert.equal(fixture.state.createdSessions, 0);
     }
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-home.png") });
-    await (await elementById(host, "home-more-actions")).tap();
+    await tapBoundAction(await elementById(host, "home-more-actions"));
     await waitForPageData(host, data => !data.showMoreActions && data.selectedMode === "free_narration", "收起选择后沿用当前方式");
-    await (await elementById(host, "primary-voice-action")).tap();
+    await tapBoundAction(await elementById(host, "primary-voice-action"));
     await waitForPageData(host, data => Boolean(data.voiceEntry), "首页原位展开讲述");
     assert.deepEqual((await session.miniProgram.pageStack()).map(page => page.path), ["pages/home/index"]);
     assert.equal(fixture.state.createdSessions, 1);
@@ -249,7 +257,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
 
-    await (await elementById(page, "voice-primary-action")).tap();
+    await tapBoundAction(await elementById(page, "voice-primary-action"));
     const recording = await waitForPageData(
       page,
       (data) => data.recording === true
@@ -263,7 +271,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     session.artifacts.mark("voice:asr:partial");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });
 
-    await (await elementById(page, "voice-primary-action")).tap();
+    await tapBoundAction(await elementById(page, "voice-primary-action"));
     const completed = await waitForPageData(
       page,
       (data) => {
@@ -289,6 +297,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const activeGatewayEvents = fixture.state.activeGatewayClientEvents;
     const gatewayTypes = activeGatewayEvents.map((event) => event.type);
     assert.deepEqual(gatewayTypes.slice(0, 3), ["session.start", "audio.frame", "audio.end"]);
+    assert.ok(gatewayTypes.includes("barge_in.start"), "播放期间通过现有 gateway 启动监听");
+    assert.ok(gatewayTypes.includes("barge_in.frame"), "监听 PCM 帧进入 gateway");
+    assert.ok(gatewayTypes.includes("barge_in.stop"), "播放结束时停止监听");
     const sessionStart = activeGatewayEvents.find(
       (event) => event.type === "session.start",
     );
@@ -308,7 +319,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(turnStart.speed_ratio, FIXTURE_TTS_SPEED_RATIO);
     assert.deepEqual(fixture.state.unexpectedRequests, []);
 
-    await (await elementById(page, "voice-finish-action")).tap();
+    await tapBoundAction(await elementById(page, "voice-finish-action"));
     await waitForValue(() => fixture.state.sessionStatus, status => status === "stopped", {
       description: "语音会话确认停止", timeoutMs: 20000,
     });
@@ -325,10 +336,10 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await host.callMethod("refreshAccessibilitySettings");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-modes-large-collapsed.png") });
     const guidedPicker = await assertNarrationModes(host, "home-narration-modes", "free_narration");
-    await (await elementById(guidedPicker, "mode-guided_interview")).tap();
+    await tapBoundAction(await elementById(guidedPicker, "mode-guided_interview"));
     await host.callMethod("loadHome", true);
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
-    await (await elementById(host, "primary-voice-action")).tap();
+    await tapBoundAction(await elementById(host, "primary-voice-action"));
     const next = await elementById(host, "voice-session");
     const nextReady = await waitForPageData(next, data => data.status === "ready", "第二次讲述就绪");
     assert.equal(fixture.state.createdSessions, 2);
@@ -345,16 +356,16 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal((await host.data()).voiceEntry.voiceSessionId, fixture.state.sessionId);
     assert.equal((await next.data()).recording, false);
     await assertNarrationModes(next, "session-narration-modes", "guided_interview");
-    await (await elementById(next, "voice-finish-action")).tap();
+    await tapBoundAction(await elementById(next, "voice-finish-action"));
     await waitForPageData(host, data => !data.voiceEntry, "结束空讲述并收起");
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
     await waitForPageData(host, data => !data.loading && !data.creatingVoice && !data.voiceEntry, "首页完成刷新");
     session.artifacts.mark("voice:human:start");
     await session.miniProgram.pageScrollTo(0);
     const humanPicker = await elementById(host, "home-narration-modes");
-    await (await elementById(humanPicker, "mode-human_interview")).tap();
+    await tapBoundAction(await elementById(humanPicker, "mode-human_interview"));
     await waitForPageData(host, data => data.selectedMode === "human_interview", "选择真人访谈");
-    await (await elementById(host, "primary-voice-action")).tap();
+    await tapBoundAction(await elementById(host, "primary-voice-action"));
     const human = await elementById(host, "voice-session");
     await waitForPageData(human, data => data.status === "ready" && data.showHumanRecordActions, "真人访谈就绪");
     await assertNarrationModes(human, "session-narration-modes", "human_interview");
@@ -362,21 +373,21 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await waitForPageData(human, data => data.recording && data.liveText.includes("第一次坐火车"), "真人录音转写");
     await assertNarrationModes(human, "session-narration-modes", "human_interview");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-human-recording.png") });
-    await (await elementById(human, "voice-primary-action")).tap();
+    await tapBoundAction(await elementById(human, "voice-primary-action"));
     await waitForPageData(human, data => !data.recording && data.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), "真人讲述保存");
-    await (await elementById(human, "voice-finish-action")).tap();
+    await tapBoundAction(await elementById(human, "voice-finish-action"));
     await waitForPageData(host, data => !data.voiceEntry, "真人访谈结束");
     session.artifacts.mark("voice:supplement:select");
     await session.miniProgram.pageScrollTo(0);
     const supplementPicker = await elementById(host, "home-narration-modes");
-    await (await elementById(supplementPicker, "mode-book_completion")).tap();
-    await (await elementById(host, "primary-voice-action")).tap();
+    await tapBoundAction(await elementById(supplementPicker, "mode-book_completion"));
+    await tapBoundAction(await elementById(host, "primary-voice-action"));
     const supplement = await waitForCurrentPage(session.miniProgram, "pages/book-completion/index");
     await waitForPageData(supplement, data => !data.loading && !data.error, "书稿待补问题页");
     const supplementModes = await assertNarrationModes(supplement, "supplement-narration-modes", "book_completion");
     assert.equal(fixture.state.createdSessions, 3, "补充方式先选问题，不提前开录音会话");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-supplement.png") });
-    await (await elementById(supplementModes, "mode-free_narration")).tap();
+    await tapBoundAction(await elementById(supplementModes, "mode-free_narration"));
     await waitForCurrentPage(session.miniProgram, "pages/home/index");
     await waitForPageData(host, data => data.selectedMode === "free_narration", "返回首页选择自由讲述");
     await assertNarrationModes(host, "home-narration-modes", "free_narration");
