@@ -1,4 +1,4 @@
-.voice-edit-page { padding-bottom: 64rpx; }
+.voice-edit-page { padding: 24rpx 30rpx 64rpx; }
 .edit-intro { padding: 24rpx 0 32rpx; }
 .edit-book, .edit-title, .edit-hint, .edit-reply, .edit-detail { display: block; }
 .edit-book { color: #8d7669; font-size: 26rpx; margin-bottom: 16rpx; }
