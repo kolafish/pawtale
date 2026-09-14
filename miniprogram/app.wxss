@@ -119,7 +119,7 @@ image {
   transition-timing-function: ease-out;
 }
 
-.ui-button::after {
+button::after {
   border: 0;
 }
 
