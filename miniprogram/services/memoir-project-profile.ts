@@ -63,7 +63,7 @@ export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | 
 }
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
+  return mode === "guided_interview" ? "老余引导访谈" : "自由讲述";
 }
 
 export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceModule {

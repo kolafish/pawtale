@@ -44,8 +44,8 @@ test("formats memoir project profile labels", () => {
   };
 
   assert.equal(narratorGenderLabel("male"), "男");
-  assert.equal(guidanceModeLabel("guided_interview"), "小余陪着问");
-  assert.equal(projectProfileSummary(project), "男 · 重庆 · 68 岁 · 慢慢讲");
+  assert.equal(guidanceModeLabel("guided_interview"), "老余引导访谈");
+  assert.equal(projectProfileSummary(project), "男 · 重庆 · 68 岁 · 自由讲述");
 });
 
 test("project edit validates age text", () => {

@@ -28,7 +28,7 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
@@ -109,6 +109,7 @@ interface HomeData extends HomeStoryData {
   moreActionsToggleText: string;
   moreActionsToggleAriaLabel: string;
   alternateModeButtonTitle: string;
+  alternateModeHintText: string;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -139,6 +140,7 @@ type HomeViewPatch = Pick<
   | "moreActionsToggleText"
   | "moreActionsToggleAriaLabel"
   | "alternateModeButtonTitle"
+  | "alternateModeHintText"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
 >;
@@ -245,7 +247,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
         ),
     voiceStartButtonClass,
     voiceStartButtonHoverClass,
-    currentGuidanceText: `当前讲述方式：${state.selectedMode === "guided_interview" ? "小余陪着问" : "自由讲述"}`,
+    currentGuidanceText: `当前讲述方式：${guidanceModeLabel(state.selectedMode)}`,
     primaryVoiceButtonTitle: state.loading
       ? "正在加载"
       : (
@@ -260,7 +262,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
                         : (
                             state.creatingVoice
                               ? "正在准备"
-                              : (state.selectedMode === "guided_interview" ? "让小余陪着问" : "随便讲一段")
+                              : (state.selectedMode === "guided_interview" ? guidanceModeLabel(state.selectedMode) : "随便讲一段")
                           )
                     )
               )
@@ -281,7 +283,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
                               ? "我马上开始听。"
                               : (
                                   state.selectedMode === "guided_interview"
-                                    ? "小余会从一件具体的事开始问起。"
+                                    ? "AI 按话题提问，帮助您展开回忆。"
                                     : "说一两句也可以，我会帮您记下来。"
                                 )
                           )
@@ -291,9 +293,12 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
     showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
-    moreActionsToggleText: state.showMoreActions ? "收起其他讲述方式" : "其他讲述方式",
-    moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述方式" : "展开其他讲述方式",
-    alternateModeButtonTitle: state.selectedMode === "guided_interview" ? "我想自己讲" : "让小余陪着问",
+    moreActionsToggleText: state.showMoreActions ? "收起更多操作" : "更多操作",
+    moreActionsToggleAriaLabel: state.showMoreActions ? "收起讲述与书稿操作" : "展开讲述与书稿操作",
+    alternateModeButtonTitle: guidanceModeLabel(state.selectedMode === "guided_interview" ? "free_narration" : "guided_interview"),
+    alternateModeHintText: state.selectedMode === "guided_interview"
+      ? "按自己的节奏讲，想到哪里讲到哪里"
+      : "AI 按话题提问，帮助您展开回忆",
     showVoiceAuthorizationPanel: state.hasProject
       && !state.needsLogin
       && !state.loading
@@ -404,9 +409,10 @@ definePage<HomeData>()({
     resumeAskButtonHoverClass: "resume-ask-button-hover",
     showResumeActions: false,
     showMoreActions: false,
-    moreActionsToggleText: "其他讲述方式",
-    moreActionsToggleAriaLabel: "展开其他讲述方式",
-    alternateModeButtonTitle: "让小余陪着问",
+    moreActionsToggleText: "更多操作",
+    moreActionsToggleAriaLabel: "展开讲述与书稿操作",
+    alternateModeButtonTitle: guidanceModeLabel("guided_interview"),
+    alternateModeHintText: "AI 按话题提问，帮助您展开回忆",
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
@@ -788,12 +794,16 @@ definePage<HomeData>()({
     setHomeData(this, { showMoreActions: !this.data.showMoreActions }, () => this.measureNarration());
   },
 
-  openBookWorkspace() {
+  openBookSupplementInterview() {
     if (!this.canStartVoiceChat(false)) {
       return;
     }
-    writeBookWorkspaceNavigationTarget("chapters");
-    navigateToBook();
+    wx.navigateTo({
+      url: pageUrl("/pages/book-completion/index", {
+        projectId: this.data.projectId,
+        projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
+      }),
+    });
   },
 
   openNarrationOverview() {
