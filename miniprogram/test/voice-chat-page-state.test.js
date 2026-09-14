@@ -120,7 +120,6 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.stageStatusText, "我在听，您慢慢说");
   assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
   assert.equal(patch.liveTextClass, "live-text");
-  assert.equal(patch.showHumanTranscriptOverlay, false);
   assert.equal(patch.captureStripClass, "capture-strip active");
   assert.equal(patch.showLiveCharCount, true);
   assert.equal(patch.showInlineHelp, true);
@@ -204,7 +203,6 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
   assert.equal(recordingPatch.showStageStatus, false);
-  assert.equal(recordingPatch.showHumanTranscriptOverlay, true);
   assert.equal(recordingPatch.showCaptureStrip, true);
   assert.equal(recordingPatch.controlHintText, "");
   assert.equal(recordingPatch.liveDisplayText, "等待转写...");
@@ -345,7 +343,6 @@ test("voice chat view patch adds focused large text root classes", () => {
   assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
   assert.equal(humanCapturePatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus large-text capture-focus");
   assert.equal(humanCapturePatch.showStageStatus, false);
-  assert.equal(humanCapturePatch.showHumanTranscriptOverlay, true);
   assert.equal(humanCapturePatch.liveTextClass, "live-text");
 });
 

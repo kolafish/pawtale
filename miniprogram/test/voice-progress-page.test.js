@@ -194,13 +194,13 @@ test("narration overview gives each session one clear title", () => {
     guidance_mode: "free_narration",
     current_guidance_module: "free_narration",
   })), "自由讲述");
-  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "小余访谈 · 人物");
+  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "引导访谈 · 人物");
   assert.equal(sessionTitle(sampleSession("human", "stopped", {
     interview_type: "human_interview",
-  })), "面对面采访");
+  })), "真人访谈");
   assert.equal(sessionTitle(sampleSession("completion", "stopped", {
     session_goal: "book_completion",
-  })), "补充成书内容");
+  })), "书稿补充");
 });
 
 test("narration overview scopes all data to the active project", async () => {

@@ -1,6 +1,5 @@
 .voice-chat-page {
   --ui-fixed-action-space: 252rpx;
-  --voice-overlay-bottom: 228rpx;
   padding-top: 34rpx;
   padding-right: 30rpx;
   padding-left: 30rpx;
@@ -606,71 +605,6 @@
   height: 2rpx;
 }
 
-.human-transcript-overlay {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: calc(var(--voice-overlay-bottom) + env(safe-area-inset-bottom));
-  box-sizing: border-box;
-  padding: 28rpx 30rpx 24rpx;
-  background: rgba(247, 243, 236, 0.96);
-  z-index: 24;
-  display: flex;
-}
-
-.human-transcript-sheet {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 42rpx 38rpx 28rpx;
-  border-radius: 34rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow-raised);
-  display: flex;
-  flex-direction: column;
-}
-
-.human-transcript-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-.human-transcript-sheet .live-text {
-  font-size: 58rpx;
-  line-height: 1.45;
-}
-
-.human-transcript-footer {
-  margin-top: 24rpx;
-  min-height: 72rpx;
-  padding: 0 24rpx;
-  border-radius: 18rpx;
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent);
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.human-transcript-footer .capture-dot {
-  background: var(--ui-accent);
-  box-shadow: 0 0 0 10rpx rgba(168, 79, 67, 0.12);
-}
-
-.human-transcript-level {
-  margin-top: 18rpx;
-  height: 12rpx;
-  border-radius: 999rpx;
-  background: var(--ui-border);
-  overflow: hidden;
-}
-
 .capture-strip {
   margin-top: 34rpx;
   padding: 20rpx 24rpx;
@@ -1196,7 +1130,6 @@
 
 .voice-chat-page.large-text {
   --ui-fixed-action-space: 308rpx;
-  --voice-overlay-bottom: 284rpx;
   padding-top: 28rpx;
   padding-right: 24rpx;
   padding-left: 24rpx;
@@ -1330,26 +1263,6 @@
 .voice-chat-page.large-text.human-recording-focus .live-scroll.long {
   height: 760rpx;
   max-height: 760rpx;
-}
-
-.voice-chat-page.large-text.human-recording-focus .human-transcript-overlay {
-  bottom: 260rpx;
-}
-
-.voice-chat-page.large-text .human-transcript-sheet {
-  padding: 46rpx 36rpx 32rpx;
-  border-radius: 38rpx;
-}
-
-.voice-chat-page.large-text .human-transcript-sheet .live-text {
-  font-size: 64rpx;
-  line-height: 1.44;
-}
-
-.voice-chat-page.large-text .human-transcript-footer {
-  min-height: 90rpx;
-  font-size: 38rpx;
-  line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .capture-strip,

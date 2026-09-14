@@ -1,3 +1,4 @@
+import { isNarrationMode, narrationModeForSession, NARRATION_MODES, type NarrationMode, type NarrationModeEvent } from "../../domain/memoir-narration-mode";
 import type { VoiceSessionEntry, VoiceSessionExitEvent } from "../../components/voice-session/events";
 import type {
   MemoirGuidanceMode,
@@ -28,12 +29,13 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
-import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
+import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
   consumeHomeStoryTarget,
   consumeHomeVoiceTarget,
+  consumeHomeNarrationMode,
   type HomeVoiceTarget,
   type HomeStoryTarget,
   navigateToMe,
@@ -90,8 +92,7 @@ interface HomeData extends HomeStoryData {
   launchPrimaryText: string;
   launchSecondaryText: string;
   hasProject: boolean;
-  selectedMode: MemoirGuidanceMode;
-  currentGuidanceText: string;
+  selectedMode: NarrationMode;
   voiceAuthorizationAgreed: boolean;
   greetingText: string;
   launchModeTagText: string;
@@ -102,14 +103,7 @@ interface HomeData extends HomeStoryData {
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
   voiceStartNoteText: string;
-  resumeAskButtonClass: string;
-  resumeAskButtonHoverClass: string;
   showResumeActions: boolean;
-  showMoreActions: boolean;
-  moreActionsToggleText: string;
-  moreActionsToggleAriaLabel: string;
-  alternateModeButtonTitle: string;
-  alternateModeHintText: string;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -132,15 +126,8 @@ type HomeViewPatch = Pick<
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
-  | "currentGuidanceText"
   | "voiceStartNoteText"
-  | "resumeAskButtonClass"
-  | "resumeAskButtonHoverClass"
   | "showResumeActions"
-  | "moreActionsToggleText"
-  | "moreActionsToggleAriaLabel"
-  | "alternateModeButtonTitle"
-  | "alternateModeHintText"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
 >;
@@ -224,85 +211,38 @@ function launchCopy(
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
-  const voiceStartButtonClass = blocked ? "voice-start-button button-blocked" : "voice-start-button";
-  const voiceStartButtonHoverClass = blocked ? "none" : "voice-start-button-hover";
+  const choice = NARRATION_MODES[state.selectedMode];
+  const primaryVoiceButtonTitle = state.loading ? "正在加载"
+    : state.needsLogin ? "登录后开始"
+    : !state.hasProject ? "创建回忆录"
+    : state.creatingVoice ? "正在准备"
+    : state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed ? "同意协议后开始"
+    : choice.action;
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
-    launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
-    projectHeadingText: state.loading
-      ? "正在加载回忆录"
-      : (
-          state.hasProject
-            ? (state.projectDisplayTitle || state.projectTitle || "这段回忆")
-            : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录")
-        ),
-    projectMetaText: state.loading
-      ? "我先确认当前回忆录。"
-      : (
-          state.needsLogin
-            ? "登录后，我在这里等你。"
-            : (!state.hasProject ? "先创建一本回忆录，我再听你讲。" : (state.hasLastStoryHint ? state.lastStoryText : state.projectPromptText))
-        ),
-    voiceStartButtonClass,
-    voiceStartButtonHoverClass,
-    currentGuidanceText: `当前讲述方式：${guidanceModeLabel(state.selectedMode)}`,
-    primaryVoiceButtonTitle: state.loading
-      ? "正在加载"
-      : (
-          state.needsLogin
-            ? "登录后开始"
-            : (
-                !state.hasProject
-                  ? "创建回忆录"
-                  : (
-                      !state.voiceAuthorizationAgreed
-                        ? "同意协议后开始"
-                        : (
-                            state.creatingVoice
-                              ? "正在准备"
-                              : (state.selectedMode === "guided_interview" ? guidanceModeLabel(state.selectedMode) : "随便讲一段")
-                          )
-                    )
-              )
-        ),
-    voiceStartNoteText: state.loading
-      ? "马上就好。"
-      : (
-          state.needsLogin
-            ? "先登录，再继续讲回忆。"
-            : (
-                !state.hasProject
-                  ? "先起个名字，我再听您讲。"
-                  : (
-                      !state.voiceAuthorizationAgreed
-                        ? "同意后才会打开麦克风。"
-                        : (
-                            state.creatingVoice
-                              ? "我马上开始听。"
-                              : (
-                                  state.selectedMode === "guided_interview"
-                                    ? "AI 按话题提问，帮助您展开回忆。"
-                                    : "说一两句也可以，我会帮您记下来。"
-                                )
-                          )
-                    )
-              )
-        ),
-    resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
-    resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
+    launchVoiceButtonTitle: primaryVoiceButtonTitle,
+    projectHeadingText: state.loading ? "正在加载回忆录"
+      : state.hasProject ? (state.projectDisplayTitle || state.projectTitle || "这段回忆")
+      : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录"),
+    projectMetaText: state.loading ? "我先确认当前回忆录。"
+      : state.needsLogin ? "登录后，我在这里等你。"
+      : !state.hasProject ? "先创建一本回忆录，我再听你讲。"
+      : state.hasLastStoryHint ? state.lastStoryText : state.projectPromptText,
+    voiceStartButtonClass: blocked ? "voice-start-button button-blocked" : "voice-start-button",
+    voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
+    primaryVoiceButtonTitle,
+    voiceStartNoteText: state.loading ? "马上就好。"
+      : state.needsLogin ? "先登录，再继续讲回忆。"
+      : !state.hasProject ? "先起个名字，我再听您讲。"
+      : state.creatingVoice ? "我马上开始听。"
+      : state.selectedMode === "book_completion" ? "选定问题后再开始录音。"
+      : !state.voiceAuthorizationAgreed ? "同意后才会打开麦克风。"
+      : choice.description,
     showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
-    moreActionsToggleText: state.showMoreActions ? "收起更多操作" : "更多操作",
-    moreActionsToggleAriaLabel: state.showMoreActions ? "收起讲述与书稿操作" : "展开讲述与书稿操作",
-    alternateModeButtonTitle: guidanceModeLabel(state.selectedMode === "guided_interview" ? "free_narration" : "guided_interview"),
-    alternateModeHintText: state.selectedMode === "guided_interview"
-      ? "按自己的节奏讲，想到哪里讲到哪里"
-      : "AI 按话题提问，帮助您展开回忆",
-    showVoiceAuthorizationPanel: state.hasProject
-      && !state.needsLogin
-      && !state.loading
-      && !state.voiceAuthorizationAgreed,
+    showVoiceAuthorizationPanel: state.hasProject && !state.needsLogin && !state.loading
+      && state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed,
   };
 }
 
@@ -353,7 +293,7 @@ function applyHomeSnapshotData(
     launchVariant,
     ...launchCopy(launchVariant, projectDisplayTitle),
     hasProject,
-    selectedMode: profile.defaultGuidanceMode,
+    selectedMode: changedProject ? profile.defaultGuidanceMode : context.data.selectedMode,
   });
 }
 
@@ -394,7 +334,6 @@ definePage<HomeData>()({
     launchSecondaryText: "先看看首页",
     hasProject: false,
     selectedMode: "free_narration",
-    currentGuidanceText: "当前讲述方式：自由讲述",
     voiceAuthorizationAgreed: false,
     greetingText: "你好，作者",
     launchModeTagText: "第一次来",
@@ -405,14 +344,7 @@ definePage<HomeData>()({
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "创建回忆录",
     voiceStartNoteText: "先起个名字，我再听您讲。",
-    resumeAskButtonClass: "resume-ask-button",
-    resumeAskButtonHoverClass: "resume-ask-button-hover",
     showResumeActions: false,
-    showMoreActions: false,
-    moreActionsToggleText: "更多操作",
-    moreActionsToggleAriaLabel: "展开讲述与书稿操作",
-    alternateModeButtonTitle: guidanceModeLabel("guided_interview"),
-    alternateModeHintText: "AI 按话题提问，帮助您展开回忆",
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
@@ -426,6 +358,7 @@ definePage<HomeData>()({
 
   async onShow() {
     this.homeVisible = true;
+    const modeTarget = consumeHomeNarrationMode();
     this.homeLaunchScope = "";
     this.storyNavigationTarget = consumeHomeStoryTarget() ?? this.storyNavigationTarget;
     this.voiceNavigationTarget = consumeHomeVoiceTarget() ?? this.voiceNavigationTarget;
@@ -434,6 +367,9 @@ definePage<HomeData>()({
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
+    if (this.homeVisible && modeTarget?.projectId === this.data.projectId) {
+      this.selectNarrationMode({ detail: { value: modeTarget.mode } });
+    }
     this.openPendingVoiceSession();
   },
 
@@ -542,7 +478,6 @@ definePage<HomeData>()({
           launchVariant: "none",
           ...launchCopy("none", ""),
           hasProject: false,
-          showMoreActions: false,
           selectedMode: "free_narration",
         });
         return;
@@ -784,23 +719,28 @@ definePage<HomeData>()({
     wx.navigateTo({ url: "/pages/projects/index" });
   },
 
+  selectNarrationMode({ detail }: NarrationModeEvent) {
+    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry || !isNarrationMode(detail.value)) return;
+    setHomeData(this, { selectedMode: detail.value, error: "" }, () => this.measureNarration());
+  },
+
   async startPrimaryVoiceChat() {
-    await this.startVoiceChatWithMode(this.data.selectedMode, "home_resume");
+    await this.startSelectedNarration("home_resume");
   },
 
   async startLaunchVoiceChat() {
-    await this.startVoiceChatWithMode(this.data.selectedMode, "home_launch");
+    await this.startSelectedNarration("home_launch");
   },
 
-  async startAlternateGuidance() {
-    const mode = this.data.selectedMode === "guided_interview"
-      ? "free_narration"
-      : "guided_interview";
-    await this.startVoiceChatWithMode(mode, "home_resume");
-  },
-
-  toggleMoreActions() {
-    setHomeData(this, { showMoreActions: !this.data.showMoreActions }, () => this.measureNarration());
+  async startSelectedNarration(entry: HomeVoiceEntry) {
+    const mode = this.data.selectedMode;
+    if (mode === "book_completion") {
+      this.openBookSupplementInterview();
+      return;
+    }
+    const human = mode === "human_interview";
+    await this.startVoiceChatWithMode(mode === "human_interview" ? "free_narration" : mode,
+      entry, human ? "human_interview" : "ai_interview");
   },
 
   openBookSupplementInterview() {
@@ -820,10 +760,6 @@ definePage<HomeData>()({
       return;
     }
     wx.navigateTo({ url: "/pages/voice-progress/index" });
-  },
-
-  async startHumanInterview() {
-    await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
   },
 
   ensureVoiceAuthorization() {
@@ -937,7 +873,10 @@ definePage<HomeData>()({
     this.voiceNavigationTarget = null;
     if (target.userId !== this.data.userId || target.projectId !== this.data.projectId || this.data.needsLogin) return;
     if (this.data.voiceEntry) return;
-    setHomeData(this, { voiceEntry: target.entry, showContinueNarration: false, narrationSaved: false }, () => {
+    setHomeData(this, { voiceEntry: target.entry, selectedMode: narrationModeForSession({
+      guidance_mode: target.entry.mode || "free_narration", interview_type: target.entry.interviewType || "ai_interview",
+      session_goal: target.entry.sessionGoal || "open_narration",
+    }), showContinueNarration: false, narrationSaved: false }, () => {
       wx.pageScrollTo({ scrollTop: 0, duration: 250 });
     });
   },

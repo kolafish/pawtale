@@ -1,3 +1,4 @@
+import { NARRATION_MODES } from "../domain/memoir-narration-mode";
 import type { Project } from "../domain/memoir";
 import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/memoir-voice-session";
 import type { MemoirNarratorGender } from "./memoir";
@@ -63,7 +64,7 @@ export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | 
 }
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "老余引导访谈" : "自由讲述";
+  return NARRATION_MODES[mode].label;
 }
 
 export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceModule {

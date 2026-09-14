@@ -45,6 +45,7 @@ function createVoiceFixtureServer() {
     createdSessions: 0,
     sessionId: FIXTURE_SESSION_ID,
     sessionStatus: "created",
+    sessionConfig: {},
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
     utterances: [],
@@ -56,9 +57,9 @@ function createVoiceFixtureServer() {
         id: state.sessionId,
         project_id: FIXTURE_PROJECT_ID,
         status: state.sessionStatus,
-        guidance_mode: "free_narration",
-        interview_type: "ai_interview",
-        session_goal: "open_narration",
+        guidance_mode: state.sessionConfig.guidance_mode || "free_narration",
+        interview_type: state.sessionConfig.interview_type || "ai_interview",
+        session_goal: state.sessionConfig.session_goal || "open_narration",
         current_completion_issue_id: null,
         anchor_framework_item_id: null,
         current_guidance_module: null,
@@ -116,11 +117,16 @@ function createVoiceFixtureServer() {
       });
       return;
     }
+    if (request.method === "GET" && url.pathname === `/api/memoir/projects/${FIXTURE_PROJECT_ID}/book-completion`) {
+      respond(response, 200, { project_id: FIXTURE_PROJECT_ID, headline: "还没有待补问题", detail: "先讲一段回忆，再整理书稿。", total_chapters: 0, completed_chapters: 0, chapters: [] });
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/api/mobile/memoir/voice-sessions") {
+      state.sessionConfig = body;
       state.createdSessions += 1;
       state.sessionId = `${FIXTURE_SESSION_ID}-${state.createdSessions}`;
       state.sessionStatus = "created";
-      state.messages = [initialAssistantMessage(state.sessionId)];
+      state.messages = body.interview_type === "human_interview" ? [] : [initialAssistantMessage(state.sessionId)];
       state.utterances = [];
       respond(response, 200, sessionDetail());
       return;
@@ -397,6 +403,7 @@ function createVoiceFixtureServer() {
       state.httpRequests.length = 0;
       state.createdSessions = 0;
       state.sessionId = FIXTURE_SESSION_ID;
+      state.sessionConfig = {};
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";
       state.messages = [initialAssistantMessage(state.sessionId)];

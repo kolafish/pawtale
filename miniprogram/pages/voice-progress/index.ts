@@ -1,3 +1,4 @@
+import { narrationModeForSession, NARRATION_MODES } from "../../domain/memoir-narration-mode";
 import type {
   MemoirTopicMap,
   MemoirTopicMapItem,
@@ -121,19 +122,10 @@ function statusText(status: string): string {
 }
 
 export function sessionTitle(item: MemoirVoiceSessionSummary): string {
-  if (item.interview_type === "human_interview") {
-    return "面对面采访";
-  }
-  if (item.session_goal === "book_completion") {
-    return "补充成书内容";
-  }
-  if (item.guidance_mode === "guided_interview") {
-    const topic = item.current_guidance_module
-      ? MODULE_LABELS[item.current_guidance_module]
-      : "";
-    return topic ? `小余访谈 · ${topic}` : "小余访谈";
-  }
-  return "自由讲述";
+  const mode = narrationModeForSession(item);
+  const topic = mode === "guided_interview" && item.current_guidance_module
+    ? MODULE_LABELS[item.current_guidance_module] : "";
+  return `${NARRATION_MODES[mode].label}${topic ? ` · ${topic}` : ""}`;
 }
 
 function formatDate(value?: string | null): string {
