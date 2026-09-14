@@ -10,7 +10,7 @@
       <text class="field-label ui-section-heading">回忆录名称</text>
       <input
         id="project-title-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{title}}"
         maxlength="40"
         placeholder="例如：母亲的回忆"
@@ -24,7 +24,7 @@
         <view
           wx:for="{{genderOptions}}"
           wx:key="value"
-          class="segment {{narratorGender === item.value ? 'selected' : ''}}"
+          class="segment ui-pressable {{narratorGender === item.value ? 'selected' : ''}}"
           data-gender="{{item.value}}"
           bindtap="selectGender"
         >
@@ -37,7 +37,7 @@
       <text class="field-label ui-section-heading">籍贯</text>
       <input
         id="project-origin-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{narratorOrigin}}"
         maxlength="40"
         placeholder="例如：四川成都"
@@ -49,7 +49,7 @@
       <text class="field-label ui-section-heading">年龄</text>
       <input
         id="project-age-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{narratorAgeText}}"
         type="number"
         maxlength="3"
@@ -65,20 +65,21 @@
         <view
           wx:for="{{guidanceOptions}}"
           wx:key="value"
-          class="mode-option {{defaultGuidanceMode === item.value ? 'selected' : ''}}"
+          class="mode-option ui-pressable {{defaultGuidanceMode === item.value ? 'selected' : ''}}"
           data-mode="{{item.value}}"
           bindtap="selectGuidanceMode"
         >
           <text class="mode-title">{{item.label}}</text>
           <text class="mode-desc">{{item.value === 'guided_interview' ? '小余按人物、事件、地点和主题追问' : '讲述者按自己的节奏说'}}</text>
+          <text wx:if="{{defaultGuidanceMode === item.value}}" class="option-check" aria-hidden="true">✓</text>
         </view>
       </view>
     </view>
   </view>
 
   <view class="actions">
-    <button id="project-cancel-action" class="ghost-button" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
-    <button id="project-save-action" class="primary-button" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
+    <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
+    <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
       {{saving ? "保存中" : "保存"}}
     </button>
   </view>

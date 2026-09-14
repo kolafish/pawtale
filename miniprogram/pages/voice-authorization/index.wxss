@@ -1,49 +1,38 @@
-.voice-authorization-page {
-  --ui-fixed-action-space: 168rpx;
-  padding-top: 28rpx;
-  padding-right: 36rpx;
-  padding-left: 36rpx;
-}
-
-.agreement-panel {
-  padding: 32rpx;
-}
-
-.section + .section {
-  margin-top: 30rpx;
-}
+.voice-authorization-page { --ui-fixed-action-space: 172rpx; padding: 24rpx 32rpx 0; }
+.voice-authorization-page > .ui-page-context-row { min-height: 44rpx; margin-bottom: 18rpx; justify-content: flex-start; gap: 12rpx; }
+.voice-authorization-page > .ui-page-context-row::before { content: ""; width: 10rpx; height: 10rpx; flex: 0 0 10rpx; border-radius: 50%; background: var(--ui-accent); }
+.voice-authorization-page .ui-page-context { color: var(--ui-text-muted); font-size: 23rpx; }
+.agreement-panel { padding: 8rpx 30rpx; }
+.section { padding: 28rpx 0 30rpx; }
+.section + .section { border-top: 1rpx solid var(--ui-divider); }
+.section-title { font-size: 29rpx; }
 
 .paragraph {
   display: block;
   margin-top: 12rpx;
   color: var(--ui-text-primary);
-  font-size: 29rpx;
-  line-height: 1.65;
+  font-size: 28rpx;
+  line-height: 1.72;
   word-break: break-word;
+  text-wrap: pretty;
 }
 
 .actions {
-  --ui-fixed-action-inline: 36rpx;
-  --ui-fixed-action-background: rgba(255, 250, 242, 0.96);
+  --ui-fixed-action-inline: 32rpx;
+  --ui-fixed-action-top: 20rpx;
+  --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.96) 24rpx, #f5f1ea 54rpx);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  gap: 18rpx;
+  grid-template-columns: minmax(168rpx, 0.72fr) minmax(0, 1.28fr);
+  gap: 14rpx;
 }
 
 .ghost-button,
 .primary-button {
-  height: 96rpx;
-  border-radius: 24rpx;
-  font-size: 32rpx;
-  font-weight: 800;
+  height: 92rpx;
+  border-radius: var(--ui-radius-control);
+  font-size: 30rpx;
+  font-weight: 700;
 }
 
-.ghost-button {
-  background: var(--ui-accent-surface);
-  color: var(--ui-section-title);
-}
-
-.primary-button {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
-}
+.ghost-button { background: transparent; color: var(--ui-text-secondary); }
+.primary-button { background: var(--ui-accent); color: var(--ui-on-accent); box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.16); }

@@ -15,17 +15,19 @@
 
     <view
       id="wechat-login-action"
-      class="primary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+      class="primary-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{loading || wechatLoading}}"
       bindtap="submitWeChat"
     >
-      {{wechatLoading ? "微信登录中" : "微信登录"}}
+      <text class="login-action-mark" aria-hidden="true">微</text>
+      <text class="login-action-label">{{wechatLoading ? "微信登录中" : "微信登录"}}</text>
+      <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
 
     <view
       id="account-login-toggle"
-      class="mode-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+      class="mode-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{loading || wechatLoading}}"
       bindtap="toggleAccountMode"
@@ -38,7 +40,7 @@
         <text class="field-label">邮箱</text>
         <input
           id="account-email-input"
-          class="field-input"
+          class="field-input support-form-input"
           type="text"
           value="{{email}}"
           placeholder="name@example.com"
@@ -50,7 +52,7 @@
         <text class="field-label">密码</text>
         <input
           id="account-password-input"
-          class="field-input"
+          class="field-input support-form-input"
           password
           value="{{password}}"
           placeholder="至少 8 位"
@@ -60,12 +62,14 @@
 
       <view
         id="account-login-action"
-        class="secondary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+        class="secondary-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{loading || wechatLoading}}"
         bindtap="submitAccount"
       >
-        {{loading ? "登录中" : "账号登录"}}
+        <text class="login-action-mark" aria-hidden="true">邮</text>
+        <text class="login-action-label">{{loading ? "登录中" : "账号登录"}}</text>
+        <text class="login-action-arrow" aria-hidden="true">›</text>
       </view>
     </view>
   </view>
@@ -103,7 +107,7 @@
     <view class="profile-name-field">
       <text class="profile-field-title">昵称</text>
       <input
-        class="profile-name-input"
+        class="profile-name-input support-form-input"
         type="nickname"
         value="{{profileDisplayName}}"
         maxlength="40"
@@ -114,16 +118,18 @@
     </view>
 
     <view
-      class="primary-button ui-block-action {{profileSaving ? 'is-disabled' : ''}}"
+      class="primary-button support-action ui-block-action ui-pressable {{profileSaving ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{profileSaving}}"
       bindtap="saveWeChatProfile"
       hover-class="primary-button-hover"
     >
-      {{profileSaving ? "保存中" : "保存并进入"}}
+      <text class="login-action-mark" aria-hidden="true">✓</text>
+      <text class="login-action-label">{{profileSaving ? "保存中" : "保存并进入"}}</text>
+      <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
     <view
-      class="skip-profile-button ui-block-action {{profileSaving ? 'is-disabled' : ''}}"
+      class="skip-profile-button support-action ui-block-action ui-pressable {{profileSaving ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{profileSaving}}"
       bindtap="skipWeChatProfile"

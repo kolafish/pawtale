@@ -22,8 +22,8 @@
         </view>
       </label>
     </checkbox-group>
-    <button wx:if="{{items.length}}" class="edit-apply ui-button" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">执行所选修改（{{selectedCount}}）</button>
+    <button wx:if="{{items.length}}" class="edit-apply ui-button ui-block-action" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">执行所选修改（{{selectedCount}}）</button>
   </view>
-  <view wx:if="{{message}}" class="edit-result ui-card" aria-live="polite">{{message}}</view>
+  <view wx:if="{{message}}" class="edit-result edit-message ui-card" aria-live="polite">{{message}}</view>
   <button class="edit-back ui-button" bindtap="backToStory">回到故事</button>
 </view>
