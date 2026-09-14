@@ -46,8 +46,6 @@
       id="story-chapter-{{item.id}}"
       class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
     >
-      <view class="chapter-decoration" aria-hidden="true"></view>
-      <view class="chapter-branch" aria-hidden="true"></view>
       <view class="chapter-node ui-tabular" aria-hidden="true">{{item.ordinal}}</view>
 
       <view

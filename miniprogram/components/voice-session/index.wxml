@@ -85,7 +85,7 @@
         <checkbox
           value="voice_authorization"
           checked="{{voiceAuthorizationAgreed}}"
-          color="#a84f43"
+          color="#b65d49"
         />
         <view class="voice-auth-copy">
           <text>我已阅读并同意</text>
@@ -150,32 +150,50 @@
       <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
     </view>
     <text wx:if="{{followUpTTSError}}" class="tts-error">{{followUpTTSError}}</text>
-    <view wx:if="{{showAssistantActions}}" class="assistant-actions">
-      <button
-        wx:if="{{assistantPromptText}}"
-        class="assistant-button ghost"
-        loading="{{followUpTTSLoading}}"
-        disabled="{{followUpTTSLoading}}"
-        bindtap="playFollowUpAudio"
-      >
-        {{replayButtonText}}
-      </button>
-      <button
-        class="assistant-button"
-        loading="{{followUpLoading}}"
-        disabled="{{followUpLoading}}"
-        bindtap="regenerateFollowUp"
-      >
-        {{followUpButtonText}}
-      </button>
-      <button
-        wx:if="{{showSkipFollowUp}}"
-        class="assistant-button ghost"
-        bindtap="skipFollowUp"
-      >
-        跳过
-      </button>
+  </view>
+
+  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
+    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
+    <view
+      id="voice-primary-action"
+      class="{{micButtonClass}}"
+      bindtap="toggleRecording"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
+      aria-label="{{micButtonText}}"
+    >
+      <view class="mic-icon-shell">
+        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
+      <text class="mic-button-text">{{micButtonText}}</text>
     </view>
+  </view>
+
+  <view wx:if="{{showAssistantActions}}" class="assistant-actions">
+    <button
+      wx:if="{{assistantPromptText}}"
+      class="assistant-button ghost"
+      loading="{{followUpTTSLoading}}"
+      disabled="{{followUpTTSLoading}}"
+      bindtap="playFollowUpAudio"
+    >
+      {{replayButtonText}}
+    </button>
+    <button
+      class="assistant-button"
+      loading="{{followUpLoading}}"
+      disabled="{{followUpLoading}}"
+      bindtap="regenerateFollowUp"
+    >
+      {{followUpButtonText}}
+    </button>
+    <button
+      wx:if="{{showSkipFollowUp}}"
+      class="assistant-button ghost"
+      bindtap="skipFollowUp"
+    >
+      跳过
+    </button>
   </view>
 
   <view class="transcript-stage">
@@ -236,19 +254,4 @@
     </view>
   </view>
 
-  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
-    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
-    <view
-      id="voice-primary-action"
-      class="{{micButtonClass}}"
-      bindtap="toggleRecording"
-      aria-role="button"
-      aria-disabled="{{micButtonDisabled}}"
-    >
-      <view class="mic-icon-shell">
-        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
-      <text class="mic-button-text">{{micButtonText}}</text>
-    </view>
-  </view>
 </view>
