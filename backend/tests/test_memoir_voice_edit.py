@@ -135,14 +135,139 @@ async def test_standalone_section_delete_preserves_material_and_other_sections(c
     assert await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == story["materials"][1])) is None
 
 
-async def test_stale_membership_or_source_blocks_delete(client, test_db, monkeypatch, story):
-    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_chapter", "target_ref": story["chapters"][0]}])
+async def test_background_draft_completion_does_not_block_section_delete(client, test_db, monkeypatch, story):
+    target = story["sections"][3]
+    response, fake = await preview(client, monkeypatch, story, [{"action": "delete_section", "target_ref": target}])
+    assert response.status_code == 200, response.text
+    other_chapter = story["chapters"][2]
+    original = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == other_chapter))
+    assert any(d["ref"] == original.id for d in fake.inputs[0]["book_data"]["drafts"])
+    # Reproduce production: another chapter finishes generating after the edit
+    # snapshot was read, while the section selected for deletion stays unchanged.
+    generated = MemoirBookChapterDraftVersion(
+        draft_id=original.draft_id, project_id=story["pid"], chapter_id=other_chapter,
+        version=2, content="后台刚整理好的日常饮食正文。",
+    )
+    test_db.add(generated)
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirSection, target) is None
+    assert await test_db.get(MemoirSection, story["sections"][1]) is not None
+    assert await test_db.get(MemoirBookChapterDraftVersion, generated.id) is not None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][2]) is not None
+
+
+@pytest.mark.parametrize("other_action", ["rename_chapter", "rename_section", "delete_material", "delete_section", "delete_chapter"])
+async def test_edits_in_different_chapters_can_both_apply(client, test_db, monkeypatch, story, other_action):
+    target = story["sections"][3]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_section", "target_ref": target}])
+    kind = other_action.split("_", 1)[1]
+    other_op = {"action": other_action, "target_ref": story[kind + "s"][0]}
+    if other_action.startswith("rename"):
+        other_op["new_title"] = "日常饮食"
+    other, _ = await preview(client, monkeypatch, story, [other_op])
+    assert (await apply(client, story, other.json())).status_code == 200
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirSection, target) is None
+
+
+async def test_unrelated_material_correction_does_not_block_delete(client, test_db, monkeypatch, story):
+    target = story["sections"][3]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_section", "target_ref": target}])
+    material = await test_db.get(MemoirVoiceUtterance, story["materials"][2])
+    material.transcript_edited = "另一个章节的讲述后来校正了。"
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirSection, target) is None
+    assert (await test_db.get(MemoirVoiceUtterance, material.id)).transcript_edited == "另一个章节的讲述后来校正了。"
+
+
+async def test_only_selected_operations_are_checked(client, test_db, monkeypatch, story):
+    ops = [
+        {"action": "delete_section", "target_ref": story["sections"][3]},
+        {"action": "rename_chapter", "target_ref": story["chapters"][2], "new_title": "日常饮食"},
+    ]
+    response, _ = await preview(client, monkeypatch, story, ops)
+    other = await test_db.get(MemoirBookPlanChapter, story["chapters"][2])
+    other.title = "未选中的章节后来改了名"
+    await test_db.commit()
+    result = await apply(client, story, response.json(), operations=ops[:1])
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirSection, story["sections"][3]) is None
+    assert (await test_db.get(MemoirBookPlanChapter, other.id)).title == "未选中的章节后来改了名"
+
+
+@pytest.mark.parametrize("change", ["title", "membership", "chapter"])
+async def test_changed_section_still_blocks_delete(client, test_db, monkeypatch, story, change):
+    target = story["sections"][3]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_section", "target_ref": target}])
+    section = await test_db.get(MemoirSection, target)
+    if change == "title":
+        section.title = "后来修改的小节标题"
+        section.version += 1
+    elif change == "membership":
+        membership = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == story["materials"][1]))
+        membership.section_id = target
+    else:
+        section.chapter_id = story["chapters"][2]
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409, result.text
+    assert await test_db.get(MemoirSection, target) is not None
+
+
+async def test_conflict_in_selected_batch_prevents_all_edits(client, test_db, monkeypatch, story):
+    ops = [
+        {"action": "rename_chapter", "target_ref": story["chapters"][2], "new_title": "不应保存的改名"},
+        {"action": "delete_section", "target_ref": story["sections"][3]},
+    ]
+    response, _ = await preview(client, monkeypatch, story, ops)
+    section = await test_db.get(MemoirSection, story["sections"][3])
+    section.title = "同时被别人改了名的小节"
+    section.version += 1
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    assert (await test_db.get(MemoirBookPlanChapter, story["chapters"][2])).title == "早晨日常"
+    assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+
+
+@pytest.mark.parametrize("change", ["section", "draft"])
+async def test_changed_chapter_contents_block_chapter_delete(client, test_db, monkeypatch, story, change):
+    target = story["chapters"][0]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_chapter", "target_ref": target}])
+    if change == "section":
+        test_db.add(MemoirSection(project_id=story["pid"], chapter_id=target, title="后来新增的小节", sort_order=1))
+    else:
+        original = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == target))
+        test_db.add(MemoirBookChapterDraftVersion(draft_id=original.draft_id, project_id=story["pid"], chapter_id=target, version=2, content="这章后来修改过的正文。"))
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    assert await test_db.get(MemoirBookPlanChapter, target) is not None
+
+
+async def test_legacy_preview_requires_refresh_without_writing(client, test_db, story):
+    old_signature = semantic_json_signature(await _story(test_db, story["pid"]))
+    result = await apply(client, story, {"signature": old_signature}, operations=[{"action": "delete_section", "target_ref": story["sections"][3]}])
+    assert result.status_code == 409
+    assert "重新查看" in result.json()["detail"]
+    assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+
+
+@pytest.mark.parametrize("action,kind", [("delete_chapter", "chapters"), ("delete_material", "materials")])
+async def test_changed_source_blocks_delete(client, test_db, monkeypatch, story, action, kind):
+    response, _ = await preview(client, monkeypatch, story, [{"action": action, "target_ref": story[kind][0]}])
     material = await test_db.get(MemoirVoiceUtterance, story["materials"][0])
     material.transcript_edited = "这是后来补充的重要回忆。"
     await test_db.commit()
     result = await apply(client, story, response.json())
     assert result.status_code == 409
     assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][0]) is not None
 
 
 async def test_failure_rolls_back_prior_renames_and_deletions(client, test_db, monkeypatch, story):
