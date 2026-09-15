@@ -23,6 +23,7 @@ from app.models.memoir import (
 )
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
+    book_output_snapshots,
     chapter_digests,
     chapter_generation,
     section_digests,
@@ -801,6 +802,37 @@ def test_chapter_digest_keeps_all_independent_user_questions():
 
     assert len(normalized["candidate_issues"]) == 5
     assert normalized["summary"] == "第1小节《比赛》 的章节摘要"
+
+
+def test_chapter_digest_ignores_included_section_without_materials():
+    material = SimpleNamespace(utterance_id="material-1", include_in_book=True)
+    assert book_output_snapshots.legacy_chapter_version_needs_upgrade(
+        SimpleNamespace(content="旧正文", section_snapshot_json=[])
+    )
+
+    def section(section_id, title, order, materials):
+        return SimpleNamespace(
+            id=section_id, title=title, section_type="life_fragment",
+            sort_order=order, status="active", include_in_book=True,
+            materials=materials,
+        )
+
+    populated = section("section-1", "童年回忆", 0, [material])
+    empty = section("section-2", "待补充的小节", 1, [])
+    chapter = SimpleNamespace(
+        id="chapter-1", project_id="project-1", title="童年回忆",
+        sort_order=0, include_in_book=True, sections=[empty, populated],
+    )
+    context = chapter_digests.chapter_digest_context(
+        chapter,
+        section_digests_by_id={populated.id: SimpleNamespace(
+            id="digest-1", input_signature="signature",
+            digest_json={"summary": "童年往事。"},
+        )},
+    )
+
+    assert [section.section_id for section in context.sections] == [populated.id]
+    assert context.allowed_material_ids == frozenset({material.utterance_id})
 
 
 async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(

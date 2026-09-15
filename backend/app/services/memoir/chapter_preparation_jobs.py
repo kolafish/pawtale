@@ -11,6 +11,7 @@ from app.models.memoir import MemoirEditingJob
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import chapter_digests, chapter_generation, editing_jobs
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_output_snapshots import legacy_chapter_version_needs_upgrade
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.project_ai_preferences import select_project_ai_model
@@ -24,6 +25,7 @@ _CHECKPOINT_KEYS = {
     "checkpoint_editor_notes",
     "checkpoint_model",
 }
+_LEGACY_SECTION_UPGRADE_REVISION = "skip-empty-sections-v1"
 
 
 def _job_dedupe_key(chapter_id: str) -> str:
@@ -104,6 +106,17 @@ async def enqueue_chapter_preparation_job(
         db,
         context=context,
     )
+    latest = await chapter_generation.latest_chapter_draft_version(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    needs_legacy_upgrade = legacy_chapter_version_needs_upgrade(latest)
+    job_input_signature = (
+        f"{context.input_signature}:{_LEGACY_SECTION_UPGRADE_REVISION}"
+        if needs_legacy_upgrade
+        else context.input_signature
+    )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     existing = await _load_job(
         db,
@@ -127,7 +140,21 @@ async def enqueue_chapter_preparation_job(
             db, project_id=project_id, chapter_id=chapter_id,
         )
     )
-    if automatic and not retry and not decision_resolved and existing is not None and previous_payload.get("input_signature") == context.input_signature:
+    if (
+        automatic
+        and not retry
+        and not decision_resolved
+        and existing is not None
+        and (
+            previous_payload.get("input_signature") == job_input_signature
+            or (
+                needs_legacy_upgrade
+                and existing.status != MemoirEditingJobStatus.FAILED.value
+                and previous_payload.get("input_signature")
+                == context.input_signature
+            )
+        )
+    ):
         if on_enqueued is not None:
             await on_enqueued(existing)
         return _job_state(project_id=project_id, chapter_id=chapter_id, job=existing)
@@ -136,7 +163,7 @@ async def enqueue_chapter_preparation_job(
         and existing.status == MemoirEditingJobStatus.FAILED.value
         and previous_payload.get("operation") == req.operation
         and previous_payload.get("requested_ai_model") == selected_ai_model
-        and previous_payload.get("input_signature") == context.input_signature
+        and previous_payload.get("input_signature") == job_input_signature
         and previous_result.get("checkpoint_input_signature")
         == context.input_signature
     )
@@ -176,7 +203,7 @@ async def enqueue_chapter_preparation_job(
             "allow_admin": allow_admin,
             "operation": req.operation,
             "requested_ai_model": selected_ai_model,
-            "input_signature": context.input_signature,
+            "input_signature": job_input_signature,
             "automatic": automatic,
         },
     )
