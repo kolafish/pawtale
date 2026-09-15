@@ -111,9 +111,10 @@ async def enqueue_chapter_preparation_job(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    needs_legacy_upgrade = legacy_chapter_version_needs_upgrade(latest)
     job_input_signature = (
         f"{context.input_signature}:{_LEGACY_SECTION_UPGRADE_REVISION}"
-        if legacy_chapter_version_needs_upgrade(latest)
+        if needs_legacy_upgrade
         else context.input_signature
     )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
@@ -145,8 +146,13 @@ async def enqueue_chapter_preparation_job(
         and not decision_resolved
         and existing is not None
         and (
-            existing.status != MemoirEditingJobStatus.FAILED.value
-            or previous_payload.get("input_signature") == job_input_signature
+            previous_payload.get("input_signature") == job_input_signature
+            or (
+                needs_legacy_upgrade
+                and existing.status != MemoirEditingJobStatus.FAILED.value
+                and previous_payload.get("input_signature")
+                == context.input_signature
+            )
         )
     ):
         if on_enqueued is not None:
