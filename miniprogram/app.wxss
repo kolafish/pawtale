@@ -6,7 +6,7 @@ page {
   --ui-surface-subtle: #f2ece4;
   --ui-text-primary: #302925;
   --ui-text-secondary: #706761;
-  --ui-text-muted: #918780;
+  --ui-text-muted: #736963;
   --ui-on-accent: #ffffff;
   --ui-section-title: #8d4d40;
   --ui-value-text: #5f5550;
