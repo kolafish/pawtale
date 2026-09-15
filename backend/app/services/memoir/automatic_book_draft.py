@@ -18,6 +18,7 @@ from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
 from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+from app.services.memoir.book_output_snapshots import normalized_section_snapshots
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -90,10 +91,20 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     progress.chapters = {chapter.id: progress.chapters.get(chapter.id, ChapterProgress()) for chapter in chapters}
     retry = (job.payload_json or {}).get("source") == "retry"
     readable = set()
+    legacy_upgrade_pending = False
     for chapter in chapters:
         chapter_id = chapter.id
         state = progress.chapters[chapter_id]
         state.draft_version_id = None
+        latest = await chapter_generation.latest_chapter_draft_version(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+        if latest is not None and latest.content.strip() and not normalized_section_snapshots(
+            latest.section_snapshot_json
+        ):
+            legacy_upgrade_pending = True
         try:
             context = await chapter_generation.load_chapter_generation_context(
                 db, project_id=project_id, chapter_id=chapter_id
@@ -104,7 +115,6 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             state.status, state.error_message = "needs_material", str(exc.detail)
             continue
         state.input_signature = context.input_signature
-        latest = await chapter_generation.latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
         if chapter_generation.chapter_draft_sources_still_included(context, latest):
             readable.add(chapter_id)
             state.draft_version_id = latest.id
@@ -137,7 +147,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
-    if readable or progress.output_id:
+    if not legacy_upgrade_pending and (readable or progress.output_id):
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
         progress.output_version_id = assembled.output_version_id
@@ -168,7 +178,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.stage = "reviewing_book"
             return _waiting(job, progress)
         progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
-    if progress.preserved_manual or progress.omitted_chapter_ids:
+    if legacy_upgrade_pending or progress.preserved_manual or progress.omitted_chapter_ids:
         progress.stage = "needs_attention"
     return EditingJobResult(result_json=progress.model_dump(mode="json"))
 

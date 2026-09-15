@@ -174,6 +174,21 @@ async def _load_chapter(
     return chapter
 
 
+def _sections_with_included_materials(
+    chapter: MemoirBookPlanChapter,
+) -> list[MemoirSection]:
+    return sorted(
+        (
+            section
+            for section in chapter.sections
+            if section.status == MemoirSectionStatus.ACTIVE.value
+            and section.include_in_book
+            and any(material.include_in_book for material in section.materials)
+        ),
+        key=lambda item: (item.sort_order, item.id),
+    )
+
+
 async def ensure_section_digests(
     db: AsyncSession,
     *,
@@ -188,15 +203,7 @@ async def ensure_section_digests(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    sections = sorted(
-        (
-            section
-            for section in chapter.sections
-            if section.status == MemoirSectionStatus.ACTIVE.value
-            and section.include_in_book
-        ),
-        key=lambda item: (item.sort_order, item.id),
-    )
+    sections = _sections_with_included_materials(chapter)
     if not sections:
         raise HTTPException(status_code=422, detail="章节没有可收录的小章节")
     for index, section in enumerate(sections):
@@ -260,15 +267,7 @@ def chapter_digest_context(
 ) -> ChapterDigestContext:
     sections: list[ChapterDigestSection] = []
     material_ids: set[str] = set()
-    for section in sorted(
-        chapter.sections,
-        key=lambda item: (item.sort_order, item.id),
-    ):
-        if (
-            section.status != MemoirSectionStatus.ACTIVE.value
-            or not section.include_in_book
-        ):
-            continue
+    for section in _sections_with_included_materials(chapter):
         digest = section_digests_by_id.get(section.id)
         if digest is None:
             raise HTTPException(
