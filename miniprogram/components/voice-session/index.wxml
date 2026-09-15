@@ -105,6 +105,7 @@
     <text wx:if="{{completionIssueActionText}}" class="completion-issue-action-state">{{completionIssueActionText}}</text>
     <view wx:if="{{showCompletionIssueActions}}" class="completion-issue-actions">
       <button
+        class="completion-issue-defer ui-button ui-pressable {{completionIssueControlsDisabled ? 'is-disabled' : ''}}"
         disabled="{{completionIssueControlsDisabled}}"
         bindtap="chooseCompletionIssueResolution"
       >暂时不补</button>
@@ -172,7 +173,7 @@
   <view wx:if="{{showAssistantActions}}" class="assistant-actions">
     <button
       wx:if="{{assistantPromptText}}"
-      class="assistant-button ghost"
+      class="assistant-button ghost {{followUpTTSLoading ? 'is-disabled' : ''}}"
       loading="{{followUpTTSLoading}}"
       disabled="{{followUpTTSLoading}}"
       bindtap="playFollowUpAudio"
@@ -180,7 +181,7 @@
       {{replayButtonText}}
     </button>
     <button
-      class="assistant-button"
+      class="assistant-button {{followUpLoading ? 'is-disabled' : ''}}"
       loading="{{followUpLoading}}"
       disabled="{{followUpLoading}}"
       bindtap="regenerateFollowUp"
