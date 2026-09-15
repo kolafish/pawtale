@@ -57,9 +57,19 @@
   transition-timing-function: ease-out;
 }
 
+.search-clear {
+  width: 88rpx;
+  max-width: 88rpx;
+  padding: 0;
+}
+
 .voice-search-button {
-  min-width: 132rpx;
+  width: 152rpx;
+  min-width: 152rpx;
+  max-width: 152rpx;
+  padding: 0 8rpx;
   background: var(--ui-accent-surface-subtle);
+  white-space: nowrap;
 }
 
 .voice-search-button.recording {
@@ -370,6 +380,12 @@
   height: 96rpx;
   font-size: 32rpx;
   line-height: 96rpx;
+}
+
+.transcripts-page.large-text .voice-search-button {
+  width: 176rpx;
+  min-width: 176rpx;
+  max-width: 176rpx;
 }
 
 .transcripts-page.large-text .search-chip,

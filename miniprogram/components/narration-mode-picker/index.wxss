@@ -20,8 +20,8 @@
 .narration-option-mark { width: 18rpx; height: 18rpx; flex: 0 0 18rpx; border-radius: 50%; background: var(--ui-success-text); box-shadow: 0 0 0 8rpx var(--ui-success-surface); }
 .narration-option-copy { min-width: 0; flex: 1; }
 .narration-option-heading { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; color: var(--ui-text-primary); font-size: 30rpx; font-weight: 700; line-height: 1.45; }
-.narration-option-check { width: 40rpx; height: 40rpx; flex: 0 0 40rpx; border-radius: 50%; background: var(--ui-accent); color: var(--ui-on-accent); font-size: 23rpx; line-height: 40rpx; opacity: 0; text-align: center; transform: scale(0.8); }
-.narration-option-check.is-visible { opacity: 1; transform: scale(1); }
+.narration-option-check { width: 40rpx; height: 40rpx; flex: 0 0 40rpx; border-radius: 50%; background: var(--ui-accent); color: var(--ui-on-accent); font-size: 23rpx; line-height: 40rpx; opacity: 0; text-align: center; filter: blur(4px); transform: scale(0.25); transition: transform 300ms cubic-bezier(0.2, 0, 0, 1), opacity 300ms cubic-bezier(0.2, 0, 0, 1), filter 300ms cubic-bezier(0.2, 0, 0, 1); }
+.narration-option-check.is-visible { opacity: 1; filter: blur(0); transform: scale(1); }
 .narration-option-description, .narration-picker-hint { color: var(--ui-text-secondary); font-size: 24rpx; line-height: 1.5; text-wrap: pretty; }
 .narration-option-description { margin-top: 4rpx; }
 .narration-picker-hint { margin-top: 12rpx; }

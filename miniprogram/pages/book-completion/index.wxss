@@ -152,6 +152,7 @@
   color: var(--ui-text-secondary);
   font-size: 26rpx;
   line-height: 40rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .review-complete {
@@ -216,6 +217,7 @@
   font-size: 28rpx;
   font-weight: 700;
   line-height: 40rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .editorial-action-reason {
@@ -400,6 +402,7 @@
 
 .chapter-order {
   color: var(--ui-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .chapter-state {
