@@ -484,7 +484,11 @@
 }
 
 .book-title-ai {
-  flex: 0 0 auto;
+  width: 184rpx;
+  min-width: 184rpx;
+  max-width: 184rpx;
+  padding: 0 12rpx;
+  flex: 0 0 184rpx;
 }
 
 .book-title-suggestion-list {
@@ -545,7 +549,13 @@
 }
 
 .book-editorial-generate {
-  min-width: 112rpx;
+  width: 200rpx;
+  min-width: 200rpx;
+  max-width: 200rpx;
+  padding: 0 12rpx;
+  flex: 0 0 200rpx;
+  background: var(--ui-surface);
+  box-shadow: inset 0 0 0 1rpx var(--ui-accent-border);
 }
 
 .book-metadata-input,
