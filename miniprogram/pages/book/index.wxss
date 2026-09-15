@@ -450,7 +450,7 @@
 .automation-ack {
   flex: 0 0 112rpx;
   width: 112rpx;
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 0;
   padding: 0 12rpx;
   border: 0;
@@ -905,7 +905,7 @@
 .source-split-toggle {
   flex: 0 0 104rpx;
   width: 104rpx;
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 1rpx 0 0;
   padding: 0;
   border: 0;
@@ -1218,6 +1218,10 @@
 .book-page.large-text .image-assets-entry-count {
   font-size: 28rpx;
   line-height: 1.5;
+}
+.book-page.large-text .automation-ack,
+.book-page.large-text .source-split-toggle {
+  min-height: 96rpx;
 }
 .book-page.large-text .source-preview,
 .book-page.large-text .source-ref-text,

@@ -302,7 +302,7 @@
 
 .completion-issue-defer,
 .completion-issue-continue {
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 0;
   padding: 12rpx 16rpx;
   border: 0;
