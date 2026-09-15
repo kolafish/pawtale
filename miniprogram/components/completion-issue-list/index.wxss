@@ -3,8 +3,7 @@
 .question,
 .reason,
 .state,
-.required-answer-label,
-.required-answer-hint {
+.required-answer-label {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -19,6 +18,7 @@
   font-size: 28rpx;
   font-weight: 700;
   line-height: 40rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .required .group-title {
@@ -77,7 +77,7 @@
 }
 
 .action {
-  min-height: 76rpx;
+  min-height: 88rpx;
   margin-top: 18rpx;
   display: flex;
   align-items: center;

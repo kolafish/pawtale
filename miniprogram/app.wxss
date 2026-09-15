@@ -155,13 +155,34 @@ button::after {
   transform: scale(0.96);
 }
 
+.ui-consent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 8rpx;
+}
+
+.ui-consent-choice,
+.ui-consent-link {
+  min-height: var(--ui-hit-size);
+  display: inline-flex;
+  align-items: center;
+}
+
+.ui-consent-choice {
+  gap: 16rpx;
+}
+
+.ui-consent-link {
+  padding: 0 8rpx;
+  border-radius: 12rpx;
+  color: var(--ui-accent);
+  font-weight: 700;
+}
+
 .ui-avatar-action-hover {
   transform: scale(0.96);
   box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.10);
-}
-
-.tap-hover {
-  opacity: 0.82;
 }
 
 .ui-page-context-row {

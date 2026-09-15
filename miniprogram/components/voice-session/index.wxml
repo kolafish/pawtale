@@ -81,17 +81,23 @@
     <text class="voice-auth-title">开始录音前需要声纹授权</text>
     <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、小余语音回应、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
-      <label class="voice-auth-row">
-        <checkbox
-          value="voice_authorization"
-          checked="{{voiceAuthorizationAgreed}}"
-          color="#b65d49"
-        />
-        <view class="voice-auth-copy">
-          <text>我已阅读并同意</text>
-          <text class="voice-auth-link" catchtap="openVoiceAuthorization">《声纹授权协议》</text>
-        </view>
-      </label>
+      <view class="voice-auth-row ui-consent-row">
+        <label class="ui-consent-choice">
+          <checkbox
+            value="voice_authorization"
+            checked="{{voiceAuthorizationAgreed}}"
+            color="#b65d49"
+          />
+          <text class="voice-auth-copy">我已阅读并同意</text>
+        </label>
+        <view
+          class="voice-auth-link ui-consent-link ui-pressable"
+          catchtap="openVoiceAuthorization"
+          hover-class="ui-subtle-action-hover"
+          aria-role="button"
+          aria-label="查看声纹授权协议"
+        >《声纹授权协议》</view>
+      </view>
     </checkbox-group>
   </view>
 

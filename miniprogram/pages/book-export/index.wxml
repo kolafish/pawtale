@@ -210,7 +210,7 @@
           <view
             wx:for="{{bookTitleSuggestions}}"
             wx:key="*this"
-            class="book-title-suggestion"
+            class="book-title-suggestion ui-pressable"
             data-title="{{item}}"
             bindtap="chooseBookTitleSuggestion"
           >

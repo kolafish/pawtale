@@ -299,6 +299,7 @@
 
 .session-meta {
   margin-top: 8rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .continue-button {
@@ -317,6 +318,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .session-stats text {

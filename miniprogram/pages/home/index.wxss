@@ -538,23 +538,16 @@
     0 8rpx 20rpx rgba(0, 0, 0, 0.05);
 }
 
-.voice-auth-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16rpx;
-}
-
 .voice-auth-copy {
-  flex: 1;
   min-width: 0;
   color: var(--ui-text-primary);
+}
+
+.voice-auth-copy,
+.voice-auth-link {
   font-size: 30rpx;
   font-weight: 600;
   line-height: 1.45;
-}
-
-.voice-auth-link {
-  color: var(--ui-accent);
 }
 
 .voice-auth-hint {
@@ -680,7 +673,8 @@
 }
 
 .home-page.large-text .return-prompt-text,
-.home-page.large-text .voice-auth-copy {
+.home-page.large-text .voice-auth-copy,
+.home-page.large-text .voice-auth-link {
   font-size: 36rpx;
   line-height: 56rpx;
 }

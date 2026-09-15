@@ -272,7 +272,7 @@
 
 .section-media { max-width: 188rpx; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6rpx; }
 .section-media-entry { min-width: 40px; min-height: 40px; padding: 0 8rpx; border-radius: var(--ui-radius-control); }
-.media-chip { padding: 6rpx 10rpx; border-radius: 999rpx; font-size: 19rpx; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.media-chip { padding: 6rpx 10rpx; border-radius: 999rpx; font-size: 19rpx; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .image-chip { color: #756147; background: var(--ui-warning-surface); }
 .video-chip { color: #5f6973; background: #e7ecef; }
 

@@ -496,10 +496,13 @@
 
 .book-title-suggestion {
   max-width: 100%;
-  padding: 11rpx 17rpx;
+  min-height: 88rpx;
+  padding: 0 17rpx;
   border-radius: 999rpx;
   background: var(--ui-accent-surface);
   color: var(--ui-accent-strong);
+  display: inline-flex;
+  align-items: center;
   font-size: 23rpx;
   font-weight: 700;
   line-height: 1.35;
@@ -547,16 +550,16 @@
 
 .book-metadata-input,
 .book-metadata-textarea {
-  min-height: 76rpx;
+  min-height: 88rpx;
   padding: 16rpx 18rpx;
   font-weight: 600;
 }
 
 .book-metadata-input {
-  height: 76rpx;
+  height: 88rpx;
   padding-top: 0;
   padding-bottom: 0;
-  line-height: 76rpx;
+  line-height: 88rpx;
 }
 
 .book-metadata-textarea {
@@ -565,6 +568,16 @@
 
 .book-metadata-textarea.compact {
   min-height: 92rpx;
+}
+
+.ui-accessible-page.large-text .book-title-suggestion {
+  min-height: 96rpx;
+  font-size: 28rpx;
+}
+
+.ui-accessible-page.large-text .book-metadata-input {
+  height: 96rpx;
+  line-height: 96rpx;
 }
 
 .book-cover-style-picker {
@@ -671,6 +684,7 @@
   color: var(--ui-section-title);
   font-size: 23rpx;
   line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 
 .save-design-button {
@@ -779,6 +793,7 @@
   color: var(--ui-section-title);
   font-size: 23rpx;
   line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 
 .chapter-title {
