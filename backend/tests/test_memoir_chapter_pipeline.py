@@ -23,6 +23,7 @@ from app.models.memoir import (
 )
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
+    book_output_snapshots,
     chapter_digests,
     chapter_generation,
     section_digests,
@@ -805,6 +806,9 @@ def test_chapter_digest_keeps_all_independent_user_questions():
 
 def test_chapter_digest_ignores_included_section_without_materials():
     material = SimpleNamespace(utterance_id="material-1", include_in_book=True)
+    assert book_output_snapshots.legacy_chapter_version_needs_upgrade(
+        SimpleNamespace(content="旧正文", section_snapshot_json=[])
+    )
 
     def section(section_id, title, order, materials):
         return SimpleNamespace(

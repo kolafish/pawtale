@@ -12,6 +12,16 @@ def latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookCh
     return max(draft.versions, key=lambda version: (version.version, version.created_at, version.id)) if draft and draft.versions else None
 
 
+def legacy_chapter_version_needs_upgrade(
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    return bool(
+        version
+        and version.content.strip()
+        and not normalized_section_snapshots(version.section_snapshot_json)
+    )
+
+
 async def load_book_plan_drafts(db: AsyncSession, *, project_id: str) -> MemoirBookPlan:
     plan = await db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id).options(
         selectinload(MemoirBookPlan.chapters).selectinload(MemoirBookPlanChapter.draft).selectinload(MemoirBookChapterDraft.versions),

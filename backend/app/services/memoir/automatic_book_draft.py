@@ -18,7 +18,7 @@ from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
 from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
-from app.services.memoir.book_output_snapshots import normalized_section_snapshots
+from app.services.memoir.book_output_snapshots import legacy_chapter_version_needs_upgrade
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -101,9 +101,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             project_id=project_id,
             chapter_id=chapter_id,
         )
-        if latest is not None and latest.content.strip() and not normalized_section_snapshots(
-            latest.section_snapshot_json
-        ):
+        if legacy_chapter_version_needs_upgrade(latest):
             legacy_upgrade_pending = True
         try:
             context = await chapter_generation.load_chapter_generation_context(
