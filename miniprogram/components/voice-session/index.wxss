@@ -300,7 +300,7 @@
   justify-content: flex-end;
 }
 
-.completion-issue-actions button,
+.completion-issue-defer,
 .completion-issue-continue {
   min-height: 80rpx;
   margin: 0;
@@ -341,23 +341,23 @@
   margin-top: 18rpx;
 }
 
-.completion-issue-actions button::after,
+.completion-issue-defer::after,
 .completion-issue-continue::after {
   border: 0;
 }
 
-.completion-issue-actions button:active,
+.completion-issue-defer:active,
 .completion-issue-continue:active {
   transform: scale(0.96);
 }
 
-.completion-issue-actions button[disabled],
-.completion-issue-continue[disabled] {
+.completion-issue-defer.is-disabled,
+.completion-issue-continue.is-disabled {
   opacity: 0.58;
   transform: none;
 }
 
-.completion-issue-actions button {
+.completion-issue-defer {
   min-width: 220rpx;
 }
 
@@ -526,7 +526,7 @@
   border: 0;
 }
 
-.voice-chat-page .assistant-button[disabled] {
+.voice-chat-page .assistant-button.is-disabled {
   opacity: 0.66;
 }
 
@@ -1043,7 +1043,7 @@
   font-weight: 800;
 }
 
-.session-state-strip text {
+.session-state-error {
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
   background: var(--ui-accent-surface);
@@ -1201,7 +1201,7 @@
   line-height: 56rpx;
 }
 
-.voice-chat-page.large-text .completion-issue-actions button,
+.voice-chat-page.large-text .completion-issue-defer,
 .voice-chat-page.large-text .completion-issue-continue {
   min-height: 104rpx;
   font-size: 36rpx;
