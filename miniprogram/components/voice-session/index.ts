@@ -90,7 +90,11 @@ type SpeakerRoleTapEvent = PageDatasetEvent<{ role?: string }>;
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
 Component({
-  properties: { entry: { type: Object, value: null }, embedded: { type: Boolean, value: false } },
+  properties: {
+    entry: { type: Object, value: null },
+    embedded: { type: Boolean, value: false },
+    minimized: { type: Boolean, value: false },
+  },
   data: initialVoiceChatData(),
   lifetimes: {
     attached() { void this.onLoad(this.properties.entry as VoiceSessionEntry); },
@@ -105,6 +109,16 @@ Component({
     applyVoiceChatDataPatch(this, { showNarrationModes: !this.data.showNarrationModes });
   },
   runtime() { return voiceSessionRuntime(this); },
+  returnToHome() {
+    if (!this.properties.embedded || this.data.finishingSession || this.runtime().pageSuspended) return;
+    trackAuditAction("voice_chat.return_home", {}, { voiceSessionId: this.data.voiceSessionId });
+    this.suspendVoiceChat("hide");
+    this.triggerEvent("returnhome", { voiceSessionId: this.data.voiceSessionId });
+  },
+  resumeFromHome() {
+    if (!this.properties.embedded || this.runtime().disposed) return;
+    this.onShow();
+  },
   exitSession(detail: VoiceSessionExit) {
     const runtime = this.runtime();
     if (runtime.disposed) return;
@@ -181,7 +195,7 @@ Component({
   },
 
   onShow() {
-    if (this.runtime().disposed) return;
+    if (this.runtime().disposed || this.properties.minimized) return;
     const wasSuspended = this.runtime().pageSuspended;
     this.runtime().pageSuspended = false;
     const pendingExit = this.runtime().pendingExit;

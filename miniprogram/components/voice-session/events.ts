@@ -16,3 +16,5 @@ export type VoiceSessionExit =
   | { destination: "transcripts" };
 
 export interface VoiceSessionExitEvent { detail: VoiceSessionExit & { voiceSessionId: string } }
+
+export interface VoiceSessionReturnHomeEvent { detail: { voiceSessionId: string } }

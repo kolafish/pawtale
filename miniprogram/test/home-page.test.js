@@ -162,6 +162,41 @@ test("home closes only the current confirmed session, then refreshes the story i
   assert.deepEqual(context.storyNavigationTarget, { projectId: "p1", narrationSaved: false });
 });
 
+test("home pauses an embedded voice session and resumes the same instance", async () => {
+  const { page } = loadHomePage();
+  const entry = { voiceSessionId: "s1", projectId: "p1", mode: "guided_interview" };
+  const toasts = [];
+  let resumes = 0;
+  global.wx = {
+    showToast(options) { toasts.push(options); },
+    pageScrollTo() {},
+  };
+  const context = pageContext(page, {
+    userId: "u1",
+    projectId: "p1",
+    hasProject: true,
+    hasStories: true,
+    voiceEntry: entry,
+  });
+  context.measureNarration = () => {};
+  context.selectComponent = () => ({ resumeFromHome() { resumes += 1; } });
+
+  context.returnFromVoiceSession({ detail: { voiceSessionId: "stale" } });
+  assert.equal(context.data.voiceSessionMinimized, false);
+
+  context.returnFromVoiceSession({ detail: { voiceSessionId: "s1" } });
+  assert.equal(context.data.voiceEntry, entry, "the current session stays mounted");
+  assert.equal(context.data.voiceSessionMinimized, true);
+  assert.equal(context.data.primaryVoiceButtonTitle, "继续本次讲述");
+  assert.equal(context.data.homePageClass, "home-page");
+  assert.deepEqual(toasts, [{ title: "讲述已暂停，可随时继续", icon: "none" }]);
+
+  await context.startPrimaryVoiceChat();
+  assert.equal(context.data.voiceEntry, entry);
+  assert.equal(context.data.voiceSessionMinimized, false);
+  assert.equal(resumes, 1);
+});
+
 test("mini program opens on the home page without a tab bar", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
 
@@ -189,6 +224,7 @@ test("home routes the hero to a new story and the resume card to the prior conte
   assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
   assert.match(pageWxml, /class="resume-primary-action[\s\S]*?bindtap="resumeLastStory"/);
   assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
+  assert.match(pageWxml, /minimized="\{\{voiceSessionMinimized\}\}"[\s\S]*?bindreturnhome="returnFromVoiceSession"/);
 });
 
 test("home places the story review notice after the story tree", () => {

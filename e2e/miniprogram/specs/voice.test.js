@@ -241,7 +241,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await waitForPageData(host, data => Boolean(data.voiceEntry), "首页原位展开讲述");
     assert.deepEqual((await session.miniProgram.pageStack()).map(page => page.path), ["pages/home/index"]);
     assert.equal(fixture.state.createdSessions, 1);
-    const page = await elementById(host, "voice-session");
+    let page = await elementById(host, "voice-session");
     const ready = await waitForPageData(
       page,
       (data) => data.status === "ready" && data.connecting === false,
@@ -254,6 +254,30 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await assertNarrationModes(page, "session-narration-modes", "free_narration");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
+
+    await tapBoundAction(await elementById(page, "voice-home-action"));
+    const pausedHome = await waitForPageData(
+      host,
+      data => data.voiceSessionMinimized === true && data.voiceEntry?.voiceSessionId,
+      "语音讲述暂停并返回首页",
+    );
+    const pausedSessionId = pausedHome.voiceEntry.voiceSessionId;
+    assert.equal(fixture.state.createdSessions, 1);
+    assert.equal(pausedHome.primaryVoiceButtonTitle, "继续本次讲述");
+    assert.ok(await host.$("#voice-session"), "暂停后保留同一个语音组件实例");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-paused.png") });
+
+    await tapBoundAction(await elementById(host, "primary-voice-action"));
+    await waitForPageData(host, data => data.voiceSessionMinimized === false, "从首页继续同一次讲述");
+    page = await elementById(host, "voice-session");
+    await waitForPageData(
+      page,
+      data => data.status === "ready" && data.connecting === false,
+      "暂停后的语音 gateway 恢复就绪",
+      30000,
+    );
+    assert.equal((await host.data()).voiceEntry.voiceSessionId, pausedSessionId);
+    assert.equal(fixture.state.createdSessions, 1, "继续讲述不会新建会话");
 
     await tapBoundAction(await elementById(page, "voice-primary-action"));
     const recording = await waitForPageData(
