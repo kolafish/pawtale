@@ -251,7 +251,7 @@
 }
 
 .voice-chat-page.ai-recording-focus .transcript-stage {
-  min-height: 620rpx;
+  min-height: 500rpx;
   padding: 34rpx 36rpx;
   border-radius: 36rpx;
   justify-content: flex-start;
@@ -681,8 +681,8 @@
 
 .voice-chat-page.ai-recording-focus .live-scroll,
 .voice-chat-page.ai-recording-focus .live-scroll.long {
-  height: 430rpx;
-  max-height: 430rpx;
+  height: 360rpx;
+  max-height: 360rpx;
 }
 
 .live-scroll.long {
@@ -1697,7 +1697,7 @@
 }
 
 .voice-chat-page.large-text.capture-focus .transcript-stage {
-  min-height: 520rpx;
+  min-height: 450rpx;
   padding: 30rpx 36rpx;
   border-radius: 40rpx;
   justify-content: flex-start;
@@ -1715,12 +1715,12 @@
 }
 
 .voice-chat-page.large-text.capture-focus .live-scroll {
-  height: 340rpx;
-  max-height: 340rpx;
+  height: 280rpx;
+  max-height: 280rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .live-scroll.long {
-  height: 340rpx;
+  height: 280rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .live-text-current {
