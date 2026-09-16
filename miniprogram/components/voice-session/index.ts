@@ -33,7 +33,6 @@ import {
   assistantTranscriptState,
   canRequestFollowUp,
   followUpSourceMessageId,
-  latestAssistantMessageId,
   statusText,
   upsertTranscriptLine,
 } from "../../services/voice-chat-state";
@@ -782,7 +781,6 @@ Component({
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
     applyVoiceChatDataPatch(this, {
-      dismissedFollowUpMessageId: "",
       followUpLoading: false,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
@@ -847,7 +845,6 @@ Component({
           : true,
         canRequestFollowUp: true,
       }),
-      dismissedFollowUpMessageId: "",
       followUpError: message,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
@@ -981,35 +978,6 @@ Component({
 
   async regenerateFollowUp() {
     await this.generateFollowUp(true);
-  },
-
-  skipFollowUp() {
-    const dismissedFollowUpMessageId = latestAssistantMessageId(this.data.transcriptLines);
-    this.cancelFollowUpTTS();
-    applyVoiceChatDataPatch(this, {
-      assistantPromptText: "",
-      followUpError: "",
-      dismissedFollowUpMessageId,
-      followUpMessageId: "",
-      followUpAudioFileId: "",
-      followUpTTSLoading: false,
-      followUpTTSError: "",
-      followUpTTSStateText: "",
-      assistantExpectsAnswer: true,
-      ttsSpokenText: "",
-      ttsCurrentText: "",
-      ttsRemainingText: "",
-      ttsProgressPercent: 0,
-      ttsAlignment: [],
-      canRequestFollowUp: canRequestFollowUp(
-        this.data.transcriptLines,
-        this.data.guidanceMode,
-        this.data.lastFollowUpSourceMessageId,
-        this.data.followUpLoading,
-      ),
-      selectedOpeningTopicText: "",
-      persistenceStateText: "已跳过回应",
-    });
   },
 
   chooseOpeningTopic(event: OpeningTopicTapEvent) {

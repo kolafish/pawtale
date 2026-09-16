@@ -30,6 +30,7 @@
   <narration-mode-picker wx:if="{{showNarrationModes}}" id="session-narration-modes" selected="{{narrationMode}}" locked="{{true}}" compact="{{true}}" large-text="{{largeTextEnabled}}" />
 
   <view class="topic-panel">
+    <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>
     <text class="topic-kicker">正在聊：</text>
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
@@ -170,51 +171,17 @@
     <text wx:if="{{followUpTTSError}}" class="tts-error">{{followUpTTSError}}</text>
   </view>
 
-  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
-    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
-    <view
-      id="voice-primary-action"
-      class="{{micButtonClass}}"
-      bindtap="toggleRecording"
-      aria-role="button"
-      aria-disabled="{{micButtonDisabled}}"
-      aria-label="{{micButtonText}}"
-    >
-      <view class="mic-icon-shell">
-        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
-      <text class="mic-button-text">{{micButtonText}}</text>
-    </view>
-  </view>
+  <button
+    wx:if="{{showInlineHelp}}"
+    class="inline-help-button"
+    loading="{{followUpLoading}}"
+    disabled="{{followUpLoading}}"
+    bindtap="stopAndAskFollowUp"
+  >
+    让小余问一句
+  </button>
 
-  <view wx:if="{{showAssistantActions}}" class="assistant-actions">
-    <button
-      wx:if="{{assistantPromptText}}"
-      class="assistant-button ghost {{followUpTTSLoading ? 'is-disabled' : ''}}"
-      loading="{{followUpTTSLoading}}"
-      disabled="{{followUpTTSLoading}}"
-      bindtap="playFollowUpAudio"
-    >
-      {{replayButtonText}}
-    </button>
-    <button
-      class="assistant-button {{followUpLoading ? 'is-disabled' : ''}}"
-      loading="{{followUpLoading}}"
-      disabled="{{followUpLoading}}"
-      bindtap="regenerateFollowUp"
-    >
-      {{followUpButtonText}}
-    </button>
-    <button
-      wx:if="{{showSkipFollowUp}}"
-      class="assistant-button ghost"
-      bindtap="skipFollowUp"
-    >
-      跳过
-    </button>
-  </view>
-
-  <view class="transcript-stage">
+  <view wx:if="{{showTranscriptStage}}" class="transcript-stage">
     <view class="transcript-stage-head">
       <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
         {{stageStatusText}}
@@ -252,15 +219,6 @@
       <view class="capture-dot"></view>
       <text>说完后点“说完了”，我会帮您整理成文字。</text>
     </view>
-    <button
-      wx:if="{{showInlineHelp}}"
-      class="inline-help-button"
-      loading="{{followUpLoading}}"
-      disabled="{{followUpLoading}}"
-      bindtap="stopAndAskFollowUp"
-    >
-      不知道讲什么，让小余问一句
-    </button>
     <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">
         <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
@@ -287,6 +245,44 @@
       <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
         <text class="line-role">{{item.roleText}}</text>
         <text>{{item.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
+    <text class="control-hint {{controlHintText ? '' : 'is-empty'}}">{{controlHintText || ' '}}</text>
+    <view
+      id="voice-primary-action"
+      class="{{micButtonClass}}"
+      bindtap="toggleRecording"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
+      aria-label="{{micButtonText}}"
+    >
+      <view class="mic-icon-shell">
+        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
+      <text class="mic-button-text">{{micButtonText}}</text>
+    </view>
+    <view class="assistant-actions-slot">
+      <view wx:if="{{showAssistantActions}}" class="assistant-actions">
+        <button
+          wx:if="{{assistantPromptText}}"
+          class="assistant-button ghost {{followUpTTSLoading ? 'is-disabled' : ''}}"
+          loading="{{followUpTTSLoading}}"
+          disabled="{{followUpTTSLoading}}"
+          bindtap="playFollowUpAudio"
+        >
+          {{replayButtonText}}
+        </button>
+        <button
+          class="assistant-button {{followUpLoading ? 'is-disabled' : ''}}"
+          loading="{{followUpLoading}}"
+          disabled="{{followUpLoading}}"
+          bindtap="regenerateFollowUp"
+        >
+          {{followUpButtonText}}
+        </button>
       </view>
     </view>
   </view>

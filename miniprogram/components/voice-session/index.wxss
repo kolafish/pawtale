@@ -1,5 +1,5 @@
 .voice-chat-page {
-  --ui-fixed-action-space: 340rpx;
+  --ui-fixed-action-space: 370rpx;
   padding-top: 26rpx;
   padding-right: 30rpx;
   padding-left: 30rpx;
@@ -73,42 +73,58 @@
 }
 
 .topic-panel {
-  position: relative;
   margin-top: 18rpx;
-  padding: 28rpx 30rpx 28rpx 64rpx;
+  min-height: 92rpx;
+  padding: 16rpx 24rpx;
   border: 0;
   border-radius: var(--ui-radius-card);
   background: var(--ui-surface);
   box-shadow: var(--ui-card-shadow);
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
 }
 
 .topic-panel::before {
-  content: "“";
-  position: absolute;
-  left: 24rpx;
-  top: 16rpx;
-  color: var(--ui-accent-border);
-  font-family: var(--ui-font-editorial);
-  font-size: 58rpx;
-  line-height: 1;
+  content: none;
+}
+
+.topic-leaf {
+  width: 48rpx;
+  height: 48rpx;
+  flex: 0 0 48rpx;
+  border-radius: 50%;
+  background: #eef3e9;
+  color: #718565;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topic-leaf-shape {
+  width: 23rpx;
+  height: 16rpx;
+  border-radius: 100% 0 100% 0;
+  background: currentColor;
+  transform: rotate(-34deg) translate(1rpx, -1rpx);
 }
 
 .topic-kicker {
-  display: block;
+  flex: 0 0 auto;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 36rpx;
+  font-size: 26rpx;
+  line-height: 40rpx;
 }
 
 .topic-title {
-  display: block;
-  margin-top: 8rpx;
+  min-width: 0;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
-  font-size: 36rpx;
+  font-size: 34rpx;
   font-weight: 800;
-  line-height: 52rpx;
+  line-height: 48rpx;
   word-break: break-word;
+  text-wrap: balance;
 }
 
 .story-growth-bubble {
@@ -212,9 +228,9 @@
 }
 
 .transcript-stage {
-  min-height: 380rpx;
-  margin-top: 28rpx;
-  padding: 40rpx 34rpx;
+  min-height: 520rpx;
+  margin-top: 22rpx;
+  padding: 34rpx;
   border: 0;
   border-radius: var(--ui-radius-card);
   background: var(--ui-surface);
@@ -243,12 +259,12 @@
 }
 
 .assistant-panel {
-  margin-top: 24rpx;
-  padding: 34rpx;
+  margin-top: 22rpx;
+  padding: 30rpx 32rpx 32rpx;
   border: 0;
-  border-radius: 32rpx;
+  border-radius: 34rpx;
   background: var(--ui-accent-surface-subtle);
-  box-shadow: var(--ui-card-shadow);
+  box-shadow: var(--ui-card-shadow-raised);
 }
 
 .completion-issue-panel {
@@ -418,7 +434,7 @@
   border-radius: 999rpx;
   background: var(--ui-surface-subtle);
   color: var(--ui-section-title);
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 600;
   line-height: 38rpx;
 }
@@ -428,10 +444,11 @@
   display: block;
   margin-top: 22rpx;
   color: var(--ui-text-primary);
-  font-size: 38rpx;
+  font-size: 40rpx;
   font-weight: 600;
   line-height: 1.48;
   word-break: break-word;
+  text-wrap: pretty;
 }
 
 .assistant-opening {
@@ -441,17 +458,19 @@
 .assistant-context {
   display: block;
   color: var(--ui-text-secondary);
-  font-size: 30rpx;
+  font-size: 28rpx;
   line-height: 1.55;
+  text-wrap: pretty;
 }
 
 .assistant-question {
   display: block;
   margin-top: 18rpx;
   color: var(--ui-text-primary);
-  font-size: 46rpx;
+  font-size: 42rpx;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.42;
+  text-wrap: balance;
 }
 
 .assistant-topic-options {
@@ -520,12 +539,13 @@
 }
 
 .assistant-actions {
-  margin-top: 22rpx;
+  width: 100%;
+  margin-top: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 10rpx;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .voice-chat-page .assistant-button {
@@ -547,6 +567,9 @@
   font-weight: 600;
   line-height: 38rpx;
   white-space: nowrap;
+  transition-property: transform, opacity, background-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
 
 .assistant-button::after {
@@ -555,6 +578,14 @@
 
 .voice-chat-page .assistant-button.is-disabled {
   opacity: 0.66;
+}
+
+.voice-chat-page .assistant-button:active {
+  transform: scale(0.96);
+}
+
+.voice-chat-page .assistant-button.is-disabled:active {
+  transform: none;
 }
 
 .voice-chat-page .assistant-button.ghost {
@@ -794,22 +825,31 @@
 
 .inline-help-button {
   align-self: flex-start;
-  min-height: 80rpx;
-  margin: 22rpx 0 0;
+  min-width: 232rpx;
+  min-height: 88rpx;
+  margin: 20rpx 0 0;
   border: 0;
   border-radius: 999rpx;
-  background: var(--ui-accent-surface);
+  background: var(--ui-surface);
   color: var(--ui-accent-strong);
+  box-shadow: var(--ui-control-shadow);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0 22rpx;
   font-size: 28rpx;
   font-weight: 700;
+  transition-property: transform, opacity, background-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
 }
 
 .inline-help-button::after {
   border: 0;
+}
+
+.inline-help-button:active {
+  transform: scale(0.96);
 }
 
 .level-track {
@@ -939,19 +979,22 @@
 }
 
 .control-bar {
-  --ui-fixed-action-top: 22rpx;
-  --ui-fixed-action-bottom: 20rpx;
+  --ui-fixed-action-top: 8rpx;
+  --ui-fixed-action-bottom: 12rpx;
+  min-height: 348rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
 }
 
-.assistant-panel + .control-bar {
-  position: static;
+.assistant-actions-slot {
   width: 100%;
-  margin-top: 10rpx;
-  padding: 24rpx 0 6rpx;
-  background: transparent;
+  min-height: 80rpx;
+  margin-top: 4rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .human-record-panel {
@@ -1034,8 +1077,8 @@
 .mic-button {
   position: relative;
   box-sizing: border-box;
-  width: 300rpx;
-  min-height: 232rpx;
+  width: 270rpx;
+  min-height: 190rpx;
   margin: 0;
   border: 0;
   border-radius: var(--ui-radius-card);
@@ -1046,7 +1089,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 46rpx;
+  gap: 22rpx;
   padding: 0;
   font-size: 30rpx;
   font-weight: 700;
@@ -1081,8 +1124,8 @@
 .mic-button.disabled:active { transform: none; }
 
 .mic-icon-shell {
-  width: 136rpx;
-  height: 136rpx;
+  width: 116rpx;
+  height: 116rpx;
   border-radius: 999rpx;
   background: var(--ui-accent-surface);
   display: flex;
@@ -1092,6 +1135,9 @@
     0 0 0 20rpx rgba(182, 93, 73, 0.07),
     0 0 0 40rpx rgba(182, 93, 73, 0.035),
     0 14rpx 28rpx rgba(120, 66, 52, 0.12);
+  transition-property: transform, background-color, box-shadow;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 .mic-button.recording .mic-icon-shell {
@@ -1110,11 +1156,16 @@
 
 .control-hint {
   display: block;
-  margin: 0 0 18rpx;
+  min-height: 42rpx;
+  margin: 0 0 4rpx;
   color: var(--ui-text-secondary);
   font-size: 26rpx;
   line-height: 42rpx;
   text-align: center;
+}
+
+.control-hint.is-empty {
+  visibility: hidden;
 }
 
 .error {
@@ -1228,7 +1279,7 @@
 }
 
 .voice-chat-page.large-text {
-  --ui-fixed-action-space: 410rpx;
+  --ui-fixed-action-space: 420rpx;
   padding-top: 28rpx;
   padding-right: 24rpx;
   padding-left: 24rpx;
@@ -1268,10 +1319,27 @@
   font-size: 56rpx;
 }
 
-.voice-chat-page.large-text .topic-panel,
 .voice-chat-page.large-text .assistant-panel {
   padding: 36rpx 32rpx;
   border-radius: 36rpx;
+}
+
+.voice-chat-page.large-text .topic-panel {
+  min-height: 108rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 30rpx;
+  gap: 14rpx;
+}
+
+.voice-chat-page.large-text .topic-leaf {
+  width: 58rpx;
+  height: 58rpx;
+  flex-basis: 58rpx;
+}
+
+.voice-chat-page.large-text .topic-leaf-shape {
+  width: 28rpx;
+  height: 20rpx;
 }
 
 .voice-chat-page.large-text .history-panel {
@@ -1317,8 +1385,9 @@
 }
 
 .voice-chat-page.large-text .topic-title {
-  font-size: 58rpx;
-  line-height: 80rpx;
+  margin-top: 0;
+  font-size: 46rpx;
+  line-height: 64rpx;
 }
 
 .voice-chat-page.large-text .assistant-context {
@@ -1439,9 +1508,10 @@
 }
 
 .voice-chat-page.large-text .control-bar {
-  --ui-fixed-action-top: 30rpx;
+  --ui-fixed-action-top: 8rpx;
   --ui-fixed-action-inline: 24rpx;
-  --ui-fixed-action-bottom: 30rpx;
+  --ui-fixed-action-bottom: 14rpx;
+  min-height: 398rpx;
 }
 
 .voice-chat-page.large-text.no-control-bar {
@@ -1477,10 +1547,10 @@
 }
 
 .voice-chat-page.large-text .mic-button {
-  width: 340rpx;
-  min-height: 292rpx;
+  width: 310rpx;
+  min-height: 210rpx;
   max-width: none;
-  gap: 54rpx;
+  gap: 24rpx;
   padding: 0;
   font-size: 38rpx;
   line-height: 54rpx;
@@ -1493,14 +1563,19 @@
   line-height: 54rpx;
 }
 
+.voice-chat-page.large-text .assistant-actions-slot {
+  min-height: 92rpx;
+  margin-top: 6rpx;
+}
+
 .voice-chat-page.large-text .mic-icon-shell {
-  width: 168rpx;
-  height: 168rpx;
+  width: 132rpx;
+  height: 132rpx;
 }
 
 .voice-chat-page.large-text .mic-icon {
-  width: 88rpx;
-  height: 88rpx;
+  width: 76rpx;
+  height: 76rpx;
 }
 
 .voice-chat-page.large-text .voice-auth-title {
@@ -1544,7 +1619,7 @@
 
 .voice-chat-page.large-text.assistant-focus .topic-title,
 .voice-chat-page.large-text.capture-focus .topic-title {
-  margin-top: 2rpx;
+  margin-top: 0;
   font-size: 44rpx;
   line-height: 60rpx;
 }

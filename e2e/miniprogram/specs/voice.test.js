@@ -251,6 +251,16 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(ready.voiceAuthorizationAgreed, true);
     assert.equal(ready.recoveryNotice, "");
     assert.equal(ready.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
+    assert.ok(await page.$(".assistant-panel"), "提问态只显示小余的问题卡");
+    assert.equal(await page.$(".transcript-stage"), null, "提问态不再显示重复教学卡");
+    assert.equal(await page.$(".history-panel"), null, "只有小余开场白时不显示已保存记录");
+    const readyAssistantButtons = await page.$$(".assistant-button");
+    assert.equal(readyAssistantButtons.length, 2, "提问态只保留重听和换问法两个辅助操作");
+    assert.match(await readyAssistantButtons[0].text(), /重听一遍/);
+    const readyPrimaryAction = await elementById(page, "voice-primary-action");
+    const readyPrimaryOffset = await readyPrimaryAction.offset();
+    const readyPrimarySize = await readyPrimaryAction.size();
+    assert.ok(readyPrimarySize.width >= 40 && readyPrimarySize.height >= 40, "主操作满足最小触控区域");
     await assertNarrationModes(page, "session-narration-modes", "free_narration");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
@@ -289,6 +299,16 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       20000,
     );
     assert.equal(recording.status, "listening");
+    assert.equal(await page.$(".assistant-panel"), null, "讲述态不再保留小余问题卡");
+    assert.ok(await page.$(".transcript-stage"), "讲述态以实时文字卡为主角");
+    assert.equal((await page.$$(".assistant-button")).length, 0, "讲述态不显示提问辅助操作");
+    const recordingPrimaryAction = await elementById(page, "voice-primary-action");
+    const recordingPrimaryOffset = await recordingPrimaryAction.offset();
+    assert.ok(
+      Math.abs(recordingPrimaryOffset.left - readyPrimaryOffset.left) <= 2
+        && Math.abs(recordingPrimaryOffset.top - readyPrimaryOffset.top) <= 2,
+      "提问态和讲述态的麦克风保持在同一位置",
+    );
     await assertNarrationModes(page, "session-narration-modes", "free_narration");
     session.artifacts.mark("voice:asr:partial");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });

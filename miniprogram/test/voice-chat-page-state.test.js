@@ -49,6 +49,8 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.autoBargeInEnabled, true);
   assert.equal(first.voiceChatPageClass, "voice-chat-page");
   assert.equal(first.showVoiceAuthorizationPanel, true);
+  assert.equal(first.showTranscriptStage, false);
+  assert.equal(first.showAssistantActions, false);
   assert.equal(first.micButtonClass, "mic-button disabled");
   assert.equal(voiceChatViewPatch(first).micButtonClass, "mic-button disabled");
   assert.equal(first.micButtonDisabled, true);
@@ -95,10 +97,13 @@ test("voice chat view patch derives simple fields for first assistant turn", () 
   assert.equal(patch.voiceChatPageClass, "voice-chat-page");
   assert.equal(patch.showVoiceAuthorizationPanel, false);
   assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.showAssistantOpening, false);
+  assert.equal(patch.showTranscriptStage, false);
+  assert.equal(patch.showAssistantActions, true);
   assert.equal(patch.assistantDisplayText, "小余正在准备第一句话");
   assert.equal(patch.stageStatusText, "小余正在准备问题");
   assert.equal(patch.liveDisplayText, "小余正在准备第一句话");
-  assert.equal(patch.controlHintText, "小余先问一句，稍等一下。");
+  assert.equal(patch.controlHintText, "小余先问一句，稍等一下");
   assert.equal(patch.micButtonText, "我来讲了");
   assert.equal(patch.micButtonDisabled, false);
 });
@@ -120,6 +125,9 @@ test("voice chat view patch derives transcript and recording render fields", () 
   const patch = voiceChatViewPatch(data);
 
   assert.equal(patch.voiceChatPageClass, "voice-chat-page ai-recording-focus");
+  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.showTranscriptStage, true);
+  assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusClass, "stage-status listening");
   assert.equal(patch.stageStatusText, "我在听，您慢慢说");
   assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
@@ -161,6 +169,36 @@ test("voice chat only expands saved history when the user asks to review it", ()
   assert.equal(collapsed.historyToggleText, "查看");
   assert.equal(expanded.showHistoryLines, true);
   assert.equal(expanded.historyToggleText, "收起");
+});
+
+test("voice chat does not treat an assistant-only opening prompt as saved narration", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    assistantPromptText: "今天想先讲哪件小事？",
+    transcriptLines: [
+      { id: "assistant-1", role: "assistant", text: "今天想先讲哪件小事？" },
+    ],
+  });
+
+  assert.equal(patch.showHistoryPanel, false);
+  assert.equal(patch.showHistoryLines, false);
+});
+
+test("voice chat keeps the saved transcript as the only focus while the next question is prepared", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    latestTranscriptText: "那个月亮特别大，也特别圆。",
+    liveText: "那个月亮特别大，也特别圆。",
+    followUpLoading: true,
+    canRequestFollowUp: true,
+  });
+
+  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.showTranscriptStage, true);
+  assert.equal(patch.showAssistantActions, false);
+  assert.equal(patch.stageStatusText, "正在帮您整理成文字");
+  assert.equal(patch.liveDisplayText, "那个月亮特别大，也特别圆。");
 });
 
 test("voice chat keeps the newest part prominent and exposes paused follow state", () => {
@@ -362,7 +400,7 @@ test("voice chat view patch adds focused large text root classes", () => {
 
   assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page large-text idle-focus");
   assert.equal(assistantPatch.voiceChatPageClass, "voice-chat-page large-text assistant-focus");
-  assert.equal(assistantPatch.liveDisplayText, "听完后，点下方“我来讲了”开始回答");
+  assert.equal(assistantPatch.liveDisplayText, "现在可以说了");
   assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page ai-recording-focus large-text capture-focus");
   assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
   assert.equal(humanCapturePatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus large-text capture-focus");
