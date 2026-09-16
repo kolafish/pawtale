@@ -63,10 +63,18 @@ test("story maps server content into the hero, themes and book summary", () => {
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
-  assert.equal(view.chapters[0].memoryText, "2 段回忆");
-  assert.equal(view.chapters[0].statusText, "已丰富");
+  assert.equal(view.chapters[0].storyCountText, "1 个故事");
+  assert.equal(view.chapters[0].statusText, "已经很丰富");
   assert.equal(view.chapters[0].readable, true);
-  assert.equal(view.chapters[1].statusText, "已整理");
+  assert.equal(view.chapters[1].statusText, "正在长大");
+
+  const counted = snapshot();
+  counted.chapters[0].sections.push({
+    id: "section-extra", title: "另一个故事", material_count: 2, image_count: 0, video_count: 0,
+  });
+  const countedView = storyViewData(counted);
+  assert.equal(countedView.overview.summaryText, "2 个主题 · 3 个故事");
+  assert.deepEqual(countedView.chapters.map(chapter => chapter.storyCountText), ["2 个故事", "1 个故事"]);
 });
 
 test("story distinguishes empty, organizing and section-less states", () => {
@@ -367,11 +375,22 @@ test("home separates chapter decisions, optional supplements and book decisions"
       issues: { review_count: i ? 0 : 2, supplement_count: i ? 1 : 0 } })),
   });
   assert.deepEqual(homeStoryNotice(current), {
-    reviewNoticeText: "2 个故事等您确认 · 1 个故事可以继续聊", reviewNoticeDetail: "书里有 1 处等您确认", reviewNoticeAction: "issues",
+    reviewNoticeText: "2 个故事等您确认", reviewNoticeDetail: "书里有 1 处等您确认", reviewNoticeAction: "issues",
   });
   const view = storyViewData(current);
   assert.equal(view.chapters[0].statusText, "待您确认");
-  assert.equal(view.chapters[1].statusText, "可继续聊");
+  assert.equal(view.chapters[1].statusText, "还可以聊聊");
+
+  const supplementOnly = snapshot({
+    chapters: current.chapters.map(chapter => ({
+      ...chapter, issues: { review_count: 0, supplement_count: chapter.issues.supplement_count },
+    })),
+    book_issues: { review_count: 0, supplement_count: 0 },
+    progress: progress({ needs_user_material_count: 0 }),
+  });
+  assert.deepEqual(homeStoryNotice(supplementOnly), {
+    reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "",
+  });
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {

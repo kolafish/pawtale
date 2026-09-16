@@ -149,14 +149,14 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     : !state.hasProject ? "种下我的故事"
     : state.creatingVoice ? "正在准备"
     : state.selectedMode === "book_completion" ? choice.action
-    : state.hasStories ? "继续讲故事" : "讲第一个故事";
+    : state.hasStories ? "讲个新故事" : "讲第一个故事";
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     headerSubtitleText: state.loading ? "正在看看您的故事树。"
       : state.needsLogin ? "登录后，把想说的故事慢慢留下来。"
       : !state.hasProject ? "每一个故事，都从一颗种子开始。"
-      : state.hasStories ? "继续讲述，让生活的故事慢慢长成一棵树。"
+      : state.hasStories ? ""
       : "从一段回忆开始，让故事慢慢发芽。",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
@@ -601,7 +601,11 @@ definePage<HomeData>()({
   },
 
   async startPrimaryVoiceChat() {
-    await this.startSelectedNarration(this.data.launchVariant === "none" ? "home_resume" : "home_launch");
+    await this.startSelectedNarration(this.data.launchVariant === "none" ? "home" : "home_launch");
+  },
+
+  async resumeLastStory() {
+    await this.startSelectedNarration("home_resume");
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {

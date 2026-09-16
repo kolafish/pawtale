@@ -3,7 +3,7 @@
     <view class="header-main">
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
-        <text class="header-subtitle">{{headerSubtitleText}}</text>
+        <text wx:if="{{headerSubtitleText}}" class="header-subtitle">{{headerSubtitleText}}</text>
       </view>
       <view class="header-actions">
         <button id="home-settings" size="mini" class="home-header-button ui-button" bindtap="openSettings"
@@ -95,7 +95,7 @@
               hover-class="ui-subtle-action-hover" aria-role="button" aria-expanded="{{showMoreActions}}">
               {{showMoreActions ? "收起" : "换个话题"}}
             </view>
-            <view class="resume-primary-action ui-pressable" bindtap="startPrimaryVoiceChat"
+            <view class="resume-primary-action ui-pressable" bindtap="resumeLastStory"
               hover-class="ui-accent-action-hover" aria-role="button">接着讲 ›</view>
           </view>
         </view>
@@ -145,7 +145,7 @@
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
     <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration"
       loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">
-      <text>继续讲故事</text><text class="continue-narration-arrow" aria-hidden="true">›</text>
+      <text>{{primaryVoiceButtonTitle}}</text><text class="continue-narration-arrow" aria-hidden="true">›</text>
     </button>
   </view>
 </view>

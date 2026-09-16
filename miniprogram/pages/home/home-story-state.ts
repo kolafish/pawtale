@@ -144,14 +144,11 @@ export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
 
 
 export function homeStoryNotice(snapshot: MemoirStorySnapshot): StoryNotice {
-  const chapters = snapshot.chapters.reduce((counts, chapter) => ({
-    review_count: counts.review_count + (chapter.issues?.review_count || 0),
-    supplement_count: counts.supplement_count + (chapter.issues?.supplement_count || 0),
-  }), { review_count: 0, supplement_count: 0 });
-  const chapterText = [
-    chapters.review_count ? `${chapters.review_count} 个故事等您确认` : "",
-    chapters.supplement_count ? `${chapters.supplement_count} 个故事可以继续聊` : "",
-  ].filter(Boolean).join(" · ");
+  const chapterReviews = snapshot.chapters.reduce(
+    (total, chapter) => total + (chapter.issues?.review_count || 0),
+    0,
+  );
+  const chapterText = chapterReviews ? `${chapterReviews} 个故事等您确认` : "";
   const bookText = snapshot.book_issues?.review_count
     ? `书里有 ${snapshot.book_issues.review_count} 处等您确认`
     : snapshot.book_issues?.supplement_count

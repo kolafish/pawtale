@@ -28,7 +28,7 @@ export interface StoryChapterView {
   id: string;
   hasSections: boolean;
   title: string;
-  memoryText: string;
+  storyCountText: string;
   statusText: string;
   statusTone: StoryStatusTone;
   readable: boolean;

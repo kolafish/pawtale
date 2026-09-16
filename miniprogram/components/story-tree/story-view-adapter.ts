@@ -12,11 +12,11 @@ function formatBookChars(count: number): string {
 function storyStatus(chapter: MemoirStoryChapter): { text: string; tone: StoryStatusTone } {
   if (chapter.issues?.review_count) return { text: "待您确认", tone: "confirm" };
   if (chapter.candidate_job_id) return { text: "有新稿", tone: "confirm" };
-  if (chapter.issues?.supplement_count) return { text: "可继续聊", tone: "continue" };
+  if (chapter.issues?.supplement_count) return { text: "还可以聊聊", tone: "continue" };
   if (chapter.state === "draft") return { text: "正在整理", tone: "working" };
   if (chapter.material_count <= 1 && chapter.sections.length <= 1) return { text: "刚开始", tone: "starting" };
-  if (chapter.state === "settled" || chapter.readable) return { text: "已丰富", tone: "rich" };
-  return { text: "已整理", tone: "quiet" };
+  if (chapter.state === "settled" || chapter.readable) return { text: "已经很丰富", tone: "rich" };
+  return { text: "正在长大", tone: "quiet" };
 }
 
 function storyGrowthText(snapshot: MemoirStorySnapshot, growthStage: number): string {
@@ -45,7 +45,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       id: chapter.id,
       hasSections: chapter.sections.length > 0,
       title: chapter.title || "未命名故事",
-      memoryText: `${chapter.material_count} 段回忆`,
+      storyCountText: chapter.sections.length ? `${chapter.sections.length} 个故事` : "正在长成故事",
       statusText: status.text,
       statusTone: status.tone,
       readable: chapter.readable,
