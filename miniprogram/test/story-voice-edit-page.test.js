@@ -35,6 +35,7 @@ test("story voice edit opts into the shared automatic dictation flow", () => {
   );
   assert.match(template, /auto-start="\{\{true\}\}"/);
   assert.match(template, /submit-on-voice-final="\{\{true\}\}"/);
+  assert.match(template, /给童年回忆重新整理小节/);
 });
 
 test("raw transcribed request reaches the model; selected existing operations execute only on tap", async () => {
@@ -53,6 +54,38 @@ test("raw transcribed request reaches the model; selected existing operations ex
   assert.equal(context.data.preview, null);
   assert.equal(context.data.message, "修改已保存");
   assert.equal(context.data.instruction, "");
+});
+
+test("chapter section regeneration is shown as a confirmable operation", async () => {
+  const regeneration = {
+    signature: "section-sig",
+    reply: "可以根据这一章的讲述重新整理小节。",
+    questions: [],
+    operations: [{
+      action: "regenerate_chapter_sections",
+      target_ref: "c1",
+      new_title: null,
+      label: "重新整理章节「童年回忆」的小节分组",
+      detail: "原始讲述和现有正文版本会保留。",
+    }],
+  };
+  const { context, calls } = setup({
+    preview: async () => regeneration,
+    apply: async () => ({ message: "已开始重新整理小节，可在章节工作台查看进度。" }),
+  });
+  await context.submitInstruction({
+    detail: { value: "看看是不是可以给第一章生成一些小节。" },
+  });
+
+  assert.equal(context.data.items[0].label, "重新整理章节「童年回忆」的小节分组");
+  assert.equal(context.data.selectedCount, 1);
+  await context.apply();
+  assert.deepEqual(calls.applies, [["p1", "section-sig", [{
+    action: "regenerate_chapter_sections",
+    target_ref: "c1",
+    new_title: null,
+  }]]]);
+  assert.equal(context.data.message, "已开始重新整理小节，可在章节工作台查看进度。");
 });
 
 test("editing the command discards its previous operations", async () => {

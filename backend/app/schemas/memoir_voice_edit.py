@@ -5,7 +5,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class VoiceEditOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["delete_chapter", "delete_section", "delete_material", "rename_chapter", "rename_section"]
+    action: Literal[
+        "delete_chapter",
+        "delete_section",
+        "delete_material",
+        "rename_chapter",
+        "rename_section",
+        "regenerate_chapter_sections",
+    ]
     target_ref: str = Field(min_length=1, max_length=80)
     new_title: str | None = Field(default=None, max_length=80)
 
@@ -15,8 +22,8 @@ class VoiceEditOperation(BaseModel):
             self.new_title = self.new_title.strip()
         if self.action.startswith("rename_") and not self.new_title:
             raise ValueError("改名必须提供新标题")
-        if self.action.startswith("delete_") and self.new_title is not None:
-            raise ValueError("删除操作不能包含新标题")
+        if not self.action.startswith("rename_") and self.new_title is not None:
+            raise ValueError("只有改名操作可以提供新标题")
         return self
 
 
