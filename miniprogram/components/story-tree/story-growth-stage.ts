@@ -4,10 +4,10 @@ export type StoryTreeGrowthStage = 1 | 2 | 3 | 4 | 5;
 export type StoryGrowthNoticeKind = "new" | "enriched" | "progress";
 
 export const STORY_TREE_STAGE_IMAGES: Record<StoryTreeGrowthStage, string> = {
-  1: "/assets/story-tree/tree-stage-01-seedling.png",
-  2: "/assets/story-tree/tree-stage-02-sapling.png",
-  3: "/assets/story-tree/tree-stage-03-branching.png",
-  4: "/assets/story-tree/tree-stage-04-leafy.png",
+  1: "/assets/story-tree/tree-stage-01-seed.png",
+  2: "/assets/story-tree/tree-stage-02-seedling.png",
+  3: "/assets/story-tree/tree-stage-03-sapling.png",
+  4: "/assets/story-tree/tree-stage-04-branching.png",
   5: "/assets/story-tree/tree-stage-05-mature.png",
 };
 
@@ -16,7 +16,7 @@ export const STORY_CHAPTER_SPRIG_IMAGE = "/assets/story-tree/chapter-sprig.png";
 export const STORY_GROWTH_NOTICE_IMAGES: Record<StoryGrowthNoticeKind, string> = {
   new: STORY_CHAPTER_SPRIG_IMAGE,
   enriched: "/assets/story-tree/notice-enriched.png",
-  progress: STORY_TREE_STAGE_IMAGES[3],
+  progress: STORY_TREE_STAGE_IMAGES[4],
 };
 
 type StoryGrowthInput = Pick<

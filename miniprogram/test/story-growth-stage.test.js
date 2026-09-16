@@ -49,6 +49,14 @@ test("story tree becomes mature only after both final milestones", () => {
 });
 
 test("story tree art configuration points to packaged assets", () => {
+  assert.deepEqual(Object.values(STORY_TREE_STAGE_IMAGES), [
+    "/assets/story-tree/tree-stage-01-seed.png",
+    "/assets/story-tree/tree-stage-02-seedling.png",
+    "/assets/story-tree/tree-stage-03-sapling.png",
+    "/assets/story-tree/tree-stage-04-branching.png",
+    "/assets/story-tree/tree-stage-05-mature.png",
+  ]);
+  assert.equal(STORY_GROWTH_NOTICE_IMAGES.progress, STORY_TREE_STAGE_IMAGES[4]);
   const sources = new Set([
     ...Object.values(STORY_TREE_STAGE_IMAGES),
     STORY_CHAPTER_SPRIG_IMAGE,
