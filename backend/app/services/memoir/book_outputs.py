@@ -69,7 +69,8 @@ from app.services.memoir.book_output_snapshots import (
     readable_chapter_versions,
     book_content_from_chapter_snapshots,
     chapter_snapshot,
-    normalized_section_snapshots,
+    legacy_chapter_version_needs_upgrade,
+    protected_legacy_chapter_version,
 )
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_output_export import (
@@ -215,7 +216,14 @@ def _current_book_snapshot(
         if (
             not chapter.draft
             or not version
-            or not normalized_section_snapshots(version.section_snapshot_json)
+            or not version.content.strip()
+            or (
+                legacy_chapter_version_needs_upgrade(version)
+                and not protected_legacy_chapter_version(
+                    chapter.draft,
+                    version,
+                )
+            )
         ):
             unavailable_titles.append(chapter.title)
             continue
