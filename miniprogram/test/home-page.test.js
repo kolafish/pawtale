@@ -191,6 +191,13 @@ test("home places the story review notice after the story tree", () => {
   assert.ok(storyTreeIndex < reviewNoticeIndex);
 });
 
+test("home only surfaces failed draft progress that the reader can act on", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /wx:if="\{\{progress && progress\.status === 'failed'\}\}"/);
+  assert.match(pageWxml, /bindtap="retryDraft"/);
+});
+
 test("home supports a local large text mode without changing the default class", () => {
   const loaded = loadHomePage({
     accessibilityExports: {
@@ -357,7 +364,6 @@ test("home selection is separate from start and all three direct modes create th
     context.toggleMoreActions();
     assert.equal(context.data.showMoreActions, false);
     assert.equal(context.data.selectedMode, mode, "collapsing choices preserves the selected mode");
-    assert.ok(context.data.currentGuidanceText.includes({ guided_interview: "引导访谈", free_narration: "自由讲述", human_interview: "真人访谈" }[mode]));
     await context.startPrimaryVoiceChat();
     assert.equal(created.at(-1).guidance_mode, mode === "human_interview" ? "free_narration" : mode);
     assert.equal(created.at(-1).interview_type, mode === "human_interview" ? "human_interview" : "ai_interview");

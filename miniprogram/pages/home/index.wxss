@@ -494,14 +494,10 @@
   transform: translateX(1rpx);
 }
 
-.current-guidance { display: block; margin-top: 28rpx; color: var(--ui-text-primary); font-size: 28rpx; font-weight: 600; line-height: 42rpx; }
-.current-guidance + .voice-start-button { margin-top: 14rpx; }
 .resume-actions { margin-top: 8rpx; }
 .more-actions-toggle { box-sizing: border-box; width: 100%; min-height: 44px; border-radius: 16rpx; color: var(--ui-text-secondary); font-size: 28rpx; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; padding: 0 8rpx; transition: transform 150ms ease-out, background-color 150ms ease-out; }
 .more-actions-chevron { color: var(--ui-accent); font-size: 34rpx; font-weight: 700; line-height: 44rpx; }
 .more-actions-panel { margin-top: 10rpx; padding-top: 18rpx; border-top: 1rpx solid var(--ui-divider); }
-.home-page.large-text .current-guidance { font-size: 32rpx; line-height: 48rpx; }
-.home-page.large-text .current-guidance + .voice-start-button { margin-top: 18rpx; }
 .home-page.large-text .more-actions-toggle { font-size: 32rpx; }
 .home-page.large-text .more-actions-chevron { font-size: 44rpx; line-height: 60rpx; }
 
