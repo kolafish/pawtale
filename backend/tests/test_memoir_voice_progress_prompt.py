@@ -46,7 +46,6 @@ def test_snapshot_count_is_not_treated_as_a_pending_voice_notice() -> None:
 
     assert context.progress_update is None
     assert context.voice_announcement_event_ids == []
-    assert context.announcement_key == ""
     assert "30 条讲述记录" not in context.prompt_text
 
 
@@ -67,7 +66,6 @@ def test_pending_event_is_passed_to_llm_as_one_voice_notice() -> None:
 
     assert context.progress_update is not None
     assert context.voice_announcement_event_ids == ["event-30"]
-    assert context.announcement_key == "automation-event:event-30"
     assert "本轮进展：这个项目已经留下 30 条讲述记录。" in context.prompt_text
     assert "统一组织成一段自然口语" in context.prompt_text
 

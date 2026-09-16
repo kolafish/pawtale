@@ -328,7 +328,6 @@ class VoiceAssistantTurnStreamSession:
                 progress_update=None,
                 automation_event_ids=[],
                 voice_announcement_event_ids=[],
-                announcement_key="",
             )
         else:
             project_progress_context = build_progress_prompt_context(
@@ -573,7 +572,6 @@ class VoiceAssistantTurnStreamSession:
                 "progress_update_used": project_progress_context.progress_update is not None,
                 "progress_spoken_text": "",
                 "progress_voice_selected_event_ids": project_progress_context.voice_announcement_event_ids or [],
-                "progress_announcement_key": project_progress_context.announcement_key,
                 "current_completion_issue_id": (
                     completion_prompt_context.issue_id if completion_prompt_context else None
                 ),
@@ -758,7 +756,6 @@ class VoiceAssistantTurnStreamSession:
                     "progress_automation_event_ids": progress_context.automation_event_ids or [],
                     "progress_voice_selected_event_ids": progress_context.voice_announcement_event_ids or [],
                     "progress_spoken_text": "",
-                    "progress_announcement_key": progress_context.announcement_key,
                     "current_completion_issue_id": (
                         completion_prompt_context.issue_id if completion_prompt_context else None
                     ),

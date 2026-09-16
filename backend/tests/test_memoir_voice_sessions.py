@@ -680,6 +680,11 @@ async def test_voice_progress_notice_queue_consumes_after_playback(client, test_
 
     assert regular == []
     assert [item.id for item in pending_voice] == [event.id]
+    assert await automation_events.acknowledge_dismissible_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+    ) == 0
 
     updated = await automation_events.mark_automation_events_voice_played(
         test_db,

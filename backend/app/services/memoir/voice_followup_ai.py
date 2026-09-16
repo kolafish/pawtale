@@ -52,7 +52,6 @@ class ProgressPromptContext:
     progress_update: dict[str, object] | None = None
     automation_event_ids: list[str] | None = None
     voice_announcement_event_ids: list[str] | None = None
-    announcement_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,23 +156,16 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
             progress_update=None,
             automation_event_ids=[],
             voice_announcement_event_ids=[],
-            announcement_key="",
         )
 
     event_ids = selected_update.get("event_ids")
     automation_event_ids = [str(item) for item in event_ids] if isinstance(event_ids, list) else []
-    announcement_key = (
-        f"automation-event:{automation_event_ids[0]}"
-        if automation_event_ids
-        else ""
-    )
     prompt_text = _progress_prompt_text(selected_update)
     return ProgressPromptContext(
         prompt_text=prompt_text,
         progress_update=selected_update,
         automation_event_ids=automation_event_ids,
         voice_announcement_event_ids=automation_event_ids,
-        announcement_key=announcement_key,
     )
 
 

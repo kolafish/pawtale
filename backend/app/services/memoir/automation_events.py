@@ -455,6 +455,8 @@ async def acknowledge_dismissible_automation_events(
     now_iso = _utcnow_iso()
     updated_count = 0
     for event in events:
+        if _event_is_voice_only(event):
+            continue
         metadata = event.metadata_json or {}
         if metadata.get(ACKNOWLEDGED_AT_KEY):
             continue

@@ -167,7 +167,6 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["progress_update_used"] is True
     assert assistant_message.metadata_json["progress_update"]["text"] == "这个项目已经留下 1 条讲述记录。"
     assert "本轮进展：这个项目已经留下 1 条讲述记录。" in ai_client.calls[0]["user_prompt"]
-    assert assistant_message.metadata_json["progress_announcement_key"].startswith("automation-event:")
 
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
@@ -734,10 +733,8 @@ async def test_voice_assistant_turn_does_not_offer_same_progress_twice(
     )
 
     assert first["progress_update_used"] is True
-    assert first["progress_announcement_key"].startswith("automation-event:")
     assert "本轮进展：这个项目已经留下 1 条讲述记录。" in first_ai.calls[0]["user_prompt"]
     assert second["progress_update_used"] is False
-    assert second["progress_announcement_key"] == ""
     assert "本轮没有可播报的结构化进度变化" in second_ai.calls[0]["user_prompt"]
     assert "这个项目已经留下 1 条讲述记录" not in second_ai.calls[0]["user_prompt"]
 
@@ -779,7 +776,6 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     assert completed["progress_update"]["kind"] == "automation_event"
     assert completed["progress_update"]["event_ids"] == [event.id]
     assert completed["progress_spoken_text"] == ""
-    assert completed["progress_announcement_key"].startswith("automation-event:")
 
     assistant_message = await test_db.scalar(
         select(MemoirChatMessage).where(MemoirChatMessage.id == completed["message_id"])
