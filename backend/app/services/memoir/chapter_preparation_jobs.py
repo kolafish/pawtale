@@ -25,6 +25,7 @@ _CHECKPOINT_KEYS = {
     "checkpoint_editor_notes",
     "checkpoint_model",
 }
+_PRIVATE_RESULT_KEYS = _CHECKPOINT_KEYS | {"candidate_sections"}
 _LEGACY_SECTION_UPGRADE_REVISION = "skip-empty-sections-v1"
 
 
@@ -33,11 +34,24 @@ def _job_dedupe_key(chapter_id: str) -> str:
 
 
 def _public_result(result_json: dict) -> dict:
-    return {
+    result = {
         key: value
         for key, value in result_json.items()
-        if key not in _CHECKPOINT_KEYS
+        if key not in _PRIVATE_RESULT_KEYS
     }
+    if result.get("candidate_content"):
+        result["candidate_sections"] = [
+            {
+                "section_id": str(section.get("section_id") or ""),
+                "title": str(section.get("title") or ""),
+                "content": str(section.get("content") or ""),
+            }
+            for section in result_json.get("checkpoint_sections", [])
+            if isinstance(section, dict)
+            and section.get("section_id")
+            and section.get("content")
+        ]
+    return result
 
 
 def _job_state(

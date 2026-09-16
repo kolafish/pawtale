@@ -32,7 +32,10 @@ import {
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { LOADING_NEXT_ACTION } from "./chapter-next-action";
-import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
+import {
+  chapterCandidateViewPatch,
+  chapterWorkspaceViewPatch,
+} from "./chapter-workspace-view";
 import {
   readCachedMemoirChapterWorkspace,
   writeCachedMemoirChapterWorkspace,
@@ -115,6 +118,12 @@ definePage<ChapterWorkspacePageData>()({
     chapterPreparationDetail: "",
     chapterPreparationProgress: 0,
     chapterPreparationProgressMode: "hidden",
+    candidateMode: "changes",
+    candidatePreviewVersion: "after",
+    candidateComparisonAvailable: false,
+    candidateSummaryText: "",
+    candidateChangedSections: [],
+    candidateWholeContent: "",
     sectionRegenerationJob: null,
     sectionRegenerationTitle: "",
     sectionRegenerationDetail: "",
@@ -387,6 +396,12 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       workspace: viewWorkspace,
       ...viewPatch,
+      ...chapterCandidateViewPatch(
+        viewWorkspace,
+        this.data.chapterPreparationJob,
+        this.data.candidateMode,
+        this.data.candidatePreviewVersion,
+      ),
       focusedSectionId: focusedSection?.id || "",
       focusedSectionTitle: focusedSection?.title || "",
       suggestionsExpanded: focusedSectionId && !hasFocusedSection

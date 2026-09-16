@@ -1530,7 +1530,14 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
 test("candidate remains separate from edited draft and only acceptance writes it", async () => {
   let accepted = 0;
   const candidate = chapterPreparationJob({ job_id: "candidate-job", status: "succeeded", outcome: "needs_review",
-    candidate_content: "根据新增讲述整理的新稿", candidate_base_version_id: "version-1" });
+    candidate_content: "十八岁那年，我第一次离开家，也第一次坐上长途火车。",
+    candidate_base_version_id: "version-1",
+    candidate_sections: [{
+      section_id: "section-1",
+      title: "离家前的准备",
+      content: "十八岁那年，我第一次离开家，也第一次坐上长途火车。",
+    }],
+  });
   const { page } = loadWorkspacePage({ voiceApiExports: {
     acceptMemoirChapterCandidate: async (projectId, chapterId, jobId) => {
       assert.deepEqual([projectId, chapterId, jobId], ["project-1", "chapter-1", "candidate-job"]);
@@ -1544,17 +1551,33 @@ test("candidate remains separate from edited draft and only acceptance writes it
   await context.applyChapterPreparationJob(candidate, true);
   assert.equal(context.data.chapterPreparationJob.candidate_content, candidate.candidate_content);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.candidateComparisonAvailable, true);
+  assert.equal(context.data.candidateMode, "changes");
+  assert.equal(context.data.candidatePreviewVersion, "after");
+  assert.match(context.data.candidateSummaryText, /1 个小节有变化/);
+  assert.equal(context.data.candidateChangedSections[0].display_content, candidate.candidate_content);
+  context.switchCandidateView({ currentTarget: { dataset: { version: "before" } } });
+  assert.equal(context.data.candidateChangedSections[0].display_content, "十八岁那年，我第一次离开家。");
+  context.switchCandidateView({ currentTarget: { dataset: { mode: "whole" } } });
+  assert.equal(context.data.candidateWholeContent, "十八岁那年，我第一次离开家。");
+  context.switchCandidateView({ currentTarget: { dataset: { version: "after" } } });
+  assert.equal(context.data.candidateWholeContent, candidate.candidate_content);
   assert.equal(accepted, 0);
   await context.acceptChapterCandidate();
   assert.equal(accepted, 1);
   assert.equal(context.data.chapterPreparationJob, null);
+  assert.equal(context.data.candidateWholeContent, "");
 });
 
 test("stale candidate acceptance preserves original and surfaces conflict", async () => {
   const { page } = loadWorkspacePage({ voiceApiExports: { acceptMemoirChapterCandidate: async () => { throw Error("正文已更新，请重新检查候选稿"); } } });
   const candidate = chapterPreparationJob({ job_id: "candidate-job", status: "succeeded", outcome: "needs_review", candidate_content: "候选" });
-  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterPreparationJob: candidate });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
   context.pageVisible = true;
+  await context.applyChapterPreparationJob(candidate, true);
+  assert.equal(context.data.candidateComparisonAvailable, false);
+  assert.equal(context.data.candidateMode, "whole");
+  assert.equal(context.data.candidateWholeContent, "候选");
   await context.acceptChapterCandidate();
   assert.match(context.data.error, /正文已更新/);
   assert.equal(context.data.chapterPreparationJob, candidate);

@@ -154,17 +154,34 @@ async def test_automatic_generation_keeps_manual_text_as_candidate(
         project_id=project_id,
         chapter_id=chapter_id,
         job_type="prepare_chapter",
+        dedupe_key=f"prepare-chapter:{chapter_id}",
         status="succeeded",
         run_after=utcnow_naive(),
         result_json={**caught.value.candidate, "outcome": "needs_review"},
     )
     test_db.add(job)
     await test_db.commit()
+    current = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/current"
+    )
+    assert current.status_code == 200, current.text
+    candidate_section = current.json()["candidate_sections"][0]
+    assert candidate_section["section_id"] == section_id
+    assert (
+        candidate_section["title"]
+        == caught.value.candidate["checkpoint_sections"][0]["title"]
+    )
+    assert (
+        candidate_section["content"]
+        == caught.value.candidate["checkpoint_sections"][0]["content"]
+    )
+    assert "checkpoint_sections" not in current.json()
     calls = len(fake.prompts)
     accepted = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{job.id}/candidate/accept"
     )
     assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["candidate_sections"] == []
     assert len(fake.prompts) == calls
     assert accepted.json()["outcome"] == "ready"
     latest = await chapter_generation.latest_chapter_draft_version(

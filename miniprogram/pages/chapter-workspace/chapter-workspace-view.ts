@@ -1,4 +1,5 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import type { MemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
 import type {
   MemoirChapterSectionMaterialSummary,
   MemoirChapterSectionSummary,
@@ -48,6 +49,112 @@ export interface ChapterWorkspaceViewPatch {
   sectionViews: ChapterSectionView[];
   retainedDraftSectionCount: number;
   canConfirmChapter: boolean;
+}
+
+export type ChapterCandidateMode = "changes" | "whole";
+export type ChapterCandidatePreviewVersion = "before" | "after";
+
+export interface ChapterCandidateSectionView {
+  section_id: string;
+  title: string;
+  display_content: string;
+}
+
+export interface ChapterCandidateViewPatch {
+  candidateMode: ChapterCandidateMode;
+  candidatePreviewVersion: ChapterCandidatePreviewVersion;
+  candidateComparisonAvailable: boolean;
+  candidateSummaryText: string;
+  candidateChangedSections: ChapterCandidateSectionView[];
+  candidateWholeContent: string;
+}
+
+function visibleCharCount(value: string): number {
+  return value.replace(/\s/g, "").length;
+}
+
+export function chapterCandidateViewPatch(
+  workspace: MemoirChapterWorkspace | null,
+  job: MemoirChapterPreparationJob | null,
+  mode: ChapterCandidateMode = "changes",
+  previewVersion: ChapterCandidatePreviewVersion = "after",
+): ChapterCandidateViewPatch {
+  const candidateContent = job?.candidate_content || "";
+  const candidateSections = job?.candidate_sections || [];
+  const comparisonAvailable = Boolean(
+    workspace
+    && candidateContent
+    && candidateSections.length
+    && job?.candidate_base_version_id === (workspace.draft_version_id || null),
+  );
+  if (!workspace || !candidateContent) {
+    return {
+      candidateMode: mode,
+      candidatePreviewVersion: previewVersion,
+      candidateComparisonAvailable: false,
+      candidateSummaryText: "",
+      candidateChangedSections: [],
+      candidateWholeContent: "",
+    };
+  }
+  if (!comparisonAvailable) {
+    return {
+      candidateMode: "whole",
+      candidatePreviewVersion: "after",
+      candidateComparisonAvailable: false,
+      candidateSummaryText: "当前稿仍在使用；采用后，新稿会成为新的章节版本。",
+      candidateChangedSections: [],
+      candidateWholeContent: candidateContent,
+    };
+  }
+
+  const beforeById = new Map(
+    workspace.draft_sections.map((section) => [section.section_id, section]),
+  );
+  const afterIds = new Set(candidateSections.map((section) => section.section_id));
+  const changed = [
+    ...candidateSections.map((section) => ({
+      section_id: section.section_id,
+      title: section.title || beforeById.get(section.section_id)?.title || "正文小节",
+      before_content: beforeById.get(section.section_id)?.content || "",
+      after_content: section.content,
+    })),
+    ...workspace.draft_sections
+      .filter((section) => !afterIds.has(section.section_id))
+      .map((section) => ({
+        section_id: section.section_id,
+        title: section.title,
+        before_content: section.content,
+        after_content: "",
+      })),
+  ].filter((section) => section.before_content !== section.after_content);
+  const delta = visibleCharCount(candidateContent) - visibleCharCount(workspace.draft_content);
+  const deltaText = delta > 0
+    ? `增加 ${delta} 字`
+    : delta < 0
+      ? `减少 ${Math.abs(delta)} 字`
+      : "字数不变";
+  const effectiveMode = changed.length ? mode : "whole";
+  return {
+    candidateMode: effectiveMode,
+    candidatePreviewVersion: previewVersion,
+    candidateComparisonAvailable: true,
+    candidateSummaryText: changed.length
+      ? `与当前稿相比：${changed.length} 个小节有变化 · ${deltaText}`
+      : "新稿正文与当前稿相同。",
+    candidateChangedSections: changed.map((section) => ({
+      section_id: section.section_id,
+      title: section.title,
+      display_content: (
+        previewVersion === "before"
+          ? section.before_content || "（当前稿中没有这一小节）"
+          : section.after_content || "（新稿中不再保留这一小节）"
+      ),
+    })),
+    candidateWholeContent: previewVersion === "before"
+      ? workspace.draft_content
+      : candidateContent,
+  };
 }
 
 const SECTION_TYPE_TEXT: Record<MemoirSectionType, string> = {

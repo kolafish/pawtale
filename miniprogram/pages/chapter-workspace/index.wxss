@@ -712,3 +712,39 @@ button[disabled]:active {
   line-height: 54rpx;
   white-space: pre-wrap;
 }
+
+.candidate-summary,
+.candidate-section-title {
+  display: block;
+  color: var(--ui-text-secondary);
+}
+
+.candidate-summary {
+  margin-top: 14rpx;
+  font-size: 24rpx;
+  font-variant-numeric: tabular-nums;
+  line-height: 38rpx;
+  text-wrap: pretty;
+}
+
+.candidate-section-list {
+  margin: 22rpx 0;
+}
+
+.candidate-section {
+  padding: 22rpx 0;
+}
+
+.candidate-section + .candidate-section {
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.candidate-section-title {
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 38rpx;
+}
+
+.candidate-section .candidate-content {
+  margin-bottom: 0;
+}
