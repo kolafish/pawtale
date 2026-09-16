@@ -75,6 +75,73 @@ test("shared voice text editor shows live transcription without replacing existi
   assert.deepEqual(toasts, ["语音已转成文字"]);
 });
 
+test("opt-in voice editor starts when attached and submits only after final text", async () => {
+  const controller = {
+    callbacks: null,
+    connectCount: 0,
+    finishCount: 0,
+    recordingOptions: null,
+    async connect(options) {
+      this.connectCount += 1;
+      this.callbacks = options.callbacks;
+    },
+    startRecording(options) {
+      this.recordingOptions = options;
+      return true;
+    },
+    stopRecording() {},
+    async finishSession() {
+      this.finishCount += 1;
+      return true;
+    },
+    close() {},
+  };
+  mockModule("../services/streaming-voice-controller.ts", {
+    StreamingVoiceController: class {
+      constructor() {
+        return controller;
+      }
+    },
+  });
+  mockModule("../services/voice-authorization.ts", {
+    ensureVoiceRecordingAuthorization: async () => true,
+  });
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const component = loadComponentModule("../components/voice-text-editor/index.ts").component;
+  const context = componentContext(component, {
+    gatewayUrl: "ws://backend.local/projects/project-1/dictation",
+    autoStart: true,
+    submitOnVoiceFinal: true,
+  });
+  component.lifetimes.attached.call(context);
+  await flushAsyncWork();
+
+  assert.equal(controller.connectCount, 1);
+  assert.deepEqual(controller.recordingOptions, {
+    maxDurationMs: 30000,
+    noVoiceActivityTimeoutMs: 15000,
+  });
+  controller.callbacks.onStatus("listening");
+  controller.callbacks.onPartial("童年回忆换个");
+  assert.equal(context.events.filter(event => event.name === "submit").length, 0);
+  controller.callbacks.onFinal({ type: "asr.final", text: "童年回忆换个名字。" });
+  assert.equal(context.events.filter(event => event.name === "submit").length, 0);
+  controller.callbacks.onEvent({ type: "audio.ended" });
+  await flushAsyncWork();
+
+  assert.equal(controller.finishCount, 1);
+  assert.deepEqual(
+    context.events.filter(event => event.name === "submit").map(event => event.detail.value),
+    ["童年回忆换个名字。"],
+  );
+  assert.deepEqual(toasts, ["已听完，正在理解"]);
+});
+
 for (const ending of ["silence", "manual"]) {
   test(`voice editor uses the shared recording pipeline to finish on ${ending} and wait for final text`, async (t) => {
     let now = 10000;

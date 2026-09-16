@@ -1,5 +1,7 @@
 require("./register-ts");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext, flushAsyncWork } = require("./page-harness");
 
@@ -26,13 +28,22 @@ function setup({ preview, apply } = {}) {
   return { context, calls };
 }
 
+test("story voice edit opts into the shared automatic dictation flow", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/story-voice-edit/index.wxml"),
+    "utf8",
+  );
+  assert.match(template, /auto-start="\{\{true\}\}"/);
+  assert.match(template, /submit-on-voice-final="\{\{true\}\}"/);
+});
+
 test("raw transcribed request reaches the model; selected existing operations execute only on tap", async () => {
   const { context, calls } = setup();
   const raw = "童年记忆这一张换个名字，那个小杰也换个名字。";
-  context.changeInstruction({ detail: { value: raw } });
-  await context.submitInstruction();
+  await context.submitInstruction({ detail: { value: raw } });
   assert.deepEqual(calls.previews, [["p1", raw]]);
   assert.equal(calls.applies.length, 0);
+  assert.equal(context.data.instruction, raw);
   assert.match(context.data.gatewayUrl, /p1\/dictation$/);
   assert.equal(context.data.items[0].detail, "保留 1 条讲述");
   assert.equal(context.data.preview.questions.length, 1);

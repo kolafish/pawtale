@@ -2,11 +2,12 @@
   <view class="edit-intro">
     <text class="edit-book">{{projectTitle || '当前回忆录'}}</text>
     <text class="edit-title">说说你想怎么改</text>
-    <text class="edit-hint">直接说出要修改的内容，不用先找章节。</text>
+    <text class="edit-hint">进入页面后直接说，停顿后会自动理解；确认前不会修改。</text>
   </view>
   <voice-text-editor value="{{instruction}}" gateway-url="{{gatewayUrl}}" maxlength="2000"
     placeholder="比如：早晨日常这一章删掉，童年回忆帮我换个名字。"
     submit-text="发送" busy-text="正在理解…" busy="{{loading}}" disabled="{{applying || !projectId}}"
+    auto-start="{{true}}" submit-on-voice-final="{{true}}"
     bind:change="changeInstruction" bind:submit="submitInstruction" />
   <view wx:if="{{error}}" class="ui-error-banner" aria-live="polite">{{error}}</view>
   <view wx:if="{{preview}}" class="edit-result ui-card">

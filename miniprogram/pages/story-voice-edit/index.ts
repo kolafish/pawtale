@@ -49,11 +49,11 @@ definePage<EditData>()({
     this.setData({ instruction: event.detail.value, preview: null, items: [], selectedCount: 0, message: "", error: "" });
   },
 
-  async submitInstruction() {
-    const instruction = this.data.instruction.trim();
+  async submitInstruction(event?: { detail?: { value?: string } }) {
+    const instruction = String(event?.detail?.value ?? this.data.instruction).trim();
     if (!instruction || !this.data.projectId || this.data.loading || this.data.applying) return;
     const sequence = ++this.requestSequence;
-    this.setData({ loading: true, error: "", message: "", preview: null, items: [], selectedCount: 0 });
+    this.setData({ instruction, loading: true, error: "", message: "", preview: null, items: [], selectedCount: 0 });
     try {
       await ensureMemoirBackendSession();
       if (sequence !== this.requestSequence) return;
