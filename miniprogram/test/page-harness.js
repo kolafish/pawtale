@@ -116,8 +116,9 @@ function componentContext(component, propertiesPatch = {}, dataPatch = {}) {
     properties: { ...properties, ...propertiesPatch },
     data: { ...component.data, ...dataPatch },
     events: [],
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
     triggerEvent(name, detail) {
       this.events.push({ name, detail });

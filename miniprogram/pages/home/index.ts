@@ -9,10 +9,7 @@ import type { MemoirVoiceTranscriptItem } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
-import {
-  memoirHomePrompt,
-  memoirStoryTitle,
-} from "../../services/memoir-display-copy";
+import { memoirStoryTitle } from "../../services/memoir-display-copy";
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
@@ -22,8 +19,7 @@ import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-se
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
 import { emptyHomeStoryData, homeStorySnapshotData, clearStoryGrowthAnimation, HomeGrowthTracker, type HomeStoryData } from "./home-story-state";
-import { toggleStoryChapter } from "../../components/story-tree/story-view-data";
-import type { StoryTreeChapterEvent, StoryTreeMediaEvent, StoryTreeHandle, StoryTreeFocusEvent } from "../../components/story-tree/events";
+import type { StoryTreeChapterEvent, StoryTreeHandle, StoryTreeFocusEvent } from "../../components/story-tree/events";
 import {
   dismissHomeLaunch,
   resolveHomeLaunch,
@@ -79,30 +75,18 @@ interface HomeData extends HomeStoryData {
   projectId: string;
   projectTitle: string;
   projectDisplayTitle: string;
-  projectPromptText: string;
   lastStoryHint: string;
-  lastStoryText: string;
   hasLastStoryHint: boolean;
   launchVariant: HomeLaunchVariant;
-  showLaunchPanel: boolean;
-  showReturnPrompt: boolean;
-  launchEyebrow: string;
-  launchTitle: string;
-  launchBody: string;
-  launchSecondaryText: string;
   hasProject: boolean;
   selectedMode: NarrationMode;
   voiceAuthorizationAgreed: boolean;
+  voiceAuthorizationRequested: boolean;
   greetingText: string;
-  launchModeTagText: string;
-  launchVoiceButtonTitle: string;
-  projectHeadingText: string;
-  projectMetaText: string;
+  headerSubtitleText: string;
   voiceStartButtonClass: string;
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
-  voiceStartNoteText: string;
-  showResumeActions: boolean;
   showMoreActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
@@ -119,15 +103,10 @@ interface CheckboxChangeEvent {
 type HomeViewPatch = Pick<
   HomeData,
   | "greetingText"
-  | "launchModeTagText"
-  | "launchVoiceButtonTitle"
-  | "projectHeadingText"
-  | "projectMetaText"
+  | "headerSubtitleText"
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
-  | "voiceStartNoteText"
-  | "showResumeActions"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
 >;
@@ -162,84 +141,29 @@ export function homeResumeHint(item?: Pick<
   return text.length > RESUME_HINT_CHAR_LIMIT ? `${text.slice(0, RESUME_HINT_CHAR_LIMIT)}...` : text;
 }
 
-function lastStoryText(hint: string): string {
-  if (!hint) {
-    return "";
-  }
-  return `上次您说到：${hint}${hint.endsWith("...") ? "" : "。"}`;
-}
-
-function launchCopy(
-  variant: HomeLaunchVariant,
-  projectDisplayTitle: string,
-): Pick<
-  HomeData,
-  "showLaunchPanel" | "showReturnPrompt" | "launchEyebrow" | "launchTitle" | "launchBody" | "launchSecondaryText"
-> {
-  if (variant === "first_visit") {
-    return {
-      showLaunchPanel: true,
-      showReturnPrompt: false,
-      launchEyebrow: "聊出一本书",
-      launchTitle: "我的故事，慢慢讲",
-      launchBody: "不用写，不用想完整。说一段，小余帮您整理成一页。一段段讲下去，就慢慢成了一本书。",
-      launchSecondaryText: "先看看首页",
-    };
-  }
-  if (variant === "new_project") {
-    return {
-      showLaunchPanel: true,
-      showReturnPrompt: false,
-      launchEyebrow: "新的故事本",
-      launchTitle: `${projectDisplayTitle || "这本回忆录"}，慢慢讲`,
-      launchBody: "不用写，不用想完整。说一段，小余帮您整理成一页。一段段讲下去，就慢慢成了一本书。",
-      launchSecondaryText: "先看看首页",
-    };
-  }
-  return {
-    showLaunchPanel: false,
-    showReturnPrompt: variant === "returning_soft",
-    launchEyebrow: "",
-    launchTitle: "",
-    launchBody: "",
-    launchSecondaryText: "先看看首页",
-  };
-}
-
 export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.needsLogin ? "登录后开始"
-    : !state.hasProject ? "创建回忆录"
+    : !state.hasProject ? "种下我的故事"
     : state.creatingVoice ? "正在准备"
-    : state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed ? "同意协议后开始"
-    : choice.action;
+    : state.selectedMode === "book_completion" ? choice.action
+    : state.hasStories ? "继续讲故事" : "讲第一个故事";
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
-    launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
-    launchVoiceButtonTitle: primaryVoiceButtonTitle,
-    projectHeadingText: state.loading ? "正在加载回忆录"
-      : state.hasProject ? (state.projectDisplayTitle || state.projectTitle || "这段回忆")
-      : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录"),
-    projectMetaText: state.loading ? "我先确认当前回忆录。"
-      : state.needsLogin ? "登录后，我在这里等你。"
-      : !state.hasProject ? "先创建一本回忆录，我再听你讲。"
-      : state.hasLastStoryHint ? state.lastStoryText : state.projectPromptText,
-    voiceStartButtonClass: blocked ? "voice-start-button button-blocked" : "voice-start-button",
+    headerSubtitleText: state.loading ? "正在看看您的故事树。"
+      : state.needsLogin ? "登录后，把想说的故事慢慢留下来。"
+      : !state.hasProject ? "每一个故事，都从一颗种子开始。"
+      : state.hasStories ? "继续讲述，让生活的故事慢慢长成一棵树。"
+      : "从一段回忆开始，让故事慢慢发芽。",
+    voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
-    voiceStartNoteText: state.loading ? "马上就好。"
-      : state.needsLogin ? "先登录，再继续讲回忆。"
-      : !state.hasProject ? "先起个名字，我再听您讲。"
-      : state.creatingVoice ? "我马上开始听。"
-      : state.selectedMode === "book_completion" ? "选定问题后再开始录音。"
-      : !state.voiceAuthorizationAgreed ? "同意后才会打开麦克风。"
-      : choice.description,
-    showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
     showVoiceAuthorizationPanel: state.hasProject && !state.needsLogin && !state.loading
-      && state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed,
+      && state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed
+      && state.voiceAuthorizationRequested,
   };
 }
 
@@ -282,13 +206,16 @@ function applyHomeSnapshotData(
     projectId: identity.active_project_id,
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
-    projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
-    ...(changedProject ? { ...emptyHomeStoryData(), showContinueNarration: false, voiceEntry: null } : {}),
+    ...(changedProject ? {
+      ...emptyHomeStoryData(),
+      showContinueNarration: false,
+      voiceEntry: null,
+      voiceAuthorizationRequested: false,
+      showMoreActions: false,
+    } : {}),
     lastStoryHint: latestHint,
-    lastStoryText: lastStoryText(latestHint),
     hasLastStoryHint: Boolean(latestHint),
     launchVariant,
-    ...launchCopy(launchVariant, projectDisplayTitle),
     hasProject,
     selectedMode: changedProject ? profile.defaultGuidanceMode : context.data.selectedMode,
   });
@@ -317,30 +244,18 @@ definePage<HomeData>()({
     projectId: "",
     projectTitle: "",
     projectDisplayTitle: "",
-    projectPromptText: "不用讲完整，先说一件您想起来的事。",
     lastStoryHint: "",
-    lastStoryText: "",
     hasLastStoryHint: false,
     launchVariant: "none",
-    showLaunchPanel: false,
-    showReturnPrompt: false,
-    launchEyebrow: "",
-    launchTitle: "",
-    launchBody: "",
-    launchSecondaryText: "先看看首页",
     hasProject: false,
     selectedMode: "free_narration",
     voiceAuthorizationAgreed: false,
+    voiceAuthorizationRequested: false,
     greetingText: "你好，作者",
-    launchModeTagText: "第一次来",
-    launchVoiceButtonTitle: "今天先聊一段",
-    projectHeadingText: "还没有回忆录",
-    projectMetaText: "先创建一本回忆录，我再听你讲。",
-    voiceStartButtonClass: "voice-start-button",
+    headerSubtitleText: "每一个故事，都从一颗种子开始。",
+    voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
-    primaryVoiceButtonTitle: "创建回忆录",
-    voiceStartNoteText: "先起个名字，我再听您讲。",
-    showResumeActions: false,
+    primaryVoiceButtonTitle: "种下我的故事",
     showMoreActions: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
@@ -395,7 +310,11 @@ definePage<HomeData>()({
   },
 
   refreshVoiceAuthorizationConsent() {
-    setHomeData(this, { voiceAuthorizationAgreed: readVoiceAuthorizationConsent() });
+    const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
+    setHomeData(this, {
+      voiceAuthorizationAgreed,
+      voiceAuthorizationRequested: voiceAuthorizationAgreed ? false : this.data.voiceAuthorizationRequested,
+    });
   },
 
   async loadHome(background = false) {
@@ -441,7 +360,7 @@ definePage<HomeData>()({
       const target = this.storyNavigationTarget;
       this.storyNavigationTarget = null;
       const validTarget = target && (!target.projectId || target.projectId === this.data.projectId);
-      this.setData({
+      setHomeData(this, {
         ...homeStorySnapshotData(snapshot, this.data.story, freshEvents),
         ...(validTarget ? { narrationSaved: target.narrationSaved } : {}),
       }, () => {
@@ -468,14 +387,13 @@ definePage<HomeData>()({
           projectId: "",
           projectTitle: "登录后创建回忆录",
           projectDisplayTitle: "登录后创建回忆录",
-          projectPromptText: "登录后，我在这里等你。",
           lastStoryHint: "",
-          lastStoryText: "",
           hasLastStoryHint: false,
           launchVariant: "none",
-          ...launchCopy("none", ""),
           hasProject: false,
           selectedMode: "free_narration",
+          voiceAuthorizationRequested: false,
+          showMoreActions: false,
         });
         return;
       }
@@ -502,7 +420,7 @@ definePage<HomeData>()({
   },
 
   measureNarration() {
-    wx.createSelectorQuery().select("#home-narration").boundingClientRect(rect => {
+    wx.createSelectorQuery().select("#home-narration-end").boundingClientRect(rect => {
       if (rect) {
         this.narrationBottom = rect.bottom + this.homeScrollTop;
         this.onPageScroll({ scrollTop: this.homeScrollTop });
@@ -518,11 +436,7 @@ definePage<HomeData>()({
   viewStoryGrowth() {
     const target = this.data.growthTarget;
     if (!target) return;
-    this.setData({ story: { ...this.data.story, chapters: this.data.story.chapters.map(chapter => ({
-      ...chapter, expanded: chapter.id === target.chapterId ? true : chapter.expanded,
-    })) } }, () => {
-      this.selectComponent<StoryTreeHandle>("#story-tree")?.focusGrowth(target.chapterId, target.sectionId);
-    });
+    this.selectComponent<StoryTreeHandle>("#story-tree")?.focusGrowth(target.chapterId);
   },
 
   focusStoryGrowth(event: StoryTreeFocusEvent) {
@@ -530,7 +444,6 @@ definePage<HomeData>()({
   },
 
   async continueNarration() {
-    if (!this.data.voiceAuthorizationAgreed) wx.pageScrollTo({ selector: "#home-voice-authorization", duration: 250 });
     await this.startPrimaryVoiceChat();
   },
 
@@ -582,17 +495,6 @@ definePage<HomeData>()({
     }
   },
 
-  toggleChapter(event: StoryTreeChapterEvent) {
-    const { chapterId } = event.detail;
-    if (!chapterId) {
-      return;
-    }
-    this.clearGrowthAnimation();
-    this.setData({
-      story: { ...this.data.story, chapters: toggleStoryChapter(this.data.story.chapters, chapterId) },
-    });
-  },
-
   openBook() {
     if (!this.canStartVoiceChat(false)) return;
     if (this.data.bookReadable) {
@@ -600,12 +502,6 @@ definePage<HomeData>()({
     } else {
       navigateToBook();
     }
-  },
-
-  readChapter(event: StoryTreeChapterEvent) {
-    const { chapterId } = event.detail;
-    if (!this.data.projectId || !this.data.story.chapters.some((chapter) => chapter.id === chapterId && chapter.readable)) return;
-    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId, chapterId }) });
   },
 
   openChapterManager() {
@@ -645,28 +541,13 @@ definePage<HomeData>()({
   },
 
   openChapter(event: StoryTreeChapterEvent) {
-    const { chapterId, sectionId } = event.detail;
+    const { chapterId } = event.detail;
     if (!this.data.projectId || !chapterId) {
       return;
     }
     wx.navigateTo({
       url: pageUrl(CHAPTER_WORKSPACE_PAGE_URL, {
         projectId: this.data.projectId,
-        chapterId,
-        sectionId,
-      }),
-    });
-  },
-
-  openMedia(event: StoryTreeMediaEvent) {
-    if (!this.data.projectId) {
-      return;
-    }
-    const { chapterId } = event.detail;
-    wx.navigateTo({
-      url: pageUrl("/pages/image-assets/index", {
-        projectId: this.data.projectId,
-        scope: chapterId ? "chapter" : "unassigned",
         chapterId,
       }),
     });
@@ -677,6 +558,7 @@ definePage<HomeData>()({
     const consent = saveVoiceAuthorizationConsent(agreed);
     setHomeData(this, {
       voiceAuthorizationAgreed: consent.agreed,
+      voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
       error: agreed ? "" : this.data.error,
     }, () => this.measureNarration());
     void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
@@ -688,16 +570,9 @@ definePage<HomeData>()({
     wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
   },
 
-  dismissLaunchPanel() {
+  dismissLaunchExperience() {
     dismissHomeLaunch(this.data.userId, this.data.launchVariant, this.data.projectId);
-    setHomeData(this, {
-      launchVariant: "none",
-      ...launchCopy("none", this.data.projectDisplayTitle),
-    }, () => this.measureNarration());
-  },
-
-  dismissReturnPrompt() {
-    setHomeData(this, { launchVariant: "none", showReturnPrompt: false }, () => this.measureNarration());
+    setHomeData(this, { launchVariant: "none" });
   },
 
   createProject() {
@@ -726,11 +601,7 @@ definePage<HomeData>()({
   },
 
   async startPrimaryVoiceChat() {
-    await this.startSelectedNarration("home_resume");
-  },
-
-  async startLaunchVoiceChat() {
-    await this.startSelectedNarration("home_launch");
+    await this.startSelectedNarration(this.data.launchVariant === "none" ? "home_resume" : "home_launch");
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {
@@ -756,19 +627,13 @@ definePage<HomeData>()({
     });
   },
 
-  openNarrationOverview() {
-    if (!this.canStartVoiceChat(false)) {
-      return;
-    }
-    wx.navigateTo({ url: "/pages/voice-progress/index" });
-  },
-
   ensureVoiceAuthorization() {
     if (this.data.voiceAuthorizationAgreed) {
       return true;
     }
-    setHomeData(this, { error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
-    wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    setHomeData(this, { voiceAuthorizationRequested: true, error: "" }, () => {
+      wx.pageScrollTo({ selector: "#home-voice-authorization", duration: 250 });
+    });
     return false;
   },
 
@@ -859,7 +724,7 @@ definePage<HomeData>()({
       { projectId, voiceSessionId: detail.session.id },
     );
     if (entry === "home_launch") {
-      this.dismissLaunchPanel();
+      this.dismissLaunchExperience();
     }
     this.voiceNavigationTarget = { userId, projectId, entry: {
       voiceSessionId: detail.session.id, projectId, mode, interviewType, sessionGoal,
