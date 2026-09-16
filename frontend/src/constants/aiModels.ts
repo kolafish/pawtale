@@ -1,5 +1,5 @@
 export type AiModelValue =
-  | 'deepseek-v4-flash'
+  | 'deepseek-flash'
   | 'deepseek-v4-pro'
   | 'doubao-seed-2-0-pro-260215'
   | 'claude-fable-5'
@@ -7,7 +7,7 @@ export type AiModelValue =
   | 'claude-sonnet-4';
 
 export const AI_MODEL_OPTIONS: { value: AiModelValue; label: string }[] = [
-  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash' },
   { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { value: 'doubao-seed-2-0-pro-260215', label: 'Doubao Seed 2.0 Pro' },
   { value: 'claude-fable-5', label: 'Claude Fable 5' },

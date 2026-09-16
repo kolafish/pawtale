@@ -149,7 +149,7 @@ def test_small_concurrency_provider_limit_defaults():
     assert settings.voice_gateway_max_active_sessions == 10
     assert settings.voice_gateway_max_active_sessions_per_user == 1
     assert settings.ai_text_max_concurrent_requests == 3
-    assert settings.deepseek_model == "deepseek-v4-flash"
+    assert settings.deepseek_model == "deepseek-flash"
     assert settings.deepseek_thinking_type == "disabled"
     assert settings.volc_ark_base_url == "https://ark.cn-beijing.volces.com/api/v3"
     assert settings.volc_ark_model == "doubao-seed-2-0-pro-260215"

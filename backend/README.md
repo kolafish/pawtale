@@ -94,7 +94,7 @@ venv/bin/python -m pytest \
 
 ```bash
 PYTHONPATH=. venv/bin/python scripts/eval_memoir_self_correction.py \
-  --ai-model deepseek-v4-flash --output /tmp/memoir-self-correction.json
+  --ai-model deepseek-flash --output /tmp/memoir-self-correction.json
 ```
 
 可用 `--case correct_relationship` 缩小范围，或用 `--polish-level medium` / `high` 验证其他整理档位。脚本保存实际输出和模型信息；片段检查通过后仍需人工核对人物关系、时间归属和事实完整性，不能把样本通过率当成线上准确率。

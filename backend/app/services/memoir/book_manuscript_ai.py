@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.config import get_settings
 from app.services.ai_calls import AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import (
-    DEEPSEEK_V4_FLASH_MODEL,
+    DEEPSEEK_FLASH_ALIASES,
     DEEPSEEK_V4_PRO_MODEL,
     VOLC_DOUBAO_PRO_MODEL,
     get_ai_service,
@@ -363,7 +363,7 @@ def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object
 def _text_ai_configured(ai_model: str | None) -> bool:
     settings = get_settings()
     model = (ai_model or settings.default_ai_model or "").lower()
-    if model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL, DEEPSEEK_V4_PRO_MODEL}:
+    if model in DEEPSEEK_FLASH_ALIASES or model == DEEPSEEK_V4_PRO_MODEL:
         return bool(settings.deepseek_api_key.strip())
     if model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
         return bool(settings.volc_ark_api_key.strip())
