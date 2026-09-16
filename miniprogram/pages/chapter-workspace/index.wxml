@@ -41,8 +41,49 @@
 
     <view wx:if="{{chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
       <text class="section-kicker">后台整理的新稿</text>
-      <text class="status-detail">您修改或确认过的正文已保留。阅读下面的新稿后，可以决定是否采用。</text>
-      <text class="candidate-content" selectable="{{true}}">{{chapterPreparationJob.candidate_content}}</text>
+      <text class="status-detail">当前稿仍在使用。对照下面的变化后，再决定是否采用新稿。</text>
+      <text class="candidate-summary">{{candidateSummaryText}}</text>
+      <block wx:if="{{candidateComparisonAvailable}}">
+        <view class="candidate-switch ui-version-switch" aria-label="查看范围">
+          <view
+            class="ui-version-option ui-pressable {{candidateMode === 'changes' ? 'active' : ''}}"
+            aria-role="button"
+            aria-pressed="{{candidateMode === 'changes'}}"
+            data-mode="changes"
+            bindtap="switchCandidateView"
+          >只看变化</view>
+          <view
+            class="ui-version-option ui-pressable {{candidateMode === 'whole' ? 'active' : ''}}"
+            aria-role="button"
+            aria-pressed="{{candidateMode === 'whole'}}"
+            data-mode="whole"
+            bindtap="switchCandidateView"
+          >查看全文</view>
+        </view>
+        <view class="candidate-switch ui-version-switch" aria-label="查看版本">
+          <view
+            class="ui-version-option ui-pressable {{candidatePreviewVersion === 'before' ? 'active' : ''}}"
+            aria-role="button"
+            aria-pressed="{{candidatePreviewVersion === 'before'}}"
+            data-version="before"
+            bindtap="switchCandidateView"
+          >当前稿</view>
+          <view
+            class="ui-version-option ui-pressable {{candidatePreviewVersion === 'after' ? 'active' : ''}}"
+            aria-role="button"
+            aria-pressed="{{candidatePreviewVersion === 'after'}}"
+            data-version="after"
+            bindtap="switchCandidateView"
+          >新稿</view>
+        </view>
+      </block>
+      <view wx:if="{{candidateMode === 'changes'}}" class="candidate-section-list">
+        <view wx:for="{{candidateChangedSections}}" wx:key="section_id" class="candidate-section">
+          <text class="candidate-section-title">{{item.title}}</text>
+          <text class="candidate-content" selectable="{{true}}">{{item.display_content}}</text>
+        </view>
+      </view>
+      <text wx:else class="candidate-content" selectable="{{true}}">{{candidateWholeContent}}</text>
       <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">采用这版新稿</button>
     </view>
 

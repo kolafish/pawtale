@@ -18,7 +18,10 @@ import {
   datasetString,
   type PageDatasetEvent,
 } from "../../services/page-input";
-import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
+import {
+  chapterCandidateViewPatch,
+  chapterWorkspaceViewPatch,
+} from "./chapter-workspace-view";
 import {
   chapterPreparationView,
   CLOSED_DRAFT_SECTION_EDITOR,
@@ -55,6 +58,22 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     this.setData({
       suggestionsExpanded: !this.data.suggestionsExpanded,
     });
+  },
+
+  switchCandidateView(event: PageDatasetEvent<{ mode?: string; version?: string }>) {
+    const mode = datasetString(event, "mode");
+    const version = datasetString(event, "version");
+    if (!this.data.workspace) {
+      return;
+    }
+    this.setData(chapterCandidateViewPatch(
+      this.data.workspace,
+      this.data.chapterPreparationJob,
+      mode === "changes" || mode === "whole" ? mode : this.data.candidateMode,
+      version === "before" || version === "after"
+        ? version
+        : this.data.candidatePreviewVersion,
+    ));
   },
 
   openSectionStructure() {
@@ -271,10 +290,21 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     );
     if (job.status === "succeeded") {
       if (job.outcome === "needs_review" && job.candidate_content) {
-        this.setData({ chapterPreparationJob: job });
+        this.setData({
+          chapterPreparationJob: job,
+          ...chapterCandidateViewPatch(
+            this.data.workspace,
+            job,
+            this.data.candidateMode,
+            this.data.candidatePreviewVersion,
+          ),
+        });
         return;
       }
-      this.setData({ chapterPreparationJob: null });
+      this.setData({
+        chapterPreparationJob: null,
+        ...chapterCandidateViewPatch(this.data.workspace, null),
+      });
       if (!wasActive) {
         return;
       }
@@ -349,7 +379,10 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     try {
       await acceptMemoirChapterCandidate(projectId, chapterId, job.job_id);
       if (!this.pageVisible || this.data.projectId !== projectId || this.data.chapterId !== chapterId) return;
-      this.setData({ chapterPreparationJob: null });
+      this.setData({
+        chapterPreparationJob: null,
+        ...chapterCandidateViewPatch(this.data.workspace, null),
+      });
       await this.loadPageData(true);
       wx.showToast({ title: "已采用新稿", icon: "success" });
     } catch (error) {

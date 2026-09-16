@@ -200,6 +200,11 @@ export interface MemoirBookRevisionProposal {
 export interface MemoirChapterPreparationJob {
   candidate_content?: string;
   candidate_base_version_id?: string | null;
+  candidate_sections?: Array<{
+    section_id: string;
+    title: string;
+    content: string;
+  }>;
   job_id: string | null;
   project_id: string;
   chapter_id: string;

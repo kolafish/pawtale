@@ -11,6 +11,9 @@ import {
 } from "../../services/ai-task-progress";
 import type { ChapterNextAction } from "./chapter-next-action";
 import type {
+  ChapterCandidateMode,
+  ChapterCandidatePreviewVersion,
+  ChapterCandidateSectionView,
   ChapterSectionView,
 } from "./chapter-workspace-view";
 
@@ -266,6 +269,12 @@ export interface ChapterWorkspacePageData {
   chapterPreparationDetail: string;
   chapterPreparationProgress: number;
   chapterPreparationProgressMode: AITaskProgressMode;
+  candidateMode: ChapterCandidateMode;
+  candidatePreviewVersion: ChapterCandidatePreviewVersion;
+  candidateComparisonAvailable: boolean;
+  candidateSummaryText: string;
+  candidateChangedSections: ChapterCandidateSectionView[];
+  candidateWholeContent: string;
   sectionRegenerationJob: MemoirChapterSectionRegenerationJob | null;
   sectionRegenerationTitle: string;
   sectionRegenerationDetail: string;

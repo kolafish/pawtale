@@ -77,6 +77,12 @@ class MemoirChapterPreparationJobRequest(MemoirChapterAIRequest):
     operation: Literal["prepare", "rewrite"] = "prepare"
 
 
+class MemoirChapterCandidateSection(BaseModel):
+    section_id: str
+    title: str
+    content: str
+
+
 class MemoirChapterPreparationJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
@@ -100,6 +106,9 @@ class MemoirChapterPreparationJobResponse(BaseModel):
     outcome: str = ""
     candidate_content: str | None = None
     candidate_base_version_id: str | None = None
+    candidate_sections: list[MemoirChapterCandidateSection] = Field(
+        default_factory=list
+    )
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     can_cancel: bool = False
