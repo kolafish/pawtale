@@ -5,9 +5,10 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy import select
 
+from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlan,
-    MemoirBookPlanChapter, MemoirSection, MemoirSectionMaterial,
+    MemoirBookPlanChapter, MemoirEditingJob, MemoirSection, MemoirSectionMaterial,
     MemoirVoiceSession, MemoirVoiceUtterance,
 )
 from app.models.projects import Project
@@ -105,6 +106,93 @@ async def test_raw_speech_context_and_both_renames(client, test_db, monkeypatch,
     assert (await test_db.get(MemoirSection, story["sections"][3])).title == "外婆家的快乐时光"
     assert (await test_db.get(MemoirSection, story["sections"][1])).title == "童年回忆"
     assert (await apply(client, story, response.json())).status_code == 409
+
+
+async def test_regenerate_chapter_sections_preview_queues_existing_workflow(
+    client,
+    test_db,
+    monkeypatch,
+    story,
+):
+    operation = {
+        "action": "regenerate_chapter_sections",
+        "target_ref": story["chapters"][1],
+    }
+    response, fake = await preview(
+        client,
+        monkeypatch,
+        story,
+        [operation],
+        instruction="看看是不是可以给第一章生成一些小节。",
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "regenerate_chapter_sections" in fake.system
+    assert data["operations"][0]["label"] == "重新整理章节「童年回忆」的小节分组"
+    assert "原始讲述和现有正文版本会保留" in data["operations"][0]["detail"]
+
+    result = await apply(client, story, data)
+    assert result.status_code == 200, result.text
+    assert "已开始重新整理小节" in result.json()["message"]
+    job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == story["pid"],
+            MemoirEditingJob.chapter_id == story["chapters"][1],
+            MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+        )
+    )
+    assert job is not None
+    assert job.status == "pending"
+    expected = job.payload_json["request"]["expected_sections"]
+    assert {item["id"] for item in expected} == {
+        story["sections"][1],
+        story["sections"][3],
+    }
+    assert await test_db.get(MemoirSection, story["sections"][1]) is not None
+    assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+
+
+async def test_regenerate_chapter_sections_rejects_stale_or_mixed_chapter_edits(
+    client,
+    test_db,
+    monkeypatch,
+    story,
+):
+    operation = {
+        "action": "regenerate_chapter_sections",
+        "target_ref": story["chapters"][1],
+    }
+    mixed, _ = await preview(
+        client,
+        monkeypatch,
+        story,
+        [
+            operation,
+            {
+                "action": "rename_section",
+                "target_ref": story["sections"][3],
+                "new_title": "外婆家的快乐时光",
+            },
+        ],
+    )
+    assert mixed.status_code == 422
+    assert "不能和同一章内的其他修改同时执行" in mixed.json()["detail"]
+
+    response, _ = await preview(client, monkeypatch, story, [operation])
+    assert response.status_code == 200, response.text
+    section = await test_db.get(MemoirSection, story["sections"][3])
+    section.title = "后来修改的小节"
+    section.version += 1
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.chapter_id == story["chapters"][1],
+            MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+        )
+    )
+    assert job is None
 
 
 async def test_selected_deletion_combines_material_and_structure_atomically(client, test_db, monkeypatch, story):
@@ -283,7 +371,12 @@ async def test_failure_rolls_back_prior_renames_and_deletions(client, test_db, m
     assert semantic_json_signature(await _story(test_db, story["pid"])) == before
 
 
-@pytest.mark.parametrize("action,target_kind", [("delete_chapter", "sections"), ("delete_material", "chapters"), ("rename_section", "materials")])
+@pytest.mark.parametrize("action,target_kind", [
+    ("delete_chapter", "sections"),
+    ("delete_material", "chapters"),
+    ("rename_section", "materials"),
+    ("regenerate_chapter_sections", "sections"),
+])
 async def test_wrong_entity_kind_is_rejected(client, monkeypatch, story, action, target_kind):
     op = {"action": action, "target_ref": story[target_kind][0]}
     if action.startswith("rename"):
@@ -335,6 +428,7 @@ async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, t
 @pytest.mark.parametrize("data", [
     {"action": "rename_chapter", "target_ref": "c", "new_title": "  "},
     {"action": "delete_chapter", "target_ref": "c", "new_title": "新名"},
+    {"action": "regenerate_chapter_sections", "target_ref": "c", "new_title": "新小节"},
     {"action": "execute_sql", "target_ref": "c"},
 ])
 def test_operation_contract_rejects_unexecutable_actions(data):

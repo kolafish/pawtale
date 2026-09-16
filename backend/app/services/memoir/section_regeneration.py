@@ -842,6 +842,7 @@ async def enqueue_chapter_section_regeneration(
     chapter_id: str,
     req: MemoirSectionRegenerateRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> dict[str, object]:
     project = await load_memoir_project(
         db,
@@ -887,7 +888,10 @@ async def enqueue_chapter_section_regeneration(
             "requested_ai_model": requested_ai_model,
         }
         db.add(job)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(job)
     return _job_state(
         project_id=project_id,
