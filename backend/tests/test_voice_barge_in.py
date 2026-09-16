@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from app.services.asr import barge_in as barge_in_module
 from app.services.asr.barge_in import BargeInDetector, load_barge_in_model
 from app.services.asr.gateway import VoiceGatewayClientError, VoiceGatewaySession
 from tests.test_memoir_voice_gateway import FakeGatewayClient, FakeStreamingASRClient
@@ -24,6 +25,22 @@ def test_bundled_model_detects_speech_across_pcm_frame_boundaries():
         hits = [detector.feed(pcm[i:i + size]) for i in range(0, len(pcm), size)]
         assert sum(hits) == 1
         assert detector.feed(pcm) is False
+
+
+def test_speech_requires_five_consecutive_model_windows(monkeypatch):
+    class AlwaysSpeechModel:
+        def run(self, _outputs, inputs):
+            return np.array([[0.95]], dtype=np.float32), inputs["state"]
+
+    monkeypatch.setattr(barge_in_module, "load_barge_in_model", lambda: AlwaysSpeechModel())
+    detector = BargeInDetector()
+    detector.feed(b"\0" * barge_in_module.WARMUP_WINDOWS * barge_in_module.WINDOW_SAMPLES * 2)
+    speech_window = np.full(barge_in_module.WINDOW_SAMPLES, 0.2, dtype=np.float32)
+    speech_pcm = (speech_window * 32767).astype("<i2").tobytes()
+
+    for _ in range(4):
+        assert detector.feed(speech_pcm) is False
+    assert detector.feed(speech_pcm) is True
 
 
 def test_streams_share_weights_but_never_recurrent_state():
