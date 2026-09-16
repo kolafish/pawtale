@@ -11,14 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow_naive
 from app.config import get_settings
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookPlanChapter,
+    MemoirEditingJob,
+)
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
 from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
-from app.services.memoir.book_output_snapshots import legacy_chapter_version_needs_upgrade
+from app.services.memoir.book_output_snapshots import (
+    legacy_chapter_version_needs_upgrade,
+    protected_legacy_chapter_version,
+)
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -101,8 +108,19 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             project_id=project_id,
             chapter_id=chapter_id,
         )
-        if legacy_chapter_version_needs_upgrade(latest):
+        legacy_upgrade = legacy_chapter_version_needs_upgrade(latest)
+        if legacy_upgrade:
             legacy_upgrade_pending = True
+            draft = await db.scalar(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id == chapter_id,
+                )
+            )
+            if protected_legacy_chapter_version(draft, latest):
+                # A confirmed or manually edited flat draft remains readable
+                # while its structured rewrite waits for review.
+                readable.add(chapter_id)
         try:
             context = await chapter_generation.load_chapter_generation_context(
                 db, project_id=project_id, chapter_id=chapter_id
@@ -145,7 +163,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
-    if not legacy_upgrade_pending and (readable or progress.output_id):
+    if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
         progress.output_version_id = assembled.output_version_id

@@ -278,6 +278,92 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     assert preserved.content == "用户亲自整理的全书。"
 
 
+async def test_automatic_book_snapshot_keeps_legacy_flat_chapter_while_upgrade_needs_review(
+    client,
+    test_db,
+    monkeypatch,
+):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.models.memoir import MemoirBookOutputVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=3)
+    drafts = []
+    versions = []
+    for chapter in chapters:
+        draft, version = await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+        drafts.append(draft)
+        versions.append(version)
+    drafts[0].status = MemoirBookChapterDraftStatus.DRAFT.value
+    drafts[0].metadata_json = {"confirmed_version_id": versions[0].id}
+    versions[0].section_snapshot_json = []
+    test_db.add(drafts[0])
+    test_db.add(versions[0])
+    await test_db.commit()
+
+    previous = await assemble_book_output(
+        test_db,
+        project_id=project_id,
+        eligible_chapter_ids={chapters[2].id},
+        automatic=True,
+    )
+    assert [item["chapter_id"] for item in previous.chapter_snapshot_json] == [
+        chapters[2].id
+    ]
+
+    async def keep_upgrade_for_review(**kwargs):
+        assert kwargs["chapter_id"] == chapters[0].id
+        return {
+            "job_id": "legacy-upgrade-job",
+            "status": "succeeded",
+            "outcome": "needs_review",
+            "error_message": "",
+        }
+
+    monkeypatch.setattr(
+        automatic_book_draft.chapter_preparation_jobs,
+        "enqueue_chapter_preparation_job",
+        keep_upgrade_for_review,
+    )
+    parent = await automatic_book_draft.schedule_book_draft(
+        test_db,
+        project_id=project_id,
+    )
+    await test_db.commit()
+
+    result = await automatic_book_draft.run_book_draft_job(test_db, parent)
+
+    assert result.result_json["stage"] == "needs_attention"
+    assert result.result_json["omitted_chapter_ids"] == []
+    latest = await test_db.get(
+        MemoirBookOutputVersion,
+        result.result_json["output_version_id"],
+    )
+    assert latest is not None
+    assert [item["chapter_id"] for item in latest.chapter_snapshot_json] == [
+        chapter.id for chapter in chapters
+    ]
+    assert latest.chapter_snapshot_json[0]["sections"] == []
+    assert latest.chapter_snapshot_json[0]["content"] == versions[0].content
+
+    response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output"
+    )
+    assert response.status_code == 200
+    output = response.json()
+    assert output["is_stale"] is False
+    assert [
+        chapter["chapter_id"]
+        for chapter in output["latest_version"]["manuscript"]["chapters"]
+    ] == [chapter.id for chapter in chapters]
+
+
 async def test_stale_book_review_decisions_still_omit_their_chapters(client, test_db):
     from app.domain.memoir.types import MemoirBookChapterDraftStatus
     from app.models.memoir import MemoirBookReview

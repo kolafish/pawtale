@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -833,6 +834,56 @@ def test_chapter_digest_ignores_included_section_without_materials():
 
     assert [section.section_id for section in context.sections] == [populated.id]
     assert context.allowed_material_ids == frozenset({material.utterance_id})
+
+
+def test_automatic_partial_book_keeps_legacy_flat_chapter():
+    version = SimpleNamespace(
+        id="version-1",
+        draft_id="draft-1",
+        version=1,
+        created_at=datetime(2026, 9, 15),
+        created_by="ai",
+        feedback=None,
+        content="这是旧格式保存的完整章节正文。",
+        section_snapshot_json=[],
+    )
+    chapter = SimpleNamespace(
+        id="chapter-1",
+        title="童年回忆",
+        sort_order=0,
+        include_in_book=True,
+        metadata_json={},
+        draft=SimpleNamespace(
+            versions=[version],
+            status="draft",
+            metadata_json={"confirmed_version_id": version.id},
+        ),
+    )
+    plan = SimpleNamespace(chapters=[chapter])
+
+    assert book_output_snapshots.readable_chapter_versions(
+        plan,
+        allow_partial=True,
+    ) == [(chapter, version)]
+    snapshot = book_output_snapshots.chapter_snapshot(
+        chapter,
+        version,
+        chapter_index=1,
+    )
+    assert snapshot["sections"] == []
+    assert snapshot["content"] == version.content
+    assert "这是旧格式保存的完整章节正文。" in (
+        book_output_snapshots.book_content_from_chapter_snapshots(
+            title="我的回忆录",
+            snapshots=[snapshot],
+        )
+    )
+
+    chapter.draft.metadata_json = {}
+    assert book_output_snapshots.readable_chapter_versions(
+        plan,
+        allow_partial=True,
+    ) == []
 
 
 async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(
