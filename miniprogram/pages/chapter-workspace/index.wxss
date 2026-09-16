@@ -700,9 +700,9 @@ button[disabled]:active {
   color: var(--ui-danger-text);
 }
 
-.candidate-content {
+.candidate-content,
+.candidate-diff-content {
   display: block;
-  margin: 22rpx 0;
   padding: 22rpx;
   border-radius: var(--ui-radius-inner);
   background: var(--ui-surface-soft);
@@ -711,10 +711,14 @@ button[disabled]:active {
   font-size: 29rpx;
   line-height: 54rpx;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.candidate-summary,
-.candidate-section-title {
+.candidate-content {
+  margin: 22rpx 0;
+}
+
+.candidate-summary {
   display: block;
   color: var(--ui-text-secondary);
 }
@@ -727,24 +731,52 @@ button[disabled]:active {
   text-wrap: pretty;
 }
 
-.candidate-section-list {
+.candidate-diff {
   margin: 22rpx 0;
 }
 
-.candidate-section {
-  padding: 22rpx 0;
+.candidate-diff-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx 18rpx;
+  margin-bottom: 14rpx;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 34rpx;
 }
 
-.candidate-section + .candidate-section {
-  border-top: 1rpx solid var(--ui-divider);
+.candidate-diff-legend-item {
+  white-space: nowrap;
 }
 
-.candidate-section-title {
-  font-size: 25rpx;
+.candidate-diff-marker {
+  margin-right: 6rpx;
+  padding: 2rpx 6rpx;
+  border-radius: 6rpx;
+  font-size: 20rpx;
   font-weight: 700;
-  line-height: 38rpx;
+  line-height: 28rpx;
 }
 
-.candidate-section .candidate-content {
-  margin-bottom: 0;
+.candidate-diff-marker.is-modified,
+.candidate-diff-segment.is-modified {
+  background: var(--ui-warning-surface);
+  color: var(--ui-warning-text);
+}
+
+.candidate-diff-marker.is-added,
+.candidate-diff-segment.is-added {
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
+}
+
+.candidate-diff-marker.is-deleted,
+.candidate-diff-segment.is-deleted {
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
+}
+
+.candidate-diff-segment.is-deleted {
+  text-decoration: line-through;
+  text-decoration-thickness: 2rpx;
 }

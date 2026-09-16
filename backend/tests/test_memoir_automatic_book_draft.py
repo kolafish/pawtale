@@ -9,11 +9,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
 from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
-from app.services.memoir import automatic_book_draft, chapter_generation
+from app.services.memoir import automatic_book_draft, chapter_generation, chapter_preparation_jobs
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from tests.memoir_helpers import run_test_editing_job
 from tests.test_memoir_chapter_pipeline import _chapter, FakeChapterAI
+
+
+def test_candidate_diff_segments_reconstruct_both_versions():
+    before = "十八岁那年，我第一次离开家。月台很安静。"
+    after = "十八岁那年，我第一次坐上长途火车。月台很明亮。这是新的开始。"
+
+    segments = chapter_preparation_jobs._candidate_diff_segments(before, after)
+
+    assert "".join(
+        segment["text"]
+        for segment in segments
+        if segment["kind"] in {"equal", "deleted"}
+    ) == before
+    assert (
+        "".join(
+            segment["text"]
+            for segment in segments
+            if segment["kind"] in {"equal", "modified", "added"}
+        )
+        == after
+    )
+    assert {segment["kind"] for segment in segments} >= {
+        "equal",
+        "deleted",
+        "modified",
+    }
+    assert chapter_preparation_jobs._candidate_diff_segments("相同", "相同新增")[-1] == {
+        "kind": "added",
+        "text": "新增",
+    }
 
 
 async def _setup(client, test_db, monkeypatch):
@@ -175,6 +205,25 @@ async def test_automatic_generation_keeps_manual_text_as_candidate(
         candidate_section["content"]
         == caught.value.candidate["checkpoint_sections"][0]["content"]
     )
+    candidate_diff = current.json()["candidate_diff_segments"]
+    assert (
+        "".join(
+            segment["text"]
+            for segment in candidate_diff
+            if segment["kind"] in {"equal", "deleted"}
+        )
+        == "这是我亲手改的正文。"
+    )
+    assert (
+        "".join(
+            segment["text"]
+            for segment in candidate_diff
+            if segment["kind"] in {"equal", "modified", "added"}
+        )
+        == current.json()["candidate_content"]
+    )
+    assert {segment["kind"] for segment in candidate_diff} & {"modified", "added"}
+    assert any(segment["kind"] == "deleted" for segment in candidate_diff)
     assert "checkpoint_sections" not in current.json()
     calls = len(fake.prompts)
     accepted = await client.post(
@@ -182,6 +231,7 @@ async def test_automatic_generation_keeps_manual_text_as_candidate(
     )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["candidate_sections"] == []
+    assert accepted.json()["candidate_diff_segments"] == []
     assert len(fake.prompts) == calls
     assert accepted.json()["outcome"] == "ready"
     latest = await chapter_generation.latest_chapter_draft_version(

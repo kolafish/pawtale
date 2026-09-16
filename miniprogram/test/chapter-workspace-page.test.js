@@ -1530,12 +1530,18 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
 test("candidate remains separate from edited draft and only acceptance writes it", async () => {
   let accepted = 0;
   const candidate = chapterPreparationJob({ job_id: "candidate-job", status: "succeeded", outcome: "needs_review",
-    candidate_content: "十八岁那年，我第一次离开家，也第一次坐上长途火车。",
+    candidate_content: "十八岁那年，我第一次坐上长途火车。",
     candidate_base_version_id: "version-1",
+    candidate_diff_segments: [
+      { kind: "equal", text: "十八岁那年，我第一次" },
+      { kind: "deleted", text: "离开家" },
+      { kind: "modified", text: "坐上长途火车" },
+      { kind: "equal", text: "。" },
+    ],
     candidate_sections: [{
       section_id: "section-1",
       title: "离家前的准备",
-      content: "十八岁那年，我第一次离开家，也第一次坐上长途火车。",
+      content: "十八岁那年，我第一次坐上长途火车。",
     }],
   });
   const { page } = loadWorkspacePage({ voiceApiExports: {
@@ -1555,10 +1561,12 @@ test("candidate remains separate from edited draft and only acceptance writes it
   assert.equal(context.data.candidateMode, "changes");
   assert.equal(context.data.candidatePreviewVersion, "after");
   assert.match(context.data.candidateSummaryText, /1 个小节有变化/);
-  assert.equal(context.data.candidateChangedSections[0].display_content, candidate.candidate_content);
-  context.switchCandidateView({ currentTarget: { dataset: { version: "before" } } });
-  assert.equal(context.data.candidateChangedSections[0].display_content, "十八岁那年，我第一次离开家。");
+  assert.deepEqual(
+    context.data.candidateDiffSegments.map(({ kind, text }) => ({ kind, text })),
+    candidate.candidate_diff_segments,
+  );
   context.switchCandidateView({ currentTarget: { dataset: { mode: "whole" } } });
+  context.switchCandidateView({ currentTarget: { dataset: { version: "before" } } });
   assert.equal(context.data.candidateWholeContent, "十八岁那年，我第一次离开家。");
   context.switchCandidateView({ currentTarget: { dataset: { version: "after" } } });
   assert.equal(context.data.candidateWholeContent, candidate.candidate_content);

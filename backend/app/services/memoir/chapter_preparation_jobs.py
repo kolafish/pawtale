@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from difflib import SequenceMatcher
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirEditingJob
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import chapter_digests, chapter_generation, editing_jobs
 from app.services.memoir.access import load_memoir_project
@@ -25,7 +26,11 @@ _CHECKPOINT_KEYS = {
     "checkpoint_editor_notes",
     "checkpoint_model",
 }
-_PRIVATE_RESULT_KEYS = _CHECKPOINT_KEYS | {"candidate_sections"}
+_PRIVATE_RESULT_KEYS = _CHECKPOINT_KEYS | {
+    "candidate_diff_segments",
+    "candidate_sections",
+}
+_DIFF_EQUAL_MERGE_MAX_CHARS = 4
 _LEGACY_SECTION_UPGRADE_REVISION = "skip-empty-sections-v1"
 
 
@@ -52,6 +57,75 @@ def _public_result(result_json: dict) -> dict:
             and section.get("content")
         ]
     return result
+
+
+def _append_diff_segment(segments: list[dict[str, str]], kind: str, text: str) -> None:
+    if not text:
+        return
+    if segments and segments[-1]["kind"] == kind:
+        segments[-1]["text"] += text
+    else:
+        segments.append({"kind": kind, "text": text})
+
+
+def _candidate_diff_segments(before: str, after: str) -> list[dict[str, str]]:
+    opcodes = SequenceMatcher(None, before, after, autojunk=False).get_opcodes()
+    segments: list[dict[str, str]] = []
+    index = 0
+    while index < len(opcodes):
+        tag, before_start, before_end, after_start, after_end = opcodes[index]
+        if tag == "equal":
+            _append_diff_segment(segments, "equal", after[after_start:after_end])
+            index += 1
+            continue
+
+        index += 1
+        while index + 1 < len(opcodes):
+            equal = opcodes[index]
+            changed = opcodes[index + 1]
+            if (
+                equal[0] != "equal"
+                or changed[0] == "equal"
+                or equal[2] - equal[1] > _DIFF_EQUAL_MERGE_MAX_CHARS
+            ):
+                break
+            before_end = changed[2]
+            after_end = changed[4]
+            index += 2
+
+        before_text = before[before_start:before_end]
+        after_text = after[after_start:after_end]
+        if before_text and after_text:
+            _append_diff_segment(segments, "deleted", before_text)
+            _append_diff_segment(segments, "modified", after_text)
+        elif before_text:
+            _append_diff_segment(segments, "deleted", before_text)
+        else:
+            _append_diff_segment(segments, "added", after_text)
+    return segments
+
+
+async def _with_candidate_diff(
+    db: AsyncSession,
+    *,
+    state: dict[str, object],
+    project_id: str,
+    chapter_id: str,
+) -> dict[str, object]:
+    candidate_content = state.get("candidate_content")
+    base_version_id = state.get("candidate_base_version_id")
+    if not isinstance(candidate_content, str) or not candidate_content or not base_version_id:
+        return state
+    base = await db.get(MemoirBookChapterDraftVersion, str(base_version_id))
+    if base is None or base.project_id != project_id or base.chapter_id != chapter_id:
+        return state
+    return {
+        **state,
+        "candidate_diff_segments": _candidate_diff_segments(
+            base.content,
+            candidate_content,
+        ),
+    }
 
 
 def _job_state(
@@ -262,10 +336,15 @@ async def get_chapter_preparation_job(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    return _job_state(
+    return await _with_candidate_diff(
+        db,
+        state=_job_state(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            job=job,
+        ),
         project_id=project_id,
         chapter_id=chapter_id,
-        job=job,
     )
 
 
