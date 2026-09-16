@@ -84,7 +84,10 @@ from app.services.memoir.book_output_versions import (
     append_book_output_version,
     book_output_version_title,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    resolve_project_ai_model,
+    select_project_ai_model,
+)
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -577,7 +580,8 @@ async def suggest_book_output_titles(
         chapters=chapters,
         source_refs_by_chapter=refs_by_chapter,
     )
-    ai_model = select_project_ai_model(project, req.ai_model)
+    ai_model = resolve_project_ai_model(project, req.ai_model)
+    await db.commit()
     generated = await generate_title_suggestions(
         title=base_title,
         snapshot=snapshot,

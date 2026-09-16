@@ -25,7 +25,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import resolve_project_ai_model
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
@@ -326,7 +326,8 @@ async def preview_voice_transcript_edit(
         user_id=user_id,
         draft_text=req.draft_text,
     )
-    selected_ai_model = select_project_ai_model(context.project, req.ai_model)
+    selected_ai_model = resolve_project_ai_model(context.project, req.ai_model)
+    await db.commit()
     client = ai_client
     try:
         if client is None:

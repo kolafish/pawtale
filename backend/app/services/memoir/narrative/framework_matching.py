@@ -271,6 +271,9 @@ async def run_framework_matching_job(
         job.project_id,
         payload["ai_model"] if isinstance(payload.get("ai_model"), str) else None,
     )
+    # Framework initialization may write rows. Commit that short phase before
+    # waiting on the model so no database locks cross the provider call.
+    await db.commit()
     client = ai_client or get_ai_service(model)
     matches = await select_framework_matches(
         project_framework=project_framework,

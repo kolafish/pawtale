@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.memoir import (
     MemoirChatMessage,
@@ -43,9 +44,16 @@ async def claim_transcript_mutation_guard(
     utterance: MemoirVoiceUtterance,
     expected: TranscriptMutationGuard,
 ) -> bool:
-    if transcript_mutation_guard(utterance) != expected:
+    locked_utterance = await db.scalar(
+        select(MemoirVoiceUtterance)
+        .where(MemoirVoiceUtterance.id == utterance.id)
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_utterance is None or transcript_mutation_guard(locked_utterance) != expected:
         return False
-    message = utterance.chat_message
+    message = locked_utterance.chat_message
     if message is None:
         return False
     if source_text_hash(message.content_text) != expected.source_text_hash:
@@ -57,20 +65,16 @@ async def claim_transcript_mutation_guard(
         else MemoirChatMessage.transcript_version_id
         == expected.transcript_version_id
     )
-    result = await db.execute(
-        update(MemoirChatMessage)
+    locked_message_id = await db.scalar(
+        select(MemoirChatMessage.id)
         .where(
             MemoirChatMessage.id == message.id,
             MemoirChatMessage.content_text == message.content_text,
             version_filter,
         )
-        .values(
-            content_text=MemoirChatMessage.content_text,
-            transcript_version_id=MemoirChatMessage.transcript_version_id,
-            updated_at=MemoirChatMessage.updated_at,
-        )
+        .with_for_update()
     )
-    return result.rowcount == 1
+    return locked_message_id is not None
 
 
 async def schedule_ready_utterance_background_work(

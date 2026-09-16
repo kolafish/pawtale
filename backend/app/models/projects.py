@@ -1,7 +1,18 @@
 from datetime import datetime, date
 from typing import TYPE_CHECKING
 import uuid
-from sqlalchemy import String, Text, Integer, Date, DateTime, JSON, ForeignKey
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow_naive
@@ -54,6 +65,38 @@ class Project(Base):
     )
     memoir_book_outputs: Mapped[list["MemoirBookOutput"]] = relationship(
         "MemoirBookOutput", back_populates="project", cascade="all, delete-orphan",
+    )
+
+
+class MemoirProjectRevisionEvent(Base):
+    """Append-only content revision written by PostgreSQL triggers.
+
+    A global sequence provides a monotonic cache version without turning the
+    parent ``projects`` row into a lock shared by every memoir write.
+    """
+
+    __tablename__ = "memoir_project_revision_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "transaction_id",
+            name="uq_memoir_project_revision_events_transaction",
+        ),
+    )
+
+    revision: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    transaction_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+        server_default=func.now(),
+        nullable=False,
     )
 
 

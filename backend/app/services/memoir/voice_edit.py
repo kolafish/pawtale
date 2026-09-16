@@ -182,7 +182,13 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
 async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, req: VoiceEditApplyRequest) -> VoiceEditApplyResponse:
     await load_memoir_project(db, project_id, user_id)
     try:
-        await db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
+        # Serialize voice-edit applications without blocking the KEY SHARE lock
+        # used by append-only revision-event foreign-key checks.
+        await db.execute(
+            select(Project.id)
+            .where(Project.id == project_id)
+            .with_for_update(key_share=True)
+        )
         story = await _story(db, project_id, lock=True)
         try:
             signatures = TypeAdapter(dict[str, str]).validate_json(req.signature)

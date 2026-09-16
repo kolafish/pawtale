@@ -227,6 +227,7 @@ async def run_policy_outcome_evaluation_job(
             or settings.memoir_interview_policy_active_model.strip()
         )
         client = get_ai_service(selected_model or None)
+    await db.commit()
     outcome = await select_response_outcome(
         decision=decision,
         generated_message=generated_message,

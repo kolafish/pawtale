@@ -115,7 +115,7 @@ flowchart LR
 | `type` | 当前产品类型，回忆录项目应为 memoir |
 | `title`、`description` | 项目级展示信息 |
 | `metadata_json` | 方言、AI 模型偏好等非核心扩展信息 |
-| `memoir_data_revision` | 项目级单调版本，用于首页、书稿、章节工作台快照一致性 |
+| `memoir_data_revision` | 迁移前的项目版本基线；新变更读取追加式 revision event |
 
 来源：
 
@@ -131,8 +131,19 @@ flowchart LR
 编辑原则：
 
 - 项目资料可以修改；
-- `memoir_data_revision` 由服务端随业务可见变更推进，不由用户编辑；
+- `memoir_data_revision` 是迁移前的版本基线；当前服务端通过
+  `memoir_project_revision_events` 为每个发生业务可见变更的事务追加一个单调版本，
+  不再回写 `projects` 行；
+- `memoir_editing_jobs` 的领取、心跳、进度和结束状态不属于内容版本，不能推进内容 revision；
 - `metadata_json` 只能承载扩展配置，不能替代素材、小节、章节等核心模型。
+
+事务与加锁约束：
+
+- 后台任务遵循“读取快照 → 提交并释放事务 → 调用外部模型 → 按稳定顺序加行锁并复核 → 短事务写回”；
+- 禁止在持有数据库写锁时等待 LLM、ASR、Embedding、图片生成或其他网络调用；
+- 同一事务锁多条素材时按稳定 ID 顺序获取；修改讲述文字时先锁
+  `memoir_voice_utterances`，再锁对应 `memoir_chat_messages`；
+- 任务表只承担调度和租约，不得通过触发器把任务心跳变成项目级内容锁。
 
 ### 2.2 VoiceSession：一次访谈
 
