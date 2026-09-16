@@ -72,7 +72,6 @@ export interface VoiceChatData {
   followUpLoading: boolean;
   followUpError: string;
   lastFollowUpSourceMessageId: string;
-  dismissedFollowUpMessageId: string;
   canRequestFollowUp: boolean;
   followUpMessageId: string;
   followUpAudioFileId: string;
@@ -139,9 +138,9 @@ export interface VoiceChatData {
   assistantDisplayText: string;
   showTTSProgress: boolean;
   showAssistantActions: boolean;
+  showTranscriptStage: boolean;
   replayButtonText: string;
   followUpButtonText: string;
-  showSkipFollowUp: boolean;
   showStageStatus: boolean;
   stageStatusClass: string;
   stageStatusText: string;
@@ -227,7 +226,6 @@ export function initialVoiceChatData(): VoiceChatData {
     followUpLoading: false,
     followUpError: "",
     lastFollowUpSourceMessageId: "",
-    dismissedFollowUpMessageId: "",
     canRequestFollowUp: false,
     followUpMessageId: "",
     followUpAudioFileId: "",
@@ -293,10 +291,10 @@ export function initialVoiceChatData(): VoiceChatData {
     showAssistantTTS: false,
     assistantDisplayText: "小余会先问一句，帮您开始讲。",
     showTTSProgress: false,
-    showAssistantActions: true,
+    showAssistantActions: false,
+    showTranscriptStage: false,
     replayButtonText: "读给我听",
     followUpButtonText: "让小余问一句",
-    showSkipFollowUp: false,
     showStageStatus: true,
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
@@ -322,7 +320,7 @@ export function initialVoiceChatData(): VoiceChatData {
     showHistoryLines: false,
     historyToggleText: "查看",
     transcriptLineViews: [],
-    controlHintText: "说一两句也可以，我会帮您记下来。",
+    controlHintText: "现在可以说了",
     micButtonClass: "mic-button disabled",
     micButtonDisabled: true,
     micButtonText: "同意后开始说话",
@@ -387,9 +385,9 @@ export type VoiceChatViewPatch = Pick<
   | "assistantDisplayText"
   | "showTTSProgress"
   | "showAssistantActions"
+  | "showTranscriptStage"
   | "replayButtonText"
   | "followUpButtonText"
-  | "showSkipFollowUp"
   | "showStageStatus"
   | "stageStatusClass"
   | "stageStatusText"
@@ -511,8 +509,13 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     && !state.completionIssueLoading
     && !state.completionIssue;
   const showCompletionIssuePanel = isBookCompletion;
+  const showTranscriptProcessing = !isHumanInterview
+    && !state.recording
+    && state.followUpLoading
+    && Boolean(state.latestTranscriptText);
   const showAssistantPanel = !isHumanInterview
     && !state.recording
+    && !showTranscriptProcessing
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview
     && !completionRoundFinished
@@ -520,6 +523,12 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     && !state.recordingStarting
     && state.voiceAuthorizationAgreed;
   const showControlBar = !showHumanRecordActions && !completionRoundFinished;
+  const showTranscriptStage = isHumanInterview
+    || isBookCompletion
+    || state.recording
+    || showTranscriptProcessing
+    || Boolean(!showAssistantPanel && state.voiceAuthorizationAgreed && (state.liveText || state.latestTranscriptText));
+  const hasSavedNarration = state.transcriptLines.some((line) => line.role !== "assistant");
   const showStageStatus = !isHumanInterview || Boolean(state.error);
   const showCaptureStrip = (!isHumanInterview || state.recording)
     && !completionRoundFinished;
@@ -539,20 +548,20 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   } else if (state.followUpLoading) {
     stageStatusText = state.latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题";
   }
-  let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”";
+  let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了";
   if (state.recording) {
     liveDisplayText = state.liveText || (isHumanInterview ? "等待转写..." : "直接说就行，我会帮您记下来");
   } else if (state.followUpLoading && state.latestTranscriptText) {
-    liveDisplayText = "刚才那段正在整理，请稍等";
+    liveDisplayText = state.liveText || state.latestTranscriptText;
   } else if (state.followUpLoading && !hasAssistantPrompt) {
     liveDisplayText = "小余正在准备第一句话";
   } else if (state.followUpTTSLoading || state.followUpTTSPlaying || hasAssistantPrompt || state.selectedOpeningTopicText) {
-    liveDisplayText = "听完后，点下方“我来讲了”开始回答";
+    liveDisplayText = "现在可以说了";
   } else {
     liveDisplayText = state.liveText
       || state.latestTranscriptText
       || (state.followUpLoading ? "小余正在准备第一句话" : (
-        isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”"
+        isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了"
       ));
   }
   if (isBookCompletion && !state.recording && !assistantBusy) {
@@ -579,13 +588,13 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   ].filter(Boolean).join(" ");
   let controlHintText = isHumanInterview
     ? ""
-    : (isBookCompletion ? "只说您记得的部分就可以。" : "说一两句也可以，我会帮您记下来。");
+    : (isBookCompletion ? "只说您记得的部分就可以" : "现在可以说了");
   if (state.recording) {
     controlHintText = isHumanInterview ? "" : "说完请点这里";
   } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
-    controlHintText = "小余先问一句，稍等一下。";
+    controlHintText = "小余先问一句，稍等一下";
   } else if (!isHumanInterview && assistantBusy) {
-    controlHintText = "点这里就可以开始说";
+    controlHintText = "听完就可以开始说";
   }
   if (completionRoundFinished) {
     controlHintText = "";
@@ -604,7 +613,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   } else if (!isHumanInterview && assistantBusy) {
     micButtonText = "我来讲了";
   } else if (state.primaryActionText === "开始说话") {
-    micButtonText = isHumanInterview ? `记录${speakerRoleLabel(state.speakerRole)}` : "我来说一段";
+    micButtonText = isHumanInterview ? `记录${speakerRoleLabel(state.speakerRole)}` : "我来讲了";
   } else if (state.primaryActionText === "继续说话") {
     micButtonText = "继续讲";
   }
@@ -686,6 +695,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
         ? (completionRoundFinished ? "本次补充已结束" : "小余正在问这一章")
         : "小余想听您讲讲"),
     showAssistantOpening: !isBookCompletion
+      && !hasAssistantPrompt
       && !state.latestTranscriptText
       && !state.followUpLoading
       && !state.followUpError
@@ -696,11 +706,10 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     assistantDisplayText: state.assistantPromptText
       || (state.followUpLoading ? state.assistantLoadingText : (state.followUpError || state.assistantEmptyText)),
     showTTSProgress: Boolean(state.assistantPromptText && state.followUpTTSPlaying),
-    showAssistantActions: !completionRoundFinished,
-    replayButtonText: state.followUpAudioFileId ? "重听一遍" : (state.followUpTTSError ? "重试朗读" : "读给我听"),
+    showAssistantActions: !completionRoundFinished && showAssistantPanel,
+    showTranscriptStage,
+    replayButtonText: state.followUpTTSError ? "重试朗读" : (hasAssistantPrompt ? "重听一遍" : "读给我听"),
     followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),
-    showSkipFollowUp: !isBookCompletion
-      && Boolean(state.assistantPromptText && !state.followUpLoading && !state.followUpError),
     showStageStatus,
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
@@ -719,8 +728,8 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),
     historyCountText: `${state.transcriptLines.length} 段 · ${state.totalTranscriptCharCount} 字`,
-    showHistoryPanel: state.transcriptLines.length > 0,
-    showHistoryLines: state.historyExpanded && state.transcriptLines.length > 0,
+    showHistoryPanel: hasSavedNarration,
+    showHistoryLines: state.historyExpanded && hasSavedNarration,
     historyToggleText: state.historyExpanded ? "收起" : "查看",
     transcriptLineViews: previous && previous.transcriptLines === state.transcriptLines
       && previous.interviewType === state.interviewType
@@ -774,7 +783,6 @@ type VoiceSessionPatchCurrent = Pick<
   | "currentCompletionIssueId"
   | "transcriptLines"
   | "lastFollowUpSourceMessageId"
-  | "dismissedFollowUpMessageId"
   | "followUpLoading"
   | "followUpTTSStateText"
   | "recoveryNotice"
@@ -873,7 +881,6 @@ function assistantSessionPatch(
   return {
     guidanceMode,
     ...assistantTranscriptState(lines, {
-      dismissedFollowUpMessageId: current.dismissedFollowUpMessageId,
       guidanceMode,
       lastFollowUpSourceMessageId,
       followUpLoading: current.followUpLoading,

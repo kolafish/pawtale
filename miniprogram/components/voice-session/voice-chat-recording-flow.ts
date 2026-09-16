@@ -250,7 +250,6 @@ export function voiceFinalTranscriptResult(
       errorKindText: "",
       assistantPromptText: "",
       selectedOpeningTopicText: "",
-      dismissedFollowUpMessageId: "",
       followUpMessageId: "",
       followUpAudioFileId: "",
       followUpLoading: false,
@@ -285,7 +284,6 @@ export function noAnswerPromptStartPatch(): VoiceChatPatch {
 
 export function noAnswerPromptQueuedPatch(autoListenAfterPlayback: boolean): VoiceChatPatch {
   return {
-    dismissedFollowUpMessageId: "",
     followUpTTSError: "",
     persistenceStateText: autoListenAfterPlayback ? "小余正在确认" : "已暂停收音",
     autoListenStateText: autoListenAfterPlayback ? "小余问完会继续听" : "已暂停，可点继续说话",
