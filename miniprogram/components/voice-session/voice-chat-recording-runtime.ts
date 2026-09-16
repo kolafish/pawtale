@@ -7,7 +7,11 @@ import type {
 } from "../../domain/memoir-voice-session";
 import type { VoiceSessionExit } from "./events";
 import { trackAuditAction } from "../../services/audit-tracker";
-import { AUTO_STOP_SILENCE_MS, AUTO_STOP_MIN_RECORDING_MS } from "../../services/voice-activity-detector";
+import {
+  AUTO_LISTEN_NO_ANSWER_MS,
+  AUTO_STOP_SILENCE_MS,
+  AUTO_STOP_MIN_RECORDING_MS,
+} from "../../services/voice-activity-detector";
 import { assistantTurnQueueItem } from "../../services/voice-assistant-turn-queue";
 import {
   classifyVoiceClientConnectionError,
@@ -50,7 +54,6 @@ import {
   voiceRecordingUnavailablePatch,
 } from "./voice-chat-recording-flow";
 
-const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 
 export interface VoiceChatRecordingRuntimeMethods {

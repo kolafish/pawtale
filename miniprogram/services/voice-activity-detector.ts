@@ -2,6 +2,7 @@ import { estimatePcm16Level, pcmFrameDurationMs } from "./memoir-streaming-asr-p
 
 export const AUTO_STOP_SILENCE_MS = 3500;
 export const AUTO_STOP_MIN_RECORDING_MS = 2000;
+export const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 
 export interface VoiceActivityDetectorOptions {
   silenceLevelThreshold: number;
