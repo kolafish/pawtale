@@ -53,6 +53,7 @@ from app.services.memoir.section_roles import (
 )
 from app.services.memoir.sections import (
     assign_material_to_section,
+    lock_chapter_structure,
     mark_section_structure_changed,
 )
 from app.services.memoir.transcript_projection import (
@@ -661,6 +662,13 @@ async def regenerate_chapter_sections(
         pending_assignments=pending_assignments,
     )
 
+    # The expensive model work runs without a transaction. Lock only for the
+    # final revalidation and atomic structure replacement.
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     chapter = await _load_chapter(
         db,
         project_id=project_id,
