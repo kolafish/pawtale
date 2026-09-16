@@ -51,10 +51,10 @@
   content: "";
   position: absolute;
   z-index: 0;
-  left: 25rpx;
+  left: 24rpx;
   top: 42rpx;
   bottom: 72rpx;
-  width: 2rpx;
+  width: 3rpx;
   background: linear-gradient(180deg, var(--ui-accent-border), #d8c8ba 74%, rgba(216, 200, 186, 0));
 }
 
@@ -69,22 +69,24 @@
 
 .overview-symbol {
   position: absolute;
-  left: -70rpx;
-  top: 23rpx;
-  width: 48rpx;
-  height: 48rpx;
+  left: -75rpx;
+  top: 24rpx;
+  width: 56rpx;
+  height: 56rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--ui-success-surface);
-  box-shadow: 0 0 0 5rpx rgba(255, 253, 250, 0.9);
+  box-shadow:
+    0 0 0 5rpx rgba(255, 253, 250, 0.9),
+    0 6rpx 14rpx rgba(88, 112, 82, 0.08);
 }
 
 .overview-sprout {
   position: relative;
-  width: 4rpx;
-  height: 21rpx;
+  width: 5rpx;
+  height: 25rpx;
   border-radius: 999rpx;
   background: var(--ui-success-text);
   transform: rotate(-5deg);
@@ -94,13 +96,13 @@
 .overview-sprout::after {
   content: "";
   position: absolute;
-  width: 15rpx;
-  height: 9rpx;
+  width: 18rpx;
+  height: 11rpx;
   background: #87a17e;
 }
 
-.overview-sprout::before { top: 1rpx; right: 1rpx; border-radius: 100% 0; transform: rotate(18deg); }
-.overview-sprout::after { top: 9rpx; left: 1rpx; border-radius: 0 100%; transform: rotate(-18deg); }
+.overview-sprout::before { top: 1rpx; right: 2rpx; border-radius: 100% 0; transform: rotate(18deg); }
+.overview-sprout::after { top: 10rpx; left: 2rpx; border-radius: 0 100%; transform: rotate(-18deg); }
 
 .overview-card {
   width: 100%;
@@ -140,19 +142,47 @@
 .chapter-node {
   position: absolute;
   z-index: 2;
-  left: 1rpx;
+  left: -1rpx;
   top: 28rpx;
-  width: 48rpx;
-  height: 48rpx;
+  width: 52rpx;
+  height: 52rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--chapter-tone);
   color: var(--ui-on-accent);
-  font-size: 24rpx;
+  font-size: 26rpx;
   font-weight: 800;
   box-shadow: 0 0 0 5rpx rgba(255, 253, 250, 0.9);
+}
+
+.chapter-node::before {
+  content: "";
+  position: absolute;
+  right: -5rpx;
+  top: -4rpx;
+  width: 3rpx;
+  height: 16rpx;
+  border-radius: 999rpx;
+  background: rgba(88, 112, 82, 0.56);
+  opacity: 0.72;
+  transform: rotate(38deg);
+  transform-origin: bottom center;
+}
+
+.chapter-node::after {
+  content: "";
+  position: absolute;
+  right: -10rpx;
+  top: -6rpx;
+  width: 20rpx;
+  height: 12rpx;
+  border-radius: 100% 0 100% 0;
+  background: var(--ui-success-text);
+  opacity: 0.58;
+  transform: rotate(-16deg);
+  transform-origin: left bottom;
 }
 
 .chapter-card {

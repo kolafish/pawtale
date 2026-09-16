@@ -163,8 +163,13 @@
     </view>
     <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
       <view class="home-growth-copy">
-        <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
-        <text class="home-story-progress-detail">{{growthNoticeText}}</text>
+        <view class="home-growth-icon" aria-hidden="true">
+          <view class="home-growth-sprout"></view>
+        </view>
+        <view class="home-growth-text">
+          <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
+          <text class="home-story-progress-detail ui-tabular">{{growthNoticeText}}</text>
+        </view>
       </view>
       <view class="home-growth-actions">
         <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button" bindtap="viewStoryGrowth">看看变化</button>

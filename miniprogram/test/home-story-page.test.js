@@ -110,6 +110,7 @@ test("story marks new sections and expands their chapter only when the reader as
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
+  assert.equal(context.data.growthNoticeText, "新长出 1 个小节：《章节 2 · 小节 2》");
   assert.equal(context.data.story.chapters[1].expanded, false);
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });

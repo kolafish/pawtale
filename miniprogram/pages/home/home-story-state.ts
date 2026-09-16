@@ -58,6 +58,12 @@ export function emptyHomeStoryData(): HomeStoryData {
   };
 }
 
+function namedNewSections(labels: string[]): string {
+  const visible = labels.slice(0, 3).map(label => `《${label}》`).join("、");
+  if (!visible) return "";
+  return `：${visible}${labels.length > 3 ? "等" : ""}`;
+}
+
 export function homeStorySnapshotData(
   snapshot: MemoirStorySnapshot,
   previous: StoryViewData,
@@ -69,6 +75,7 @@ export function homeStorySnapshotData(
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
   const newChapters = new Set<string>(), newSections = new Set<string>();
   const updatedChapters = new Set<string>(), updatedSections = new Set<string>();
+  const newSectionLabels = new Map<string, string>();
   const sectionParents = new Set<string>();
   let bookUpdated = false;
   let growthTarget: StoryGrowthTarget | null = null;
@@ -82,6 +89,10 @@ export function homeStorySnapshotData(
         const section = chapter.sections.find(item => item.id === change.section_id);
         if (!section) continue;
         (added ? newSections : updatedSections).add(section.id);
+        if (added) newSectionLabels.set(
+          section.id,
+          chapter.title === section.title ? section.title : `${chapter.title} · ${section.title}`,
+        );
         sectionParents.add(chapter.id);
         section.growthLabel = added || section.growthLabel === "新长出" ? "新长出" : "已补充";
         section.highlighted = true;
@@ -106,7 +117,7 @@ export function homeStorySnapshotData(
     + [...updatedChapters].filter(id => !newChapters.has(id) && !sectionParents.has(id)).length;
   const summary = [
     newChapters.size ? `新长出 ${newChapters.size} 章` : "",
-    newSections.size ? `新长出 ${newSections.size} 个小节` : "",
+    newSections.size ? `新长出 ${newSections.size} 个小节${namedNewSections([...newSectionLabels.values()])}` : "",
     updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
     bookUpdated ? "书稿已更新" : "",
   ].filter(Boolean).join("，");
