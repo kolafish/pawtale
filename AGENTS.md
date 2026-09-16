@@ -4,7 +4,7 @@
 
 除非用户明确要求只做本地修改、不开 PR 或不 merge，提交类任务默认按以下流程交付：
 
-1. 从最新 `origin/main` 创建独立 `codex/*` 分支，严格按任务范围实现；修复 issue 时在 PR 中关联 issue。
+1. 使用独立 `codex/*` 分支并保留任务所需的现有基线，严格按任务范围实现；修复 issue 时在 PR 中关联 issue。
 2. push 到 `origin` 并创建指向 `main` 的 PR。
 3. 在当前线程完成 code review，不另开线程或独立 agent；逐条处理 review 结论并更新 PR。
 4. 按 Testing Strategy 运行与改动风险匹配的最小验证。
