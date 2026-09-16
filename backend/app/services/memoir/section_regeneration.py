@@ -53,6 +53,8 @@ from app.services.memoir.section_roles import (
 )
 from app.services.memoir.sections import (
     assign_material_to_section,
+    lock_chapter_structure,
+    lock_plan_structure,
     mark_section_structure_changed,
 )
 from app.services.memoir.transcript_projection import (
@@ -661,6 +663,17 @@ async def regenerate_chapter_sections(
         pending_assignments=pending_assignments,
     )
 
+    # The expensive model work runs without a transaction. Lock only for the
+    # final revalidation and atomic structure replacement.
+    plan = await lock_plan_structure(
+        db,
+        project_id=project_id,
+    )
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     chapter = await _load_chapter(
         db,
         project_id=project_id,
@@ -751,9 +764,6 @@ async def regenerate_chapter_sections(
             material.include_in_book = assignment.material.include_in_book
             db.add(material)
 
-    plan = await db.get(MemoirBookPlan, chapter.plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="章节规划不存在")
     await mark_section_structure_changed(
         db,
         project_id=project_id,

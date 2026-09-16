@@ -17,7 +17,12 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
     MemoirTranscriptVersion,
 )
-from app.services.memoir import chapter_generation, section_regeneration, story_tree_growth
+from app.services.memoir import (
+    chapter_generation,
+    section_regeneration,
+    sections as memoir_sections,
+    story_tree_growth,
+)
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
@@ -1173,6 +1178,130 @@ async def _stopped_growth_job(client, test_db, project_id, text):
     test_db.add(job)
     await test_db.commit()
     return source, job
+
+
+async def test_story_growth_repairs_section_order_gap_before_creating_section(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    test_db.add(MemoirSection(
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        title="保留的旧小节",
+        sort_order=2,
+    ))
+    await test_db.commit()
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "照着教程做茄子饼失败的经历。",
+    )
+
+    async def decide(**_kwargs):
+        return [story_tree_growth.GrowthGroup(
+            utterance_ids=[source["utterance_id"]],
+            action="create_section",
+            chapter_id=chapters[0].id,
+            new_section_title="茄子饼失败的经历",
+        )]
+
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+
+    assert result.status.value == "succeeded"
+    chapter_sections = list((await test_db.scalars(
+        select(MemoirSection)
+        .where(MemoirSection.chapter_id == chapters[0].id)
+        .order_by(MemoirSection.sort_order)
+    )).all())
+    assert [section.sort_order for section in chapter_sections] == [0, 1, 2]
+    created = next(
+        section for section in chapter_sections
+        if section.title == "茄子饼失败的经历"
+    )
+    assert await test_db.scalar(select(MemoirSectionMaterial.id).where(
+        MemoirSectionMaterial.section_id == created.id,
+        MemoirSectionMaterial.utterance_id == source["utterance_id"],
+    ))
+
+
+async def test_delete_section_compacts_remaining_order(client, test_db):
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    for title in ("中间小节", "末尾小节"):
+        response = await client.post(
+            f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections",
+            json={"title": title},
+        )
+        assert response.status_code == 200, response.text
+
+    middle = await test_db.scalar(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+        MemoirSection.title == "中间小节",
+    ))
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    await memoir_sections.delete_section(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        section_id=middle.id,
+    )
+
+    remaining_orders = list((await test_db.scalars(
+        select(MemoirSection.sort_order)
+        .where(MemoirSection.chapter_id == chapters[0].id)
+        .order_by(MemoirSection.sort_order)
+    )).all())
+    assert remaining_orders == [0, 1]
+
+
+async def test_concurrent_section_creation_serializes_chapter_order(
+    client, test_db,
+):
+    import asyncio
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from app.schemas.memoir_sections import MemoirSectionMaterialPlacementRequest
+    from app.services.memoir.sections import place_material
+
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    sources = [
+        await create_test_voice_transcript(
+            client, test_db, text, project_id=project_id,
+        )
+        for text in ("第一次新讲述。", "第二次新讲述。")
+    ]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    session_factory = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async def create(source, title):
+        async with session_factory() as db:
+            return await place_material(
+                db,
+                user_id=user_id,
+                project_id=project_id,
+                utterance_id=source["utterance_id"],
+                req=MemoirSectionMaterialPlacementRequest(
+                    target_chapter_id=chapters[0].id,
+                    new_section_title=title,
+                ),
+            )
+
+    await asyncio.gather(
+        create(sources[0], "并发新小节一"),
+        create(sources[1], "并发新小节二"),
+    )
+
+    async with session_factory() as db:
+        created_sections = list((await db.scalars(
+            select(MemoirSection)
+            .where(MemoirSection.chapter_id == chapters[0].id)
+            .order_by(MemoirSection.sort_order)
+        )).all())
+    assert [section.sort_order for section in created_sections] == [0, 1, 2]
+    assert {section.title for section in created_sections} >= {
+        "并发新小节一", "并发新小节二",
+    }
 
 
 async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, monkeypatch):
