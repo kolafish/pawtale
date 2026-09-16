@@ -60,7 +60,7 @@
           bindtap="openChapter"
           hover-class="ui-subtle-action-hover"
           aria-role="button"
-          aria-label="{{item.title}}，{{item.memoryText}}，{{item.statusText}}"
+          aria-label="{{item.title}}，{{item.storyCountText}}，{{item.statusText}}"
         >
           <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">
             <view class="story-leaf-shape"></view>
@@ -70,7 +70,7 @@
               <text class="story-row-title">{{item.title}}</text>
               <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
             </view>
-            <text class="story-row-meta ui-tabular">{{item.memoryText}}</text>
+            <text class="story-row-meta ui-tabular">{{item.storyCountText}}</text>
           </view>
           <text class="story-status story-status-{{item.statusTone}}">{{item.statusText}}</text>
           <text class="story-row-arrow" aria-hidden="true">›</text>

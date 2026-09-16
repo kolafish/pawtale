@@ -54,31 +54,35 @@ function story({ stage = 1, chapters = [], readable = false, bookChapters = 0, b
   };
 }
 
-function chapter(id, title, memoryCount, statusText, statusTone, tone, featured = true) {
+function chapter(id, title, storyCount, statusText, statusTone, tone) {
   return {
     id,
     hasSections: true,
     title,
-    memoryText: `${memoryCount} 段回忆`,
+    storyCountText: `${storyCount} 个故事`,
     statusText,
     statusTone,
     readable: statusTone === "rich",
     state: statusTone === "rich" ? "settled" : "attention",
-    featured,
+    featured: true,
     tone,
     highlighted: false,
     growthLabel: "",
     growthAnimating: false,
-    sections: [{ id: `${id}-story`, title: `${title}的故事`, highlighted: false, growthLabel: "", growthAnimating: false }],
+    sections: Array.from({ length: storyCount }, (_, index) => ({
+      id: `${id}-story-${index + 1}`,
+      title: `${title}的故事 ${index + 1}`,
+      highlighted: false,
+      growthLabel: "",
+      growthAnimating: false,
+    })),
   };
 }
 
 const richChapters = [
-  chapter("childhood", "童年回忆", 11, "已丰富", "rich", "clay"),
-  chapter("meals", "日常饮食", 4, "可继续聊", "continue", "sun"),
-  chapter("exercise", "运动日常", 2, "刚开始", "starting", "leaf"),
-  chapter("work", "工作岁月", 7, "已整理", "quiet", "clay", false),
-  chapter("family", "家人和朋友", 5, "待您确认", "confirm", "sun", false),
+  chapter("childhood", "童年回忆", 3, "还可以聊聊", "continue", "clay"),
+  chapter("meals", "日常饮食", 4, "已经很丰富", "rich", "sun"),
+  chapter("exercise", "运动日常", 2, "已经很丰富", "rich", "leaf"),
 ];
 
 function baseState() {
@@ -101,10 +105,10 @@ function baseState() {
     voiceAuthorizationAgreed: true,
     voiceAuthorizationRequested: false,
     greetingText: "你好，Kola",
-    headerSubtitleText: "继续讲述，让生活的故事慢慢长成一棵树。",
+    headerSubtitleText: "",
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
-    primaryVoiceButtonTitle: "继续讲故事",
+    primaryVoiceButtonTitle: "讲个新故事",
     showMoreActions: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
@@ -204,7 +208,7 @@ function stateFixtures() {
         growthNoticeTitle: "故事树长出了新内容",
         growthNoticeText: "新长出 1 个故事：《童年回忆 · 夏天的河边》",
         growthNoticeIcon: "/assets/story-tree/chapter-sprig.png",
-        growthTarget: { chapterId: "childhood", sectionId: "childhood-story" },
+        growthTarget: { chapterId: "childhood", sectionId: "childhood-story-1" },
         narrationSaved: true,
         story: story({
           stage: 5,
@@ -223,7 +227,7 @@ function stateFixtures() {
       data: {
         ...base,
         storyError: "进度暂未刷新，已保存的讲述和故事仍在，稍后会再试。",
-        reviewNoticeText: "2 个故事等您确认 · 1 个故事可以继续聊",
+        reviewNoticeText: "2 个故事等您确认",
         reviewNoticeDetail: "书里有 1 处等您确认",
         reviewNoticeAction: "issues",
       },

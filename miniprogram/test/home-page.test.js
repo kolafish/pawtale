@@ -183,6 +183,14 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
+test("home routes the hero to a new story and the resume card to the prior context", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
+  assert.match(pageWxml, /class="resume-primary-action[\s\S]*?bindtap="resumeLastStory"/);
+  assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
+});
+
 test("home places the story review notice after the story tree", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   const storyTreeIndex = pageWxml.indexOf("<story-tree");
@@ -287,8 +295,8 @@ test("home view patch keeps first-screen template state simple", () => {
     },
     {
       greetingText: "你好，余主任",
-      headerSubtitleText: "继续讲述，让生活的故事慢慢长成一棵树。",
-      primaryVoiceButtonTitle: "继续讲故事",
+      headerSubtitleText: "",
+      primaryVoiceButtonTitle: "讲个新故事",
       voiceStartButtonClass: "button-blocked",
       voiceStartButtonHoverClass: "none",
       showVoiceAuthorizationPanel: false,
@@ -314,7 +322,7 @@ test("home start action follows account, project, story and completion states", 
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
   assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
-  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "继续讲故事");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
   assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
@@ -676,7 +684,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
   assert.deepEqual(navigations, []);
   assert.deepEqual(context.data.voiceEntry, { voiceSessionId: "voice/1", projectId: "project/1", mode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration", projectTitle: "爷爷的故事" });
@@ -729,7 +737,7 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(context.data.voiceEntry.mode, "free_narration");
 });
 
-test("home daily actions create free narration and human interview sessions", async () => {
+test("home keeps new-story and resume actions distinct across narration modes", async () => {
   const createdSessions = [];
   const navigations = [];
   global.wx = {
@@ -768,16 +776,21 @@ test("home daily actions create free narration and human interview sessions", as
 
   await page.startPrimaryVoiceChat.call(context);
   context.data.voiceEntry = null; // The prior component has completed and unmounted.
+  await context.resumeLastStory();
+  context.data.voiceEntry = null;
   context.selectNarrationMode({ detail: { value: "human_interview" } });
   await context.startPrimaryVoiceChat();
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
-  assert.equal(createdSessions[0].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
-  assert.equal(createdSessions[1].input.guidance_mode, "free_narration");
-  assert.equal(createdSessions[1].input.interview_type, "human_interview");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[0].input.metadata_json.resume_hint, undefined);
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
-  assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
+  assert.equal(createdSessions[1].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
+  assert.equal(createdSessions[2].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[2].input.interview_type, "human_interview");
+  assert.equal(createdSessions[2].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[2].input.metadata_json.resume_hint, undefined);
+  assert.equal(createdSessions[2].input.metadata_json.interview_type, "human_interview");
   assert.equal(navigations.length, 0);
   assert.equal(context.data.voiceEntry.interviewType, "human_interview");
 });
