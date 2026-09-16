@@ -183,8 +183,12 @@ test("home exposes mini program share entry points", () => {
 
 test("home places the story review notice after the story tree", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const storyTreeIndex = pageWxml.indexOf("<story-tree");
+  const reviewNoticeIndex = pageWxml.indexOf('wx:if="{{reviewNoticeText}}"');
 
-  assert.ok(pageWxml.indexOf("<story-tree") < pageWxml.indexOf('wx:if="{{reviewNoticeText}}"'));
+  assert.notEqual(storyTreeIndex, -1);
+  assert.notEqual(reviewNoticeIndex, -1);
+  assert.ok(storyTreeIndex < reviewNoticeIndex);
 });
 
 test("home supports a local large text mode without changing the default class", () => {
