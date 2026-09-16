@@ -55,6 +55,9 @@ async def test_existing_message_metadata_suppresses_same_progress() -> None:
     context = build_progress_prompt_context(_snapshot())
 
     class FakeSession:
+        async def scalar(self, _statement):
+            return None
+
         async def scalars(self, _statement):
             return [{"progress_update": context.progress_update}]
 

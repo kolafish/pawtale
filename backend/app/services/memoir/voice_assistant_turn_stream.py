@@ -85,18 +85,30 @@ async def _progress_announcement_already_used(
 ) -> bool:
     if not announcement_key:
         return False
+    current_message_id = await db.scalar(
+        select(MemoirChatMessage.id)
+        .where(
+            MemoirChatMessage.project_id == project_id,
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.metadata_json["progress_announcement_key"].as_string()
+            == announcement_key,
+        )
+        .limit(1)
+    )
+    if current_message_id is not None:
+        return True
+
     metadata_rows = await db.scalars(
         select(MemoirChatMessage.metadata_json)
         .where(
             MemoirChatMessage.project_id == project_id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.metadata_json["progress_announcement_key"].as_string().is_(None),
         )
     )
     for metadata in metadata_rows:
         if not isinstance(metadata, dict):
             continue
-        if metadata.get("progress_announcement_key") == announcement_key:
-            return True
         legacy_update = metadata.get("progress_update")
         if isinstance(legacy_update, dict) and progress_announcement_key(legacy_update) == announcement_key:
             return True
