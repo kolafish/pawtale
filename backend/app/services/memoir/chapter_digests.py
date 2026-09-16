@@ -588,6 +588,9 @@ async def generate_or_reuse_chapter_digest(
                 "current_section_title": "",
             }
         )
+    # Stale-cache bookkeeping is complete. The context is a value snapshot and
+    # is revalidated after generation, so no transaction needs to span the call.
+    await db.commit()
     timeout_seconds = ai_text_timeout_seconds(
         CHAPTER_DIGEST_POLICY.timeout_profile
     )

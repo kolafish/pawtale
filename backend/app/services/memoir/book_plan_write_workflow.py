@@ -297,11 +297,14 @@ async def generate_book_plan(
     )
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
+    project_title = project.title
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
+    await db.commit()
     generated = await _generate_book_plan_from_sources(
-        project_title=project.title,
+        project_title=project_title,
         sources=sources,
         max_chapters=req.max_chapters,
-        ai_model=select_project_ai_model(project, req.ai_model),
+        ai_model=selected_ai_model,
         ai_client=ai_client,
     )
     return await _replace_plan(
@@ -821,13 +824,15 @@ async def generate_book_chapter_title(
         allow_admin=allow_admin,
     )
     refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
+    await db.commit()
     generated = await _generate_chapter_title_from_sources(
         sources=_chapter_title_source_digests(
             chapter,
             sources,
             source_refs=refs_by_chapter.get(chapter.id, []),
         ),
-        ai_model=select_project_ai_model(project, req.ai_model),
+        ai_model=selected_ai_model,
         ai_client=ai_client,
     )
     return await _save_chapter_title(

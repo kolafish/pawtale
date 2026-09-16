@@ -163,6 +163,9 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     timeout = ai_text_timeout_seconds(policy.timeout_profile)
     system = SYSTEM_PROMPT + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
+    # The proposal and its signatures are immutable snapshots. Do not retain a
+    # database transaction while the model is producing the preview.
+    await db.commit()
     started = time.monotonic()
     try:
         generated = await client.generate_structured(system, payload, output_model=VoiceEditProposal, requested_model=model, temperature=0, max_tokens=policy.max_tokens, timeout=timeout, max_attempts=1)
