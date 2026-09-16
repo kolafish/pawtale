@@ -145,13 +145,6 @@
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
     <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory" loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
     <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
-    <view wx:if="{{reviewNoticeText}}" class="home-review-notice" aria-live="polite">
-      <view class="home-review-copy">
-        <text class="home-review-text">{{reviewNoticeText}}</text>
-        <text wx:if="{{reviewNoticeDetail}}" class="home-review-text">{{reviewNoticeDetail}}</text>
-      </view>
-      <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
-    </view>
     <view wx:if="{{candidateNoticeText}}" class="home-review-notice" aria-live="polite">
       <view class="home-review-copy"><text class="home-review-text">{{candidateNoticeText}}</text></view>
       <button size="mini" class="home-inline-action ui-button" bindtap="openChapterCandidate">查看新稿 ›</button>
@@ -179,6 +172,13 @@
     <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && hasStories}}" can-voice-edit="{{hasProject}}"
       bind:voiceedit="openVoiceEdit" bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
       bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
+    <view wx:if="{{reviewNoticeText}}" class="home-review-notice home-review-notice-footer" aria-live="polite">
+      <view class="home-review-copy">
+        <text class="home-review-text">{{reviewNoticeText}}</text>
+        <text wx:if="{{reviewNoticeDetail}}" class="home-review-text">{{reviewNoticeDetail}}</text>
+      </view>
+      <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
+    </view>
   </view>
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
     <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration" loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">

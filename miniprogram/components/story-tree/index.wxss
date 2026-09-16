@@ -6,10 +6,17 @@
   gap: 10rpx;
 }
 
-.timeline-label {
-  min-width: 0;
+.timeline-label,
+.voice-edit-entry,
+.transcript-list-entry {
+  height: 44px;
   display: flex;
   align-items: center;
+  line-height: 1;
+}
+
+.timeline-label {
+  min-width: 0;
   gap: 12rpx;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
@@ -27,7 +34,6 @@
 
 .voice-edit-entry,
 .transcript-list-entry {
-  min-height: 44px;
   margin: 0;
   padding: 0 10rpx;
   border-radius: 14rpx;
@@ -35,11 +41,10 @@
   color: var(--ui-accent-strong);
   font-size: 24rpx;
   font-weight: 600;
-  line-height: 1;
 }
 
-.voice-edit-entry { width: auto; margin-left: auto; color: var(--ui-text-secondary); font-size: 22rpx; }
-.transcript-list-entry { display: flex; align-items: center; gap: 6rpx; }
+.voice-edit-entry { width: auto; margin-left: auto; justify-content: center; color: var(--ui-text-secondary); font-size: 22rpx; }
+.transcript-list-entry { gap: 6rpx; }
 .transcript-list-mark { font-size: 30rpx; font-weight: 400; line-height: 1; }
 
 .story-tree {
