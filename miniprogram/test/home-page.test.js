@@ -181,6 +181,12 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
+test("home places the story review notice after the story tree", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.ok(pageWxml.indexOf("<story-tree") < pageWxml.indexOf('wx:if="{{reviewNoticeText}}"'));
+});
+
 test("home supports a local large text mode without changing the default class", () => {
   const loaded = loadHomePage({
     accessibilityExports: {
