@@ -9,7 +9,6 @@ from typing import Protocol
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -46,9 +45,7 @@ from app.services.memoir.voice_followup_ai import (
     recent_context_messages,
     _requested_topic_hint,
     interviewer_persona_for_voice,
-    progress_announcement_key,
     strip_streaming_speaker_label_prefix,
-    suppress_repeated_progress_context,
     system_prompt_for_persona,
 )
 from app.services.memoir.streaming_tts_events import (
@@ -75,44 +72,6 @@ STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v4"
 STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
-
-
-async def _progress_announcement_already_used(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    announcement_key: str,
-) -> bool:
-    if not announcement_key:
-        return False
-    current_message_id = await db.scalar(
-        select(MemoirChatMessage.id)
-        .where(
-            MemoirChatMessage.project_id == project_id,
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
-            MemoirChatMessage.metadata_json["progress_announcement_key"].as_string()
-            == announcement_key,
-        )
-        .limit(1)
-    )
-    if current_message_id is not None:
-        return True
-
-    metadata_rows = await db.scalars(
-        select(MemoirChatMessage.metadata_json)
-        .where(
-            MemoirChatMessage.project_id == project_id,
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
-            MemoirChatMessage.metadata_json["progress_announcement_key"].as_string().is_(None),
-        )
-    )
-    for metadata in metadata_rows:
-        if not isinstance(metadata, dict):
-            continue
-        legacy_update = metadata.get("progress_update")
-        if isinstance(legacy_update, dict) and progress_announcement_key(legacy_update) == announcement_key:
-            return True
-    return False
 
 
 class AssistantTurnStreamClient(Protocol):
@@ -380,14 +339,6 @@ class VoiceAssistantTurnStreamSession:
                     voice_unannounced_events_only=True,
                 )
             )
-            if await _progress_announcement_already_used(
-                self.db,
-                project_id=voice_session.project_id,
-                announcement_key=project_progress_context.announcement_key,
-            ):
-                project_progress_context = suppress_repeated_progress_context(
-                    project_progress_context
-                )
         completion_prompt_context = await completion_interviews.prompt_context_for_session(
             self.db,
             voice_session=voice_session,
@@ -898,7 +849,7 @@ def _build_stream_turn_prompt(
 - 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
         elif has_previous_project_narration:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
-- 自然地欢迎回来，并给一个清楚、轻松的开口，例如问“今天想先讲哪一段？”
+- 自然地欢迎回来，再给一个清楚、轻松的开放入口
 - 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
 - 可以自然给出几个轻选项，但不要念成长列表，选项来自：{GUIDED_TOPIC_MENU}
 - 必须说明想不起来也没关系，可以随便聊"""
@@ -918,7 +869,7 @@ def _build_stream_turn_prompt(
             mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
 - 自然地欢迎回来，并给一个很小的开口
 - 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
-- 结尾可以问“今天想接着讲哪一段？”或“先说一件想起来的小事也可以”"""
+- 让叙述者可以自然选择接着讲或从一件刚想起来的小事开始"""
         else:
             mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导。
 - 用“{host_name}”做很短的自我介绍，说明可以慢慢聊，并给一个很小的开口

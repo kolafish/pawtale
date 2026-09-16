@@ -28,6 +28,7 @@ from app.models.memoir_narrative import (
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
+from app.services.memoir import voice_progress_notices
 from app.services.memoir.memory_activation import MemoryActivationResult
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
@@ -53,6 +54,12 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
         guidance_mode="guided_interview",
         current_guidance_module="work",
     )
+    await voice_progress_notices.enqueue_utterance_milestone_notice(
+        test_db,
+        project_id=created["session"]["project_id"],
+        utterance_id=created["utterance_id"],
+    )
+    await test_db.commit()
     stream_client = FakeTurnClient()
     ai_client = FakeStreamingAI(
         [
@@ -156,11 +163,11 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
     assert assistant_message.metadata_json["tts_duration_seconds"] == 0.4
     assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "好"
-    assert assistant_message.metadata_json["progress_prompt_version"] == "memoir_voice_progress_context_v3"
+    assert assistant_message.metadata_json["progress_prompt_version"] == "memoir_voice_progress_context_v4"
     assert assistant_message.metadata_json["progress_update_used"] is True
     assert assistant_message.metadata_json["progress_update"]["text"] == "这个项目已经留下 1 条讲述记录。"
     assert "本轮进展：这个项目已经留下 1 条讲述记录。" in ai_client.calls[0]["user_prompt"]
-    assert assistant_message.metadata_json["progress_announcement_key"].startswith("memoir-progress:")
+    assert assistant_message.metadata_json["progress_announcement_key"].startswith("automation-event:")
 
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
@@ -615,16 +622,15 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert completed["primary_intent"] == "opening"
-    assert completed["progress_update_used"] is True
-    assert completed["progress_update"]["kind"] == "project_progress_snapshot"
+    assert completed["progress_update_used"] is False
+    assert completed["progress_update"] is None
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "主题讲述首次开场" in prompt
     assert "用“老余”做很短的自我介绍" in prompt
-    assert "今天想先讲哪一段" in prompt
     assert "不要念成长列表" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
     assert "统一组织成一句或两句连贯口语" in prompt
-    assert "这个项目还没有留下讲述记录，今天可以从第一条开始。" in prompt
+    assert "本轮没有可播报的结构化进度变化" in prompt
     assert "问候、进度和问题都由你统一组织" in prompt
 
 
@@ -655,7 +661,7 @@ async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
     assert "用“小余”做很短的自我介绍" in prompt
 
 
-async def test_voice_assistant_turn_progress_prompt_uses_project_snapshot_without_event(
+async def test_voice_assistant_turn_does_not_turn_project_snapshot_into_notice(
     client,
     test_db,
 ):
@@ -682,11 +688,9 @@ async def test_voice_assistant_turn_progress_prompt_uses_project_snapshot_withou
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
-    assert completed["progress_update_used"] is True
-    assert completed["progress_update"]["kind"] == "project_progress_snapshot"
-    assert completed["progress_update"]["valid_utterance_count"] == 2
-    assert "当前项目进度：2 条讲述记录，0 条已收入章节，2 条待整理" in prompt
-    assert "本轮进展：这个项目已经留下 2 条讲述记录，接下来可以慢慢整理成章节。" in prompt
+    assert completed["progress_update_used"] is False
+    assert completed["progress_update"] is None
+    assert "2 条讲述记录" not in prompt
 
 
 async def test_voice_assistant_turn_does_not_offer_same_progress_twice(
@@ -700,12 +704,26 @@ async def test_voice_assistant_turn_does_not_offer_same_progress_twice(
         guidance_mode="guided_interview",
         current_guidance_module="family",
     )
+    await voice_progress_notices.enqueue_utterance_milestone_notice(
+        test_db,
+        project_id=created["session"]["project_id"],
+        utterance_id=created["utterance_id"],
+    )
+    await test_db.commit()
 
     _, first_ai, _, first = await _run_stream_turn(
         test_db,
         voice_session_id=created["session"]["id"],
         user_id=created["user_id"],
         chunks=["这已经是第一条讲述了，外婆在院子里最常带您做什么？"],
+    )
+    await automation_events.mark_automation_events_voice_played(
+        test_db,
+        user_id=created["user_id"],
+        project_id=created["session"]["project_id"],
+        event_ids=first["progress_voice_selected_event_ids"],
+        voice_session_id=created["session"]["id"],
+        message_id=first["message_id"],
     )
     _, second_ai, _, second = await _run_stream_turn(
         test_db,
@@ -716,11 +734,11 @@ async def test_voice_assistant_turn_does_not_offer_same_progress_twice(
     )
 
     assert first["progress_update_used"] is True
-    assert first["progress_announcement_key"].startswith("memoir-progress:")
+    assert first["progress_announcement_key"].startswith("automation-event:")
     assert "本轮进展：这个项目已经留下 1 条讲述记录。" in first_ai.calls[0]["user_prompt"]
     assert second["progress_update_used"] is False
     assert second["progress_announcement_key"] == ""
-    assert "当前进度与已经自动播报过的内容相同" in second_ai.calls[0]["user_prompt"]
+    assert "本轮没有可播报的结构化进度变化" in second_ai.calls[0]["user_prompt"]
     assert "这个项目已经留下 1 条讲述记录" not in second_ai.calls[0]["user_prompt"]
 
 
@@ -761,7 +779,7 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     assert completed["progress_update"]["kind"] == "automation_event"
     assert completed["progress_update"]["event_ids"] == [event.id]
     assert completed["progress_spoken_text"] == ""
-    assert completed["progress_announcement_key"].startswith("memoir-progress:")
+    assert completed["progress_announcement_key"].startswith("automation-event:")
 
     assistant_message = await test_db.scalar(
         select(MemoirChatMessage).where(MemoirChatMessage.id == completed["message_id"])
@@ -894,7 +912,7 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert "这条自动补写记录不应该重复播报" not in prompt
-    assert completed["progress_update"]["kind"] != "automation_event"
+    assert completed["progress_update"] is None
 
 
 async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_session_text(

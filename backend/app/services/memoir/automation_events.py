@@ -35,6 +35,7 @@ from app.services.memoir.automation_event_metadata import (
     _clean_utterance_ids,
     _event_utterance_ids,
     _event_is_visible,
+    _event_is_voice_only,
     _event_is_voice_unannounced,
     _event_signature,
     _preserved_metadata,
@@ -80,7 +81,7 @@ def _visible_events(
     voice_unannounced_only: bool,
 ) -> list[MemoirAutomationEvent]:
     if include_acknowledged and not voice_unannounced_only:
-        return events
+        return [event for event in events if not _event_is_voice_only(event)]
 
     hidden_signatures = {
         signature
@@ -95,8 +96,9 @@ def _visible_events(
         if voice_unannounced_only:
             if not _event_is_voice_unannounced(event):
                 continue
-        elif not _event_is_visible(event):
-            continue
+        else:
+            if _event_is_voice_only(event) or not _event_is_visible(event):
+                continue
 
         signature = _event_signature(event.metadata_json or {})
         if signature and (signature in hidden_signatures or signature in seen_signatures):

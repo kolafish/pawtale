@@ -6,7 +6,9 @@ from fastapi import HTTPException
 
 from app.config import Settings
 from app.services.memoir.voice_assistant_turn_stream import (
-    AssistantTurnArtifacts, AssistantTurnStartRequest, ProgressPromptContext, VoiceAssistantTurnStreamSession,
+    AssistantTurnArtifacts,
+    AssistantTurnStartRequest,
+    VoiceAssistantTurnStreamSession,
 )
 from app.services.memoir.voice_tts import VolcTTSClient
 from app.services.memoir.streaming_tts_events import chunk_text_for_tts, stream_tts_events
@@ -50,7 +52,7 @@ async def test_assistant_stream_finishes_both_tasks(ending, monkeypatch):
     task = asyncio.create_task(session._stream_text_and_audio(
         ai_client=None, tts_client=None, system_prompt="", prompt="", max_tokens=1, turn_id="turn",
         req=AssistantTurnStartRequest(), artifacts=AssistantTurnArtifacts(),
-        progress_context=ProgressPromptContext(prompt_text=""), cancel_event=asyncio.Event(),
+        cancel_event=asyncio.Event(),
     ))
     try:
         await asyncio.wait_for(text_started.wait(), 1)
