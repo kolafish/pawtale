@@ -57,7 +57,7 @@ test("story maps server counts and distinguishes pending from user decisions", (
   assert.equal(view.memoir.progressDetail, "阅读草稿");
   assert.equal(view.overview.readableText, "1 章可读");
   assert.equal(view.overview.growthStage, 2);
-  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-stage-02-sapling.png");
+  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-stage-02-seedling.png");
   assert.deepEqual(view.chapters.map(chapter => chapter.ordinal), [1, 2]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
