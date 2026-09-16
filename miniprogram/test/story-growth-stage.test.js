@@ -18,38 +18,34 @@ const snapshot = (patch = {}) => ({
 test("story tree grows through structure and writing milestones", () => {
   assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: [] })), 1);
   assert.equal(resolveStoryTreeGrowthStage(snapshot()), 2);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ book_char_count: 2_999 })), 2);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ book_char_count: 3_000 })), 3);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: [chapter(), chapter({ readable: true })] })), 2);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: [chapter({ readable: true }), chapter({ readable: true })] })), 3);
+  assert.equal(resolveStoryTreeGrowthStage(snapshot({
+    chapters: [chapter({ readable: true }), chapter({ readable: true })],
+    book_readable: true,
+    book_char_count: 20_000,
+    book_chapter_count: 2,
+  })), 2);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: [chapter(), chapter(), chapter()] })), 3);
+  assert.equal(resolveStoryTreeGrowthStage(snapshot({
+    chapters: [chapter({ char_count: 1_499 }), chapter({ char_count: 1_500 })],
+  })), 2);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({
     chapters: [chapter({ char_count: 1_500 }), chapter({ char_count: 1_500 })],
   })), 3);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: Array.from({ length: 5 }, () => chapter()) })), 4);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ book_char_count: 9_999, chapters: [chapter(), chapter(), chapter()] })), 3);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ book_char_count: 10_000 })), 4);
+  assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: [chapter({ char_count: 10_000 })] })), 4);
 });
 
-test("story tree uses current readable coverage for the final stages", () => {
-  const threeReadable = [chapter({ readable: true }), chapter({ readable: true }), chapter({ readable: true })];
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: threeReadable, book_readable: true, book_chapter_count: 3 })), 5);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({ chapters: threeReadable, book_readable: true, book_chapter_count: 2 })), 4);
+test("story tree becomes mature only after both final milestones", () => {
   assert.equal(resolveStoryTreeGrowthStage(snapshot({
-    chapters: [chapter({ readable: true }), chapter({ readable: true }), chapter()],
+    chapters: Array.from({ length: 5 }, () => chapter({ char_count: 1_999 })),
   })), 4);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({
-    chapters: [chapter({ readable: true }), chapter({ readable: true })], book_readable: true, book_chapter_count: 2,
+    chapters: [chapter({ char_count: 10_000 }), chapter(), chapter()],
   })), 4);
   assert.equal(resolveStoryTreeGrowthStage(snapshot({
-    chapters: [chapter({ readable: true, char_count: 10_000 })], book_readable: true, book_chapter_count: 1,
+    chapters: Array.from({ length: 5 }, () => chapter({ char_count: 2_000 })),
   })), 5);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({
-    chapters: [...threeReadable, chapter({ include_in_book: false })], book_readable: true, book_chapter_count: 3,
-  })), 5);
-  assert.equal(resolveStoryTreeGrowthStage(snapshot({
-    chapters: [chapter({ include_in_book: false, readable: true, char_count: 20_000 })], book_readable: true, book_chapter_count: 1,
-  })), 4);
 });
 
 test("story tree art configuration points to packaged assets", () => {
