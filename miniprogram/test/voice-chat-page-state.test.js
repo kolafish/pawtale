@@ -57,6 +57,10 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.liveScrollTarget, "");
   assert.equal(first.liveScrollTop, 0);
   assert.equal(first.liveTextEndId, "live-text-end");
+  assert.equal(first.liveTranscriptFollowing, true);
+  assert.equal(first.liveReviewStartCharCount, 0);
+  assert.equal(first.showReturnToLatest, false);
+  assert.equal(first.returnToLatestText, "回到最新");
   assert.equal(first.historyCountText, "0 段 · 0 字");
   assert.equal(first.historyExpanded, false);
   assert.equal(first.showHistoryPanel, false);
@@ -157,6 +161,26 @@ test("voice chat only expands saved history when the user asks to review it", ()
   assert.equal(collapsed.historyToggleText, "查看");
   assert.equal(expanded.showHistoryLines, true);
   assert.equal(expanded.historyToggleText, "收起");
+});
+
+test("voice chat keeps the newest part prominent and exposes paused follow state", () => {
+  const liveText = "小时候我们住在河边，每天放学以后都会先去找外婆。后来搬到了城里，但我一直记得院子里的桂花树，秋天的时候整个屋子都能闻到香味。";
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    recording: true,
+    liveText,
+    liveCharCount: liveText.length,
+    liveScrollClass: "live-scroll long",
+    liveTranscriptFollowing: false,
+    liveReviewStartCharCount: liveText.length - 5,
+  });
+
+  assert.equal(patch.liveContextText + patch.liveCurrentText, liveText);
+  assert.ok(patch.liveContextText.length > 0);
+  assert.ok(Array.from(patch.liveCurrentText).length <= 56);
+  assert.match(patch.liveScrollClass, /reviewing/);
+  assert.equal(patch.showReturnToLatest, true);
+  assert.equal(patch.returnToLatestText, "回到最新 · 新增 5 字");
 });
 
 test("voice chat view patch combines human speaker choice with record actions", () => {

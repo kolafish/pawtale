@@ -14,6 +14,8 @@ const {
   voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
   voiceRecordingUnavailablePatch,
+  voiceTranscriptFollowLatestPatch,
+  voiceTranscriptReviewStartedPatch,
 } = require("../components/voice-session/voice-chat-recording-flow.ts");
 
 test("voice recording flow detects when recorder must reconnect first", () => {
@@ -34,6 +36,8 @@ test("voice recording flow derives recording start and unavailable patches", () 
     error: "",
     liveText: "",
     liveCharCount: 0,
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
     selectedOpeningTopicText: "",
     primaryActionText: "暂停收音",
     autoListenStateText: "小余说完，正在听您说",
@@ -52,7 +56,11 @@ test("voice recording flow derives recording start and unavailable patches", () 
 test("voice recording flow derives live transcript patches", () => {
   const longPartial = "这是一段很长的正常访谈实时识别文字，".repeat(6);
 
-  const firstPatch = voiceLiveTranscriptPatch(longPartial, 0);
+  const firstPatch = voiceLiveTranscriptPatch(longPartial, {
+    liveText: "",
+    liveScrollTop: 0,
+    liveTranscriptFollowing: true,
+  });
   assert.equal(firstPatch.liveText, longPartial);
   assert.equal(firstPatch.liveCharCount, longPartial.length);
   assert.equal(firstPatch.liveScrollClass, "live-scroll long");
@@ -61,9 +69,39 @@ test("voice recording flow derives live transcript patches", () => {
   assert.equal(firstPatch.liveTextEndId, "live-text-end-10000");
   assert.equal(firstPatch.persistenceStateText, "识别中");
 
-  const secondPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。`, firstPatch.liveScrollTop);
+  const secondPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。`, {
+    liveText: longPartial,
+    liveScrollTop: firstPatch.liveScrollTop,
+    liveTranscriptFollowing: true,
+  });
   assert.equal(secondPatch.liveScrollTop, 20000);
   assert.equal(secondPatch.liveScrollTarget, "live-text-end-20000");
+
+  const pausedPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。后面还有`, {
+    liveText: `${longPartial}继续说到最新进度。`,
+    liveScrollTop: secondPatch.liveScrollTop,
+    liveTranscriptFollowing: false,
+  });
+  assert.equal(pausedPatch.liveScrollTop, undefined);
+  assert.equal(pausedPatch.liveScrollTarget, undefined);
+});
+
+test("voice recording flow pauses review and explicitly returns to the newest caption", () => {
+  assert.deepEqual(voiceTranscriptReviewStartedPatch({
+    liveCharCount: 88,
+    liveTranscriptFollowing: true,
+  }), {
+    liveTranscriptFollowing: false,
+    liveReviewStartCharCount: 88,
+    liveScrollTarget: "",
+  });
+  assert.deepEqual(voiceTranscriptFollowLatestPatch(10000), {
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
+    liveScrollTop: 20000,
+    liveTextEndId: "live-text-end-20000",
+    liveScrollTarget: "live-text-end-20000",
+  });
 });
 
 test("voice recording flow derives final transcript result", () => {
@@ -92,6 +130,8 @@ test("voice recording flow derives final transcript result", () => {
   assert.equal(result.patch.liveScrollClass, "live-scroll");
   assert.equal(result.patch.liveScrollTarget, "");
   assert.equal(result.patch.liveScrollTop, 0);
+  assert.equal(result.patch.liveTranscriptFollowing, true);
+  assert.equal(result.patch.liveReviewStartCharCount, 0);
   assert.equal(result.patch.persistenceStateText, "已保存");
   assert.equal(result.patch.followUpLoading, false);
 });

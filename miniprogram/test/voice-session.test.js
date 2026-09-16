@@ -1519,6 +1519,8 @@ test("voice chat clears live transcript when a new recording session starts", ()
       ...page.data,
       liveText: "上一轮刚保存的回答",
       liveCharCount: 9,
+      liveTranscriptFollowing: false,
+      liveReviewStartCharCount: 9,
       persistenceStateText: "已保存",
     },
     setData(patch) {
@@ -1536,6 +1538,8 @@ test("voice chat clears live transcript when a new recording session starts", ()
   assert.equal(context.data.liveScrollClass, "live-scroll");
   assert.equal(context.data.liveScrollTarget, "");
   assert.equal(context.data.liveScrollTop, 0);
+  assert.equal(context.data.liveTranscriptFollowing, true);
+  assert.equal(context.data.liveReviewStartCharCount, 0);
   assert.equal(context.data.persistenceStateText, "等待识别");
 });
 
