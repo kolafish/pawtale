@@ -126,7 +126,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/section-regeneration-jobs");
   assert.deepEqual(apiRequests[1].data, {
     expected_sections: [{ id: "section/1", version: 3 }],
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[1].timeout, 60000);
   assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/section-regeneration-jobs/current");
@@ -138,7 +138,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
     operation: "plan",
     proposal_id: null,
     feedback: "写得更平实一些",
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[4].timeout, 60000);
   assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/draft-sections/section%2F1/revision/jobs/current");
@@ -161,7 +161,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   assert.equal(apiRequests[11].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/jobs");
   assert.deepEqual(apiRequests[11].data, {
     operation: "rewrite",
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[11].timeout, 60000);
   assert.equal(apiRequests[12].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/jobs/current");
