@@ -47,7 +47,10 @@ async def claim_transcript_mutation_guard(
     locked_utterance = await db.scalar(
         select(MemoirVoiceUtterance)
         .where(MemoirVoiceUtterance.id == utterance.id)
-        .options(selectinload(MemoirVoiceUtterance.chat_message))
+        .options(
+            selectinload(MemoirVoiceUtterance.voice_session),
+            selectinload(MemoirVoiceUtterance.chat_message),
+        )
         .with_for_update()
         .execution_options(populate_existing=True)
     )
