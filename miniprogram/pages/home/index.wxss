@@ -111,26 +111,7 @@
   box-shadow: 0 0 0 1rpx rgba(88, 112, 82, 0.08);
 }
 
-.home-growth-sprout {
-  position: relative;
-  width: 4rpx;
-  height: 24rpx;
-  border-radius: 999rpx;
-  background: var(--ui-success-text);
-  transform: rotate(-6deg);
-}
-
-.home-growth-sprout::before,
-.home-growth-sprout::after {
-  content: "";
-  position: absolute;
-  width: 18rpx;
-  height: 11rpx;
-  background: #87a17e;
-}
-
-.home-growth-sprout::before { top: 1rpx; right: 1rpx; border-radius: 100% 0; transform: rotate(18deg); }
-.home-growth-sprout::after { top: 10rpx; left: 1rpx; border-radius: 0 100%; transform: rotate(-18deg); }
+.home-growth-image { width: 48rpx; height: 48rpx; }
 
 .home-growth-copy {
   flex: 1;
@@ -814,6 +795,8 @@
   height: 62rpx;
   flex-basis: 62rpx;
 }
+
+.home-page.large-text .home-growth-image { width: 58rpx; height: 58rpx; }
 
 .large-text .home-review-text,
 .home-page.large-text .home-inline-action { font-size: 32rpx; }

@@ -1,5 +1,6 @@
 import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot, MemoirStoryIssueCounts } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
+import { STORY_GROWTH_NOTICE_IMAGES } from "../../components/story-tree/story-growth-stage";
 import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
 
 export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
@@ -22,6 +23,7 @@ export interface HomeStoryData extends StoryNotice {
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
+  growthNoticeIcon: string;
   growthTarget: StoryGrowthTarget | null;
   narrationSaved: boolean;
   dismissingGrowth: boolean;
@@ -53,7 +55,7 @@ export function emptyHomeStoryData(): HomeStoryData {
     reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "",
     candidateNoticeText: "", candidateChapterId: "",
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
-    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
+    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeIcon: "",
     growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
   };
 }
@@ -121,6 +123,7 @@ export function homeStorySnapshotData(
     updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
     bookUpdated ? "书稿已更新" : "",
   ].filter(Boolean).join("，");
+  const growthNoticeKind = addedCount ? "new" : updatedCount ? "enriched" : "progress";
   return {
     ...homeStoryNotice(snapshot),
     candidateNoticeText: candidates.length ? `有 ${candidates.length} 章整理出了新稿，原稿已保留` : "",
@@ -129,6 +132,7 @@ export function homeStorySnapshotData(
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
     growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),
+    growthNoticeIcon: STORY_GROWTH_NOTICE_IMAGES[growthNoticeKind],
   };
 }
 

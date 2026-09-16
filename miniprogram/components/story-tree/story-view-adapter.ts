@@ -1,4 +1,5 @@
 import type { MemoirStorySnapshot } from "../../domain/memoir-snapshots";
+import { resolveStoryTreeGrowthStage, STORY_TREE_STAGE_IMAGES } from "./story-growth-stage";
 import type { StoryViewData } from "./story-view-data";
 
 export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
@@ -41,6 +42,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
   const pending = progress?.pending_material_count || 0;
   const needsUser = progress?.needs_user_material_count || 0;
   const materialCount = progress?.material_count || 0;
+  const growthStage = resolveStoryTreeGrowthStage(snapshot);
   return {
     memoir: {
       title: project?.title || "我的故事",
@@ -53,6 +55,8 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       title: "人生总览",
       summaryText: `${chapters.length} 章 · ${chapters.reduce((total, chapter) => total + chapter.sections.length, 0)} 小节 · ${materialCount} 段讲述`,
       outcomeText: count >= 10_000 ? `约 ${(count / 10_000).toFixed(1)} 万字` : count ? `${count} 字` : "还没有正文",
+      growthStage,
+      growthImageSrc: STORY_TREE_STAGE_IMAGES[growthStage],
     },
     chapters,
     unassignedMaterialTitle: pending ? "待归入故事的讲述" : materialCount ? "全部讲述" : "从一段讲述开始",
