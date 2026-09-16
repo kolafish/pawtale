@@ -163,6 +163,9 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     timeout = ai_text_timeout_seconds(policy.timeout_profile)
     system = SYSTEM_PROMPT + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
+    # The proposal and its signatures are immutable snapshots. Do not retain a
+    # database transaction while the model is producing the preview.
+    await db.commit()
     started = time.monotonic()
     try:
         generated = await client.generate_structured(system, payload, output_model=VoiceEditProposal, requested_model=model, temperature=0, max_tokens=policy.max_tokens, timeout=timeout, max_attempts=1)
@@ -182,7 +185,13 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
 async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, req: VoiceEditApplyRequest) -> VoiceEditApplyResponse:
     await load_memoir_project(db, project_id, user_id)
     try:
-        await db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
+        # Serialize voice-edit applications without blocking the KEY SHARE lock
+        # used by append-only revision-event foreign-key checks.
+        await db.execute(
+            select(Project.id)
+            .where(Project.id == project_id)
+            .with_for_update(key_share=True)
+        )
         story = await _story(db, project_id, lock=True)
         try:
             signatures = TypeAdapter(dict[str, str]).validate_json(req.signature)

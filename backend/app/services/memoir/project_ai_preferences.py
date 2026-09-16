@@ -34,7 +34,7 @@ def project_ai_model(project: Project | None) -> str | None:
 
 def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
     model = (ai_model or "").strip()
-    if not model:
+    if not model or project_ai_model(project) == model:
         return
     project.metadata_json = {
         **(project.metadata_json or {}),
@@ -43,12 +43,15 @@ def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
     }
 
 
-def select_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
+def resolve_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
     requested = (requested_ai_model or "").strip()
-    if requested:
-        remember_project_ai_model(project, requested)
-        return requested
-    return project_ai_model(project)
+    return requested or project_ai_model(project)
+
+
+def select_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
+    selected = resolve_project_ai_model(project, requested_ai_model)
+    remember_project_ai_model(project, requested_ai_model)
+    return selected
 
 
 async def load_project_ai_model(
@@ -57,7 +60,7 @@ async def load_project_ai_model(
     requested_ai_model: str | None = None,
 ) -> str | None:
     project = await db.get(Project, project_id)
-    return select_project_ai_model(project, requested_ai_model) if project else None
+    return resolve_project_ai_model(project, requested_ai_model) if project else None
 
 
 def normalize_transcript_polish_level(

@@ -19,7 +19,10 @@ from app.schemas.memoir_interview_editor import (
     MemoirDialectGlossaryUpdateRequest,
 )
 from app.services.memoir import voice_transcripts
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    resolve_project_ai_model,
+    select_project_ai_model,
+)
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.transcript_projection import current_utterance_text
@@ -178,7 +181,7 @@ async def preview_batch_cleanup(
     allow_admin: bool = False,
 ) -> MemoirBatchTranscriptCleanupPreviewResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    selected_ai_model = select_project_ai_model(project, req.ai_model)
+    selected_ai_model = resolve_project_ai_model(project, req.ai_model)
     glossary_entries = _glossary_entries(project)
     glossary_lines = _glossary_context_lines(glossary_entries)
     utterances = await _load_project_utterances(
@@ -188,7 +191,7 @@ async def preview_batch_cleanup(
         utterance_ids=req.utterance_ids,
         allow_admin=allow_admin,
     )
-    items: list[MemoirBatchTranscriptCleanupPreviewItem] = []
+    prepared = []
     for utterance in utterances:
         source_text = _ensure_cleanup_source(utterance)
         context = await voice_transcripts.load_voice_transcript_cleanup_context(
@@ -197,13 +200,19 @@ async def preview_batch_cleanup(
             exclude_message_id=utterance.chat_message_id,
             dialect_glossary=glossary_lines,
         )
+        prepared.append((utterance, source_text, context, transcript_mutation_guard(utterance)))
+
+    # Preview is read-only. Release its database transaction before making one
+    # or more provider calls; the returned guards protect the later confirm.
+    await db.commit()
+    items: list[MemoirBatchTranscriptCleanupPreviewItem] = []
+    for utterance, source_text, context, mutation_guard in prepared:
         cleaned = await voice_transcripts.generate_cleaned_transcript_text(
             source_text,
             ai_model=selected_ai_model,
             context=context,
             strict=True,
         )
-        mutation_guard = transcript_mutation_guard(utterance)
         items.append(
             MemoirBatchTranscriptCleanupPreviewItem(
                 utterance_id=utterance.id,
@@ -233,6 +242,9 @@ async def confirm_batch_cleanup(
 ) -> MemoirBatchTranscriptCleanupConfirmResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     selected_ai_model = select_project_ai_model(project, req.ai_model)
+    # Persist a changed preference in its own short transaction before taking
+    # any material guards.
+    await db.commit()
     item_by_utterance_id = {item.utterance_id: item for item in req.items}
     utterances = await _load_project_utterances(
         db,
@@ -242,7 +254,9 @@ async def confirm_batch_cleanup(
         allow_admin=allow_admin,
     )
     try:
-        for utterance in utterances:
+        # Acquire multi-row guards in a stable order so overlapping batch edits
+        # cannot deadlock by presenting the same materials in a different order.
+        for utterance in sorted(utterances, key=lambda item: item.id):
             _ensure_cleanup_source(utterance)
             item = item_by_utterance_id[utterance.id]
             claimed = await claim_transcript_mutation_guard(

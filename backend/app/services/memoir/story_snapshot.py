@@ -34,6 +34,7 @@ from app.services.memoir import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automatic_book_draft import DraftProgress
+from app.services.memoir.project_revisions import project_data_revision
 from app.services.memoir.read_snapshots import _empty_automation_events
 from app.services.memoir.story_growth_projection import story_growth_events
 
@@ -46,7 +47,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     if not identity.active_project_id:
         return result
     project = await load_memoir_project(db, identity.active_project_id, user.id)
-    result.server_revision = project.memoir_data_revision
+    result.server_revision = await project_data_revision(db, project)
     result.updated_at = project.updated_at.isoformat()
     transcripts = await voice_transcripts.list_voice_transcripts(db, user.id, project_id=project.id, limit=1)
     result.latest_transcript = transcripts.items[0] if transcripts.items else None

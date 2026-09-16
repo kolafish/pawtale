@@ -1325,6 +1325,10 @@ async def generate_and_save_chapter_draft(
     protected = chapter_version_is_protected(draft_before, latest_before)
     plan = chapter_draft_generation_plan(before, latest_before)
     continuity = await load_section_continuity(db, context=before)
+    # Generation uses immutable context snapshots. Release all read locks and
+    # the connection before the slow provider phase; the write phase below
+    # locks the chapter and revalidates the input signature.
+    await db.commit()
     generated = await generate_chapter(
         plan.target_context,
         editorial_guidance=editorial_guidance,

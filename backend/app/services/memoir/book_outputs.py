@@ -84,7 +84,10 @@ from app.services.memoir.book_output_versions import (
     append_book_output_version,
     book_output_version_title,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    resolve_project_ai_model,
+    select_project_ai_model,
+)
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -463,11 +466,17 @@ async def regenerate_book_output_editorial_copy(
     if not manuscript:
         raise HTTPException(status_code=400, detail="全书稿结构不可用")
 
+    base_version_id = latest.id
+    output_title = output.title
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
+    # Persist a changed model preference and release all locks before the
+    # provider call. The output row is locked and the base version revalidated
+    # immediately before appending the generated version.
+    await db.commit()
     editorial_copy = await generate_manuscript_editorial_copy(
-        title=output.title,
+        title=output_title,
         snapshot=snapshot,
         ai_model=ai_model,
         targets=sorted(targets),
@@ -484,6 +493,19 @@ async def regenerate_book_output_editorial_copy(
         chapter_ids=chapter_ids,
     )
     manuscript_json = manuscript.model_dump(mode="json")
+    await db.execute(
+        select(MemoirBookOutput.id)
+        .where(MemoirBookOutput.id == output.id)
+        .with_for_update()
+    )
+    output = await _load_output(db, project_id=project_id)
+    if (
+        output is None
+        or not output.versions
+        or output.versions[-1].id != base_version_id
+    ):
+        raise HTTPException(status_code=409, detail="生成期间全书稿已更新，请重试")
+    latest = output.versions[-1]
     if manuscript_json != latest.manuscript_json:
         await append_book_output_version(
             db,
@@ -577,7 +599,8 @@ async def suggest_book_output_titles(
         chapters=chapters,
         source_refs_by_chapter=refs_by_chapter,
     )
-    ai_model = select_project_ai_model(project, req.ai_model)
+    ai_model = resolve_project_ai_model(project, req.ai_model)
+    await db.commit()
     generated = await generate_title_suggestions(
         title=base_title,
         snapshot=snapshot,

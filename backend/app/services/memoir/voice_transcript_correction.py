@@ -183,15 +183,19 @@ async def run_transcript_correction_job(
         )
 
     expected = transcript_mutation_guard(utterance)
+    cleanup_context = await load_voice_transcript_cleanup_context(
+        db,
+        utterance.voice_session,
+        exclude_message_id=utterance.chat_message_id,
+    )
+    # The provider call may take seconds. End the read phase before crossing the
+    # network; the mutation guard below re-locks and revalidates the source.
+    await db.commit()
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=ai_model,
         transcript_polish_level=polish_level,
-        context=await load_voice_transcript_cleanup_context(
-            db,
-            utterance.voice_session,
-            exclude_message_id=utterance.chat_message_id,
-        ),
+        context=cleanup_context,
         strict=False,
     )
     if not await claim_transcript_mutation_guard(db, utterance=utterance, expected=expected):

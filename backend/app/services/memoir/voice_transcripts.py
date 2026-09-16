@@ -65,7 +65,9 @@ from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
+    claim_transcript_mutation_guard,
     schedule_ready_utterance_background_work,
+    transcript_mutation_guard,
 )
 
 
@@ -1159,6 +1161,11 @@ async def cleanup_voice_transcript(
         if req.transcript_polish_level is not None
         else project_transcript_polish_level(utterance.voice_session.project)
     )
+    expected = transcript_mutation_guard(utterance)
+    # Persist a changed model preference, then release the request transaction
+    # before waiting on the provider. Re-lock and revalidate the exact source
+    # rows before applying the result.
+    await db.commit()
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=selected_ai_model,
@@ -1166,6 +1173,12 @@ async def cleanup_voice_transcript(
         transcript_polish_level=polish_level,
         strict=True,
     )
+    if not await claim_transcript_mutation_guard(
+        db,
+        utterance=utterance,
+        expected=expected,
+    ):
+        raise HTTPException(status_code=409, detail="讲述内容已更新，请重新整理")
     return await _apply_edited_text(
         db,
         utterance,

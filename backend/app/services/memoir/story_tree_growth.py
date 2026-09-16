@@ -582,12 +582,13 @@ async def grow_story_tree(
             section_chapters={item.id: item.chapter_id for item in sections},
             chapter_updated_at={item.id: item.updated_at for item in chapters},
         )
+        ai_model = await load_project_ai_model(db, job.project_id, None)
         await db.commit()
         batch.groups = await decide_story_growth(
             utterances=utterances,
             chapters=chapters,
             sections=sections,
-            ai_model=await load_project_ai_model(db, job.project_id, None),
+            ai_model=ai_model,
         )
         progress.batch = batch
         await _save_progress(db, job, progress)

@@ -80,6 +80,7 @@ def test_postgres_baseline_round_trip_matches_models(postgres_schema):
     assert "projects" in tables
     assert "memoir_voice_utterances" in tables
     assert "memoir_book_outputs" in tables
+    assert "memoir_project_revision_events" in tables
 
     retrieval_indexes = asyncio.run(_retrieval_index_names())
     assert "ix_memoir_retrieval_entries_bm25" in retrieval_indexes

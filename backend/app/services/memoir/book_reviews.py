@@ -729,6 +729,9 @@ async def generate_or_reuse_book_review(
         await progress_callback({"provider_request_pending": True,
                                  "provider": getattr(client, "provider_name", None),
                                  "resolved_ai_model": getattr(client, "model_name", ai_model)})
+    # Persist stale-cache/progress updates and release the read transaction.
+    # The full input signature is checked again before the result is saved.
+    await db.commit()
     generation: dict[str, object]
     try:
         generated = await generate_structured_with_client(

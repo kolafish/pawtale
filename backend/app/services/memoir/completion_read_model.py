@@ -44,6 +44,7 @@ from app.services.memoir import (
     section_digests,
     sections,
 )
+from app.services.memoir.project_revisions import project_data_revision
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
 )
@@ -623,9 +624,8 @@ async def chapter_workspace(
     project_id: str,
     chapter_id: str,
 ) -> MemoirChapterWorkspaceResponse:
-    server_revision = await db.scalar(
-        select(Project.memoir_data_revision).where(Project.id == project_id)
-    )
+    project = await db.get(Project, project_id)
+    server_revision = await project_data_revision(db, project) if project else 0
     chapter = await db.scalar(
         select(MemoirBookPlanChapter).where(
             MemoirBookPlanChapter.project_id == project_id,

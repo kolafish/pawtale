@@ -242,6 +242,9 @@ async def run_source_indexing_job(
             utterance=utterance,
         )
 
+    # Embedding is external work; keep the write transaction limited to the
+    # revalidated FOR UPDATE section below.
+    await db.commit()
     client: EmbeddingClient = embedding_client or create_embedding_client()
     embedded = await client.embed([text])
 
@@ -367,6 +370,9 @@ async def run_semantic_indexing_job(
             utterance=utterance,
         )
 
+    # Generation is external work. A fresh read below validates the source
+    # again before progress or retrieval rows are written.
+    await db.commit()
     generation_client = ai_client or get_ai_service(SEMANTIC_INDEX_MODEL)
     generation_started = time.perf_counter()
     try:
