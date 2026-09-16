@@ -102,6 +102,21 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(
         """
+        UPDATE projects AS project
+        SET memoir_data_revision = GREATEST(
+            project.memoir_data_revision,
+            revision.latest_revision
+        )
+        FROM (
+            SELECT project_id, MAX(revision) AS latest_revision
+            FROM memoir_project_revision_events
+            GROUP BY project_id
+        ) AS revision
+        WHERE project.id = revision.project_id
+        """
+    )
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION pawtale_bump_memoir_revision()
         RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE
