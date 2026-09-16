@@ -75,7 +75,7 @@ test("shared voice text editor shows live transcription without replacing existi
   assert.deepEqual(toasts, ["语音已转成文字"]);
 });
 
-test("opt-in voice editor starts when attached and submits only after final text", async () => {
+test("opt-in voice editor resumes after authorization and submits only after final text", async () => {
   const controller = {
     callbacks: null,
     connectCount: 0,
@@ -103,8 +103,12 @@ test("opt-in voice editor starts when attached and submits only after final text
       }
     },
   });
+  let authorizationAttempts = 0;
   mockModule("../services/voice-authorization.ts", {
-    ensureVoiceRecordingAuthorization: async () => true,
+    ensureVoiceRecordingAuthorization: async () => {
+      authorizationAttempts += 1;
+      return authorizationAttempts > 1;
+    },
   });
   const toasts = [];
   global.wx = {
@@ -120,7 +124,13 @@ test("opt-in voice editor starts when attached and submits only after final text
   });
   component.lifetimes.attached.call(context);
   await flushAsyncWork();
+  assert.equal(controller.connectCount, 0);
 
+  component.pageLifetimes.hide.call(context);
+  component.pageLifetimes.show.call(context);
+  await flushAsyncWork();
+
+  assert.equal(authorizationAttempts, 2);
   assert.equal(controller.connectCount, 1);
   assert.deepEqual(controller.recordingOptions, {
     maxDurationMs: 30000,
