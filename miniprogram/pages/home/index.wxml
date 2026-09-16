@@ -155,19 +155,17 @@
       <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
     </view>
     <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
-      <view class="home-growth-copy">
+      <view class="home-growth-heading">
         <view class="home-growth-icon" aria-hidden="true">
           <image class="home-growth-image" src="{{growthNoticeIcon}}" mode="aspectFit" />
         </view>
-        <view class="home-growth-text">
-          <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
-          <text class="home-story-progress-detail ui-tabular">{{growthNoticeText}}</text>
+        <text class="home-story-progress-title home-growth-title">{{growthNoticeTitle}}</text>
+        <view class="home-growth-actions">
+          <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button" bindtap="viewStoryGrowth">看看变化</button>
+          <button size="mini" class="home-inline-action home-growth-dismiss ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
         </view>
       </view>
-      <view class="home-growth-actions">
-        <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button" bindtap="viewStoryGrowth">看看变化</button>
-        <button size="mini" class="home-inline-action home-growth-dismiss ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
-      </view>
+      <text class="home-story-progress-detail home-growth-detail ui-tabular">{{growthNoticeText}}</text>
     </view>
     <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && hasStories}}" can-voice-edit="{{hasProject}}"
       bind:voiceedit="openVoiceEdit" bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
