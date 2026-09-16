@@ -1,5 +1,7 @@
 require("./register-ts");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { componentContext, loadComponentModule } = require("./page-harness");
 const { emptyStoryViewData, toggleStoryChapter } = require("../components/story-tree/story-view-data.ts");
@@ -39,12 +41,20 @@ test("tree preserves chapter and section targets for reading, editing and media"
   ]);
 });
 
-test("tree leaves book, transcript and chapter-manager destinations to its host", () => {
+test("tree leaves book, voice-edit, transcript and chapter-manager destinations to its host", () => {
   const context = tree();
   context.openBook();
+  context.openVoiceEdit();
   context.openTranscripts();
   context.openChapterManager();
-  assert.deepEqual(context.events.map(({ name }) => name), ["openbook", "opentranscripts", "managechapters"]);
+  assert.deepEqual(context.events.map(({ name }) => name), ["openbook", "voiceedit", "opentranscripts", "managechapters"]);
+});
+
+test("tree toolbar uses the same text layout primitive for both utility actions", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../components/story-tree/index.wxml"), "utf8");
+
+  assert.doesNotMatch(template, /<button[^>]*class="voice-edit-entry/);
+  assert.match(template, /class="voice-edit-entry ui-pressable"/);
 });
 
 test("tree ignores chapter actions without a target", () => {

@@ -68,6 +68,24 @@ async def _load_plan(
     return plan
 
 
+async def lock_plan_structure(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> MemoirBookPlan:
+    """Lock the plan before a write that also locks chapters."""
+
+    plan = await db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if plan is None:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    return plan
+
+
 async def _load_chapter(
     db: AsyncSession,
     *,
@@ -1088,7 +1106,7 @@ async def place_material(
         user_id,
         allow_admin=allow_admin,
     )
-    plan = await _load_plan(db, project_id=project_id)
+    plan = await lock_plan_structure(db, project_id=project_id)
     target: MemoirSection | None = None
     target_chapter_id: str | None = None
     if req.target_section_id:
@@ -1100,11 +1118,6 @@ async def place_material(
         target_chapter_id = target.chapter_id
     elif req.target_chapter_id:
         target_chapter_id = req.target_chapter_id
-    else:
-        # Chapter ordering is plan-scoped. Lock only while allocating and
-        # persisting the new chapter, never during AI work.
-        await db.refresh(plan, with_for_update=True)
-
     membership_snapshot, locked_chapters = await _lock_material_move_chapters(
         db,
         project_id=project_id,
@@ -1308,7 +1321,7 @@ async def merge_sections(
         user_id,
         allow_admin=allow_admin,
     )
-    plan = await _load_plan(db, project_id=project_id)
+    plan = await lock_plan_structure(db, project_id=project_id)
     if target_section_id in req.source_section_ids:
         raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
     target = await _load_section(
