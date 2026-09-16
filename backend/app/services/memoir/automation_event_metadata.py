@@ -18,6 +18,8 @@ VOICE_PLAYED_SESSION_ID_KEY = "voice_played_session_id"
 VOICE_PLAYED_MESSAGE_ID_KEY = "voice_played_message_id"
 EVENT_SIGNATURE_KEY = "event_signature"
 EDITING_JOB_FAILURE_SOURCE = "editing_job_failure"
+VOICE_ONLY_KEY = "voice_only"
+VOICE_PROGRESS_MILESTONE_SOURCE = "voice_progress_milestone"
 
 
 def _clean_utterance_ids(
@@ -54,6 +56,12 @@ def _event_is_voice_unannounced(
         and metadata.get("source") != EDITING_JOB_FAILURE_SOURCE
         and not metadata.get(VOICE_PLAYED_AT_KEY)
     )
+
+
+def _event_is_voice_only(
+    event: AutomationEventMetadataCarrier,
+) -> bool:
+    return (event.metadata_json or {}).get(VOICE_ONLY_KEY) is True
 
 
 def _event_signature(metadata: dict) -> str:

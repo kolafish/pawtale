@@ -18,12 +18,14 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirAutomationEvent,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
 from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import voice_transcript_correction
 from app.services.asr.gateway import (
     MAX_AUDIO_FRAME_BYTES,
@@ -918,6 +920,11 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
             )
         )
     ).scalars().all()
+    progress_notice = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+        )
+    )
     jobs_by_type = {job.job_type: job for job in editing_jobs}
     versions = (
         await test_db.execute(
@@ -968,6 +975,10 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert retrieval_job.payload_json["text_source"] == "raw"
     assert "search_text" not in retrieval_job.payload_json
     assert MemoirEditingJobType.ORGANIZE_MATERIAL.value not in jobs_by_type
+    assert progress_notice is not None
+    assert progress_notice.summary_text == "这个项目已经留下 1 条讲述记录。"
+    assert progress_notice.utterance_ids_json == [utterance.id]
+    assert progress_notice.metadata_json[automation_event_metadata.VOICE_ONLY_KEY] is True
     assert MemoirEditingJobType.UPDATE_TOPIC_MAP.value not in jobs_by_type
 
 

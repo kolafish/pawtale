@@ -68,7 +68,7 @@ from app.services.memoir.voice_tts_types import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v3"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v4"
 STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
@@ -327,7 +327,6 @@ class VoiceAssistantTurnStreamSession:
                 ),
                 progress_update=None,
                 automation_event_ids=[],
-                speech_prefix="",
                 voice_announcement_event_ids=[],
             )
         else:
@@ -464,7 +463,6 @@ class VoiceAssistantTurnStreamSession:
             max_tokens=max_tokens,
             turn_id=turn_id,
             artifacts=artifacts,
-            progress_context=project_progress_context,
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
@@ -572,7 +570,7 @@ class VoiceAssistantTurnStreamSession:
                 "ai_model_mismatch": artifacts.ai_model_mismatch,
                 "progress_update": project_progress_context.progress_update,
                 "progress_update_used": project_progress_context.progress_update is not None,
-                "progress_spoken_text": project_progress_context.speech_prefix,
+                "progress_spoken_text": "",
                 "progress_voice_selected_event_ids": project_progress_context.voice_announcement_event_ids or [],
                 "current_completion_issue_id": (
                     completion_prompt_context.issue_id if completion_prompt_context else None
@@ -591,7 +589,6 @@ class VoiceAssistantTurnStreamSession:
         max_tokens: int,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
-        progress_context: ProgressPromptContext,
         cancel_event: asyncio.Event,
     ) -> None:
         text_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -607,13 +604,6 @@ class VoiceAssistantTurnStreamSession:
         )
 
         async def produce_text() -> None:
-            await self._stream_progress_prefix(
-                text_queue=text_queue,
-                turn_id=turn_id,
-                artifacts=artifacts,
-                progress_context=progress_context,
-                cancel_event=cancel_event,
-            )
             await self._stream_text(
                 ai_client=ai_client,
                 system_prompt=system_prompt,
@@ -638,31 +628,6 @@ class VoiceAssistantTurnStreamSession:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _stream_progress_prefix(
-        self,
-        *,
-        text_queue: asyncio.Queue[str | None],
-        turn_id: str,
-        artifacts: AssistantTurnArtifacts,
-        progress_context: ProgressPromptContext,
-        cancel_event: asyncio.Event,
-    ) -> None:
-        text = progress_context.speech_prefix.strip()
-        if not text or cancel_event.is_set():
-            return
-        artifacts.text += text
-        await text_queue.put(text)
-        await self.client.send_json(
-            {
-                "type": "text.delta",
-                "turn_id": turn_id,
-                "voice_session_id": self.voice_session_id,
-                "text_delta": text,
-                "text": artifacts.text,
-                "source": "progress_announcement",
-            }
-        )
 
     async def _stream_text(
         self,
@@ -790,7 +755,7 @@ class VoiceAssistantTurnStreamSession:
                     "progress_update_used": progress_context.progress_update is not None,
                     "progress_automation_event_ids": progress_context.automation_event_ids or [],
                     "progress_voice_selected_event_ids": progress_context.voice_announcement_event_ids or [],
-                    "progress_spoken_text": progress_context.speech_prefix,
+                    "progress_spoken_text": "",
                     "current_completion_issue_id": (
                         completion_prompt_context.issue_id if completion_prompt_context else None
                     ),
@@ -881,13 +846,13 @@ def _build_stream_turn_prompt(
 - 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
         elif has_previous_project_narration:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
-- 最多两句：第一句简短欢迎回来；第二句只问“今天想先讲哪一段？”
+- 自然地欢迎回来，再给一个清楚、轻松的开放入口
 - 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
 - 可以自然给出几个轻选项，但不要念成长列表，选项来自：{GUIDED_TOPIC_MENU}
 - 必须说明想不起来也没关系，可以随便聊"""
         else:
             mode_instruction = f"""当前是主题讲述首次开场。
-- 最多两句：第一句用“{host_name}”做很短的自我介绍并说明可以慢慢聊；第二句问“今天想先讲哪一段？”
+- 用“{host_name}”做很短的自我介绍，说明可以慢慢聊，并给一个清楚、轻松的开口
 - 可以自然带出 3 到 5 个轻选项，但不要念成长列表，选项来自：{GUIDED_TOPIC_MENU}
 - 明确说想不起来也没关系，可以随便聊
 - 不要立刻进入历史细节"""
@@ -899,12 +864,12 @@ def _build_stream_turn_prompt(
 - 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
         elif has_previous_project_narration:
             mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
-- 最多两句：第一句简短欢迎回来；第二句给一个很小的开口
+- 自然地欢迎回来，并给一个很小的开口
 - 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
-- 结尾可以问“今天想接着讲哪一段？”或“先说一件想起来的小事也可以”"""
+- 让叙述者可以自然选择接着讲或从一件刚想起来的小事开始"""
         else:
             mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导。
-- 最多两句：第一句用“{host_name}”做很短的自我介绍并说明可以慢慢聊；第二句给一个很小的开口
+- 用“{host_name}”做很短的自我介绍，说明可以慢慢聊，并给一个很小的开口
 - 可以提示“先说一件想起来的小事”或“从一个人、一件事、一个地方开始都可以”
 - 不要连续提问，只给一个开放入口"""
     return f"""请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。
@@ -914,7 +879,7 @@ def _build_stream_turn_prompt(
 - 不要在正文前加“{host_name}：”“老余：”“小余：”“AI：”等说话人标签；自称只能出现在自然句子里，标签不属于可播放内容
 - 你可以自主组合动作：承接认可、鼓励继续讲、小结、自然换方向、继续追问，或没听清/太短时温和接住
 - 普通回应 1 到 2 句，建议 35 到 75 个汉字
-- 开场最多 2 句，建议 45 到 70 个汉字；先轻提示，再给一个明确问题，不要说成长开场白
+- 问候、进度和问题都由你统一组织成一句或两句连贯口语，不要说成长开场白，也不要出现分段播报感
 - 不要上来就追问历史细节，不要给叙述者压力
 - 不要机械重复叙述者刚说过的话；认可必须落在具体内容上，但不要把用户原话换个说法再说一遍
 - 如果要问问题，一次只问一个自然问题

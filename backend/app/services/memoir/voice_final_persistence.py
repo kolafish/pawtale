@@ -21,6 +21,7 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
+from app.services.memoir import voice_progress_notices
 from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.asr.streaming import StreamingASREvent
@@ -220,6 +221,11 @@ class VoiceFinalPersistenceService:
                     project_id=voice_session.project_id,
                     utterance=utterance,
                     source="asr_final",
+                )
+                await voice_progress_notices.enqueue_utterance_milestone_notice(
+                    self.db,
+                    project_id=voice_session.project_id,
+                    utterance_id=utterance.id,
                 )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
