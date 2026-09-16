@@ -29,6 +29,17 @@ page method、view model、service 和状态机测试；本目录只覆盖真实
 ./scripts/test-miniprogram-e2e.sh voice
 ```
 
+首页改版可单独运行不依赖后端账号的视觉状态矩阵：
+
+```bash
+npm --prefix e2e/miniprogram run test:home-visual
+```
+
+它仍要求微信开发者工具已经登录并开启服务端口，但不会读取 `.env.e2e.local` 中的测试账号，
+页面数据使用本地注入，不依赖生产后端，也不会修改项目数据。测试在真实小程序渲染器中注入未登录、无项目、空项目、
+已有故事、声纹授权、成长反馈、刷新/整理失败和大字长文案状态，检查横向溢出与 44px 主操作
+点击区域，并把首屏和需要滚动的页面截图写入 `artifacts/foundation-<timestamp>/`。
+
 语音测试启动仅监听 `127.0.0.1` 随机端口的内存 fixture，模拟后端 HTTP、Streaming
 ASR、LLM 回应和 PCM TTS；开发者工具中的录音器输入也使用固定 PCM 帧。小程序仍走
 真实页面绑定、授权同步、WebSocket 协议、语音状态机和 WebAudio 播放代码。该目标不

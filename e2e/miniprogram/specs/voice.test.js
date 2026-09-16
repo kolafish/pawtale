@@ -223,11 +223,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
   try {
     session.artifacts.mark("voice:page:open:start");
     const host = await session.miniProgram.reLaunch("/pages/home/index");
-    const home = await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
-    if (home.showLaunchPanel) await (await host.$(".launch-secondary-button")).tap();
+    await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
     assert.equal((await host.data()).showMoreActions, false);
     assert.equal(await host.$("#home-narration-modes"), null);
-    assert.equal((await host.data()).currentGuidanceText, "当前讲述方式：自由讲述");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-modes-collapsed.png") });
     const homePicker = await assertNarrationModes(host, "home-narration-modes", "free_narration");
     for (const mode of ["guided_interview", "book_completion", "human_interview", "free_narration"]) {

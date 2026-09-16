@@ -102,10 +102,15 @@ function readIOSNativeConfig() {
   };
 }
 
-function readE2EConfig() {
+function readE2EConfig({ requireAccount = true } = {}) {
+  const defaultCliPath = [
+    "/Applications/wechatwebdevtools.app/Contents/MacOS/cli",
+    "/Applications/wechatwebdevtools-stable.app/Contents/MacOS/cli",
+  ].find((candidate) => fs.existsSync(candidate))
+    || "/Applications/wechatwebdevtools.app/Contents/MacOS/cli";
   const cliPath = path.resolve(
     process.env.PAWTALE_E2E_CLI_PATH
-      || "/Applications/wechatwebdevtools.app/Contents/MacOS/cli",
+      || defaultCliPath,
   );
   const projectPath = path.resolve(
     process.env.PAWTALE_E2E_PROJECT_PATH || REPOSITORY_ROOT,
@@ -117,7 +122,7 @@ function readE2EConfig() {
     throw new Error(`小程序项目缺少 project.config.json：${projectPath}`);
   }
   return {
-    account: requiredAccountConfig(),
+    account: requireAccount ? requiredAccountConfig() : { email: "", password: "" },
     artifactsPath: path.join(E2E_ROOT, "artifacts"),
     automationPort: integerEnvironmentValue("PAWTALE_E2E_AUTOMATION_PORT", undefined),
     cliPath,

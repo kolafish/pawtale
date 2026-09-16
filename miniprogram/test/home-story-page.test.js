@@ -12,11 +12,13 @@ function progress(patch = {}) {
 function snapshot(patch = {}) {
   return {
     identity: { id: "user-1", email: "test@example.com", display_name: "作者", active_project_id: "project-1", active_project: { id: "project-1", title: "余仲尤的回忆录" } },
-    progress: progress(), book_readable: true, book_char_count: 200, updated_at: "2026-09-05T00:00:00Z",
+    progress: progress(), book_readable: true, book_char_count: 200, book_chapter_count: 1,
+    book_issues: { review_count: 0, supplement_count: 0 }, book_manual_edit_preserved: false,
+    updated_at: "2026-09-05T00:00:00Z",
     chapters: [1, 2].map((n) => ({ id: `chapter-${n}`, title: `章节 ${n}`, include_in_book: n === 1,
       material_count: 2, char_count: n === 1 ? 200 : 0, readable: n === 1,
       state: n === 1 ? "settled" : "muted", state_text: n === 1 ? "可阅读" : "暂不入书",
-      image_count: 3, video_count: 1,
+      image_count: 3, video_count: 1, issues: { review_count: 0, supplement_count: 0 },
       sections: [{ id: `section-${n}`, title: `小节 ${n}`, material_count: 1, image_count: 1, video_count: 2 }],
     })),
     automation_events: { items: [], total: 0, limit: 8 },
@@ -52,43 +54,40 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
   return { ...loadPageModule("../pages/home/index.ts"), calls };
 }
 
-test("story maps server counts and distinguishes pending from user decisions", () => {
+test("story maps server content into the hero, themes and book summary", () => {
   const view = storyViewData(snapshot());
-  assert.equal(view.memoir.progressDetail, "阅读草稿");
-  assert.equal(view.overview.readableText, "1 章可读");
+  assert.equal(view.memoir.progressDetail, "读读我的书");
+  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 200 字");
   assert.equal(view.overview.growthStage, 2);
-  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-stage-02-seedling.png");
-  assert.deepEqual(view.chapters.map(chapter => chapter.ordinal), [1, 2]);
+  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
+  assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
   assert.equal(view.chapters[0].hasSections, true);
-  assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
-  assert.match(view.unassignedMaterialDetail, /1 段需要您补充或确认/);
+  assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
+  assert.equal(view.chapters[0].memoryText, "2 段回忆");
+  assert.equal(view.chapters[0].statusText, "已丰富");
   assert.equal(view.chapters[0].readable, true);
-  assert.equal(view.chapters[0].sections[0].imageCount, 1);
-  assert.equal(view.chapters[0].sections[0].videoCount, 2);
-  assert.equal(view.chapters[1].outcomeText, "暂不入书");
-  assert.equal(view.unassignedImageCount, 2);
-  assert.equal(view.unassignedVideoCount, 1);
+  assert.equal(view.chapters[1].statusText, "已整理");
 });
 
-test("story distinguishes empty and fully assigned material", () => {
-  const empty = storyViewData(snapshot({ chapters: [], book_readable: false, progress: null }));
-  assert.equal(empty.unassignedMaterialText, "还没有讲述");
-  assert.equal(empty.overview.readableText, "还没有正文");
+test("story distinguishes empty, organizing and section-less states", () => {
+  const empty = storyViewData(snapshot({ chapters: [], book_readable: false, book_chapter_count: 0, book_char_count: 0, progress: null }));
+  assert.equal(empty.overview.summaryText, "故事树还在等待第一段回忆");
+  assert.equal(empty.overview.hasChapters, false);
+  assert.equal(empty.memoir.bookMetaText, "故事会在这里慢慢写成书");
   const noSections = storyViewData(snapshot({chapters:[{...snapshot().chapters[0], sections:[]}]}));
   assert.equal(noSections.chapters[0].hasSections, false);
-  const assigned = storyViewData(snapshot({ progress: progress({ pending_material_count: 0, needs_user_material_count: 0 }) }));
-  assert.equal(assigned.unassignedMaterialText, "所有讲述都已归入故事");
+  const organizing = storyViewData(snapshot({ chapters: [], book_readable: false, progress: progress({ material_count: 2 }) }));
+  assert.equal(organizing.overview.summaryText, "回忆正在整理成故事");
 });
 
-test("story keeps expansion while refreshing the same project", async () => {
+test("story applies large text while refreshing the same project", async () => {
   const { page } = loadStoryPage({ largeText: true });
   const context = pageContext(page);
   await context.onShow();
   assert.match(context.data.homePageClass, /large-text/);
   assert.equal(context.data.largeTextEnabled, true);
-  context.toggleChapter({ detail: { chapterId: "chapter-1" } });
   await context.loadHome();
-  assert.equal(context.data.story.chapters[0].expanded, false);
+  assert.equal(context.data.story.chapters[0].title, "章节 1");
   context.onHide();
 });
 
@@ -106,20 +105,19 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("story marks new sections and expands their chapter only when the reader asks", async () => {
+test("story marks new sections and focuses their parent theme only when the reader asks", async () => {
   const event = { event_id: "growth-1", created_at: "2026-09-05T00:00:00Z", summary_text: "新长出了一个小节", changes: [{kind:"section_added",chapter_id:"chapter-2",section_id:"section-2"}] };
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
-  assert.equal(context.data.growthNoticeText, "新长出 1 个小节：《章节 2 · 小节 2》");
+  assert.equal(context.data.growthNoticeText, "新长出 1 个故事：《章节 2 · 小节 2》");
   assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/chapter-sprig.png");
-  assert.equal(context.data.story.chapters[1].expanded, false);
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
   context.viewStoryGrowth();
-  assert.equal(context.data.story.chapters[1].expanded, true);
-  assert.deepEqual(targets, [["chapter-2", "section-2"]]);
+  assert.deepEqual(targets, [["chapter-2"]]);
+  assert.equal(context.data.story.chapters[1].highlighted, true);
   assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
   assert.deepEqual(calls.acknowledgedEventIds, []);
   await context.dismissGrowthNotice();
@@ -134,7 +132,6 @@ test("story stops polling on hide, rejects old responses and resumes on reentry"
   const context = pageContext(page);
   await context.onShow();
   assert.equal(context.homeRefreshTimer.pending, true);
-  context.toggleChapter({ detail: { chapterId: "chapter-1" } });
   current = null;
   const pending = context.loadHome(true);
   context.onHide();
@@ -142,12 +139,10 @@ test("story stops polling on hide, rejects old responses and resumes on reentry"
   resolve(snapshot({ progress: progress({ status: "ready" }) }));
   await pending;
   assert.equal(context.data.progress.status, "processing");
-  assert.equal(context.data.story.chapters[0].expanded, false);
   current = snapshot({ identity: { id: "user-1", email: "test@example.com", display_name: "作者", active_project_id: "project-2", active_project: { id: "project-2" } }, progress: progress({ status: "failed", can_retry: true }) });
   await context.onShow();
   assert.equal(context.data.projectId, "project-2");
   assert.equal(context.data.progress.status, "failed");
-  assert.equal(context.data.story.chapters[0].expanded, true);
   assert.equal(context.homeRefreshTimer.pending, true);
   context.onUnload();
 });
@@ -170,25 +165,19 @@ test("story offers explicit retry and does not turn a refresh failure into job f
   context.onHide();
 });
 
-test("story reads book and chapter directly and retains editing destinations", async () => {
+test("story opens the book, compact theme workspace and chapter manager", async () => {
   const { page, calls } = loadStoryPage();
   const context = pageContext(page);
   const urls = [];
   global.wx.navigateTo = ({ url }) => urls.push(url);
   await context.onShow();
   context.openBook();
-  context.readChapter({ detail: { chapterId: "chapter-1" } });
-  context.readChapter({ detail: { chapterId: "chapter-2" } });
   context.openChapterManager();
   context.openChapter({ detail: { chapterId: "chapter-1" } });
-  context.openChapter({ detail: { chapterId: "chapter-2", sectionId: "section-2" } });
-  context.openMedia({ detail: { chapterId: "chapter-1" } });
-  context.openMedia({ detail: { chapterId: "" } });
-  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project-1", "/pages/book-reader/index?projectId=project-1&chapterId=chapter-1",
+  context.openChapter({ detail: { chapterId: "chapter-2" } });
+  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2&sectionId=section-2",
-    "/pages/image-assets/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
-    "/pages/image-assets/index?projectId=project-1&scope=unassigned"]);
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2"]);
   assert.equal(calls.book, 1);
   assert.deepEqual(calls.bookTargets, ["chapters"]);
   context.onHide();
@@ -209,7 +198,7 @@ test("story clears prior project data on auth loss or an empty account", async (
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.progress, null);
   assert.equal(context.data.story.chapters.length, 0);
-  assert.equal(context.data.story.unassignedImageCount, 0);
+  assert.equal(context.data.story.overview.hasChapters, false);
   authFailure = false;
   await context.loadHome();
   assert.equal(context.data.story.chapters.length, 2);
@@ -239,7 +228,7 @@ function growth(id, kind = "section_added", chapterId = "chapter-2", sectionId =
   return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", changes: [{ kind, chapter_id: chapterId, section_id: sectionId }] };
 }
 
-test("growth animates once after initial data, retains collapse and never scrolls during a refresh", async () => {
+test("growth animates once after initial data and never scrolls during a refresh", async () => {
   let current = snapshot({ growth_events: [growth("old")] });
   const { page, calls } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
@@ -251,11 +240,7 @@ test("growth animates once after initial data, retains collapse and never scroll
   current = snapshot({ growth_events: [growth("fresh", "section_updated"), growth("old")] });
   await context.loadHome(true);
   assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, true);
-  assert.equal(context.data.story.chapters[1].expanded, false);
-  context.toggleChapter({detail:{chapterId:"chapter-2"}});
-  context.toggleChapter({detail:{chapterId:"chapter-2"}});
   await context.loadHome(true);
-  assert.equal(context.data.story.chapters[1].expanded, false);
   assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
   context.onHide();
   await context.onShow();
@@ -335,7 +320,9 @@ test("continue narration directs an unconsented reader to the authorization cont
   await context.continueNarration();
   assert.deepEqual(scrolls, [{selector:"#home-voice-authorization",duration:250}]);
   assert.equal(context.data.creatingVoice, false);
-  assert.match(context.data.error, /声纹授权/);
+  assert.equal(context.data.voiceAuthorizationRequested, true);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.equal(context.data.error, "");
   context.onHide();
 });
 
@@ -345,9 +332,9 @@ test("story keeps readable chapter drafts available while the assembled book awa
     book_readable: false,
     progress: progress({ status: "needs_input", readable_chapter_count: 0 }),
   }));
-  assert.equal(view.overview.readableText, "1 章可读");
   assert.equal(view.chapters[0].readable, true);
-  assert.equal(view.memoir.progressDetail, "查看书稿");
+  assert.equal(view.memoir.progressDetail, "看看书稿");
+  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 200 字");
 });
 
 const { homeStoryNotice } = require("../pages/home/home-story-state.ts");
@@ -360,9 +347,9 @@ test("home exposes chapter candidates independently of issue notices and routes 
   global.wx.navigateTo = ({url}) => urls.push(url);
   try {
     await context.onShow();
-    assert.equal(context.data.reviewNoticeText, "全书：1 项待确认");
-    assert.equal(context.data.candidateNoticeText, "有 1 章整理出了新稿，原稿已保留");
-    assert.equal(context.data.story.chapters[0].detailActionText, "查看新稿");
+    assert.equal(context.data.reviewNoticeText, "书里有 1 处等您确认");
+    assert.equal(context.data.candidateNoticeText, "有 1 个主题整理出了新稿，原稿已保留");
+    assert.equal(context.data.story.chapters[0].statusText, "有新稿");
     context.openChapterCandidate();
     assert.deepEqual(urls, ["/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1"]);
     current.chapters[0].candidate_job_id = null;
@@ -380,12 +367,11 @@ test("home separates chapter decisions, optional supplements and book decisions"
       issues: { review_count: i ? 0 : 2, supplement_count: i ? 1 : 0 } })),
   });
   assert.deepEqual(homeStoryNotice(current), {
-    reviewNoticeText: "章节：2 项待确认 · 1 项待补充", reviewNoticeDetail: "全书：1 项待确认", reviewNoticeAction: "issues",
+    reviewNoticeText: "2 个故事等您确认 · 1 个故事可以继续聊", reviewNoticeDetail: "书里有 1 处等您确认", reviewNoticeAction: "issues",
   });
   const view = storyViewData(current);
-  assert.equal(view.chapters[0].detailActionText, "2 项待确认");
-  assert.equal(view.chapters[1].detailActionText, "1 项待补充");
-  assert.equal(view.chapters[0].outcomeText, "");
+  assert.equal(view.chapters[0].statusText, "待您确认");
+  assert.equal(view.chapters[1].statusText, "可继续聊");
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -394,14 +380,14 @@ test("closed issues disappear despite an old needs_input job; five readable draf
     progress: progress({status: "needs_input", readable_chapter_count: 0, needs_user_material_count: 0}),
     book_readable: false, book_chapter_count: 0, book_issues: {review_count: 1, supplement_count: 0},
   });
-  assert.equal(homeStoryNotice(current).reviewNoticeText, "全书：1 项待确认");
-  assert.equal(storyViewData(current).overview.readableText, "5 章可读");
-  assert.equal(storyViewData(current).overview.bookText, "");
+  assert.equal(homeStoryNotice(current).reviewNoticeText, "书里有 1 处等您确认");
+  assert.equal(storyViewData(current).overview.summaryText, "5 个主题 · 5 个故事");
+  assert.equal(storyViewData(current).memoir.bookMetaText, "已写成 5 章 · 200 字");
   current.book_issues.review_count = 0;
   assert.deepEqual(homeStoryNotice(current), {reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: ""});
   current.book_readable = true;
   current.book_chapter_count = 3;
-  assert.equal(storyViewData(current).overview.bookText, "3 章已入书稿");
+  assert.equal(storyViewData(current).memoir.bookMetaText, "已写成 3 章 · 200 字");
 });
 
 test("home notice opens the matching issue, transcript or manuscript destination", async () => {
@@ -414,7 +400,7 @@ test("home notice opens the matching issue, transcript or manuscript destination
   assert.match(urls[0], /^\/pages\/book-completion\/index\?projectId=project-1/);
   current.book_issues.review_count = 0;
   await context.loadHome(true);
-  assert.equal(context.data.reviewNoticeText, "有 1 段讲述需要您查看");
+  assert.equal(context.data.reviewNoticeText, "有 1 段回忆想请您看看");
   context.openStoryNotice();
   assert.equal(calls.transcripts, 1);
   current.progress.needs_user_material_count = 0;

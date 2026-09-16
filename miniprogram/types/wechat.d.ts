@@ -37,7 +37,7 @@ type ComponentInstance<
   properties: {
     [TKey in keyof TProperties]: ComponentPropertyValue<TProperties[TKey]>;
   };
-  setData(data: Partial<TData>): void;
+  setData(data: Partial<TData>, callback?: () => void): void;
   triggerEvent(name: string, detail?: unknown): void;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
 };
@@ -48,6 +48,9 @@ declare function Component<
   TMethods extends object = object,
 >(
   options: {
+    options?: {
+      multipleSlots?: boolean;
+    };
     properties: TProperties;
     data?: TData;
     methods: TMethods & ThisType<ComponentInstance<TProperties, TData, TMethods>>;

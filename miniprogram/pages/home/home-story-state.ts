@@ -1,4 +1,4 @@
-import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot, MemoirStoryIssueCounts } from "../../domain/memoir-snapshots";
+import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
 import { STORY_GROWTH_NOTICE_IMAGES } from "../../components/story-tree/story-growth-stage";
 import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
@@ -68,12 +68,11 @@ function namedNewSections(labels: string[]): string {
 
 export function homeStorySnapshotData(
   snapshot: MemoirStorySnapshot,
-  previous: StoryViewData,
+  _previous: StoryViewData,
   freshEventIds: Set<string> = new Set(),
 ): Partial<HomeStoryData> {
   const story = storyViewData(snapshot);
   const candidates = snapshot.chapters.filter(chapter => chapter.include_in_book && chapter.candidate_job_id);
-  const expanded = new Map(previous.chapters.map((chapter) => [chapter.id, chapter.expanded]));
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
   const newChapters = new Set<string>(), newSections = new Set<string>();
   const updatedChapters = new Set<string>(), updatedSections = new Set<string>();
@@ -99,6 +98,8 @@ export function homeStorySnapshotData(
         section.growthLabel = added || section.growthLabel === "新长出" ? "新长出" : "已补充";
         section.highlighted = true;
         section.growthAnimating ||= freshEventIds.has(event.event_id);
+        chapter.growthLabel = added || chapter.growthLabel === "新长出" ? "新长出" : "已补充";
+        chapter.growthAnimating ||= freshEventIds.has(event.event_id);
         growthTarget ||= { chapterId: chapter.id, sectionId: section.id };
       } else {
         (added ? newChapters : updatedChapters).add(chapter.id);
@@ -109,24 +110,22 @@ export function homeStorySnapshotData(
       chapter.highlighted = true;
     }
   }
-  // A repeated snapshot must not reopen a chapter the reader has collapsed.
   for (const chapter of story.chapters) {
-    chapter.expanded = expanded.get(chapter.id) ?? chapter.expanded;
     if (chapter.highlighted && !chapter.growthLabel) chapter.growthLabel = "有更新";
   }
   const addedCount = newChapters.size + newSections.size;
   const updatedCount = [...updatedSections].filter(id => !newSections.has(id)).length
     + [...updatedChapters].filter(id => !newChapters.has(id) && !sectionParents.has(id)).length;
   const summary = [
-    newChapters.size ? `新长出 ${newChapters.size} 章` : "",
-    newSections.size ? `新长出 ${newSections.size} 个小节${namedNewSections([...newSectionLabels.values()])}` : "",
+    newChapters.size ? `新长出 ${newChapters.size} 个主题` : "",
+    newSections.size ? `新长出 ${newSections.size} 个故事${namedNewSections([...newSectionLabels.values()])}` : "",
     updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
     bookUpdated ? "书稿已更新" : "",
   ].filter(Boolean).join("，");
   const growthNoticeKind = addedCount ? "new" : updatedCount ? "enriched" : "progress";
   return {
     ...homeStoryNotice(snapshot),
-    candidateNoticeText: candidates.length ? `有 ${candidates.length} 章整理出了新稿，原稿已保留` : "",
+    candidateNoticeText: candidates.length ? `有 ${candidates.length} 个主题整理出了新稿，原稿已保留` : "",
     candidateChapterId: candidates[0]?.id || "",
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
@@ -144,28 +143,28 @@ export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
 }
 
 
-function issueSummary(counts: MemoirStoryIssueCounts): string {
-  return [
-    counts.review_count ? `${counts.review_count} 项待确认` : "",
-    counts.supplement_count ? `${counts.supplement_count} 项待补充` : "",
-  ].filter(Boolean).join(" · ");
-}
-
 export function homeStoryNotice(snapshot: MemoirStorySnapshot): StoryNotice {
   const chapters = snapshot.chapters.reduce((counts, chapter) => ({
     review_count: counts.review_count + (chapter.issues?.review_count || 0),
     supplement_count: counts.supplement_count + (chapter.issues?.supplement_count || 0),
   }), { review_count: 0, supplement_count: 0 });
-  const chapterText = issueSummary(chapters);
-  const bookText = snapshot.book_issues ? issueSummary(snapshot.book_issues) : "";
+  const chapterText = [
+    chapters.review_count ? `${chapters.review_count} 个故事等您确认` : "",
+    chapters.supplement_count ? `${chapters.supplement_count} 个故事可以继续聊` : "",
+  ].filter(Boolean).join(" · ");
+  const bookText = snapshot.book_issues?.review_count
+    ? `书里有 ${snapshot.book_issues.review_count} 处等您确认`
+    : snapshot.book_issues?.supplement_count
+      ? `书里有 ${snapshot.book_issues.supplement_count} 处可以继续聊`
+      : "";
   if (chapterText || bookText) return {
-    reviewNoticeText: chapterText ? `章节：${chapterText}` : `全书：${bookText}`,
-    reviewNoticeDetail: chapterText && bookText ? `全书：${bookText}` : "",
+    reviewNoticeText: chapterText || bookText,
+    reviewNoticeDetail: chapterText && bookText ? bookText : "",
     reviewNoticeAction: "issues",
   };
   const materials = snapshot.progress?.needs_user_material_count || 0;
   if (materials) return {
-    reviewNoticeText: `有 ${materials} 段讲述需要您查看`, reviewNoticeDetail: "", reviewNoticeAction: "transcripts",
+    reviewNoticeText: `有 ${materials} 段回忆想请您看看`, reviewNoticeDetail: "", reviewNoticeAction: "transcripts",
   };
   if (snapshot.book_manual_edit_preserved) return {
     reviewNoticeText: "已保留您修改的稿件", reviewNoticeDetail: "", reviewNoticeAction: "book",

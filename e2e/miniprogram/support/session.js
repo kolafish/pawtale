@@ -115,7 +115,7 @@ async function prepareE2ERuntime(session) {
 }
 
 async function launchE2ESession(options = {}) {
-  const configured = readE2EConfig();
+  const configured = readE2EConfig({ requireAccount: options.requireAccount !== false });
   const config = {
     ...configured,
     automationPort: configured.automationPort || await findAvailablePort(),

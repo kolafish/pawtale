@@ -58,7 +58,9 @@ function loadHomePage({
       return {
         server_revision: 1,
         chapters: [], progress: null, growth_events: [], automation_events: { items: [], total: 0, limit: 8 },
-        book_readable: false, book_char_count: 0, updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
+        book_readable: false, book_char_count: 0, book_chapter_count: 0,
+        book_issues: { review_count: 0, supplement_count: 0 }, book_manual_edit_preserved: false,
+        updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
         identity,
         latest_transcript: latest.items[0] || null,
       };
@@ -209,8 +211,9 @@ test("home supports a local large text mode without changing the default class",
   const context = {
     ...page,
     data: { ...page.data },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
@@ -253,80 +256,71 @@ test("home creates concise resume hints from the latest transcript", () => {
 });
 
 test("home view patch keeps first-screen template state simple", () => {
-  const { homeViewPatch } = loadHomePage().mod;
+  const loaded = loadHomePage();
+  const { homeViewPatch } = loaded.mod;
   const baseData = {
-    loading: false,
-    creatingVoice: false,
+    ...loaded.page.data,
     needsLogin: false,
-    error: "",
     userId: "user-1",
     displayName: "余主任",
     projectId: "project-1",
     projectTitle: "爷爷主题",
     projectDisplayTitle: "爷爷的故事",
-    projectPromptText: "不用讲完整，可以先说一件和爷爷有关的小事。",
     lastStoryHint: "爷爷退休后还在忙公司的事",
-    lastStoryText: "上次您说到：爷爷退休后还在忙公司的事。",
     hasLastStoryHint: true,
     launchVariant: "new_project",
-    showLaunchPanel: true,
-    showReturnPrompt: false,
-    launchEyebrow: "新的故事本",
-    launchTitle: "爷爷的故事，慢慢讲",
-    launchBody: "",
-    launchSecondaryText: "先看看首页",
     hasProject: true,
+    hasStories: true,
     selectedMode: "free_narration",
     voiceAuthorizationAgreed: true,
+    voiceAuthorizationRequested: false,
   };
 
   assert.deepEqual(
     {
       greetingText: homeViewPatch(baseData).greetingText,
-      launchModeTagText: homeViewPatch(baseData).launchModeTagText,
-      projectHeadingText: homeViewPatch(baseData).projectHeadingText,
-      projectMetaText: homeViewPatch(baseData).projectMetaText,
+      headerSubtitleText: homeViewPatch(baseData).headerSubtitleText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
       voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
-      showResumeActions: homeViewPatch(baseData).showResumeActions,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
       greetingText: "你好，余主任",
-      launchModeTagText: "新故事本",
-      projectHeadingText: "爷爷的故事",
-      projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
-      primaryVoiceButtonTitle: "开始自由讲述",
-      voiceStartButtonClass: "voice-start-button button-blocked",
+      headerSubtitleText: "继续讲述，让生活的故事慢慢长成一棵树。",
+      primaryVoiceButtonTitle: "继续讲故事",
+      voiceStartButtonClass: "button-blocked",
       voiceStartButtonHoverClass: "none",
-      showResumeActions: true,
       showVoiceAuthorizationPanel: false,
     },
   );
 });
 
-test("home start action identifies the selected narration mode", () => {
+test("home start action follows account, project, story and completion states", () => {
   const { homeViewPatch } = loadHomePage().mod;
   const baseData = {
     ...loadHomePage().page.data,
     hasProject: true,
     needsLogin: false,
     voiceAuthorizationAgreed: true,
+    hasStories: false,
   };
 
   const guided = homeViewPatch({
     ...baseData,
     selectedMode: "guided_interview",
   });
-  assert.equal(guided.primaryVoiceButtonTitle, "开始引导访谈");
-  assert.equal(guided.voiceStartNoteText, "AI 按人物、事件和话题提问，帮您展开回忆。");
+  assert.equal(guided.primaryVoiceButtonTitle, "讲第一个故事");
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
-  assert.equal(free.primaryVoiceButtonTitle, "开始自由讲述");
+  assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "继续讲故事");
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
+  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
 });
 
-test("home only shows project actions and voice consent after a usable project has loaded", () => {
+test("home reveals voice consent only after a usable project requests it", () => {
   const loaded = loadHomePage();
   const { homeViewPatch } = loaded.mod;
   const baseData = {
@@ -335,11 +329,11 @@ test("home only shows project actions and voice consent after a usable project h
     needsLogin: false,
     hasProject: true,
     voiceAuthorizationAgreed: false,
+    voiceAuthorizationRequested: false,
   };
 
-  assert.equal(homeViewPatch(baseData).showResumeActions, true);
-  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, true);
-  assert.equal(homeViewPatch({ ...baseData, loading: true }).showResumeActions, false);
+  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, voiceAuthorizationRequested: true }).showVoiceAuthorizationPanel, true);
   assert.equal(homeViewPatch({ ...baseData, loading: true }).showVoiceAuthorizationPanel, false);
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).showVoiceAuthorizationPanel, false);
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
@@ -475,7 +469,6 @@ test("home refreshes guidance mode from current project on load", async () => {
   assert.equal(context.data.hasProject, true);
   assert.deepEqual(transcriptCalls, [{ projectId: "project-1", limit: 1 }]);
   assert.equal(context.data.lastStoryHint, "爷爷退休后还在忙公司的事");
-  assert.equal(context.data.lastStoryText, "上次您说到：爷爷退休后还在忙公司的事。");
   assert.equal(context.data.hasLastStoryHint, true);
 });
 
@@ -575,7 +568,7 @@ test("home shows explicit project creation state for logged-in users without pro
   assert.equal(context.data.hasProject, false);
 });
 
-test("home shows first-visit launch copy from launch state", async () => {
+test("home keeps first-visit context while presenting the seed state", async () => {
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -604,9 +597,8 @@ test("home shows first-visit launch copy from launch state", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.launchVariant, "first_visit");
-  assert.equal(context.data.showLaunchPanel, true);
-  assert.equal(context.data.launchEyebrow, "聊出一本书");
-  assert.equal(context.data.launchTitle, "我的故事，慢慢讲");
+  assert.equal(context.data.primaryVoiceButtonTitle, "种下我的故事");
+  assert.equal(context.data.headerSubtitleText, "每一个故事，都从一颗种子开始。");
 });
 
 test("home dismisses one-time new-project launch markers", () => {
@@ -623,18 +615,16 @@ test("home dismisses one-time new-project launch markers", () => {
       userId: "user-1",
       projectId: "project-1",
       launchVariant: "new_project",
-      showLaunchPanel: true,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
   };
 
-  page.dismissLaunchPanel.call(context);
+  page.dismissLaunchExperience.call(context);
 
   assert.deepEqual(dismissals, [["user-1", "new_project", "project-1"]]);
   assert.equal(context.data.launchVariant, "none");
-  assert.equal(context.data.showLaunchPanel, false);
 });
 
 test("home creates voice sessions with the project-bound guidance mode", async () => {
@@ -829,35 +819,7 @@ test("home opens project-scoped supplement questions before creating an intervie
   context.data.creatingVoice = true;
   context.selectNarrationMode({ detail: { value: "book_completion" } });
   await context.startPrimaryVoiceChat();
-  page.openNarrationOverview.call(context);
   assert.equal(navigations.length, 1, "navigation waits for voice preparation to finish");
-});
-
-test("home opens narration overview without requiring microphone consent", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
-      voiceAuthorizationAgreed: false,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.openNarrationOverview.call(context);
-
-  assert.equal(navigations[0], "/pages/voice-progress/index");
-  assert.equal(context.data.error, "");
 });
 
 test("home does not create voice sessions when consent audit sync fails", async () => {
@@ -883,8 +845,9 @@ test("home does not create voice sessions when consent audit sync fails", async 
       hasProject: true,
       voiceAuthorizationAgreed: true,
     },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
@@ -984,11 +947,9 @@ test("home opens the project switcher from the current memoir", () => {
 
 test("home blocks voice session creation before voice authorization consent", async () => {
   let createCalls = 0;
-  const toasts = [];
+  const scrolls = [];
   global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
+    pageScrollTo(options) { scrolls.push(options); },
   };
   const { page } = loadHomePage({
     voiceApiExports: {
@@ -1007,16 +968,19 @@ test("home blocks voice session creation before voice authorization consent", as
       hasProject: true,
       voiceAuthorizationAgreed: false,
     },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
   await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
-  assert.match(context.data.error, /声纹授权协议/);
-  assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.voiceAuthorizationRequested, true);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.deepEqual(scrolls, [{ selector: "#home-voice-authorization", duration: 250 }]);
 });
 
 test("home refreshes voice authorization consent from storage", () => {
