@@ -69,10 +69,10 @@
 
 .overview-symbol {
   position: absolute;
-  left: -75rpx;
-  top: 24rpx;
-  width: 56rpx;
-  height: 56rpx;
+  left: -79rpx;
+  top: 20rpx;
+  width: 64rpx;
+  height: 64rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -83,26 +83,7 @@
     0 6rpx 14rpx rgba(88, 112, 82, 0.08);
 }
 
-.overview-sprout {
-  position: relative;
-  width: 5rpx;
-  height: 25rpx;
-  border-radius: 999rpx;
-  background: var(--ui-success-text);
-  transform: rotate(-5deg);
-}
-
-.overview-sprout::before,
-.overview-sprout::after {
-  content: "";
-  position: absolute;
-  width: 18rpx;
-  height: 11rpx;
-  background: #87a17e;
-}
-
-.overview-sprout::before { top: 1rpx; right: 2rpx; border-radius: 100% 0; transform: rotate(18deg); }
-.overview-sprout::after { top: 10rpx; left: 2rpx; border-radius: 0 100%; transform: rotate(-18deg); }
+.overview-tree-image { width: 64rpx; height: 64rpx; }
 
 .overview-card {
   width: 100%;
@@ -157,33 +138,17 @@
   box-shadow: 0 0 0 5rpx rgba(255, 253, 250, 0.9);
 }
 
-.chapter-node::before {
-  content: "";
+.chapter-sprig-image {
   position: absolute;
-  right: -5rpx;
-  top: -4rpx;
-  width: 3rpx;
-  height: 16rpx;
-  border-radius: 999rpx;
-  background: rgba(88, 112, 82, 0.56);
-  opacity: 0.72;
-  transform: rotate(38deg);
-  transform-origin: bottom center;
+  z-index: 0;
+  right: -18rpx;
+  top: -17rpx;
+  width: 38rpx;
+  height: 38rpx;
+  pointer-events: none;
 }
 
-.chapter-node::after {
-  content: "";
-  position: absolute;
-  right: -10rpx;
-  top: -6rpx;
-  width: 20rpx;
-  height: 12rpx;
-  border-radius: 100% 0 100% 0;
-  background: var(--ui-success-text);
-  opacity: 0.58;
-  transform: rotate(-16deg);
-  transform-origin: left bottom;
-}
+.chapter-node-number { position: relative; z-index: 1; }
 
 .chapter-card {
   position: relative;

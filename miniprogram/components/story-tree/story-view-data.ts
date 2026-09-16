@@ -1,3 +1,5 @@
+import { STORY_TREE_STAGE_IMAGES, type StoryTreeGrowthStage } from "./story-growth-stage";
+
 export type StoryChapterState = "settled" | "attention" | "draft" | "muted";
 
 export interface StoryMemoirSummaryView {
@@ -42,6 +44,8 @@ export interface StoryOverviewView {
   title: string;
   summaryText: string;
   outcomeText: string;
+  growthStage: StoryTreeGrowthStage;
+  growthImageSrc: string;
 }
 
 export interface StoryViewData {
@@ -67,6 +71,8 @@ export function emptyStoryViewData(): StoryViewData {
       title: "人生总览",
       summaryText: "0 章 · 0 小节 · 0 段讲述",
       outcomeText: "还没有正文",
+      growthStage: 1,
+      growthImageSrc: STORY_TREE_STAGE_IMAGES[1],
     },
     chapters: [],
     unassignedMaterialTitle: "从一段讲述开始",

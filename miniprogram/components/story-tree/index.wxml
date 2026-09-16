@@ -20,7 +20,7 @@
   <view class="story-tree">
     <view class="overview-row">
       <view class="overview-symbol" aria-hidden="true">
-        <view class="overview-sprout"></view>
+        <image class="overview-tree-image" src="{{story.overview.growthImageSrc}}" mode="aspectFit" />
       </view>
       <view class="overview-card ui-card ui-card-borderless">
         <view class="overview-heading">
@@ -46,7 +46,10 @@
       id="story-chapter-{{item.id}}"
       class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
     >
-      <view class="chapter-node ui-tabular" aria-hidden="true">{{item.ordinal}}</view>
+      <view class="chapter-node ui-tabular" aria-hidden="true">
+        <image class="chapter-sprig-image" src="/assets/story-tree/chapter-sprig.png" mode="aspectFit" />
+        <text class="chapter-node-number">{{item.ordinal}}</text>
+      </view>
 
       <view
         class="chapter-card ui-card ui-card-borderless ui-pressable"

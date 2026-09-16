@@ -164,7 +164,7 @@
     <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
       <view class="home-growth-copy">
         <view class="home-growth-icon" aria-hidden="true">
-          <view class="home-growth-sprout"></view>
+          <image class="home-growth-image" src="{{growthNoticeIcon}}" mode="aspectFit" />
         </view>
         <view class="home-growth-text">
           <text class="home-story-progress-title">{{growthNoticeTitle}}</text>

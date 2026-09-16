@@ -56,6 +56,8 @@ test("story maps server counts and distinguishes pending from user decisions", (
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.progressDetail, "阅读草稿");
   assert.equal(view.overview.readableText, "1 章可读");
+  assert.equal(view.overview.growthStage, 2);
+  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-stage-02-sapling.png");
   assert.deepEqual(view.chapters.map(chapter => chapter.ordinal), [1, 2]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
@@ -111,6 +113,7 @@ test("story marks new sections and expands their chapter only when the reader as
   await context.onShow();
   await flushAsyncWork();
   assert.equal(context.data.growthNoticeText, "新长出 1 个小节：《章节 2 · 小节 2》");
+  assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/chapter-sprig.png");
   assert.equal(context.data.story.chapters[1].expanded, false);
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
@@ -270,6 +273,7 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters[1].sections.length, 1);
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
   assert.equal(context.data.growthNoticeText, "补充了 1 个已有故事");
+  assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/notice-enriched.png");
   context.onHide();
 });
 
