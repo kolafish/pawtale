@@ -13,6 +13,7 @@ VALID_APP_ENVS = {"development", "test", "production"}
 DEFAULT_AI_TEXT_MODEL = "claude-opus-4-8"
 VALID_AI_TEXT_MODELS = {
     "deepseek",
+    "deepseek-flash",
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "volc-doubao-pro",
@@ -48,7 +49,7 @@ class Settings(BaseSettings):
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     deepseek_thinking_type: str = "disabled"
 
     # VolcEngine Ark API Keys

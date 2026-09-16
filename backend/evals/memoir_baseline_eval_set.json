@@ -3,7 +3,7 @@
   "name": "memoir_baseline_eval_set",
   "description": "Synthetic baseline data for comparing memoir LLM providers. Do not add provider keys or real user private data to this file.",
   "candidate_models": [
-    "deepseek-v4-flash",
+    "deepseek-flash",
     "deepseek-v4-pro",
     "doubao-seed-2-0-pro-260215"
   ],

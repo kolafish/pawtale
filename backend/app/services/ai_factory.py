@@ -13,8 +13,14 @@ from app.config import DEFAULT_AI_TEXT_MODEL, VALID_AI_TEXT_MODELS, get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+DEEPSEEK_FLASH_MODEL = "deepseek-flash"
 DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_V4_PRO_MODEL = "deepseek-v4-pro"
+DEEPSEEK_FLASH_ALIASES = frozenset({
+    "deepseek",
+    DEEPSEEK_FLASH_MODEL,
+    DEEPSEEK_V4_FLASH_MODEL,
+})
 VOLC_DOUBAO_PRO_MODEL = "doubao-seed-2-0-pro-260215"
 
 
@@ -34,8 +40,8 @@ class AIServiceFactory:
 
     @staticmethod
     def _service_for_model(model: str) -> AITextServiceBase:
-        if model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
-            return DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
+        if model in DEEPSEEK_FLASH_ALIASES:
+            return DeepSeekTextService(model=DEEPSEEK_FLASH_MODEL)
         if model == DEEPSEEK_V4_PRO_MODEL:
             return DeepSeekTextService(model=DEEPSEEK_V4_PRO_MODEL)
         if model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
@@ -54,7 +60,8 @@ class AIServiceFactory:
         根据模型名称返回对应的AI服务实例
 
         Args:
-            model: 模型名称 (deepseek / deepseek-v4-flash / deepseek-v4-pro /
+            model: 模型名称 (deepseek / deepseek-flash / deepseek-v4-flash /
+                  deepseek-v4-pro /
                   doubao-seed-2-0-pro-260215 / claude-fable-5 /
                   claude-opus-4-8 / claude-sonnet-4)
                   如果为None，使用默认模型

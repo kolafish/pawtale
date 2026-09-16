@@ -11,8 +11,9 @@ VOLC_DEFAULT_MODEL = ai_factory.settings.volc_ark_model
 @pytest.mark.parametrize(
     ("model", "expected_type", "expected_model"),
     [
-        ("deepseek", DeepSeekTextService, "deepseek-v4-flash"),
-        ("deepseek-v4-flash", DeepSeekTextService, "deepseek-v4-flash"),
+        ("deepseek", DeepSeekTextService, "deepseek-flash"),
+        ("deepseek-flash", DeepSeekTextService, "deepseek-flash"),
+        ("deepseek-v4-flash", DeepSeekTextService, "deepseek-flash"),
         ("deepseek-v4-pro", DeepSeekTextService, "deepseek-v4-pro"),
         ("doubao-seed-2-0-pro-260215", VolcArkTextService, VOLC_DEFAULT_MODEL),
         ("volc-doubao-pro", VolcArkTextService, VOLC_DEFAULT_MODEL),
@@ -33,7 +34,8 @@ def test_get_ai_service_resolves_supported_models(model, expected_type, expected
     [
         ("claude-fable-5", ClaudeTextService, "claude-fable-5"),
         ("claude-opus-4-8", ClaudeTextService, "claude-opus-4-8"),
-        ("deepseek", DeepSeekTextService, "deepseek-v4-flash"),
+        ("deepseek", DeepSeekTextService, "deepseek-flash"),
+        ("deepseek-flash", DeepSeekTextService, "deepseek-flash"),
         ("deepseek-v4-pro", DeepSeekTextService, "deepseek-v4-pro"),
         ("doubao-seed-2-0-pro-260215", VolcArkTextService, VOLC_DEFAULT_MODEL),
     ],

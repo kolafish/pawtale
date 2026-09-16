@@ -565,7 +565,7 @@ class TestCallLlmContract:
         truncated = (
             '{"ok":',
             {
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{"finish_reason": "length"}],
                 "usage": {
                     "prompt_tokens": 10,
@@ -577,7 +577,7 @@ class TestCallLlmContract:
         complete = (
             '{"ok": true}',
             {
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{"finish_reason": "stop"}],
                 "usage": {
                     "prompt_tokens": 12,
@@ -594,14 +594,14 @@ class TestCallLlmContract:
                 "system",
                 "user",
                 output_model=_StructuredProbe,
-                requested_model="deepseek-v4-flash",
+                requested_model="deepseek-flash",
                 temperature=0.2,
                 max_tokens=512,
                 timeout=30,
                 max_attempts=2,
             )
 
-        assert result.response.requested_model == "deepseek-v4-flash"
+        assert result.response.requested_model == "deepseek-flash"
         assert result.response.resolved_model == service.model_name
         assert result.value.ok is True
         assert result.response.attempt_count == 2
@@ -619,14 +619,14 @@ class TestCallLlmContract:
         malformed = (
             '{"ok": "目前"过年"部分"}',
             {
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{"finish_reason": "stop"}],
             },
         )
         complete = (
             '{"ok": true}',
             {
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{"finish_reason": "stop"}],
             },
         )
@@ -637,7 +637,7 @@ class TestCallLlmContract:
                 "system",
                 "user",
                 output_model=_StructuredProbe,
-                requested_model="deepseek-v4-flash",
+                requested_model="deepseek-flash",
                 max_attempts=2,
             )
 
@@ -651,7 +651,7 @@ class TestCallLlmContract:
         truncated = (
             '{"ok":',
             {
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{"finish_reason": "length"}],
             },
         )
@@ -666,7 +666,7 @@ class TestCallLlmContract:
                     "system",
                     "user",
                     output_model=_StructuredProbe,
-                    requested_model="deepseek-v4-flash",
+                    requested_model="deepseek-flash",
                     max_attempts=2,
                 )
 
@@ -691,7 +691,7 @@ class TestCallLlmContract:
         assert isinstance(result, str)
         assert result == "world"
         _, kwargs = inst.post.call_args
-        assert kwargs["json"]["model"] == "deepseek-v4-flash"
+        assert kwargs["json"]["model"] == "deepseek-flash"
         assert kwargs["json"]["thinking"] == {"type": "disabled"}
 
     @pytest.mark.asyncio
@@ -885,7 +885,7 @@ class TestCallLlmContract:
 
         deepseek = DeepSeekTextService()
         assert deepseek.provider_name == "deepseek"
-        assert deepseek.model_name == "deepseek-v4-flash"
+        assert deepseek.model_name == "deepseek-flash"
 
         volc = VolcArkTextService()
         assert volc.provider_name == "volc_ark"
@@ -921,7 +921,7 @@ async def test_public_structured_call_does_not_retry_transport_timeout():
             await generate_structured_with_client(
                 service, "system", "user",
                 output_model=_StructuredProbe,
-                requested_model="deepseek-v4-flash",
+                requested_model="deepseek-flash",
                 temperature=0.2,
                 max_tokens=512,
                 timeout=30,
@@ -937,14 +937,14 @@ async def test_public_text_call_preserves_provider_diagnostics():
     with patch.object(service, "_call_llm", AsyncMock(return_value=raw)):
         result = await generate_text_with_client(
             service, "system", "user",
-            requested_model="deepseek-v4-flash",
+            requested_model="deepseek-flash",
             temperature=0.2,
             max_tokens=512,
             timeout=30,
         )
     assert result.content == "完成"
     assert result.provider == service.provider_name
-    assert result.requested_model == "deepseek-v4-flash"
+    assert result.requested_model == "deepseek-flash"
     assert result.resolved_model == result.response_model == service.model_name
     assert result.usage == {"total_tokens": 12}
     assert result.attempt_count == 1

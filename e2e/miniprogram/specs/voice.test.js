@@ -20,7 +20,7 @@ const AI_MODEL_STORAGE_KEY = "pawtale_ai_model_settings";
 const TTS_SETTINGS_STORAGE_KEY = "pawtale_memoir_tts_settings";
 const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
 const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
-const FIXTURE_AI_MODEL = "deepseek-v4-flash";
+const FIXTURE_AI_MODEL = "deepseek-flash";
 const FIXTURE_TTS_VOICE = "zh_male_m191_uranus_bigtts";
 const FIXTURE_TTS_SPEED_RATIO = 0.7;
 

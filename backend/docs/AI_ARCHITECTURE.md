@@ -21,7 +21,7 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 
 | 产品值 | provider 实现 |
 | --- | --- |
-| `deepseek-v4-flash` | DeepSeek OpenAI-compatible chat API |
+| `deepseek-flash` | DeepSeek V4.1 Flash OpenAI-compatible chat API |
 | `deepseek-v4-pro` | DeepSeek OpenAI-compatible chat API |
 | `doubao-seed-2-0-pro-260215` | Volc Ark Responses API |
 | `claude-fable-5` | Claude Fable 5 OpenAI-compatible relay |
@@ -29,6 +29,7 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 | `claude-sonnet-4` | Claude Sonnet 4.6 兼容代理 |
 
 `AIServiceFactory.get_service(model)` 负责产品模型值到 transport 的映射。未知值回退到后端配置的默认模型。
+历史值 `deepseek-v4-flash` 仍由后端兼容解析到 `deepseek-flash`，供已有项目和待重试任务平滑迁移。
 
 ## 统一接口
 
