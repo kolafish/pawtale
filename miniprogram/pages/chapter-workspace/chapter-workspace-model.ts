@@ -13,7 +13,7 @@ import type { ChapterNextAction } from "./chapter-next-action";
 import type {
   ChapterCandidateMode,
   ChapterCandidatePreviewVersion,
-  ChapterCandidateSectionView,
+  ChapterCandidateDiffSegmentView,
   ChapterSectionView,
 } from "./chapter-workspace-view";
 
@@ -273,7 +273,7 @@ export interface ChapterWorkspacePageData {
   candidatePreviewVersion: ChapterCandidatePreviewVersion;
   candidateComparisonAvailable: boolean;
   candidateSummaryText: string;
-  candidateChangedSections: ChapterCandidateSectionView[];
+  candidateDiffSegments: ChapterCandidateDiffSegmentView[];
   candidateWholeContent: string;
   sectionRegenerationJob: MemoirChapterSectionRegenerationJob | null;
   sectionRegenerationTitle: string;

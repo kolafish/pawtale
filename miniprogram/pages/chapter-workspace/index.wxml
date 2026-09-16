@@ -51,7 +51,7 @@
             aria-pressed="{{candidateMode === 'changes'}}"
             data-mode="changes"
             bindtap="switchCandidateView"
-          >只看变化</view>
+          >对比修改</view>
           <view
             class="ui-version-option ui-pressable {{candidateMode === 'whole' ? 'active' : ''}}"
             aria-role="button"
@@ -60,7 +60,7 @@
             bindtap="switchCandidateView"
           >查看全文</view>
         </view>
-        <view class="candidate-switch ui-version-switch" aria-label="查看版本">
+        <view wx:if="{{candidateMode === 'whole'}}" class="candidate-switch ui-version-switch" aria-label="查看版本">
           <view
             class="ui-version-option ui-pressable {{candidatePreviewVersion === 'before' ? 'active' : ''}}"
             aria-role="button"
@@ -77,11 +77,20 @@
           >新稿</view>
         </view>
       </block>
-      <view wx:if="{{candidateMode === 'changes'}}" class="candidate-section-list">
-        <view wx:for="{{candidateChangedSections}}" wx:key="section_id" class="candidate-section">
-          <text class="candidate-section-title">{{item.title}}</text>
-          <text class="candidate-content" selectable="{{true}}">{{item.display_content}}</text>
+      <view wx:if="{{candidateMode === 'changes'}}" class="candidate-diff">
+        <view class="candidate-diff-legend" aria-label="修改标记说明">
+          <text class="candidate-diff-legend-item"><text class="candidate-diff-marker is-modified">改</text>新稿改写</text>
+          <text class="candidate-diff-legend-item"><text class="candidate-diff-marker is-added">增</text>新稿新增</text>
+          <text class="candidate-diff-legend-item"><text class="candidate-diff-marker is-deleted">删</text>当前稿删去</text>
         </view>
+        <text class="candidate-diff-content" selectable="{{true}}">
+          <text wx:for="{{candidateDiffSegments}}" wx:key="key">
+            <text wx:if="{{item.kind === 'modified'}}" class="candidate-diff-marker is-modified">改</text>
+            <text wx:elif="{{item.kind === 'added'}}" class="candidate-diff-marker is-added">增</text>
+            <text wx:elif="{{item.kind === 'deleted'}}" class="candidate-diff-marker is-deleted">删</text>
+            <text class="candidate-diff-segment is-{{item.kind}}">{{item.text}}</text>
+          </text>
+        </text>
       </view>
       <text wx:else class="candidate-content" selectable="{{true}}">{{candidateWholeContent}}</text>
       <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">采用这版新稿</button>

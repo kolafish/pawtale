@@ -54,10 +54,12 @@ export interface ChapterWorkspaceViewPatch {
 export type ChapterCandidateMode = "changes" | "whole";
 export type ChapterCandidatePreviewVersion = "before" | "after";
 
-export interface ChapterCandidateSectionView {
-  section_id: string;
-  title: string;
-  display_content: string;
+export type ChapterCandidateDiffKind = "equal" | "deleted" | "modified" | "added";
+
+export interface ChapterCandidateDiffSegmentView {
+  key: string;
+  kind: ChapterCandidateDiffKind;
+  text: string;
 }
 
 export interface ChapterCandidateViewPatch {
@@ -65,7 +67,7 @@ export interface ChapterCandidateViewPatch {
   candidatePreviewVersion: ChapterCandidatePreviewVersion;
   candidateComparisonAvailable: boolean;
   candidateSummaryText: string;
-  candidateChangedSections: ChapterCandidateSectionView[];
+  candidateDiffSegments: ChapterCandidateDiffSegmentView[];
   candidateWholeContent: string;
 }
 
@@ -81,10 +83,14 @@ export function chapterCandidateViewPatch(
 ): ChapterCandidateViewPatch {
   const candidateContent = job?.candidate_content || "";
   const candidateSections = job?.candidate_sections || [];
+  const candidateDiffSegments = (job?.candidate_diff_segments || []).map(
+    (segment, index) => ({ ...segment, key: `${index}-${segment.kind}` }),
+  );
+  const hasTextChanges = candidateDiffSegments.some((segment) => segment.kind !== "equal");
   const comparisonAvailable = Boolean(
     workspace
     && candidateContent
-    && candidateSections.length
+    && candidateDiffSegments.length
     && job?.candidate_base_version_id === (workspace.draft_version_id || null),
   );
   if (!workspace || !candidateContent) {
@@ -93,7 +99,7 @@ export function chapterCandidateViewPatch(
       candidatePreviewVersion: previewVersion,
       candidateComparisonAvailable: false,
       candidateSummaryText: "",
-      candidateChangedSections: [],
+      candidateDiffSegments: [],
       candidateWholeContent: "",
     };
   }
@@ -103,7 +109,7 @@ export function chapterCandidateViewPatch(
       candidatePreviewVersion: "after",
       candidateComparisonAvailable: false,
       candidateSummaryText: "当前稿仍在使用；采用后，新稿会成为新的章节版本。",
-      candidateChangedSections: [],
+      candidateDiffSegments: [],
       candidateWholeContent: candidateContent,
     };
   }
@@ -134,23 +140,15 @@ export function chapterCandidateViewPatch(
     : delta < 0
       ? `减少 ${Math.abs(delta)} 字`
       : "字数不变";
-  const effectiveMode = changed.length ? mode : "whole";
+  const effectiveMode = hasTextChanges ? mode : "whole";
   return {
     candidateMode: effectiveMode,
     candidatePreviewVersion: previewVersion,
     candidateComparisonAvailable: true,
-    candidateSummaryText: changed.length
-      ? `与当前稿相比：${changed.length} 个小节有变化 · ${deltaText}`
+    candidateSummaryText: hasTextChanges
+      ? `与当前稿相比：${changed.length ? `${changed.length} 个小节有变化` : "正文有变化"} · ${deltaText}`
       : "新稿正文与当前稿相同。",
-    candidateChangedSections: changed.map((section) => ({
-      section_id: section.section_id,
-      title: section.title,
-      display_content: (
-        previewVersion === "before"
-          ? section.before_content || "（当前稿中没有这一小节）"
-          : section.after_content || "（新稿中不再保留这一小节）"
-      ),
-    })),
+    candidateDiffSegments,
     candidateWholeContent: previewVersion === "before"
       ? workspace.draft_content
       : candidateContent,

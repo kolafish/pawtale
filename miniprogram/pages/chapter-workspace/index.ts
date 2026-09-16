@@ -122,7 +122,7 @@ definePage<ChapterWorkspacePageData>()({
     candidatePreviewVersion: "after",
     candidateComparisonAvailable: false,
     candidateSummaryText: "",
-    candidateChangedSections: [],
+    candidateDiffSegments: [],
     candidateWholeContent: "",
     sectionRegenerationJob: null,
     sectionRegenerationTitle: "",

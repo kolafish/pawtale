@@ -83,6 +83,11 @@ class MemoirChapterCandidateSection(BaseModel):
     content: str
 
 
+class MemoirChapterCandidateDiffSegment(BaseModel):
+    kind: Literal["equal", "deleted", "modified", "added"]
+    text: str
+
+
 class MemoirChapterPreparationJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
@@ -107,6 +112,9 @@ class MemoirChapterPreparationJobResponse(BaseModel):
     candidate_content: str | None = None
     candidate_base_version_id: str | None = None
     candidate_sections: list[MemoirChapterCandidateSection] = Field(
+        default_factory=list
+    )
+    candidate_diff_segments: list[MemoirChapterCandidateDiffSegment] = Field(
         default_factory=list
     )
     requested_ai_model: str | None = None
