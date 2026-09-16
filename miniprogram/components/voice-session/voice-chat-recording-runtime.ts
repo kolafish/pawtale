@@ -52,6 +52,8 @@ import {
   voiceRecordingStartedPatch,
   voiceRecordingStoppedPatch,
   voiceRecordingUnavailablePatch,
+  voiceTranscriptFollowLatestPatch,
+  voiceTranscriptReviewStartedPatch,
 } from "./voice-chat-recording-flow";
 
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
@@ -76,6 +78,8 @@ export interface VoiceChatRecordingRuntimeMethods {
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handleClientEvent(event: MemoirStreamingAsrClientEvent): void;
   handlePartial(text: string): void;
+  pauseLiveTranscriptFollow(): void;
+  resumeLiveTranscriptFollow(): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
   handleError(message: string, error?: VoiceChatErrorInfo): void;
 }
@@ -458,7 +462,29 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   handlePartial(text: string) {
-    applyVoiceChatDataPatch(this, voiceLiveTranscriptPatch(text, this.data.liveScrollTop));
+    applyVoiceChatDataPatch(this, voiceLiveTranscriptPatch(text, {
+      liveText: this.data.liveText,
+      liveScrollTop: this.data.liveScrollTop,
+      liveTranscriptFollowing: this.data.liveTranscriptFollowing,
+    }));
+  },
+
+  pauseLiveTranscriptFollow() {
+    if (
+      !this.data.recording
+      || !this.data.liveTranscriptFollowing
+      || !this.data.liveScrollClass.split(" ").includes("long")
+    ) {
+      return;
+    }
+    applyVoiceChatDataPatch(this, voiceTranscriptReviewStartedPatch(this.data));
+  },
+
+  resumeLiveTranscriptFollow() {
+    if (this.data.liveTranscriptFollowing) {
+      return;
+    }
+    applyVoiceChatDataPatch(this, voiceTranscriptFollowLatestPatch(this.data.liveScrollTop));
   },
 
   handleFinal(event: VoiceGatewayServerEvent) {

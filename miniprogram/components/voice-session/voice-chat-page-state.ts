@@ -146,11 +146,17 @@ export interface VoiceChatData {
   stageStatusClass: string;
   stageStatusText: string;
   liveDisplayText: string;
+  liveContextText: string;
+  liveCurrentText: string;
   liveTextClass: string;
   liveScrollClass: string;
   liveScrollTarget: string;
   liveScrollTop: number;
   liveTextEndId: string;
+  liveTranscriptFollowing: boolean;
+  liveReviewStartCharCount: number;
+  showReturnToLatest: boolean;
+  returnToLatestText: string;
   showCaptureStrip: boolean;
   captureStripClass: string;
   showLiveCharCount: boolean;
@@ -295,11 +301,17 @@ export function initialVoiceChatData(): VoiceChatData {
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
     liveDisplayText: "点下方“我来说一段”",
+    liveContextText: "",
+    liveCurrentText: "点下方“我来说一段”",
     liveTextClass: "live-text",
     liveScrollClass: "live-scroll",
     liveScrollTarget: "",
     liveScrollTop: 0,
     liveTextEndId: "live-text-end",
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
+    showReturnToLatest: false,
+    returnToLatestText: "回到最新",
     showCaptureStrip: true,
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
@@ -382,11 +394,15 @@ export type VoiceChatViewPatch = Pick<
   | "stageStatusClass"
   | "stageStatusText"
   | "liveDisplayText"
+  | "liveContextText"
+  | "liveCurrentText"
   | "liveTextClass"
   | "liveScrollClass"
   | "liveScrollTarget"
   | "liveScrollTop"
   | "liveTextEndId"
+  | "showReturnToLatest"
+  | "returnToLatestText"
   | "showCaptureStrip"
   | "captureStripClass"
   | "showLiveCharCount"
@@ -418,6 +434,34 @@ function largeTextFocusClass(state: VoiceChatData, showAssistantPanel: boolean):
 
 function speakerRoleLabel(role: MemoirSpeakerRole): string {
   return role === "interviewer" ? "采访者" : "被访者";
+}
+
+function liveTranscriptParts(
+  displayText: string,
+  state: Pick<VoiceChatData, "recording" | "liveText">,
+): { context: string; current: string } {
+  if (!state.recording || !state.liveText) {
+    return { context: "", current: displayText };
+  }
+  const characters = Array.from(state.liveText);
+  const currentTargetLength = 36;
+  const maximumCurrentLength = 56;
+  if (characters.length <= maximumCurrentLength) {
+    return { context: "", current: state.liveText };
+  }
+  const preferredSplit = characters.length - currentTargetLength;
+  const earliestSplit = Math.max(0, characters.length - maximumCurrentLength);
+  let splitAt = preferredSplit;
+  for (let index = preferredSplit - 1; index >= earliestSplit; index -= 1) {
+    if (/[。！？!?；;，,、\n]/.test(characters[index])) {
+      splitAt = index + 1;
+      break;
+    }
+  }
+  return {
+    context: characters.slice(0, splitAt).join(""),
+    current: characters.slice(splitAt).join(""),
+  };
 }
 
 function completionIssueStatusText(state: VoiceChatData): string {
@@ -521,6 +565,18 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
           : (state.completionIssueLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"))
       );
   }
+  const liveTextParts = liveTranscriptParts(liveDisplayText, state);
+  const pendingLiveChars = Math.max(0, state.liveCharCount - state.liveReviewStartCharCount);
+  const showReturnToLatest = Boolean(
+    state.recording
+    && state.liveText
+    && !state.liveTranscriptFollowing,
+  );
+  const liveScrollClass = [
+    "live-scroll",
+    state.liveScrollClass.split(" ").includes("long") ? "long" : "",
+    state.liveTranscriptFollowing ? "" : "reviewing",
+  ].filter(Boolean).join(" ");
   let controlHintText = isHumanInterview
     ? ""
     : (isBookCompletion ? "只说您记得的部分就可以。" : "说一两句也可以，我会帮您记下来。");
@@ -649,11 +705,15 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
     liveDisplayText,
+    liveContextText: liveTextParts.context,
+    liveCurrentText: liveTextParts.current,
     liveTextClass: isHumanInterview && state.recording && !state.liveText ? "live-text placeholder" : "live-text",
-    liveScrollClass: state.liveScrollClass,
+    liveScrollClass,
     liveScrollTarget: state.liveScrollTarget,
     liveScrollTop: state.liveScrollTop,
     liveTextEndId: state.liveTextEndId,
+    showReturnToLatest,
+    returnToLatestText: pendingLiveChars > 0 ? `回到最新 · 新增 ${pendingLiveChars} 字` : "回到最新",
     showCaptureStrip,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
@@ -964,6 +1024,8 @@ export function voiceGatewayEventPatch(
     nextData.liveScrollTarget = "";
     nextData.liveScrollTop = 0;
     nextData.liveTextEndId = "live-text-end";
+    nextData.liveTranscriptFollowing = true;
+    nextData.liveReviewStartCharCount = 0;
   }
   return nextData;
 }

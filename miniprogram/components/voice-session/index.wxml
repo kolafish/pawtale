@@ -204,23 +204,42 @@
   </view>
 
   <view class="transcript-stage">
-    <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
-      {{stageStatusText}}
-    </text>
-    <scroll-view
-      class="{{liveScrollClass}}"
-      scroll-y="{{true}}"
-      scroll-top="{{liveScrollTop}}"
-      scroll-into-view="{{liveScrollTarget}}"
-    >
-      <text class="{{liveTextClass}}">{{liveDisplayText}}</text>
-      <view id="{{liveTextEndId}}" class="live-text-end"></view>
-    </scroll-view>
-    <view wx:if="{{showCaptureStrip}}" class="{{captureStripClass}}">
+    <view class="transcript-stage-head">
+      <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
+        {{stageStatusText}}
+      </text>
+      <view wx:if="{{recording}}" class="capture-summary">
+        <view class="capture-dot"></view>
+        <text>已说 {{captureDurationText}}</text>
+        <text wx:if="{{showLiveCharCount}}">· {{liveCharCount}} 字</text>
+      </view>
+      <button
+        wx:if="{{showReturnToLatest}}"
+        class="return-to-latest ui-button"
+        bindtap="resumeLiveTranscriptFollow"
+        aria-label="{{returnToLatestText}}"
+      >{{returnToLatestText}}</button>
+    </view>
+    <view class="live-caption-shell {{liveTranscriptFollowing ? '' : 'reviewing'}}">
+      <scroll-view
+        class="{{liveScrollClass}}"
+        scroll-y="{{true}}"
+        scroll-top="{{liveScrollTop}}"
+        scroll-into-view="{{liveScrollTarget}}"
+        scroll-with-animation="{{false}}"
+        lower-threshold="32"
+        bindtouchstart="pauseLiveTranscriptFollow"
+        bindscrolltolower="resumeLiveTranscriptFollow"
+      >
+        <text wx:if="{{liveContextText}}" class="live-text-context">{{liveContextText}}</text>
+        <text class="{{liveTextClass}} live-text-current">{{liveCurrentText}}</text>
+        <view id="{{liveTextEndId}}" class="live-text-end"></view>
+      </scroll-view>
+      <view wx:if="{{liveContextText}}" class="live-caption-top-fade" aria-hidden="true"></view>
+    </view>
+    <view wx:if="{{showCaptureStrip && !recording}}" class="{{captureStripClass}}">
       <view class="capture-dot"></view>
-      <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
-      <text wx:else>说完后点“说完了”，我会帮您整理成文字。</text>
-      <text wx:if="{{showLiveCharCount}}">本句 {{liveCharCount}} 字</text>
+      <text>说完后点“说完了”，我会帮您整理成文字。</text>
     </view>
     <button
       wx:if="{{showInlineHelp}}"

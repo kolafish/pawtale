@@ -75,6 +75,8 @@ export function voiceRecordingStartedPatch(autoTriggered: boolean): VoiceChatPat
     error: "",
     liveText: "",
     liveCharCount: 0,
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
     selectedOpeningTopicText: "",
     primaryActionText: "暂停收音",
     autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
@@ -94,32 +96,88 @@ function resetLiveTranscriptScrollPatch(): VoiceChatPatch {
     liveScrollTarget: "",
     liveScrollTop: 0,
     liveTextEndId: "live-text-end",
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
   };
 }
 
-function liveTranscriptScrollPatch(text: string, currentScrollTop: number): VoiceChatPatch {
+interface LiveTranscriptScrollState {
+  liveText: string;
+  liveScrollTop: number;
+  liveTranscriptFollowing: boolean;
+}
+
+function shouldAdvanceLiveTranscript(text: string, previousText: string): boolean {
+  const nextLength = Array.from(text).length;
+  const previousLength = Array.from(previousText).length;
+  if (nextLength <= LIVE_TRANSCRIPT_SCROLL_THRESHOLD) {
+    return false;
+  }
+  if (previousLength <= LIVE_TRANSCRIPT_SCROLL_THRESHOLD) {
+    return true;
+  }
+  if (Math.floor(nextLength / 12) !== Math.floor(previousLength / 12)) {
+    return true;
+  }
+  return text !== previousText && /[。！？!?；;，,、\n]$/.test(text);
+}
+
+function liveTranscriptScrollPatch(text: string, current: LiveTranscriptScrollState): VoiceChatPatch {
   if (!text) {
     return resetLiveTranscriptScrollPatch();
   }
-  const scrollTop = currentScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
+  const basePatch: VoiceChatPatch = {
+    liveScrollClass: Array.from(text).length > LIVE_TRANSCRIPT_SCROLL_THRESHOLD
+      ? "live-scroll long"
+      : "live-scroll",
+  };
+  if (!current.liveTranscriptFollowing || !shouldAdvanceLiveTranscript(text, current.liveText)) {
+    return basePatch;
+  }
+  const scrollTop = current.liveScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
   const endId = `live-text-end-${scrollTop}`;
   return {
-    liveScrollClass: text.length > LIVE_TRANSCRIPT_SCROLL_THRESHOLD ? "live-scroll long" : "live-scroll",
+    ...basePatch,
     liveScrollTop: scrollTop,
     liveTextEndId: endId,
     liveScrollTarget: endId,
   };
 }
 
-export function voiceLiveTranscriptPatch(text: string, currentScrollTop: number): VoiceChatPatch {
+export function voiceLiveTranscriptPatch(text: string, current: LiveTranscriptScrollState): VoiceChatPatch {
   const displayText = normalizeMemoirAsrText(text || "");
   return {
     liveText: displayText,
     liveCharCount: countTextChars(displayText),
-    ...liveTranscriptScrollPatch(displayText, currentScrollTop),
+    ...liveTranscriptScrollPatch(displayText, current),
     persistenceStateText: "识别中",
     error: "",
     errorKindText: "",
+  };
+}
+
+export function voiceTranscriptReviewStartedPatch(
+  current: Pick<VoiceChatData, "liveCharCount" | "liveTranscriptFollowing">,
+): VoiceChatPatch {
+  if (!current.liveTranscriptFollowing) {
+    return {};
+  }
+  return {
+    liveTranscriptFollowing: false,
+    liveReviewStartCharCount: current.liveCharCount,
+    liveScrollTarget: "",
+  };
+}
+
+export function voiceTranscriptFollowLatestPatch(currentScrollTop: number): VoiceChatPatch {
+  const scrollTop = currentScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
+  const endId = `live-text-end-${scrollTop}`;
+  return {
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
+    liveScrollTop: scrollTop,
+    liveTextEndId: endId,
+    liveScrollTarget: endId,
   };
 }
 
