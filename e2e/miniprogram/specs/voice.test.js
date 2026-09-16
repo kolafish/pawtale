@@ -300,10 +300,19 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     );
     assert.equal(recording.status, "listening");
     assert.equal(await page.$(".assistant-panel"), null, "讲述态不再保留小余问题卡");
-    assert.ok(await page.$(".transcript-stage"), "讲述态以实时文字卡为主角");
+    const recordingTranscriptStage = await page.$(".transcript-stage");
+    assert.ok(recordingTranscriptStage, "讲述态以实时文字卡为主角");
     assert.equal((await page.$$(".assistant-button")).length, 0, "讲述态不显示提问辅助操作");
     const recordingPrimaryAction = await elementById(page, "voice-primary-action");
     const recordingPrimaryOffset = await recordingPrimaryAction.offset();
+    const recordingStageOffset = await recordingTranscriptStage.offset();
+    const recordingStageSize = await recordingTranscriptStage.size();
+    const recordingDock = await page.$(".control-bar");
+    const recordingDockOffset = await recordingDock.offset();
+    assert.ok(
+      recordingStageOffset.top + recordingStageSize.height <= recordingDockOffset.top,
+      `实时文字卡不被固定操作区遮挡（卡片底部 ${recordingStageOffset.top + recordingStageSize.height}，操作区顶部 ${recordingDockOffset.top}）`,
+    );
     assert.ok(
       Math.abs(recordingPrimaryOffset.left - readyPrimaryOffset.left) <= 2
         && Math.abs(recordingPrimaryOffset.top - readyPrimaryOffset.top) <= 2,
