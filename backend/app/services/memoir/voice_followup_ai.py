@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+import json
 import re
 
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
-    MemoirAutomationEventType,
     MemoirChatMessageRole,
     MemoirGuidanceMode,
 )
@@ -23,7 +24,7 @@ FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 FREE_OPENING_MAX_TOKENS = 360
 GUIDED_OPENING_MAX_TOKENS = 420
-PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v2"
+PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v3"
 PROGRESS_UTTERANCE_MILESTONES = {1, 3, 5, 10, 15, 20, 30, 50, 75, 100}
 SPEAKER_LABELS = ("小余", "老余", "AI", "Ai", "ai", "助手", "主持人")
 
@@ -53,8 +54,8 @@ class ProgressPromptContext:
     prompt_text: str
     progress_update: dict[str, object] | None = None
     automation_event_ids: list[str] | None = None
-    speech_prefix: str = ""
     voice_announcement_event_ids: list[str] | None = None
+    announcement_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -160,39 +161,72 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
             ),
             progress_update=None,
             automation_event_ids=[],
-            speech_prefix="",
             voice_announcement_event_ids=[],
+            announcement_key="",
         )
 
     event_ids = selected_update.get("event_ids")
     automation_event_ids = [str(item) for item in event_ids] if isinstance(event_ids, list) else []
-    speech_prefix = _progress_speech_prefix(selected_update)
-    voice_announcement_event_ids = automation_event_ids if speech_prefix else []
-    if speech_prefix:
-        selected_update = {
-            **selected_update,
-            "speech_prefix": speech_prefix,
-            "voice_announcement_event_ids": voice_announcement_event_ids,
-        }
+    announcement_key = progress_announcement_key(selected_update)
     prompt_text = _progress_prompt_text(selected_update)
     return ProgressPromptContext(
         prompt_text=prompt_text,
         progress_update=selected_update,
         automation_event_ids=automation_event_ids,
-        speech_prefix=speech_prefix,
-        voice_announcement_event_ids=voice_announcement_event_ids,
+        voice_announcement_event_ids=automation_event_ids,
+        announcement_key=announcement_key,
     )
+
+
+def suppress_repeated_progress_context(context: ProgressPromptContext) -> ProgressPromptContext:
+    if not context.announcement_key:
+        return context
+    return ProgressPromptContext(
+        prompt_text=(
+            "项目进度事实：当前进度与已经自动播报过的内容相同，本轮不要再次提及进度；"
+            "自然组织本轮其余问候、承接和问题。"
+        ),
+        progress_update=None,
+        automation_event_ids=[],
+        voice_announcement_event_ids=[],
+        announcement_key="",
+    )
+
+
+def progress_announcement_key(selected_update: dict[str, object]) -> str:
+    if selected_update.get("source") == "automation_event":
+        identity = {
+            key: selected_update.get(key)
+            for key in (
+                "kind",
+                "source",
+                "text",
+                "event_type",
+                "event_status",
+                "chapter_id",
+            )
+        }
+    else:
+        identity = {
+            key: value
+            for key, value in selected_update.items()
+            if key not in {"event_ids", "utterance_ids"}
+        }
+    encoded = json.dumps(
+        identity,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return f"memoir-progress:{sha256(encoded).hexdigest()}"
 
 
 def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     lines = [
-        "项目进度事实（调试期偏主动；只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
-        f"- 本轮可选进度鼓励：{selected_update['text']}",
+        "项目进度事实（只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
+        f"- 本轮进展：{selected_update['text']}",
     ]
-    speech_prefix = selected_update.get("speech_prefix")
-    has_speech_prefix = isinstance(speech_prefix, str) and bool(speech_prefix.strip())
-    if has_speech_prefix:
-        lines.append(f"- 本轮语音开头会先播报：{speech_prefix.strip()}")
     snapshot_line = selected_update.get("snapshot_line")
     if isinstance(snapshot_line, str) and snapshot_line.strip():
         lines.append(f"- 当前项目进度：{snapshot_line.strip()}")
@@ -200,15 +234,10 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     if isinstance(chapter_lines, list):
         for line in [str(item).strip() for item in chapter_lines if str(item).strip()][:3]:
             lines.append(f"- 章节状态：{line}")
-    if has_speech_prefix:
-        lines.append(
-            "使用规则：上面的语音开头会由系统先播放；你不要重复同一条进度、数字或章节名，只需要自然承接，然后继续访谈。"
-        )
-    else:
-        lines.append(
-            "使用规则：调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果；"
-            "只说一句，不要堆数字，不要让进度提醒替代追问。"
-        )
+    lines.append(
+        "使用规则：请把进度与本轮需要的问候、承接或问题统一组织成一段自然口语；"
+        "不要把进度单独播报，不要重复同一事实，也不要堆砌数字。"
+    )
     return "\n".join(lines)
 
 
@@ -248,34 +277,6 @@ def _automation_event_progress_update(
             "utterance_ids": list(event.utterance_ids),
         }
     return None
-
-
-def _sentence_text(text: str, limit: int = 90) -> str:
-    clean = re.sub(r"\s+", "", text).strip()
-    if not clean:
-        return ""
-    if len(clean) > limit:
-        clean = clean[:limit].rstrip("，、；：") + "..."
-    if clean[-1] not in "。！？!?":
-        clean += "。"
-    return clean
-
-
-def _progress_speech_prefix(update: dict[str, object]) -> str:
-    if update.get("source") != "automation_event":
-        return ""
-
-    kind = str(update.get("kind") or "")
-    event_type = str(update.get("event_type") or "")
-    text = str(update.get("text") or "").strip()
-    if not text:
-        return ""
-
-    if kind == "automation_event_failure":
-        return _sentence_text(text)
-    if event_type in {item.value for item in MemoirAutomationEventType}:
-        return _sentence_text(text)
-    return ""
 
 
 def _snapshot_milestone_progress_update(
