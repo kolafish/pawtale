@@ -43,6 +43,7 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.book_output_snapshots import chapter_version_is_protected
 from app.services.memoir import automation_events
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
@@ -1318,17 +1319,10 @@ async def generate_and_save_chapter_draft(
         chapter_id=chapter_id,
     )
     base_version_id = latest_before.id if latest_before else None
-    protected = latest_before is not None and (
-        latest_before.created_by == MemoirCreatedBy.USER.value or bool(latest_before.feedback)
-    )
     draft_before = await db.scalar(select(MemoirBookChapterDraft).where(
         MemoirBookChapterDraft.chapter_id == chapter_id,
     ))
-    protected = protected or bool(draft_before and (
-        draft_before.status == MemoirBookChapterDraftStatus.CONFIRMED.value
-        or ((draft_before.metadata_json or {}).get("confirmed_version_id") == base_version_id
-            and base_version_id is not None)
-    ))
+    protected = chapter_version_is_protected(draft_before, latest_before)
     plan = chapter_draft_generation_plan(before, latest_before)
     continuity = await load_section_continuity(db, context=before)
     generated = await generate_chapter(

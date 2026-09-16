@@ -23,21 +23,28 @@ def legacy_chapter_version_needs_upgrade(
     )
 
 
+def chapter_version_is_protected(
+    draft: MemoirBookChapterDraft | None,
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    if draft is None or version is None:
+        return False
+    metadata = draft.metadata_json if isinstance(draft.metadata_json, dict) else {}
+    return bool(
+        version.created_by == MemoirCreatedBy.USER.value
+        or version.feedback
+        or draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value
+        or metadata.get("confirmed_version_id") == version.id
+    )
+
+
 def protected_legacy_chapter_version(
     draft: MemoirBookChapterDraft | None,
     version: MemoirBookChapterDraftVersion | None,
 ) -> bool:
-    if draft is None or not legacy_chapter_version_needs_upgrade(version):
-        return False
-    metadata = draft.metadata_json if isinstance(draft.metadata_json, dict) else {}
     return bool(
-        version
-        and (
-            version.created_by == MemoirCreatedBy.USER.value
-            or version.feedback
-            or draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value
-            or metadata.get("confirmed_version_id") == version.id
-        )
+        legacy_chapter_version_needs_upgrade(version)
+        and chapter_version_is_protected(draft, version)
     )
 
 
