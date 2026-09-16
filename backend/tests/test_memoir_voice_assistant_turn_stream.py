@@ -111,7 +111,7 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert completed["primary_intent"] == "follow_up"
     assert completed["audio_file_id"]
     assert completed["progress_update_used"] is True
-    assert completed["progress_update"]["kind"] == "valid_utterance_milestone"
+    assert completed["progress_update"]["kind"] == "automation_event"
 
     text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
     assert text_deltas == ai_client.chunks
@@ -952,7 +952,7 @@ async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_sessio
     prompt = ai_client.calls[0]["user_prompt"]
     assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
-    assert "今天想先讲哪一段" in prompt
+    assert "清楚、轻松的开放入口" in prompt
     assert "当前没有检索具体历史内容" in prompt
     assert "想不起来也没关系" in prompt
     assert "叙述者：上次讲到我第一次去上海找工作。" not in prompt
