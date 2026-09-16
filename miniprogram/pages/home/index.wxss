@@ -83,7 +83,7 @@
 .hero-voice-action {
   box-sizing: border-box;
   width: 100%;
-  min-height: 96rpx;
+  min-height: 48px;
   margin-top: 22rpx;
   padding: 8rpx 10rpx 8rpx 30rpx;
   border-radius: 22rpx;
@@ -431,7 +431,7 @@
 .large-text .hello { font-size: 44rpx; }
 .large-text .header-subtitle { font-size: 31rpx; }
 .large-text .home-header-button { font-size: 31rpx; }
-.large-text .hero-voice-action { min-height: 112rpx; }
+.large-text .hero-voice-action { min-height: 56px; }
 .large-text .hero-voice-label { font-size: 37rpx; }
 .large-text .resume-title { font-size: 36rpx; }
 .large-text .resume-text,
@@ -452,7 +452,6 @@
 @media (max-width: 360px) {
   .home-page { padding-right: 24rpx; padding-left: 24rpx; }
   .header-main { align-items: flex-start; }
-  .header-actions { flex-direction: column; gap: 0; }
   .resume-card { grid-template-columns: 52rpx minmax(0, 1fr); padding: 20rpx; }
   .resume-actions { grid-column: 1 / span 2; }
   .home-growth-actions { grid-column: 1 / span 2; padding-left: 66rpx; }

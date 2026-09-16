@@ -286,7 +286,10 @@ async function renderFixture(fixture) {
   const pixels = value => Number.parseFloat(String(value));
   assert.ok(pixels(pageSize.width) <= pixels(systemInfo.windowWidth) + 1, `${fixture.name} 不应横向溢出`);
   assert.ok(pixels(heroSize.width) > pixels(systemInfo.windowWidth) * 0.8, `${fixture.name} Hero 应占据主视觉宽度`);
-  assert.ok(pixels(primarySize.height) >= 44, `${fixture.name} 主按钮点击区域不小于 44px`);
+  assert.ok(
+    pixels(primarySize.height) >= 44,
+    `${fixture.name} 主按钮点击区域不小于 44px（实际 ${pixels(primarySize.height)}px）`,
+  );
 
   await session.miniProgram.screenshot({
     path: path.join(session.artifacts.runPath, `home-${fixture.name}-top.png`),
