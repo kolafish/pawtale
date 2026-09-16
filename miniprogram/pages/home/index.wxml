@@ -76,7 +76,6 @@
     <text wx:else class="project-title">{{projectHeadingText}}</text>
     <text class="project-meta">{{projectMetaText}}</text>
 
-    <text wx:if="{{showResumeActions}}" class="current-guidance">{{currentGuidanceText}}</text>
     <view
       id="primary-voice-action"
       class="{{voiceStartButtonClass}}"
@@ -149,7 +148,7 @@
       <view class="home-review-copy"><text class="home-review-text">{{candidateNoticeText}}</text></view>
       <button size="mini" class="home-inline-action ui-button" bindtap="openChapterCandidate">查看新稿 ›</button>
     </view>
-    <view wx:if="{{progress && progress.status !== 'idle' && progress.status !== 'needs_input'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
+    <view wx:if="{{progress && progress.status === 'failed'}}" class="home-story-progress is-error" aria-live="polite">
       <text class="home-story-progress-title">{{progress.title}}</text>
       <text class="home-story-progress-detail">{{progress.detail}}</text>
       <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
