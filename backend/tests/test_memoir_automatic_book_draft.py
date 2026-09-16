@@ -317,7 +317,7 @@ async def test_automatic_book_snapshot_keeps_legacy_flat_chapter_while_upgrade_n
         chapters[2].id
     ]
 
-    async def keep_upgrade_for_review(**kwargs):
+    async def keep_upgrade_for_review(_db, **kwargs):
         assert kwargs["chapter_id"] == chapters[0].id
         return {
             "job_id": "legacy-upgrade-job",
