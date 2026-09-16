@@ -1,5 +1,5 @@
 <view class="ui-page-shell {{homePageClass}}">
-  <view class="header" hidden="{{voiceEntry}}">
+  <view class="header" hidden="{{voiceEntry && !voiceSessionMinimized}}">
     <view class="header-main">
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
@@ -16,9 +16,12 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}" bindexit="exitVoiceSession" />
+  <view wx:if="{{voiceEntry}}" hidden="{{voiceSessionMinimized}}">
+    <voice-session id="voice-session" entry="{{voiceEntry}}" embedded="{{true}}"
+      minimized="{{voiceSessionMinimized}}" bindreturnhome="returnFromVoiceSession" bindexit="exitVoiceSession" />
+  </view>
 
-  <view hidden="{{voiceEntry}}" class="home-content">
+  <view hidden="{{voiceEntry && !voiceSessionMinimized}}" class="home-content">
     <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
     <button wx:if="{{!storyLoaded && error}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
@@ -84,7 +87,7 @@
           <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别、保存原始音频和整理故事。</text>
         </view>
 
-        <view wx:if="{{hasProject && hasLastStoryHint}}" class="resume-card ui-card ui-card-borderless">
+        <view wx:if="{{hasProject && hasLastStoryHint && !voiceSessionMinimized}}" class="resume-card ui-card ui-card-borderless">
           <view class="resume-icon" aria-hidden="true"><text>•••</text></view>
           <view class="resume-copy">
             <text class="resume-title">接着上次说</text>
@@ -100,14 +103,14 @@
           </view>
         </view>
 
-        <view wx:if="{{hasProject && !hasLastStoryHint}}" id="home-more-actions"
+        <view wx:if="{{hasProject && !hasLastStoryHint && !voiceSessionMinimized}}" id="home-more-actions"
           class="topic-toggle-alone ui-pressable" bindtap="toggleMoreActions" hover-class="ui-subtle-action-hover"
           aria-role="button" aria-expanded="{{showMoreActions}}">
           <text>{{showMoreActions ? "收起讲述方式" : "想换个话题？"}}</text>
           <text aria-hidden="true">{{showMoreActions ? "⌃" : "⌄"}}</text>
         </view>
 
-        <view wx:if="{{showMoreActions}}" class="narration-options-panel">
+        <view wx:if="{{showMoreActions && !voiceSessionMinimized}}" class="narration-options-panel">
           <narration-mode-picker id="home-narration-modes" selected="{{selectedMode}}"
             disabled="{{loading || creatingVoice}}" compact="{{true}}" large-text="{{largeTextEnabled}}"
             bindchange="selectNarrationMode" />

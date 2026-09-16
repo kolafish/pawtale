@@ -1,5 +1,16 @@
 <view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}} {{embedded ? 'voice-session-embedded' : ''}}">
   <view class="top-bar">
+    <button
+      wx:if="{{embedded}}"
+      id="voice-home-action"
+      class="home-return-button ui-button"
+      disabled="{{finishingSession}}"
+      bindtap="returnToHome"
+      aria-label="暂停讲述并返回首页"
+    >
+      <text class="home-return-mark" aria-hidden="true">‹</text>
+      <text>首页</text>
+    </button>
     <view id="session-mode-disclosure" class="top-copy" bindtap="toggleNarrationModes"
       aria-role="button" aria-expanded="{{showNarrationModes}}" aria-label="{{topModeLabel}}，查看本次讲述方式">
       <text class="mode-label">{{topModeLabel}} {{showNarrationModes ? '⌃' : '⌄'}}</text>
