@@ -172,7 +172,9 @@ Component({
         ["declined", "用户选择不补充这项内容"],
       ];
       wx.showActionSheet({
-        itemList: ["暂时不补", "想不起来", "不想补充"],
+        itemList: this.properties.chapterId
+          ? ["以后再聊", "想不起来", "不想聊这件事"]
+          : ["暂时不补", "想不起来", "不想补充"],
         success: ({ tapIndex }) => {
           const choice = choices[tapIndex];
           if (choice) {

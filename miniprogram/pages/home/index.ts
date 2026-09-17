@@ -42,7 +42,6 @@ import {
   navigateToLogin,
 } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
-import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -501,26 +500,9 @@ definePage<HomeData>()({
     }
   },
 
-  openChapterManager() {
-    if (!this.canStartVoiceChat(false)) return;
-    writeBookWorkspaceNavigationTarget("chapters");
-    navigateToBook();
-  },
-
-  openStoryNotice() {
-    if (this.data.reviewNoticeAction === "issues") this.openReviewIssues();
-    else if (this.data.reviewNoticeAction === "transcripts") this.openTranscripts();
-    else if (this.data.reviewNoticeAction === "book") this.openChapterManager();
-  },
-
   openReviewIssues() {
     if (!this.data.projectId) return;
     wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
-  },
-
-  openChapterCandidate() {
-    if (!this.data.candidateChapterId) return;
-    this.openChapter({ detail: { chapterId: this.data.candidateChapterId } });
   },
 
   openTranscripts() {

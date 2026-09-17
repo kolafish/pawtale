@@ -103,11 +103,6 @@
     <button wx:if="{{storyError}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
 
-    <view wx:if="{{candidateNoticeText}}" class="home-review-notice" aria-live="polite">
-      <view class="home-review-copy"><text class="home-review-text">{{candidateNoticeText}}</text></view>
-      <button size="mini" class="home-inline-action ui-button" bindtap="openChapterCandidate">查看新稿 ›</button>
-    </view>
-
     <view wx:if="{{progress && progress.status === 'failed'}}" class="home-story-progress is-error" aria-live="polite">
       <view class="home-review-copy">
         <text class="home-story-progress-title">{{progress.title}}</text>
@@ -117,13 +112,6 @@
         loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
     </view>
 
-    <view wx:if="{{reviewNoticeText}}" class="home-review-notice" aria-live="polite">
-      <view class="home-review-copy">
-        <text class="home-review-text">{{reviewNoticeText}}</text>
-        <text wx:if="{{reviewNoticeDetail}}" class="home-review-text">{{reviewNoticeDetail}}</text>
-      </view>
-      <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
-    </view>
   </view>
 
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">

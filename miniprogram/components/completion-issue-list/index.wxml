@@ -43,17 +43,17 @@
 </view>
 
 <view wx:if="{{optionalIssues.length}}" class="issue-group optional">
-  <text class="group-title">可选补充 · {{optionalIssues.length}} 项</text>
-  <text class="group-detail">可以补讲、标记已处理或跳过，不会阻塞成书。</text>
+  <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可选补充 · " + optionalIssues.length + " 项"}}</text>
+  <text class="group-detail">{{chapterId ? "想聊时可以直接语音回答；暂时不想聊，也可以先放一放。" : "可以补讲、标记已处理或跳过，不会阻塞成书。"}}</text>
   <view wx:for="{{optionalIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
     <text class="reason">{{item.reason}}</text>
     <view class="actions">
       <view class="action compact ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}" data-issue-id="{{item.id}}" bindtap="beginInterview">
-        {{item.active_session_id ? "继续补充" : "语音补充"}}
+        {{item.active_session_id ? (chapterId ? "接着聊" : "继续补充") : (chapterId ? "聊聊这个" : "语音补充")}}
       </view>
-      <view class="action compact ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}" data-issue-id="{{item.id}}" bindtap="markHandled">已处理</view>
-      <view class="action compact subtle ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}" data-issue-id="{{item.id}}" bindtap="skip">不补了</view>
+      <view class="action compact ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}" data-issue-id="{{item.id}}" bindtap="markHandled">{{chapterId ? "已经讲过" : "已处理"}}</view>
+      <view class="action compact subtle ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}" data-issue-id="{{item.id}}" bindtap="skip">{{chapterId ? "先放一放" : "不补了"}}</view>
     </view>
   </view>
 </view>

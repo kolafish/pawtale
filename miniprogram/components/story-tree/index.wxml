@@ -31,7 +31,6 @@
     </view>
 
     <text class="hero-summary ui-tabular">{{story.overview.summaryText}}</text>
-    <text class="hero-growth-copy">{{story.overview.growthText}}</text>
     <slot name="heroAction"></slot>
   </view>
 
@@ -60,7 +59,7 @@
           bindtap="openChapter"
           hover-class="ui-subtle-action-hover"
           aria-role="button"
-          aria-label="{{item.title}}，{{item.storyCountText}}，{{item.statusText}}"
+          aria-label="{{item.title}}，{{item.storyCountText}}"
         >
           <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">
             <view class="story-leaf-shape"></view>
@@ -72,7 +71,6 @@
             </view>
             <text class="story-row-meta ui-tabular">{{item.storyCountText}}</text>
           </view>
-          <text class="story-status story-status-{{item.statusTone}}">{{item.statusText}}</text>
           <text class="story-row-arrow" aria-hidden="true">›</text>
         </view>
       </block>

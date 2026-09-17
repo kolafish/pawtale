@@ -104,15 +104,15 @@
       <view
         class="structure-heading"
         aria-role="button"
-        aria-label="{{suggestionsExpanded ? '收起' : '展开'}}{{focusedSectionId ? '本章建议' : '审阅建议'}}"
+        aria-label="{{suggestionsExpanded ? '收起' : '展开'}}这一章值得继续聊的内容"
         bindtap="toggleSuggestions"
       >
         <view>
-          <text class="section-kicker">{{focusedSectionId ? "本章建议" : "审阅建议"}}</text>
-          <text class="section-title">{{focusedSectionId ? "还可以补充的内容" : "必须确认与可选补充"}}</text>
+          <text class="section-kicker">这一章</text>
+          <text class="section-title">{{requiredIssues.length ? (optionalIssues.length ? "需要确认，也有些地方想听您再讲讲" : "有些地方需要您确认") : "还有些地方想听您再讲讲"}}</text>
         </view>
         <view class="structure-heading-meta">
-          <text class="suggestion-count">{{focusedSectionId ? "可选补充 " + optionalIssues.length + " 项" : "必须 " + requiredIssues.length + " · 可选 " + optionalIssues.length}}</text>
+          <text class="suggestion-count">{{requiredIssues.length ? ("需要确认 " + requiredIssues.length + " 项" + (optionalIssues.length ? " · 可以慢慢聊 " + optionalIssues.length + " 件" : "")) : (optionalIssues.length === 1 ? "1 件事" : optionalIssues.length + " 件事")}}</text>
           <text class="structure-expand-mark">{{suggestionsExpanded ? "收起" : "查看全部"}}</text>
         </view>
       </view>
