@@ -241,6 +241,11 @@ export interface ChapterWorkspacePageData {
   focusedSectionTitle: string;
   workspace: MemoirChapterWorkspace | null;
   nextAction: ChapterNextAction;
+  chapterHeroKicker: string;
+  chapterStoryCountText: string;
+  chapterStoryDetail: string;
+  chapterHasReadableDraft: boolean;
+  chapterEditingHint: string;
   readinessTitle: string;
   readinessDetail: string;
   rewriteNoticeTitle: string;
@@ -255,7 +260,7 @@ export interface ChapterWorkspacePageData {
   rewriteDraftActionText: string;
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
-  suggestionsExpanded: boolean;
+  editingToolsExpanded: boolean;
   requiredIssues: MemoirCompletionIssue[];
   optionalIssues: MemoirCompletionIssue[];
   sectionViews: ChapterSectionView[];

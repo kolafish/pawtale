@@ -32,6 +32,11 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
 
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
+  chapterHeroKicker: string;
+  chapterStoryCountText: string;
+  chapterStoryDetail: string;
+  chapterHasReadableDraft: boolean;
+  chapterEditingHint: string;
   readinessTitle: string;
   readinessDetail: string;
   rewriteNoticeTitle: string;
@@ -245,16 +250,9 @@ function visibleSectionViews(
         typeText: section.requires_user_assignment
           ? "暂不纳入正文"
           : SECTION_TYPE_TEXT[section.section_type] || "内容小节",
-        metaText: [
-          `${visibleMaterials.length} 条讲述`,
-          ...(section.requires_user_assignment
-            ? []
-            : [
-              draft
-                ? `${draft.content.replace(/\s/g, "").length} 字正文${draftNeedsUpdate ? " · 待更新" : ""}`
-                : "正文待生成",
-            ]),
-        ].join(" · "),
+        metaText: section.requires_user_assignment
+          ? `${visibleMaterials.length} 段待整理的回忆`
+          : `${visibleMaterials.length} 段回忆${draftNeedsUpdate ? " · 故事待更新" : ""}`,
         assignmentHint: section.requires_user_assignment
           ? "这些讲述暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击讲述进入编辑或删除。"
           : "",
@@ -428,8 +426,27 @@ export function chapterWorkspaceViewPatch(
     0,
   );
   const structureChanged = draftStructureChanged(workspace);
+  const chapterHasReadableDraft = Boolean(
+    workspace.draft_version_id
+    && workspace.draft_content.trim(),
+  );
   return {
     nextAction,
+    chapterHeroKicker: chapterHasReadableDraft
+      ? "这一章已经整理成"
+      : "这一章正在慢慢长大",
+    chapterStoryCountText: narrativeSectionCount
+      ? `${narrativeSectionCount} 个故事`
+      : "故事正在生长",
+    chapterStoryDetail: chapterHasReadableDraft
+      ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
+      : "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+    chapterHasReadableDraft,
+    chapterEditingHint: pendingAssignmentCount
+      ? `${pendingAssignmentCount} 段回忆待整理`
+      : workspace.draft_needs_rewrite
+        ? "有新回忆等待写进故事"
+        : "",
     readinessTitle: summary.headline,
     readinessDetail: summary.detail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace, structureChanged),
@@ -452,10 +469,10 @@ export function chapterWorkspaceViewPatch(
     ),
     narrativeSectionCount,
     sectionStructureSummary: [
-      `${narrativeSectionCount} 个小节`,
-      `${includedMaterialCount} 条讲述`,
+      `${narrativeSectionCount} 个故事`,
+      `${includedMaterialCount} 段回忆`,
       ...(pendingAssignmentCount
-        ? [`${pendingAssignmentCount} 条暂未归类`]
+        ? [`${pendingAssignmentCount} 段待整理`]
         : []),
     ].join(" · "),
     rewriteDraftActionText,
