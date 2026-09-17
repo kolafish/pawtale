@@ -95,9 +95,7 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.micButtonProcessing, false);
   assert.equal(first.micButtonText, "同意后开始说话");
   assert.equal(first.liveScrollClass, "live-scroll");
-  assert.equal(first.liveScrollTarget, "");
   assert.equal(first.liveScrollTop, 0);
-  assert.equal(first.liveTextEndId, "live-text-end");
   assert.equal(first.liveTranscriptFollowing, true);
   assert.equal(first.liveReviewStartCharCount, 0);
   assert.equal(first.showReturnToLatest, false);

@@ -24,6 +24,8 @@ export function createVoiceSessionRuntime() {
     noAnswerPromptRequestSerial: 0,
     consecutiveNoAnswerPrompts: 0,
     handledNoAnswerFrameCount: -1,
+    liveTranscriptMeasureVersion: 0,
+    liveTranscriptMeasurePending: false,
     followUpRequestSerial: 0,
     autoListenPendingAfterPlayback: false,
     pageSuspended: false,

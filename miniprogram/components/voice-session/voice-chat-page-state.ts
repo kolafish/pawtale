@@ -147,9 +147,7 @@ export interface VoiceChatData {
   liveCurrentText: string;
   liveTextClass: string;
   liveScrollClass: string;
-  liveScrollTarget: string;
   liveScrollTop: number;
-  liveTextEndId: string;
   liveTranscriptFollowing: boolean;
   liveReviewStartCharCount: number;
   showReturnToLatest: boolean;
@@ -300,9 +298,7 @@ export function initialVoiceChatData(): VoiceChatData {
     liveCurrentText: "点下方“我来说一段”",
     liveTextClass: "live-text",
     liveScrollClass: "live-scroll",
-    liveScrollTarget: "",
     liveScrollTop: 0,
-    liveTextEndId: "live-text-end",
     liveTranscriptFollowing: true,
     liveReviewStartCharCount: 0,
     showReturnToLatest: false,
@@ -332,12 +328,13 @@ export type VoiceChatPatch = Partial<VoiceChatData>;
 
 export interface VoiceChatDataContext {
   data: VoiceChatData;
-  setData(patch: VoiceChatPatch): void;
+  setData(patch: VoiceChatPatch, callback?: () => void): void;
 }
 
 export function applyVoiceChatDataPatch(
   context: VoiceChatDataContext,
   patch: VoiceChatPatch,
+  callback?: () => void,
 ): void {
   const nextData: VoiceChatData = { ...context.data, ...patch };
   const values = {
@@ -347,7 +344,11 @@ export function applyVoiceChatDataPatch(
   const changed = Object.fromEntries(
     Object.entries(values).filter(([key, value]) => !Object.is(context.data[key as keyof VoiceChatData], value)),
   ) as VoiceChatPatch;
-  if (Object.keys(changed).length) context.setData(changed);
+  if (Object.keys(changed).length) {
+    context.setData(changed, callback);
+  } else {
+    callback?.();
+  }
 }
 
 export type VoiceChatViewPatch = Pick<
@@ -393,9 +394,7 @@ export type VoiceChatViewPatch = Pick<
   | "liveCurrentText"
   | "liveTextClass"
   | "liveScrollClass"
-  | "liveScrollTarget"
   | "liveScrollTop"
-  | "liveTextEndId"
   | "showReturnToLatest"
   | "returnToLatestText"
   | "showCaptureStrip"
@@ -755,9 +754,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     liveCurrentText: liveDisplayText,
     liveTextClass: isHumanInterview && state.recording && !state.liveText ? "live-text placeholder" : "live-text",
     liveScrollClass,
-    liveScrollTarget: state.liveScrollTarget,
     liveScrollTop: state.liveScrollTop,
-    liveTextEndId: state.liveTextEndId,
     showReturnToLatest,
     returnToLatestText: pendingLiveChars > 0 ? `回到最新 · 新增 ${pendingLiveChars} 字` : "回到最新",
     showCaptureStrip,
@@ -1066,9 +1063,7 @@ export function voiceGatewayEventPatch(
     nextData.liveText = "";
     nextData.liveCharCount = 0;
     nextData.liveScrollClass = "live-scroll";
-    nextData.liveScrollTarget = "";
     nextData.liveScrollTop = 0;
-    nextData.liveTextEndId = "live-text-end";
     nextData.liveTranscriptFollowing = true;
     nextData.liveReviewStartCharCount = 0;
   }

@@ -43,6 +43,7 @@ import {
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
   noAnswerPromptStartPatch,
+  liveTranscriptScrollTop,
   voiceFinalTranscriptResult,
   voiceAssistantInterruptedPatch,
   voiceClientUnavailableForRecording,
@@ -78,6 +79,8 @@ export interface VoiceChatRecordingRuntimeMethods {
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handleClientEvent(event: MemoirStreamingAsrClientEvent): void;
   handlePartial(text: string): void;
+  scheduleLiveTranscriptScroll(): void;
+  measureLiveTranscriptScroll(): void;
   pauseLiveTranscriptFollow(): void;
   resumeLiveTranscriptFollow(): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
@@ -86,6 +89,7 @@ export interface VoiceChatRecordingRuntimeMethods {
 
 export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   runtime(): VoiceSessionRuntime;
+  createSelectorQuery(): WechatMiniprogram.SelectorQuery;
   exitSession(detail: VoiceSessionExit): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
@@ -465,11 +469,76 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   handlePartial(text: string) {
-    applyVoiceChatDataPatch(this, voiceLiveTranscriptPatch(text, {
-      liveText: this.data.liveText,
-      liveScrollTop: this.data.liveScrollTop,
-      liveTranscriptFollowing: this.data.liveTranscriptFollowing,
-    }));
+    applyVoiceChatDataPatch(this, voiceLiveTranscriptPatch(text), () => {
+      this.scheduleLiveTranscriptScroll();
+    });
+  },
+
+  scheduleLiveTranscriptScroll() {
+    const runtime = this.runtime();
+    runtime.liveTranscriptMeasureVersion += 1;
+    if (
+      runtime.liveTranscriptMeasurePending
+      || runtime.disposed
+      || runtime.pageSuspended
+      || !this.data.liveTranscriptFollowing
+      || !this.data.liveText
+    ) {
+      return;
+    }
+    this.measureLiveTranscriptScroll();
+  },
+
+  measureLiveTranscriptScroll() {
+    const runtime = this.runtime();
+    if (
+      runtime.liveTranscriptMeasurePending
+      || runtime.disposed
+      || runtime.pageSuspended
+      || !this.data.liveTranscriptFollowing
+      || !this.data.liveText
+    ) {
+      return;
+    }
+    runtime.liveTranscriptMeasurePending = true;
+    const measurementVersion = runtime.liveTranscriptMeasureVersion;
+    let viewportHeight = 0;
+    let contentHeight = 0;
+    let completedMeasurements = 0;
+    const completeMeasurement = () => {
+      completedMeasurements += 1;
+      if (completedMeasurements < 2) return;
+      runtime.liveTranscriptMeasurePending = false;
+      const shouldMeasureAgain = runtime.liveTranscriptMeasureVersion !== measurementVersion;
+      if (
+        runtime.disposed
+        || runtime.pageSuspended
+        || !this.data.liveTranscriptFollowing
+        || viewportHeight <= 0
+        || contentHeight <= 0
+      ) {
+        return;
+      }
+      const scrollTop = liveTranscriptScrollTop(contentHeight, viewportHeight);
+      const continueAfterLayout = () => {
+        if (shouldMeasureAgain) this.measureLiveTranscriptScroll();
+      };
+      if (Math.abs(scrollTop - this.data.liveScrollTop) >= 1) {
+        applyVoiceChatDataPatch(this, { liveScrollTop: scrollTop }, continueAfterLayout);
+      } else {
+        continueAfterLayout();
+      }
+    };
+    const query = this.createSelectorQuery();
+    query.select(".live-scroll").boundingClientRect((rect) => {
+      viewportHeight = rect?.height || 0;
+      completeMeasurement();
+    });
+    query.select(".live-text-content").boundingClientRect((rect) => {
+      contentHeight = rect?.height || 0;
+      completeMeasurement();
+    });
+    query.exec();
   },
 
   pauseLiveTranscriptFollow() {
@@ -487,7 +556,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     if (this.data.liveTranscriptFollowing) {
       return;
     }
-    applyVoiceChatDataPatch(this, voiceTranscriptFollowLatestPatch(this.data.liveScrollTop));
+    applyVoiceChatDataPatch(this, voiceTranscriptFollowLatestPatch(), () => {
+      this.scheduleLiveTranscriptScroll();
+    });
   },
 
   handleFinal(event: VoiceGatewayServerEvent) {

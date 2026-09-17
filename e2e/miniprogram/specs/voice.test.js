@@ -196,6 +196,51 @@ async function tapBoundAction(element) {
   await element.trigger("tap");
 }
 
+async function assertVerticallyCentered(container, label, description, tolerance = 2) {
+  const [containerOffset, containerSize, labelOffset, labelSize] = await Promise.all([
+    container.offset(),
+    container.size(),
+    label.offset(),
+    label.size(),
+  ]);
+  const containerCenter = containerOffset.top + (containerSize.height / 2);
+  const labelCenter = labelOffset.top + (labelSize.height / 2);
+  const delta = Math.abs(containerCenter - labelCenter);
+  assert.ok(
+    delta <= tolerance,
+    `${description}垂直居中（中心偏差 ${delta.toFixed(2)}px）`,
+  );
+}
+
+async function assertMeasuredTranscriptScroll(page, expectedText, description) {
+  const data = await waitForPageData(
+    page,
+    value => value.liveText === expectedText,
+    `${description}文字更新`,
+  );
+  const [viewportSize, contentSize] = await Promise.all([
+    (await page.$(".live-scroll")).size(),
+    (await page.$(".live-text-content")).size(),
+  ]);
+  const expectedScrollTop = Math.max(0, Math.ceil(contentSize.height - viewportSize.height));
+  const measured = await waitForPageData(
+    page,
+    value => Math.abs(value.liveScrollTop - expectedScrollTop) <= 1,
+    `${description}跟随真实行高`,
+  );
+  assert.equal(measured.liveTranscriptFollowing, true);
+  assert.ok(
+    Math.abs(measured.liveScrollTop - expectedScrollTop) <= 1,
+    `${description}滚动位置来自渲染高度（实际 ${measured.liveScrollTop}，期望 ${expectedScrollTop}）`,
+  );
+  return {
+    contentHeight: contentSize.height,
+    scrollTop: measured.liveScrollTop,
+    viewportHeight: viewportSize.height,
+    initialData: data,
+  };
+}
+
 async function changeProjectDefaultMode(host, mode) {
   const edit = await session.miniProgram.navigateTo(
     `/pages/project-edit/index?projectId=${encodeURIComponent(FIXTURE_PROJECT_ID)}`,
@@ -238,6 +283,11 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const readyAssistantButtons = await page.$$(".assistant-button");
     assert.equal(readyAssistantButtons.length, 2, "提问态只保留重听和换问法两个辅助操作");
     assert.match(await readyAssistantButtons[0].text(), /重听一遍/);
+    await assertVerticallyCentered(
+      await page.$(".assistant-label"),
+      await page.$(".assistant-label-text"),
+      "小余提示标签",
+    );
     const readyPrimaryAction = await elementById(page, "voice-primary-action");
     const readyPrimaryOffset = await readyPrimaryAction.offset();
     const readyPrimarySize = await readyPrimaryAction.size();
@@ -320,6 +370,69 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       "提问态和讲述态的麦克风保持在同一位置",
     );
     assert.equal(await page.$("#session-narration-modes"), null);
+    await assertVerticallyCentered(
+      await page.$(".stage-status"),
+      await page.$(".stage-status-text"),
+      "正在倾听状态标签",
+    );
+    const longTranscript = "那时候每天早上起来以后，我先收拾屋子，再去院子里忙一会儿。".repeat(12);
+    const transcriptSnapshots = [];
+    for (const length of [40, 80, 120, 200, 300]) {
+      const partial = longTranscript.slice(0, length);
+      await page.callMethod("handlePartial", partial);
+      transcriptSnapshots.push(await assertMeasuredTranscriptScroll(
+        page,
+        partial,
+        `${length}字实时讲述`,
+      ));
+    }
+    assert.ok(
+      transcriptSnapshots.every((snapshot, index) => (
+        index === 0 || snapshot.scrollTop >= transcriptSnapshots[index - 1].scrollTop
+      )),
+      "逐步增长的实时文字不会反向跳动",
+    );
+    let sameLineVerified = false;
+    let priorSnapshot = transcriptSnapshots.at(-1);
+    for (let length = 301; length <= 310; length += 1) {
+      const partial = longTranscript.slice(0, length);
+      await page.callMethod("handlePartial", partial);
+      const nextSnapshot = await assertMeasuredTranscriptScroll(page, partial, `${length}字同行增量`);
+      if (nextSnapshot.contentHeight === priorSnapshot.contentHeight) {
+        assert.equal(nextSnapshot.scrollTop, priorSnapshot.scrollTop, "同一渲染行内新增文字不会跳动");
+        sameLineVerified = true;
+        break;
+      }
+      priorSnapshot = nextSnapshot;
+    }
+    assert.equal(sameLineVerified, true, "找到并验证一组未换行的实时文字增量");
+    const liveScroll = await page.$(".live-scroll");
+    await liveScroll.trigger("touchstart");
+    const pausedReview = await waitForPageData(
+      page,
+      data => data.liveTranscriptFollowing === false,
+      "触摸实时文字后暂停自动跟随",
+    );
+    const pausedTop = pausedReview.liveScrollTop;
+    const pausedUpdate = longTranscript.slice(0, 320);
+    await page.callMethod("handlePartial", pausedUpdate);
+    await waitForPageData(page, data => data.liveText === pausedUpdate, "阅读时继续接收实时文字");
+    assert.equal((await page.data()).liveScrollTop, pausedTop, "用户阅读旧文字时不抢回滚动位置");
+    await tapBoundAction(await page.$(".return-to-latest"));
+    await assertMeasuredTranscriptScroll(page, pausedUpdate, "回到最新文字");
+    const shorterRewrite = longTranscript.slice(0, 120);
+    await page.callMethod("handlePartial", shorterRewrite);
+    const shorterSnapshot = await assertMeasuredTranscriptScroll(
+      page,
+      shorterRewrite,
+      "ASR 缩短重写",
+    );
+    assert.ok(
+      shorterSnapshot.scrollTop < transcriptSnapshots.at(-1).scrollTop,
+      "ASR 把内容改短后，跟随位置会按真实高度回收",
+    );
+    await page.callMethod("handlePartial", longTranscript.slice(0, 300));
+    await assertMeasuredTranscriptScroll(page, longTranscript.slice(0, 300), "ASR 恢复长文本");
     session.artifacts.mark("voice:asr:partial");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });
 
@@ -361,6 +474,13 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(completed.persistenceStateText, "小余已回应");
     assert.ok(await page.$(".history-panel"), "完成一段讲述后显示轻量保存状态条");
     assert.ok(await page.$(".history-saved-check"), "保存状态条包含确认标记");
+    await tapBoundAction(await page.$(".history-toggle"));
+    await waitForPageData(page, data => data.historyExpanded, "展开已保存讲述");
+    await assertVerticallyCentered(
+      await page.$(".line-role"),
+      await page.$(".line-role-text"),
+      "讲述角色标签",
+    );
     session.artifacts.mark("voice:assistant:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-completed.png") });
 
@@ -417,6 +537,37 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(nextReady.liveText, "");
     assert.equal(nextReady.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
+    await tapBoundAction(await elementById(next, "voice-primary-action"));
+    await waitForPageData(
+      next,
+      data => data.recording && data.liveText.includes("第一次坐火车"),
+      "大字模式开始实时讲述",
+    );
+    const largeTranscript = "小时候家门口有一条小路，每次出门都能遇见熟悉的人。".repeat(14).slice(0, 300);
+    await next.callMethod("handlePartial", largeTranscript);
+    await assertMeasuredTranscriptScroll(next, largeTranscript, "大字模式300字实时讲述");
+    await assertVerticallyCentered(
+      await next.$(".stage-status"),
+      await next.$(".stage-status-text"),
+      "大字模式正在倾听状态标签",
+    );
+    const largeStage = await next.$(".transcript-stage");
+    const largeDock = await next.$(".control-bar");
+    const [largeStageOffset, largeStageSize, largeDockOffset] = await Promise.all([
+      largeStage.offset(),
+      largeStage.size(),
+      largeDock.offset(),
+    ]);
+    assert.ok(
+      largeStageOffset.top + largeStageSize.height <= largeDockOffset.top,
+      "大字模式的完整行窗口不被固定操作区遮挡",
+    );
+    await tapBoundAction(await elementById(next, "voice-primary-action"));
+    await waitForPageData(
+      next,
+      data => !data.recording && data.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT),
+      "大字模式讲述保存",
+    );
     session.artifacts.mark("voice:guided:leave");
     await session.miniProgram.navigateTo("/pages/voice-authorization/index");
     session.artifacts.mark("voice:guided:return");
