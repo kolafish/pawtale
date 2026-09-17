@@ -1,9 +1,4 @@
 <view class="ui-page-shell {{pageClass}}">
-  <view wx:if="{{focusedSectionId}}" class="ui-page-context-row">
-    <text class="ui-page-context">{{focusedSectionTitle || "故事详情"}}</text>
-    <button class="workspace-home-action ui-button" bindtap="openBookHome">书稿首页</button>
-  </view>
-
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
   <view wx:if="{{loading && !workspace}}" class="loading-state">正在读取本章</view>
 
@@ -45,7 +40,7 @@
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
 
-    <view wx:if="{{chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
+    <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
       <text class="section-kicker">后台整理的新稿</text>
       <text class="status-detail">当前稿仍在使用。对照下面的变化后，再决定是否采用新稿。</text>
       <text class="candidate-summary">{{candidateSummaryText}}</text>
@@ -142,23 +137,135 @@
       </view>
     </view>
 
-    <view wx:if="{{focusedSectionId || editingToolsExpanded}}" class="content-card draft-card ui-card ui-card-borderless" id="chapter-sections">
+    <block wx:if="{{focusedSectionId && focusedSection}}">
+      <view class="story-detail-summary">
+        <text class="story-detail-summary-text">{{focusedSection.visibleMaterials.length}} 段回忆 · {{focusedSection.hasDraft ? "已整理成故事" : "故事整理中"}}</text>
+        <view
+          class="story-media-action ui-pressable"
+          aria-role="button"
+          aria-label="查看{{focusedSectionTitle}}的图片和视频"
+          bindtap="openFocusedSectionMedia"
+        >
+          <image class="story-media-icon" src="/assets/chapter-workspace/media.svg" mode="aspectFit" />
+          <text>图片与视频</text>
+          <text class="story-media-arrow">›</text>
+        </view>
+      </view>
+
+      <view class="focused-story-card ui-card ui-card-borderless" id="focused-story">
+        <text class="focused-card-label">整理后的故事{{focusedSection.draftNeedsUpdate ? "（待更新）" : ""}}</text>
+
+        <block wx:if="{{editingSectionId === focusedSection.id && editingMode === 'manual'}}">
+          <textarea
+            class="draft-editor focused-story-editor"
+            value="{{editingSectionContent}}"
+            maxlength="-1"
+            auto-height
+            cursor-spacing="24"
+            aria-label="编辑故事 {{focusedSection.title}}"
+            bindinput="changeDraftSectionContent"
+          />
+          <view class="edit-actions">
+            <button
+              class="secondary-action ui-button"
+              disabled="{{operationKind !== ''}}"
+              bindtap="cancelDraftSectionEdit"
+            >取消</button>
+            <button
+              class="secondary-action strong ui-button"
+              loading="{{operationKind === 'save_draft_section'}}"
+              disabled="{{operationKind === 'save_draft_section'}}"
+              bindtap="saveDraftSectionEdit"
+            >保存这个故事</button>
+          </view>
+        </block>
+
+        <block wx:elif="{{focusedSection.hasDraft}}">
+          <text class="focused-story-content {{focusedStoryExpanded ? 'is-expanded' : ''}}" selectable>{{focusedSection.draftContent}}</text>
+          <view
+            wx:if="{{focusedSection.draftCanExpand}}"
+            class="focused-story-expand ui-pressable"
+            aria-role="button"
+            aria-expanded="{{focusedStoryExpanded}}"
+            aria-label="{{focusedStoryExpanded ? '收起故事正文' : '展开故事全文'}}"
+            bindtap="toggleFocusedStory"
+          >
+            <text>{{focusedStoryExpanded ? "收起" : "展开全文"}}</text>
+            <text class="focused-story-expand-icon {{focusedStoryExpanded ? 'is-expanded' : ''}}">⌄</text>
+          </view>
+          <view class="focused-story-actions">
+            <view
+              class="focused-story-action ui-pressable {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== focusedSection.id) ? 'is-disabled' : ''}}"
+              data-id="{{focusedSection.id}}"
+              aria-role="button"
+              aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== focusedSection.id)}}"
+              bindtap="playDraftSection"
+            >
+              <image class="focused-story-action-icon" src="/assets/chapter-workspace/speaker.svg" mode="aspectFit" />
+              <text>{{audioPhase === "preparing" && audioTarget === focusedSection.id ? "准备中…" : (audioPhase === "playing" && audioTarget === focusedSection.id ? "停止朗读" : "朗读")}}</text>
+            </view>
+            <view
+              class="focused-story-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+              data-id="{{focusedSection.id}}"
+              aria-role="button"
+              aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+              bindtap="startDraftSectionEdit"
+            >
+              <image class="focused-story-action-icon" src="/assets/chapter-workspace/pencil.svg" mode="aspectFit" />
+              <text>自己修改</text>
+            </view>
+            <view
+              class="focused-story-action is-accent ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+              data-id="{{focusedSection.id}}"
+              aria-role="button"
+              aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+              bindtap="startDraftSectionAIEdit"
+            >
+              <image class="focused-story-action-icon" src="/assets/chapter-workspace/wand.svg" mode="aspectFit" />
+              <text>请小余改</text>
+            </view>
+          </view>
+        </block>
+
+        <view wx:else class="focused-story-empty">
+          <text class="empty-detail">这个故事还在整理。完成当前步骤后，会根据讲过的回忆生成。</text>
+        </view>
+      </view>
+
+      <view class="focused-memories-card ui-card ui-card-borderless">
+        <view class="focused-memories-heading">
+          <text class="focused-card-label">讲过的回忆</text>
+          <text class="focused-memories-count">{{focusedSection.visibleMaterials.length}} 段</text>
+        </view>
+        <view class="focused-memory-list">
+          <view
+            wx:for="{{focusedSection.visibleMaterials}}"
+            wx:key="utterance_id"
+            class="focused-memory-row ui-pressable"
+            data-utterance-id="{{item.utterance_id}}"
+            aria-role="button"
+            aria-label="查看与修改{{item.indexText}}"
+            bindtap="openMaterialEditor"
+          >
+            <view class="focused-memory-copy">
+              <text class="focused-memory-index">{{item.indexText}}</text>
+              <text class="focused-memory-preview">{{item.text}}</text>
+            </view>
+            <text class="focused-memory-arrow">›</text>
+          </view>
+        </view>
+      </view>
+    </block>
+
+    <view wx:if="{{!focusedSectionId && editingToolsExpanded}}" class="content-card draft-card ui-card ui-card-borderless" id="chapter-sections">
       <view class="draft-heading">
         <view>
-          <text wx:if="{{focusedSectionId}}" class="section-kicker">故事详情</text>
-          <text class="section-title">{{focusedSectionId ? focusedSectionTitle : "故事与回忆"}}</text>
+          <text class="section-title">故事与回忆</text>
           <text class="section-structure-summary">{{sectionStructureSummary}}</text>
         </view>
         <view class="draft-heading-actions">
           <view
-            wx:if="{{focusedSectionId}}"
-            class="chapter-read-action ui-pressable"
-            aria-role="button"
-            aria-label="查看{{focusedSectionTitle}}的图片和视频"
-            bindtap="openFocusedSectionMedia"
-          >图片与视频</view>
-          <view
-            wx:elif="{{workspace.draft_version_id && workspace.draft_content}}"
+            wx:if="{{workspace.draft_version_id && workspace.draft_content}}"
             class="chapter-read-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -167,11 +274,11 @@
         </view>
       </view>
 
-      <view wx:if="{{!focusedSectionId && sectionViews.length}}" class="structure-tools">
+      <view wx:if="{{sectionViews.length}}" class="structure-tools">
         <text class="structure-tools-detail">可以编辑故事标题，查看每个故事背后的回忆，或修改整理后的正文。</text>
       </view>
 
-      <view wx:if="{{!focusedSectionId && workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
+      <view wx:if="{{workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
         <text wx:if="{{retainedDraftSectionCount}}" class="rewrite-notice-detail">调整前另有 {{retainedDraftSectionCount}} 个故事的旧正文保留在历史版本中，不会误放到现在的故事里。</text>
@@ -205,7 +312,6 @@
           class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}"
         >
           <view
-            wx:if="{{!focusedSectionId}}"
             class="section-toggle ui-pressable"
             data-id="{{item.id}}"
             aria-role="button"
@@ -221,27 +327,10 @@
               <text class="section-expand-mark">编辑 <text class="section-expand-chevron">{{item.expanded ? "⌃" : "›"}}</text></text>
             </view>
           </view>
-          <view wx:else class="section-focus-heading">
-            <view class="section-index"><text>{{item.indexText}}</text></view>
-            <view class="section-copy">
-              <text class="section-name">这个故事</text>
-              <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
-            </view>
-            <text
-              wx:if="{{!item.requires_user_assignment}}"
-              class="section-rename-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
-              data-id="{{item.id}}"
-              data-title="{{item.title}}"
-              data-version="{{item.version}}"
-              aria-role="button"
-              aria-label="编辑{{item.title}}的标题"
-              bindtap="renameSection"
-            >✎</text>
-          </view>
 
           <block wx:if="{{item.expanded}}">
             <view
-              wx:if="{{!focusedSectionId && !item.requires_user_assignment}}"
+              wx:if="{{!item.requires_user_assignment}}"
               class="section-title-edit-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
               data-id="{{item.id}}"
               data-title="{{item.title}}"
@@ -268,7 +357,7 @@
                     <text class="section-material-index">{{material.indexText}}</text>
                     <text class="section-material-text">{{material.text}}</text>
                   </view>
-                  <text class="section-material-open-action">{{item.requires_user_assignment ? "编辑或删除" : "查看与修改"}} ›</text>
+                  <text class="section-material-open-action">{{item.requires_user_assignment ? "编辑或删除 ›" : "›"}}</text>
                 </view>
                 <picker
                   wx:if="{{item.requires_user_assignment}}"
@@ -350,7 +439,7 @@
               </view>
 
               <view
-                wx:if="{{!focusedSectionId && item.mergeTargetId}}"
+                wx:if="{{item.mergeTargetId}}"
                 class="section-merge-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-source-id="{{item.id}}"
                 data-source-title="{{item.title}}"
@@ -368,7 +457,7 @@
         </view>
       </view>
 
-      <view wx:if="{{!focusedSectionId && sectionViews.length}}" class="structure-actions">
+      <view wx:if="{{sectionViews.length}}" class="structure-actions">
         <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
           <ai-task-progress
             title="{{sectionRegenerationTitle}}"
@@ -391,7 +480,7 @@
         </view>
       </view>
 
-      <view wx:if="{{!focusedSectionId && !workspace.draft_sections.length}}" class="draft-empty">
+      <view wx:if="{{!workspace.draft_sections.length}}" class="draft-empty">
         <block wx:if="{{workspace.draft_content}}">
           <text class="empty-title">{{draftRecoveryTitle}}</text>
           <text class="empty-detail">{{draftRecoveryDetail}}</text>
@@ -423,14 +512,14 @@
       </view>
 
       <view
-        wx:if="{{!focusedSectionId && workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
+        wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
         class="primary-action confirm-chapter-action ui-pressable {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{!canConfirmChapter || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="confirmChapter"
       >{{operationKind === "confirm_chapter" ? "正在收入书稿…" : "把这一章收入书稿"}}</view>
 
-      <view wx:if="{{!focusedSectionId && workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
+      <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
         <view class="chapter-finished-action ui-pressable" aria-role="button" bindtap="returnToBookFlow">
           <view class="chapter-finished-copy">
             <text class="chapter-finished-title">已收入书稿</text>
@@ -442,7 +531,7 @@
     </view>
 
     <view
-      wx:if="{{requiredIssues.length || optionalIssues.length}}"
+      wx:if="{{!focusedSectionId && (requiredIssues.length || optionalIssues.length)}}"
       class="content-card suggestions-card friendly-suggestions-card ui-card ui-card-borderless"
       id="chapter-suggestions"
     >

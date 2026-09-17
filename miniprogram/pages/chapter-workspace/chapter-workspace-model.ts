@@ -239,6 +239,8 @@ export interface ChapterWorkspacePageData {
   chapterId: string;
   focusedSectionId: string;
   focusedSectionTitle: string;
+  focusedSection: ChapterSectionView | null;
+  focusedStoryExpanded: boolean;
   workspace: MemoirChapterWorkspace | null;
   nextAction: ChapterNextAction;
   chapterHeroKicker: string;
