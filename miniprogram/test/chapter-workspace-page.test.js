@@ -382,6 +382,8 @@ test("chapter workspace opens a focused section selected from the story tree", a
 
   assert.equal(context.data.focusedSectionId, "section-1");
   assert.equal(context.data.focusedSectionTitle, "离家前的准备");
+  assert.equal(context.data.focusedSection.id, "section-1");
+  assert.equal(context.data.focusedStoryExpanded, false);
   assert.equal(context.data.sectionViews.length, 1);
   assert.equal(context.data.sectionViews[0].expanded, true);
   assert.equal(context.data.expandedSectionIds["section-1"], true);
@@ -389,6 +391,9 @@ test("chapter workspace opens a focused section selected from the story tree", a
   assert.equal(context.data.optionalIssues.length, 1);
   assert.deepEqual(scrolls, []);
   assert.deepEqual(navigationTitles, ["离家前的准备"]);
+
+  page.toggleFocusedStory.call(context);
+  assert.equal(context.data.focusedStoryExpanded, false);
 
   page.openMaterialEditor.call(context, {
     currentTarget: { dataset: { utteranceId: "utterance-1" } },
@@ -403,6 +408,56 @@ test("chapter workspace opens a focused section selected from the story tree", a
     navigations.at(-1),
     "/pages/image-assets/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
   );
+});
+
+test("focused story detail keeps reading content before memory summaries", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
+    "utf8",
+  );
+  const focusedStart = template.indexOf('<block wx:if="{{focusedSectionId && focusedSection}}">');
+  const editingStart = template.indexOf('<view wx:if="{{!focusedSectionId && editingToolsExpanded}}"');
+  const focusedTemplate = template.slice(focusedStart, editingStart);
+  const storyCard = focusedTemplate.indexOf('class="focused-story-card');
+  const memoryCard = focusedTemplate.indexOf('class="focused-memories-card');
+
+  assert.ok(focusedStart >= 0, "应复用章节工作台中的聚焦故事详情态");
+  assert.ok(storyCard >= 0 && memoryCard > storyCard, "整理后的故事应先于讲过的回忆");
+  assert.match(focusedTemplate, />整理后的故事/);
+  assert.match(focusedTemplate, />讲过的回忆</);
+  assert.match(focusedTemplate, /bindtap="toggleFocusedStory"/);
+  assert.match(focusedTemplate, /draftCanExpand && !focusedStoryExpanded/);
+  assert.match(focusedTemplate, /assets\/chapter-workspace\/speaker\.svg/);
+  assert.match(focusedTemplate, /assets\/chapter-workspace\/pencil\.svg/);
+  assert.match(focusedTemplate, /assets\/chapter-workspace\/wand\.svg/);
+  assert.doesNotMatch(focusedTemplate, />这个故事</);
+  assert.doesNotMatch(focusedTemplate, />查看与修改/);
+});
+
+test("focused story detail expands a long organized story on demand", async () => {
+  const base = workspace();
+  const longContent = "十八岁那年，我第一次离开家。".repeat(24);
+  installWx();
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_sections: [{
+        ...base.draft_sections[0],
+        content: longContent,
+      }],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    sectionId: "section-1",
+  });
+
+  assert.equal(context.data.focusedSection.draftCanExpand, true);
+  assert.equal(context.data.focusedStoryExpanded, false);
+  page.toggleFocusedStory.call(context);
+  assert.equal(context.data.focusedStoryExpanded, true);
 });
 
 test("chapter workspace falls back to full chapter for a stale section link", async () => {
@@ -465,7 +520,7 @@ test("chapter workspace switches one story list between browse and editing modes
   assert.doesNotMatch(overviewTemplate, /story-overview-meta/);
   assert.match(entryMarkTemplate, /editing-entry-chevron/);
   assert.doesNotMatch(entryMarkTemplate, /收起/);
-  assert.match(template, /"故事与回忆"/);
+  assert.match(template, />故事与回忆</);
   assert.doesNotMatch(template, /故事、回忆与正文|>改名</);
   assert.ok(regroupStart > sectionListStart, "重新分组应位于故事编辑列表之后");
   assert.match(template, />已收入书稿</);

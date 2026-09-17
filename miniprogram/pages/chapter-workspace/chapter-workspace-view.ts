@@ -25,6 +25,7 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
   mergeTargetTitle: string;
   hasDraft: boolean;
   draftContent: string;
+  draftCanExpand: boolean;
   draftNeedsUpdate: boolean;
   expanded: boolean;
   visibleMaterials: ChapterSectionMaterialView[];
@@ -234,7 +235,7 @@ function visibleSectionViews(
         .sort((left, right) => left.sort_order - right.sort_order)
         .map((material, materialIndex) => ({
           ...material,
-          indexText: `回忆 ${materialIndex + 1}`,
+          indexText: `第 ${materialIndex + 1} 段`,
           assignmentOptions: section.requires_user_assignment
             ? assignmentOptions
             : [],
@@ -260,6 +261,13 @@ function visibleSectionViews(
         mergeTargetTitle: mergeTarget?.title || "",
         hasDraft: Boolean(draft),
         draftContent: draft?.content || "",
+        draftCanExpand: Boolean(
+          draft
+          && (
+            visibleCharCount(draft.content) > 140
+            || draft.content.split("\n").length > 7
+          )
+        ),
         draftNeedsUpdate,
         expanded: section.requires_user_assignment
           ? expandedSectionIds[section.id] !== false

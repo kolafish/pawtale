@@ -18,7 +18,6 @@ import {
 } from "../../services/memoir-chapter-workspace-api";
 import {
   redirectToBook,
-  returnToBook,
   routeAuthError,
 } from "../../services/navigation";
 import {
@@ -88,6 +87,8 @@ definePage<ChapterWorkspacePageData>()({
     chapterId: "",
     focusedSectionId: "",
     focusedSectionTitle: "",
+    focusedSection: null,
+    focusedStoryExpanded: false,
     workspace: null,
     nextAction: LOADING_NEXT_ACTION,
     chapterHeroKicker: "这一章正在慢慢长大",
@@ -269,12 +270,6 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
-  openBookHome() {
-    this.leaveAfterEditConfirmation(() => {
-      returnToBook();
-    });
-  },
-
   returnToBookFlow() {
     this.leaveAfterEditConfirmation(() => {
       wx.navigateBack({
@@ -408,6 +403,7 @@ definePage<ChapterWorkspacePageData>()({
       ),
       focusedSectionId: focusedSection?.id || "",
       focusedSectionTitle: focusedSection?.title || "",
+      focusedSection: focusedSection || null,
       sectionViews: focusedSection
         ? [{ ...focusedSection, expanded: true }]
         : viewPatch.sectionViews,
@@ -485,6 +481,13 @@ definePage<ChapterWorkspacePageData>()({
         sectionId: this.data.focusedSectionId,
       }),
     });
+  },
+
+  toggleFocusedStory() {
+    if (!this.data.focusedSection?.draftCanExpand) {
+      return;
+    }
+    this.setData({ focusedStoryExpanded: !this.data.focusedStoryExpanded });
   },
 
   openChapterPreview() {
