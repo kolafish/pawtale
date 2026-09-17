@@ -54,6 +54,7 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.micButtonClass, "mic-button disabled");
   assert.equal(voiceChatViewPatch(first).micButtonClass, "mic-button disabled");
   assert.equal(first.micButtonDisabled, true);
+  assert.equal(first.micButtonProcessing, false);
   assert.equal(first.micButtonText, "同意后开始说话");
   assert.equal(first.liveScrollClass, "live-scroll");
   assert.equal(first.liveScrollTarget, "");
@@ -106,6 +107,7 @@ test("voice chat view patch derives simple fields for first assistant turn", () 
   assert.equal(patch.controlHintText, "小余先问一句，稍等一下");
   assert.equal(patch.micButtonText, "我来讲了");
   assert.equal(patch.micButtonDisabled, false);
+  assert.equal(patch.micButtonProcessing, false);
 });
 
 test("voice chat view patch derives transcript and recording render fields", () => {
@@ -135,12 +137,11 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.captureStripClass, "capture-strip active");
   assert.equal(patch.showLiveCharCount, true);
   assert.equal(patch.showInlineHelp, true);
-  assert.equal(patch.historyCountText, "2 段 · 7 字");
+  assert.equal(patch.historyCountText, "1 段 · 6 字");
   assert.equal(patch.showHistoryPanel, true);
   assert.equal(patch.showHistoryLines, false);
   assert.equal(patch.historyToggleText, "查看");
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
-    ["transcript-line assistant", "小余"],
     ["transcript-line user", "我"],
   ]);
   assert.equal(patch.controlHintText, "说完请点这里");
@@ -199,9 +200,14 @@ test("voice chat keeps the saved transcript as the only focus while the next que
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusText, "正在帮您整理成文字");
   assert.equal(patch.liveDisplayText, "那个月亮特别大，也特别圆。");
+  assert.equal(patch.controlHintText, "正在帮您整理刚才的故事");
+  assert.equal(patch.micButtonClass, "mic-button processing disabled");
+  assert.equal(patch.micButtonDisabled, true);
+  assert.equal(patch.micButtonProcessing, true);
+  assert.equal(patch.micButtonText, "正在帮您整理");
 });
 
-test("voice chat keeps the newest part prominent and exposes paused follow state", () => {
+test("voice chat keeps one continuous live transcript and exposes paused follow state", () => {
   const liveText = "小时候我们住在河边，每天放学以后都会先去找外婆。后来搬到了城里，但我一直记得院子里的桂花树，秋天的时候整个屋子都能闻到香味。";
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
@@ -213,9 +219,7 @@ test("voice chat keeps the newest part prominent and exposes paused follow state
     liveReviewStartCharCount: liveText.length - 5,
   });
 
-  assert.equal(patch.liveContextText + patch.liveCurrentText, liveText);
-  assert.ok(patch.liveContextText.length > 0);
-  assert.ok(Array.from(patch.liveCurrentText).length <= 56);
+  assert.equal(patch.liveCurrentText, liveText);
   assert.match(patch.liveScrollClass, /reviewing/);
   assert.equal(patch.showReturnToLatest, true);
   assert.equal(patch.returnToLatestText, "回到最新 · 新增 5 字");

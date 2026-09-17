@@ -31,7 +31,7 @@
 
   <view class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>
-    <text class="topic-kicker">正在聊：</text>
+    <text class="topic-kicker">正在聊</text>
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
 
@@ -209,11 +209,9 @@
         bindtouchstart="pauseLiveTranscriptFollow"
         bindscrolltolower="resumeLiveTranscriptFollow"
       >
-        <text wx:if="{{liveContextText}}" class="live-text-context">{{liveContextText}}</text>
         <text class="{{liveTextClass}} live-text-current">{{liveCurrentText}}</text>
         <view id="{{liveTextEndId}}" class="live-text-end"></view>
       </scroll-view>
-      <view wx:if="{{liveContextText}}" class="live-caption-top-fade" aria-hidden="true"></view>
     </view>
     <view wx:if="{{showCaptureStrip && !recording}}" class="{{captureStripClass}}">
       <view class="capture-dot"></view>
@@ -233,13 +231,17 @@
       hover-class="ui-subtle-action-hover"
       aria-role="button"
       aria-expanded="{{historyExpanded}}"
-      aria-label="{{historyToggleText}}本次已保存的讲述"
+      aria-label="{{historyToggleText}}已保存的讲述"
     >
       <view class="history-heading">
-        <text>本次已保存</text>
+        <text class="history-saved-check" aria-hidden="true">✓</text>
+        <text class="history-saved-label">已保存</text>
         <text class="history-count">{{historyCountText}}</text>
       </view>
-      <text class="history-toggle-text">{{historyToggleText}}</text>
+      <view class="history-toggle-action">
+        <text class="history-toggle-text">{{historyToggleText}}</text>
+        <text class="history-toggle-mark" aria-hidden="true">{{historyExpanded ? '⌃' : '›'}}</text>
+      </view>
     </view>
     <view wx:if="{{showHistoryLines}}" class="history-lines">
       <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
@@ -261,6 +263,9 @@
     >
       <view class="mic-icon-shell">
         <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+        <view class="mic-processing-indicator" aria-hidden="true">
+          <view class="mic-processing-spinner"></view>
+        </view>
       </view>
       <text class="mic-button-text">{{micButtonText}}</text>
     </view>

@@ -14,24 +14,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
+  gap: 12rpx;
 }
 
 .top-copy {
   flex: 1;
   min-width: 0;
+  text-align: center;
 }
 
 .home-return-button {
-  width: 136rpx;
-  min-width: 136rpx;
+  box-sizing: border-box;
+  width: 144rpx;
+  min-width: 144rpx;
   height: 80rpx;
   margin: 0;
-  padding: 0 12rpx 0 4rpx;
-  flex: 0 0 136rpx;
+  padding: 0 8rpx 0 2rpx;
+  flex: 0 0 144rpx;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4rpx;
   border: 0;
   border-radius: var(--ui-radius-control);
@@ -212,12 +214,13 @@
 }
 
 .finish-button {
-  width: 160rpx;
-  min-width: 160rpx;
+  box-sizing: border-box;
+  width: 144rpx;
+  min-width: 144rpx;
   height: 80rpx;
   margin: 0;
-  padding: 0 12rpx;
-  flex: 0 0 160rpx;
+  padding: 0 4rpx;
+  flex: 0 0 144rpx;
   white-space: nowrap;
   border-radius: var(--ui-radius-control);
   background: transparent;
@@ -699,16 +702,6 @@
   text-wrap: pretty;
 }
 
-.live-text-context {
-  display: block;
-  padding-bottom: 18rpx;
-  color: var(--ui-text-secondary);
-  font-size: 40rpx;
-  font-weight: 500;
-  line-height: 1.55;
-  word-break: break-all;
-}
-
 .live-text-current {
   display: block;
 }
@@ -731,25 +724,6 @@
 .voice-chat-page.human-recording-focus .live-text-end,
 .live-scroll.reviewing .live-text-end {
   height: 120rpx;
-}
-
-.live-caption-top-fade {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 1;
-  height: 62rpx;
-  pointer-events: none;
-  background: linear-gradient(180deg, var(--ui-surface), rgba(255, 253, 250, 0));
-  opacity: 1;
-  transition-property: opacity;
-  transition-duration: 150ms;
-  transition-timing-function: ease-out;
-}
-
-.live-caption-shell.reviewing .live-caption-top-fade {
-  opacity: 0;
 }
 
 .return-to-latest {
@@ -868,30 +842,30 @@
 }
 
 .history-panel {
-  margin-top: 30rpx;
-  padding: 12rpx;
+  margin-top: 22rpx;
+  padding: 0;
   border: 0;
   border-radius: 24rpx;
   background: var(--ui-surface);
   box-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.06),
-    0 10rpx 26rpx rgba(0, 0, 0, 0.06);
+    0 0 0 1rpx rgba(0, 0, 0, 0.045),
+    0 8rpx 22rpx rgba(0, 0, 0, 0.045);
 }
 
 .history-toggle {
   box-sizing: border-box;
   width: 100%;
-  min-height: 88rpx;
+  min-height: 108rpx;
   margin: 0;
   border: 0;
-  border-radius: 18rpx;
+  border-radius: 24rpx;
   background: transparent;
   color: var(--ui-text-primary);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18rpx;
-  padding: 14rpx 18rpx;
+  padding: 12rpx 24rpx;
   text-align: left;
   transition-property: transform, background-color;
   transition-duration: 150ms;
@@ -902,34 +876,74 @@
   border: 0;
 }
 
+.history-toggle:active {
+  transform: scale(0.96);
+}
+
 .history-heading {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2rpx;
-  font-size: 32rpx;
+  align-items: center;
+  gap: 10rpx;
+  font-size: 28rpx;
   font-weight: 700;
-  line-height: 44rpx;
+  line-height: 42rpx;
+}
+
+.history-saved-check {
+  width: 40rpx;
+  height: 40rpx;
+  flex: 0 0 40rpx;
+  border-radius: 999rpx;
+  background: #eef3e9;
+  color: #6f8464;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 40rpx;
+}
+
+.history-saved-label {
+  flex: 0 0 auto;
 }
 
 .history-count {
   color: var(--ui-text-muted);
   font-size: 26rpx;
   font-weight: 500;
-  line-height: 38rpx;
+  line-height: 42rpx;
   font-variant-numeric: tabular-nums;
 }
 
-.history-toggle-text {
+.history-toggle-action {
+  min-width: 92rpx;
+  min-height: 80rpx;
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6rpx;
+}
+
+.history-toggle-text {
   color: var(--ui-accent);
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 700;
   line-height: 42rpx;
 }
 
+.history-toggle-mark {
+  margin-top: -2rpx;
+  color: var(--ui-accent);
+  font-size: 34rpx;
+  font-weight: 500;
+  line-height: 42rpx;
+}
+
 .history-lines {
-  padding: 0 14rpx 14rpx;
+  padding: 0 18rpx 18rpx;
 }
 
 .transcript-line {
@@ -1060,9 +1074,8 @@
 }
 
 .role-record-icon {
-  width: 40rpx;
-  height: 40rpx;
-  transform: scale(1.35);
+  width: 52rpx;
+  height: 52rpx;
 }
 
 .role-record-text {
@@ -1116,14 +1129,23 @@
   box-shadow: none;
 }
 
+.mic-button.processing {
+  color: var(--ui-text-secondary);
+}
+
 .mic-button.disabled {
   opacity: 0.72;
+}
+
+.mic-button.processing.disabled {
+  opacity: 1;
 }
 
 .mic-button:active { transform: scale(0.96); }
 .mic-button.disabled:active { transform: none; }
 
 .mic-icon-shell {
+  position: relative;
   width: 116rpx;
   height: 116rpx;
   border-radius: 999rpx;
@@ -1148,10 +1170,67 @@
     0 14rpx 30rpx rgba(120, 66, 52, 0.18);
 }
 
+.mic-button.processing .mic-icon-shell {
+  background: #f1ede7;
+  box-shadow:
+    0 0 0 1rpx rgba(0, 0, 0, 0.04),
+    0 10rpx 24rpx rgba(78, 65, 55, 0.08);
+}
+
 .mic-icon {
-  width: 72rpx;
-  height: 72rpx;
-  transform: scale(1.35);
+  width: 84rpx;
+  height: 84rpx;
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition-property: transform, opacity, filter;
+  transition-duration: 300ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.mic-button.recording .mic-icon {
+  filter: brightness(0) invert(1);
+}
+
+.mic-button.processing .mic-icon {
+  opacity: 0;
+  transform: scale(0.25);
+  filter: blur(4px);
+}
+
+.mic-processing-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.25);
+  filter: blur(4px);
+  pointer-events: none;
+  transition-property: transform, opacity, filter;
+  transition-duration: 300ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.mic-button.processing .mic-processing-indicator {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+}
+
+.mic-processing-spinner {
+  box-sizing: border-box;
+  width: 48rpx;
+  height: 48rpx;
+  border: 6rpx solid rgba(166, 91, 73, 0.18);
+  border-top-color: var(--ui-accent);
+  border-radius: 999rpx;
+  animation: mic-processing-spin 900ms linear infinite;
+}
+
+@keyframes mic-processing-spin {
+  to { transform: rotate(360deg); }
 }
 
 .control-hint {
@@ -1300,19 +1379,19 @@
 }
 
 .voice-chat-page.large-text .finish-button {
-  width: 184rpx;
-  min-width: 184rpx;
-  flex-basis: 184rpx;
+  width: 144rpx;
+  min-width: 144rpx;
+  flex-basis: 144rpx;
   height: 92rpx;
-  font-size: 34rpx;
+  font-size: 30rpx;
 }
 
 .voice-chat-page.large-text .home-return-button {
-  width: 152rpx;
-  min-width: 152rpx;
-  flex-basis: 152rpx;
+  width: 144rpx;
+  min-width: 144rpx;
+  flex-basis: 144rpx;
   height: 92rpx;
-  font-size: 32rpx;
+  font-size: 30rpx;
 }
 
 .voice-chat-page.large-text .home-return-mark {
@@ -1343,8 +1422,39 @@
 }
 
 .voice-chat-page.large-text .history-panel {
-  padding: 14rpx;
+  padding: 0;
   border-radius: 30rpx;
+}
+
+.voice-chat-page.large-text .history-toggle {
+  min-height: 124rpx;
+  border-radius: 30rpx;
+  padding: 14rpx 28rpx;
+}
+
+.voice-chat-page.large-text .history-heading {
+  gap: 12rpx;
+  font-size: 34rpx;
+  line-height: 50rpx;
+}
+
+.voice-chat-page.large-text .history-saved-check {
+  width: 48rpx;
+  height: 48rpx;
+  flex-basis: 48rpx;
+  font-size: 28rpx;
+  line-height: 48rpx;
+}
+
+.voice-chat-page.large-text .history-count,
+.voice-chat-page.large-text .history-toggle-text {
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.voice-chat-page.large-text .history-toggle-mark {
+  font-size: 40rpx;
+  line-height: 48rpx;
 }
 
 .voice-chat-page.large-text .completion-issue-panel {
@@ -1436,12 +1546,6 @@
 .voice-chat-page.large-text .live-text {
   font-size: 64rpx;
   line-height: 92rpx;
-}
-
-.voice-chat-page.large-text .live-text-context {
-  padding-bottom: 20rpx;
-  font-size: 44rpx;
-  line-height: 68rpx;
 }
 
 .voice-chat-page.large-text .capture-summary {
@@ -1537,8 +1641,8 @@
 }
 
 .voice-chat-page.large-text .role-record-icon {
-  width: 50rpx;
-  height: 50rpx;
+  width: 58rpx;
+  height: 58rpx;
 }
 
 .voice-chat-page.large-text .role-record-text {
@@ -1574,8 +1678,8 @@
 }
 
 .voice-chat-page.large-text .mic-icon {
-  width: 76rpx;
-  height: 76rpx;
+  width: 96rpx;
+  height: 96rpx;
 }
 
 .voice-chat-page.large-text .voice-auth-title {
@@ -1728,11 +1832,6 @@
   line-height: 82rpx;
 }
 
-.voice-chat-page.large-text.capture-focus .live-text-context {
-  font-size: 42rpx;
-  line-height: 66rpx;
-}
-
 .voice-chat-page.large-text.capture-focus .capture-strip {
   margin-top: 40rpx;
   padding: 24rpx 28rpx;
@@ -1748,13 +1847,13 @@
 .voice-chat-page.large-text.assistant-focus .history-panel,
 .voice-chat-page.large-text.capture-focus .history-panel {
   margin-top: 24rpx;
-  padding: 12rpx;
+  padding: 0;
   border-radius: 30rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .history-toggle,
 .voice-chat-page.large-text.capture-focus .history-toggle {
-  min-height: 100rpx;
+  min-height: 116rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .transcript-line,
@@ -1805,4 +1904,9 @@
 .voice-chat-page.voice-session-embedded.large-text .mic-icon-shell {
   width: 154rpx;
   height: 154rpx;
+}
+
+.voice-chat-page.voice-session-embedded.large-text .mic-icon {
+  width: 108rpx;
+  height: 108rpx;
 }

@@ -261,6 +261,26 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const readyPrimaryOffset = await readyPrimaryAction.offset();
     const readyPrimarySize = await readyPrimaryAction.size();
     assert.ok(readyPrimarySize.width >= 40 && readyPrimarySize.height >= 40, "主操作满足最小触控区域");
+    const topBar = await page.$(".top-bar");
+    const topBarOffset = await topBar.offset();
+    const topBarSize = await topBar.size();
+    const finishAction = await elementById(page, "voice-finish-action");
+    const homeActionSize = await (await elementById(page, "voice-home-action")).size();
+    const finishActionOffset = await finishAction.offset();
+    const finishActionSize = await finishAction.size();
+    assert.ok(
+      Math.abs(homeActionSize.width - finishActionSize.width) <= 1,
+      `顶部左右操作等宽，模式标题保持居中（首页 ${homeActionSize.width}，结束 ${finishActionSize.width}）`,
+    );
+    assert.ok(
+      finishActionOffset.left + finishActionSize.width <= topBarOffset.left + topBarSize.width + 1,
+      `结束讲述按钮完整位于顶部栏内（按钮右侧 ${finishActionOffset.left + finishActionSize.width}，顶部栏右侧 ${topBarOffset.left + topBarSize.width}）`,
+    );
+    const readyMicIconSize = await (await page.$(".mic-icon")).size();
+    assert.ok(
+      readyMicIconSize.width >= 32 && readyMicIconSize.height >= 32,
+      `简洁麦克风在按钮内保持清晰尺寸（${readyMicIconSize.width}×${readyMicIconSize.height}）`,
+    );
     await assertNarrationModes(page, "session-narration-modes", "free_narration");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
@@ -300,6 +320,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(await page.$(".assistant-panel"), null, "讲述态不再保留小余问题卡");
     const recordingTranscriptStage = await page.$(".transcript-stage");
     assert.ok(recordingTranscriptStage, "讲述态以实时文字卡为主角");
+    assert.equal(await page.$(".live-text-context"), null, "讲述态不再拆出容易误解的灰色上一段");
     assert.equal((await page.$$(".assistant-button")).length, 0, "讲述态不显示提问辅助操作");
     const recordingPrimaryAction = await elementById(page, "voice-primary-action");
     const recordingPrimaryOffset = await recordingPrimaryAction.offset();
@@ -321,6 +342,15 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });
 
     await tapBoundAction(await elementById(page, "voice-primary-action"));
+    const processing = await waitForPageData(
+      page,
+      data => data.micButtonProcessing === true,
+      "讲述结束后进入独立整理状态",
+      10000,
+    );
+    assert.equal(processing.micButtonDisabled, true);
+    assert.match(processing.micButtonClass, /processing/);
+    assert.equal(processing.micButtonText, "正在帮您整理");
     const completed = await waitForPageData(
       page,
       (data) => {
@@ -341,7 +371,10 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(completed.followUpTTSError, "");
     assert.equal(completed.ttsProgressPercent, 100);
     assert.equal(completed.persistenceStateText, "小余已回应");
+    assert.ok(await page.$(".history-panel"), "完成一段讲述后显示轻量保存状态条");
+    assert.ok(await page.$(".history-saved-check"), "保存状态条包含确认标记");
     session.artifacts.mark("voice:assistant:complete");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-completed.png") });
 
     const activeGatewayEvents = fixture.state.activeGatewayClientEvents;
     const gatewayTypes = activeGatewayEvents.map((event) => event.type);

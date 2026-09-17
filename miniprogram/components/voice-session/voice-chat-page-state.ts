@@ -145,7 +145,6 @@ export interface VoiceChatData {
   stageStatusClass: string;
   stageStatusText: string;
   liveDisplayText: string;
-  liveContextText: string;
   liveCurrentText: string;
   liveTextClass: string;
   liveScrollClass: string;
@@ -169,6 +168,7 @@ export interface VoiceChatData {
   controlHintText: string;
   micButtonClass: string;
   micButtonDisabled: boolean;
+  micButtonProcessing: boolean;
   micButtonText: string;
   largeTextEnabled: boolean;
   autoBargeInEnabled: boolean;
@@ -299,7 +299,6 @@ export function initialVoiceChatData(): VoiceChatData {
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
     liveDisplayText: "点下方“我来说一段”",
-    liveContextText: "",
     liveCurrentText: "点下方“我来说一段”",
     liveTextClass: "live-text",
     liveScrollClass: "live-scroll",
@@ -323,6 +322,7 @@ export function initialVoiceChatData(): VoiceChatData {
     controlHintText: "现在可以说了",
     micButtonClass: "mic-button disabled",
     micButtonDisabled: true,
+    micButtonProcessing: false,
     micButtonText: "同意后开始说话",
     largeTextEnabled: false,
     autoBargeInEnabled: true,
@@ -392,7 +392,6 @@ export type VoiceChatViewPatch = Pick<
   | "stageStatusClass"
   | "stageStatusText"
   | "liveDisplayText"
-  | "liveContextText"
   | "liveCurrentText"
   | "liveTextClass"
   | "liveScrollClass"
@@ -413,6 +412,7 @@ export type VoiceChatViewPatch = Pick<
   | "controlHintText"
   | "micButtonClass"
   | "micButtonDisabled"
+  | "micButtonProcessing"
   | "micButtonText"
   | "voiceChatPageClass"
 >;
@@ -432,34 +432,6 @@ function largeTextFocusClass(state: VoiceChatData, showAssistantPanel: boolean):
 
 function speakerRoleLabel(role: MemoirSpeakerRole): string {
   return role === "interviewer" ? "采访者" : "被访者";
-}
-
-function liveTranscriptParts(
-  displayText: string,
-  state: Pick<VoiceChatData, "recording" | "liveText">,
-): { context: string; current: string } {
-  if (!state.recording || !state.liveText) {
-    return { context: "", current: displayText };
-  }
-  const characters = Array.from(state.liveText);
-  const currentTargetLength = 36;
-  const maximumCurrentLength = 56;
-  if (characters.length <= maximumCurrentLength) {
-    return { context: "", current: state.liveText };
-  }
-  const preferredSplit = characters.length - currentTargetLength;
-  const earliestSplit = Math.max(0, characters.length - maximumCurrentLength);
-  let splitAt = preferredSplit;
-  for (let index = preferredSplit - 1; index >= earliestSplit; index -= 1) {
-    if (/[。！？!?；;，,、\n]/.test(characters[index])) {
-      splitAt = index + 1;
-      break;
-    }
-  }
-  return {
-    context: characters.slice(0, splitAt).join(""),
-    current: characters.slice(splitAt).join(""),
-  };
 }
 
 function completionIssueStatusText(state: VoiceChatData): string {
@@ -528,7 +500,12 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     || state.recording
     || showTranscriptProcessing
     || Boolean(!showAssistantPanel && state.voiceAuthorizationAgreed && (state.liveText || state.latestTranscriptText));
-  const hasSavedNarration = state.transcriptLines.some((line) => line.role !== "assistant");
+  const savedNarrationLines = state.transcriptLines.filter((line) => line.role !== "assistant");
+  const hasSavedNarration = savedNarrationLines.length > 0;
+  const savedNarrationCharCount = savedNarrationLines.reduce(
+    (total, line) => total + Array.from(line.text.trim()).length,
+    0,
+  );
   const showStageStatus = !isHumanInterview || Boolean(state.error);
   const showCaptureStrip = (!isHumanInterview || state.recording)
     && !completionRoundFinished;
@@ -574,7 +551,6 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
           : (state.completionIssueLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"))
       );
   }
-  const liveTextParts = liveTranscriptParts(liveDisplayText, state);
   const pendingLiveChars = Math.max(0, state.liveCharCount - state.liveReviewStartCharCount);
   const showReturnToLatest = Boolean(
     state.recording
@@ -598,9 +574,13 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   }
   if (completionRoundFinished) {
     controlHintText = "";
+  } else if (showTranscriptProcessing) {
+    controlHintText = "正在帮您整理刚才的故事";
   }
   let micButtonText = state.primaryActionText;
-  if (!state.voiceAuthorizationAgreed) {
+  if (showTranscriptProcessing) {
+    micButtonText = "正在帮您整理";
+  } else if (!state.voiceAuthorizationAgreed) {
     micButtonText = "同意后开始说话";
   } else if (state.recordingStarting) {
     micButtonText = "正在打开麦克风";
@@ -638,6 +618,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     pageClass.push("large-text", focusClass);
   }
   const micButtonDisabled = state.recordingStarting
+    || showTranscriptProcessing
     || !state.voiceAuthorizationAgreed
     || completionRoundFinished
     || (completionUnavailable && !state.recording);
@@ -645,6 +626,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   const micButtonClass = [
     "mic-button",
     state.recording ? "recording" : "",
+    showTranscriptProcessing ? "processing" : "",
     micButtonDisabled ? "disabled" : "",
   ].filter(Boolean).join(" ");
   const completionIssueStatus = state.completionIssue?.status;
@@ -714,8 +696,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
     liveDisplayText,
-    liveContextText: liveTextParts.context,
-    liveCurrentText: liveTextParts.current,
+    liveCurrentText: liveDisplayText,
     liveTextClass: isHumanInterview && state.recording && !state.liveText ? "live-text placeholder" : "live-text",
     liveScrollClass,
     liveScrollTarget: state.liveScrollTarget,
@@ -727,14 +708,14 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),
-    historyCountText: `${state.transcriptLines.length} 段 · ${state.totalTranscriptCharCount} 字`,
+    historyCountText: `${savedNarrationLines.length} 段 · ${savedNarrationCharCount} 字`,
     showHistoryPanel: hasSavedNarration,
     showHistoryLines: state.historyExpanded && hasSavedNarration,
     historyToggleText: state.historyExpanded ? "收起" : "查看",
     transcriptLineViews: previous && previous.transcriptLines === state.transcriptLines
       && previous.interviewType === state.interviewType
       ? previous.transcriptLineViews
-      : state.transcriptLines.map((line) => ({
+      : savedNarrationLines.map((line) => ({
       ...line,
       lineClass: line.role === "assistant"
         ? "transcript-line assistant"
@@ -746,6 +727,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     controlHintText,
     micButtonClass,
     micButtonDisabled,
+    micButtonProcessing: showTranscriptProcessing,
     micButtonText,
   };
 }
