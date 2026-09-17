@@ -426,6 +426,7 @@ test("focused story detail keeps reading content before memory summaries", () =>
   assert.match(focusedTemplate, />整理后的故事/);
   assert.match(focusedTemplate, />讲过的回忆</);
   assert.match(focusedTemplate, /bindtap="toggleFocusedStory"/);
+  assert.match(focusedTemplate, /draftCanExpand && !focusedStoryExpanded/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/speaker\.svg/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/pencil\.svg/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/wand\.svg/);

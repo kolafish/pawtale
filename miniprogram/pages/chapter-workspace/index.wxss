@@ -123,22 +123,20 @@
 
 .focused-story-content {
   margin-top: 16rpx;
-  overflow: hidden;
+  overflow: visible;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
   font-size: 30rpx;
   line-height: 56rpx;
   white-space: pre-wrap;
   text-wrap: pretty;
+}
+
+.focused-story-content.is-collapsed {
+  overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 8;
-}
-
-.focused-story-content.is-expanded {
-  display: block;
-  overflow: visible;
-  -webkit-line-clamp: initial;
 }
 
 .focused-story-expand {

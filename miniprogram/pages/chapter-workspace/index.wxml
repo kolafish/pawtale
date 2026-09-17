@@ -181,7 +181,7 @@
         </block>
 
         <block wx:elif="{{focusedSection.hasDraft}}">
-          <text class="focused-story-content {{focusedStoryExpanded ? 'is-expanded' : ''}}" selectable>{{focusedSection.draftContent}}</text>
+          <text class="focused-story-content {{focusedSection.draftCanExpand && !focusedStoryExpanded ? 'is-collapsed' : ''}}" selectable>{{focusedSection.draftContent}}</text>
           <view
             wx:if="{{focusedSection.draftCanExpand}}"
             class="focused-story-expand ui-pressable"
