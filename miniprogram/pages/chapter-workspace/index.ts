@@ -106,8 +106,8 @@ definePage<ChapterWorkspacePageData>()({
     draftRecoveryActionDisabled: true,
     narrativeSectionCount: 0,
     sectionStructureSummary: "",
-    rewriteDraftActionText: "更新有变化的小节正文",
-    rewriteDraftBusyText: "正在更新小节正文…",
+    rewriteDraftActionText: "更新有变化的故事",
+    rewriteDraftBusyText: "正在更新故事…",
     rewriteDraftScopeDetail: "",
     editingToolsExpanded: false,
     requiredIssues: [],
@@ -258,7 +258,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     wx.showModal({
       title: "放弃当前修改？",
-      content: "当前小节的修改还没有完成，离开后这些内容会丢失。",
+      content: "当前故事的修改还没有完成，离开后这些内容会丢失。",
       confirmText: "放弃修改",
       cancelText: "继续编辑",
       success: (result) => {
@@ -444,7 +444,7 @@ definePage<ChapterWorkspacePageData>()({
     if (!sectionId || !expectedVersion || this.data.operationKind) {
       return;
     }
-    const title = await promptRequiredText("小节改名", currentTitle || "请输入小节名称");
+    const title = await promptRequiredText("编辑故事标题", currentTitle || "请输入故事标题");
     if (!title || title === currentTitle || !this.beginOperation("rename_section", sectionId)) {
       return;
     }
@@ -456,13 +456,13 @@ definePage<ChapterWorkspacePageData>()({
         expectedVersion,
       );
       await this.loadPageData(true);
-      wx.showToast({ title: "小节名称已更新", icon: "success" });
+      wx.showToast({ title: "故事标题已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "小节改名失败",
+        error: error instanceof Error ? error.message : "故事标题更新失败",
       });
     } finally {
       this.finishOperation("rename_section", sectionId);
@@ -575,8 +575,8 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "确认素材归属",
-      content: `把这条讲述移到“${target.title}”？`,
+      title: "确认回忆归属",
+      content: `把这段回忆移到“${target.title}”？`,
       confirmText: "确认移动",
       cancelText: "再想想",
       success: (result) => {
@@ -584,7 +584,7 @@ definePage<ChapterWorkspacePageData>()({
           void this.performMaterialPlacement(
             utteranceId,
             { target_section_id: target.id },
-            "已选择小节",
+            "已选择故事",
           );
         }
       },
@@ -592,7 +592,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async createSectionForMaterial(utteranceId: string) {
-    const title = await promptRequiredText("新建小节", "请输入小节名称");
+    const title = await promptRequiredText("新建故事", "请输入故事标题");
     if (!title) {
       return;
     }
@@ -602,7 +602,7 @@ definePage<ChapterWorkspacePageData>()({
         target_chapter_id: this.data.chapterId,
         new_section_title: title,
       },
-      "已新建小节",
+      "已新建故事",
     );
   },
 
@@ -632,7 +632,7 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         error: error instanceof Error
           ? error.message
-          : "素材位置更新失败",
+          : "回忆位置更新失败",
       });
     } finally {
       this.finishOperation("move_material", utteranceId);

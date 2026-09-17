@@ -302,14 +302,29 @@
 }
 
 .editing-entry-mark {
-  min-width: 58rpx;
-  min-height: 58rpx;
+  width: 58rpx;
+  height: 58rpx;
+  flex: 0 0 58rpx;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   color: var(--ui-text-secondary);
-  font-size: 38rpx;
-  line-height: 50rpx;
+}
+
+.editing-entry-chevron {
+  width: 16rpx;
+  height: 16rpx;
+  margin-top: -8rpx;
+  border-right: 3rpx solid currentColor;
+  border-bottom: 3rpx solid currentColor;
+  transform: rotate(45deg);
+  transform-origin: center;
+  transition: transform 180ms ease, margin 180ms ease;
+}
+
+.editing-entry-chevron.is-expanded {
+  margin-top: 8rpx;
+  transform: rotate(225deg);
 }
 
 .workspace-page.large-text .chapter-hero-copy {
@@ -408,11 +423,7 @@
 }
 
 .structure-tools {
-  margin-top: 22rpx;
-  padding: 20rpx 22rpx;
-  border-radius: var(--ui-radius-inner);
-  background: var(--ui-surface-soft);
-  box-shadow: inset 0 0 0 1rpx rgba(54, 42, 34, 0.05);
+  margin-top: 14rpx;
 }
 
 .structure-tools-detail {
@@ -424,12 +435,35 @@
 }
 
 .section-regeneration-status {
-  margin-top: 20rpx;
-  padding-top: 20rpx;
-  border-top: 1rpx solid var(--ui-divider);
+  padding: 20rpx 0;
 }
 
-.structure-regenerate-action,
+.structure-actions {
+  margin-top: 8rpx;
+}
+
+.structure-regenerate-action {
+  width: 100%;
+  min-height: 96rpx;
+  padding: 14rpx 2rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  border-top: 1rpx solid var(--ui-divider);
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+}
+
+.structure-regenerate-arrow {
+  color: var(--ui-text-secondary);
+  font-size: 38rpx;
+  font-weight: 300;
+  line-height: 46rpx;
+}
+
 .rewrite-action {
   width: 100%;
   min-height: 88rpx;
@@ -471,6 +505,7 @@
 }
 
 .section-item.is-unassigned .section-index {
+  border-radius: 50%;
   color: var(--ui-warning-text);
   box-shadow: inset 0 0 0 1rpx rgba(134, 98, 49, 0.2);
 }
@@ -497,18 +532,18 @@
 }
 
 .section-index {
-  width: 48rpx;
-  height: 48rpx;
-  flex: 0 0 48rpx;
+  width: 58rpx;
+  min-height: 58rpx;
+  flex: 0 0 58rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
   color: var(--ui-accent-strong);
-  box-shadow: inset 0 0 0 1rpx var(--ui-accent-border);
-  font-size: 23rpx;
+  font-family: var(--ui-font-editorial);
+  font-size: 26rpx;
   font-weight: 700;
-  line-height: 32rpx;
+  letter-spacing: 0.04em;
+  line-height: 38rpx;
   font-variant-numeric: tabular-nums;
 }
 
@@ -543,6 +578,15 @@
   line-height: 36rpx;
 }
 
+.section-expand-chevron {
+  display: inline-block;
+  min-width: 24rpx;
+  color: var(--ui-text-secondary);
+  font-size: 30rpx;
+  font-weight: 400;
+  text-align: right;
+}
+
 .section-heading-actions {
   flex: 0 0 auto;
   display: flex;
@@ -551,16 +595,32 @@
 }
 
 .section-rename-action {
-  min-width: 80rpx;
-  min-height: 88rpx;
-  padding: 0 12rpx;
+  width: 88rpx;
+  height: 88rpx;
+  flex: 0 0 88rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--ui-text-secondary);
+  font-family: var(--ui-font-editorial);
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.section-title-edit-action {
+  min-height: 88rpx;
+  margin-left: 76rpx;
+  padding: 12rpx 2rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  border-top: 1rpx solid var(--ui-divider);
+  color: var(--ui-text-secondary);
   font-size: 23rpx;
   font-weight: 600;
-  line-height: 32rpx;
+  line-height: 34rpx;
 }
 
 .section-material-list {
@@ -794,17 +854,6 @@ button[disabled]:active {
   border-top: 1rpx solid var(--ui-divider);
 }
 
-.confirmed-badge {
-  flex: 0 0 auto;
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  background: var(--ui-success-surface);
-  color: var(--ui-success-text);
-  font-size: 22rpx;
-  font-weight: 700;
-  line-height: 30rpx;
-}
-
 .draft-section-actions {
   margin-top: 18rpx;
   display: flex;
@@ -916,8 +965,20 @@ button[disabled]:active {
 
 .chapter-finished {
   margin-top: 30rpx;
-  padding-top: 28rpx;
   border-top: 1rpx solid var(--ui-divider);
+}
+
+.chapter-finished-action {
+  min-height: 96rpx;
+  padding: 18rpx 2rpx;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.chapter-finished-copy {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .chapter-finished-title,
@@ -928,16 +989,29 @@ button[disabled]:active {
 .chapter-finished-title {
   color: var(--ui-success-text);
   font-family: var(--ui-font-editorial);
-  font-size: 30rpx;
+  font-size: 27rpx;
   font-weight: 700;
-  line-height: 42rpx;
+  line-height: 38rpx;
 }
 
 .chapter-finished-detail {
-  margin-top: 10rpx;
+  margin-top: 4rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: 22rpx;
+  line-height: 34rpx;
+}
+
+.chapter-finished-arrow {
+  width: 44rpx;
+  height: 56rpx;
+  flex: 0 0 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--ui-text-secondary);
+  font-size: 42rpx;
+  font-weight: 300;
+  line-height: 52rpx;
 }
 
 .message {
@@ -1032,4 +1106,10 @@ button[disabled]:active {
 .candidate-diff-segment.is-deleted {
   text-decoration: line-through;
   text-decoration-thickness: 2rpx;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editing-entry-chevron {
+    transition: none;
+  }
 }
