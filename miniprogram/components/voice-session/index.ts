@@ -92,7 +92,6 @@ Component({
   properties: {
     entry: { type: Object, value: null },
     embedded: { type: Boolean, value: false },
-    minimized: { type: Boolean, value: false },
   },
   data: initialVoiceChatData(),
   lifetimes: {
@@ -108,15 +107,10 @@ Component({
     applyVoiceChatDataPatch(this, { showNarrationModes: !this.data.showNarrationModes });
   },
   runtime() { return voiceSessionRuntime(this); },
-  returnToHome() {
+  async returnToHome() {
     if (!this.properties.embedded || this.data.finishingSession || this.runtime().pageSuspended) return;
     trackAuditAction("voice_chat.return_home", {}, { voiceSessionId: this.data.voiceSessionId });
-    this.suspendVoiceChat("hide");
-    this.triggerEvent("returnhome", { voiceSessionId: this.data.voiceSessionId });
-  },
-  resumeFromHome() {
-    if (!this.properties.embedded || this.runtime().disposed) return;
-    this.onShow();
+    await this.finishSession();
   },
   exitSession(detail: VoiceSessionExit) {
     const runtime = this.runtime();
@@ -194,7 +188,7 @@ Component({
   },
 
   onShow() {
-    if (this.runtime().disposed || this.properties.minimized) return;
+    if (this.runtime().disposed) return;
     const wasSuspended = this.runtime().pageSuspended;
     this.runtime().pageSuspended = false;
     const pendingExit = this.runtime().pendingExit;

@@ -2,7 +2,6 @@ import { isNarrationMode, narrationModeForSession, NARRATION_MODES, type Narrati
 import type {
   VoiceSessionEntry,
   VoiceSessionExitEvent,
-  VoiceSessionReturnHomeEvent,
 } from "../../components/voice-session/events";
 import type {
   MemoirGuidanceMode,
@@ -72,7 +71,6 @@ interface HomeData extends HomeStoryData {
   loading: boolean;
   creatingVoice: boolean;
   voiceEntry: VoiceSessionEntry | null;
-  voiceSessionMinimized: boolean;
   needsLogin: boolean;
   error: string;
   userId: string;
@@ -147,18 +145,16 @@ export function homeResumeHint(item?: Pick<
 }
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
-  const voiceSessionVisible = Boolean(state.voiceEntry) && !state.voiceSessionMinimized;
-  const blocked = state.loading || state.creatingVoice || voiceSessionVisible;
+  const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.needsLogin ? "登录后开始"
     : !state.hasProject ? "种下我的故事"
     : state.creatingVoice ? "正在准备"
-    : state.voiceSessionMinimized ? "继续本次讲述"
     : state.selectedMode === "book_completion" ? choice.action
     : state.hasStories ? "讲个新故事" : "讲第一个故事";
   return {
-    homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${voiceSessionVisible ? " is-narrating" : ""}`,
+    homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     headerSubtitleText: state.loading ? "正在看看您的故事树。"
       : state.needsLogin ? "登录后，把想说的故事慢慢留下来。"
@@ -217,7 +213,6 @@ function applyHomeSnapshotData(
       ...emptyHomeStoryData(),
       showContinueNarration: false,
       voiceEntry: null,
-      voiceSessionMinimized: false,
       voiceAuthorizationRequested: false,
       showMoreActions: false,
     } : {}),
@@ -245,7 +240,6 @@ definePage<HomeData>()({
     loading: false,
     creatingVoice: false,
     voiceEntry: null,
-    voiceSessionMinimized: false,
     needsLogin: false,
     error: "",
     userId: "",
@@ -390,7 +384,6 @@ definePage<HomeData>()({
           ...emptyHomeStoryData(),
           needsLogin: true,
           voiceEntry: null,
-          voiceSessionMinimized: false,
           showContinueNarration: false,
           userId: "",
           displayName: "作者",
@@ -425,7 +418,7 @@ definePage<HomeData>()({
 
   onPageScroll(event: { scrollTop: number }) {
     this.homeScrollTop = event.scrollTop;
-    const showContinueNarration = (!this.data.voiceEntry || this.data.voiceSessionMinimized)
+    const showContinueNarration = !this.data.voiceEntry
       && this.data.hasProject && !this.data.needsLogin && event.scrollTop > this.narrationBottom;
     if (showContinueNarration !== this.data.showContinueNarration) this.setData({ showContinueNarration });
   },
@@ -545,7 +538,7 @@ definePage<HomeData>()({
   openVoiceEdit() {
     if (!this.data.projectId) return;
     if (this.data.voiceEntry) {
-      wx.showToast({ title: "请先继续或结束当前讲述", icon: "none" });
+      wx.showToast({ title: "请先结束当前讲述", icon: "none" });
       return;
     }
     wx.navigateTo({ url: pageUrl("/pages/story-voice-edit/index", { projectId: this.data.projectId, projectTitle: this.data.projectTitle }) });
@@ -621,10 +614,6 @@ definePage<HomeData>()({
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {
-    if (this.data.voiceSessionMinimized) {
-      this.resumeMinimizedVoiceSession();
-      return;
-    }
     const mode = this.data.selectedMode;
     if (mode === "book_completion") {
       this.openBookSupplementInterview();
@@ -658,8 +647,7 @@ definePage<HomeData>()({
   },
 
   canStartVoiceChat(requireVoiceAuthorization = true) {
-    if (this.data.loading || this.data.creatingVoice
-      || (this.data.voiceEntry && !this.data.voiceSessionMinimized)) {
+    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry) {
       return false;
     }
     if (this.data.needsLogin) {
@@ -760,35 +748,11 @@ definePage<HomeData>()({
     this.voiceNavigationTarget = null;
     if (target.userId !== this.data.userId || target.projectId !== this.data.projectId || this.data.needsLogin) return;
     if (this.data.voiceEntry) return;
-    setHomeData(this, { voiceEntry: target.entry, voiceSessionMinimized: false, selectedMode: narrationModeForSession({
+    setHomeData(this, { voiceEntry: target.entry, selectedMode: narrationModeForSession({
       guidance_mode: target.entry.mode || "free_narration", interview_type: target.entry.interviewType || "ai_interview",
       session_goal: target.entry.sessionGoal || "open_narration",
     }), showContinueNarration: false, narrationSaved: false }, () => {
       wx.pageScrollTo({ scrollTop: 0, duration: 250 });
-    });
-  },
-
-  returnFromVoiceSession({ detail }: VoiceSessionReturnHomeEvent) {
-    const currentEntry = this.data.voiceEntry;
-    if (!this.homeVisible || !currentEntry || currentEntry.voiceSessionId !== detail.voiceSessionId) return;
-    setHomeData(this, {
-      voiceSessionMinimized: true,
-      showContinueNarration: false,
-      showMoreActions: false,
-    }, () => this.measureNarration());
-    wx.showToast({ title: "讲述已暂停，可随时继续", icon: "none" });
-  },
-
-  resumeMinimizedVoiceSession() {
-    if (!this.data.voiceEntry || !this.data.voiceSessionMinimized
-      || this.data.loading || this.data.creatingVoice) return;
-    setHomeData(this, {
-      voiceSessionMinimized: false,
-      showContinueNarration: false,
-      narrationSaved: false,
-    }, () => {
-      wx.pageScrollTo({ scrollTop: 0, duration: 250 });
-      this.selectComponent<{ resumeFromHome(): void }>("#voice-session")?.resumeFromHome();
     });
   },
 
@@ -799,7 +763,7 @@ definePage<HomeData>()({
       this.openStoryProgress();
       return;
     }
-    setHomeData(this, { voiceEntry: null, voiceSessionMinimized: false }, () => this.measureNarration());
+    setHomeData(this, { voiceEntry: null }, () => this.measureNarration());
     if (detail.destination === "transcripts") {
       navigateToTranscripts();
       return;
