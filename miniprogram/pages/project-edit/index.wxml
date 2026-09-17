@@ -72,7 +72,7 @@
 
     <view class="field">
       <text class="field-label ui-section-heading">默认访谈方式</text>
-      <text class="mode-desc">以后从首页开始的新讲述会使用这个方式，进行中的讲述不会改变。</text>
+      <text class="mode-desc">以后从首页开始会使用这个方式；书稿补充会先进入待补问题列表，进行中的讲述不会改变。</text>
       <view class="mode-list" aria-role="radiogroup" aria-label="默认访谈方式">
         <view
           wx:for="{{narrationOptions}}"

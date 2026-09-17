@@ -3,7 +3,11 @@ import type {
   MemoirProjectListResponse,
   Project,
 } from "../domain/memoir";
-import type { MemoirGuidanceMode, MemoirInterviewType } from "../domain/memoir-voice-session";
+import type {
+  MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSessionGoal,
+} from "../domain/memoir-voice-session";
 import {
   memoirProjectPath,
   memoirRequest,
@@ -20,6 +24,7 @@ export interface MemoirProjectInput {
   narrator_age?: number | null;
   default_guidance_mode?: MemoirGuidanceMode;
   default_interview_type?: MemoirInterviewType;
+  default_session_goal?: MemoirSessionGoal;
   transcript_polish_level?: MemoirTranscriptPolishLevel;
 }
 

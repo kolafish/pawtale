@@ -30,6 +30,7 @@ DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 DEFAULT_INTERVIEW_TYPE = "ai_interview"
+DEFAULT_SESSION_GOAL = "open_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
 
 
@@ -45,6 +46,7 @@ def _default_profile() -> dict[str, object]:
         "narrator_age": None,
         "default_guidance_mode": DEFAULT_GUIDANCE_MODE,
         "default_interview_type": DEFAULT_INTERVIEW_TYPE,
+        "default_session_goal": DEFAULT_SESSION_GOAL,
     }
 
 
@@ -88,6 +90,12 @@ def _profile_metadata(
             if req.default_interview_type is not None
             else DEFAULT_INTERVIEW_TYPE
         )
+    if include_defaults or _field_was_set(req, "default_session_goal"):
+        profile["default_session_goal"] = (
+            req.default_session_goal.value
+            if req.default_session_goal is not None
+            else DEFAULT_SESSION_GOAL
+        )
     if (
         _field_was_set(req, "default_guidance_mode")
         and not _field_was_set(req, "default_interview_type")
@@ -96,7 +104,18 @@ def _profile_metadata(
         # explicit return to an AI interview if the project previously used
         # human interview mode.
         profile["default_interview_type"] = DEFAULT_INTERVIEW_TYPE
-    if profile["default_interview_type"] == "human_interview":
+    if (
+        _field_was_set(req, "default_guidance_mode")
+        or _field_was_set(req, "default_interview_type")
+    ) and not _field_was_set(req, "default_session_goal"):
+        # Older clients do not know about the project-level session goal.
+        # Changing an interview default there means returning to a regular
+        # narration instead of keeping a stale book-completion default.
+        profile["default_session_goal"] = DEFAULT_SESSION_GOAL
+    if profile["default_session_goal"] == "book_completion":
+        profile["default_guidance_mode"] = "guided_interview"
+        profile["default_interview_type"] = DEFAULT_INTERVIEW_TYPE
+    elif profile["default_interview_type"] == "human_interview":
         profile["default_guidance_mode"] = DEFAULT_GUIDANCE_MODE
 
     metadata[MEMOIR_PROFILE_METADATA_KEY] = profile

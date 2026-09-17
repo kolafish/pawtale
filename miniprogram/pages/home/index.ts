@@ -599,11 +599,17 @@ definePage<HomeData>()({
   async startSelectedNarration(entry: HomeVoiceEntry) {
     const mode = this.data.selectedMode;
     if (mode === "book_completion") {
+      this.openBookSupplementInterview();
       return;
     }
     const human = mode === "human_interview";
     await this.startVoiceChatWithMode(mode === "human_interview" ? "free_narration" : mode,
       entry, human ? "human_interview" : "ai_interview");
+  },
+
+  openBookSupplementInterview() {
+    if (!this.canStartVoiceChat(false)) return;
+    this.openReviewIssues();
   },
 
   ensureVoiceAuthorization() {

@@ -61,7 +61,12 @@ interface ProjectEditData {
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
-const NARRATION_VALUES: readonly DefaultNarrationMode[] = ["free_narration", "guided_interview", "human_interview"];
+const NARRATION_VALUES: readonly DefaultNarrationMode[] = [
+  "free_narration",
+  "guided_interview",
+  "book_completion",
+  "human_interview",
+];
 const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page";
 
 function ageFromText(value: string): number | null {
@@ -204,6 +209,7 @@ definePage<ProjectEditData>()({
       narrator_age: narratorAge,
       default_guidance_mode: narrationFields.guidanceMode,
       default_interview_type: narrationFields.interviewType,
+      default_session_goal: narrationFields.sessionGoal,
     };
     try {
       let createdProject: { id: string; title: string } | null = null;

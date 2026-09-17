@@ -8,11 +8,11 @@ export const NARRATION_MODES = {
 };
 
 export type NarrationMode = keyof typeof NARRATION_MODES;
-export type DefaultNarrationMode = Exclude<NarrationMode, "book_completion">;
+export type DefaultNarrationMode = NarrationMode;
 export const NARRATION_MODE_OPTIONS = Object.entries(NARRATION_MODES).map(([value, option]) => ({ value, ...option }));
-export const DEFAULT_NARRATION_MODE_OPTIONS = NARRATION_MODE_OPTIONS.filter(
-  (option): option is typeof option & { value: DefaultNarrationMode } => option.value !== "book_completion",
-);
+export const DEFAULT_NARRATION_MODE_OPTIONS = NARRATION_MODE_OPTIONS as Array<
+  (typeof NARRATION_MODE_OPTIONS)[number] & { value: DefaultNarrationMode }
+>;
 
 export function narrationModeForSession(session: Pick<MemoirVoiceSessionSummary, "guidance_mode" | "interview_type" | "session_goal">): NarrationMode {
   if (session.session_goal === "book_completion") return "book_completion";
