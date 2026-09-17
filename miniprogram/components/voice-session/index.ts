@@ -236,18 +236,21 @@ Component({
   },
 
   suspendVoiceChat(reason: "hide" | "unload") {
-    this.runtime().pageSuspended = true;
+    const runtime = this.runtime();
+    runtime.pageSuspended = true;
     this.stopCompletionIssueRefresh();
-    this.runtime().recordingStartGeneration += 1;
-    this.runtime().followUpRequestSerial += 1;
-    this.runtime().noAnswerPromptRequestSerial += 1;
-    this.runtime().noAnswerPromptInFlight = false;
+    runtime.recordingStartGeneration += 1;
+    runtime.followUpRequestSerial += 1;
+    runtime.noAnswerPromptRequestSerial += 1;
+    runtime.noAnswerPromptInFlight = false;
     this.stopStoryGrowthWatch();
-    this.runtime().progressNoticeWatcher.stop();
-    this.persistCurrentTranscriptSnapshot();
-    this.persistPendingVoiceClose(reason);
+    runtime.progressNoticeWatcher.stop();
+    if (!runtime.sessionStopConfirmed) {
+      this.persistCurrentTranscriptSnapshot();
+      this.persistPendingVoiceClose(reason);
+    }
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
-    void this.runtime().voiceStreaming.stopBargeInMonitoring(true);
+    void runtime.voiceStreaming.stopBargeInMonitoring(true);
     if (this.data.recordingStarting) {
       applyVoiceChatDataPatch(this, { recordingStarting: false });
     }
@@ -430,6 +433,7 @@ Component({
         throw new Error("这次讲述不属于当前回忆录，请重新进入。");
       }
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
+      this.runtime().sessionStopConfirmed = detail.session.status === "stopped";
       this.applyVoiceSessionDetail(detail);
       await this.refreshCompletionIssue();
       this.reconcilePendingClose(detail);
