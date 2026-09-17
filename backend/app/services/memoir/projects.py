@@ -29,6 +29,7 @@ from app.services.projects.access import load_project
 DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_GUIDANCE_MODE = "free_narration"
+DEFAULT_INTERVIEW_TYPE = "ai_interview"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
 
 
@@ -43,6 +44,7 @@ def _default_profile() -> dict[str, object]:
         "narrator_origin": "",
         "narrator_age": None,
         "default_guidance_mode": DEFAULT_GUIDANCE_MODE,
+        "default_interview_type": DEFAULT_INTERVIEW_TYPE,
     }
 
 
@@ -80,6 +82,22 @@ def _profile_metadata(
             if req.default_guidance_mode is not None
             else DEFAULT_GUIDANCE_MODE
         )
+    if include_defaults or _field_was_set(req, "default_interview_type"):
+        profile["default_interview_type"] = (
+            req.default_interview_type.value
+            if req.default_interview_type is not None
+            else DEFAULT_INTERVIEW_TYPE
+        )
+    if (
+        _field_was_set(req, "default_guidance_mode")
+        and not _field_was_set(req, "default_interview_type")
+    ):
+        # Older clients only send the AI guidance field. Treat that as an
+        # explicit return to an AI interview if the project previously used
+        # human interview mode.
+        profile["default_interview_type"] = DEFAULT_INTERVIEW_TYPE
+    if profile["default_interview_type"] == "human_interview":
+        profile["default_guidance_mode"] = DEFAULT_GUIDANCE_MODE
 
     metadata[MEMOIR_PROFILE_METADATA_KEY] = profile
     return metadata

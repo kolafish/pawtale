@@ -11,9 +11,8 @@
       <text class="home-return-mark" aria-hidden="true">‹</text>
       <text>首页</text>
     </button>
-    <view id="session-mode-disclosure" class="top-copy" bindtap="toggleNarrationModes"
-      aria-role="button" aria-expanded="{{showNarrationModes}}" aria-label="{{topModeLabel}}，查看本次讲述方式">
-      <text class="mode-label">{{topModeLabel}} {{showNarrationModes ? '⌃' : '⌄'}}</text>
+    <view class="top-copy">
+      <text class="mode-label">{{topModeLabel}}</text>
       <text class="top-subtitle">{{topSubtitle}}</text>
     </view>
     <button
@@ -26,8 +25,6 @@
       {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
     </button>
   </view>
-
-  <narration-mode-picker wx:if="{{showNarrationModes}}" id="session-narration-modes" selected="{{narrationMode}}" locked="{{true}}" compact="{{true}}" large-text="{{largeTextEnabled}}" />
 
   <view class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>

@@ -103,9 +103,6 @@ Component({
     hide() { this.onHide(); },
   },
   methods: {
-  toggleNarrationModes() {
-    applyVoiceChatDataPatch(this, { showNarrationModes: !this.data.showNarrationModes });
-  },
   runtime() { return voiceSessionRuntime(this); },
   async returnToHome() {
     if (!this.properties.embedded || this.data.finishingSession || this.runtime().pageSuspended) return;

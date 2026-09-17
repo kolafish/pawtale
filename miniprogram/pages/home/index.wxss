@@ -212,7 +212,6 @@
   gap: 8rpx;
 }
 
-.resume-topic-action,
 .resume-primary-action {
   min-height: 44px;
   padding: 0 14rpx;
@@ -223,35 +222,8 @@
   font-weight: 700;
 }
 
-.resume-topic-action {
-  color: var(--ui-text-secondary);
-}
-
 .resume-primary-action {
   color: var(--ui-accent-strong);
-}
-
-.topic-toggle-alone {
-  box-sizing: border-box;
-  width: fit-content;
-  min-height: 44px;
-  margin: 10rpx auto 0;
-  padding: 0 16rpx;
-  border-radius: 16rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  font-weight: 650;
-}
-
-.narration-options-panel {
-  margin: 14rpx 0 24rpx;
-  padding: 20rpx 22rpx 2rpx;
-  border-radius: 28rpx;
-  background: rgba(250, 247, 242, 0.92);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .voice-auth-panel,
@@ -435,9 +407,7 @@
 .large-text .hero-voice-label { font-size: 37rpx; }
 .large-text .resume-title { font-size: 36rpx; }
 .large-text .resume-text,
-.large-text .resume-topic-action,
 .large-text .resume-primary-action,
-.large-text .topic-toggle-alone,
 .large-text .voice-auth-hint,
 .large-text .home-growth-detail,
 .large-text .home-story-progress-detail,

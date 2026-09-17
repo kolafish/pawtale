@@ -49,7 +49,7 @@
         catchtap="openProjectEdit"
         hover-class="project-action-hover"
       >
-        编辑资料
+        编辑设置
       </button>
       <button
         wx:if="{{item.canDelete}}"

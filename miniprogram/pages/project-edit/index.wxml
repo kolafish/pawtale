@@ -1,6 +1,6 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">资料会用于语音访谈和小余追问</text>
+    <text class="ui-page-context">资料和默认访谈方式会用于之后的新讲述</text>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
@@ -15,6 +15,18 @@
         maxlength="40"
         placeholder="例如：母亲的回忆"
         bindinput="changeTitle"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label ui-section-heading">主人公称呼</text>
+      <input
+        id="project-narrator-name-input"
+        class="text-input support-form-input"
+        value="{{narratorName}}"
+        maxlength="40"
+        placeholder="例如：爷爷"
+        bindinput="changeNarratorName"
       />
     </view>
 
@@ -59,19 +71,23 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">AI 的默认引导方式</text>
-      <text class="mode-desc">仅设置 AI 的默认方式；四种讲述方式在首页选择。</text>
-      <view class="mode-list">
+      <text class="field-label ui-section-heading">默认访谈方式</text>
+      <text class="mode-desc">以后从首页开始的新讲述会使用这个方式，进行中的讲述不会改变。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="默认访谈方式">
         <view
-          wx:for="{{guidanceOptions}}"
+          wx:for="{{narrationOptions}}"
           wx:key="value"
-          class="mode-option ui-pressable {{defaultGuidanceMode === item.value ? 'selected' : ''}}"
+          id="default-mode-{{item.value}}"
+          class="mode-option ui-pressable {{defaultNarrationMode === item.value ? 'selected' : ''}}"
           data-mode="{{item.value}}"
-          bindtap="selectGuidanceMode"
+          bindtap="selectNarrationMode"
+          aria-role="radio"
+          aria-checked="{{defaultNarrationMode === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
         >
           <text class="mode-title">{{item.label}}</text>
-          <text class="mode-desc">{{item.value === 'guided_interview' ? '小余按人物、事件、地点和主题追问' : '讲述者按自己的节奏说'}}</text>
-          <text wx:if="{{defaultGuidanceMode === item.value}}" class="option-check" aria-hidden="true">✓</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{defaultNarrationMode === item.value}}" class="option-check" aria-hidden="true">✓</text>
         </view>
       </view>
     </view>

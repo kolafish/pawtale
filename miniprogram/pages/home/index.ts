@@ -1,4 +1,4 @@
-import { isNarrationMode, narrationModeForSession, NARRATION_MODES, type NarrationMode, type NarrationModeEvent } from "../../domain/memoir-narration-mode";
+import { narrationModeForSession, NARRATION_MODES, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   VoiceSessionEntry,
   VoiceSessionExitEvent,
@@ -34,7 +34,6 @@ import {
   CHAPTER_WORKSPACE_PAGE_URL,
   consumeHomeStoryTarget,
   consumeHomeVoiceTarget,
-  consumeHomeNarrationMode,
   type HomeVoiceTarget,
   type HomeStoryTarget,
   navigateToMe,
@@ -90,7 +89,6 @@ interface HomeData extends HomeStoryData {
   voiceStartButtonClass: string;
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
-  showMoreActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -214,13 +212,14 @@ function applyHomeSnapshotData(
       showContinueNarration: false,
       voiceEntry: null,
       voiceAuthorizationRequested: false,
-      showMoreActions: false,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
     launchVariant,
     hasProject,
-    selectedMode: changedProject ? profile.defaultGuidanceMode : context.data.selectedMode,
+    selectedMode: changedProject || !context.data.voiceEntry
+      ? profile.defaultNarrationMode
+      : context.data.selectedMode,
   });
 }
 
@@ -259,7 +258,6 @@ definePage<HomeData>()({
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "种下我的故事",
-    showMoreActions: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
@@ -273,7 +271,6 @@ definePage<HomeData>()({
 
   async onShow() {
     this.homeVisible = true;
-    const modeTarget = consumeHomeNarrationMode();
     this.homeLaunchScope = "";
     this.storyNavigationTarget = consumeHomeStoryTarget() ?? this.storyNavigationTarget;
     this.voiceNavigationTarget = consumeHomeVoiceTarget() ?? this.voiceNavigationTarget;
@@ -282,9 +279,6 @@ definePage<HomeData>()({
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
-    if (this.homeVisible && modeTarget?.projectId === this.data.projectId) {
-      this.selectNarrationMode({ detail: { value: modeTarget.mode } });
-    }
     this.openPendingVoiceSession();
   },
 
@@ -396,7 +390,6 @@ definePage<HomeData>()({
           hasProject: false,
           selectedMode: "free_narration",
           voiceAuthorizationRequested: false,
-          showMoreActions: false,
         });
         return;
       }
@@ -595,16 +588,6 @@ definePage<HomeData>()({
     wx.navigateTo({ url: "/pages/projects/index" });
   },
 
-  selectNarrationMode({ detail }: NarrationModeEvent) {
-    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry
-      || !isNarrationMode(detail.value)) return;
-    setHomeData(this, { selectedMode: detail.value, error: "" }, () => this.measureNarration());
-  },
-
-  toggleMoreActions() {
-    setHomeData(this, { showMoreActions: !this.data.showMoreActions }, () => this.measureNarration());
-  },
-
   async startPrimaryVoiceChat() {
     await this.startSelectedNarration(this.data.launchVariant === "none" ? "home" : "home_launch");
   },
@@ -616,24 +599,11 @@ definePage<HomeData>()({
   async startSelectedNarration(entry: HomeVoiceEntry) {
     const mode = this.data.selectedMode;
     if (mode === "book_completion") {
-      this.openBookSupplementInterview();
       return;
     }
     const human = mode === "human_interview";
     await this.startVoiceChatWithMode(mode === "human_interview" ? "free_narration" : mode,
       entry, human ? "human_interview" : "ai_interview");
-  },
-
-  openBookSupplementInterview() {
-    if (!this.canStartVoiceChat(false)) {
-      return;
-    }
-    wx.navigateTo({
-      url: pageUrl("/pages/book-completion/index", {
-        projectId: this.data.projectId,
-        projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
-      }),
-    });
   },
 
   ensureVoiceAuthorization() {

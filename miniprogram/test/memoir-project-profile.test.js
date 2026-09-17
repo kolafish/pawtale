@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   guidanceModeLabel,
+  defaultNarrationSessionFields,
   memoirProjectProfile,
   narratorGenderLabel,
   projectProfileSummary,
@@ -18,6 +19,7 @@ test("normalizes memoir project profile metadata", () => {
         narrator_origin: " 四川成都 ",
         narrator_age: 72.2,
         default_guidance_mode: "guided_interview",
+        default_interview_type: "ai_interview",
       },
     },
   };
@@ -28,6 +30,8 @@ test("normalizes memoir project profile metadata", () => {
     narratorOrigin: "四川成都",
     narratorAge: 72,
     defaultGuidanceMode: "guided_interview",
+    defaultInterviewType: "ai_interview",
+    defaultNarrationMode: "guided_interview",
   });
 });
 
@@ -39,13 +43,18 @@ test("formats memoir project profile labels", () => {
         narrator_origin: "重庆",
         narrator_age: 68,
         default_guidance_mode: "free_narration",
+        default_interview_type: "human_interview",
       },
     },
   };
 
   assert.equal(narratorGenderLabel("male"), "男");
   assert.equal(guidanceModeLabel("guided_interview"), "引导访谈");
-  assert.equal(projectProfileSummary(project), "男 · 重庆 · 68 岁 · 自由讲述");
+  assert.equal(projectProfileSummary(project), "男 · 重庆 · 68 岁 · 真人访谈");
+  assert.deepEqual(defaultNarrationSessionFields("human_interview"), {
+    guidanceMode: "free_narration",
+    interviewType: "human_interview",
+  });
 });
 
 test("project edit validates age text", () => {

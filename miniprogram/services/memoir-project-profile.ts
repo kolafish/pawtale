@@ -1,6 +1,10 @@
-import { NARRATION_MODES } from "../domain/memoir-narration-mode";
+import { NARRATION_MODES, type DefaultNarrationMode } from "../domain/memoir-narration-mode";
 import type { Project } from "../domain/memoir";
-import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/memoir-voice-session";
+import type {
+  MemoirGuidanceMode,
+  MemoirGuidanceModule,
+  MemoirInterviewType,
+} from "../domain/memoir-voice-session";
 import type { MemoirNarratorGender } from "./memoir";
 
 export interface GuidanceOption<T extends string> {
@@ -22,6 +26,8 @@ export interface MemoirProjectProfile {
   narratorOrigin: string;
   narratorAge: number | null;
   defaultGuidanceMode: MemoirGuidanceMode;
+  defaultInterviewType: MemoirInterviewType;
+  defaultNarrationMode: DefaultNarrationMode;
 }
 
 function metadataProfile(project?: Pick<Project, "metadata_json"> | null): Record<string, unknown> {
@@ -52,15 +58,34 @@ function guidanceModeValue(value: unknown): MemoirGuidanceMode {
   return value === "guided_interview" ? "guided_interview" : "free_narration";
 }
 
+function interviewTypeValue(value: unknown): MemoirInterviewType {
+  return value === "human_interview" ? "human_interview" : "ai_interview";
+}
+
 export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | null): MemoirProjectProfile {
   const profile = metadataProfile(project);
+  const defaultGuidanceMode = guidanceModeValue(profile.default_guidance_mode);
+  const defaultInterviewType = interviewTypeValue(profile.default_interview_type);
   return {
     narratorName: stringValue(profile.narrator_name),
     narratorGender: genderValue(profile.narrator_gender),
     narratorOrigin: stringValue(profile.narrator_origin),
     narratorAge: ageValue(profile.narrator_age),
-    defaultGuidanceMode: guidanceModeValue(profile.default_guidance_mode),
+    defaultGuidanceMode,
+    defaultInterviewType,
+    defaultNarrationMode: defaultInterviewType === "human_interview"
+      ? "human_interview"
+      : defaultGuidanceMode,
   };
+}
+
+export function defaultNarrationSessionFields(mode: DefaultNarrationMode): {
+  guidanceMode: MemoirGuidanceMode;
+  interviewType: MemoirInterviewType;
+} {
+  return mode === "human_interview"
+    ? { guidanceMode: "free_narration", interviewType: "human_interview" }
+    : { guidanceMode: mode, interviewType: "ai_interview" };
 }
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
@@ -93,7 +118,7 @@ export function projectProfileSummary(project: Project): string {
     narratorGenderLabel(profile.narratorGender),
     profile.narratorOrigin,
     profile.narratorAge !== null ? `${profile.narratorAge} 岁` : "",
-    guidanceModeLabel(profile.defaultGuidanceMode),
+    NARRATION_MODES[profile.defaultNarrationMode].label,
   ].filter(Boolean);
   return parts.join(" · ");
 }
