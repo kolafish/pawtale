@@ -27,7 +27,6 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
-  transcriptBookInclusionText,
   transcriptCreatedAtText,
   transcriptDurationText,
   transcriptTitleText,
@@ -68,15 +67,13 @@ interface TranscriptItemView {
   summarySegments: TranscriptTextSegment[];
   anchorId: string;
   recordMetaText: string;
-  recoveryNoticeText: string;
   canRecoverTranscription: boolean;
   recoverButtonLoading: boolean;
   recoverButtonDisabled: boolean;
   recoverButtonText: string;
-  bookInclusionText: string;
-  isIncludedInBook: boolean;
+  storyStatusText: string;
   cardClass: string;
-  bookStatusClass: string;
+  storyStatusClass: string;
   detailActionText: string;
   cardAriaLabel: string;
 }
@@ -191,9 +188,9 @@ function withTranscriptRuntimeState(
   return {
     ...item,
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
-    bookStatusClass: item.canRecoverTranscription
-      ? "book-status pending"
-      : (item.isIncludedInBook ? "book-status included" : "book-status"),
+    storyStatusClass: item.canRecoverTranscription
+      ? "record-status pending"
+      : "record-status",
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
@@ -367,14 +364,21 @@ function toViewItem(
   searchQuery = "",
 ): TranscriptItemView {
   const canRecoverTranscription = isPendingTranscription(item);
-  const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const isIncludedInBook = !canRecoverTranscription && Boolean(
+    item.is_included_in_book
+    || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
+  );
   const summaryTitleText = transcriptTitleText(item);
-  const summaryPreviewText = transcriptSummaryPreview(item);
+  const summaryPreviewText = canRecoverTranscription
+    ? "恢复转写后即可继续整理。"
+    : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
-  const bookInclusionText = canRecoverTranscription
-    ? "等待转写后再入章"
-    : transcriptBookInclusionText(item);
+  const storyStatusText = canRecoverTranscription
+    ? "待转写"
+    : (isIncludedInBook
+      ? "已放进故事树"
+      : (item.section_assignment ? "已整理到故事树" : "还没有放进故事树"));
   const detailActionText = canRecoverTranscription ? "查看音频" : "查看详情";
   const recordMetaText = [
     createdAtText,
@@ -388,19 +392,17 @@ function toViewItem(
     summarySegments: highlightTranscriptText(summaryPreviewText, searchQuery),
     anchorId: transcriptAnchorId(item.id),
     recordMetaText,
-    recoveryNoticeText: canRecoverTranscription ? "音频已保存，恢复转写后即可继续整理。" : "",
     canRecoverTranscription,
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
     recoverButtonText: "恢复转写",
-    bookInclusionText,
-    isIncludedInBook,
+    storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
-    bookStatusClass: canRecoverTranscription
-      ? "book-status pending"
-      : (isIncludedInBook ? "book-status included" : "book-status"),
+    storyStatusClass: canRecoverTranscription
+      ? "record-status pending"
+      : "record-status",
     detailActionText,
-    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${bookInclusionText}，${detailActionText}`,
+    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，${detailActionText}`,
   };
 }
 

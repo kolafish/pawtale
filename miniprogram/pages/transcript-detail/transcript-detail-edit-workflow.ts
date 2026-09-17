@@ -169,7 +169,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({
         assignmentError: error instanceof Error
           ? error.message
-          : "章节和小节加载失败",
+          : "收录位置加载失败",
       });
     } finally {
       this.setData({ assignmentLoading: false });
@@ -289,7 +289,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
         },
         { projectId: item.project_id },
       );
-      wx.showToast({ title: "章节和小节已更新", icon: "success" });
+      wx.showToast({ title: "收录位置已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -297,7 +297,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({
         assignmentError: error instanceof Error
           ? error.message
-          : "章节和小节更新失败",
+          : "收录位置更新失败",
       });
     } finally {
       this.setData({

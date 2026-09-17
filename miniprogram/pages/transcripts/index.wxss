@@ -98,8 +98,8 @@
   max-width: 100%;
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
-  background: var(--ui-success-surface);
-  color: var(--ui-success-text);
+  background: var(--ui-surface-subtle);
+  color: var(--ui-text-secondary);
   font-size: 23rpx;
   font-weight: 700;
   line-height: 1.4;
@@ -202,22 +202,11 @@
 
 .transcript-card {
   position: relative;
-  padding: 30rpx 30rpx 28rpx 36rpx;
+  padding: 30rpx 30rpx 28rpx;
   overflow: hidden;
   transition-property: background-color, box-shadow;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
-}
-
-.transcript-card::before {
-  content: "";
-  position: absolute;
-  top: 30rpx;
-  bottom: 30rpx;
-  left: 0;
-  width: 5rpx;
-  border-radius: 0 999rpx 999rpx 0;
-  background: var(--ui-accent-border);
 }
 
 .transcript-card-hover {
@@ -231,12 +220,8 @@
     var(--ui-card-shadow-raised);
 }
 
-.transcript-card.highlighted::before {
-  background: var(--ui-accent);
-}
-
 .transcript-card.recovery-pending {
-  background: var(--ui-surface-soft);
+  background: var(--ui-surface);
 }
 
 .record-meta {
@@ -270,34 +255,24 @@
 
 .recovery-row {
   margin-top: 20rpx;
-  padding: 18rpx 20rpx;
-  border-radius: var(--ui-radius-inner);
-  background: var(--ui-success-surface);
   display: flex;
   align-items: center;
-  gap: 16rpx;
-}
-
-.recovery-notice {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--ui-success-text);
-  font-size: 25rpx;
-  line-height: 1.5;
-  text-wrap: pretty;
+  justify-content: flex-start;
 }
 
 .small-primary {
   flex: 0 0 auto;
-  min-width: 168rpx;
+  min-width: 220rpx;
   min-height: 88rpx;
   margin: 0;
   padding: 0 22rpx;
   border: 0;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface);
-  color: var(--ui-success-text);
-  box-shadow: var(--ui-control-shadow);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  box-shadow:
+    0 0 0 1rpx rgba(148, 69, 53, 0.12),
+    0 6rpx 14rpx rgba(148, 69, 53, 0.14);
   font-size: 26rpx;
   font-weight: 700;
   line-height: 1.35;
@@ -324,22 +299,23 @@
   gap: 18rpx;
 }
 
-.book-status {
+.record-status {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--ui-warning-text);
+  color: var(--ui-text-secondary);
   font-size: 24rpx;
   font-weight: 600;
   line-height: 38rpx;
   overflow-wrap: anywhere;
 }
 
-.book-status.included {
-  color: var(--ui-success-text);
-}
-
-.book-status.pending {
-  color: var(--ui-text-secondary);
+.record-status.pending {
+  flex: 0 0 auto;
+  padding: 5rpx 13rpx;
+  border-radius: 999rpx;
+  background: var(--ui-warning-surface);
+  color: var(--ui-warning-text);
+  line-height: 32rpx;
 }
 
 .detail-action {
@@ -389,7 +365,7 @@
 }
 
 .transcripts-page.large-text .search-chip,
-.transcripts-page.large-text .book-status,
+.transcripts-page.large-text .record-status,
 .transcripts-page.large-text .detail-action {
   font-size: 28rpx;
 }
@@ -413,9 +389,4 @@
 .transcripts-page.large-text .empty-secondary-button {
   min-height: 96rpx;
   font-size: 30rpx;
-}
-
-.transcripts-page.large-text .recovery-notice {
-  font-size: 30rpx;
-  line-height: 1.55;
 }

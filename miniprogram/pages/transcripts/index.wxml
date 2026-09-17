@@ -117,7 +117,6 @@
       class="recovery-row"
       catchtap="stopCardTap"
     >
-      <text class="recovery-notice">{{item.recoveryNoticeText}}</text>
       <button
         class="small-primary"
         data-id="{{item.id}}"
@@ -129,7 +128,7 @@
       </button>
     </view>
     <view class="record-footer">
-      <text class="{{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
+      <text class="{{item.storyStatusClass}}">{{item.storyStatusText}}</text>
       <text class="detail-action">{{item.detailActionText}} ›</text>
     </view>
   </view>

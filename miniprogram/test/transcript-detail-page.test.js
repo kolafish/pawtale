@@ -284,7 +284,10 @@ test("transcript detail page loads a single transcript", async () => {
   assert.equal(context.data.item.createdAtText, "07-01 15:38");
   assert.equal(context.data.item.audioText, "32 秒");
   assert.equal(context.data.item.recordMetaText, "07-01 15:38 · 32 秒");
-  assert.equal(context.data.item.bookInclusionText, "尚未入章");
+  assert.equal(context.data.item.heroStatusText, "已整理");
+  assert.equal(context.data.item.heroStatusClass, "ready");
+  assert.equal(context.data.item.locationTitleText, "还没有放进故事树");
+  assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.questionTitleText, "小余刚才问了");
   assert.equal(context.data.item.questionCanExpand, false);
   assert.equal(context.data.questionExpanded, false);
@@ -358,19 +361,22 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
 
   await page.onLoad.call(context, { id: "utterance-pending" });
 
-  assert.equal(context.data.item.titleText, "音频已保存，等待转写");
-  assert.equal(context.data.item.transcriptionNoticeText, "音频已保存，等待转写");
-  assert.equal(context.data.item.displayCountText, "待转写");
-  assert.equal(context.data.item.rawCountText, "待转写");
-  assert.equal(context.data.item.bookInclusionText, "等待转写后再入章");
-  assert.equal(context.data.item.bookStatusClass, "pending");
+  assert.equal(context.data.item.titleText, "音频已保存");
+  assert.equal(context.data.item.transcriptionNoticeText, "这段录音已经安全保存，恢复转写后即可继续整理。");
+  assert.equal(context.data.item.heroStatusText, "等待转写");
+  assert.equal(context.data.item.heroStatusClass, "pending");
+  assert.equal(context.data.item.displayCountText, "尚未生成");
+  assert.equal(context.data.item.rawCountText, "尚未转写");
+  assert.equal(context.data.item.locationTitleText, "还没有放进故事树");
+  assert.equal(context.data.item.locationDescriptionText, "小余会帮您判断这段故事适合放在哪里。");
+  assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.canPlayAnswerAudio, true);
   assert.equal(context.data.item.canRecoverTranscription, true);
   assert.deepEqual(context.data.item.displaySegments, [
-    { text: "这段录音已经保存，但还没有识别成文字。", highlight: false },
+    { text: "小余会帮您整理成适合阅读的文字。", highlight: false },
   ]);
   assert.deepEqual(context.data.item.rawSegments, [
-    { text: "等待恢复转写后显示原始识别文字。", highlight: false },
+    { text: "这里会保留尽量忠于原话的识别文字。", highlight: false },
   ]);
 
   await page.onLoad.call(context, { id: "utterance-pending", mode: "edit" });
@@ -690,13 +696,11 @@ test("transcript detail page uses content-first inclusion labels", async () => {
 
   await page.onLoad.call(context, { id: "utterance-included" });
 
-  assert.equal(
-    context.data.item.bookInclusionText,
-    "已放入第 1 章：退休后的日子 · 小节 2：退休不下岗",
-  );
-  assert.equal(context.data.item.chapterLocationText, "第 1 章：退休后的日子");
-  assert.equal(context.data.item.sectionLocationText, "小节 2：退休不下岗");
-  assert.equal(context.data.item.isIncludedInBook, true);
+  assert.equal(context.data.item.locationTitleText, "已放进故事树");
+  assert.equal(context.data.item.locationDescriptionText, "这段故事现在在故事树的这个位置。");
+  assert.equal(context.data.item.showLocationPath, true);
+  assert.equal(context.data.item.chapterLocationText, "退休后的日子");
+  assert.equal(context.data.item.sectionLocationText, "退休不下岗");
 });
 
 test("transcript detail page moves material to a selected chapter section", async () => {
@@ -814,9 +818,9 @@ test("transcript detail page moves material to a selected chapter section", asyn
   }]);
   assert.equal(detailLoads, 2);
   assert.equal(context.data.assignmentEditorOpen, false);
-  assert.equal(context.data.item.chapterLocationText, "第 2 章：家里的人");
-  assert.equal(context.data.item.sectionLocationText, "小节 1：她给我送胡豆");
-  assert.deepEqual(toasts, [{ title: "章节和小节已更新", icon: "success" }]);
+  assert.equal(context.data.item.chapterLocationText, "家里的人");
+  assert.equal(context.data.item.sectionLocationText, "她给我送胡豆");
+  assert.deepEqual(toasts, [{ title: "收录位置已更新", icon: "success" }]);
 });
 
 test("transcript detail page creates a chapter while assigning material", async () => {

@@ -213,13 +213,13 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒 · 5 字");
-  assert.equal(context.data.items[0].bookInclusionText, "尚未入章");
+  assert.equal(context.data.items[0].storyStatusText, "还没有放进故事树");
   assert.equal(context.data.pageMetaText, "我的回忆录 · 1 条讲述");
   assert.equal(context.data.showNoProjectPanel, false);
   assert.equal(context.data.showGenericEmpty, false);
   assert.equal(context.data.showLoadMore, false);
   assert.equal(context.data.items[0].cardClass, "transcript-card");
-  assert.equal(context.data.items[0].bookStatusClass, "book-status");
+  assert.equal(context.data.items[0].storyStatusClass, "record-status");
   assert.equal(context.data.items[0].detailActionText, "查看详情");
   assert.match(context.data.items[0].cardAriaLabel, /爷爷退休后仍帮公司做事/);
   assert.equal("transcript_raw" in context.data.items[0], false);
@@ -266,8 +266,8 @@ test("transcripts page shows the assigned section on a material card", async () 
   await page.loadTranscripts.call(context, true);
 
   assert.equal(
-    context.data.items[0].bookInclusionText,
-    "已放入第 1 章：家里的人 · 小节 2：她给我送胡豆",
+    context.data.items[0].storyStatusText,
+    "已放进故事树",
   );
 });
 
@@ -328,11 +328,11 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
 
   const item = context.data.items[0];
   assert.equal(item.summaryTitleText, "音频已保存，等待转写");
-  assert.equal(item.summaryPreviewText, "这段录音已经保存，但还没有识别成文字。");
+  assert.equal(item.summaryPreviewText, "恢复转写后即可继续整理。");
   assert.equal(item.recordMetaText, "07-01 15:38 · 8 秒");
-  assert.equal(item.recoveryNoticeText, "音频已保存，恢复转写后即可继续整理。");
-  assert.equal(item.bookInclusionText, "等待转写后再入章");
-  assert.equal(item.bookStatusClass, "book-status pending");
+  assert.equal("recoveryNoticeText" in item, false);
+  assert.equal(item.storyStatusText, "待转写");
+  assert.equal(item.storyStatusClass, "record-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
   assert.equal(item.detailActionText, "查看音频");
   assert.match(item.cardAriaLabel, /查看音频$/);
