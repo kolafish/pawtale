@@ -37,6 +37,7 @@ from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.memoir import (
     book_completion_jobs,
     book_revision_generation,
+    book_revision_proposals,
     book_review_jobs,
     book_reviews,
     chapter_preparation_jobs,
@@ -78,6 +79,8 @@ class LayeredBookAI(AITextServiceBase):
         book_issue: bool = False,
         book_actions: bool = False,
         book_profile_action: bool = False,
+        section_revision_title: str | None = None,
+        section_revision_content: str | None = None,
     ):
         self.section_issue = section_issue
         self.chapter_interview_issue = chapter_interview_issue
@@ -85,6 +88,8 @@ class LayeredBookAI(AITextServiceBase):
         self.book_issue = book_issue
         self.book_actions = book_actions
         self.book_profile_action = book_profile_action
+        self.section_revision_title = section_revision_title
+        self.section_revision_content = section_revision_content
         self.system_prompts: list[str] = []
         self.prompts: list[str] = []
 
@@ -281,13 +286,28 @@ class LayeredBookAI(AITextServiceBase):
         else:
             section_materials = _prompt_section_materials(user_prompt)
             is_revision = "用户修改要求：" in user_prompt
+            current_title = (
+                user_prompt.partition("当前小节标题：\n")[2].splitlines()[0]
+                if "当前小节标题：\n" in user_prompt
+                else ""
+            )
             payload = {
                 "sections": [
                     {
                         "section_id": section_id,
-                        "title": "比赛后的回想风" if is_revision else "",
-                        "content": ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
-                        + "这段经历让我一直记得，也让我第一次认真看待输赢。",
+                        "title": (
+                            self.section_revision_title or current_title
+                            if is_revision
+                            else ""
+                        ),
+                        "content": (
+                            self.section_revision_content
+                            if is_revision and self.section_revision_content is not None
+                            else (
+                                ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
+                                + "这段经历让我一直记得，也让我第一次认真看待输赢。"
+                            )
+                        ),
                         "used_material_ids": allowed_material_ids,
                     }
                     for section_id, allowed_material_ids in section_materials
@@ -384,6 +404,45 @@ def test_book_revision_plan_rejects_non_object_metadata_patch():
                 "book_metadata_patch": [],
             }
         )
+
+
+def test_book_revision_comparison_counts_title_only_change():
+    before = [{
+        "chapter_id": "chapter-1",
+        "chapter_title": "上学时光",
+        "sections": [{
+            "section_id": "section-1",
+            "title": "比赛后的回想峰",
+            "content": "这是已经存在的完整章节正文。",
+        }],
+    }]
+    after = [{
+        "chapter_id": "chapter-1",
+        "chapter_title": "上学时光",
+        "sections": [{
+            "section_id": "section-1",
+            "title": "赛后回想",
+            "content": "这是已经存在的完整章节正文。",
+        }],
+    }]
+
+    comparison = book_revision_proposals.build_comparison(
+        before=before,
+        after=after,
+    )
+
+    assert comparison["changed_chapter_count"] == 1
+    assert comparison["changed_section_count"] == 1
+    assert comparison["chapters"][0]["sections"][0] == {
+        "section_id": "section-1",
+        "title": "赛后回想",
+        "before_title": "比赛后的回想峰",
+        "after_title": "赛后回想",
+        "before_content": "这是已经存在的完整章节正文。",
+        "after_content": "这是已经存在的完整章节正文。",
+        "before_char_count": 14,
+        "after_char_count": 14,
+    }
 
 
 def test_editorial_profile_plan_requires_selected_metadata_fields():
@@ -1283,7 +1342,10 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
-    fake = LayeredBookAI()
+    fake = LayeredBookAI(
+        section_revision_title="赛后回想",
+        section_revision_content="这是已经存在的完整章节正文。",
+    )
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
@@ -1296,7 +1358,7 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         json={
             "operation": "plan",
             "ai_model": "claude-opus-4-8",
-            "feedback": "把这一小节写得更平实，但不要改变标题。",
+            "feedback": "把标题中的错字改正，并把标题缩短为“赛后回想”。",
         },
     )
     assert queued.status_code == 202, queued.text
@@ -1325,7 +1387,7 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         json={
             "operation": "feedback",
             "proposal_id": proposal_id,
-            "feedback": "还要压缩重复表达。",
+            "feedback": "标题就用“赛后回想”。",
         },
     )
     assert feedback.status_code == 202, feedback.text
@@ -1356,8 +1418,9 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     assert body["phase"] == "draft_ready"
     assert body["can_apply"] is True
     comparison = body["comparison"]["chapters"][0]["sections"][0]
-    assert comparison["before_content"] != comparison["after_content"]
-    assert comparison["after_content"].startswith("那天刮着风")
+    assert comparison["before_title"] == "比赛后的回想峰"
+    assert comparison["after_title"] == "赛后回想"
+    assert comparison["before_content"] == comparison["after_content"]
     assert await test_db.scalar(
         select(func.count(MemoirBookChapterDraftVersion.id)).where(
             MemoirBookChapterDraftVersion.draft_id == version.draft_id
@@ -1376,12 +1439,12 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     assert latest is not None
     assert latest.version == 2
     assert latest.section_snapshot_json[0]["content"] == "这是已经存在的完整章节正文。"
-    assert latest.section_snapshot_json[1]["title"] == "比赛后的回想峰"
-    assert latest.section_snapshot_json[1]["content"].startswith("那天刮着风")
+    assert latest.section_snapshot_json[1]["title"] == "赛后回想"
+    assert latest.section_snapshot_json[1]["content"] == "这是已经存在的完整章节正文。"
     assert latest.prompt_snapshot.endswith(":section_revision_workbench")
     await test_db.refresh(target_section)
-    assert target_section.title == "比赛后的回想峰"
-    assert target_section.version == 1
+    assert target_section.title == "赛后回想"
+    assert target_section.version == 2
     draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
     assert draft is not None
     assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"

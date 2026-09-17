@@ -178,12 +178,16 @@ def build_comparison(
                 continue
             before_content = _text(before_section.get("content"))
             after_content = _text(after_section.get("content"))
-            if before_content == after_content:
+            before_title = _text(before_section.get("title"))
+            after_title = _text(after_section.get("title")) or before_title
+            if before_content == after_content and before_title == after_title:
                 continue
             changed_sections.append(
                 {
                     "section_id": section_id,
-                    "title": (_text(after_section.get("title")) or _text(before_section.get("title"))),
+                    "title": after_title,
+                    "before_title": before_title,
+                    "after_title": after_title,
                     "before_content": before_content,
                     "after_content": after_content,
                     "before_char_count": len(before_content),

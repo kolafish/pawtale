@@ -149,6 +149,8 @@ export interface MemoirBookRevisionMetadataChange {
 export interface MemoirBookRevisionSectionComparison {
   section_id: string;
   title: string;
+  before_title: string;
+  after_title: string;
   before_content: string;
   after_content: string;
   before_char_count: number;
