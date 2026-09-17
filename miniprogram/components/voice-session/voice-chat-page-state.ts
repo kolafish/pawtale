@@ -469,8 +469,56 @@ export function bookCompletionRoundFinished(
     && state.transcriptLines.some((line) => line.role === "user");
 }
 
+export type VoiceChatInteractionPhase =
+  | "idle"
+  | "recording"
+  | "transcript_processing"
+  | "assistant_preparing"
+  | "assistant_responding"
+  | "waiting_for_answer"
+  | "assistant_error";
+
+type VoiceChatInteractionState = Pick<
+  VoiceChatData,
+  | "recording"
+  | "latestTranscriptText"
+  | "assistantPromptText"
+  | "followUpLoading"
+  | "followUpError"
+  | "followUpTTSLoading"
+  | "followUpTTSPlaying"
+>;
+
+function assistantTurnActive(state: VoiceChatInteractionState): boolean {
+  return state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
+}
+
+export function voiceChatInteractionPhase(state: VoiceChatInteractionState): VoiceChatInteractionPhase {
+  if (state.recording) {
+    return "recording";
+  }
+  const hasAssistantPrompt = Boolean(state.assistantPromptText);
+  if ((hasAssistantPrompt && assistantTurnActive(state)) || state.followUpTTSPlaying) {
+    return "assistant_responding";
+  }
+  if (state.followUpError) {
+    return "assistant_error";
+  }
+  if (hasAssistantPrompt) {
+    return "waiting_for_answer";
+  }
+  if (state.followUpLoading && state.latestTranscriptText) {
+    return "transcript_processing";
+  }
+  if (assistantTurnActive(state)) {
+    return "assistant_preparing";
+  }
+  return "idle";
+}
+
 export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatData): VoiceChatViewPatch {
-  const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
+  const interactionPhase = voiceChatInteractionPhase(state);
+  const assistantBusy = assistantTurnActive(state);
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
   const isHumanInterview = state.interviewType === "human_interview";
   const isBookCompletion = state.sessionGoal === "book_completion";
@@ -480,13 +528,15 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     && !state.completionIssue;
   const showCompletionIssuePanel = isBookCompletion;
   const showTranscriptProcessing = !isHumanInterview
-    && !state.recording
-    && state.followUpLoading
-    && Boolean(state.latestTranscriptText);
+    && interactionPhase === "transcript_processing";
+  const assistantPhaseVisible = interactionPhase === "assistant_preparing"
+    || interactionPhase === "assistant_responding"
+    || interactionPhase === "waiting_for_answer"
+    || interactionPhase === "assistant_error";
   const showAssistantPanel = !isHumanInterview
     && !state.recording
     && !showTranscriptProcessing
-    && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
+    && Boolean(assistantPhaseVisible || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview
     && !completionRoundFinished
     && !state.recording
@@ -514,30 +564,35 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     stageStatusText = "请重新进入补全成书";
   } else if (completionRoundFinished) {
     stageStatusText = "本次补充已经完成";
-  } else if (state.recording) {
+  } else if (interactionPhase === "recording") {
     stageStatusText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "我在听，您慢慢说";
+  } else if (interactionPhase === "assistant_responding") {
+    stageStatusText = state.followUpTTSLoading || state.followUpTTSPlaying
+      ? "小余正在读问题"
+      : "小余正在准备问题";
+  } else if (interactionPhase === "transcript_processing") {
+    stageStatusText = "正在帮您整理成文字";
+  } else if (interactionPhase === "assistant_preparing") {
+    stageStatusText = "小余正在准备问题";
   } else if (state.persistenceStateText === "已保存") {
     stageStatusText = "这一段已经记下来了";
-  } else if (state.followUpTTSPlaying || (state.followUpTTSLoading && hasAssistantPrompt)) {
-    stageStatusText = "小余正在读问题";
-  } else if (state.followUpLoading) {
-    stageStatusText = state.latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题";
   }
   let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了";
-  if (state.recording) {
+  if (interactionPhase === "recording") {
     liveDisplayText = state.liveText || (isHumanInterview ? "等待转写..." : "直接说就行，我会帮您记下来");
-  } else if (state.followUpLoading && state.latestTranscriptText) {
+  } else if (interactionPhase === "transcript_processing") {
     liveDisplayText = state.liveText || state.latestTranscriptText;
-  } else if (state.followUpLoading && !hasAssistantPrompt) {
+  } else if (interactionPhase === "assistant_preparing") {
     liveDisplayText = "小余正在准备第一句话";
-  } else if (state.followUpTTSLoading || state.followUpTTSPlaying || hasAssistantPrompt || state.selectedOpeningTopicText) {
+  } else if (interactionPhase === "assistant_responding"
+    || interactionPhase === "waiting_for_answer"
+    || interactionPhase === "assistant_error"
+    || state.selectedOpeningTopicText) {
     liveDisplayText = "现在可以说了";
   } else {
     liveDisplayText = state.liveText
       || state.latestTranscriptText
-      || (state.followUpLoading ? "小余正在准备第一句话" : (
-        isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了"
-      ));
+      || (isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了");
   }
   if (isBookCompletion && !state.recording && !assistantBusy) {
     liveDisplayText = completionRoundFinished
@@ -563,11 +618,11 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   let controlHintText = isHumanInterview
     ? ""
     : (isBookCompletion ? "只说您记得的部分就可以" : "现在可以说了");
-  if (state.recording) {
+  if (interactionPhase === "recording") {
     controlHintText = isHumanInterview ? "" : "说完请点这里";
-  } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
+  } else if (!isHumanInterview && interactionPhase === "assistant_preparing") {
     controlHintText = "小余先问一句，稍等一下";
-  } else if (!isHumanInterview && assistantBusy) {
+  } else if (!isHumanInterview && interactionPhase === "assistant_responding") {
     controlHintText = "听完就可以开始说";
   }
   if (completionRoundFinished) {
@@ -588,7 +643,10 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     micButtonText = "请先保存离开";
   } else if (state.recording) {
     micButtonText = isHumanInterview ? "说完了，保存这段" : "说完了，帮我整理";
-  } else if (!isHumanInterview && assistantBusy) {
+  } else if (!isHumanInterview && (
+    interactionPhase === "assistant_preparing"
+    || interactionPhase === "assistant_responding"
+  )) {
     micButtonText = "我来讲了";
   } else if (state.primaryActionText === "开始说话") {
     micButtonText = isHumanInterview ? `记录${speakerRoleLabel(state.speakerRole)}` : "我来讲了";

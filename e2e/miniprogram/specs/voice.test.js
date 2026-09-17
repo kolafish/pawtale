@@ -324,15 +324,21 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-listening.png") });
 
     await tapBoundAction(await elementById(page, "voice-primary-action"));
-    const processing = await waitForPageData(
+    const responding = await waitForPageData(
       page,
-      data => data.micButtonProcessing === true,
-      "讲述结束后进入独立整理状态",
-      10000,
+      data => data.assistantPromptText === FIXTURE_ASSISTANT_TEXT
+        && data.followUpTTSPlaying === true,
+      "讲述结束后切换到正在播放的小余问题",
+      20000,
     );
-    assert.equal(processing.micButtonDisabled, true);
-    assert.match(processing.micButtonClass, /processing/);
-    assert.equal(processing.micButtonText, "正在帮您整理");
+    assert.equal(responding.micButtonProcessing, false);
+    assert.equal(responding.micButtonDisabled, false);
+    assert.doesNotMatch(responding.micButtonClass, /processing/);
+    assert.equal(responding.micButtonText, "我来讲了");
+    assert.equal(responding.showAssistantPanel, true);
+    assert.equal(responding.showTranscriptStage, false);
+    assert.ok(await page.$(".assistant-panel"), "AI 开始播放后立即显示本轮问题");
+    assert.equal(await page.$(".transcript-stage"), null, "AI 播放时不再停留在上一段整理卡");
     const completed = await waitForPageData(
       page,
       (data) => {

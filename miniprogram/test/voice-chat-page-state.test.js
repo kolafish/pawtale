@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   initialVoiceChatData,
   applyVoiceChatDataPatch,
+  voiceChatInteractionPhase,
   voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
@@ -16,6 +17,43 @@ const {
   voiceGatewayEventPatch,
   voiceSessionDetailPatch,
 } = require("../components/voice-session/voice-chat-page-state.ts");
+
+test("voice chat derives one interaction phase from overlapping runtime facts", () => {
+  const state = (patch = {}) => ({
+    ...initialVoiceChatData(),
+    ...patch,
+  });
+
+  assert.equal(voiceChatInteractionPhase(state()), "idle");
+  assert.equal(voiceChatInteractionPhase(state({ recording: true })), "recording");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    followUpLoading: true,
+    followUpTTSLoading: true,
+  })), "transcript_processing");
+  assert.equal(voiceChatInteractionPhase(state({
+    followUpLoading: true,
+    followUpTTSLoading: true,
+  })), "assistant_preparing");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    assistantPromptText: "那时候您最难忘的人是谁？",
+    followUpLoading: true,
+    followUpTTSPlaying: true,
+  })), "assistant_responding");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    followUpLoading: true,
+    followUpTTSPlaying: true,
+  })), "assistant_responding");
+  assert.equal(voiceChatInteractionPhase(state({
+    assistantPromptText: "那时候您最难忘的人是谁？",
+  })), "waiting_for_answer");
+  assert.equal(voiceChatInteractionPhase(state({
+    followUpError: "小余回应失败",
+    assistantPromptText: "上一轮留下的问题",
+  })), "assistant_error");
+});
 
 test("recording level updates keep long history on the page without resending it", () => {
   const sent = [];
@@ -205,6 +243,31 @@ test("voice chat keeps the saved transcript as the only focus while the next que
   assert.equal(patch.micButtonDisabled, true);
   assert.equal(patch.micButtonProcessing, true);
   assert.equal(patch.micButtonText, "正在帮您整理");
+});
+
+test("voice chat switches to the assistant as soon as the next question starts playing", () => {
+  const question = "您刚才说到可乐，第一次喝到它是在什么时候？";
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    latestTranscriptText: "这是上一轮已经保存的一大段讲述。",
+    liveText: "这是上一轮已经保存的一大段讲述。",
+    assistantPromptText: question,
+    followUpLoading: true,
+    followUpTTSLoading: false,
+    followUpTTSPlaying: true,
+  });
+
+  assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.showTranscriptStage, false);
+  assert.equal(patch.assistantDisplayText, question);
+  assert.equal(patch.showAssistantTTS, true);
+  assert.equal(patch.stageStatusText, "小余正在读问题");
+  assert.equal(patch.controlHintText, "听完就可以开始说");
+  assert.equal(patch.micButtonClass, "mic-button");
+  assert.equal(patch.micButtonDisabled, false);
+  assert.equal(patch.micButtonProcessing, false);
+  assert.equal(patch.micButtonText, "我来讲了");
 });
 
 test("voice chat keeps one continuous live transcript and exposes paused follow state", () => {
