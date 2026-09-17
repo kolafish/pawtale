@@ -300,6 +300,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   toggleRecording() {
+    if (this.data.micButtonProcessing) {
+      return;
+    }
     if (!this.ensureVoiceAuthorization(false)) {
       return;
     }

@@ -267,6 +267,32 @@ test("voice chat blocks recording before voice authorization consent", () => {
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
 });
 
+test("voice chat ignores the microphone while the saved narration is being organized", () => {
+  const page = loadVoiceChatPage();
+  let authorizationChecks = 0;
+  let recordingStarts = 0;
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      micButtonProcessing: true,
+      voiceAuthorizationAgreed: true,
+    },
+    ensureVoiceAuthorization() {
+      authorizationChecks += 1;
+      return true;
+    },
+    startRecording() {
+      recordingStarts += 1;
+    },
+  };
+
+  page.toggleRecording.call(context);
+
+  assert.equal(authorizationChecks, 0);
+  assert.equal(recordingStarts, 0);
+});
+
 test("closing a completion issue keeps save controls available while it persists", async () => {
   let releaseClose;
   const closeStarted = new Promise((resolve) => {
