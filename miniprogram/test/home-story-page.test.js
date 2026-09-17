@@ -180,6 +180,7 @@ test("story opens the book and compact theme workspace", async () => {
   const urls = [];
   global.wx.navigateTo = ({ url }) => urls.push(url);
   await context.onShow();
+  context.setData({ loading: true });
   context.openBook();
   context.openChapter({ detail: { chapterId: "chapter-1" } });
   context.openChapter({ detail: { chapterId: "chapter-2" } });

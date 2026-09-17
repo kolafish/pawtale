@@ -905,6 +905,8 @@ test("voice chat does not auto reconnect when recorder start is not ready", asyn
 
 test("voice chat finishSession ignores duplicate finish taps", async () => {
   let finishCalls = 0;
+  let snapshotWrites = 0;
+  let pendingCloseWrites = 0;
   let resolveFinish = () => {};
   const storyTabs = [];
   global.wx = {
@@ -914,6 +916,10 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
     },
   };
   const page = loadVoiceChatPage({
+    memoirCacheExports: {
+      writeMemoirVoiceSessionSnapshot: () => { snapshotWrites += 1; },
+      writeMemoirVoiceSessionPendingClose: () => { pendingCloseWrites += 1; },
+    },
     streamingExports: {
       MemoirStreamingAsrClient: class {
       isBargeInMonitoring() { return false; }
@@ -985,6 +991,10 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.status, "closed");
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
+  const writesAfterFinish = snapshotWrites;
+  page.onUnload.call(context);
+  assert.equal(snapshotWrites, writesAfterFinish);
+  assert.equal(pendingCloseWrites, 0);
   await flushAsyncWork();
   assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: true, finished: true, voiceSessionId: "voice-1" } }]);
   assert.deepEqual(storyTabs, []);

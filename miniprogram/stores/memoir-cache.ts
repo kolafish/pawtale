@@ -298,10 +298,11 @@ function writeVoiceSessionCache(
   descriptor: MemoirCacheDescriptor<MemoirVoiceSessionCachePayload>,
   payload: MemoirVoiceSessionCachePayload,
   stale = false,
+  prune = false,
 ): void {
   const status = writeMemoirCache(descriptor, payload, { stale });
   const identity = currentCacheIdentity();
-  if (status === "written" && identity) {
+  if (status === "written" && identity && prune) {
     pruneVoiceSessionCache(identity);
   }
 }
@@ -464,7 +465,7 @@ export function writeMemoirVoiceSessionSnapshot(
     detail,
     transcript_lines: transcriptLines,
     pending_close: existing?.pending_close,
-  });
+  }, false, cached.status === "miss");
 }
 
 export function writeMemoirVoiceSessionPendingClose(
@@ -483,6 +484,7 @@ export function writeMemoirVoiceSessionPendingClose(
       pending_close: pendingClose,
     },
     true,
+    cached.status === "miss",
   );
 }
 

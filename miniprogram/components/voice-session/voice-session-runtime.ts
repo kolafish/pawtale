@@ -29,6 +29,7 @@ export function createVoiceSessionRuntime() {
     followUpRequestSerial: 0,
     autoListenPendingAfterPlayback: false,
     pageSuspended: false,
+    sessionStopConfirmed: false,
     gatewayConnectPromise: null as Promise<boolean> | null,
     recordingStartPromise: null as Promise<boolean> | null,
     recordingStartGeneration: 0,

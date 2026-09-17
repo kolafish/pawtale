@@ -492,7 +492,7 @@ definePage<HomeData>()({
   },
 
   openBook() {
-    if (!this.canStartVoiceChat(false)) return;
+    if (!this.data.projectId) return;
     if (this.data.bookReadable) {
       wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId }) });
     } else {

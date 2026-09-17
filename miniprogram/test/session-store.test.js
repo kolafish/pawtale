@@ -13,6 +13,7 @@ function installWxStorageMock(initialStorage = {}, failWrites = 0) {
   const storage = clone(initialStorage) || {};
   const writes = [];
   let remainingFailures = failWrites;
+  let storageInfoReads = 0;
 
   global.wx = {
     getStorageSync(key) {
@@ -30,11 +31,12 @@ function installWxStorageMock(initialStorage = {}, failWrites = 0) {
       delete storage[key];
     },
     getStorageInfoSync() {
+      storageInfoReads += 1;
       return { keys: Object.keys(storage) };
     },
   };
 
-  return { storage, writes };
+  return { storage, writes, get storageInfoReads() { return storageInfoReads; } };
 }
 
 function voiceStorage() {
@@ -343,4 +345,21 @@ test("voice session pending close snapshots can be written, preserved, and clear
 
   assert.equal(snapshot.pendingClose, undefined);
   assert.deepEqual(snapshot.transcriptLines.map((line) => line.text), ["已经保存的一句"]);
+});
+
+test("updating an existing voice session does not rescan all cached sessions", () => {
+  const mock = installWxStorageMock(voiceStorage());
+  const { writeMemoirVoiceSessionSnapshot } = memoirCacheModule();
+
+  writeMemoirVoiceSessionSnapshot("voice-1", {
+    transcriptLines: [{ id: "line-1", text: "第一句" }],
+  });
+  const readsAfterCreate = mock.storageInfoReads;
+  assert.ok(readsAfterCreate > 0);
+
+  writeMemoirVoiceSessionSnapshot("voice-1", {
+    transcriptLines: [{ id: "line-1", text: "第一句" }, { id: "line-2", text: "第二句" }],
+  });
+
+  assert.equal(mock.storageInfoReads, readsAfterCreate);
 });
