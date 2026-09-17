@@ -6,7 +6,7 @@
       class="home-return-button ui-button"
       disabled="{{finishingSession}}"
       bindtap="returnToHome"
-      aria-label="暂停讲述并返回首页"
+      aria-label="结束讲述并返回首页"
     >
       <text class="home-return-mark" aria-hidden="true">‹</text>
       <text>首页</text>

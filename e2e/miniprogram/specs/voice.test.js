@@ -265,29 +265,27 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
 
+    const endedSessionId = (await host.data()).voiceEntry.voiceSessionId;
     await tapBoundAction(await elementById(page, "voice-home-action"));
-    const pausedHome = await waitForPageData(
-      host,
-      data => data.voiceSessionMinimized === true && data.voiceEntry?.voiceSessionId,
-      "语音讲述暂停并返回首页",
-    );
-    const pausedSessionId = pausedHome.voiceEntry.voiceSessionId;
+    await waitForValue(() => fixture.state.sessionStatus, status => status === "stopped", {
+      description: "首页入口确认结束语音会话", timeoutMs: 20000,
+    });
+    await waitForPageData(host, data => !data.voiceEntry, "结束讲述并返回首页");
     assert.equal(fixture.state.createdSessions, 1);
-    assert.equal(pausedHome.primaryVoiceButtonTitle, "继续本次讲述");
-    assert.ok(await host.$("#voice-session"), "暂停后保留同一个语音组件实例");
-    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-paused.png") });
+    assert.equal(await host.$("#voice-session"), null, "返回首页后不保留暂停会话");
+    await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ended.png") });
 
     await tapBoundAction(await elementById(host, "primary-voice-action"));
-    await waitForPageData(host, data => data.voiceSessionMinimized === false, "从首页继续同一次讲述");
+    const restartedHome = await waitForPageData(host, data => data.voiceEntry?.voiceSessionId, "从首页开始新的讲述");
     page = await elementById(host, "voice-session");
     await waitForPageData(
       page,
       data => data.status === "ready" && data.connecting === false,
-      "暂停后的语音 gateway 恢复就绪",
+      "新语音 gateway 就绪",
       30000,
     );
-    assert.equal((await host.data()).voiceEntry.voiceSessionId, pausedSessionId);
-    assert.equal(fixture.state.createdSessions, 1, "继续讲述不会新建会话");
+    assert.notEqual(restartedHome.voiceEntry.voiceSessionId, endedSessionId);
+    assert.equal(fixture.state.createdSessions, 2, "返回首页后的下一次讲述会新建会话");
 
     await tapBoundAction(await elementById(page, "voice-primary-action"));
     const recording = await waitForPageData(
@@ -392,8 +390,8 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     await assertNarrationModes(host, "home-narration-modes", "guided_interview");
     await tapBoundAction(await elementById(host, "primary-voice-action"));
     const next = await elementById(host, "voice-session");
-    const nextReady = await waitForPageData(next, data => data.status === "ready", "第二次讲述就绪");
-    assert.equal(fixture.state.createdSessions, 2);
+    const nextReady = await waitForPageData(next, data => data.status === "ready", "下一次讲述就绪");
+    assert.equal(fixture.state.createdSessions, 3);
     assert.equal(nextReady.largeTextEnabled, true);
     assert.equal(nextReady.guidanceMode, "guided_interview");
     await assertNarrationModes(next, "session-narration-modes", "guided_interview");
@@ -436,7 +434,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const supplement = await waitForCurrentPage(session.miniProgram, "pages/book-completion/index");
     await waitForPageData(supplement, data => !data.loading && !data.error, "书稿待补问题页");
     const supplementModes = await assertNarrationModes(supplement, "supplement-narration-modes", "book_completion");
-    assert.equal(fixture.state.createdSessions, 3, "补充方式先选问题，不提前开录音会话");
+    assert.equal(fixture.state.createdSessions, 4, "补充方式先选问题，不提前开录音会话");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "four-narration-modes-supplement.png") });
     await tapBoundAction(await elementById(supplementModes, "mode-free_narration"));
     await waitForCurrentPage(session.miniProgram, "pages/home/index");

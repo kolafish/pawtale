@@ -90,7 +90,6 @@ function baseState() {
     loading: false,
     creatingVoice: false,
     voiceEntry: null,
-    voiceSessionMinimized: false,
     needsLogin: false,
     error: "",
     userId: "visual-user",

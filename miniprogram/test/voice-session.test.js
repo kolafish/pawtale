@@ -1200,50 +1200,22 @@ test("voice chat refreshes session on show only after page suspension", () => {
   assert.equal(context.pageSuspended, false);
 });
 
-test("embedded voice chat returns home without finishing the session", () => {
+test("embedded voice chat finishes the session before returning home", async () => {
   const page = loadVoiceChatPage();
   const context = componentContext(page.definition, { embedded: true }, {
     voiceSessionId: "voice-1",
     finishingSession: false,
   });
-  const suspendReasons = [];
-  context.suspendVoiceChat = (reason) => {
-    suspendReasons.push(reason);
-    context.runtime().pageSuspended = true;
+  let finishCalls = 0;
+  context.finishSession = async () => {
+    finishCalls += 1;
   };
 
-  context.returnToHome();
-  context.returnToHome();
+  await context.returnToHome();
 
-  assert.deepEqual(suspendReasons, ["hide"]);
-  assert.deepEqual(context.events, [{
-    name: "returnhome",
-    detail: { voiceSessionId: "voice-1" },
-  }]);
-});
-
-test("a minimized embedded voice chat stays suspended until the home resumes it", () => {
-  const page = loadVoiceChatPage();
-  const context = componentContext(page.definition, { embedded: true, minimized: true }, {
-    voiceSessionId: "voice-1",
-    status: "ready",
-    connecting: false,
-  });
-  let refreshes = 0;
-  context.runtime().pageSuspended = true;
-  context.refreshVoiceSessionSnapshot = () => {
-    refreshes += 1;
-    return Promise.resolve(null);
-  };
-
-  context.onShow();
-  assert.equal(context.runtime().pageSuspended, true);
-  assert.equal(refreshes, 0);
-
-  context.properties.minimized = false;
-  context.resumeFromHome();
+  assert.equal(finishCalls, 1);
   assert.equal(context.runtime().pageSuspended, false);
-  assert.equal(refreshes, 1);
+  assert.deepEqual(context.events, []);
 });
 
 test("voice chat stops active AI speech when the page is hidden", () => {
