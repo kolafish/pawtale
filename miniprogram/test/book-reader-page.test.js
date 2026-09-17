@@ -61,8 +61,12 @@ test("book reader page loads the finished book by project id", async () => {
   assert.deepEqual(calls, ["project/1"]);
   assert.equal(context.data.projectId, "project/1");
   assert.equal(context.data.readerTitle, "外婆回忆录");
+  assert.equal(context.data.readerSubtitle, "根据口述访谈整理而成");
+  assert.equal(context.data.readerMetaText, "2章 · 7字");
   assert.equal(context.data.bookContent, "外婆回忆录正文");
   assert.equal(context.data.bookPreviewChapters.length, 2);
+  assert.equal(context.data.bookPreviewTocItems[0].expanded, false);
+  assert.equal(context.data.bookPreviewTocItems[0].storyCountText, "2个故事");
   assert.deepEqual(
     context.data.bookPreviewTocItems[0].sections.map((section) => section.title),
     ["院子里的日子", "外婆的身影"],
@@ -198,7 +202,7 @@ test("book reader page shares the same finished-book route", async () => {
   }
 });
 
-test("book reader jumps from the table of contents to a chapter and back to the top", () => {
+test("book reader expands stories and jumps from the table of contents to the text", () => {
   const scrolls = [];
   global.wx = {
     pageScrollTo(options) {
@@ -206,17 +210,87 @@ test("book reader jumps from the table of contents to a chapter and back to the 
     },
   };
   const { page } = loadBookReaderPage();
-  const context = pageContext(page);
+  const context = pageContext(page, {
+    bookPreviewTocItems: [{
+      id: "chapter-1:1",
+      chapterId: "chapter-1",
+      index: 1,
+      indexText: "1",
+      title: "外婆家的童年",
+      metaText: "",
+      storyCountText: "1个故事",
+      expanded: false,
+      sections: [{ id: "section-1" }],
+    }, {
+      id: "chapter-2:2",
+      chapterId: "chapter-2",
+      index: 2,
+      indexText: "2",
+      title: "第一次离家",
+      metaText: "",
+      storyCountText: "整章正文",
+      expanded: false,
+      sections: [],
+    }],
+  });
 
-  page.openReaderChapter.call(context, {
-    currentTarget: { dataset: { index: "1" } },
+  page.toggleTocChapter.call(context, {
+    currentTarget: { dataset: { chapterIndex: "0" } },
+  });
+  assert.equal(context.data.bookPreviewTocItems[0].expanded, true);
+
+  page.openReaderSection.call(context, {
+    currentTarget: { dataset: { chapterIndex: "0", sectionIndex: "0" } },
+  });
+  page.toggleTocChapter.call(context, {
+    currentTarget: { dataset: { chapterIndex: "1" } },
   });
   page.scrollReaderToTop.call(context);
 
   assert.deepEqual(scrolls, [
+    { selector: "#reader-section-0-0", duration: 280 },
     { selector: "#reader-chapter-1", duration: 280 },
     { scrollTop: 0, duration: 280 },
   ]);
+});
+
+test("book reader presents chapter updates as reading context", async () => {
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => sampleBookOutput(
+      3,
+      "更新后的正文",
+      true,
+      ["工作与创业经历", "家庭生活"],
+      [],
+      sampleBookManuscript(),
+    ),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project-1" });
+
+  assert.equal(context.data.readerUpdateNotice, "《工作与创业经历》等章节刚刚更新");
+  assert.equal(context.data.readerMetaText, "2章 · 6字");
+});
+
+test("book reader template keeps editing language out of the reading view", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/book-reader/index.wxml"),
+    "utf8",
+  );
+
+  [
+    "bookVersionText",
+    "bookStaleNotice",
+    "chapter.metaText",
+    "已修改",
+    "重新整理一版",
+    "原始讲述",
+    "小节 ",
+    "回到目录与封面",
+  ].forEach((editingCopy) => assert.equal(template.includes(editingCopy), false));
+  assert.match(template, /readerUpdateNotice/);
+  assert.match(template, /回到目录/);
 });
 
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {

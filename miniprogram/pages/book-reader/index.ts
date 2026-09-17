@@ -48,7 +48,16 @@ import {
   type BookTTSState,
 } from "../book/book-tts-player";
 
-type BookReaderData = BookReadingData & BookTTSState & {
+type BookReaderTocItem = BookReadingData["bookPreviewTocItems"][number] & {
+  expanded: boolean;
+  storyCountText: string;
+};
+
+type ReaderData = Omit<BookReadingData, "bookPreviewTocItems"> & {
+  bookPreviewTocItems: BookReaderTocItem[];
+};
+
+type BookReaderData = ReaderData & BookTTSState & {
   pageClass: string;
   loading: boolean;
   playbackError: string;
@@ -58,6 +67,8 @@ type BookReaderData = BookReadingData & BookTTSState & {
   readerMode: "book" | "chapter";
   readerTitle: string;
   readerSubtitle: string;
+  readerMetaText: string;
+  readerUpdateNotice: string;
   readerHighlightSectionId: string;
   readerHighlightParagraphIndex: number;
   readerHighlightBefore: string;
@@ -65,7 +76,10 @@ type BookReaderData = BookReadingData & BookTTSState & {
   readerHighlightAfter: string;
 };
 
-type ReaderDatasetEvent = PageDatasetEvent<{ index?: string }>;
+type ReaderDatasetEvent = PageDatasetEvent<{
+  chapterIndex?: string;
+  sectionIndex?: string;
+}>;
 
 interface ChapterParagraphRange {
   sectionId: string;
@@ -163,17 +177,38 @@ function sentenceHighlight(
 function readerData(
   output: MemoirBookOutput | null,
   version: MemoirBookOutputVersion | null = null,
-): BookReadingData & Pick<BookReaderData, "readerTitle" | "readerSubtitle"> {
+): ReaderData & Pick<
+  BookReaderData,
+  "readerTitle" | "readerSubtitle" | "readerMetaText" | "readerUpdateNotice"
+> {
   const data = bookReadingData(output, version);
   const readerTitle = (
     trimText(data.bookManuscriptTitle)
     || trimText(data.bookPreviewTitle)
     || "家庭回忆录"
   );
+  const subtitle = trimText(data.bookManuscriptSubtitle);
+  const chapterCount = data.bookPreviewChapters.length || data.bookPreviewTocItems.length;
+  const staleTitles = (output?.stale_chapter_titles || []).filter(Boolean);
   return {
     ...data,
+    bookPreviewTocItems: data.bookPreviewTocItems.map((chapter) => ({
+      ...chapter,
+      expanded: false,
+      storyCountText: chapter.sections.length
+        ? `${chapter.sections.length}个故事`
+        : "整章正文",
+    })),
     readerTitle,
-    readerSubtitle: trimText(data.bookManuscriptSubtitle || "根据口述访谈整理"),
+    readerSubtitle: !subtitle || subtitle === "根据口述访谈整理"
+      ? "根据口述访谈整理而成"
+      : subtitle,
+    readerMetaText: `${chapterCount}章 · ${data.bookCharCount || 0}字`,
+    readerUpdateNotice: output?.is_stale
+      ? (staleTitles.length
+        ? `《${staleTitles[0]}》${staleTitles.length > 1 ? "等章节" : ""}刚刚更新`
+        : "这本书刚刚更新")
+      : "",
   };
 }
 
@@ -227,6 +262,8 @@ function chapterReaderData(
       : "",
     readerTitle: chapter.title,
     readerSubtitle: chapter.metaText,
+    readerMetaText: "",
+    readerUpdateNotice: workspace.draft_needs_rewrite ? "这篇故事刚刚更新" : "",
   };
 }
 
@@ -313,12 +350,34 @@ definePage<BookReaderData>()({
     });
   },
 
-  openReaderChapter(event: ReaderDatasetEvent) {
-    const chapterIndex = datasetString(event, "index");
-    if (!/^\d+$/.test(chapterIndex)) {
+  toggleTocChapter(event: ReaderDatasetEvent) {
+    const chapterIndexText = datasetString(event, "chapterIndex");
+    if (!/^\d+$/.test(chapterIndexText)) {
       return;
     }
-    scrollReader({ selector: `#reader-chapter-${chapterIndex}` });
+    const chapterIndex = Number(chapterIndexText);
+    const chapter = this.data.bookPreviewTocItems[chapterIndex];
+    if (!chapter) {
+      return;
+    }
+    if (!chapter.sections.length) {
+      scrollReader({ selector: `#reader-chapter-${chapterIndex}` });
+      return;
+    }
+    this.setData({
+      bookPreviewTocItems: this.data.bookPreviewTocItems.map((item, index) => (
+        index === chapterIndex ? { ...item, expanded: !item.expanded } : item
+      )),
+    });
+  },
+
+  openReaderSection(event: ReaderDatasetEvent) {
+    const chapterIndex = datasetString(event, "chapterIndex");
+    const sectionIndex = datasetString(event, "sectionIndex");
+    if (!/^\d+$/.test(chapterIndex) || !/^\d+$/.test(sectionIndex)) {
+      return;
+    }
+    scrollReader({ selector: `#reader-section-${chapterIndex}-${sectionIndex}` });
   },
 
   scrollReaderToTop() {
