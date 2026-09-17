@@ -90,6 +90,11 @@ definePage<ChapterWorkspacePageData>()({
     focusedSectionTitle: "",
     workspace: null,
     nextAction: LOADING_NEXT_ACTION,
+    chapterHeroKicker: "这一章正在慢慢长大",
+    chapterStoryCountText: "故事正在生长",
+    chapterStoryDetail: "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+    chapterHasReadableDraft: false,
+    chapterEditingHint: "",
     readinessTitle: "正在读取本章",
     readinessDetail: "",
     rewriteNoticeTitle: "",
@@ -104,7 +109,7 @@ definePage<ChapterWorkspacePageData>()({
     rewriteDraftActionText: "更新有变化的小节正文",
     rewriteDraftBusyText: "正在更新小节正文…",
     rewriteDraftScopeDetail: "",
-    suggestionsExpanded: false,
+    editingToolsExpanded: false,
     requiredIssues: [],
     optionalIssues: [],
     sectionViews: [],
@@ -141,7 +146,6 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       projectId,
       chapterId,
-      suggestionsExpanded: Boolean(this.sectionFocusId),
     });
     if (!projectId || !chapterId) {
       this.setData({ loading: false, error: "缺少章节信息" });
@@ -404,9 +408,6 @@ definePage<ChapterWorkspacePageData>()({
       ),
       focusedSectionId: focusedSection?.id || "",
       focusedSectionTitle: focusedSection?.title || "",
-      suggestionsExpanded: focusedSectionId && !hasFocusedSection
-        ? false
-        : this.data.suggestionsExpanded,
       sectionViews: focusedSection
         ? [{ ...focusedSection, expanded: true }]
         : viewPatch.sectionViews,
@@ -500,6 +501,28 @@ definePage<ChapterWorkspacePageData>()({
       url: pageUrl("/pages/book-reader/index", {
         projectId: this.data.projectId,
         chapterId: this.data.chapterId,
+      }),
+    });
+  },
+
+  openStorySection(
+    event: PageDatasetEvent<{ id?: string }>,
+  ) {
+    const sectionId = datasetString(event, "id");
+    if (
+      !sectionId
+      || !this.data.projectId
+      || !this.data.chapterId
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/chapter-workspace/index", {
+        projectId: this.data.projectId,
+        chapterId: this.data.chapterId,
+        sectionId,
       }),
     });
   },

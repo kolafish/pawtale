@@ -24,7 +24,6 @@ import {
 } from "./chapter-workspace-view";
 import {
   chapterPreparationView,
-  CLOSED_DRAFT_SECTION_EDITOR,
   isActiveChapterPreparation,
   isActiveSectionRegeneration,
   scrollToSection,
@@ -44,7 +43,6 @@ interface ChapterWorkspaceJobHost {
   beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
   loadPageData(silent?: boolean): Promise<void>;
-  leaveAfterEditConfirmation(navigate: () => void): void;
 }
 
 function defineChapterWorkspaceJobMethods<TMethods extends object>(
@@ -54,9 +52,12 @@ function defineChapterWorkspaceJobMethods<TMethods extends object>(
 }
 
 export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
-  toggleSuggestions() {
+  toggleEditingTools() {
+    if (this.data.operationKind || this.data.editingSectionId) {
+      return;
+    }
     this.setData({
-      suggestionsExpanded: !this.data.suggestionsExpanded,
+      editingToolsExpanded: !this.data.editingToolsExpanded,
     });
   },
 
@@ -74,18 +75,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         ? version
         : this.data.candidatePreviewVersion,
     ));
-  },
-
-  openSectionStructure() {
-    if (this.data.operationKind) {
-      return;
-    }
-    this.leaveAfterEditConfirmation(() => {
-      this.setData({
-        ...CLOSED_DRAFT_SECTION_EDITOR,
-      });
-      scrollToSection("#chapter-sections");
-    });
   },
 
   toggleSection(event: PageDatasetEvent<{ id?: string }>) {

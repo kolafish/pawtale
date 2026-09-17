@@ -1,3 +1,73 @@
+<block wx:if="{{friendlyMode}}">
+  <view wx:if="{{requiredIssues.length}}" class="friendly-issue-group friendly-required-group">
+    <text class="friendly-group-title">有件事想请您确认</text>
+    <view wx:for="{{requiredIssues}}" wx:key="id" class="friendly-issue-card">
+      <text class="friendly-question">{{item.question}}</text>
+      <block wx:if="{{allowRequiredConfirmation}}">
+        <view
+          wx:if="{{answeringIssueId !== item.id}}"
+          class="friendly-primary-action ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
+          data-issue-id="{{item.id}}"
+          aria-role="button"
+          aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
+          bindtap="beginRequiredAnswer"
+        >说说您的想法 <text>›</text></view>
+        <view wx:else class="required-answer-editor">
+          <text class="required-answer-label">我的回答或处理说明</text>
+          <voice-text-editor
+            value="{{requiredAnswer}}"
+            gateway-url="{{requiredAnswerGatewayUrl}}"
+            voice-session-id="{{answeringIssueId}}"
+            maxlength="1000"
+            placeholder="可以写下来，也可以直接说给小余听。"
+            submit-text="保存这段回答"
+            busy-text="正在保存…"
+            cancel-text="稍后再说"
+            hint="您的原话会和这个故事一起保存。"
+            aria-label="填写或说出问题的回答或处理说明"
+            disabled="{{disabled}}"
+            busy="{{busyIssueId !== ''}}"
+            bindchange="changeRequiredAnswer"
+            bindsubmit="submitRequiredAnswer"
+            bindcancel="cancelRequiredAnswer"
+          />
+        </view>
+      </block>
+    </view>
+  </view>
+
+  <view wx:if="{{optionalIssues.length}}" class="friendly-issue-group friendly-optional-group">
+    <view wx:for="{{optionalIssues}}" wx:key="id" class="friendly-issue-card friendly-chat-card">
+      <view class="friendly-question-row">
+        <view class="friendly-chat-icon">
+          <image src="/assets/chapter-workspace/chapter-chat.png" mode="aspectFit" />
+        </view>
+        <text class="friendly-question">{{item.question}}</text>
+      </view>
+      <view
+        class="friendly-primary-action ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
+        data-issue-id="{{item.id}}"
+        aria-role="button"
+        aria-disabled="{{busyIssueId !== '' || disabled}}"
+        bindtap="beginInterview"
+      >{{item.active_session_id ? "接着聊这个" : "聊聊这个"}} <text>›</text></view>
+      <view class="friendly-secondary-actions">
+        <text
+          class="friendly-secondary-action ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
+          data-issue-id="{{item.id}}"
+          bindtap="markHandled"
+        >已经讲过</text>
+        <text
+          class="friendly-secondary-action ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
+          data-issue-id="{{item.id}}"
+          bindtap="skip"
+        >以后再说</text>
+      </view>
+    </view>
+  </view>
+</block>
+
+<block wx:else>
 <view wx:if="{{requiredIssues.length}}" class="issue-group required">
   <text class="group-title">需要确认 · {{requiredIssues.length}} 项</text>
   <text class="group-detail">
@@ -57,3 +127,4 @@
     </view>
   </view>
 </view>
+</block>

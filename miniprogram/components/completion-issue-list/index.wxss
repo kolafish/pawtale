@@ -3,9 +3,135 @@
 .question,
 .reason,
 .state,
-.required-answer-label {
+.required-answer-label,
+.friendly-group-title,
+.friendly-question {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.friendly-issue-group {
+  margin-top: 22rpx;
+}
+
+.friendly-required-group + .friendly-optional-group {
+  margin-top: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.friendly-group-title {
+  margin-bottom: 12rpx;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  font-weight: 650;
+  line-height: 34rpx;
+}
+
+.friendly-issue-card {
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: rgba(248, 239, 234, 0.72);
+  box-shadow:
+    0 0 0 1rpx rgba(91, 63, 48, 0.05),
+    0 8rpx 24rpx rgba(91, 63, 48, 0.04);
+}
+
+.friendly-issue-card + .friendly-issue-card {
+  margin-top: 14rpx;
+}
+
+.friendly-question-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+}
+
+.friendly-chat-icon {
+  width: 68rpx;
+  height: 68rpx;
+  flex: 0 0 68rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 253, 250, 0.76);
+}
+
+.friendly-chat-icon image {
+  width: 46rpx;
+  height: 46rpx;
+}
+
+.friendly-question {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: 28rpx;
+  font-weight: 650;
+  line-height: 46rpx;
+  text-wrap: pretty;
+}
+
+.friendly-primary-action {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 22rpx;
+  padding: 14rpx 22rpx 14rpx 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  border-radius: 22rpx;
+  background: rgba(255, 253, 250, 0.86);
+  color: var(--ui-accent-strong);
+  box-shadow:
+    0 0 0 1rpx var(--ui-accent-border),
+    0 6rpx 18rpx rgba(91, 63, 48, 0.04);
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  transition-property: transform, opacity;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.friendly-primary-action:active {
+  transform: scale(0.96);
+  opacity: 0.84;
+}
+
+.friendly-primary-action > text {
+  margin-top: -2rpx;
+  font-size: 36rpx;
+  font-weight: 400;
+  line-height: 36rpx;
+}
+
+.friendly-secondary-actions {
+  min-height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 36rpx;
+}
+
+.friendly-secondary-action {
+  min-height: 76rpx;
+  padding: 0 8rpx;
+  display: flex;
+  align-items: center;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 34rpx;
+  transition-property: opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.friendly-secondary-action:active {
+  opacity: 0.62;
 }
 
 .issue-group {

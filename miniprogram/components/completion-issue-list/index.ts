@@ -32,6 +32,7 @@ Component({
     requiredIssues: { type: Array, value: [] },
     optionalIssues: { type: Array, value: [] },
     allowRequiredConfirmation: { type: Boolean, value: false },
+    friendlyMode: { type: Boolean, value: false },
     disabled: { type: Boolean, value: false },
   },
 

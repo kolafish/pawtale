@@ -294,7 +294,7 @@ function installWx({ editableContent = "新小节" } = {}) {
 }
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
-  const { navigationTitles } = installWx();
+  const { navigationTitles, navigations } = installWx();
   let loadCount = 0;
   const { page } = loadWorkspacePage({
     voiceApiExports: {
@@ -311,17 +311,33 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
-  assert.equal(context.data.sectionStructureSummary, "1 个小节 · 1 条讲述");
+  assert.equal(context.data.chapterHeroKicker, "这一章已经整理成");
+  assert.equal(context.data.chapterStoryCountText, "1 个故事");
+  assert.equal(context.data.chapterHasReadableDraft, true);
+  assert.equal(context.data.chapterEditingHint, "");
+  assert.equal(context.data.sectionStructureSummary, "1 个故事 · 1 段回忆");
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
   assert.equal(context.data.sectionViews[0].expanded, false);
-  assert.equal(context.data.sectionViews[0].metaText, "1 条讲述 · 14 字正文");
+  assert.equal(context.data.sectionViews[0].metaText, "1 段回忆");
   assert.equal(context.data.sectionViews[0].draftContent, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.canConfirmChapter, true);
+  assert.equal(context.data.editingToolsExpanded, false);
   assert.deepEqual(navigationTitles, ["第一次离家"]);
   assert.doesNotMatch(
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
+  );
+
+  page.toggleEditingTools.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
+
+  page.openStorySection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  assert.equal(
+    navigations.at(-1),
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
   );
 });
 
@@ -368,7 +384,6 @@ test("chapter workspace opens a focused section selected from the story tree", a
   assert.equal(context.data.sectionViews.length, 1);
   assert.equal(context.data.sectionViews[0].expanded, true);
   assert.equal(context.data.expandedSectionIds["section-1"], true);
-  assert.equal(context.data.suggestionsExpanded, true);
   assert.equal(context.data.requiredIssues.length, 0);
   assert.equal(context.data.optionalIssues.length, 1);
   assert.deepEqual(scrolls, []);
@@ -409,7 +424,6 @@ test("chapter workspace falls back to full chapter for a stale section link", as
 
   assert.equal(context.data.focusedSectionId, "");
   assert.equal(context.data.sectionViews.length, 1);
-  assert.equal(context.data.suggestionsExpanded, false);
   assert.equal(context.data.requiredIssues.length, 1);
 });
 
@@ -674,8 +688,8 @@ test("chapter workspace renames a section through the existing section update AP
   assert.equal(context.data.operationKind, "");
 });
 
-test("confirmed chapter can reopen its structure and merge with the previous section", async () => {
-  const { modals, scrolls, toasts } = installWx();
+test("confirmed chapter can reopen its editing tools and merge with the previous story", async () => {
+  const { modals, toasts } = installWx();
   const calls = [];
   const base = workspace();
   const confirmedWorkspace = workspace({
@@ -712,8 +726,8 @@ test("confirmed chapter can reopen its structure and merge with the previous sec
   });
 
   assert.equal(context.data.sectionViews[1].mergeTargetId, "section-1");
-  page.openSectionStructure.call(context);
-  assert.equal(scrolls.at(-1), "#chapter-sections");
+  page.toggleEditingTools.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
 
   page.mergeSectionIntoPrevious.call(context, {
     currentTarget: {
@@ -916,8 +930,9 @@ test("chapter workspace keeps pending materials optional and opens their editor"
   );
   assert.equal(
     context.data.sectionStructureSummary,
-    "1 个小节 · 1 条讲述 · 1 条暂未归类",
+    "1 个故事 · 1 段回忆 · 1 段待整理",
   );
+  assert.equal(context.data.chapterEditingHint, "1 段回忆待整理");
   assert.equal(context.data.canConfirmChapter, true);
 
   page.openMaterialEditor.call(context, {
