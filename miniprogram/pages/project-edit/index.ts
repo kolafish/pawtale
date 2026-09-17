@@ -1,4 +1,7 @@
-import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
+import {
+  DEFAULT_NARRATION_MODE_OPTIONS,
+  type DefaultNarrationMode,
+} from "../../domain/memoir-narration-mode";
 import {
   accessibilityPageClass,
   accessibilityPagePatch,
@@ -14,7 +17,10 @@ import {
   updateMemoirProject,
 } from "../../services/memoir";
 import { markHomeLaunchProjectCreated } from "../../services/home-launch-state";
-import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
+import {
+  defaultNarrationSessionFields,
+  memoirProjectProfile,
+} from "../../services/memoir-project-profile";
 import {
   datasetChoice,
   queryParam,
@@ -45,16 +51,17 @@ interface ProjectEditData {
   projectId: string;
   pageTitle: string;
   title: string;
+  narratorName: string;
   narratorGender: MemoirNarratorGender;
   narratorOrigin: string;
   narratorAgeText: string;
-  defaultGuidanceMode: MemoirGuidanceMode;
+  defaultNarrationMode: DefaultNarrationMode;
   genderOptions: Array<Option<MemoirNarratorGender>>;
-  guidanceOptions: Array<Option<MemoirGuidanceMode>>;
+  narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
-const GUIDANCE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+const NARRATION_VALUES: readonly DefaultNarrationMode[] = ["free_narration", "guided_interview", "human_interview"];
 const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page";
 
 function ageFromText(value: string): number | null {
@@ -78,19 +85,17 @@ definePage<ProjectEditData>()({
     projectId: "",
     pageTitle: "新建回忆录",
     title: "",
+    narratorName: "",
     narratorGender: "unspecified",
     narratorOrigin: "",
     narratorAgeText: "",
-    defaultGuidanceMode: "free_narration",
+    defaultNarrationMode: "free_narration",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
       { value: "unspecified", label: "未填写" },
     ],
-    guidanceOptions: [
-      { value: "free_narration", label: guidanceModeLabel("free_narration") },
-      { value: "guided_interview", label: guidanceModeLabel("guided_interview") },
-    ],
+    narrationOptions: DEFAULT_NARRATION_MODE_OPTIONS,
   },
 
   onShow() {
@@ -109,10 +114,11 @@ definePage<ProjectEditData>()({
       projectId: "",
       pageTitle: "新建回忆录",
       title: "",
+      narratorName: "",
       narratorGender: "unspecified",
       narratorOrigin: "",
       narratorAgeText: "",
-      defaultGuidanceMode: "free_narration",
+      defaultNarrationMode: "free_narration",
     });
     setPageNavigationTitle("新建回忆录");
   },
@@ -129,10 +135,11 @@ definePage<ProjectEditData>()({
       const profile = memoirProjectProfile(project);
       this.setData({
         title: project.title,
+        narratorName: profile.narratorName,
         narratorGender: profile.narratorGender,
         narratorOrigin: profile.narratorOrigin,
         narratorAgeText: profile.narratorAge === null ? "" : String(profile.narratorAge),
-        defaultGuidanceMode: profile.defaultGuidanceMode,
+        defaultNarrationMode: profile.defaultNarrationMode,
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
@@ -143,6 +150,10 @@ definePage<ProjectEditData>()({
 
   changeTitle(event: InputEvent) {
     this.setData({ title: event.detail.value, error: "" });
+  },
+
+  changeNarratorName(event: InputEvent) {
+    this.setData({ narratorName: event.detail.value, error: "" });
   },
 
   changeOrigin(event: InputEvent) {
@@ -160,10 +171,10 @@ definePage<ProjectEditData>()({
     }
   },
 
-  selectGuidanceMode(event: DatasetEvent) {
-    const mode = datasetChoice(event, "mode", GUIDANCE_VALUES, this.data.defaultGuidanceMode);
+  selectNarrationMode(event: DatasetEvent) {
+    const mode = datasetChoice(event, "mode", NARRATION_VALUES, this.data.defaultNarrationMode);
     if (mode) {
-      this.setData({ defaultGuidanceMode: mode, error: "" });
+      this.setData({ defaultNarrationMode: mode, error: "" });
     }
   },
 
@@ -183,13 +194,16 @@ definePage<ProjectEditData>()({
       this.setData({ error: error instanceof Error ? error.message : "年龄格式不正确" });
       return;
     }
+    const narrationFields = defaultNarrationSessionFields(this.data.defaultNarrationMode);
     this.setData({ saving: true, error: "" });
     const payload = {
       title,
+      elder_name: this.data.narratorName.trim(),
       narrator_gender: this.data.narratorGender,
       narrator_origin: this.data.narratorOrigin.trim(),
       narrator_age: narratorAge,
-      default_guidance_mode: this.data.defaultGuidanceMode,
+      default_guidance_mode: narrationFields.guidanceMode,
+      default_interview_type: narrationFields.interviewType,
     };
     try {
       let createdProject: { id: string; title: string } | null = null;
@@ -201,7 +215,7 @@ definePage<ProjectEditData>()({
         createdProject = { id: project.id, title: project.title };
         await activateMemoirProject(project.id);
         trackAuditAction("project.create", {
-          default_guidance_mode: this.data.defaultGuidanceMode,
+          default_narration_mode: this.data.defaultNarrationMode,
         }, { projectId: project.id });
       }
       const identity = await getMemoirIdentity();

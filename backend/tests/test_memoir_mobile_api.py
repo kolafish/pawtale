@@ -151,6 +151,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
             "narrator_origin": "四川成都",
             "narrator_age": 72,
             "default_guidance_mode": "guided_interview",
+            "default_interview_type": "ai_interview",
         },
     )
     assert created_response.status_code == 201
@@ -165,6 +166,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
         "narrator_origin": "四川成都",
         "narrator_age": 72,
         "default_guidance_mode": "guided_interview",
+        "default_interview_type": "ai_interview",
     }
 
     renamed_response = await client.patch(
@@ -175,6 +177,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
             "narrator_origin": "四川绵阳",
             "narrator_age": 73,
             "default_guidance_mode": "free_narration",
+            "default_interview_type": "human_interview",
             "transcript_polish_level": "high",
         },
     )
@@ -184,6 +187,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert renamed["metadata_json"]["memoir_profile"]["narrator_origin"] == "四川绵阳"
     assert renamed["metadata_json"]["memoir_profile"]["narrator_age"] == 73
     assert renamed["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
+    assert renamed["metadata_json"]["memoir_profile"]["default_interview_type"] == "human_interview"
     assert renamed["metadata_json"]["transcript_polish_level"] == "high"
 
     project_list_response = await client.get("/api/mobile/memoir/projects")

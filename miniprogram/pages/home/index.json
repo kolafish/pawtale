@@ -2,7 +2,6 @@
   "navigationBarTitleText": "老余口述",
   "usingComponents": {
     "voice-session": "/components/voice-session/index",
-    "story-tree": "/components/story-tree/index",
-    "narration-mode-picker": "/components/narration-mode-picker/index"
+    "story-tree": "/components/story-tree/index"
   }
 }

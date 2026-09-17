@@ -1,4 +1,3 @@
-import { isNarrationMode, type NarrationModeEvent } from "../../domain/memoir-narration-mode";
 import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
@@ -30,7 +29,7 @@ import {
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-book-completion-api";
-import { returnToHomeNarrationMode, returnToBook, routeAuthError } from "../../services/navigation";
+import { returnToBook, routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -501,12 +500,6 @@ definePage<BookCompletionData>()({
   async onPullDownRefresh() {
     await this.loadOverview();
     wx.stopPullDownRefresh();
-  },
-
-  selectNarrationMode({ detail }: NarrationModeEvent) {
-    if (this.data.projectId && isNarrationMode(detail.value) && detail.value !== "book_completion") {
-      returnToHomeNarrationMode(this.data.projectId, detail.value);
-    }
   },
 
   openBookHome() {

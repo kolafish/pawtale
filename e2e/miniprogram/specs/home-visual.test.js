@@ -109,7 +109,6 @@ function baseState() {
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "讲个新故事",
-    showMoreActions: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",

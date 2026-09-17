@@ -1,4 +1,3 @@
-import type { NarrationMode } from "../domain/memoir-narration-mode";
 import type { VoiceSessionEntry } from "../components/voice-session/events";
 import { ApiError } from "./request";
 
@@ -15,19 +14,6 @@ export type PageNotFoundQuery = Record<string, string | undefined>;
 const LEGACY_PAGE_REDIRECTS: Record<string, string> = {
   "pages/book-chapter/index": CHAPTER_WORKSPACE_PAGE_URL,
 };
-
-let pendingNarrationMode: { projectId: string; mode: NarrationMode } | null = null;
-
-export function returnToHomeNarrationMode(projectId: string, mode: NarrationMode): void {
-  pendingNarrationMode = { projectId, mode };
-  returnToHome();
-}
-
-export function consumeHomeNarrationMode() {
-  const target = pendingNarrationMode;
-  pendingNarrationMode = null;
-  return target;
-}
 
 export interface HomeVoiceTarget { userId: string; projectId: string; entry: VoiceSessionEntry }
 let pendingVoiceTarget: HomeVoiceTarget | null = null;

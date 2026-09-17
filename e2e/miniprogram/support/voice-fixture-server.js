@@ -48,10 +48,45 @@ function createVoiceFixtureServer() {
     sessionId: sessionPrefix,
     sessionStatus: "created",
     sessionConfig: {},
+    projectTitle: "E2E 回忆录",
+    projectProfile: {
+      narrator_name: "",
+      narrator_gender: "unspecified",
+      narrator_origin: "",
+      narrator_age: null,
+      default_guidance_mode: "free_narration",
+      default_interview_type: "ai_interview",
+    },
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
     utterances: [],
   };
+
+  function projectDetail() {
+    return {
+      id: FIXTURE_PROJECT_ID,
+      title: state.projectTitle,
+      type: "memoir",
+      total_word_count: 0,
+      metadata_json: { memoir_profile: { ...state.projectProfile } },
+      groups: [],
+      references: [],
+      created_at: timestamp(),
+      updated_at: timestamp(),
+    };
+  }
+
+  function identity() {
+    const project = projectDetail();
+    return {
+      id: "e2e-user",
+      display_name: "测试作者",
+      email: "fixture@example.invalid",
+      active_project_id: project.id,
+      active_project: project,
+      projects: [project],
+    };
+  }
 
   function sessionDetail() {
     return {
@@ -101,11 +136,9 @@ function createVoiceFixtureServer() {
     state.httpRequests.push({ method: request.method, path: url.pathname, body });
 
     if (request.method === "GET" && url.pathname === "/api/mobile/memoir/story-snapshot") {
-      const project = { id: FIXTURE_PROJECT_ID, title: "E2E 回忆录", metadata_json: {} };
       respond(response, 200, {
         server_revision: state.httpRequests.length,
-        identity: { id: "e2e-user", display_name: "测试作者", email: "fixture@example.invalid",
-          active_project_id: project.id, active_project: project, projects: [project] },
+        identity: identity(),
         latest_transcript: null, chapters: [], growth_events: [],
         book_issues: { review_count: 0, supplement_count: 0 },
         book_readable: false, book_char_count: 0, book_chapter_count: 0, updated_at: timestamp(),
@@ -117,6 +150,33 @@ function createVoiceFixtureServer() {
           needs_user_material_count: 0, readable_chapter_count: 0, total_chapter_count: 0,
         } : null, automation_events: { items: [], total: 0, limit: 8 },
       });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/me") {
+      respond(response, 200, identity());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/projects") {
+      const currentIdentity = identity();
+      respond(response, 200, {
+        active_project_id: currentIdentity.active_project_id,
+        active_project: currentIdentity.active_project,
+        projects: currentIdentity.projects,
+      });
+      return;
+    }
+    if (request.method === "PATCH" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}`) {
+      state.projectTitle = body.title || state.projectTitle;
+      state.projectProfile = {
+        ...state.projectProfile,
+        narrator_name: body.elder_name,
+        narrator_gender: body.narrator_gender,
+        narrator_origin: body.narrator_origin,
+        narrator_age: body.narrator_age,
+        default_guidance_mode: body.default_guidance_mode,
+        default_interview_type: body.default_interview_type,
+      };
+      respond(response, 200, projectDetail());
       return;
     }
     if (request.method === "GET" && url.pathname === `/api/memoir/projects/${FIXTURE_PROJECT_ID}/book-completion/overview`) {
@@ -451,6 +511,7 @@ function createVoiceFixtureServer() {
 
 module.exports = {
   FIXTURE_ASSISTANT_TEXT,
+  FIXTURE_PROJECT_ID,
   FIXTURE_SESSION_ID,
   FIXTURE_USER_TEXT,
   createVoiceFixtureServer,

@@ -129,7 +129,7 @@
           <view class="settings-row-copy">
             <text class="action-title">{{projectCount ? "管理回忆录" : "创建回忆录"}}</text>
             <text class="action-meta">
-              {{projectCount ? ("切换当前回忆录、编辑资料 · 共 " + projectCount + " 本") : "创建第一本回忆录后开始访谈"}}
+              {{projectCount ? ("切换当前回忆录、编辑设置 · 共 " + projectCount + " 本") : "创建第一本回忆录后开始访谈"}}
             </text>
           </view>
           <text class="row-chevron">›</text>
