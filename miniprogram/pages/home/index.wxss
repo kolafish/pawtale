@@ -288,8 +288,7 @@
 .home-growth-title,
 .home-growth-detail,
 .home-story-progress-title,
-.home-story-progress-detail,
-.home-review-text {
+.home-story-progress-detail {
   display: block;
 }
 
@@ -302,8 +301,7 @@
 }
 
 .home-growth-detail,
-.home-story-progress-detail,
-.home-review-text {
+.home-story-progress-detail {
   margin-top: 3rpx;
   color: var(--ui-text-secondary);
   font-size: 24rpx;
@@ -336,12 +334,10 @@
 }
 
 .story-refresh-error,
-.home-review-notice,
 .home-story-progress {
   margin-top: 18rpx;
 }
 
-.home-review-notice,
 .home-story-progress {
   padding: 18rpx 20rpx;
   border-radius: 22rpx;
@@ -410,8 +406,7 @@
 .large-text .resume-primary-action,
 .large-text .voice-auth-hint,
 .large-text .home-growth-detail,
-.large-text .home-story-progress-detail,
-.large-text .home-review-text { font-size: 31rpx; }
+.large-text .home-story-progress-detail { font-size: 31rpx; }
 .large-text .voice-auth-copy,
 .large-text .voice-auth-link,
 .large-text .home-growth-title,

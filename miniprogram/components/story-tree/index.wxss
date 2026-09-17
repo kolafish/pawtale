@@ -99,8 +99,7 @@
   line-height: 1.35;
 }
 
-.hero-summary,
-.hero-growth-copy {
+.hero-summary {
   display: block;
   text-align: center;
 }
@@ -112,15 +111,6 @@
   font-weight: 800;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-}
-
-.hero-growth-copy {
-  max-width: 560rpx;
-  margin: 8rpx auto 0;
-  color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 1.55;
-  text-wrap: pretty;
 }
 
 .story-list-section {
@@ -254,23 +244,6 @@
   font-weight: 700;
 }
 
-.story-status {
-  flex: 0 0 auto;
-  padding: 6rpx 12rpx;
-  border-radius: 999rpx;
-  font-size: 21rpx;
-  font-weight: 700;
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
-.story-status-rich { color: var(--ui-success-text); background: var(--ui-success-surface); }
-.story-status-continue { color: var(--ui-warning-text); background: var(--ui-warning-surface); }
-.story-status-starting,
-.story-status-quiet { color: var(--ui-text-secondary); background: var(--ui-surface-subtle); }
-.story-status-working { color: #5f6973; background: #e7ecef; }
-.story-status-confirm { color: var(--ui-accent-strong); background: var(--ui-accent-surface); }
-
 .story-row-arrow {
   width: 24rpx;
   flex: 0 0 24rpx;
@@ -389,16 +362,13 @@
 .large-text .theme-tag { max-width: 240rpx; min-height: 66rpx; }
 .large-text .theme-tag-text { font-size: 30rpx; }
 .large-text .hero-summary { font-size: 36rpx; }
-.large-text .hero-growth-copy { font-size: 31rpx; }
 .large-text .story-list-title { font-size: 38rpx; }
 .large-text .story-list-toggle,
 .large-text .story-utility { font-size: 31rpx; }
 .large-text .story-row { min-height: 136rpx; flex-wrap: wrap; }
 .large-text .story-row-title { font-size: 35rpx; }
 .large-text .story-row-meta,
-.large-text .story-status,
 .large-text .growth-label { font-size: 28rpx; }
-.large-text .story-status { margin-left: 68rpx; }
 .large-text .book-card { min-height: 150rpx; flex-wrap: wrap; }
 .large-text .book-title { font-size: 36rpx; }
 .large-text .book-meta,
@@ -409,7 +379,6 @@
   .story-hero { padding: 20rpx; }
   .hero-visual { height: 360rpx; }
   .theme-tag { max-width: 180rpx; padding-right: 12rpx; padding-left: 12rpx; }
-  .story-status { padding-right: 9rpx; padding-left: 9rpx; }
   .book-card { flex-wrap: wrap; }
   .book-action { margin-left: 80rpx; }
 }

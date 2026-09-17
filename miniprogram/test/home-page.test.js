@@ -193,14 +193,11 @@ test("home routes the hero to a new story and the resume card to the prior conte
   assert.doesNotMatch(pageWxml, /bindreturnhome|voiceSessionMinimized/);
 });
 
-test("home places the story review notice after the story tree", () => {
+test("home keeps interview-engine notices out of the story overview", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  const storyTreeIndex = pageWxml.indexOf("<story-tree");
-  const reviewNoticeIndex = pageWxml.indexOf('wx:if="{{reviewNoticeText}}"');
 
-  assert.notEqual(storyTreeIndex, -1);
-  assert.notEqual(reviewNoticeIndex, -1);
-  assert.ok(storyTreeIndex < reviewNoticeIndex);
+  assert.match(pageWxml, /<story-tree/);
+  assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
 
 test("home only surfaces failed draft progress that the reader can act on", () => {
