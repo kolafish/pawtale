@@ -7,6 +7,7 @@ import {
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
+import type { MemoirTranscriptPolishLevel } from "../../domain/memoir";
 import type { MemoirNarratorGender } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -29,10 +30,17 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import {
+  transcriptPolishLevel,
+  TRANSCRIPT_POLISH_LEVELS,
+  TRANSCRIPT_POLISH_OPTIONS,
+  type TranscriptPolishOption,
+} from "../../services/transcript-polish-settings";
 
 interface ProjectEditDataset {
   gender?: string;
   mode?: string;
+  polish?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<ProjectEditDataset>;
@@ -56,8 +64,10 @@ interface ProjectEditData {
   narratorOrigin: string;
   narratorAgeText: string;
   defaultNarrationMode: DefaultNarrationMode;
+  transcriptPolishLevel: MemoirTranscriptPolishLevel;
   genderOptions: Array<Option<MemoirNarratorGender>>;
   narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
+  transcriptPolishOptions: TranscriptPolishOption[];
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
@@ -95,12 +105,14 @@ definePage<ProjectEditData>()({
     narratorOrigin: "",
     narratorAgeText: "",
     defaultNarrationMode: "free_narration",
+    transcriptPolishLevel: "low",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
       { value: "unspecified", label: "未填写" },
     ],
     narrationOptions: DEFAULT_NARRATION_MODE_OPTIONS,
+    transcriptPolishOptions: TRANSCRIPT_POLISH_OPTIONS,
   },
 
   onShow() {
@@ -124,6 +136,7 @@ definePage<ProjectEditData>()({
       narratorOrigin: "",
       narratorAgeText: "",
       defaultNarrationMode: "free_narration",
+      transcriptPolishLevel: "low",
     });
     setPageNavigationTitle("新建回忆录");
   },
@@ -145,6 +158,7 @@ definePage<ProjectEditData>()({
         narratorOrigin: profile.narratorOrigin,
         narratorAgeText: profile.narratorAge === null ? "" : String(profile.narratorAge),
         defaultNarrationMode: profile.defaultNarrationMode,
+        transcriptPolishLevel: transcriptPolishLevel(project),
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
@@ -183,6 +197,18 @@ definePage<ProjectEditData>()({
     }
   },
 
+  selectTranscriptPolishLevel(event: DatasetEvent) {
+    const level = datasetChoice(
+      event,
+      "polish",
+      TRANSCRIPT_POLISH_LEVELS,
+      this.data.transcriptPolishLevel,
+    );
+    if (level) {
+      this.setData({ transcriptPolishLevel: level, error: "" });
+    }
+  },
+
   async saveProject() {
     if (this.data.saving || this.data.loading) {
       return;
@@ -210,6 +236,7 @@ definePage<ProjectEditData>()({
       default_guidance_mode: narrationFields.guidanceMode,
       default_interview_type: narrationFields.interviewType,
       default_session_goal: narrationFields.sessionGoal,
+      transcript_polish_level: this.data.transcriptPolishLevel,
     };
     try {
       let createdProject: { id: string; title: string } | null = null;

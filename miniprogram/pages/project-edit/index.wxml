@@ -1,6 +1,6 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">资料和默认访谈方式会用于之后的新讲述</text>
+    <text class="ui-page-context">资料、访谈方式和润色强度只用于这本回忆录</text>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
@@ -88,6 +88,28 @@
           <text class="mode-title">{{item.label}}</text>
           <text class="mode-desc">{{item.description}}</text>
           <text wx:if="{{defaultNarrationMode === item.value}}" class="option-check" aria-hidden="true">✓</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="field">
+      <text class="field-label ui-section-heading">素材与正文润色强度</text>
+      <text class="mode-desc">用于这本回忆录之后新增或重新处理的内容，已经生成的文字不会自动改写。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="素材与正文润色强度">
+        <view
+          wx:for="{{transcriptPolishOptions}}"
+          wx:key="value"
+          id="polish-level-{{item.value}}"
+          class="mode-option ui-pressable {{transcriptPolishLevel === item.value ? 'selected' : ''}}"
+          data-polish="{{item.value}}"
+          bindtap="selectTranscriptPolishLevel"
+          aria-role="radio"
+          aria-checked="{{transcriptPolishLevel === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
+        >
+          <text class="mode-title">{{item.label}}</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{transcriptPolishLevel === item.value}}" class="option-check" aria-hidden="true">✓</text>
         </view>
       </view>
     </view>

@@ -32,12 +32,13 @@ function loadProjectEditPage({ project, updateMemoirProject }) {
   return loadPageModule("../pages/project-edit/index.ts");
 }
 
-test("project edit loads and saves the memoir-level default interview mode", async () => {
+test("project edit loads and saves memoir-level interview and polish settings", async () => {
   const updates = [];
   const project = {
     id: "project-1",
     title: "爷爷的回忆",
     metadata_json: {
+      transcript_polish_level: "high",
       memoir_profile: {
         narrator_name: "爷爷",
         narrator_gender: "male",
@@ -63,14 +64,21 @@ test("project edit loads and saves the memoir-level default interview mode", asy
   await context.onLoad({ projectId: project.id });
   assert.equal(context.data.narratorName, "爷爷");
   assert.equal(context.data.defaultNarrationMode, "human_interview");
+  assert.equal(context.data.transcriptPolishLevel, "high");
   assert.deepEqual(context.data.narrationOptions.map(option => option.value), [
     "free_narration",
     "guided_interview",
     "book_completion",
     "human_interview",
   ]);
+  assert.deepEqual(context.data.transcriptPolishOptions.map(option => option.value), [
+    "low",
+    "medium",
+    "high",
+  ]);
 
   context.selectNarrationMode({ currentTarget: { dataset: { mode: "book_completion" } } });
+  context.selectTranscriptPolishLevel({ currentTarget: { dataset: { polish: "medium" } } });
   await context.saveProject();
 
   assert.equal(updates.length, 1);
@@ -79,4 +87,5 @@ test("project edit loads and saves the memoir-level default interview mode", asy
   assert.equal(updates[0].payload.default_guidance_mode, "guided_interview");
   assert.equal(updates[0].payload.default_interview_type, "ai_interview");
   assert.equal(updates[0].payload.default_session_goal, "book_completion");
+  assert.equal(updates[0].payload.transcript_polish_level, "medium");
 });

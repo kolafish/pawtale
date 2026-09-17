@@ -34,8 +34,6 @@ test("transcript polish transport ignores stale project settings", () => {
 function loadVoiceSettingsPage({
   aiModelExports = {},
   accessibilityExports = {},
-  authExports,
-  memoirExports,
   ttsExports = {},
 } = {}) {
   mockModule("../services/ai-model-settings.ts", {
@@ -72,12 +70,6 @@ function loadVoiceSettingsPage({
     }),
     ...accessibilityExports,
   });
-  if (authExports) {
-    mockModule("../services/auth.ts", authExports);
-  }
-  if (memoirExports) {
-    mockModule("../services/memoir.ts", memoirExports);
-  }
   mockModule("../services/tts-settings.ts", {
     TTS_VOICE_OPTIONS: [
       {
@@ -122,9 +114,19 @@ test("voice settings page is registered in the miniprogram route list", () => {
   ));
 
   assert.ok(appConfig.pages.includes("pages/voice-settings/index"));
+  const pageTemplate = fs.readFileSync(
+    path.join(__dirname, "../pages/voice-settings/index.wxml"),
+    "utf8",
+  );
+  assert.doesNotMatch(pageTemplate, /润色强度|transcriptPolishOptions/);
+  const meTemplate = fs.readFileSync(
+    path.join(__dirname, "../pages/me/index.wxml"),
+    "utf8",
+  );
+  assert.doesNotMatch(meTemplate, /文字润色/);
 });
 
-test("voice settings loads local preferences and the project polish level on show", async () => {
+test("voice settings loads account and device preferences on show", () => {
   const { page } = loadVoiceSettingsPage({
     aiModelExports: {
       readSelectedAIModel: () => "doubao-seed-2-0-pro-260215",
@@ -141,77 +143,19 @@ test("voice settings loads local preferences and the project polish level on sho
         book: { voice: "", speedRatio: 1 },
       }),
     },
-    authExports: {
-      getMemoirIdentity: async () => ({
-        active_project_id: "project-2",
-        active_project: {
-          id: "project-2",
-          metadata_json: { transcript_polish_level: "high" },
-        },
-      }),
-    },
   });
   const context = pageContext(page);
 
-  await page.onShow.call(context);
+  page.onShow.call(context);
 
   assert.equal(context.data.pageClass, "voice-settings-page large-text");
   assert.equal(context.data.autoBargeInEnabled, false);
   assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
   assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
-  assert.equal(context.data.polishProjectId, "project-2");
-  assert.equal(context.data.transcriptPolishLevel, "high");
   assert.equal(context.data.chatTTSVoice, "zh_male_m191_uranus_bigtts");
   assert.equal(context.data.chatTTSSpeedRatio, 1.5);
   assert.equal(context.data.bookTTSVoice, "");
   assert.equal(context.data.bookTTSSpeedRatio, 1);
-});
-
-test("voice settings saves the selected project polish level", async () => {
-  const updates = [];
-  const toasts = [];
-  global.wx = {
-    showToast(options) {
-      toasts.push(options.title);
-    },
-  };
-  const { page } = loadVoiceSettingsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        active_project_id: "project-1",
-        active_project: {
-          id: "project-1",
-          metadata_json: { transcript_polish_level: "low" },
-        },
-      }),
-    },
-    memoirExports: {
-      updateMemoirProject: async (projectId, input) => {
-        updates.push({ projectId, input });
-        return {
-          id: projectId,
-          metadata_json: { transcript_polish_level: input.transcript_polish_level },
-        };
-      },
-    },
-  });
-  const context = pageContext(page);
-  await page.onShow.call(context);
-
-  await page.selectTranscriptPolishLevel.call(context, {
-    currentTarget: {
-      dataset: {
-        polish: "medium",
-      },
-    },
-  });
-
-  assert.deepEqual(updates, [{
-    projectId: "project-1",
-    input: { transcript_polish_level: "medium" },
-  }]);
-  assert.equal(context.data.transcriptPolishLevel, "medium");
-  assert.deepEqual(toasts, ["已保存"]);
 });
 
 test("voice settings saves the automatic speech detection preference", () => {
