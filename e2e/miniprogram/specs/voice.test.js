@@ -560,7 +560,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     ]);
     assert.ok(
       largeStageOffset.top + largeStageSize.height <= largeDockOffset.top,
-      "大字模式的完整行窗口不被固定操作区遮挡",
+      `大字模式的完整行窗口不被固定操作区遮挡（文字卡底部 ${largeStageOffset.top + largeStageSize.height}，固定操作区顶部 ${largeDockOffset.top}）`,
     );
     await tapBoundAction(await elementById(next, "voice-primary-action"));
     await waitForPageData(

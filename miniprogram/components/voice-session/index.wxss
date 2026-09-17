@@ -1870,14 +1870,32 @@
   box-shadow: var(--ui-card-shadow-raised);
 }
 
+.voice-chat-page.large-text.capture-focus .transcript-stage-head {
+  flex-wrap: nowrap;
+  gap: 8rpx;
+}
+
 .voice-chat-page.large-text.capture-focus .stage-status {
-  min-height: 80rpx;
-  padding: 0 22rpx;
+  min-height: 76rpx;
+  padding: 0 10rpx;
+  flex: 0 1 auto;
 }
 
 .voice-chat-page.large-text.capture-focus .stage-status-text {
-  font-size: 38rpx;
-  line-height: 56rpx;
+  font-size: 36rpx;
+  line-height: 54rpx;
+  white-space: nowrap;
+}
+
+.voice-chat-page.large-text.capture-focus .capture-summary {
+  min-width: 0;
+  min-height: 60rpx;
+  padding: 6rpx 8rpx;
+  flex: 0 1 auto;
+  gap: 4rpx;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  white-space: nowrap;
 }
 
 .voice-chat-page.large-text.capture-focus .live-caption-shell {
@@ -1906,6 +1924,15 @@
   border-radius: 24rpx;
   font-size: 34rpx;
   line-height: 52rpx;
+}
+
+.voice-chat-page.large-text.capture-focus .control-bar {
+  min-height: 342rpx;
+}
+
+.voice-chat-page.large-text.capture-focus .assistant-actions-slot {
+  min-height: 36rpx;
+  margin-top: 0;
 }
 
 .voice-chat-page.large-text.capture-focus .level-track {
