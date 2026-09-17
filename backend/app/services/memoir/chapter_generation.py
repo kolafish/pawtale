@@ -49,7 +49,10 @@ from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
 )
-from app.services.memoir.section_digests import get_current_section_digest
+from app.services.memoir.section_digests import (
+    get_current_section_digest,
+    mark_section_digests_stale,
+)
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -1488,6 +1491,7 @@ async def apply_chapter_section_candidate(
     section_id: str,
     expected_version_id: str,
     expected_input_signature: str,
+    candidate_title: str,
     candidate_content: str,
     feedback: str,
     requested_ai_model: str | None,
@@ -1543,10 +1547,49 @@ async def apply_chapter_section_candidate(
         ] != expected_section_ids
     ):
         raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再修改")
+    title = candidate_title.strip()
+    if not title:
+        raise ValueError("修改稿标题不能为空")
     content = candidate_content.strip()
     if not content:
         raise ValueError("修改稿正文不能为空")
     target_input = context.sections[target_index]
+    if title != target_input.title:
+        section = await db.scalar(
+            select(MemoirSection)
+            .where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.chapter_id == chapter_id,
+                MemoirSection.id == section_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if section is None:
+            raise HTTPException(status_code=404, detail="小节不存在")
+        if section.version != target_input.section_version:
+            raise HTTPException(status_code=409, detail="小节已经变化，请刷新后再修改")
+        section.title = title
+        section.version += 1
+        section.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(section)
+        await mark_section_digests_stale(
+            db,
+            project_id=project_id,
+            section_ids={section_id},
+        )
+        await db.flush()
+        context = await load_chapter_generation_context(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+        target_index = next(
+            index
+            for index, item in enumerate(context.sections)
+            if item.section_id == section_id
+        )
+        target_input = context.sections[target_index]
     replacement = {
         "section_id": target_input.section_id,
         "title": target_input.title,

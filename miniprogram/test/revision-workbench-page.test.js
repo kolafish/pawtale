@@ -48,6 +48,8 @@ function revisionProposal(overrides = {}) {
         sections: [{
           section_id: "section-1",
           title: "旧校舍",
+          before_title: "旧校舍",
+          after_title: "校园旧事",
           before_content: "修改前正文",
           after_content: "修改后正文",
           before_char_count: 5,
@@ -272,6 +274,8 @@ test("book revision page loads only the selected whole-book preview on demand", 
 
   assert.equal(after.changedChapters[0].sections[0].display_content, "修改后正文");
   assert.equal(before.changedChapters[0].sections[0].display_content, "修改前正文");
+  assert.equal(after.changedChapters[0].sections[0].display_title, "校园旧事");
+  assert.equal(before.changedChapters[0].sections[0].display_title, "旧校舍");
   assert.equal(after.proposal.comparison.before_chapter_order[0].title, "上学时光");
   assert.equal("before" in after.proposal, false);
   assert.equal("chapters" in after.proposal.comparison, false);
