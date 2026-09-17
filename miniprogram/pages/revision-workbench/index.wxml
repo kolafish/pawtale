@@ -5,7 +5,7 @@
       <text class="revision-kicker">小节修改</text>
       <text class="revision-title">先说怎么改，再看修改思路</text>
       <text wx:if="{{sectionTitle}}" class="chapter-title">{{sectionTitle}}</text>
-      <text class="revision-summary">可以说或输入修改要求。AI 会先给出完整修改思路；确认思路后才生成候选稿，最终确认前不会改动当前正文。</text>
+      <text class="revision-summary">进入页面后直接说修改要求，停顿后会自动生成修改思路；也可以输入。确认思路后才生成候选稿，最终确认前不会改动当前正文。</text>
       <voice-text-editor
         value="{{feedbackText}}"
         gateway-url="{{feedbackDictationUrl}}"
@@ -16,6 +16,7 @@
         busy-text="正在整理修改思路…"
         disabled="{{busy}}"
         busy="{{feedbackBusy}}"
+        automatic-voice-command="{{true}}"
         bindchange="changeFeedbackText"
         bindsubmit="submitFeedback"
       />

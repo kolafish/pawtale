@@ -106,7 +106,7 @@
       <view class="edit-assistant">
         <view>
           <text class="edit-assistant-title">让小余帮我改</text>
-          <text class="edit-assistant-hint">输入或说出要替换的词、句子或片段</text>
+          <text class="edit-assistant-hint">进入编辑后直接说，停顿后会自动生成修改后文字；也可以输入</text>
         </view>
         <voice-text-editor
           value="{{voiceEditInstructionText}}"
@@ -119,6 +119,7 @@
           hint="结果会放到上方“修改后”草稿，保存前可与修改前对比。"
           disabled="{{saving || deleting || convertingQuestionToAnswer}}"
           busy="{{voiceEditLoading}}"
+          automatic-voice-command="{{true}}"
           aria-label="输入或说出素材修改意见"
           bindchange="changeVoiceEditInstruction"
           bindsubmit="previewVoiceEdit"
