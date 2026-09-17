@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
   finishSessionSavedPatch,
   finishSessionStartPatch,
+  liveTranscriptScrollTop,
   noAnswerPromptFailedPatch,
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
@@ -36,6 +37,8 @@ test("voice recording flow derives recording start and unavailable patches", () 
     error: "",
     liveText: "",
     liveCharCount: 0,
+    liveScrollClass: "live-scroll",
+    liveScrollTop: 0,
     liveTranscriptFollowing: true,
     liveReviewStartCharCount: 0,
     selectedOpeningTopicText: "",
@@ -53,37 +56,30 @@ test("voice recording flow derives recording start and unavailable patches", () 
   });
 });
 
-test("voice recording flow derives live transcript patches", () => {
+test("voice recording flow derives live transcript content without guessing its scroll position", () => {
   const longPartial = "这是一段很长的正常访谈实时识别文字，".repeat(6);
 
-  const firstPatch = voiceLiveTranscriptPatch(longPartial, {
-    liveText: "",
-    liveScrollTop: 0,
-    liveTranscriptFollowing: true,
-  });
+  const firstPatch = voiceLiveTranscriptPatch(longPartial);
   assert.equal(firstPatch.liveText, longPartial);
   assert.equal(firstPatch.liveCharCount, longPartial.length);
   assert.equal(firstPatch.liveScrollClass, "live-scroll long");
-  assert.equal(firstPatch.liveScrollTop, 10000);
-  assert.equal(firstPatch.liveScrollTarget, "live-text-end-10000");
-  assert.equal(firstPatch.liveTextEndId, "live-text-end-10000");
+  assert.equal(firstPatch.liveScrollTop, undefined);
   assert.equal(firstPatch.persistenceStateText, "识别中");
 
-  const secondPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。`, {
-    liveText: longPartial,
-    liveScrollTop: firstPatch.liveScrollTop,
-    liveTranscriptFollowing: true,
-  });
-  assert.equal(secondPatch.liveScrollTop, 20000);
-  assert.equal(secondPatch.liveScrollTarget, "live-text-end-20000");
+  const emptyPatch = voiceLiveTranscriptPatch("");
+  assert.equal(emptyPatch.liveScrollClass, "live-scroll");
+  assert.equal(emptyPatch.liveScrollTop, 0);
+  assert.equal(emptyPatch.liveTranscriptFollowing, true);
+});
 
-  const pausedPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。后面还有`, {
-    liveText: `${longPartial}继续说到最新进度。`,
-    liveScrollTop: secondPatch.liveScrollTop,
-    liveTranscriptFollowing: false,
-  });
-  assert.equal(pausedPatch.liveScrollTop, undefined);
-  assert.equal(pausedPatch.liveScrollTarget, undefined);
+test("live transcript scroll follows rendered line height and handles ASR rewrites", () => {
+  assert.equal(liveTranscriptScrollTop(390, 390), 0);
+  assert.equal(liveTranscriptScrollTop(467.2, 390), 78);
+  assert.equal(liveTranscriptScrollTop(545, 390), 155);
+  assert.equal(liveTranscriptScrollTop(467, 390), 77);
+  assert.equal(liveTranscriptScrollTop(300, 390), 0);
+  assert.equal(liveTranscriptScrollTop(Number.NaN, 390), 0);
+  assert.equal(liveTranscriptScrollTop(500, 0), 0);
 });
 
 test("voice recording flow pauses review and explicitly returns to the newest caption", () => {
@@ -93,14 +89,10 @@ test("voice recording flow pauses review and explicitly returns to the newest ca
   }), {
     liveTranscriptFollowing: false,
     liveReviewStartCharCount: 88,
-    liveScrollTarget: "",
   });
-  assert.deepEqual(voiceTranscriptFollowLatestPatch(10000), {
+  assert.deepEqual(voiceTranscriptFollowLatestPatch(), {
     liveTranscriptFollowing: true,
     liveReviewStartCharCount: 0,
-    liveScrollTop: 20000,
-    liveTextEndId: "live-text-end-20000",
-    liveScrollTarget: "live-text-end-20000",
   });
 });
 
@@ -128,7 +120,6 @@ test("voice recording flow derives final transcript result", () => {
   assert.equal(result.patch.liveText, "");
   assert.equal(result.patch.liveCharCount, 0);
   assert.equal(result.patch.liveScrollClass, "live-scroll");
-  assert.equal(result.patch.liveScrollTarget, "");
   assert.equal(result.patch.liveScrollTop, 0);
   assert.equal(result.patch.liveTranscriptFollowing, true);
   assert.equal(result.patch.liveReviewStartCharCount, 0);

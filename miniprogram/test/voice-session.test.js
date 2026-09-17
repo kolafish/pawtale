@@ -1566,11 +1566,55 @@ test("voice chat clears live transcript when a new recording session starts", ()
   assert.equal(context.data.liveText, "");
   assert.equal(context.data.liveCharCount, 0);
   assert.equal(context.data.liveScrollClass, "live-scroll");
-  assert.equal(context.data.liveScrollTarget, "");
   assert.equal(context.data.liveScrollTop, 0);
   assert.equal(context.data.liveTranscriptFollowing, true);
   assert.equal(context.data.liveReviewStartCharCount, 0);
   assert.equal(context.data.persistenceStateText, "等待识别");
+});
+
+test("voice chat follows the rendered transcript height with one scroll source", () => {
+  const page = loadVoiceChatPage();
+  const rects = {
+    ".live-scroll": { top: 0, bottom: 390, left: 0, right: 320, width: 320, height: 390 },
+    ".live-text-content": { top: 0, bottom: 560, left: 0, right: 320, width: 320, height: 560 },
+  };
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      recording: true,
+      voiceAuthorizationAgreed: true,
+      liveTranscriptFollowing: true,
+    },
+    setData(patch, callback) {
+      this.data = { ...this.data, ...patch };
+      callback?.();
+    },
+    createSelectorQuery() {
+      const measurements = [];
+      const query = {
+        select(selector) {
+          return {
+            boundingClientRect(callback) {
+              measurements.push([selector, callback]);
+              return query;
+            },
+          };
+        },
+        exec() {
+          for (const [selector, callback] of measurements) callback(rects[selector] || null);
+        },
+      };
+      return query;
+    },
+  };
+
+  page.handlePartial.call(context, "这是一段正在实时增长的讲述。".repeat(8));
+
+  assert.equal(context.data.liveScrollTop, 170);
+  assert.equal(context.data.liveTranscriptFollowing, true);
+  assert.equal(context.data.liveScrollTarget, undefined);
+  assert.equal(context.data.liveTextEndId, undefined);
 });
 
 test("voice chat syncs authorization consent before reconnecting", async () => {

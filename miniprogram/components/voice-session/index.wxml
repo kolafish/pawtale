@@ -76,7 +76,9 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
   <view wx:if="{{showErrorKindStrip}}" class="session-state-strip">
-    <text class="session-state-error">{{errorKindText}}</text>
+    <view class="session-state-error">
+      <text class="session-state-error-text centered-control-label">{{errorKindText}}</text>
+    </view>
   </view>
   <view wx:if="{{showRecoveryPanel}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
@@ -138,7 +140,9 @@
 
   <view wx:if="{{showAssistantPanel}}" class="{{assistantPanelClass}}">
     <view class="assistant-head">
-      <text class="assistant-label">{{assistantLabelText}}</text>
+      <view class="assistant-label">
+        <text class="assistant-label-text centered-control-label">{{assistantLabelText}}</text>
+      </view>
     </view>
     <view wx:if="{{showAssistantOpening}}" class="assistant-opening">
       <text class="assistant-context">今天可以接着讲，也可以换个方向。想不起来也没关系。</text>
@@ -180,9 +184,9 @@
 
   <view wx:if="{{showTranscriptStage}}" class="transcript-stage">
     <view class="transcript-stage-head">
-      <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
-        {{stageStatusText}}
-      </text>
+      <view wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
+        <text class="stage-status-text centered-control-label">{{stageStatusText}}</text>
+      </view>
       <view wx:if="{{recording}}" class="capture-summary">
         <view class="capture-dot"></view>
         <text>已说 {{captureDurationText}}</text>
@@ -200,14 +204,15 @@
         class="{{liveScrollClass}}"
         scroll-y="{{true}}"
         scroll-top="{{liveScrollTop}}"
-        scroll-into-view="{{liveScrollTarget}}"
         scroll-with-animation="{{false}}"
         lower-threshold="32"
         bindtouchstart="pauseLiveTranscriptFollow"
         bindscrolltolower="resumeLiveTranscriptFollow"
       >
-        <text class="{{liveTextClass}} live-text-current">{{liveCurrentText}}</text>
-        <view id="{{liveTextEndId}}" class="live-text-end"></view>
+        <view class="live-text-content">
+          <text class="{{liveTextClass}} live-text-current">{{liveCurrentText}}</text>
+          <view class="live-text-end"></view>
+        </view>
       </scroll-view>
     </view>
     <view wx:if="{{showCaptureStrip && !recording}}" class="{{captureStripClass}}">
@@ -242,7 +247,9 @@
     </view>
     <view wx:if="{{showHistoryLines}}" class="history-lines">
       <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
-        <text class="line-role">{{item.roleText}}</text>
+        <view class="line-role">
+          <text class="line-role-text centered-control-label">{{item.roleText}}</text>
+        </view>
         <text>{{item.text}}</text>
       </view>
     </view>
