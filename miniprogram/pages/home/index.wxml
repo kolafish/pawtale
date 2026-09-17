@@ -39,21 +39,56 @@
       bind:opentranscripts="openTranscripts"
       bind:voiceedit="openVoiceEdit"
     >
-      <view
-        slot="heroAction"
-        id="primary-voice-action"
-        class="hero-voice-action {{voiceStartButtonClass}}"
-        bindtap="startPrimaryVoiceChat"
-        hover-class="{{voiceStartButtonHoverClass}}"
-        aria-role="button"
-        aria-disabled="{{loading || creatingVoice}}"
-      >
-        <text class="hero-voice-label">{{primaryVoiceButtonTitle}}</text>
-        <text class="hero-voice-arrow" aria-hidden="true">›</text>
+      <view slot="heroAction">
+        <view wx:if="{{showNarrationChoiceCard}}" class="narration-choice-card">
+          <view class="narration-choice-copy">
+            <text class="narration-choice-kicker">上次说到：</text>
+            <text class="narration-choice-text">{{lastStoryHint}}</text>
+          </view>
+          <view class="narration-choice-actions">
+            <view
+              id="resume-story-action"
+              class="narration-choice-action narration-choice-primary ui-pressable {{voiceStartButtonClass}}"
+              bindtap="resumeLastStory"
+              hover-class="{{voiceStartButtonHoverClass}}"
+              aria-role="button"
+              aria-label="接着上次的内容继续讲"
+              aria-disabled="{{loading || creatingVoice}}"
+            >
+              <text>接着讲</text>
+              <text class="narration-choice-arrow" aria-hidden="true">›</text>
+            </view>
+            <view
+              id="primary-voice-action"
+              class="narration-choice-action narration-choice-secondary ui-pressable {{voiceStartButtonClass}}"
+              bindtap="startPrimaryVoiceChat"
+              hover-class="{{voiceStartButtonHoverClass}}"
+              aria-role="button"
+              aria-label="讲一个新故事"
+              aria-disabled="{{loading || creatingVoice}}"
+            >
+              <text class="narration-choice-plus" aria-hidden="true">＋</text>
+              <text>讲个新故事</text>
+            </view>
+          </view>
+        </view>
+
+        <view
+          wx:else
+          id="primary-voice-action"
+          class="hero-voice-action {{voiceStartButtonClass}}"
+          bindtap="startPrimaryVoiceChat"
+          hover-class="{{voiceStartButtonHoverClass}}"
+          aria-role="button"
+          aria-disabled="{{loading || creatingVoice}}"
+        >
+          <text class="hero-voice-label">{{primaryVoiceButtonTitle}}</text>
+          <text class="hero-voice-arrow" aria-hidden="true">›</text>
+        </view>
       </view>
 
       <view slot="afterHero" id="home-narration-end" class="after-hero">
-        <text wx:if="{{narrationSaved}}" class="home-saved-notice" aria-live="polite">这段故事已经长进您的故事树。</text>
+        <text wx:if="{{narrationSaved && !growthNoticeText}}" class="home-saved-notice" aria-live="polite">这段故事已经长进您的故事树。</text>
 
         <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
           <view class="home-growth-icon" aria-hidden="true">
@@ -85,17 +120,6 @@
           <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别、保存原始音频和整理故事。</text>
         </view>
 
-        <view wx:if="{{hasProject && hasLastStoryHint}}" class="resume-card ui-card ui-card-borderless">
-          <view class="resume-icon" aria-hidden="true"><text>•••</text></view>
-          <view class="resume-copy">
-            <text class="resume-title">接着上次说</text>
-            <text class="resume-text">{{lastStoryHint}}</text>
-          </view>
-          <view class="resume-actions">
-            <view class="resume-primary-action ui-pressable" bindtap="resumeLastStory"
-              hover-class="ui-accent-action-hover" aria-role="button">接着讲 ›</view>
-          </view>
-        </view>
       </view>
     </story-tree>
 

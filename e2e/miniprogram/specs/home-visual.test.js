@@ -99,6 +99,7 @@ function baseState() {
     projectDisplayTitle: "Kola 的回忆录",
     lastStoryHint: "",
     hasLastStoryHint: false,
+    showNarrationChoiceCard: false,
     launchVariant: "none",
     hasProject: true,
     selectedMode: "free_narration",
@@ -184,6 +185,7 @@ function stateFixtures() {
       data: {
         ...base,
         hasLastStoryHint: true,
+        showNarrationChoiceCard: true,
         lastStoryHint: "以前做饭，我还是喜欢做那种看上去很有食欲的菜……",
       },
       lowerScreenshot: true,
@@ -196,6 +198,7 @@ function stateFixtures() {
         voiceAuthorizationRequested: true,
         showVoiceAuthorizationPanel: true,
         hasLastStoryHint: true,
+        showNarrationChoiceCard: true,
         lastStoryHint: "说到小时候住过的那条老街。",
       },
       lowerScreenshot: true,
@@ -204,6 +207,9 @@ function stateFixtures() {
       name: "growth-feedback",
       data: {
         ...base,
+        hasLastStoryHint: true,
+        showNarrationChoiceCard: true,
+        lastStoryHint: "夏天的时候，我们常去河边乘凉。",
         growthNoticeTitle: "故事树长出了新内容",
         growthNoticeText: "新长出 1 个故事：《童年回忆 · 夏天的河边》",
         growthNoticeIcon: "/assets/story-tree/chapter-sprig.png",
@@ -254,6 +260,7 @@ function stateFixtures() {
         displayName: "一位名字稍微长一些的讲述者",
         greetingText: "你好，一位名字稍微长一些的讲述者",
         hasLastStoryHint: true,
+        showNarrationChoiceCard: true,
         lastStoryHint: "那一年全家从很远的地方搬到县城，第一次住进临街的旧房子。",
         story: story({
           stage: 4,
@@ -279,8 +286,10 @@ async function renderFixture(fixture) {
   assert.ok(tree, `${fixture.name} 应渲染故事树`);
   const hero = await tree.$(".story-hero");
   const primary = await homePage.$("#primary-voice-action");
+  const resume = fixture.data.showNarrationChoiceCard ? await homePage.$("#resume-story-action") : null;
   assert.ok(hero, `${fixture.name} 应渲染故事树 Hero`);
   assert.ok(primary, `${fixture.name} 应渲染主讲述按钮`);
+  if (fixture.data.showNarrationChoiceCard) assert.ok(resume, `${fixture.name} 应渲染续讲入口`);
 
   const systemInfo = await session.miniProgram.systemInfo();
   const pageSize = await homePage.size();
@@ -293,6 +302,13 @@ async function renderFixture(fixture) {
     pixels(primarySize.height) >= 44,
     `${fixture.name} 主按钮点击区域不小于 44px（实际 ${pixels(primarySize.height)}px）`,
   );
+  if (resume) {
+    const resumeSize = await resume.size();
+    assert.ok(
+      pixels(resumeSize.height) >= 44,
+      `${fixture.name} 续讲入口点击区域不小于 44px（实际 ${pixels(resumeSize.height)}px）`,
+    );
+  }
 
   await session.miniProgram.screenshot({
     path: path.join(session.artifacts.runPath, `home-${fixture.name}-top.png`),

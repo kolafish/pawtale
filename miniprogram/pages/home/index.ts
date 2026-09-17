@@ -88,6 +88,7 @@ interface HomeData extends HomeStoryData {
   voiceStartButtonClass: string;
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
+  showNarrationChoiceCard: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -107,6 +108,7 @@ type HomeViewPatch = Pick<
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
+  | "showNarrationChoiceCard"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
 >;
@@ -161,6 +163,8 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
+    showNarrationChoiceCard: !state.needsLogin && state.hasProject && state.hasStories
+      && state.hasLastStoryHint && state.selectedMode !== "book_completion",
     showVoiceAuthorizationPanel: state.hasProject && !state.needsLogin && !state.loading
       && state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed
       && state.voiceAuthorizationRequested,
@@ -257,6 +261,7 @@ definePage<HomeData>()({
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "种下我的故事",
+    showNarrationChoiceCard: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",

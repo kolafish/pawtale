@@ -183,11 +183,14 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
-test("home routes the hero to a new story and the resume card to the prior context", () => {
+test("home combines new-story and resume actions without mixing their routes", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
   assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
-  assert.match(pageWxml, /class="resume-primary-action[\s\S]*?bindtap="resumeLastStory"/);
+  assert.match(pageWxml, /id="resume-story-action"[\s\S]*?bindtap="resumeLastStory"/);
+  assert.match(pageWxml, /wx:if="\{\{showNarrationChoiceCard\}\}"/);
+  assert.match(pageWxml, /wx:if="\{\{narrationSaved && !growthNoticeText\}\}"/);
+  assert.doesNotMatch(pageWxml, /resume-card|接着上次说/);
   assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
   assert.match(pageWxml, /<voice-session[\s\S]*?bindexit="exitVoiceSession"/);
   assert.doesNotMatch(pageWxml, /bindreturnhome|voiceSessionMinimized/);
@@ -288,6 +291,7 @@ test("home view patch keeps first-screen template state simple", () => {
       greetingText: homeViewPatch(baseData).greetingText,
       headerSubtitleText: homeViewPatch(baseData).headerSubtitleText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
+      showNarrationChoiceCard: homeViewPatch(baseData).showNarrationChoiceCard,
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
       voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
@@ -296,6 +300,7 @@ test("home view patch keeps first-screen template state simple", () => {
       greetingText: "你好，余主任",
       headerSubtitleText: "",
       primaryVoiceButtonTitle: "讲个新故事",
+      showNarrationChoiceCard: true,
       voiceStartButtonClass: "button-blocked",
       voiceStartButtonHoverClass: "none",
       showVoiceAuthorizationPanel: false,
@@ -325,6 +330,9 @@ test("home start action follows account, project, story and completion states", 
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
   assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, true);
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
 });
 
 test("home reveals voice consent only after a usable project requests it", () => {
