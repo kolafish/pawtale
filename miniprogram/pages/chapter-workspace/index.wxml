@@ -315,7 +315,7 @@
             class="section-toggle ui-pressable"
             data-id="{{item.id}}"
             aria-role="button"
-            aria-label="{{item.expanded ? '收起' : '展开'}}故事 {{item.title}}的回忆和正文"
+            aria-label="{{item.expanded ? '收起' : '展开'}}故事 {{item.title}}的管理项"
             bindtap="toggleSection"
           >
             <view class="section-index"><text>{{item.indexText}}</text></view>
@@ -324,11 +324,23 @@
               <text class="section-meta">{{item.metaText}}</text>
             </view>
             <view class="section-heading-actions">
-              <text class="section-expand-mark">编辑 <text class="section-expand-chevron">{{item.expanded ? "⌃" : "›"}}</text></text>
+              <text class="section-expand-mark">{{item.expanded ? "收起" : "展开"}} <text class="section-expand-chevron">{{item.expanded ? "⌃" : "⌄"}}</text></text>
             </view>
           </view>
 
           <block wx:if="{{item.expanded}}">
+            <view
+              wx:if="{{!item.requires_user_assignment}}"
+              class="section-story-open-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+              data-id="{{item.id}}"
+              aria-role="button"
+              aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+              aria-label="查看与编辑故事 {{item.title}}"
+              bindtap="openStorySection"
+            >
+              <text>查看与编辑故事</text>
+              <text>›</text>
+            </view>
             <view
               wx:if="{{!item.requires_user_assignment}}"
               class="section-title-edit-action ui-pressable {{operationKind !== '' ? 'is-disabled' : ''}}"
@@ -342,25 +354,24 @@
               <text>编辑故事标题</text>
               <text>›</text>
             </view>
-            <view class="section-material-list">
-              <text class="section-content-label">{{item.requires_user_assignment ? "待整理的回忆" : "讲过的回忆"}}</text>
+            <view wx:if="{{item.requires_user_assignment}}" class="section-material-list">
+              <text class="section-content-label">待整理的回忆</text>
               <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
               <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
                 <view
                   class="section-material-open ui-pressable"
                   data-utterance-id="{{material.utterance_id}}"
                   aria-role="button"
-                  aria-label="{{item.requires_user_assignment ? '编辑或删除' : '查看与修改'}}{{material.indexText}}"
+                  aria-label="编辑或删除{{material.indexText}}"
                   bindtap="openMaterialEditor"
                 >
                   <view class="section-material-open-copy">
                     <text class="section-material-index">{{material.indexText}}</text>
                     <text class="section-material-text">{{material.text}}</text>
                   </view>
-                  <text class="section-material-open-action">{{item.requires_user_assignment ? "编辑或删除 ›" : "›"}}</text>
+                  <text class="section-material-open-action">编辑或删除 ›</text>
                 </view>
                 <picker
-                  wx:if="{{item.requires_user_assignment}}"
                   mode="selector"
                   range="{{material.assignmentOptions}}"
                   range-key="title"
@@ -378,66 +389,6 @@
             </view>
 
             <block wx:if="{{!item.requires_user_assignment}}">
-              <block wx:if="{{editingSectionId === item.id && editingMode === 'manual'}}">
-            <view class="draft-section-body">
-              <textarea
-                class="draft-editor"
-                value="{{editingSectionContent}}"
-                maxlength="-1"
-                auto-height
-                cursor-spacing="24"
-                aria-label="编辑故事 {{item.title}}"
-                bindinput="changeDraftSectionContent"
-              />
-              <view class="edit-actions">
-                <button
-                  class="secondary-action ui-button"
-                  disabled="{{operationKind !== ''}}"
-                  bindtap="cancelDraftSectionEdit"
-                >取消</button>
-                <button
-                  class="secondary-action strong ui-button"
-                  loading="{{operationKind === 'save_draft_section'}}"
-                  disabled="{{operationKind === 'save_draft_section'}}"
-                  bindtap="saveDraftSectionEdit"
-                >保存这个故事</button>
-              </view>
-            </view>
-              </block>
-              <block wx:elif="{{item.hasDraft}}">
-                <view class="draft-section-actions">
-              <view
-                class="draft-section-action ui-pressable {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.id) ? 'is-disabled' : ''}}"
-                data-id="{{item.id}}"
-                aria-role="button"
-                aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.id)}}"
-                bindtap="playDraftSection"
-              >{{audioPhase === "preparing" && audioTarget === item.id ? "准备朗读…" : (audioPhase === "playing" && audioTarget === item.id ? "停止朗读" : "朗读")}}</view>
-              <view
-                class="draft-section-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-                data-id="{{item.id}}"
-                aria-role="button"
-                aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-                bindtap="startDraftSectionEdit"
-              >自己修改</view>
-              <view
-                class="draft-section-action regenerate ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-                data-id="{{item.id}}"
-                aria-role="button"
-                aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-                bindtap="startDraftSectionAIEdit"
-              >请小余改</view>
-                </view>
-                <view class="draft-section-body">
-                  <text class="section-content-label">整理后的故事{{item.draftNeedsUpdate ? "（待更新）" : ""}}</text>
-                  <text class="draft-content" selectable>{{item.draftContent}}</text>
-                </view>
-              </block>
-              <view wx:else class="draft-section-body draft-section-missing">
-                <text class="section-content-label">整理后的故事</text>
-                <text class="empty-detail">这个故事还在整理。完成当前步骤后，会根据讲过的回忆生成。</text>
-              </view>
-
               <view
                 wx:if="{{item.mergeTargetId}}"
                 class="section-merge-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
