@@ -499,7 +499,7 @@ test("chapter workspace template opens assigned materials in their existing edit
   );
 });
 
-test("chapter workspace switches one story list between browse and editing modes", () => {
+test("chapter workspace routes browse and editing story entries to one detail state", () => {
   const template = fs.readFileSync(
     path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
     "utf8",
@@ -512,17 +512,23 @@ test("chapter workspace switches one story list between browse and editing modes
   const entryMarkTemplate = template.slice(entryMarkStart, entryMarkEnd);
   const sectionListStart = template.indexOf('class="section-list unified-section-list"');
   const regroupStart = template.indexOf('class="structure-actions"');
+  const editingSectionTemplate = template.slice(sectionListStart, regroupStart);
 
   assert.match(
     template.slice(Math.max(0, overviewStart - 120), overviewStart),
     /!editingToolsExpanded/,
   );
   assert.doesNotMatch(overviewTemplate, /story-overview-meta/);
+  assert.match(overviewTemplate, /bindtap="openStorySection"/);
   assert.match(entryMarkTemplate, /editing-entry-chevron/);
   assert.doesNotMatch(entryMarkTemplate, /收起/);
   assert.match(template, />故事与回忆</);
   assert.doesNotMatch(template, /故事、回忆与正文|>改名</);
   assert.ok(regroupStart > sectionListStart, "重新分组应位于故事编辑列表之后");
+  assert.match(editingSectionTemplate, /bindtap="openStorySection"/);
+  assert.match(editingSectionTemplate, />查看与编辑故事</);
+  assert.doesNotMatch(editingSectionTemplate, /class="draft-section-(?:actions|body)/);
+  assert.doesNotMatch(editingSectionTemplate, /bindtap="startDraftSectionEdit"/);
   assert.match(template, />已收入书稿</);
 });
 
