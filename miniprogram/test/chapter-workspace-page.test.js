@@ -317,6 +317,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(context.data.chapterEditingHint, "");
   assert.equal(context.data.sectionStructureSummary, "1 个故事 · 1 段回忆");
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
+  assert.equal(context.data.sectionViews[0].indexText, "01");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
   assert.equal(context.data.sectionViews[0].expanded, false);
   assert.equal(context.data.sectionViews[0].metaText, "1 段回忆");
