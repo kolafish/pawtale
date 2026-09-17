@@ -191,6 +191,7 @@ test("chapter overview renders the story-first visual hierarchy", async () => {
     assert.ok(readActionHeight >= 40, `读章节按钮满足最小触控区域（实际 ${readActionHeight}px）`);
     assert.ok(editingEntryHeight >= 40, `整理入口满足最小触控区域（实际 ${editingEntryHeight}px）`);
     assert.equal(await page.$(".draft-card"), null, "高级整理默认收起");
+    assert.equal(await page.$(".editing-entry-chevron.is-expanded"), null, "折叠态箭头应向下");
 
     await session.miniProgram.screenshot({
       path: path.join(session.artifacts.runPath, "chapter-story-overview.png"),
@@ -200,11 +201,26 @@ test("chapter overview renders the story-first visual hierarchy", async () => {
     await sleep(350);
     assert.equal((await page.data()).editingToolsExpanded, true);
     assert.ok(await page.$(".draft-card"), "整理入口展开后仍保留完整编辑能力");
+    assert.equal(await page.$(".story-overview-card"), null, "编辑态不应重复保留浏览故事列表");
+    assert.equal((await page.$$(".section-item")).length, 2, "编辑态只展示同一组故事");
+    assert.ok(await page.$(".editing-entry-chevron.is-expanded"), "展开态箭头应向上");
+    const regroupAction = await page.$(".structure-regenerate-action");
+    const regroupActionHeight = Number.parseFloat((await regroupAction.size()).height);
+    assert.ok(regroupActionHeight >= 40, `重新分组工具项满足最小触控区域（实际 ${regroupActionHeight}px）`);
     await session.miniProgram.pageScrollTo(900);
     await sleep(300);
     await session.miniProgram.screenshot({
       path: path.join(session.artifacts.runPath, "chapter-editing-expanded.png"),
     });
+
+    const confirmedData = chapterData();
+    confirmedData.editingToolsExpanded = true;
+    confirmedData.workspace.completion_summary = { state: "confirmed" };
+    await page.setData(confirmedData);
+    await sleep(250);
+    const includedAction = await page.$(".chapter-finished-action");
+    assert.match(await includedAction.text(), /已收入书稿/);
+    assert.equal(await page.$(".confirm-chapter-action"), null, "已收入后不再显示提交式按钮");
   } catch (error) {
     failed = true;
     await session.artifacts.captureFailure(session.miniProgram, error);
