@@ -11,10 +11,7 @@ import { formatPlaybackClock } from "../../services/time";
 import {
   plainTranscriptSegments,
   transcriptAudioText,
-  transcriptBookInclusionText,
   transcriptCreatedAtText,
-  transcriptMaterialChapterText,
-  transcriptMaterialSectionText,
   transcriptTitleText,
   type TranscriptTextSegment,
 } from "../../services/transcript-view-model";
@@ -35,14 +32,16 @@ export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   audioText: string;
   recordMetaText: string;
   transcriptionNoticeText: string;
+  heroStatusText: string;
+  heroStatusClass: string;
   displayCountText: string;
   rawCountText: string;
-  bookStatusClass: string;
   canRecoverTranscription: boolean;
-  bookInclusionText: string;
+  locationTitleText: string;
+  locationDescriptionText: string;
+  showLocationPath: boolean;
   chapterLocationText: string;
   sectionLocationText: string;
-  isIncludedInBook: boolean;
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
   canPlayQuestionAudio: boolean;
@@ -271,40 +270,56 @@ export function toViewItem(
     item.can_recover_transcription || item.transcription_status === "pending_transcription",
   );
   const savedText = item.transcript_edited || item.transcript_raw;
-  const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const isIncludedInBook = !canRecoverTranscription && Boolean(
+    item.is_included_in_book
+    || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
+  );
+  const assignment = item.section_assignment;
+  const includedChapter = [...(item.included_chapters || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)[0];
+  const hasLocation = !canRecoverTranscription && Boolean(assignment || includedChapter);
+  const chapterLocationText = assignment?.chapter_title.trim()
+    || includedChapter?.title.trim()
+    || "未命名故事";
+  const sectionLocationText = assignment
+    ? (assignment.requires_user_assignment
+      ? "还没有选择具体位置"
+      : (assignment.section_title.trim() || "未命名故事"))
+    : "";
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
   const questionText = item.question_text.trim();
-  const recoveryText = item.summary_text || "这段录音已经保存，但还没有识别成文字。";
   const offlineAsrState = item.offline_asr || DEFAULT_OFFLINE_ASR_STATE;
   const offlineAsrView = materialOfflineASRView(offlineAsrState);
   return {
     ...item,
     offline_asr: offlineAsrState,
-    titleText: transcriptTitleText(item),
+    titleText: canRecoverTranscription ? "音频已保存" : transcriptTitleText(item),
     savedText,
     editingText: previous?.isEditing ? previous.editingText : savedText,
     editingCharCount: (previous?.isEditing ? previous.editingText : savedText).trim().length,
     createdAtText,
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
-    transcriptionNoticeText: canRecoverTranscription ? "音频已保存，等待转写" : "",
-    displayCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
-    rawCountText: canRecoverTranscription ? "待转写" : `${item.raw_char_count} 字`,
-    bookStatusClass: canRecoverTranscription
-      ? "pending"
-      : (isIncludedInBook ? "included" : ""),
+    transcriptionNoticeText: canRecoverTranscription
+      ? "这段录音已经安全保存，恢复转写后即可继续整理。"
+      : "",
+    heroStatusText: canRecoverTranscription ? "等待转写" : "已整理",
+    heroStatusClass: canRecoverTranscription ? "pending" : "ready",
+    displayCountText: canRecoverTranscription ? "尚未生成" : `${item.display_char_count} 字`,
+    rawCountText: canRecoverTranscription ? "尚未转写" : `${item.raw_char_count} 字`,
     canRecoverTranscription,
-    bookInclusionText: canRecoverTranscription
-      ? "等待转写后再入章"
-      : transcriptBookInclusionText(item),
-    chapterLocationText: canRecoverTranscription
-      ? "等待转写后再归入章节"
-      : transcriptMaterialChapterText(item),
-    sectionLocationText: canRecoverTranscription
-      ? "等待转写后再归入小节"
-      : transcriptMaterialSectionText(item),
-    isIncludedInBook,
+    locationTitleText: hasLocation
+      ? (isIncludedInBook ? "已放进故事树" : "已整理到故事树")
+      : "还没有放进故事树",
+    locationDescriptionText: canRecoverTranscription
+      ? "小余会帮您判断这段故事适合放在哪里。"
+      : (hasLocation
+        ? "这段故事现在在故事树的这个位置。"
+        : "小余还没有为这段故事找到合适的位置。"),
+    showLocationPath: hasLocation,
+    chapterLocationText,
+    sectionLocationText,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
     canPlayQuestionAudio: Boolean(item.question_audio_file_id),
@@ -317,8 +332,12 @@ export function toViewItem(
     questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
-    rawSegments: plainTranscriptSegments(canRecoverTranscription ? "等待恢复转写后显示原始识别文字。" : item.transcript_raw),
-    displaySegments: plainTranscriptSegments(canRecoverTranscription ? recoveryText : item.display_text),
+    rawSegments: plainTranscriptSegments(canRecoverTranscription
+      ? "这里会保留尽量忠于原话的识别文字。"
+      : item.transcript_raw),
+    displaySegments: plainTranscriptSegments(canRecoverTranscription
+      ? "小余会帮您整理成适合阅读的文字。"
+      : item.display_text),
     changed: previous?.isEditing
       ? previous.editingText.trim() !== savedText.trim()
       : false,

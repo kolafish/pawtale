@@ -28,75 +28,16 @@
     <view class="hero-panel">
       <text class="record-title">{{item.titleText}}</text>
       <text class="record-meta">{{item.recordMetaText}}</text>
-      <text wx:if="{{item.transcriptionNoticeText}}" class="transcription-notice">{{item.transcriptionNoticeText}}</text>
-      <text class="book-status {{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
-      <view wx:if="{{!item.isEditing}}" class="actions-row primary-actions">
+      <text wx:if="{{!item.isEditing}}" class="hero-status {{item.heroStatusClass}}">{{item.heroStatusText}}</text>
+      <text wx:if="{{!item.isEditing && item.transcriptionNoticeText}}" class="hero-status-copy">{{item.transcriptionNoticeText}}</text>
+      <view wx:if="{{!item.isEditing && item.canRecoverTranscription}}" class="actions-row primary-actions">
         <button
-          wx:if="{{item.canRecoverTranscription}}"
           class="primary-button"
           bindtap="recoverTranscript"
           loading="{{recovering}}"
           disabled="{{recovering || saving || deleting || convertingQuestionToAnswer}}"
         >
           {{recovering ? "转写中" : "恢复转写"}}
-        </button>
-        <button
-          wx:else
-          class="primary-button"
-          bindtap="playAnswerAudio"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
-        >
-          {{playingAudioKind === "answer" ? "停止讲述" : "听讲述原音"}}
-        </button>
-        <button
-          wx:if="{{!item.canRecoverTranscription}}"
-          class="ghost-button"
-          bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
-        >
-          编辑成书文字
-        </button>
-      </view>
-      <view wx:else class="edit-mode-summary">
-        <view class="edit-mode-copy">
-          <text class="edit-mode-title">正在编辑成书文字</text>
-          <text class="edit-mode-hint">原始录音和识别原文不会被覆盖</text>
-        </view>
-        <button class="edit-exit-button" bindtap="cancelEdit" disabled="{{saving || deleting}}">
-          退出编辑
-        </button>
-      </view>
-    </view>
-
-    <view wx:if="{{!item.isEditing && answerPlaybackVisible}}" class="playback-panel">
-      <view class="playback-head">
-        <view class="section-heading">
-          <text class="section-title">讲述原音</text>
-          <text class="section-hint">只播放家人的这段回答</text>
-        </view>
-        <text class="section-count">{{answerPlaybackStatusText}}</text>
-      </view>
-      <view class="playback-track">
-        <view class="playback-fill" style="{{answerPlaybackProgressStyle}}"></view>
-      </view>
-      <view class="playback-time-row">
-        <text>{{answerPlaybackCurrentText}}</text>
-        <text>{{answerPlaybackDurationText}}</text>
-      </view>
-      <view class="actions-row playback-actions">
-        <button
-          class="ghost-button"
-          bindtap="toggleAnswerPlaybackPause"
-          disabled="{{!answerPlaybackCanTogglePause}}"
-        >
-          {{answerPlaybackPaused ? "继续播放" : "暂停"}}
-        </button>
-        <button
-          class="ghost-button"
-          bindtap="stopPlayback"
-          disabled="{{!answerPlaybackCanStop}}"
-        >
-          {{answerPlaybackStopText}}
         </button>
       </view>
     </view>
@@ -105,9 +46,15 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">成书文字</text>
-          <text class="section-hint">这段会用于章节正文</text>
+          <text class="section-hint">整理后会用于书稿</text>
         </view>
-        <text class="section-count">{{item.displayCountText}}</text>
+        <text wx:if="{{item.canRecoverTranscription}}" class="section-count">{{item.displayCountText}}</text>
+        <button
+          wx:else
+          class="section-link"
+          bindtap="beginEdit"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
+        >编辑 ›</button>
       </view>
       <text class="body-text display-text">
         <text
@@ -208,7 +155,7 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">原始讲述</text>
-          <text class="section-hint">根据录音识别，保留口述痕迹</text>
+          <text class="section-hint">保留您当时说话的样子</text>
         </view>
         <text class="section-count">{{item.rawCountText}}</text>
       </view>
@@ -258,48 +205,38 @@
       </view>
     </view>
 
-    <view
-      wx:if="{{!item.isEditing && !item.canRecoverTranscription}}"
-      class="section-card media-tools-card ui-pressable"
-      bindtap="openMediaTools"
-      aria-role="button"
-      aria-label="打开图片与分享视频工具"
-    >
-      <view class="media-tools-copy">
-        <text class="section-title">图片与分享视频</text>
-        <text class="section-hint">从成书文字选择片段，生成插图或带原音字幕的视频</text>
-      </view>
-      <text class="media-tools-action">制作 ›</text>
-    </view>
-
     <view wx:if="{{!item.isEditing}}" class="section-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">章节与小节</text>
-          <text class="section-hint">{{item.isIncludedInBook ? "当前成书素材位置" : "当前素材整理位置"}}</text>
+          <text class="section-title">收录位置</text>
+          <text class="section-hint">这段故事现在放在哪里</text>
         </view>
-        <text class="section-count">{{item.isIncludedInBook ? "已入章" : "未入章"}}</text>
       </view>
-      <view class="material-location-summary">
+      <view class="material-location-summary {{item.showLocationPath ? 'has-path' : ''}}">
+        <text class="material-location-title">{{item.locationTitleText}}</text>
+        <text class="material-location-description">{{item.locationDescriptionText}}</text>
+        <block wx:if="{{item.showLocationPath}}">
         <view class="material-location-row">
-          <text class="material-location-label">章节</text>
+          <text class="material-location-label">故事</text>
           <text class="material-location-value">{{item.chapterLocationText}}</text>
         </view>
-        <view class="material-location-row">
-          <text class="material-location-label">小节</text>
+        <view wx:if="{{item.sectionLocationText}}" class="material-location-row">
+          <text class="material-location-label">位置</text>
           <text class="material-location-value">{{item.sectionLocationText}}</text>
         </view>
+        </block>
       </view>
       <view
-        class="material-location-action ui-pressable {{saving || deleting || convertingQuestionToAnswer || item.canRecoverTranscription ? 'is-disabled' : ''}}"
+        wx:if="{{!item.canRecoverTranscription}}"
+        class="material-location-action ui-pressable {{saving || deleting || convertingQuestionToAnswer ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{saving || deleting || convertingQuestionToAnswer || item.canRecoverTranscription}}"
+        aria-disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         bindtap="toggleMaterialAssignmentEditor"
       >
-        {{assignmentEditorOpen ? "收起调整" : "调整章节和小节"}}
+        {{assignmentEditorOpen ? "收起调整" : "调整位置"}}
       </view>
       <view wx:if="{{assignmentEditorOpen}}" class="material-assignment-editor">
-        <text wx:if="{{assignmentLoading}}" class="material-assignment-state">正在加载章节和小节…</text>
+        <text wx:if="{{assignmentLoading}}" class="material-assignment-state">正在加载可选位置…</text>
         <text wx:if="{{assignmentError}}" class="material-assignment-error">{{assignmentError}}</text>
         <block wx:if="{{!assignmentLoading && assignmentOptions.length}}">
           <picker
@@ -337,6 +274,62 @@
           </button>
         </view>
       </view>
+    </view>
+
+    <view wx:if="{{!item.isEditing}}" class="section-card audio-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">原始音频</text>
+          <text class="section-hint">保留这段讲述的声音</text>
+        </view>
+        <text class="section-count">{{item.audioText}}</text>
+      </view>
+      <button
+        class="audio-play-button"
+        bindtap="playAnswerAudio"
+        disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
+      >
+        {{playingAudioKind === "answer" ? "停止播放" : "播放原音"}}
+      </button>
+      <view wx:if="{{answerPlaybackVisible}}" class="playback-body">
+        <view class="playback-track">
+          <view class="playback-fill" style="{{answerPlaybackProgressStyle}}"></view>
+        </view>
+        <view class="playback-time-row">
+          <text>{{answerPlaybackCurrentText}}</text>
+          <text>{{answerPlaybackDurationText}}</text>
+        </view>
+        <view class="actions-row playback-actions">
+          <button
+            class="ghost-button"
+            bindtap="toggleAnswerPlaybackPause"
+            disabled="{{!answerPlaybackCanTogglePause}}"
+          >
+            {{answerPlaybackPaused ? "继续播放" : "暂停"}}
+          </button>
+          <button
+            class="ghost-button"
+            bindtap="stopPlayback"
+            disabled="{{!answerPlaybackCanStop}}"
+          >
+            {{answerPlaybackStopText}}
+          </button>
+        </view>
+      </view>
+    </view>
+
+    <view
+      wx:if="{{!item.isEditing && !item.canRecoverTranscription}}"
+      class="section-card media-tools-card ui-pressable"
+      bindtap="openMediaTools"
+      aria-role="button"
+      aria-label="打开图片与分享视频工具"
+    >
+      <view class="media-tools-copy">
+        <text class="section-title">图片与分享视频</text>
+        <text class="section-hint">从成书文字选择片段，生成插图或带原音字幕的视频</text>
+      </view>
+      <text class="media-tools-action">制作 ›</text>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="section-card more-actions-card">

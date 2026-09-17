@@ -117,7 +117,6 @@
       class="recovery-row"
       catchtap="stopCardTap"
     >
-      <text class="recovery-notice">{{item.recoveryNoticeText}}</text>
       <button
         class="small-primary"
         data-id="{{item.id}}"
