@@ -33,8 +33,7 @@ test("story voice edit opts into the shared automatic dictation flow", () => {
     path.join(__dirname, "../pages/story-voice-edit/index.wxml"),
     "utf8",
   );
-  assert.match(template, /auto-start="\{\{true\}\}"/);
-  assert.match(template, /submit-on-voice-final="\{\{true\}\}"/);
+  assert.match(template, /automatic-voice-command="\{\{true\}\}"/);
   assert.match(template, /给童年回忆重新整理小节/);
 });
 

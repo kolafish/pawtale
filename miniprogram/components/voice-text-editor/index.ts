@@ -56,8 +56,7 @@ Component({
     maxlength: { type: Number, value: 1000 },
     disabled: { type: Boolean, value: false },
     busy: { type: Boolean, value: false },
-    autoStart: { type: Boolean, value: false },
-    submitOnVoiceFinal: { type: Boolean, value: false },
+    automaticVoiceCommand: { type: Boolean, value: false },
   },
 
   data: {
@@ -70,7 +69,7 @@ Component({
     value(value: unknown) {
       this.syncText(value);
     },
-    "autoStart,gatewayUrl,disabled,busy"() {
+    "automaticVoiceCommand,gatewayUrl,disabled,busy"() {
       this.tryAutoStart();
     },
   },
@@ -142,7 +141,7 @@ Component({
       if (
         !runtime.attached
         || runtime.autoStartAttempted
-        || !this.properties.autoStart
+        || !this.properties.automaticVoiceCommand
         || !this.properties.gatewayUrl
         || !this.canEdit()
       ) {
@@ -282,7 +281,7 @@ Component({
       const shouldSubmit = Boolean(
         transcript
         && runtime.hasFinalTranscript
-        && this.properties.submitOnVoiceFinal,
+        && this.properties.automaticVoiceCommand,
       );
       runtime.baseText = "";
       runtime.transcript = "";

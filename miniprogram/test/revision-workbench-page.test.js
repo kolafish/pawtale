@@ -186,6 +186,19 @@ function loadRevisionPage({ api = {} } = {}) {
   return loadPageModule("../pages/revision-workbench/index.ts");
 }
 
+test("initial section revision uses the shared automatic voice command flow", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/revision-workbench/index.wxml"),
+    "utf8",
+  );
+
+  assert.equal(
+    template.match(/automatic-voice-command="\{\{true\}\}"/g)?.length,
+    1,
+  );
+  assert.match(template, /进入页面后直接说修改要求，停顿后会自动生成修改思路/);
+});
+
 test("book revision plan presents proposed book information before drafting", () => {
   const { mod } = loadRevisionPage();
   const proposal = revisionPlanProposal({

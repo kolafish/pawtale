@@ -75,7 +75,7 @@ test("shared voice text editor shows live transcription without replacing existi
   assert.deepEqual(toasts, ["语音已转成文字"]);
 });
 
-test("opt-in voice editor resumes after authorization and submits only after final text", async () => {
+test("automatic voice command resumes after authorization and submits only after final text", async () => {
   const controller = {
     callbacks: null,
     connectCount: 0,
@@ -119,8 +119,7 @@ test("opt-in voice editor resumes after authorization and submits only after fin
   const component = loadComponentModule("../components/voice-text-editor/index.ts").component;
   const context = componentContext(component, {
     gatewayUrl: "ws://backend.local/projects/project-1/dictation",
-    autoStart: true,
-    submitOnVoiceFinal: true,
+    automaticVoiceCommand: true,
   });
   component.lifetimes.attached.call(context);
   await flushAsyncWork();
