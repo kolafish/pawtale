@@ -327,6 +327,7 @@ test("home start action follows account, project, story and completion states", 
   assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
+  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
 });
 
 test("home reveals voice consent only after a usable project requests it", () => {
@@ -364,6 +365,36 @@ test("home starts all three regular modes from the saved project default", async
     assert.equal(created.at(-1).session_goal, "open_narration");
     context.data.voiceEntry = null;
   }
+});
+
+test("home routes the book-completion default to the scoped issue list", async () => {
+  const navigations = [];
+  let creates = 0;
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: async () => { creates += 1; },
+  } });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "爷爷的故事",
+    projectDisplayTitle: "爷爷的故事",
+    hasProject: true,
+    selectedMode: "book_completion",
+    voiceAuthorizationAgreed: false,
+  });
+
+  await context.startPrimaryVoiceChat();
+
+  assert.equal(creates, 0);
+  assert.equal(context.data.voiceAuthorizationRequested, false);
+  assert.equal(navigations.length, 1);
+  const url = new URL(navigations[0], "https://miniprogram.test");
+  assert.equal(url.pathname, "/pages/book-completion/index");
+  assert.equal(url.searchParams.get("projectId"), "project/1");
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -1001,7 +1032,7 @@ test("home persists voice authorization checkbox changes", () => {
 test("home refreshes the saved project default for the current account and project", async () => {
   let identity = { id: "u1", display_name: "作者", email: "author@test.invalid", active_project_id: "p1",
     active_project: { id: "p1", title: "回忆录", metadata_json: { memoir_profile: {
-      default_guidance_mode: "free_narration", default_interview_type: "ai_interview",
+      default_guidance_mode: "free_narration", default_interview_type: "ai_interview", default_session_goal: "open_narration",
     } } } };
   const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => identity },
     cacheExports: { readCachedMemoirHome: () => ({ payload: { identity, latest_transcript: null, server_revision: 1 } }) },
@@ -1011,20 +1042,27 @@ test("home refreshes the saved project default for the current account and proje
   await context.onShow();
   assert.equal(context.data.selectedMode, "free_narration");
   identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
-    default_guidance_mode: "guided_interview", default_interview_type: "ai_interview",
+    default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "open_narration",
   } } } };
   await context.loadHome(true);
   assert.equal(context.data.selectedMode, "guided_interview");
   identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
-    default_guidance_mode: "free_narration", default_interview_type: "human_interview",
+    default_guidance_mode: "free_narration", default_interview_type: "human_interview", default_session_goal: "open_narration",
   } } } };
   await context.loadHome(true);
   assert.equal(context.data.selectedMode, "human_interview");
+  identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
+    default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "book_completion",
+  } } } };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "book_completion");
   identity = { ...identity, id: "u2" };
   await context.loadHome(true);
-  assert.equal(context.data.selectedMode, "human_interview");
+  assert.equal(context.data.selectedMode, "book_completion");
   identity = { ...identity, active_project_id: "p2", active_project: { ...identity.active_project, id: "p2",
-    metadata_json: { memoir_profile: { default_guidance_mode: "guided_interview", default_interview_type: "ai_interview" } } } };
+    metadata_json: { memoir_profile: {
+      default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "open_narration",
+    } } } };
   context.data.voiceEntry = { voiceSessionId: "old-session" };
   context.data.selectedMode = "human_interview";
   await context.loadHome(true);

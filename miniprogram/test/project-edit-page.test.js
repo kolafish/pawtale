@@ -45,6 +45,7 @@ test("project edit loads and saves the memoir-level default interview mode", asy
         narrator_age: 97,
         default_guidance_mode: "free_narration",
         default_interview_type: "human_interview",
+        default_session_goal: "open_narration",
       },
     },
   };
@@ -65,10 +66,11 @@ test("project edit loads and saves the memoir-level default interview mode", asy
   assert.deepEqual(context.data.narrationOptions.map(option => option.value), [
     "free_narration",
     "guided_interview",
+    "book_completion",
     "human_interview",
   ]);
 
-  context.selectNarrationMode({ currentTarget: { dataset: { mode: "guided_interview" } } });
+  context.selectNarrationMode({ currentTarget: { dataset: { mode: "book_completion" } } });
   await context.saveProject();
 
   assert.equal(updates.length, 1);
@@ -76,4 +78,5 @@ test("project edit loads and saves the memoir-level default interview mode", asy
   assert.equal(updates[0].payload.elder_name, "爷爷");
   assert.equal(updates[0].payload.default_guidance_mode, "guided_interview");
   assert.equal(updates[0].payload.default_interview_type, "ai_interview");
+  assert.equal(updates[0].payload.default_session_goal, "book_completion");
 });

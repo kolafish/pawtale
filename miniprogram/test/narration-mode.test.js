@@ -15,10 +15,11 @@ function fields(mode) {
     sessionGoal: mode === "book_completion" ? "book_completion" : "open_narration" };
 }
 
-test("project defaults include the three regular interview modes but not book completion", () => {
+test("project defaults preserve all four interview modes", () => {
   assert.deepEqual(DEFAULT_NARRATION_MODE_OPTIONS.map(option => option.value), [
     "free_narration",
     "guided_interview",
+    "book_completion",
     "human_interview",
   ]);
   assert.ok(DEFAULT_NARRATION_MODE_OPTIONS.every(option => option.label && option.description));

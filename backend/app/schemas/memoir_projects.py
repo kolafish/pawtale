@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.domain.memoir.types import (
     MemoirGuidanceMode,
     MemoirInterviewType,
+    MemoirSessionGoal,
     MemoirTranscriptPolishLevel,
 )
 from app.schemas.auth import UserResponse
@@ -18,6 +19,7 @@ class MemoirProjectCreate(BaseModel):
     narrator_age: int | None = None
     default_guidance_mode: MemoirGuidanceMode | None = None
     default_interview_type: MemoirInterviewType | None = None
+    default_session_goal: MemoirSessionGoal | None = None
     transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW
 
     @field_validator("narrator_age")
@@ -36,6 +38,7 @@ class MemoirProjectUpdate(BaseModel):
     narrator_age: int | None = None
     default_guidance_mode: MemoirGuidanceMode | None = None
     default_interview_type: MemoirInterviewType | None = None
+    default_session_goal: MemoirSessionGoal | None = None
     transcript_polish_level: MemoirTranscriptPolishLevel | None = None
 
     @field_validator("narrator_age")

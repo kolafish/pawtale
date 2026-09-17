@@ -20,6 +20,7 @@ test("normalizes memoir project profile metadata", () => {
         narrator_age: 72.2,
         default_guidance_mode: "guided_interview",
         default_interview_type: "ai_interview",
+        default_session_goal: "open_narration",
       },
     },
   };
@@ -31,6 +32,7 @@ test("normalizes memoir project profile metadata", () => {
     narratorAge: 72,
     defaultGuidanceMode: "guided_interview",
     defaultInterviewType: "ai_interview",
+    defaultSessionGoal: "open_narration",
     defaultNarrationMode: "guided_interview",
   });
 });
@@ -44,6 +46,7 @@ test("formats memoir project profile labels", () => {
         narrator_age: 68,
         default_guidance_mode: "free_narration",
         default_interview_type: "human_interview",
+        default_session_goal: "open_narration",
       },
     },
   };
@@ -54,6 +57,26 @@ test("formats memoir project profile labels", () => {
   assert.deepEqual(defaultNarrationSessionFields("human_interview"), {
     guidanceMode: "free_narration",
     interviewType: "human_interview",
+    sessionGoal: "open_narration",
+  });
+});
+
+test("normalizes the book-completion project default", () => {
+  const project = {
+    metadata_json: {
+      memoir_profile: {
+        default_guidance_mode: "guided_interview",
+        default_interview_type: "ai_interview",
+        default_session_goal: "book_completion",
+      },
+    },
+  };
+
+  assert.equal(memoirProjectProfile(project).defaultNarrationMode, "book_completion");
+  assert.deepEqual(defaultNarrationSessionFields("book_completion"), {
+    guidanceMode: "guided_interview",
+    interviewType: "ai_interview",
+    sessionGoal: "book_completion",
   });
 });
 

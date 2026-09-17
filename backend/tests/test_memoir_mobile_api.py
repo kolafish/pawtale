@@ -152,6 +152,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
             "narrator_age": 72,
             "default_guidance_mode": "guided_interview",
             "default_interview_type": "ai_interview",
+            "default_session_goal": "open_narration",
         },
     )
     assert created_response.status_code == 201
@@ -167,6 +168,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
         "narrator_age": 72,
         "default_guidance_mode": "guided_interview",
         "default_interview_type": "ai_interview",
+        "default_session_goal": "open_narration",
     }
 
     renamed_response = await client.patch(
@@ -178,6 +180,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
             "narrator_age": 73,
             "default_guidance_mode": "free_narration",
             "default_interview_type": "human_interview",
+            "default_session_goal": "open_narration",
             "transcript_polish_level": "high",
         },
     )
@@ -188,7 +191,22 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert renamed["metadata_json"]["memoir_profile"]["narrator_age"] == 73
     assert renamed["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
     assert renamed["metadata_json"]["memoir_profile"]["default_interview_type"] == "human_interview"
+    assert renamed["metadata_json"]["memoir_profile"]["default_session_goal"] == "open_narration"
     assert renamed["metadata_json"]["transcript_polish_level"] == "high"
+
+    completion_response = await client.patch(
+        f"/api/mobile/memoir/projects/{created['id']}",
+        json={
+            "default_guidance_mode": "guided_interview",
+            "default_interview_type": "ai_interview",
+            "default_session_goal": "book_completion",
+        },
+    )
+    assert completion_response.status_code == 200
+    completion_profile = completion_response.json()["metadata_json"]["memoir_profile"]
+    assert completion_profile["default_guidance_mode"] == "guided_interview"
+    assert completion_profile["default_interview_type"] == "ai_interview"
+    assert completion_profile["default_session_goal"] == "book_completion"
 
     project_list_response = await client.get("/api/mobile/memoir/projects")
     project_list = project_list_response.json()

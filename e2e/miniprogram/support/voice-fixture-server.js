@@ -56,6 +56,7 @@ function createVoiceFixtureServer() {
       narrator_age: null,
       default_guidance_mode: "free_narration",
       default_interview_type: "ai_interview",
+      default_session_goal: "open_narration",
     },
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
@@ -175,6 +176,7 @@ function createVoiceFixtureServer() {
         narrator_age: body.narrator_age,
         default_guidance_mode: body.default_guidance_mode,
         default_interview_type: body.default_interview_type,
+        default_session_goal: body.default_session_goal,
       };
       respond(response, 200, projectDetail());
       return;
