@@ -246,7 +246,7 @@ function visibleSectionViews(
         ...section,
         indexText: section.requires_user_assignment
           ? "待"
-          : `${sectionIndex + 1}`,
+          : String(sectionIndex + 1).padStart(2, "0"),
         typeText: section.requires_user_assignment
           ? "暂不纳入正文"
           : SECTION_TYPE_TEXT[section.section_type] || "内容小节",

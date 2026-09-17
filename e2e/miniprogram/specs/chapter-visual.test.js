@@ -33,7 +33,7 @@ function storySection(id, title, memoryCount, index) {
     material_count: memoryCount,
     included_material_count: memoryCount,
     materials: [],
-    indexText: String(index),
+    indexText: String(index).padStart(2, "0"),
     typeText: "生活片段",
     metaText: `${memoryCount} 段回忆`,
     assignmentHint: "",
@@ -178,6 +178,13 @@ test("chapter overview renders the story-first visual hierarchy", async () => {
     assert.ok(hero, "章节概览应以故事成长卡开场");
     assert.ok(issueCard, "补充建议应直接展示具体问题");
     assert.equal(storyRows.length, 2, "章节概览应展示故事而不是后台小节摘要");
+    assert.deepEqual(
+      await Promise.all(storyRows.map(async (row) => (
+        (await row.$(".story-overview-index")).text()
+      ))),
+      ["01", "02"],
+      "故事目录使用稳定的两位编号，不重复装饰图标",
+    );
     assert.ok(Number.parseFloat((await hero.size()).width) > systemInfo.windowWidth * 0.8);
     const readActionHeight = Number.parseFloat((await readAction.size()).height);
     const editingEntryHeight = Number.parseFloat((await editingEntry.size()).height);
