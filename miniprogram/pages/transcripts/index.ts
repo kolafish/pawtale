@@ -71,9 +71,9 @@ interface TranscriptItemView {
   recoverButtonLoading: boolean;
   recoverButtonDisabled: boolean;
   recoverButtonText: string;
-  bookInclusionText: string;
+  storyStatusText: string;
   cardClass: string;
-  bookStatusClass: string;
+  storyStatusClass: string;
   detailActionText: string;
   cardAriaLabel: string;
 }
@@ -188,9 +188,9 @@ function withTranscriptRuntimeState(
   return {
     ...item,
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
-    bookStatusClass: item.canRecoverTranscription
-      ? "book-status pending"
-      : "book-status",
+    storyStatusClass: item.canRecoverTranscription
+      ? "record-status pending"
+      : "record-status",
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
@@ -374,7 +374,7 @@ function toViewItem(
     : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
-  const bookInclusionText = canRecoverTranscription
+  const storyStatusText = canRecoverTranscription
     ? "待转写"
     : (isIncludedInBook
       ? "已放进故事树"
@@ -396,13 +396,13 @@ function toViewItem(
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
     recoverButtonText: "恢复转写",
-    bookInclusionText,
+    storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
-    bookStatusClass: canRecoverTranscription
-      ? "book-status pending"
-      : "book-status",
+    storyStatusClass: canRecoverTranscription
+      ? "record-status pending"
+      : "record-status",
     detailActionText,
-    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${bookInclusionText}，${detailActionText}`,
+    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，${detailActionText}`,
   };
 }
 

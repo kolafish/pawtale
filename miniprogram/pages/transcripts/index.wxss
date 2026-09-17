@@ -299,7 +299,7 @@
   gap: 18rpx;
 }
 
-.book-status {
+.record-status {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--ui-text-secondary);
@@ -309,7 +309,7 @@
   overflow-wrap: anywhere;
 }
 
-.book-status.pending {
+.record-status.pending {
   flex: 0 0 auto;
   padding: 5rpx 13rpx;
   border-radius: 999rpx;
@@ -365,7 +365,7 @@
 }
 
 .transcripts-page.large-text .search-chip,
-.transcripts-page.large-text .book-status,
+.transcripts-page.large-text .record-status,
 .transcripts-page.large-text .detail-action {
   font-size: 28rpx;
 }
