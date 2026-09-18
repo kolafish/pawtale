@@ -38,7 +38,6 @@ import {
   type HomeStoryTarget,
   navigateToMe,
   navigateToTranscripts,
-  navigateToBook,
   navigateToLogin,
 } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
@@ -493,15 +492,6 @@ definePage<HomeData>()({
       }
     } finally {
       this.setData({ retryingDraft: false });
-    }
-  },
-
-  openBook() {
-    if (!this.data.projectId) return;
-    if (this.data.bookReadable) {
-      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId }) });
-    } else {
-      navigateToBook();
     }
   },
 

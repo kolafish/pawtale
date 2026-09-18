@@ -1,4 +1,5 @@
 import type { MemoirStorySnapshot } from "../../domain/memoir-snapshots";
+import { memoirHomepageTitle } from "../../services/memoir-display-copy";
 import { resolveStoryTreeGrowthStage, STORY_TREE_STAGE_IMAGES } from "./story-growth-stage";
 import type { StoryTone, StoryViewData } from "./story-view-data";
 
@@ -50,7 +51,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       bookMetaText: [chapterCount ? `${chapterCount} 章` : "", bookCharText].filter(Boolean).join(" · ") || "正在整理",
     },
     overview: {
-      title: "我的故事树",
+      title: memoirHomepageTitle(project?.title || ""),
       summaryText: chapters.length
         ? `${chapters.length} 个主题 · ${storyCount} 个故事`
         : materialCount ? "回忆正在整理成故事" : "故事树还在等待第一段回忆",

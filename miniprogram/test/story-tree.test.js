@@ -27,13 +27,11 @@ test("tree emits only supported destinations and preserves chapter identity", ()
   const context = tree(undefined, { canSwitchProject: true });
   context.openProjects();
   context.openChapter(tap({ id: "childhood" }));
-  context.openBook();
   context.openTranscripts();
   context.openVoiceEdit();
   assert.deepEqual(context.events, [
     { name: "openprojects", detail: undefined },
     { name: "openchapter", detail: { chapterId: "childhood" } },
-    { name: "openbook", detail: undefined },
     { name: "opentranscripts", detail: undefined },
     { name: "voiceedit", detail: undefined },
   ]);
@@ -52,9 +50,10 @@ test("tree template folds the complete story list into the hero without timeline
   assert.match(template, /id="story-summary-toggle"/);
   assert.match(template, /class="story-list-expand/);
   assert.doesNotMatch(template, /树上的故事/);
-  assert.match(template, /story-book-utility/);
-  assert.match(template, /bookMetaText/);
-  assert.doesNotMatch(template, /book-card|book-sprout\.png|我的书/);
+  assert.match(template, /全部回忆/);
+  assert.match(template, /story-utility-divider/);
+  assert.match(template, /语音编辑/);
+  assert.doesNotMatch(template, /story-book-utility|bookMetaText|book-card|book-sprout\.png|我的书/);
   assert.doesNotMatch(template, /class="book-symbol"/);
   assert.match(template, /name="heroAction"/);
   assert.match(template, /name="afterHero"/);

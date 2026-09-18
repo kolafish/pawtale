@@ -16,6 +16,7 @@
 .hero-heading {
   box-sizing: border-box;
   width: fit-content;
+  max-width: 100%;
   min-height: 44px;
   margin: -8rpx 0 0 -8rpx;
   padding: 8rpx;
@@ -26,12 +27,15 @@
 }
 
 .hero-title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
   font-size: 36rpx;
   font-weight: 800;
   line-height: 1.35;
-  text-wrap: balance;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hero-title-arrow {
@@ -303,63 +307,28 @@
   margin-top: 16rpx;
   display: flex;
   align-items: center;
-  gap: 4rpx;
+  justify-content: center;
+  gap: 6rpx;
 }
 
 .story-utility {
   box-sizing: border-box;
   min-height: 44px;
-  padding: 0 14rpx;
+  padding: 0 20rpx;
   border-radius: 16rpx;
   display: flex;
   align-items: center;
+  justify-content: center;
   color: var(--ui-text-secondary);
   font-size: 24rpx;
   font-weight: 600;
 }
 
-.story-book-utility {
-  min-width: 0;
-  flex: 1 1 auto;
-  justify-content: space-between;
-  gap: 4rpx;
-  padding-left: 8rpx;
-  color: var(--ui-text-primary);
-}
-
-.story-book-copy {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.story-book-label {
-  flex: 0 0 auto;
-  font-weight: 750;
-}
-
-.story-book-meta {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ui-text-secondary);
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.story-utility-arrow {
-  flex: 0 0 auto;
-  color: var(--ui-accent-strong);
-  font-size: 30rpx;
-  font-weight: 450;
-  line-height: 1;
-  transform: translate(1rpx, -1rpx);
-}
-
-.story-secondary-utility {
-  flex: 0 0 auto;
+.story-utility-divider {
+  width: 1rpx;
+  height: 24rpx;
+  flex: 0 0 1rpx;
+  background: rgba(96, 77, 64, 0.18);
 }
 
 .growth-arriving {
@@ -399,18 +368,10 @@
 .large-text .story-row-title { font-size: 35rpx; }
 .large-text .story-row-meta,
 .large-text .growth-label { font-size: 28rpx; }
-.large-text .story-utilities {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.large-text .story-book-utility { grid-column: 1 / -1; }
-.large-text .story-secondary-utility { justify-content: center; }
+.large-text .story-utility { font-size: 28rpx; }
 
 @media (max-width: 360px) {
   .story-hero { padding: 20rpx; }
   .hero-visual { height: 360rpx; }
   .theme-tag { max-width: 180rpx; padding-right: 12rpx; padding-left: 12rpx; }
-  .story-utilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .story-book-utility { grid-column: 1 / -1; }
-  .story-secondary-utility { justify-content: center; }
 }

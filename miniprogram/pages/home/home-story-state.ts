@@ -10,7 +10,6 @@ export interface HomeStoryData {
   hasStories: boolean;
   storyError: string;
   progress: MemoirDraftProgress | null;
-  bookReadable: boolean;
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
@@ -46,7 +45,7 @@ export class HomeGrowthTracker {
 export function emptyHomeStoryData(): HomeStoryData {
   return {
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
-    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeDetail: "",
+    growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeDetail: "",
     growthNoticeMeta: "", growthNoticeContext: "", growthTarget: null, narrationSaved: false,
     dismissingGrowth: false, retryingDraft: false,
   };
@@ -120,7 +119,7 @@ export function homeStorySnapshotData(
     && Boolean(addedCount || updatedCount || bookCharCountDelta);
   return {
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
-    bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
+    growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount || bookCharCountDelta
       ? "你的书又长了一点"
       : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",

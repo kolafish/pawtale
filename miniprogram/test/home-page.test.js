@@ -15,6 +15,7 @@ const {
 } = require("./page-harness");
 const {
   memoirHomePrompt,
+  memoirHomepageTitle,
   memoirStoryTitle,
 } = require("../services/memoir-display-copy.ts");
 const { userDisplayName } = require("../services/user-display-name.ts");
@@ -236,6 +237,9 @@ test("home supports a local large text mode without changing the default class",
 test("home presents internal project titles as natural story copy", () => {
   assert.equal(memoirStoryTitle("爷爷主题"), "爷爷的故事");
   assert.equal(memoirStoryTitle("外婆回忆录"), "外婆回忆录");
+  assert.equal(memoirHomepageTitle("外婆回忆录"), "外婆回忆录");
+  assert.equal(memoirHomepageTitle("我的回忆录"), "我的故事树");
+  assert.equal(memoirHomepageTitle("我的故事书"), "我的故事树");
   assert.equal(memoirHomePrompt("爷爷主题"), "不用讲完整，可以先说一件和爷爷有关的小事。");
 });
 

@@ -10,6 +10,22 @@ export function memoirStoryTitle(projectTitle: string): string {
   return normalized;
 }
 
+const GENERIC_MEMOIR_TITLES = new Set([
+  "回忆录",
+  "我的回忆录",
+  "我的故事",
+  "我的故事书",
+  "我的故事树",
+  "未命名回忆录",
+]);
+
+export function memoirHomepageTitle(projectTitle: string): string {
+  const displayTitle = memoirStoryTitle(projectTitle);
+  return displayTitle && !GENERIC_MEMOIR_TITLES.has(displayTitle)
+    ? displayTitle
+    : "我的故事树";
+}
+
 export function memoirStorySubject(projectTitle: string): string {
   const displayTitle = memoirStoryTitle(projectTitle);
   if (displayTitle.endsWith("的故事")) {
