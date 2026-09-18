@@ -187,6 +187,7 @@
           <text class="book-editorial-copy-notice-action">书稿工具</text>
         </view>
 
+        <text class="book-title-sync-hint">这里修改的书名，也会同步为回忆录名称</text>
         <view class="book-title-editor">
           <input
             class="book-title-input"

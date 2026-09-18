@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
@@ -202,6 +203,67 @@ def _compose_book_content_from_snapshot(
         title=title,
         snapshots=[item for item in snapshot if isinstance(item, dict)],
     )
+
+
+def _replace_book_content_title(content: str, title: str) -> str:
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        stripped = line.lstrip()
+        heading = stripped[: len(stripped) - len(stripped.lstrip("#"))]
+        spacer = " " if heading and stripped[len(heading):].startswith(" ") else ""
+        indentation = line[: len(line) - len(stripped)]
+        lines[index] = f"{indentation}{heading}{spacer}{title}"
+        return "\n".join(lines)
+    return title
+
+
+async def synchronize_book_output_title(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    title: str,
+    created_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+) -> bool:
+    canonical_title = title.strip()
+    if not canonical_title:
+        raise ValueError("回忆录名称不能为空")
+    output = await _load_output(db, project_id=project_id)
+    if not output or not output.versions:
+        return False
+    latest = output.versions[-1]
+    snapshot = [
+        item for item in (latest.chapter_snapshot_json or [])
+        if isinstance(item, dict)
+    ]
+    content = _replace_book_content_title(latest.content, canonical_title)
+    manuscript_json = _updated_manuscript_payload(
+        title=canonical_title,
+        stored=latest.manuscript_json or {},
+        content=content,
+        snapshot=snapshot,
+        cover_style_value=_stored_cover_style(latest),
+    )
+    if content != latest.content or manuscript_json != latest.manuscript_json:
+        await append_book_output_version(
+            db,
+            output=output,
+            content=content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript_json,
+            created_by=created_by,
+        )
+    if output.title != canonical_title:
+        output.title = canonical_title
+        output.updated_at = utcnow_naive()
+    invalidate_book_output(output)
+    output.metadata_json = {
+        **(output.metadata_json or {}),
+        BOOK_TTS_CACHE_KEY: None,
+    }
+    db.add(output)
+    return True
 
 
 def _current_book_snapshot(
@@ -402,14 +464,21 @@ async def update_book_output(
     req: MemoirBookOutputUpdateRequest,
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     fields_set = getattr(req, "model_fields_set", set())
-    title = _formal_book_title(req.title if "title" in fields_set and req.title is not None else output.title)
+    title = (
+        req.title.strip()
+        if "title" in fields_set and req.title is not None
+        else project.title.strip()
+    )
+    if project.title != title:
+        project.title = title
+        project.updated_at = utcnow_naive()
     cover_style = _cover_style(req.cover_style) if "cover_style" in fields_set and req.cover_style else _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
@@ -458,7 +527,7 @@ async def regenerate_book_output_editorial_copy(
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     manuscript = _editable_manuscript(
-        title=output.title,
+        title=project.title,
         content=latest.content,
         snapshot=snapshot,
         stored=latest.manuscript_json,
@@ -467,7 +536,7 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=400, detail="全书稿结构不可用")
 
     base_version_id = latest.id
-    output_title = output.title
+    output_title = project.title
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
@@ -536,14 +605,14 @@ async def update_book_output_chapter_editorial_copy(
     req: MemoirBookOutputChapterEditorialCopyUpdateRequest,
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     manuscript = _editable_manuscript(
-        title=output.title,
+        title=project.title,
         content=latest.content,
         snapshot=snapshot,
         stored=latest.manuscript_json,
@@ -592,7 +661,7 @@ async def suggest_book_output_titles(
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await load_book_plan_drafts(db, project_id=project_id)
     chapters = readable_chapter_versions(plan)
-    base_title = _formal_book_title(plan.title)
+    base_title = _formal_book_title(project.title)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     _, snapshot = _compose_book_content(
         title=base_title,

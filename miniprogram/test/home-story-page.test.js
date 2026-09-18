@@ -70,8 +70,8 @@ test("story maps server content into the hero, themes and book summary", () => {
   assert.equal("statusText" in view.chapters[0], false);
   assert.equal(view.chapters[0].readable, true);
 
-  const titledBookView = storyViewData(snapshot({ book_title: "外婆慢慢说" }));
-  assert.equal(titledBookView.overview.title, "外婆慢慢说");
+  const staleBookTitleView = storyViewData(snapshot({ book_title: "平生所忆那些事" }));
+  assert.equal(staleBookTitleView.overview.title, "余仲尤的回忆录");
 
   const counted = snapshot();
   counted.chapters[0].sections.push({

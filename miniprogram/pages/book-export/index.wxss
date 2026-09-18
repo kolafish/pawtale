@@ -439,10 +439,19 @@
 }
 
 .book-title-editor {
-  margin-top: 20rpx;
+  margin-top: 10rpx;
   display: flex;
   align-items: center;
   gap: 12rpx;
+}
+
+.book-title-sync-hint {
+  display: block;
+  margin-top: 20rpx;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 1.45;
+  text-wrap: pretty;
 }
 
 .book-title-input,

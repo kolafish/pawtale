@@ -20,6 +20,7 @@ from app.schemas.memoir_projects import (
 from app.schemas.projects import ProjectResponse
 import app.services.project_documents as project_docs
 from app.services.memoir import project_deletion
+from app.services.memoir import book_outputs
 from app.services.memoir.project_ai_preferences import (
     remember_project_transcript_polish_level,
 )
@@ -277,6 +278,11 @@ async def update_mobile_memoir_project(
         if not title:
             raise HTTPException(status_code=400, detail="回忆录名称不能为空")
         project.title = title
+        await book_outputs.synchronize_book_output_title(
+            db,
+            project_id=project.id,
+            title=title,
+        )
     if req.description is not None:
         project.description = req.description
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)

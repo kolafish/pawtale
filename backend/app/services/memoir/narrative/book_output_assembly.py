@@ -31,7 +31,6 @@ from app.services.memoir import (
 )
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
-    formal_book_title,
     manuscript_from_snapshot,
     stored_cover_style,
 )
@@ -109,11 +108,7 @@ async def assemble_book_output(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
         .with_for_update().execution_options(populate_existing=True)
     )
-    title = (
-        output.title
-        if output is not None
-        else formal_book_title(plan.title or "我的回忆录")
-    )
+    title = project.title.strip()
     content = book_content_from_chapter_snapshots(
         title=title,
         snapshots=chapter_snapshots,

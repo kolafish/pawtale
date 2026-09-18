@@ -11,10 +11,9 @@ export function memoirStoryTitle(projectTitle: string): string {
 }
 
 export function memoirHomepageTitle(
-  formalBookTitle: string,
   projectTitle: string,
 ): string {
-  return formalBookTitle.trim() || projectTitle.trim() || "还没有回忆录";
+  return projectTitle.trim() || "还没有回忆录";
 }
 
 export function memoirStorySubject(projectTitle: string): string {

@@ -113,7 +113,8 @@ flowchart LR
 | `id` | 项目边界，所有回忆录业务数据都应能回到它 |
 | `user_id` | 所有权与跨用户隔离 |
 | `type` | 当前产品类型，回忆录项目应为 memoir |
-| `title`、`description` | 项目级展示信息 |
+| `title` | 用户设置的回忆录名称，也是当前书名的唯一真相 |
+| `description` | 项目级介绍信息 |
 | `metadata_json` | 方言、AI 模型偏好等非核心扩展信息 |
 | `memoir_data_revision` | 迁移前的项目版本基线；新变更读取追加式 revision event |
 
@@ -125,6 +126,7 @@ flowchart LR
 用途与展示：
 
 - 首页、书稿、讲述记录等页面的作用域；
+- 首页、封面、阅读和导出统一使用当前 `Project.title`；
 - 服务端聚合快照和客户端缓存的作用域；
 - 权限校验和项目删除的根边界。
 
@@ -915,7 +917,7 @@ Digest 和 Review 的展示原则：
 | 字段 | 作用 |
 | --- | --- |
 | `plan_id` | 使用哪套章节规划 |
-| `title` | 正式书名 |
+| `title` | 当前书名在输出容器中的同步副本，用于兼容和版本组装；不能覆盖 `Project.title` |
 | `status` | `draft / accepted / archived` |
 | `metadata_json` | 输出来源、TTS 等扩展状态 |
 
@@ -976,7 +978,7 @@ Digest 和 Review 的展示原则：
 
 - 书稿首页预览目录、章节数、字数和版本状态；
 - 成书阅读页按章、按小节阅读；
-- 编辑书名、副标题、口述者、整理者、序言、后记、封底文案和封面风格；
+- 编辑书名时同步更新 `Project.title`；同时可编辑副标题、口述者、整理者、序言、后记、封底文案和封面风格；
 - AI 生成或重新生成编辑文案；
 - 章节引言和金句编辑；
 - 全书朗读相关能力；
@@ -1216,7 +1218,8 @@ Job 保存状态、执行时间、租约、重试次数、去重 key、输入和
 | “这条讲述不要写进书” | SectionMaterial.include_in_book | 只排除当前素材 |
 | “这个小节不要写进书” | Section.include_in_book | 排除整个叙事单元 |
 | “这句话不愿公开” | 隐私/收录决定 + 必要的素材排除 | 不能只靠 AI 改写 |
-| “书名、序言、封面要改” | BookOutput/Manuscript | 这是出版包装层 |
+| “书名要改” | Project.title，并同步 BookOutput/Manuscript | 回忆录名称与书名是同一个用户概念 |
+| “序言、封面要改” | BookOutput/Manuscript | 这是出版包装层 |
 | “这张图放到第三章” | BookImagePlacement | 图片资产与书中位置分离 |
 
 ### 14.1 修改后的失效传播
