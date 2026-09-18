@@ -36,6 +36,7 @@ import {
   consumeHomeVoiceTarget,
   type HomeVoiceTarget,
   type HomeStoryTarget,
+  navigateToBook,
   navigateToMe,
   navigateToTranscripts,
   navigateToLogin,
@@ -498,6 +499,11 @@ definePage<HomeData>()({
   openReviewIssues() {
     if (!this.data.projectId) return;
     wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
+  },
+
+  openBook() {
+    if (!this.data.projectId) return;
+    navigateToBook();
   },
 
   openTranscripts() {

@@ -28,7 +28,7 @@ function snapshot(patch = {}) {
   };
 }
 function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null } = {}) {
-  const calls = { acknowledgedEventIds: [] };
+  const calls = { acknowledgedEventIds: [], bookNavigations: 0 };
   mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", { readCachedMemoirHome: () => ({status:"miss"}), readCachedMemoirIdentity: () => null, writeCachedMemoirHome: () => {} });
   mockModule("../services/home-launch-state.ts", { resolveHomeLaunch: () => "none", dismissHomeLaunch: () => {} });
@@ -46,7 +46,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     consumeHomeStoryTarget: () => { const target = navigationTarget; navigationTarget = null; return target; },
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => [401, 403].includes(error?.statusCode),
-    navigateToBook: () => {}, navigateToLogin: () => {}, navigateToTranscripts: () => {},
+    navigateToBook: () => { calls.bookNavigations += 1; }, navigateToLogin: () => {}, navigateToTranscripts: () => {},
   });
   global.wx = {
     pageScrollTo: () => {},
@@ -189,6 +189,18 @@ test("story opens the compact theme workspace", async () => {
   context.openChapter({ detail: { chapterId: "chapter-2" } });
   assert.deepEqual(urls, ["/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2"]);
+  context.onHide();
+});
+
+test("story tree always opens the book workspace", async () => {
+  const { page, calls } = loadStoryPage();
+  const context = pageContext(page);
+  await context.onShow();
+  context.openBook();
+  assert.equal(calls.bookNavigations, 1);
+  context.setData({ projectId: "" });
+  context.openBook();
+  assert.equal(calls.bookNavigations, 1);
   context.onHide();
 });
 

@@ -10,6 +10,7 @@ Component({
   properties: {
     story: { type: Object, value: emptyStoryViewData() },
     largeText: { type: Boolean, value: false },
+    canOpenBook: { type: Boolean, value: false },
     canSwitchProject: { type: Boolean, value: false },
     canVoiceEdit: { type: Boolean, value: false },
   },
@@ -45,6 +46,10 @@ Component({
     openChapter(event: TreeTapEvent) {
       const chapterId = datasetString(event, "id");
       if (chapterId) this.triggerEvent("openchapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
+    },
+
+    openBook() {
+      if (this.properties.canOpenBook) this.triggerEvent("openbook");
     },
 
     openTranscripts() {

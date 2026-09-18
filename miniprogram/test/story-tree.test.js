@@ -24,13 +24,15 @@ test("tree expands all themes inside the hero without mutating the supplied stor
 });
 
 test("tree emits only supported destinations and preserves chapter identity", () => {
-  const context = tree(undefined, { canSwitchProject: true });
+  const context = tree(undefined, { canOpenBook: true, canSwitchProject: true });
   context.openProjects();
+  context.openBook();
   context.openChapter(tap({ id: "childhood" }));
   context.openTranscripts();
   context.openVoiceEdit();
   assert.deepEqual(context.events, [
     { name: "openprojects", detail: undefined },
+    { name: "openbook", detail: undefined },
     { name: "openchapter", detail: { chapterId: "childhood" } },
     { name: "opentranscripts", detail: undefined },
     { name: "voiceedit", detail: undefined },
@@ -40,6 +42,7 @@ test("tree emits only supported destinations and preserves chapter identity", ()
 test("tree ignores unavailable project switching and chapter actions without a target", () => {
   const context = tree(undefined, { canSwitchProject: false });
   context.openProjects();
+  context.openBook();
   context.openChapter(tap());
   assert.deepEqual(context.events, []);
 });
@@ -47,6 +50,9 @@ test("tree ignores unavailable project switching and chapter actions without a t
 test("tree template folds the complete story list into the hero without timeline numbering", () => {
   const template = fs.readFileSync(path.join(__dirname, "../components/story-tree/index.wxml"), "utf8");
   assert.match(template, /class="story-hero/);
+  assert.match(template, /id="story-book-action"[\s\S]*?bindtap="openBook"/);
+  assert.match(template, /aria-label="\{\{canOpenBook \? '进入'/);
+  assert.doesNotMatch(template, />读整本书|>阅读全书|>看看书稿/);
   assert.match(template, /id="story-summary-toggle"/);
   assert.match(template, /class="story-list-expand/);
   assert.doesNotMatch(template, /树上的故事/);

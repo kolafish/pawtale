@@ -201,6 +201,8 @@ test("home keeps interview-engine notices out of the story overview", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
   assert.match(pageWxml, /<story-tree/);
+  assert.match(pageWxml, /can-open-book="\{\{hasProject\}\}"/);
+  assert.match(pageWxml, /bind:openbook="openBook"/);
   assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
 

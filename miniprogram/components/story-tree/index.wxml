@@ -12,13 +12,22 @@
       <text wx:if="{{canSwitchProject}}" class="hero-title-arrow" aria-hidden="true">›</text>
     </view>
 
-    <view class="hero-visual" aria-label="故事树成长到第 {{story.overview.growthStage}} 阶段">
-      <image
-        class="hero-tree-image"
-        src="{{story.overview.growthImageSrc}}"
-        mode="aspectFit"
-        aria-hidden="true"
-      />
+    <view class="hero-visual">
+      <view
+        id="story-book-action"
+        class="hero-tree-book-action {{canOpenBook ? 'ui-pressable' : ''}}"
+        bindtap="openBook"
+        hover-class="{{canOpenBook ? 'story-tree-book-hover' : 'none'}}"
+        aria-role="{{canOpenBook ? 'button' : 'img'}}"
+        aria-label="{{canOpenBook ? '进入' + story.memoir.title + '的书稿整理页' : '故事树成长到第 ' + story.overview.growthStage + ' 阶段'}}"
+      >
+        <image
+          class="hero-tree-image"
+          src="{{story.overview.growthImageSrc}}"
+          mode="aspectFit"
+          aria-hidden="true"
+        />
+      </view>
       <view
         wx:for="{{story.overview.themeTags}}"
         wx:key="id"
