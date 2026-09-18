@@ -44,6 +44,7 @@ export interface TranscriptDetailEditWorkflowMethods {
   beginEdit(): void;
   switchEditPreviewVersion(event: PageDatasetEvent<{ version?: string }>): void;
   toggleEditReference(): void;
+  toggleRawExpanded(): void;
   toggleQuestionExpanded(): void;
   toggleMoreActionsExpanded(): void;
   toggleMaterialAssignmentEditor(): Promise<void>;
@@ -124,6 +125,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       return;
     }
     this.setData({ editReferenceExpanded: !this.data.editReferenceExpanded });
+  },
+
+  toggleRawExpanded() {
+    if (!this.data.item?.rawCanExpand) {
+      return;
+    }
+    this.setData({ rawExpanded: !this.data.rawExpanded });
   },
 
   toggleQuestionExpanded() {

@@ -298,12 +298,38 @@ test("transcript detail page loads a single transcript", async () => {
   assert.equal(context.data.item.recordMetaText, "07-01 15:38 · 32 秒");
   assert.equal(context.data.item.heroStatusText, "已整理");
   assert.equal(context.data.item.heroStatusClass, "ready");
-  assert.equal(context.data.item.locationTitleText, "还没有放进故事树");
+  assert.equal(context.data.item.locationTitleText, "尚未整理");
   assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.questionTitleText, "小余刚才问了");
   assert.equal(context.data.item.questionCanExpand, false);
+  assert.equal(context.data.item.rawCanExpand, false);
+  assert.equal(context.data.rawExpanded, false);
   assert.equal(context.data.questionExpanded, false);
   assert.equal(context.data.moreActionsExpanded, false);
+});
+
+test("transcript detail page keeps long original narration collapsed until requested", async () => {
+  const longRawText = "那年夏天我们一起去了老家的院子，外婆坐在门口给我们讲以前的事情。".repeat(4);
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        transcript_raw: longRawText,
+        raw_char_count: Array.from(longRawText).length,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-long-raw" });
+
+  assert.equal(context.data.item.rawCanExpand, true);
+  assert.equal(context.data.rawExpanded, false);
+
+  page.toggleRawExpanded.call(context);
+  assert.equal(context.data.rawExpanded, true);
+
+  page.toggleRawExpanded.call(context);
+  assert.equal(context.data.rawExpanded, false);
 });
 
 test("transcript detail opens the registered media tools page", async () => {
@@ -379,8 +405,7 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(context.data.item.heroStatusClass, "pending");
   assert.equal(context.data.item.displayCountText, "尚未生成");
   assert.equal(context.data.item.rawCountText, "尚未转写");
-  assert.equal(context.data.item.locationTitleText, "还没有放进故事树");
-  assert.equal(context.data.item.locationDescriptionText, "小余会帮您判断这段故事适合放在哪里。");
+  assert.equal(context.data.item.locationTitleText, "等待转写");
   assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.canPlayAnswerAudio, true);
   assert.equal(context.data.item.canRecoverTranscription, true);
@@ -708,8 +733,7 @@ test("transcript detail page uses content-first inclusion labels", async () => {
 
   await page.onLoad.call(context, { id: "utterance-included" });
 
-  assert.equal(context.data.item.locationTitleText, "已放进故事树");
-  assert.equal(context.data.item.locationDescriptionText, "这段故事现在在故事树的这个位置。");
+  assert.equal(context.data.item.locationTitleText, "已收进故事树");
   assert.equal(context.data.item.showLocationPath, true);
   assert.equal(context.data.item.chapterLocationText, "退休后的日子");
   assert.equal(context.data.item.sectionLocationText, "退休不下岗");

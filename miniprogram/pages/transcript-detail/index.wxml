@@ -155,12 +155,14 @@
     <view wx:if="{{!item.isEditing}}" class="section-card raw-material-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">原始讲述</text>
+          <view class="raw-title-line">
+            <text class="section-title">原始讲述</text>
+            <text class="raw-inline-count">· {{item.rawCountText}}</text>
+          </view>
           <text class="section-hint">保留您当时说话的样子</text>
         </view>
-        <text class="section-count">{{item.rawCountText}}</text>
       </view>
-      <text class="body-text raw-text">
+      <text class="body-text raw-text {{!rawExpanded && item.rawCanExpand ? 'collapsed' : ''}}">
         <text
           wx:for="{{item.rawSegments}}"
           wx:for-item="segment"
@@ -168,6 +170,12 @@
           wx:key="segmentIndex"
         >{{segment.text}}</text>
       </text>
+      <button
+        wx:if="{{item.rawCanExpand}}"
+        class="raw-expand-button"
+        bindtap="toggleRawExpanded"
+        aria-expanded="{{rawExpanded}}"
+      >{{rawExpanded ? "收起原话 ∧" : "展开原话 ∨"}}</button>
     </view>
 
     <view wx:if="{{!item.isEditing && item.question_text}}" class="section-card question-card">
@@ -210,31 +218,21 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">收录位置</text>
-          <text class="section-hint">这段故事现在放在哪里</text>
         </view>
+        <button
+          wx:if="{{!item.canRecoverTranscription}}"
+          class="section-link"
+          bindtap="toggleMaterialAssignmentEditor"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
+        >{{assignmentEditorOpen ? "收起" : "调整 ›"}}</button>
       </view>
-      <view class="material-location-summary {{item.showLocationPath ? 'has-path' : ''}}">
-        <text class="material-location-title">{{item.locationTitleText}}</text>
-        <text class="material-location-description">{{item.locationDescriptionText}}</text>
+      <view class="material-location-summary">
+        <text wx:if="{{item.showLocationPath}}" class="material-location-status"><text aria-hidden="true">✓ </text>{{item.locationTitleText}}</text>
         <block wx:if="{{item.showLocationPath}}">
-        <view class="material-location-row">
-          <text class="material-location-label">故事</text>
-          <text class="material-location-value">{{item.chapterLocationText}}</text>
-        </view>
-        <view wx:if="{{item.sectionLocationText}}" class="material-location-row">
-          <text class="material-location-label">位置</text>
-          <text class="material-location-value">{{item.sectionLocationText}}</text>
-        </view>
+          <text class="material-location-title">{{item.chapterLocationText}}</text>
+          <text wx:if="{{item.sectionLocationText}}" class="material-location-section">{{item.sectionLocationText}}</text>
         </block>
-      </view>
-      <view
-        wx:if="{{!item.canRecoverTranscription}}"
-        class="material-location-action ui-pressable {{saving || deleting || convertingQuestionToAnswer ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{saving || deleting || convertingQuestionToAnswer}}"
-        bindtap="toggleMaterialAssignmentEditor"
-      >
-        {{assignmentEditorOpen ? "收起调整" : "调整位置"}}
+        <text wx:else class="material-location-title is-empty">{{item.locationTitleText}}</text>
       </view>
       <view wx:if="{{assignmentEditorOpen}}" class="material-assignment-editor">
         <text wx:if="{{assignmentLoading}}" class="material-assignment-state">正在加载可选位置…</text>
@@ -278,19 +276,18 @@
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="section-card audio-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">原始音频</text>
-          <text class="section-hint">保留这段讲述的声音</text>
-        </view>
-        <text class="section-count">{{item.audioText}}</text>
-      </view>
       <button
-        class="audio-play-button"
+        class="audio-row"
         bindtap="playAnswerAudio"
         disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
+        aria-label="{{playingAudioKind === 'answer' ? '停止播放原始音频' : '播放原始音频'}}"
       >
-        {{playingAudioKind === "answer" ? "停止播放" : "播放原音"}}
+        <image class="audio-row-icon" src="/assets/chapter-workspace/speaker.svg" mode="aspectFit" aria-hidden="true" />
+        <view class="audio-row-copy">
+          <text class="section-title">原始音频</text>
+          <text class="audio-row-duration">· {{item.audioText}}</text>
+        </view>
+        <text class="audio-row-action">{{playingAudioKind === "answer" ? "停止" : "播放"}} ›</text>
       </button>
       <view wx:if="{{answerPlaybackVisible}}" class="playback-body">
         <view class="playback-track">
@@ -324,22 +321,26 @@
       class="section-card media-tools-card ui-pressable"
       bindtap="openMediaTools"
       aria-role="button"
-      aria-label="打开图片与分享视频工具"
+      aria-label="打开图片或视频制作工具"
     >
       <view class="media-tools-copy">
-        <text class="section-title">图片与分享视频</text>
-        <text class="section-hint">从成书文字选择片段，生成插图或带原音字幕的视频</text>
+        <text class="section-title">做成图片或视频</text>
+        <text class="section-hint">把这段回忆做成可以分享的内容</text>
       </view>
       <text class="media-tools-action">制作 ›</text>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="section-card more-actions-card">
-      <view class="section-head more-actions-head" bindtap="toggleMoreActionsExpanded">
+      <view
+        class="section-head more-actions-head ui-pressable"
+        bindtap="toggleMoreActionsExpanded"
+        aria-role="button"
+        aria-expanded="{{moreActionsExpanded}}"
+      >
         <view class="section-heading">
           <text class="section-title">更多操作</text>
-          <text class="section-hint">{{item.canConvertQuestionToAnswer ? "识别加强、误判修正和删除等低频操作" : "识别加强和删除等低频操作"}}</text>
         </view>
-        <text class="more-actions-toggle">{{moreActionsExpanded ? "收起" : "展开"}}</text>
+        <text class="more-actions-toggle" aria-hidden="true">{{moreActionsExpanded ? "收起" : "›"}}</text>
       </view>
       <view wx:if="{{moreActionsExpanded && item.showOfflineAsr && !item.canRecoverTranscription}}" class="offline-asr-panel">
         <view class="section-head">

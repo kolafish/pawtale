@@ -38,7 +38,6 @@ export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   rawCountText: string;
   canRecoverTranscription: boolean;
   locationTitleText: string;
-  locationDescriptionText: string;
   showLocationPath: boolean;
   chapterLocationText: string;
   sectionLocationText: string;
@@ -48,6 +47,7 @@ export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canConvertQuestionToAnswer: boolean;
   questionTitleText: string;
   questionCanExpand: boolean;
+  rawCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
   displaySegments: TranscriptTextSegment[];
@@ -87,6 +87,7 @@ export interface TranscriptDetailData {
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
+  rawExpanded: boolean;
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
   editReferenceExpanded: boolean;
@@ -107,6 +108,7 @@ export interface TranscriptDetailData {
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+const COLLAPSIBLE_RAW_CHAR_COUNT = 72;
 export const OFFLINE_ASR_POLL_INTERVAL_MS = 2000;
 export const OFFLINE_ASR_MAX_POLL_ATTEMPTS = 150;
 export type TranscriptDetailAudioKind = "question" | "answer";
@@ -270,10 +272,6 @@ export function toViewItem(
     item.can_recover_transcription || item.transcription_status === "pending_transcription",
   );
   const savedText = item.transcript_edited || item.transcript_raw;
-  const isIncludedInBook = !canRecoverTranscription && Boolean(
-    item.is_included_in_book
-    || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
-  );
   const assignment = item.section_assignment;
   const includedChapter = [...(item.included_chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)[0];
@@ -310,13 +308,8 @@ export function toViewItem(
     rawCountText: canRecoverTranscription ? "尚未转写" : `${item.raw_char_count} 字`,
     canRecoverTranscription,
     locationTitleText: hasLocation
-      ? (isIncludedInBook ? "已放进故事树" : "已整理到故事树")
-      : "还没有放进故事树",
-    locationDescriptionText: canRecoverTranscription
-      ? "小余会帮您判断这段故事适合放在哪里。"
-      : (hasLocation
-        ? "这段故事现在在故事树的这个位置。"
-        : "小余还没有为这段故事找到合适的位置。"),
+      ? "已收进故事树"
+      : (canRecoverTranscription ? "等待转写" : "尚未整理"),
     showLocationPath: hasLocation,
     chapterLocationText,
     sectionLocationText,
@@ -331,6 +324,7 @@ export function toViewItem(
     ),
     questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
+    rawCanExpand: Array.from(item.transcript_raw.trim()).length > COLLAPSIBLE_RAW_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
     rawSegments: plainTranscriptSegments(canRecoverTranscription
       ? "这里会保留尽量忠于原话的识别文字。"

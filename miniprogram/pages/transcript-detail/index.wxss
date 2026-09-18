@@ -149,6 +149,24 @@
   background: var(--ui-surface);
 }
 
+.raw-title-line,
+.audio-row-copy {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 8rpx;
+}
+
+.raw-inline-count,
+.audio-row-duration {
+  flex: 0 0 auto;
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  font-weight: 500;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
 .body-text {
   display: block;
   color: var(--ui-text-primary);
@@ -164,12 +182,49 @@
   font-size: 31rpx;
 }
 
-.raw-text,
 .question-text {
   padding: 22rpx 24rpx;
   border-radius: var(--ui-radius-inner);
   background: var(--ui-surface-subtle);
   color: var(--ui-value-text);
+}
+
+.raw-text {
+  color: var(--ui-value-text);
+  text-wrap: pretty;
+}
+
+.raw-text.collapsed {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.raw-expand-button {
+  min-width: 160rpx;
+  min-height: 80rpx;
+  margin: 8rpx -16rpx -16rpx;
+  padding: 0 16rpx;
+  border: 0;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-accent-strong);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: left;
+  transition-property: transform, opacity, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.raw-expand-button:active {
+  background: var(--ui-accent-surface-subtle);
+  transform: scale(0.96);
 }
 
 .question-text.collapsed {
@@ -253,8 +308,7 @@
   text-wrap: pretty;
 }
 
-.edit-reference-toggle,
-.material-location-action {
+.edit-reference-toggle {
   position: relative;
   min-height: 88rpx;
   margin-top: 18rpx;
@@ -269,8 +323,7 @@
   line-height: 1.4;
 }
 
-.edit-reference-toggle::after,
-.material-location-action::after {
+.edit-reference-toggle::after {
   content: "›";
   position: absolute;
   right: 24rpx;
@@ -287,14 +340,21 @@
 }
 
 .material-location-summary {
-  padding: 22rpx 24rpx;
-  border-radius: var(--ui-radius-inner);
-  background: var(--ui-surface-soft);
+  padding: 0;
 }
 
 .material-location-title,
-.material-location-description {
+.material-location-section,
+.material-location-status {
   display: block;
+}
+
+.material-location-status {
+  margin-bottom: 10rpx;
+  color: var(--ui-accent-strong);
+  font-size: 23rpx;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .material-location-title {
@@ -306,7 +366,17 @@
   text-wrap: balance;
 }
 
-.material-location-description {
+.material-location-title.is-empty,
+.material-location-section {
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.material-location-title.is-empty {
+  color: var(--ui-text-secondary);
+}
+
+.material-location-section {
   margin-top: 8rpx;
   color: var(--ui-text-secondary);
   font-size: 25rpx;
@@ -314,54 +384,10 @@
   text-wrap: pretty;
 }
 
-.material-location-summary.has-path .material-location-description {
-  margin-bottom: 14rpx;
-}
-
-.material-location-row {
-  min-height: 76rpx;
-  padding: 14rpx 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 18rpx;
-}
-
-.material-location-row + .material-location-row {
-  border-top: 1rpx solid var(--ui-divider);
-}
-
-.material-location-label {
-  flex: 0 0 72rpx;
-  color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  font-weight: 700;
-  line-height: 40rpx;
-}
-
-.material-location-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--ui-text-primary);
-  font-size: 27rpx;
-  font-weight: 700;
-  line-height: 40rpx;
-  overflow-wrap: anywhere;
-}
-
-.material-location-action {
-  width: 100%;
-  box-sizing: border-box;
-  transition-property: transform, opacity;
-  transition-duration: 150ms;
-  transition-timing-function: ease-out;
-}
-
-.material-location-action:active,
 .material-assignment-picker:active {
   transform: scale(0.96);
 }
 
-.material-location-action.is-disabled,
 .material-assignment-picker.is-disabled {
   opacity: 0.52;
 }
@@ -441,29 +467,52 @@
   line-height: 1;
 }
 
-.audio-play-button {
+.audio-card {
+  padding-top: 18rpx;
+  padding-bottom: 18rpx;
+}
+
+.audio-row {
   width: 100%;
   min-height: 88rpx;
   margin: 0;
-  padding: 14rpx 24rpx;
+  padding: 0;
   border: 0;
-  border-radius: var(--ui-radius-control);
-  background: var(--ui-accent-surface-subtle);
-  color: var(--ui-accent-strong);
-  box-shadow: var(--ui-control-shadow);
-  font-size: 27rpx;
-  font-weight: 700;
-  line-height: 1.4;
-  transition-property: transform, opacity, background-color, box-shadow;
+  border-radius: var(--ui-radius-inner);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  text-align: left;
+  transition-property: transform, opacity, background-color;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
 
-.audio-play-button:active {
+.audio-row-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex: 0 0 auto;
+}
+
+.audio-row-copy {
+  flex: 1 1 auto;
+}
+
+.audio-row-action {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.audio-row:active {
+  background: var(--ui-accent-surface-subtle);
   transform: scale(0.96);
 }
 
-.audio-play-button[disabled] {
+.audio-row[disabled] {
   opacity: 0.52;
   transform: none;
 }
@@ -477,7 +526,7 @@
 .media-tools-card {
   min-height: 116rpx;
   padding: 24rpx 64rpx 24rpx 26rpx;
-  background: linear-gradient(105deg, var(--ui-surface), var(--ui-accent-surface-subtle));
+  background: var(--ui-surface);
   display: flex;
   align-items: center;
   gap: 20rpx;
@@ -632,8 +681,8 @@
 .detail-page.large-text .repair-panel-copy,
 .detail-page.large-text .danger-panel-copy,
 .detail-page.large-text .hero-status-copy,
-.detail-page.large-text .material-location-description,
-.detail-page.large-text .material-location-label,
+.detail-page.large-text .material-location-section,
+.detail-page.large-text .material-location-status,
 .detail-page.large-text .material-assignment-label {
   font-size: 30rpx;
   line-height: 1.55;
@@ -642,7 +691,6 @@
 .detail-page.large-text .body-text,
 .detail-page.large-text .edit-before-text,
 .detail-page.large-text .edit-reference-text,
-.detail-page.large-text .material-location-value,
 .detail-page.large-text .material-assignment-value {
   font-size: 34rpx;
   line-height: 1.7;
@@ -660,9 +708,9 @@
   font-size: 28rpx;
 }
 
-.detail-page.large-text .material-location-action,
 .detail-page.large-text .material-assignment-picker,
-.detail-page.large-text .audio-play-button,
+.detail-page.large-text .audio-row,
+.detail-page.large-text .raw-expand-button,
 .detail-page.large-text .section-link,
 .detail-page.large-text .repair-button,
 .detail-page.large-text .danger-button {

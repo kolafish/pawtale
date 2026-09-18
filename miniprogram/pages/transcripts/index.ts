@@ -73,8 +73,6 @@ interface TranscriptItemView {
   recoverButtonText: string;
   storyStatusText: string;
   cardClass: string;
-  storyStatusClass: string;
-  detailActionText: string;
   cardAriaLabel: string;
 }
 
@@ -188,9 +186,6 @@ function withTranscriptRuntimeState(
   return {
     ...item,
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
-    storyStatusClass: item.canRecoverTranscription
-      ? "record-status pending"
-      : "record-status",
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
@@ -207,7 +202,7 @@ export function transcriptsViewPatch(state: TranscriptsData): TranscriptsViewPat
     showSearchClear: Boolean(state.searchInput || state.hasSearchCriteria),
     showSearchChips: state.searchChips.length > 0,
     voiceSearchButtonClass: state.voiceSearchRecording ? "voice-search-button recording" : "voice-search-button",
-    voiceSearchButtonText: state.voiceSearchRecording ? "停止" : (state.voiceSearchTranscribing ? "识别中" : "语音搜索"),
+    voiceSearchButtonText: state.voiceSearchRecording ? "停止" : (state.voiceSearchTranscribing ? "识别中" : "语音"),
     voiceSearchDisabled: state.voiceSearchTranscribing,
     loadingEmptyText: state.hasSearchCriteria ? "正在搜索" : "正在加载",
     showNoProjectPanel,
@@ -374,12 +369,19 @@ function toViewItem(
     : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
+  const includedChapter = [...(item.included_chapters || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)[0];
+  const includedLocationText = item.section_assignment?.section_title.trim()
+    || item.section_assignment?.chapter_title.trim()
+    || includedChapter?.title.trim()
+    || "";
   const storyStatusText = canRecoverTranscription
     ? "待转写"
     : (isIncludedInBook
-      ? "已放进故事树"
-      : (item.section_assignment ? "已整理到故事树" : "还没有放进故事树"));
-  const detailActionText = canRecoverTranscription ? "查看音频" : "查看详情";
+      ? `已收进：${includedLocationText || "故事树"}`
+      : (item.section_assignment
+        ? `已收进：${includedLocationText || "故事树"}`
+        : "尚未整理"));
   const recordMetaText = [
     createdAtText,
     durationText,
@@ -398,11 +400,7 @@ function toViewItem(
     recoverButtonText: "恢复转写",
     storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
-    storyStatusClass: canRecoverTranscription
-      ? "record-status pending"
-      : "record-status",
-    detailActionText,
-    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，${detailActionText}`,
+    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，打开详情`,
   };
 }
 
@@ -449,7 +447,7 @@ definePage<TranscriptsData>()({
     showSearchClear: false,
     showSearchChips: false,
     voiceSearchButtonClass: "voice-search-button",
-    voiceSearchButtonText: "语音搜索",
+    voiceSearchButtonText: "语音",
     voiceSearchDisabled: false,
     loadingEmptyText: "正在加载",
     showNoProjectPanel: true,

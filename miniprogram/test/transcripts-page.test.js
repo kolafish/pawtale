@@ -213,15 +213,14 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒 · 5 字");
-  assert.equal(context.data.items[0].storyStatusText, "还没有放进故事树");
+  assert.equal(context.data.items[0].storyStatusText, "尚未整理");
   assert.equal(context.data.pageMetaText, "我的回忆录 · 1 条讲述");
   assert.equal(context.data.showNoProjectPanel, false);
   assert.equal(context.data.showGenericEmpty, false);
   assert.equal(context.data.showLoadMore, false);
   assert.equal(context.data.items[0].cardClass, "transcript-card");
-  assert.equal(context.data.items[0].storyStatusClass, "record-status");
-  assert.equal(context.data.items[0].detailActionText, "查看详情");
   assert.match(context.data.items[0].cardAriaLabel, /爷爷退休后仍帮公司做事/);
+  assert.match(context.data.items[0].cardAriaLabel, /打开详情$/);
   assert.equal("transcript_raw" in context.data.items[0], false);
 });
 
@@ -267,7 +266,7 @@ test("transcripts page shows the assigned section on a material card", async () 
 
   assert.equal(
     context.data.items[0].storyStatusText,
-    "已放进故事树",
+    "已收进：她给我送胡豆",
   );
 });
 
@@ -332,10 +331,8 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(item.recordMetaText, "07-01 15:38 · 8 秒");
   assert.equal("recoveryNoticeText" in item, false);
   assert.equal(item.storyStatusText, "待转写");
-  assert.equal(item.storyStatusClass, "record-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
-  assert.equal(item.detailActionText, "查看音频");
-  assert.match(item.cardAriaLabel, /查看音频$/);
+  assert.match(item.cardAriaLabel, /打开详情$/);
   global.wx = {
     showToast(options) {
       toasts.push(options);
