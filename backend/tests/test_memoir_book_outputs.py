@@ -670,6 +670,10 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
     assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
 
+    story = await client.get("/api/mobile/memoir/story-snapshot")
+    assert story.status_code == 200
+    assert story.json()["book_title"] == "外婆慢慢说"
+
 
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
     project_id = await ensure_mobile_memoir_project(client)

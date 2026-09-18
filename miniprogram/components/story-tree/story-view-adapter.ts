@@ -51,7 +51,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       bookMetaText: [chapterCount ? `${chapterCount} 章` : "", bookCharText].filter(Boolean).join(" · ") || "正在整理",
     },
     overview: {
-      title: memoirHomepageTitle(project?.title || ""),
+      title: memoirHomepageTitle(snapshot.book_title || "", project?.title || ""),
       summaryText: chapters.length
         ? `${chapters.length} 个主题 · ${storyCount} 个故事`
         : materialCount ? "回忆正在整理成故事" : "故事树还在等待第一段回忆",
