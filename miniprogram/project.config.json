@@ -3,6 +3,18 @@
   "compileType": "miniprogram",
   "miniprogramRoot": "./",
   "projectname": "PawtaleMemoir",
+  "packOptions": {
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "node_modules"
+      },
+      {
+        "type": "folder",
+        "value": "test"
+      }
+    ]
+  },
   "setting": {
     "es6": true,
     "enhance": true,
