@@ -13,8 +13,6 @@ export interface HomeStoryData {
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
-  growthNoticeDetail: string;
-  growthNoticeMeta: string;
   growthNoticeContext: string;
   growthTarget: StoryGrowthTarget | null;
   narrationSaved: boolean;
@@ -45,8 +43,8 @@ export class HomeGrowthTracker {
 export function emptyHomeStoryData(): HomeStoryData {
   return {
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
-    growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeDetail: "",
-    growthNoticeMeta: "", growthNoticeContext: "", growthTarget: null, narrationSaved: false,
+    growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeContext: "",
+    growthTarget: null, narrationSaved: false,
     dismissingGrowth: false, retryingDraft: false,
   };
 }
@@ -99,21 +97,18 @@ export function homeStorySnapshotData(
     (total, event) => total + Math.max(0, event.book_char_count_delta || 0),
     0,
   );
-  const structuralChanges = [
+  const growthMetrics = [
     newChapters.size ? `新增 ${newChapters.size} 个主题` : "",
-    newSections.size ? `新增 ${newSections.size} 个故事` : "",
+    newSections.size ? `${newChapters.size ? "" : "新增 "}${newSections.size} 个故事` : "",
     updatedCount ? `补充 ${updatedCount} 个已有故事` : "",
+    bookCharCountDelta ? `书稿 +${bookCharCountDelta} 字` : "",
   ].filter(Boolean);
   const fallbackText = snapshot.growth_events.map(event => event.summary_text).filter(Boolean).join(" · ");
-  const growthNoticeText = bookCharCountDelta
-    ? `+${bookCharCountDelta} 字`
-    : structuralChanges[0] || (bookUpdated ? "书稿已更新" : fallbackText);
-  const growthNoticeDetail = bookCharCountDelta
-    ? structuralChanges.join(" · ")
-    : structuralChanges.slice(1).join(" · ");
+  const growthNoticeText = growthMetrics.slice(0, 2).join(" · ")
+    || (bookUpdated ? "书稿已更新" : fallbackText);
   const chapterTitles = [...changedChapterTitles];
   const growthNoticeContext = chapterTitles.length
-    ? `《${chapterTitles[0]}》${chapterTitles.length > 1 ? `等 ${chapterTitles.length} 个主题` : ""}有了新的内容`
+    ? `${chapterTitles[0]}等内容已更新`
     : "";
   story.overview.growthAnimating = freshEventIds.size > 0
     && Boolean(addedCount || updatedCount || bookCharCountDelta);
@@ -124,8 +119,6 @@ export function homeStorySnapshotData(
       ? "你的书又长了一点"
       : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",
     growthNoticeText,
-    growthNoticeDetail,
-    growthNoticeMeta: story.memoir.bookMetaText === "正在整理" ? "" : `现在共 ${story.memoir.bookMetaText}`,
     growthNoticeContext,
   };
 }

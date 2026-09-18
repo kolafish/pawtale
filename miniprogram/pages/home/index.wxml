@@ -93,11 +93,7 @@
         <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
           <view class="home-growth-copy">
             <text class="home-growth-title">{{growthNoticeTitle}}</text>
-            <view class="home-growth-delta">
-              <text class="home-growth-value ui-tabular">{{growthNoticeText}}</text>
-              <text wx:if="{{growthNoticeDetail}}" class="home-growth-detail ui-tabular">{{growthNoticeDetail}}</text>
-            </view>
-            <text wx:if="{{growthNoticeMeta}}" class="home-growth-meta ui-tabular">{{growthNoticeMeta}}</text>
+            <text class="home-growth-value ui-tabular">{{growthNoticeText}}</text>
             <text wx:if="{{growthNoticeContext}}" class="home-growth-context">{{growthNoticeContext}}</text>
           </view>
           <view class="home-growth-actions">
