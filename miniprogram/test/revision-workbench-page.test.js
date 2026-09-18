@@ -188,17 +188,58 @@ function loadRevisionPage({ api = {} } = {}) {
   return loadPageModule("../pages/revision-workbench/index.ts");
 }
 
-test("initial section revision uses the shared automatic voice command flow", () => {
+test("section revision keeps one automatic voice editor for initial and follow-up feedback", () => {
   const template = fs.readFileSync(
     path.join(__dirname, "../pages/revision-workbench/index.wxml"),
     "utf8",
   );
 
+  assert.equal(template.match(/<voice-text-editor/g)?.length, 1);
   assert.equal(
     template.match(/automatic-voice-command="\{\{true\}\}"/g)?.length,
     1,
   );
+  assert.match(template, /voice-session-id="\{\{proposalId \|\| sectionId\}\}"/);
+  assert.match(template, /\{\{proposal \? "继续调整" : "小节修改"\}\}/);
   assert.match(template, /进入页面后直接说修改要求，停顿后会自动生成修改思路/);
+});
+
+test("section revision resolves an existing proposal before mounting its voice editor", async () => {
+  let resolveJob;
+  const job = new Promise((resolve) => {
+    resolveJob = resolve;
+  });
+  global.wx = { setNavigationBarTitle() {} };
+  const { page } = loadRevisionPage({
+    api: {
+      getMemoirChapterSectionRevisionJob: async () => job,
+      getMemoirChapterSectionRevisionProposal: async () => revisionPlanProposal(),
+    },
+  });
+  const context = pageContext(page);
+
+  const loading = page.onLoad.call(context, {
+    scope: "chapter_section",
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    sectionId: "section-1",
+    sectionTitle: "旧校舍",
+  });
+  await Promise.resolve();
+
+  assert.equal(context.data.loading, true);
+  assert.equal(context.data.proposal, null);
+
+  resolveJob({
+    ...revisionFeedbackJob("succeeded"),
+    operation: "plan",
+    proposal_id: "proposal-1",
+  });
+  await loading;
+
+  assert.equal(context.data.loading, false);
+  assert.equal(context.data.proposal.phase, "plan_ready");
+  assert.equal(context.data.proposalId, "proposal-1");
 });
 
 test("book revision plan presents proposed book information before drafting", () => {

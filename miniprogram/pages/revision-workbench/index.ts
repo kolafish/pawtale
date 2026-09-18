@@ -364,8 +364,8 @@ definePage<RevisionWorkbenchData>()({
       return;
     }
     if (scope === "chapter_section" && !proposalId) {
-      this.setData({ loading: false });
       await this.refreshFeedbackJob();
+      this.setData({ loading: false });
       return;
     }
     if (await this.loadProposal()) {

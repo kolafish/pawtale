@@ -151,6 +151,47 @@ test("automatic voice command resumes after authorization and submits only after
   assert.deepEqual(toasts, ["已听完，正在理解"]);
 });
 
+test("automatic voice command can start again after a connection failure", async () => {
+  const controller = {
+    connectCount: 0,
+    async connect() {
+      this.connectCount += 1;
+      if (this.connectCount === 1) throw new Error("语音连接未收尾");
+    },
+    startRecording() {
+      return true;
+    },
+    close() {},
+  };
+  mockModule("../services/streaming-voice-controller.ts", {
+    StreamingVoiceController: class {
+      constructor() {
+        return controller;
+      }
+    },
+  });
+  mockModule("../services/voice-authorization.ts", {
+    ensureVoiceRecordingAuthorization: async () => true,
+  });
+  global.wx = { showToast() {} };
+  const component = loadComponentModule("../components/voice-text-editor/index.ts").component;
+  const context = componentContext(component, {
+    gatewayUrl: "ws://backend.local/projects/project-1/dictation",
+    automaticVoiceCommand: true,
+  });
+
+  component.lifetimes.attached.call(context);
+  await flushAsyncWork();
+  assert.equal(controller.connectCount, 1);
+  assert.equal(context.data.voicePhase, "idle");
+  assert.equal(context.data.error, "语音连接未收尾");
+
+  component.pageLifetimes.hide.call(context);
+  component.pageLifetimes.show.call(context);
+  await flushAsyncWork();
+  assert.equal(controller.connectCount, 2);
+});
+
 for (const ending of ["silence", "manual"]) {
   test(`voice editor uses the shared recording pipeline to finish on ${ending} and wait for final text`, async (t) => {
     let now = 10000;

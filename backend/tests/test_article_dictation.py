@@ -36,19 +36,28 @@ async def test_article_dictation_accepts_only_owned_article_document(
         return user
 
     class Lease:
+        released = False
+
         async def release(self):
+            if self.released:
+                return
+            self.released = True
             calls["released"] = True
+
+    lease = Lease()
 
     class CapacityManager:
         async def acquire(self, current_user_id, session_id):
             calls["capacity"] = (current_user_id, session_id)
-            return Lease()
+            return lease
 
     class GatewaySession:
         def __init__(self, **kwargs):
             calls["gateway"] = kwargs
 
         async def run(self):
+            await calls["gateway"]["on_stop"](None, "client_stop")
+            calls["released_before_stopped"] = lease.released
             calls["ran"] = True
 
     def create_asr(current_user_id, session_id):
@@ -70,6 +79,7 @@ async def test_article_dictation_accepts_only_owned_article_document(
 
     assert websocket.accepted
     assert calls["ran"] and calls["released"]
+    assert calls["released_before_stopped"] is True
     assert calls["capacity"][0] == user_id
     assert calls["capacity"][1].startswith("article-dictation:")
     assert calls["gateway"]["diagnostics_context"] == {

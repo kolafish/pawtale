@@ -54,6 +54,13 @@ async def stream_memoir_project_dictation(
 
     try:
         await websocket.accept()
+
+        async def release_capacity_before_stopped(
+            _error_message: str | None,
+            _stop_reason: str,
+        ) -> None:
+            await capacity_lease.release()
+
         session = VoiceGatewaySession(
             client=websocket,
             asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
@@ -61,6 +68,7 @@ async def stream_memoir_project_dictation(
                 capacity_session_id,
             ),
             text_normalizer=normalize_memoir_asr_text,
+            on_stop=release_capacity_before_stopped,
             connection_id=connection_id,
             diagnostics_context={
                 "gateway": "memoir_project_dictation",

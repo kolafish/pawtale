@@ -828,6 +828,7 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
 
         async def run(self) -> None:
             await calls["gateway_kwargs"]["on_stop"](None, "transport_closed")
+            calls["released_before_stopped"] = lease.released
 
     def fake_log(event: str, **payload: Any) -> None:
         calls["logs"].append({"event": event, **payload})
@@ -852,6 +853,7 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     assert websocket.accepted
     assert persistence.discard_calls == 0
     assert lease.released
+    assert calls["released_before_stopped"] is True
     assert "stop" not in calls
     assert calls["logs"][0]["event"] == "websocket.accepted"
     assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"

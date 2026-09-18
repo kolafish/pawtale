@@ -305,7 +305,7 @@ test("voice chat view patch combines human speaker choice with record actions", 
     interviewType: "human_interview",
     voiceAuthorizationAgreed: true,
     recordingStarting: true,
-    connecting: true,
+    status: "connecting",
   });
   const authorizationPatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
@@ -480,7 +480,6 @@ test("voice chat auto-listen gate snapshot keeps page and computed gate state to
         autoListenEnabled: true,
         status: "ready",
         recording: false,
-        connecting: false,
         followUpLoading: false,
       },
       {
@@ -494,7 +493,6 @@ test("voice chat auto-listen gate snapshot keeps page and computed gate state to
       autoListenEnabled: true,
       status: "ready",
       recording: false,
-      connecting: false,
       followUpLoading: false,
       pendingAfterPlayback: true,
       canStart: true,

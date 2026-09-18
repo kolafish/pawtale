@@ -141,7 +141,6 @@ Component({
         autoListenEnabled: this.data.autoListenEnabled,
         status: this.data.status,
         recording: this.data.recording,
-        connecting: this.data.connecting,
         followUpLoading: this.data.followUpLoading,
       });
     return voiceChatAutoListenGateSnapshot(this.data, {
@@ -202,7 +201,7 @@ Component({
     if (
       wasSuspended
       && this.data.voiceSessionId
-      && !this.data.connecting
+      && this.data.status !== "connecting"
       && this.data.status !== "closed"
       && this.data.status !== "error"
     ) {
@@ -327,7 +326,7 @@ Component({
     if (
       voiceAuthorizationAgreed
       && this.data.voiceSessionId
-      && !this.data.connecting
+      && this.data.status !== "connecting"
       && this.data.status !== "closed"
       && this.data.status !== "error"
       && !this.runtime().voiceStreaming.hasClient()
@@ -345,7 +344,12 @@ Component({
       if (this.data.recording) this.runtime().voiceStreaming.stopRecording();
     }
     applyVoiceChatDataPatch(this, voiceAuthorizationChangePatch(this.data, consent.agreed));
-    if (agreed && this.data.voiceSessionId && !this.runtime().voiceStreaming.hasClient() && !this.data.connecting) {
+    if (
+      agreed
+      && this.data.voiceSessionId
+      && !this.runtime().voiceStreaming.hasClient()
+      && this.data.status !== "connecting"
+    ) {
       await this.syncVoiceAuthorizationAndConnect();
     } else {
       void syncVoiceAuthorizationConsent({
@@ -449,7 +453,6 @@ Component({
         status: "error",
         statusText: statusText("error"),
         recording: false,
-        connecting: false,
         error: message,
         persistenceStateText: "会话加载失败",
         primaryActionText: "重新进入",
