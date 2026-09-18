@@ -2628,7 +2628,7 @@ async def test_book_review_job_accepts_readable_chapters_without_confirmation(
     assert queued.status_code == 202
 
 
-async def test_book_review_uses_the_current_output_title(
+async def test_book_review_ignores_a_stale_output_title(
     client,
     test_db,
     monkeypatch,
@@ -2669,8 +2669,8 @@ async def test_book_review_uses_the_current_output_title(
         project_id=project_id,
     )
 
-    assert context.book_metadata["title"] == "一个人的故园与远方"
-    assert context.input_signature != reviewed.json()["input_signature"]
+    assert context.book_metadata["title"] == "测试回忆录"
+    assert context.input_signature == reviewed.json()["input_signature"]
 
 
 async def test_background_batch_recovers_after_child_dispatch_without_client_reads(client, test_db, monkeypatch):

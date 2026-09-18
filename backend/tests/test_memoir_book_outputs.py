@@ -320,8 +320,8 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
 
     cleaned = sanitize_manuscript_payload(title="我的小时候", manuscript=manuscript)
 
-    assert cleaned["profile"]["title"] == "回望这一生"
-    assert cleaned["profile"]["subtitle"] == "余晋口述回忆录"
+    assert cleaned["profile"]["title"] == "我的小时候"
+    assert cleaned["profile"]["subtitle"] == "回望这一生"
     assert "爷爷主题回忆录" not in cleaned["front_matter"][1]["content"]
     assert "这一章主要记录" not in cleaned["chapters"][0]["intro"]
     assert "从口述内容看" not in cleaned["chapters"][1]["intro"]
@@ -625,9 +625,9 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
     assert response.status_code == 200
     data = response.json()
     assert len(data["suggestions"]) >= 3
-    assert "外婆的回忆录" in data["suggestions"]
-    assert "外婆口述回忆录" in data["suggestions"]
-    assert "外婆口述的回忆录" not in data["suggestions"]
+    assert "测试的回忆录" in data["suggestions"]
+    assert "测试口述回忆录" in data["suggestions"]
+    assert "测试口述的回忆录" not in data["suggestions"]
     assert all("外婆家的童年" not in title for title in data["suggestions"])
     assert all("主题" not in title for title in data["suggestions"])
 

@@ -25,7 +25,6 @@ from app.services.memoir.book_manuscript_cleanup import (
     fallback_chapter_intro,
     fallback_preface,
     formal_book_title as cleanup_formal_book_title,
-    normalize_book_identity,
     sanitize_manuscript_payload,
 )
 
@@ -396,12 +395,8 @@ def manuscript_from_snapshot(
     if subtitle is None:
         subtitle = editorial_copy.cover_subtitle if editorial_copy and editorial_copy.cover_subtitle else _fallback_cover_subtitle(chapter_titles)
     narrator_name = metadata.get("narrator_name", "")
-    formal_title, subtitle = normalize_book_identity(
-        title=title,
-        subtitle=subtitle,
-        narrator_name=narrator_name,
-        chapter_titles=chapter_titles,
-    )
+    book_title = title.strip() or "家庭回忆录"
+    subtitle = safe_str(subtitle)
     prepared_by = metadata.get("prepared_by", "家人整理") or "家人整理"
     preface = metadata.get("preface")
     if preface is None:
@@ -417,13 +412,13 @@ def manuscript_from_snapshot(
     source_count = sum(item.source_count for item in toc)
     return MemoirBookManuscript(
         profile=MemoirBookManuscriptProfile(
-            title=formal_title,
+            title=book_title,
             subtitle=subtitle,
             narrator_name=narrator_name,
             prepared_by=prepared_by,
         ),
         front_matter=[
-            MemoirBookManuscriptSection(kind="cover", title=formal_title, content=f"{formal_title}\n{subtitle}"),
+            MemoirBookManuscriptSection(kind="cover", title=book_title, content=f"{book_title}\n{subtitle}"),
             MemoirBookManuscriptSection(
                 kind="title_page",
                 title="扉页",
