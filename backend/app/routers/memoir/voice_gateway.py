@@ -80,7 +80,10 @@ async def mobile_memoir_voice_gateway(
         async def on_start() -> None:
             await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user_id)
 
-        async def on_stop(error_message: str | None, stop_reason: VoiceGatewayStopReason) -> None:
+        async def persist_voice_session_stop(
+            error_message: str | None,
+            stop_reason: VoiceGatewayStopReason,
+        ) -> None:
             nonlocal discard_pending_audio
             stop_error = error_message
             try:
@@ -112,6 +115,12 @@ async def mobile_memoir_voice_gateway(
                     current_user_id,
                     MemoirVoiceSessionStopRequest(error_message=stop_error),
                 )
+
+        async def on_stop(error_message: str | None, stop_reason: VoiceGatewayStopReason) -> None:
+            try:
+                await persist_voice_session_stop(error_message, stop_reason)
+            finally:
+                await capacity_lease.release()
 
         gateway_session = VoiceGatewaySession(
             client=websocket,

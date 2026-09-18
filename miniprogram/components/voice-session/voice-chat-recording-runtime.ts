@@ -130,7 +130,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   },
 
   async performConnectGateway(): Promise<boolean> {
-    applyVoiceChatDataPatch(this, { connecting: true, error: "" });
+    applyVoiceChatDataPatch(this, { error: "" });
     let connected = false;
     try {
       await this.runtime().voiceStreaming.connect({
@@ -168,10 +168,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
-      applyVoiceChatDataPatch(this, { connecting: false });
-      if (connected) {
-        await this.tryStartAutoListenAfterTTS();
-      }
+      if (connected) await this.tryStartAutoListenAfterTTS();
     }
     return connected;
   },
@@ -248,7 +245,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       return false;
     }
     if (
-      this.data.connecting
+      this.data.status === "connecting"
       || voiceClientUnavailableForRecording(this.runtime().voiceStreaming.hasClient(), this.data.status)
     ) {
       applyVoiceChatDataPatch(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));

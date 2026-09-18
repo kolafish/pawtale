@@ -147,6 +147,29 @@ provider final。
 如果音频已保存但转写未完成，记录页只展示“等待转写”，允许用户显式恢复。恢复流程
 不能伪造空文本，也不能把失败吞成成功。
 
+### 4.4 语音编辑命令
+
+故事、小节和讲述文字的语音编辑复用同一个 `voice-text-editor` 和临时 dictation gateway，
+不为首次修改、已有方案反馈或不同页面分别维护录音状态机。状态归属固定如下：
+
+| 层级 | 唯一职责 |
+| --- | --- |
+| 页面 | 加载、AI 任务、修改方案等业务状态 |
+| `voice-text-editor` | `idle / connecting / listening / stopping` 交互阶段 |
+| Streaming ASR 客户端 | WebSocket、原生录音器和 ASR 协议事实 |
+| 后端 gateway | `ready / listening / finishing / stopped / failed` 协议生命周期 |
+
+页面不能复制连接或录音状态，也不能为同一个可见编辑流程交替挂载多个语音编辑器。
+页面恢复已有方案时，先完成业务状态读取，再挂载唯一的编辑器；首次修改和继续调整只改变
+文案、提交目标和 busy 状态。所有 Streaming ASR gateway 必须先释放用户容量租约，再发送
+`session.stopped`，使客户端收到停止确认后可以安全进入下一次编辑或访谈。
+
+短语音输入只有两种产品模式，但共用上述状态机：编辑命令进入页面后自动收音、停顿后自动
+提交；需要逐项核对的补全回答只把语音转成文字，由用户确认后保存。模式由组件属性决定，
+页面不得据此复制连接、录音、收尾状态。连续访谈仍统一复用 `voice-session`；它保留 TTS、
+打断、持久化会话等正交事实，但连接过程只以 `VoiceChatConnectionStatus` 为唯一事实源，
+不再另设与 `status === "connecting"` 重复的布尔状态。
+
 ## 五、LLM 策略层
 
 LLM 接收经过整理的 InterviewBrief，而不是直接读取所有数据库表。Brief 可以包含：

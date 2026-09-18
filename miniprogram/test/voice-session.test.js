@@ -423,7 +423,6 @@ test("human interview record action starts the selected speaker in one tap", asy
       interviewType: "human_interview",
       voiceAuthorizationAgreed: true,
       status: "ready",
-      connecting: false,
       speakerRole: "narrator",
     },
     voiceStreaming: {
@@ -476,7 +475,6 @@ test("human interview record action reconnects and starts the selected speaker w
       interviewType: "human_interview",
       voiceAuthorizationAgreed: true,
       status: "closed",
-      connecting: false,
       speakerRole: "narrator",
     },
     voiceStreaming: {
@@ -759,7 +757,6 @@ test("voice chat does not show microphone connecting while session refresh is pe
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(context.data.connecting, false);
   assert.equal(context.data.status, "idle");
 
   resolveDetail({
@@ -784,7 +781,6 @@ test("voice chat does not show microphone connecting while session refresh is pe
   await loadPromise;
 
   assert.equal(connectCalls, 1);
-  assert.equal(context.data.connecting, false);
   assert.equal(context.data.status, "ready");
 });
 
@@ -828,7 +824,6 @@ test("voice chat reconnects on user start after a failed connect", async () => {
       voiceSessionId: "voice-1",
       voiceAuthorizationAgreed: true,
       status: "idle",
-      connecting: false,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -837,7 +832,6 @@ test("voice chat reconnects on user start after a failed connect", async () => {
 
   await page.connectGateway.call(context);
   assert.equal(connectCalls, 1);
-  assert.equal(context.data.connecting, false);
   assert.equal(context.data.status, "error");
 
   const started = page.startRecording.call(context, false);
@@ -846,7 +840,6 @@ test("voice chat reconnects on user start after a failed connect", async () => {
   assert.equal(started, true);
   assert.equal(connectCalls, 2);
   assert.equal(startRecordingCalls, 1);
-  assert.equal(context.data.connecting, false);
   assert.equal(context.data.status, "ready");
 });
 
@@ -885,7 +878,6 @@ test("voice chat does not auto reconnect when recorder start is not ready", asyn
       voiceSessionId: "voice-1",
       voiceAuthorizationAgreed: true,
       status: "idle",
-      connecting: false,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -1201,7 +1193,6 @@ test("voice chat refreshes session on show only after page suspension", () => {
       ...page.data,
       voiceSessionId: "voice-1",
       status: "ready",
-      connecting: false,
     },
     refreshVoiceSessionSnapshot() {
       refreshCalls += 1;
@@ -1646,7 +1637,6 @@ test("voice chat syncs authorization consent before reconnecting", async () => {
       voiceSessionId: "voice-1",
       voiceAuthorizationAgreed: false,
       status: "idle",
-      connecting: false,
       primaryActionText: "同意后开始说话",
     },
     setData(patch) {
@@ -1856,7 +1846,6 @@ test("voice chat starts auto listening after AI audio playback ends when gateway
         state.autoListenEnabled
         && state.status === "ready"
         && !state.recording
-        && !state.connecting
         && !state.followUpLoading
       ),
     },
@@ -1929,7 +1918,6 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
         state.autoListenEnabled
         && state.status === "ready"
         && !state.recording
-        && !state.connecting
         && !state.followUpLoading
       ),
     },

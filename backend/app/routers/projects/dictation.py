@@ -54,12 +54,20 @@ async def stream_article_dictation(
 
     try:
         await websocket.accept()
+
+        async def release_capacity_before_stopped(
+            _error_message: str | None,
+            _stop_reason: str,
+        ) -> None:
+            await capacity_lease.release()
+
         session = VoiceGatewaySession(
             client=websocket,
             asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
                 current_user.id,
                 capacity_session_id,
             ),
+            on_stop=release_capacity_before_stopped,
             connection_id=connection_id,
             diagnostics_context={
                 "gateway": "article_dictation",

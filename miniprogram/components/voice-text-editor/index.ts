@@ -9,6 +9,7 @@ import {
 } from "../../services/voice-authorization";
 
 type VoicePhase = "idle" | "connecting" | "listening" | "stopping";
+type AutomaticStartState = "detached" | "available" | "used";
 const VOICE_MAX_DURATION_MS = 30000;
 
 interface VoiceRuntime {
@@ -17,9 +18,7 @@ interface VoiceRuntime {
   text: string;
   baseText: string;
   transcript: string;
-  hasFinalTranscript: boolean;
-  attached: boolean;
-  autoStartAttempted: boolean;
+  automaticStartState: AutomaticStartState;
 }
 
 const voiceRuntimes = new WeakMap<object, VoiceRuntime>();
@@ -33,9 +32,7 @@ function voiceRuntime(owner: object): VoiceRuntime {
       text: "",
       baseText: "",
       transcript: "",
-      hasFinalTranscript: false,
-      attached: false,
-      autoStartAttempted: false,
+      automaticStartState: "detached",
     };
     voiceRuntimes.set(owner, runtime);
   }
@@ -76,12 +73,12 @@ Component({
 
   lifetimes: {
     attached() {
-      voiceRuntime(this).attached = true;
+      voiceRuntime(this).automaticStartState = "available";
       this.syncText(this.properties.value);
       this.tryAutoStart();
     },
     detached() {
-      voiceRuntime(this).attached = false;
+      voiceRuntime(this).automaticStartState = "detached";
       this.cancelVoice();
       voiceRuntimes.delete(this);
     },
@@ -92,6 +89,9 @@ Component({
       this.tryAutoStart();
     },
     hide() {
+      if (this.properties.automaticVoiceCommand) {
+        voiceRuntime(this).automaticStartState = "available";
+      }
       this.cancelVoice();
     },
   },
@@ -132,22 +132,20 @@ Component({
       runtime.streaming.close({ force: true });
       runtime.baseText = "";
       runtime.transcript = "";
-      runtime.hasFinalTranscript = false;
       this.setData({ voicePhase: "idle" });
     },
 
     tryAutoStart() {
       const runtime = voiceRuntime(this);
       if (
-        !runtime.attached
-        || runtime.autoStartAttempted
+        runtime.automaticStartState !== "available"
         || !this.properties.automaticVoiceCommand
         || !this.properties.gatewayUrl
         || !this.canEdit()
       ) {
         return;
       }
-      runtime.autoStartAttempted = true;
+      runtime.automaticStartState = "used";
       void this.startVoice(true);
     },
 
@@ -175,7 +173,7 @@ Component({
       try {
         if (!(await ensureVoiceRecordingAuthorization())) {
           if (autoTriggered) {
-            runtime.autoStartAttempted = false;
+            runtime.automaticStartState = "available";
           }
           this.setData({ voicePhase: "idle" });
           return;
@@ -185,7 +183,6 @@ Component({
         }
         runtime.baseText = runtime.text;
         runtime.transcript = "";
-        runtime.hasFinalTranscript = false;
         await runtime.streaming.connect({
           voiceSessionId: this.properties.voiceSessionId || `dictation-${token}`,
           gatewayUrl: this.properties.gatewayUrl,
@@ -209,10 +206,13 @@ Component({
                 void this.finishVoice(token);
               }
             },
-            onPartial: (text) => this.updateVoiceTranscript(token, text, false),
-            onFinal: (event) => this.updateVoiceTranscript(token, event.text || "", true),
+            onPartial: (text) => this.updateVoiceTranscript(token, text),
+            onFinal: (event) => this.updateVoiceTranscript(token, event.text || ""),
             onError: (message) => {
               if (token === runtime.token) {
+                if (autoTriggered) {
+                  runtime.automaticStartState = "available";
+                }
                 this.setData({
                   voicePhase: "idle",
                   error: message || "语音输入失败",
@@ -238,6 +238,9 @@ Component({
         if (token !== runtime.token) {
           return;
         }
+        if (autoTriggered) {
+          runtime.automaticStartState = "available";
+        }
         runtime.streaming.close({ force: true });
         this.setData({
           voicePhase: "idle",
@@ -246,15 +249,12 @@ Component({
       }
     },
 
-    updateVoiceTranscript(token: number, transcript: string, finalized: boolean) {
+    updateVoiceTranscript(token: number, transcript: string) {
       const runtime = voiceRuntime(this);
       if (token !== runtime.token) {
         return;
       }
       runtime.transcript = transcript.trim();
-      if (finalized) {
-        runtime.hasFinalTranscript = Boolean(runtime.transcript);
-      }
       const separator = runtime.baseText.trim() && runtime.transcript ? "\n" : "";
       this.updateText(
         `${runtime.baseText.trim()}${separator}${runtime.transcript}`.slice(0, this.properties.maxlength),
@@ -280,12 +280,10 @@ Component({
       const transcript = runtime.transcript.trim();
       const shouldSubmit = Boolean(
         transcript
-        && runtime.hasFinalTranscript
         && this.properties.automaticVoiceCommand,
       );
       runtime.baseText = "";
       runtime.transcript = "";
-      runtime.hasFinalTranscript = false;
       this.setData({
         voicePhase: "idle",
         ...(transcript ? {} : { error: "没有识别到内容，请再说一次" }),

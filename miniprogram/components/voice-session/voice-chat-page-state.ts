@@ -58,7 +58,6 @@ export interface VoiceChatData {
   statusText: string;
   recording: boolean;
   recordingStarting: boolean;
-  connecting: boolean;
   error: string;
   liveText: string;
   latestTranscriptText: string;
@@ -177,7 +176,6 @@ export interface AutoListenGateSnapshot {
   autoListenEnabled: boolean;
   status: VoiceChatConnectionStatus;
   recording: boolean;
-  connecting: boolean;
   followUpLoading: boolean;
   pendingAfterPlayback: boolean;
   canStart: boolean;
@@ -203,7 +201,6 @@ export function initialVoiceChatData(): VoiceChatData {
     statusText: "未连接",
     recording: false,
     recordingStarting: false,
-    connecting: false,
     error: "",
     liveText: "",
     latestTranscriptText: "",
@@ -636,7 +633,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     micButtonText = "同意后开始说话";
   } else if (state.recordingStarting) {
     micButtonText = "正在打开麦克风";
-  } else if (state.connecting) {
+  } else if (state.status === "connecting") {
     micButtonText = "正在准备";
   } else if (completionUnavailable && !state.recording) {
     micButtonText = "请先保存离开";
@@ -788,7 +785,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
 export function voiceChatAutoListenGateSnapshot(
   data: Pick<
     VoiceChatData,
-    "autoListenEnabled" | "status" | "recording" | "connecting" | "followUpLoading"
+    "autoListenEnabled" | "status" | "recording" | "followUpLoading"
   >,
   options: {
     hasClient: boolean;
@@ -801,7 +798,6 @@ export function voiceChatAutoListenGateSnapshot(
     autoListenEnabled: data.autoListenEnabled,
     status: data.status,
     recording: data.recording,
-    connecting: data.connecting,
     followUpLoading: data.followUpLoading,
     pendingAfterPlayback: options.pendingAfterPlayback,
     canStart: options.canStart,

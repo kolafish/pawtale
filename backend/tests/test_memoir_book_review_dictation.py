@@ -21,19 +21,28 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         return True
 
     class Lease:
+        released = False
+
         async def release(self):
+            if self.released:
+                return
+            self.released = True
             calls["released"] = True
+
+    lease = Lease()
 
     class CapacityManager:
         async def acquire(self, user_id, session_id):
             calls["capacity"] = (user_id, session_id)
-            return Lease()
+            return lease
 
     class GatewaySession:
         def __init__(self, **kwargs):
             calls["gateway"] = kwargs
 
         async def run(self):
+            await calls["gateway"]["on_stop"](None, "client_stop")
+            calls["released_before_stopped"] = lease.released
             calls["ran"] = True
 
     def create_asr(user_id, session_id):
@@ -67,6 +76,7 @@ async def test_memoir_project_dictation_streams_for_owned_project(
 
     assert websocket.accepted
     assert calls["ran"] and calls["released"]
+    assert calls["released_before_stopped"] is True
     assert calls["availability"] == {
         "project_id": "project-1",
         "current_user": user,
