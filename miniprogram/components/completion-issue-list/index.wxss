@@ -93,7 +93,7 @@
   font-weight: 700;
   line-height: 40rpx;
   transition-property: transform, opacity;
-  transition-duration: 140ms;
+  transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
 
@@ -110,7 +110,7 @@
 }
 
 .friendly-secondary-actions {
-  min-height: 76rpx;
+  min-height: 80rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -118,7 +118,7 @@
 }
 
 .friendly-secondary-action {
-  min-height: 76rpx;
+  min-height: 80rpx;
   padding: 0 8rpx;
   display: flex;
   align-items: center;
@@ -126,7 +126,7 @@
   font-size: 23rpx;
   line-height: 34rpx;
   transition-property: opacity;
-  transition-duration: 120ms;
+  transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
 

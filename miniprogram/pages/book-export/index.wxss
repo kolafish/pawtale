@@ -831,7 +831,7 @@
 .chapter-quote-source {
   margin-top: 6rpx;
   color: var(--ui-section-title);
-  font-family: initial;
+  font-family: var(--ui-font-sans);
   font-size: 22rpx;
   line-height: 1.4;
 }

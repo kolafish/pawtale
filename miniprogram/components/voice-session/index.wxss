@@ -684,7 +684,7 @@
   width: 12rpx;
   height: 12rpx;
   background: var(--ui-accent);
-  box-shadow: 0 0 0 7rpx rgba(168, 79, 67, 0.10);
+  box-shadow: 0 0 0 7rpx rgba(182, 93, 73, 0.10);
 }
 
 .live-caption-shell {
@@ -811,7 +811,7 @@
 
 .capture-strip.active .capture-dot {
   background: var(--ui-accent);
-  box-shadow: 0 0 0 10rpx rgba(168, 79, 67, 0.12);
+  box-shadow: 0 0 0 10rpx rgba(182, 93, 73, 0.12);
 }
 
 .voice-activity {
@@ -1092,7 +1092,7 @@
   height: 52rpx;
   flex: 0 0 52rpx;
   border-radius: 999rpx;
-  background: rgba(168, 79, 67, 0.10);
+  background: rgba(182, 93, 73, 0.10);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1252,7 +1252,7 @@
   box-sizing: border-box;
   width: 48rpx;
   height: 48rpx;
-  border: 6rpx solid rgba(166, 91, 73, 0.18);
+  border: 6rpx solid rgba(182, 93, 73, 0.18);
   border-top-color: var(--ui-accent);
   border-radius: 999rpx;
   animation: mic-processing-spin 900ms linear infinite;
