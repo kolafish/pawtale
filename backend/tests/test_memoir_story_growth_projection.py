@@ -49,14 +49,27 @@ def test_growth_resolves_current_membership_and_ignores_missing_or_foreign_targe
 
 def test_draft_and_book_events_are_updates_and_acknowledged_or_unfinished_events_are_absent():
     events = project([
-        event(id="chapter", event_type="chapter_draft_generated", chapter_id="chapter-1"),
+        event(id="chapter", event_type="chapter_draft_generated", chapter_id="chapter-1",
+              metadata_json={"book_char_count_delta": 386}),
         event(id="book", event_type="book_output_generated"),
         event(id="failed", status="failed"),
         event(id="acknowledged", metadata_json={"acknowledged_at": "2026-09-05T00:00:00Z"}),
     ])
     assert [item["event_id"] for item in events] == ["chapter", "book"]
     assert events[0]["changes"] == [{"kind": "chapter_updated", "chapter_id": "chapter-1"}]
+    assert events[0]["book_char_count_delta"] == 386
     assert events[1]["changes"] == [{"kind": "book_updated"}]
+    assert events[1]["book_char_count_delta"] == 0
+
+
+def test_growth_ignores_invalid_book_character_deltas():
+    events = project([
+        event(id="boolean", event_type="chapter_draft_generated", chapter_id="chapter-1",
+              metadata_json={"book_char_count_delta": True}),
+        event(id="text", event_type="chapter_draft_generated", chapter_id="chapter-1",
+              metadata_json={"book_char_count_delta": "386"}),
+    ])
+    assert [item["book_char_count_delta"] for item in events] == [0, 0]
 
 
 async def test_story_snapshot_projects_persisted_growth_without_ai_and_acknowledges_explicitly(

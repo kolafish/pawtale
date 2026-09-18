@@ -48,7 +48,7 @@ function story({ stage = 1, chapters = [], readable = false, bookChapters = 0, b
       growthImageSrc: TREE_IMAGES[stage],
       themeTags: chapters.slice(0, 3).map(({ id, title, tone }) => ({ id, title, tone })),
       hasChapters: chapters.length > 0,
-      hasMoreChapters: chapters.length > 3,
+      growthAnimating: false,
     },
     chapters,
   };
@@ -64,7 +64,6 @@ function chapter(id, title, storyCount, statusText, statusTone, tone) {
     statusTone,
     readable: statusTone === "rich",
     state: statusTone === "rich" ? "settled" : "attention",
-    featured: true,
     tone,
     highlighted: false,
     growthLabel: "",
@@ -83,6 +82,8 @@ const richChapters = [
   chapter("childhood", "童年回忆", 3, "还可以聊聊", "continue", "clay"),
   chapter("meals", "日常饮食", 4, "已经很丰富", "rich", "sun"),
   chapter("exercise", "运动日常", 2, "已经很丰富", "rich", "leaf"),
+  chapter("work", "工作与创业经历", 3, "还可以聊聊", "continue", "clay"),
+  chapter("home", "辞职后的居家日常", 3, "还可以聊聊", "continue", "sun"),
 ];
 
 function baseState() {
@@ -128,6 +129,7 @@ function baseState() {
     growthEvents: [],
     growthNoticeTitle: "",
     growthNoticeText: "",
+    growthNoticeContext: "",
     growthNoticeIcon: "",
     growthTarget: null,
     narrationSaved: false,
@@ -204,14 +206,26 @@ function stateFixtures() {
       lowerScreenshot: true,
     },
     {
+      name: "expanded-themes",
+      data: {
+        ...base,
+        hasLastStoryHint: true,
+        showNarrationChoiceCard: true,
+        lastStoryHint: "其实很多年都没有去逛过书店了。",
+      },
+      expandThemes: true,
+      lowerScreenshot: true,
+    },
+    {
       name: "growth-feedback",
       data: {
         ...base,
         hasLastStoryHint: true,
         showNarrationChoiceCard: true,
         lastStoryHint: "夏天的时候，我们常去河边乘凉。",
-        growthNoticeTitle: "故事树长出了新内容",
-        growthNoticeText: "新长出 1 个故事：《童年回忆 · 夏天的河边》",
+        growthNoticeTitle: "你的书刚刚又长了一点",
+        growthNoticeText: "新增 1 个故事 · 书稿 +386 字",
+        growthNoticeContext: "《童年回忆》有了新的内容",
         growthNoticeIcon: "/assets/story-tree/chapter-sprig.png",
         growthTarget: { chapterId: "childhood", sectionId: "childhood-story-1" },
         narrationSaved: true,
@@ -284,12 +298,26 @@ async function renderFixture(fixture) {
   await sleep(500);
   const tree = await homePage.$("#story-tree");
   assert.ok(tree, `${fixture.name} 应渲染故事树`);
+  if (fixture.expandThemes) {
+    await tree.callMethod("toggleAllChapters");
+    await sleep(300);
+  }
   const hero = await tree.$(".story-hero");
+  const storySummaryToggle = fixture.data.story.overview.hasChapters
+    ? await tree.$("#story-summary-toggle")
+    : null;
   const primary = await homePage.$("#primary-voice-action");
   const resume = fixture.data.showNarrationChoiceCard ? await homePage.$("#resume-story-action") : null;
   assert.ok(hero, `${fixture.name} 应渲染故事树 Hero`);
+  if (fixture.data.story.overview.hasChapters) {
+    assert.ok(storySummaryToggle, `${fixture.name} 应渲染主题展开入口`);
+  }
   assert.ok(primary, `${fixture.name} 应渲染主讲述按钮`);
   if (fixture.data.showNarrationChoiceCard) assert.ok(resume, `${fixture.name} 应渲染续讲入口`);
+  if (fixture.expandThemes) {
+    const chapterRows = await tree.$$(".story-row");
+    assert.equal(chapterRows.length, fixture.data.story.chapters.length, `${fixture.name} 应在树卡内展示全部主题`);
+  }
 
   const systemInfo = await session.miniProgram.systemInfo();
   const pageSize = await homePage.size();
@@ -302,6 +330,13 @@ async function renderFixture(fixture) {
     pixels(primarySize.height) >= 44,
     `${fixture.name} 主按钮点击区域不小于 44px（实际 ${pixels(primarySize.height)}px）`,
   );
+  if (storySummaryToggle) {
+    const summaryToggleSize = await storySummaryToggle.size();
+    assert.ok(
+      pixels(summaryToggleSize.height) >= 44,
+      `${fixture.name} 主题展开入口点击区域不小于 44px（实际 ${pixels(summaryToggleSize.height)}px）`,
+    );
+  }
   if (resume) {
     const resumeSize = await resume.size();
     assert.ok(
@@ -319,6 +354,10 @@ async function renderFixture(fixture) {
     await session.miniProgram.screenshot({
       path: path.join(session.artifacts.runPath, `home-${fixture.name}-lower.png`),
     });
+  }
+  if (fixture.expandThemes) {
+    await tree.callMethod("toggleAllChapters");
+    await sleep(250);
   }
 }
 

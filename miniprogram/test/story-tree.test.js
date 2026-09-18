@@ -13,7 +13,7 @@ function tree(story = emptyStoryViewData(), properties = {}) {
   return componentContext(component, { story, ...properties });
 }
 
-test("tree reveals additional themes locally without mutating the supplied story", () => {
+test("tree expands all themes inside the hero without mutating the supplied story", () => {
   const story = { ...emptyStoryViewData(), chapters: [{ id: "childhood" }] };
   const context = tree(story);
   context.toggleAllChapters();
@@ -46,10 +46,12 @@ test("tree ignores unavailable project switching and chapter actions without a t
   assert.deepEqual(context.events, []);
 });
 
-test("tree template keeps the hero, compact story list and book card without timeline numbering", () => {
+test("tree template folds the complete story list into the hero without timeline numbering", () => {
   const template = fs.readFileSync(path.join(__dirname, "../components/story-tree/index.wxml"), "utf8");
   assert.match(template, /class="story-hero/);
-  assert.match(template, /树上的故事/);
+  assert.match(template, /id="story-summary-toggle"/);
+  assert.match(template, /class="story-list-expand/);
+  assert.doesNotMatch(template, /树上的故事/);
   assert.match(template, /我的书/);
   assert.match(template, /name="heroAction"/);
   assert.match(template, /name="afterHero"/);
@@ -72,10 +74,10 @@ test("tree reports the parent theme position for growth feedback", () => {
   assert.deepEqual(targets, ["#story-chapter-childhood", "#story-chapter-deleted"]);
 });
 
-test("tree reveals a hidden theme before measuring its growth position", () => {
+test("tree expands the theme list before measuring its growth position", () => {
   const context = tree({
     ...emptyStoryViewData(),
-    chapters: [{ id: "later", featured: false }],
+    chapters: [{ id: "later" }],
   });
   const targets = [];
   context.createSelectorQuery = () => ({ select: selector => {

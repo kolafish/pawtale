@@ -15,6 +15,7 @@ export interface HomeStoryData {
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
+  growthNoticeContext: string;
   growthNoticeIcon: string;
   growthTarget: StoryGrowthTarget | null;
   narrationSaved: boolean;
@@ -46,14 +47,8 @@ export function emptyHomeStoryData(): HomeStoryData {
   return {
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
     bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeIcon: "",
-    growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
+    growthNoticeContext: "", growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
   };
-}
-
-function namedNewSections(labels: string[]): string {
-  const visible = labels.slice(0, 3).map(label => `《${label}》`).join("、");
-  if (!visible) return "";
-  return `：${visible}${labels.length > 3 ? "等" : ""}`;
 }
 
 export function homeStorySnapshotData(
@@ -65,8 +60,8 @@ export function homeStorySnapshotData(
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
   const newChapters = new Set<string>(), newSections = new Set<string>();
   const updatedChapters = new Set<string>(), updatedSections = new Set<string>();
-  const newSectionLabels = new Map<string, string>();
   const sectionParents = new Set<string>();
+  const changedChapterTitles = new Set<string>();
   let bookUpdated = false;
   let growthTarget: StoryGrowthTarget | null = null;
   for (const event of snapshot.growth_events) {
@@ -78,11 +73,8 @@ export function homeStorySnapshotData(
       if ("section_id" in change) {
         const section = chapter.sections.find(item => item.id === change.section_id);
         if (!section) continue;
+        changedChapterTitles.add(chapter.title);
         (added ? newSections : updatedSections).add(section.id);
-        if (added) newSectionLabels.set(
-          section.id,
-          chapter.title === section.title ? section.title : `${chapter.title} · ${section.title}`,
-        );
         sectionParents.add(chapter.id);
         section.growthLabel = added || section.growthLabel === "新长出" ? "新长出" : "已补充";
         section.highlighted = true;
@@ -91,6 +83,7 @@ export function homeStorySnapshotData(
         chapter.growthAnimating ||= freshEventIds.has(event.event_id);
         growthTarget ||= { chapterId: chapter.id, sectionId: section.id };
       } else {
+        changedChapterTitles.add(chapter.title);
         (added ? newChapters : updatedChapters).add(chapter.id);
         if (added) chapter.growthLabel = "新长出";
         chapter.growthAnimating ||= freshEventIds.has(event.event_id);
@@ -102,24 +95,37 @@ export function homeStorySnapshotData(
   const addedCount = newChapters.size + newSections.size;
   const updatedCount = [...updatedSections].filter(id => !newSections.has(id)).length
     + [...updatedChapters].filter(id => !newChapters.has(id) && !sectionParents.has(id)).length;
+  const bookCharCountDelta = snapshot.growth_events.reduce(
+    (total, event) => total + Math.max(0, event.book_char_count_delta || 0),
+    0,
+  );
   const summary = [
-    newChapters.size ? `新长出 ${newChapters.size} 个主题` : "",
-    newSections.size ? `新长出 ${newSections.size} 个故事${namedNewSections([...newSectionLabels.values()])}` : "",
-    updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
-    bookUpdated ? "书稿已更新" : "",
-  ].filter(Boolean).join("，");
+    newChapters.size ? `新增 ${newChapters.size} 个主题` : "",
+    newSections.size ? `新增 ${newSections.size} 个故事` : "",
+    updatedCount ? `补充 ${updatedCount} 个已有故事` : "",
+    bookCharCountDelta ? `书稿 +${bookCharCountDelta} 字` : bookUpdated ? "书稿已更新" : "",
+  ].filter(Boolean).join(" · ");
+  const chapterTitles = [...changedChapterTitles];
+  const growthNoticeContext = chapterTitles.length
+    ? `《${chapterTitles[0]}》${chapterTitles.length > 1 ? `等 ${chapterTitles.length} 个主题` : ""}有了新的内容`
+    : "";
   const growthNoticeKind = addedCount ? "new" : updatedCount ? "enriched" : "progress";
+  story.overview.growthAnimating = freshEventIds.size > 0
+    && Boolean(addedCount || updatedCount || bookCharCountDelta);
   return {
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
-    growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
+    growthNoticeTitle: addedCount || bookCharCountDelta
+      ? "你的书刚刚又长了一点"
+      : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",
     growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),
+    growthNoticeContext,
     growthNoticeIcon: STORY_GROWTH_NOTICE_IMAGES[growthNoticeKind],
   };
 }
 
 export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
-  return { ...story, chapters: story.chapters.map(chapter => ({
+  return { ...story, overview: { ...story.overview, growthAnimating: false }, chapters: story.chapters.map(chapter => ({
     ...chapter, growthAnimating: false,
     sections: chapter.sections.map(section => ({ ...section, growthAnimating: false })),
   })) };

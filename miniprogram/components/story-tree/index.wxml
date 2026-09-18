@@ -30,52 +30,62 @@
       </view>
     </view>
 
-    <text class="hero-summary ui-tabular">{{story.overview.summaryText}}</text>
+    <view
+      wx:if="{{story.overview.hasChapters}}"
+      id="story-summary-toggle"
+      class="story-summary-action ui-pressable {{story.overview.growthAnimating ? 'is-growing' : ''}}"
+      bindtap="toggleAllChapters"
+      hover-class="ui-subtle-action-hover"
+      aria-role="button"
+      aria-expanded="{{showAllChapters}}"
+      aria-label="{{story.overview.summaryText}}，{{showAllChapters ? '收起全部主题' : '查看全部主题'}}"
+    >
+      <text class="hero-summary ui-tabular">{{story.overview.summaryText}}</text>
+      <view class="story-summary-toggle">
+        <text>{{showAllChapters ? '收起' : '查看全部'}}</text>
+        <text class="story-summary-arrow {{showAllChapters ? 'is-open' : ''}}" aria-hidden="true">›</text>
+      </view>
+    </view>
+    <text wx:else class="hero-summary is-static ui-tabular">{{story.overview.summaryText}}</text>
+
+    <view
+      wx:if="{{story.overview.hasChapters}}"
+      class="story-list-expand {{showAllChapters ? 'is-open' : ''}}"
+      aria-hidden="{{!showAllChapters}}"
+    >
+      <view class="story-list-expand-inner">
+        <view class="story-list">
+          <block wx:for="{{story.chapters}}" wx:key="id">
+            <view
+              id="story-chapter-{{item.id}}"
+              class="story-row ui-pressable {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
+              data-id="{{item.id}}"
+              bindtap="openChapter"
+              hover-class="ui-subtle-action-hover"
+              aria-role="button"
+              aria-label="{{item.title}}，{{item.storyCountText}}"
+            >
+              <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">
+                <view class="story-leaf-shape"></view>
+              </view>
+              <view class="story-row-copy">
+                <view class="story-row-title-line">
+                  <text class="story-row-title">{{item.title}}</text>
+                  <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
+                </view>
+                <text class="story-row-meta ui-tabular">{{item.storyCountText}}</text>
+              </view>
+              <text class="story-row-arrow" aria-hidden="true">›</text>
+            </view>
+          </block>
+        </view>
+      </view>
+    </view>
+
     <slot name="heroAction"></slot>
   </view>
 
   <slot name="afterHero"></slot>
-
-  <view wx:if="{{story.overview.hasChapters}}" class="story-list-section">
-    <view class="story-list-heading">
-      <text class="story-list-title">树上的故事</text>
-      <view
-        wx:if="{{story.overview.hasMoreChapters}}"
-        class="story-list-toggle ui-pressable"
-        bindtap="toggleAllChapters"
-        hover-class="ui-subtle-action-hover"
-        aria-role="button"
-        aria-expanded="{{showAllChapters}}"
-      >{{showAllChapters ? '收起' : '查看全部'}} ›</view>
-    </view>
-
-    <view class="story-list ui-card ui-card-borderless">
-      <block wx:for="{{story.chapters}}" wx:key="id">
-        <view
-          wx:if="{{showAllChapters || item.featured}}"
-          id="story-chapter-{{item.id}}"
-          class="story-row ui-pressable {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
-          data-id="{{item.id}}"
-          bindtap="openChapter"
-          hover-class="ui-subtle-action-hover"
-          aria-role="button"
-          aria-label="{{item.title}}，{{item.storyCountText}}"
-        >
-          <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">
-            <view class="story-leaf-shape"></view>
-          </view>
-          <view class="story-row-copy">
-            <view class="story-row-title-line">
-              <text class="story-row-title">{{item.title}}</text>
-              <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
-            </view>
-            <text class="story-row-meta ui-tabular">{{item.storyCountText}}</text>
-          </view>
-          <text class="story-row-arrow" aria-hidden="true">›</text>
-        </view>
-      </block>
-    </view>
-  </view>
 
   <view wx:if="{{showBook}}" class="book-card ui-card ui-card-borderless ui-pressable" bindtap="openBook"
     hover-class="ui-subtle-action-hover" aria-role="button" aria-label="{{story.memoir.progressDetail}}，{{story.memoir.bookMetaText}}">

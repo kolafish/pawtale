@@ -19,7 +19,6 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       storyCountText: chapter.sections.length ? `${chapter.sections.length} 个故事` : "正在长成故事",
       readable: chapter.readable,
       state: chapter.state,
-      featured: index < 3,
       tone: STORY_TONES[index % STORY_TONES.length],
       highlighted: false,
       growthLabel: "",
@@ -63,7 +62,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
         tone: chapter.tone,
       })),
       hasChapters: chapters.length > 0,
-      hasMoreChapters: chapters.length > 3,
+      growthAnimating: false,
     },
     chapters,
   };

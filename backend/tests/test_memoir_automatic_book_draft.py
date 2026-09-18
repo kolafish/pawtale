@@ -92,6 +92,7 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
     chapter_event = next(event for event in events if event.event_type == "chapter_draft_generated")
     assert chapter_event.chapter_id == chapter_id
     assert chapter_event.metadata_json["draft_version_id"] == latest.id
+    assert chapter_event.metadata_json["book_char_count_delta"] == len(latest.content.strip())
     event_ids = {event.id for event in events}
     chapter_event.metadata_json = {**chapter_event.metadata_json, "acknowledged_at": "2026-09-05T08:50:49Z"}
     calls = len(fake.prompts)

@@ -1456,13 +1456,17 @@ async def _save_generated_draft(
         invalidate_book_output(output)
         db.add(output)
     await db.flush()
+    previous_char_count = len(latest.content.strip()) if latest else 0
     await automation_events.record_automation_event(
         db,
         project_id=project_id,
         event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         chapter_id=chapter_id,
         summary_text=f"《{context.chapter_title}》正文已更新，可以阅读了。",
-        metadata_json={"draft_version_id": version.id},
+        metadata_json={
+            "draft_version_id": version.id,
+            "book_char_count_delta": len(generated.content.strip()) - previous_char_count,
+        },
     )
     return draft, version
 

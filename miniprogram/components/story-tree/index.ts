@@ -27,8 +27,8 @@ Component({
       const chapters = Object.values(
         (this.properties.story as ReturnType<typeof emptyStoryViewData>).chapters || {},
       );
-      const targetIsHidden = chapters.some(chapter => chapter.id === chapterId && !chapter.featured);
-      if (targetIsHidden && !this.data.showAllChapters) {
+      const targetExists = chapters.some(chapter => chapter.id === chapterId);
+      if (targetExists && !this.data.showAllChapters) {
         this.setData({ showAllChapters: true }, measure);
         return;
       }
