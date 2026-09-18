@@ -40,7 +40,7 @@
 
 .summary-value {
   display: block;
-  color: #42563e;
+  color: var(--ui-success-text);
   font-size: 40rpx;
   font-weight: 800;
   line-height: 1;
@@ -196,8 +196,8 @@
 }
 
 .topic-item.enough_for_now .state-chip {
-  background: #edf1f5;
-  color: #53677a;
+  background: var(--ui-info-surface);
+  color: var(--ui-info-text);
 }
 
 .topic-item.not_applicable .state-chip,

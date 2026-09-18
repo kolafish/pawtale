@@ -29,7 +29,7 @@
           </view>
           <switch
             checked="{{largeTextEnabled}}"
-            color="#a84f43"
+            color="#b65d49"
             aria-label="大字模式"
             bindchange="changeLargeText"
           />
@@ -186,7 +186,7 @@
           </view>
           <switch
             checked="{{largeTextEnabled}}"
-            color="#a84f43"
+            color="#b65d49"
             aria-label="大字模式"
             bindchange="changeLargeText"
           />

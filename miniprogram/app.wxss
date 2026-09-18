@@ -24,10 +24,13 @@ page {
   --ui-success-text: #587052;
   --ui-warning-surface: #fbf0dc;
   --ui-warning-text: #866231;
+  --ui-info-surface: #edf1f5;
+  --ui-info-text: #53677a;
   --ui-radius-card: 28rpx;
   --ui-radius-inner: 20rpx;
   --ui-radius-control: 18rpx;
   --ui-page-inline: 32rpx;
+  --ui-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --ui-font-editorial: "Songti SC", STSong, "Noto Serif CJK SC", serif;
   --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx);
   --ui-card-shadow:
@@ -45,7 +48,7 @@ page {
   min-height: 100vh;
   background: var(--ui-page-background);
   color: var(--ui-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--ui-font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -53,8 +56,15 @@ view,
 text,
 button,
 textarea,
+input,
 image {
   box-sizing: border-box;
+}
+
+button,
+input,
+textarea {
+  font-family: var(--ui-font-sans);
 }
 
 .ui-page-shell {
@@ -146,7 +156,7 @@ button::after {
   background: var(--ui-accent-surface-subtle);
   transform: scale(0.96);
   box-shadow:
-    0 0 0 1rpx rgba(168, 79, 67, 0.20),
+    0 0 0 1rpx rgba(182, 93, 73, 0.20),
     0 4rpx 10rpx rgba(0, 0, 0, 0.05);
 }
 
@@ -182,7 +192,7 @@ button::after {
 
 .ui-avatar-action-hover {
   transform: scale(0.96);
-  box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.10);
+  box-shadow: 0 0 0 8rpx rgba(182, 93, 73, 0.10);
 }
 
 .ui-page-context-row {

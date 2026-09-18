@@ -431,7 +431,7 @@ export function confirmOfflineAsr(item: TranscriptDetailItemView): Promise<boole
       title: item.offline_asr.status === "succeeded" ? "再次识别这条素材？" : "离线加强识别？",
       content: `将使用火山和 StepFun 重新识别原音频，再由 AI 校对。${dialectLine}`,
       confirmText: "开始识别",
-      confirmColor: "#a84f43",
+      confirmColor: "#b65d49",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });

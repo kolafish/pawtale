@@ -16,7 +16,7 @@
     <text wx:if="{{preview.questions.length}}" class="edit-hint">可以继续说，补充到上面的要求里。</text>
     <checkbox-group bindchange="selectOperations">
       <label wx:for="{{items}}" wx:key="target_ref" class="edit-operation">
-        <checkbox value="{{item.target_ref}}" checked="{{item.selected}}" disabled="{{applying}}" color="#A84F43" />
+        <checkbox value="{{item.target_ref}}" checked="{{item.selected}}" disabled="{{applying}}" color="#b65d49" />
         <view class="edit-operation-copy">
           <text class="edit-operation-title">{{item.label}}</text>
           <text wx:if="{{item.detail}}" class="edit-detail">{{item.detail}}</text>

@@ -88,7 +88,7 @@
           </view>
           <switch
             checked="{{bookExportShowSourceAppendix}}"
-            color="#a84f43"
+            color="#b65d49"
             bindchange="toggleBookExportSourceAppendix"
           />
         </view>
