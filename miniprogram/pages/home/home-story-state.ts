@@ -1,6 +1,5 @@
 import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
-import { STORY_GROWTH_NOTICE_IMAGES } from "../../components/story-tree/story-growth-stage";
 import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
 
 export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
@@ -15,8 +14,9 @@ export interface HomeStoryData {
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
+  growthNoticeDetail: string;
+  growthNoticeMeta: string;
   growthNoticeContext: string;
-  growthNoticeIcon: string;
   growthTarget: StoryGrowthTarget | null;
   narrationSaved: boolean;
   dismissingGrowth: boolean;
@@ -46,8 +46,9 @@ export class HomeGrowthTracker {
 export function emptyHomeStoryData(): HomeStoryData {
   return {
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
-    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeIcon: "",
-    growthNoticeContext: "", growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
+    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeDetail: "",
+    growthNoticeMeta: "", growthNoticeContext: "", growthTarget: null, narrationSaved: false,
+    dismissingGrowth: false, retryingDraft: false,
   };
 }
 
@@ -99,28 +100,34 @@ export function homeStorySnapshotData(
     (total, event) => total + Math.max(0, event.book_char_count_delta || 0),
     0,
   );
-  const summary = [
+  const structuralChanges = [
     newChapters.size ? `新增 ${newChapters.size} 个主题` : "",
     newSections.size ? `新增 ${newSections.size} 个故事` : "",
     updatedCount ? `补充 ${updatedCount} 个已有故事` : "",
-    bookCharCountDelta ? `书稿 +${bookCharCountDelta} 字` : bookUpdated ? "书稿已更新" : "",
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean);
+  const fallbackText = snapshot.growth_events.map(event => event.summary_text).filter(Boolean).join(" · ");
+  const growthNoticeText = bookCharCountDelta
+    ? `+${bookCharCountDelta} 字`
+    : structuralChanges[0] || (bookUpdated ? "书稿已更新" : fallbackText);
+  const growthNoticeDetail = bookCharCountDelta
+    ? structuralChanges.join(" · ")
+    : structuralChanges.slice(1).join(" · ");
   const chapterTitles = [...changedChapterTitles];
   const growthNoticeContext = chapterTitles.length
     ? `《${chapterTitles[0]}》${chapterTitles.length > 1 ? `等 ${chapterTitles.length} 个主题` : ""}有了新的内容`
     : "";
-  const growthNoticeKind = addedCount ? "new" : updatedCount ? "enriched" : "progress";
   story.overview.growthAnimating = freshEventIds.size > 0
     && Boolean(addedCount || updatedCount || bookCharCountDelta);
   return {
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount || bookCharCountDelta
-      ? "你的书刚刚又长了一点"
+      ? "你的书又长了一点"
       : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",
-    growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),
+    growthNoticeText,
+    growthNoticeDetail,
+    growthNoticeMeta: story.memoir.bookMetaText === "正在整理" ? "" : `现在共 ${story.memoir.bookMetaText}`,
     growthNoticeContext,
-    growthNoticeIcon: STORY_GROWTH_NOTICE_IMAGES[growthNoticeKind],
   };
 }
 

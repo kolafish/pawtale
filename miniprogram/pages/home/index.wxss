@@ -272,26 +272,8 @@
 }
 
 .home-growth-notice {
-  padding: 20rpx;
-  display: grid;
-  grid-template-columns: 52rpx minmax(0, 1fr);
-  align-items: center;
-  gap: 8rpx 14rpx;
-}
-
-.home-growth-icon {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ui-success-surface);
-}
-
-.home-growth-image {
-  width: 46rpx;
-  height: 46rpx;
+  padding: 22rpx 24rpx 18rpx;
+  background: rgba(255, 253, 250, 0.9);
 }
 
 .home-growth-copy,
@@ -301,7 +283,9 @@
 }
 
 .home-growth-title,
+.home-growth-value,
 .home-growth-detail,
+.home-growth-meta,
 .home-growth-context,
 .home-story-progress-title,
 .home-story-progress-detail {
@@ -316,7 +300,32 @@
   line-height: 1.45;
 }
 
-.home-growth-detail,
+.home-growth-delta {
+  margin-top: 8rpx;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6rpx 14rpx;
+}
+
+.home-growth-value {
+  color: var(--ui-accent-strong);
+  font-family: var(--ui-font-editorial);
+  font-size: 38rpx;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-growth-detail {
+  color: var(--ui-text-primary);
+  font-size: 24rpx;
+  font-weight: 650;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.home-growth-meta,
 .home-story-progress-detail {
   margin-top: 3rpx;
   color: var(--ui-text-secondary);
@@ -326,7 +335,7 @@
 }
 
 .home-growth-context {
-  margin-top: 3rpx;
+  margin-top: 2rpx;
   color: var(--ui-text-muted);
   font-size: 23rpx;
   line-height: 1.45;
@@ -334,7 +343,7 @@
 }
 
 .home-growth-actions {
-  grid-column: 2;
+  margin-top: 8rpx;
   display: flex;
   flex-wrap: wrap;
   gap: 8rpx;
@@ -355,20 +364,6 @@
 .home-inline-action.is-secondary {
   color: var(--ui-text-secondary);
   font-weight: 600;
-}
-
-.home-growth-actions .home-inline-action:not(.is-secondary) {
-  padding-right: 18rpx;
-  padding-left: 18rpx;
-  color: var(--ui-on-accent);
-  background: var(--ui-accent);
-  box-shadow: 0 6rpx 14rpx rgba(166, 76, 59, 0.14);
-}
-
-.home-growth-actions .home-inline-action.is-secondary {
-  padding-right: 18rpx;
-  padding-left: 18rpx;
-  box-shadow: 0 0 0 1rpx rgba(166, 76, 59, 0.24) inset;
 }
 
 .story-refresh-error,
@@ -443,13 +438,15 @@
 .large-text .narration-choice-text,
 .large-text .narration-choice-action,
 .large-text .voice-auth-hint,
-.large-text .home-growth-detail,
 .large-text .home-growth-context,
 .large-text .home-story-progress-detail { font-size: 31rpx; }
 .large-text .voice-auth-copy,
 .large-text .voice-auth-link,
 .large-text .home-growth-title,
 .large-text .home-story-progress-title { font-size: 34rpx; }
+.large-text .home-growth-value { font-size: 46rpx; }
+.large-text .home-growth-detail,
+.large-text .home-growth-meta { font-size: 29rpx; }
 .large-text .home-inline-action { font-size: 30rpx; }
 .large-text .continue-narration-button { min-height: 56px; font-size: 36rpx; }
 
@@ -459,5 +456,4 @@
   .narration-choice-actions { align-items: stretch; flex-direction: column; }
   .narration-choice-primary,
   .narration-choice-secondary { width: 100%; justify-content: center; }
-  .home-growth-actions { grid-column: 1 / span 2; padding-left: 66rpx; }
 }

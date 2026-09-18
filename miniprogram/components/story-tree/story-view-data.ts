@@ -5,13 +5,7 @@ export type StoryTone = "leaf" | "sun" | "clay";
 
 export interface StoryMemoirSummaryView {
   title: string;
-  progressDetail: string;
   bookMetaText: string;
-  bookCharCountValue: string;
-  bookCharCountUnit: string;
-  bookCharCountPrefix: string;
-  bookChapterText: string;
-  bookRecentText: string;
 }
 
 export interface StoryThemeTagView {
@@ -62,13 +56,7 @@ export function emptyStoryViewData(): StoryViewData {
   return {
     memoir: {
       title: "我的故事",
-      progressDetail: "看看书稿",
-      bookMetaText: "故事会在这里慢慢写成书",
-      bookCharCountValue: "",
-      bookCharCountUnit: "字",
-      bookCharCountPrefix: "",
-      bookChapterText: "故事正在慢慢写成书",
-      bookRecentText: "",
+      bookMetaText: "正在整理",
     },
     overview: {
       title: "我的故事树",
