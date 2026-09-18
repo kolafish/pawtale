@@ -21,6 +21,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookReview,
 )
+from app.models.projects import Project
 from app.schemas.memoir_book_review import (
     MemoirBookRevisionMetadataField,
     MemoirBookReviewResponse,
@@ -280,9 +281,10 @@ async def load_book_review_context(
         if output is not None
         else None
     )
+    project = await db.get(Project, project_id)
     book_title = (
-        (output.title or "").strip()
-        if output is not None
+        (project.title or "").strip()
+        if project is not None
         else formal_book_title((plan.title or "").strip())
     ) or "我的回忆录"
     book_metadata = {

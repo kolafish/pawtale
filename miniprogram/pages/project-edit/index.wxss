@@ -25,6 +25,15 @@
   margin-bottom: 14rpx;
 }
 
+.field-hint {
+  display: block;
+  margin: -4rpx 0 12rpx;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
 .text-input {
   font-size: 30rpx;
 }

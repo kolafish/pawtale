@@ -82,7 +82,6 @@ export interface MemoirStoryGrowthEvent {
 }
 
 export interface MemoirStorySnapshot extends MemoirHomeSnapshot {
-  book_title?: string;
   book_issues: MemoirStoryIssueCounts;
   book_manual_edit_preserved: boolean;
   book_chapter_count: number;

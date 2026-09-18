@@ -190,7 +190,7 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert any(command.text == "外婆家的童年" for command in chapter_pages[0].commands)
 
     assert chapter_pages[1].body_page_number == 2
-    assert chapter_pages[1].header_title == "外婆的回忆录"
+    assert chapter_pages[1].header_title == "外婆回忆录"
     assert chapter_pages[1].show_footer is True
     assert all(
         "本章整理自" not in command.text
@@ -549,7 +549,7 @@ def test_pdf_line_wrapping_keeps_common_words_and_number_units_together():
     assert "97\n岁" not in joined_breaks
 
 
-def test_manuscript_pdf_export_sanitizes_legacy_copy_and_cover_identity():
+def test_manuscript_pdf_export_sanitizes_legacy_copy_without_replacing_user_title():
     manuscript = _sample_manuscript("夏天的晚上，我就坐在院子里边看月亮。那个院子里有一棵葡萄树。")
     manuscript["profile"]["title"] = "我的小时候"
     manuscript["profile"]["subtitle"] = "回望这一生"
@@ -578,7 +578,7 @@ def test_manuscript_pdf_export_sanitizes_legacy_copy_and_cover_identity():
 
     all_text = "\n".join(command.text for page in pages for command in page.commands)
     assert "回望这一生" in all_text
-    assert "余晋口述回忆录" in all_text
+    assert "我的小时候" in all_text
     assert "爷爷主题回忆录" not in all_text
     assert "从口述内容看" not in all_text
     assert "凡是过往皆是序章" not in all_text
@@ -590,7 +590,7 @@ def test_manuscript_pdf_export_sanitizes_legacy_copy_and_cover_identity():
         manuscript=manuscript,
         export_format=MemoirBookOutputExportFormat.PDF,
     )
-    assert export.filename.startswith("《回望这一生》_阅读版_")
+    assert export.filename.startswith("《我的小时候》_阅读版_")
 
 
 def test_chapter_epigraph_does_not_repeat_as_first_body_sentence():

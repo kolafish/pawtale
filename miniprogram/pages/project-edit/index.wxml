@@ -8,6 +8,7 @@
   <view class="form-panel ui-card">
     <view class="field">
       <text class="field-label ui-section-heading">回忆录名称</text>
+      <text class="field-hint">首页、封面和导出都会使用这个名字</text>
       <input
         id="project-title-input"
         class="text-input support-form-input"

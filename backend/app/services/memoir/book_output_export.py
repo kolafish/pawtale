@@ -8,10 +8,7 @@ from typing import Any
 
 from app.config import DATA_DIR
 from app.services.file_exports import ExportFile, safe_filename
-from app.services.memoir.book_manuscript_cleanup import (
-    formal_book_title,
-    sanitize_manuscript_payload,
-)
+from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_output_pdf_renderer import (
     PDF_LAYOUTS,
     PDF_SERIF_BOLD_FONT_NAME,
@@ -1260,14 +1257,10 @@ def _render_manuscript_pdf(
     )
 
 
-def _formal_export_title(raw_title: str) -> str:
-    return formal_book_title(raw_title)
-
-
 def _export_title(title: str, manuscript: dict[str, Any] | None) -> str:
     sanitized = sanitize_manuscript_payload(title=title, manuscript=manuscript or {})
     profile = _dict(sanitized.get("profile"))
-    return _formal_export_title(_str(profile.get("title")) or title)
+    return _str(profile.get("title")) or title.strip() or "家庭回忆录"
 
 
 def _filename_book_title(title: str) -> str:

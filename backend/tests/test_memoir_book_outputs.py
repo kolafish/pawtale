@@ -320,8 +320,8 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
 
     cleaned = sanitize_manuscript_payload(title="我的小时候", manuscript=manuscript)
 
-    assert cleaned["profile"]["title"] == "回望这一生"
-    assert cleaned["profile"]["subtitle"] == "余晋口述回忆录"
+    assert cleaned["profile"]["title"] == "我的小时候"
+    assert cleaned["profile"]["subtitle"] == "回望这一生"
     assert "爷爷主题回忆录" not in cleaned["front_matter"][1]["content"]
     assert "这一章主要记录" not in cleaned["chapters"][0]["intro"]
     assert "从口述内容看" not in cleaned["chapters"][1]["intro"]
@@ -625,9 +625,9 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
     assert response.status_code == 200
     data = response.json()
     assert len(data["suggestions"]) >= 3
-    assert "外婆的回忆录" in data["suggestions"]
-    assert "外婆口述回忆录" in data["suggestions"]
-    assert "外婆口述的回忆录" not in data["suggestions"]
+    assert "测试的回忆录" in data["suggestions"]
+    assert "测试口述回忆录" in data["suggestions"]
+    assert "测试口述的回忆录" not in data["suggestions"]
     assert all("外婆家的童年" not in title for title in data["suggestions"])
     assert all("主题" not in title for title in data["suggestions"])
 
@@ -669,10 +669,31 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert "仅供家人保存与阅读" not in latest["manuscript"]["front_matter"][1]["content"]
     assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
     assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
+    project = await test_db.get(Project, project_id)
+    assert project is not None
+    assert project.title == "外婆慢慢说"
 
-    story = await client.get("/api/mobile/memoir/story-snapshot")
-    assert story.status_code == 200
-    assert story.json()["book_title"] == "外婆慢慢说"
+
+async def test_project_title_update_replaces_existing_book_output_title(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client, title="旧项目名称")
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}",
+        json={"title": "我的故事"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "我的故事"
+    output_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+    )
+    assert output_response.status_code == 200
+    output = output_response.json()
+    assert output["title"] == "我的故事"
+    assert output["latest_version"]["content"].startswith("我的故事\n\n目录")
+    assert output["latest_version"]["manuscript"]["profile"]["title"] == "我的故事"
 
 
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):

@@ -87,14 +87,10 @@ def _revision_metadata_patch(proposal: MemoirBookRevisionProposal) -> dict[str, 
 def _book_information(
     *,
     project: Project,
-    output: MemoirBookOutput,
     baseline: MemoirBookOutputVersion,
 ) -> dict[str, str]:
     return {
-        "title": book_output_versions.book_output_version_title(
-            baseline,
-            fallback=output.title,
-        ),
+        "title": project.title.strip(),
         **effective_book_metadata(
             project=project,
             stored=baseline.manuscript_json,
@@ -440,7 +436,6 @@ async def proposal_response(
     )
     before_information = _book_information(
         project=project,
-        output=output,
         baseline=baseline,
     )
     metadata_patch = _revision_metadata_patch(proposal)
@@ -559,7 +554,6 @@ async def apply_proposal(
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
     before_information = _book_information(
         project=project,
-        output=output,
         baseline=baseline,
     )
     metadata_patch = _revision_metadata_patch(proposal)
@@ -625,12 +619,15 @@ async def apply_proposal(
         }
     output.status = MemoirOutputStatus.DRAFT.value
     output.title = after_information["title"]
+    project.title = after_information["title"]
+    project.updated_at = utcnow_naive()
     output.metadata_json = metadata
     output.updated_at = utcnow_naive()
     proposal.status = MemoirBookRevisionProposalStatus.APPLIED.value
     proposal.result_output_version_id = applied_version.id
     proposal.updated_at = utcnow_naive()
     db.add(output)
+    db.add(project)
     db.add(proposal)
     await db.flush()
     return await proposal_response(db, proposal=proposal, preview=preview)
