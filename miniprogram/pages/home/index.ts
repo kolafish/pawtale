@@ -438,6 +438,7 @@ definePage<HomeData>()({
     const target = this.data.growthTarget;
     if (!target) return;
     this.selectComponent<StoryTreeHandle>("#story-tree")?.focusGrowth(target.chapterId);
+    void this.dismissGrowthNotice();
   },
 
   focusStoryGrowth(event: StoryTreeFocusEvent) {
@@ -467,7 +468,15 @@ definePage<HomeData>()({
     this.setData({ dismissingGrowth: true });
     try {
       await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(projectId, id)));
-      if (this.homeVisible && this.data.projectId === projectId) await this.loadHome(true);
+      if (this.homeVisible && this.data.projectId === projectId) {
+        this.setData({
+          growthEvents: [],
+          growthNoticeTitle: "",
+          growthNoticeText: "",
+          growthNoticeContext: "",
+          growthTarget: null,
+        });
+      }
     } catch (error) {
       if (this.homeVisible && this.data.projectId === projectId) {
         this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });

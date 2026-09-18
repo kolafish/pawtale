@@ -272,7 +272,7 @@
 }
 
 .home-growth-notice {
-  padding: 22rpx 24rpx 18rpx;
+  padding: 26rpx 24rpx 22rpx;
   background: rgba(255, 253, 250, 0.9);
 }
 
@@ -284,15 +284,20 @@
 
 .home-growth-title,
 .home-growth-value,
-.home-growth-detail,
-.home-growth-meta,
 .home-growth-context,
 .home-story-progress-title,
 .home-story-progress-detail {
   display: block;
 }
 
-.home-growth-title,
+.home-growth-title {
+  color: var(--ui-text-primary);
+  font-size: 26rpx;
+  font-weight: 650;
+  line-height: 1.45;
+  text-wrap: balance;
+}
+
 .home-story-progress-title {
   color: var(--ui-text-primary);
   font-size: 28rpx;
@@ -300,32 +305,17 @@
   line-height: 1.45;
 }
 
-.home-growth-delta {
-  margin-top: 8rpx;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6rpx 14rpx;
-}
-
 .home-growth-value {
+  margin-top: 8rpx;
   color: var(--ui-accent-strong);
   font-family: var(--ui-font-editorial);
-  font-size: 38rpx;
+  font-size: 36rpx;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
+  text-wrap: balance;
 }
 
-.home-growth-detail {
-  color: var(--ui-text-primary);
-  font-size: 24rpx;
-  font-weight: 650;
-  line-height: 1.45;
-  text-wrap: pretty;
-}
-
-.home-growth-meta,
 .home-story-progress-detail {
   margin-top: 3rpx;
   color: var(--ui-text-secondary);
@@ -335,18 +325,18 @@
 }
 
 .home-growth-context {
-  margin-top: 2rpx;
+  margin-top: 4rpx;
   color: var(--ui-text-muted);
-  font-size: 23rpx;
-  line-height: 1.45;
+  font-size: 24rpx;
+  line-height: 1.5;
   text-wrap: pretty;
 }
 
 .home-growth-actions {
-  margin-top: 8rpx;
+  margin-top: 10rpx;
   display: flex;
   flex-wrap: wrap;
-  gap: 8rpx;
+  gap: 12rpx;
 }
 
 .home-inline-action {
@@ -362,7 +352,7 @@
 }
 
 .home-inline-action.is-secondary {
-  color: var(--ui-text-secondary);
+  color: var(--ui-text-muted);
   font-weight: 600;
 }
 
@@ -445,8 +435,6 @@
 .large-text .home-growth-title,
 .large-text .home-story-progress-title { font-size: 34rpx; }
 .large-text .home-growth-value { font-size: 46rpx; }
-.large-text .home-growth-detail,
-.large-text .home-growth-meta { font-size: 29rpx; }
 .large-text .home-inline-action { font-size: 30rpx; }
 .large-text .continue-narration-button { min-height: 56px; font-size: 36rpx; }
 

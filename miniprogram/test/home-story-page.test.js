@@ -126,18 +126,37 @@ test("story turns new sections into reader-facing growth results and focuses the
   await flushAsyncWork();
   assert.equal(context.data.growthNoticeTitle, "你的书又长了一点");
   assert.equal(context.data.growthNoticeText, "新增 1 个故事");
-  assert.equal(context.data.growthNoticeDetail, "");
-  assert.equal(context.data.growthNoticeMeta, "现在共 1 章 · 200 字");
-  assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
+  assert.equal(context.data.growthNoticeContext, "章节 2等内容已更新");
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
   context.viewStoryGrowth();
   assert.deepEqual(targets, [["chapter-2"]]);
   assert.equal(context.data.story.chapters[1].highlighted, true);
   assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
-  assert.deepEqual(calls.acknowledgedEventIds, []);
-  await context.dismissGrowthNotice();
+  await flushAsyncWork();
   assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
+  assert.equal(context.data.growthNoticeText, "");
+  assert.equal(context.data.growthTarget, null);
+  context.onHide();
+});
+
+test("knowing about story growth acknowledges it and removes the notice", async () => {
+  const event = {
+    event_id: "growth-dismissed",
+    created_at: "2026-09-05T00:00:00Z",
+    summary_text: "新长出了一个小节",
+    book_char_count_delta: 0,
+    changes: [{ kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }],
+  };
+  const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
+  const context = pageContext(page);
+  await context.onShow();
+
+  await context.dismissGrowthNotice();
+
+  assert.deepEqual(calls.acknowledgedEventIds, ["growth-dismissed"]);
+  assert.equal(context.data.growthNoticeText, "");
+  assert.equal(context.data.growthTarget, null);
   context.onHide();
 });
 
@@ -284,9 +303,7 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
   assert.equal(context.data.growthNoticeTitle, "这段回忆刚刚又丰富了一些");
   assert.equal(context.data.growthNoticeText, "补充 1 个已有故事");
-  assert.equal(context.data.growthNoticeDetail, "");
-  assert.equal(context.data.growthNoticeMeta, "现在共 1 章 · 200 字");
-  assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
+  assert.equal(context.data.growthNoticeContext, "章节 2等内容已更新");
   context.onHide();
 });
 
@@ -412,10 +429,27 @@ test("home combines story and manuscript deltas without double counting assembly
   ] });
   const homeData = homeStorySnapshotData(current, storyViewData(current));
   assert.equal(homeData.growthNoticeTitle, "你的书又长了一点");
-  assert.equal(homeData.growthNoticeText, "+386 字");
-  assert.equal(homeData.growthNoticeDetail, "新增 1 个故事");
-  assert.equal(homeData.growthNoticeMeta, "现在共 1 章 · 200 字");
-  assert.equal(homeData.growthNoticeContext, "《章节 2》有了新的内容");
+  assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
+  assert.equal(homeData.growthNoticeContext, "章节 2等内容已更新");
+});
+
+test("growth feedback keeps theme and story counts on one primary line", () => {
+  const current = snapshot({ growth_events: [{
+    event_id: "structure",
+    summary_text: "故事树已更新",
+    created_at: "2026-09-05T00:00:00Z",
+    book_char_count_delta: 426,
+    changes: [
+      { kind: "chapter_added", chapter_id: "chapter-1" },
+      { kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" },
+    ],
+  }] });
+
+  const homeData = homeStorySnapshotData(current, storyViewData(current));
+
+  assert.equal(homeData.growthNoticeText, "新增 1 个主题 · 1 个故事");
+  assert.equal(homeData.growthNoticeContext, "章节 1等内容已更新");
+  assert.doesNotMatch(homeData.growthNoticeText, /426/);
 });
 
 test("growth feedback keeps large book totals compact while preserving the exact delta", () => {
@@ -429,8 +463,7 @@ test("growth feedback keeps large book totals compact while preserving the exact
   const view = storyViewData(current);
   const homeData = homeStorySnapshotData(current, view);
   assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
-  assert.equal(homeData.growthNoticeText, "+286 字");
-  assert.equal(homeData.growthNoticeMeta, "现在共 1 章 · 约 1.2 万字");
+  assert.equal(homeData.growthNoticeText, "书稿 +286 字");
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -455,4 +488,12 @@ test("home story template exposes growth and counts without internal completion 
   assert.match(template, /growthLabel/);
   assert.match(template, /id="story-summary-toggle"/);
   assert.doesNotMatch(template, /树上的故事/);
+});
+
+test("home growth notice keeps one primary metric line and two lightweight actions", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(template, /class="home-growth-value ui-tabular"/);
+  assert.match(template, />看看变化<\/button>/);
+  assert.match(template, />知道了<\/button>/);
+  assert.doesNotMatch(template, /growthNoticeDetail|growthNoticeMeta/);
 });
