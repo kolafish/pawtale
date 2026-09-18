@@ -1,6 +1,12 @@
 import { ensureBackendSession } from "./auth";
 import { request } from "./request";
-import { ensureRecorderPrivacyAuthorization } from "./wechat-privacy";
+import {
+  ensureRecorderPrivacyAuthorization,
+  isRecorderPermissionDeniedError,
+  openRecorderPermissionSettings,
+} from "./wechat-privacy";
+
+export { isRecorderPermissionDeniedError, openRecorderPermissionSettings };
 
 export const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
 export const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";

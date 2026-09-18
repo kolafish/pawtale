@@ -26,3 +26,9 @@ test("voice status pills separate control geometry from label typography", () =>
     assert.match(template, new RegExp(`<text[^>]+class="[^\"]*${labelClass}[^\"]*"[^>]*>`));
   }
 });
+
+test("voice permission recovery exposes the microphone settings action", () => {
+  assert.match(template, /wx:if="\{\{recorderSettingsRequired\}\}"/);
+  assert.match(template, /bindtap="openRecorderSettings"/);
+  assert.match(template, />去设置麦克风<\/button>/);
+});

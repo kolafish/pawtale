@@ -151,6 +151,8 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-authorization.ts", {
     ensureVoiceRecordingAuthorization: async () => true,
+    isRecorderPermissionDeniedError: () => false,
+    openRecorderPermissionSettings: async () => true,
     readVoiceAuthorizationConsent: () => false,
     saveVoiceAuthorizationConsent: (agreed = true) => ({ agreed, version: "test", agreedAt: "now" }),
     syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
@@ -1229,6 +1231,45 @@ test("embedded voice chat finishes the session before returning home", async () 
   assert.equal(finishCalls, 1);
   assert.equal(context.runtime().pageSuspended, false);
   assert.deepEqual(context.events, []);
+});
+
+test("voice chat reconnects after microphone permission is enabled in settings", async () => {
+  let settingsCalls = 0;
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      openRecorderPermissionSettings: async () => {
+        settingsCalls += 1;
+        return true;
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "error",
+      error: "没有麦克风权限",
+      recorderSettingsRequired: true,
+    },
+    async connectGateway() {
+      connectCalls += 1;
+      return true;
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.openRecorderSettings.call(context);
+
+  assert.equal(settingsCalls, 1);
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.recorderSettingsRequired, false);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.recoveryNotice, "麦克风权限已开启，可以继续说话");
 });
 
 test("voice chat stops active AI speech when the page is hidden", () => {
@@ -3393,9 +3434,16 @@ test("failed saving and finishing in the background never navigate away or claim
 
 test("a closed voice client returns home only when the persisted session confirms it stopped", async () => {
   for (const status of [null, "active", "stopped"]) {
-    const routes = [], errors = [];
+    const routes = [], errors = [], stoppedSessions = [];
     global.wx = { reLaunch: options => routes.push(options.url) };
-    const page = loadVoiceChatPage();
+    const page = loadVoiceChatPage({
+      voiceApiExports: {
+        stopMemoirVoiceSession: async (voiceSessionId) => {
+          stoppedSessions.push(voiceSessionId);
+          return { session: { id: voiceSessionId, status: "stopped" } };
+        },
+      },
+    });
     const context = { ...page, pageSuspended: false,
       data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
       setData(patch) { this.data = {...this.data, ...patch}; },
@@ -3408,6 +3456,7 @@ test("a closed voice client returns home only when the persisted session confirm
       handleError: message => errors.push(message),
     };
     await context.finishSession();
+    assert.deepEqual(stoppedSessions, ["voice-1"]);
     assert.equal(context.data.finishingSession, false);
     if (status === "stopped") {
       assert.deepEqual(routes, []);

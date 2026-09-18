@@ -124,6 +124,13 @@ test("voice recording authorization syncs consent before requesting recorder pri
       privacyAuthorized = true;
       success();
     },
+    getSetting({ success }) {
+      success({ authSetting: {} });
+    },
+    authorize({ scope, success }) {
+      assert.equal(scope, "scope.record");
+      success();
+    },
   };
   const service = loadVoiceAuthorizationService({
     authExports: {

@@ -18,7 +18,10 @@ import {
 } from "./memoir-streaming-asr-protocol";
 import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
-import { wechatRecorderErrorMessage } from "./wechat-privacy";
+import {
+  isRecorderPermissionDeniedMessage,
+  wechatRecorderErrorMessage,
+} from "./wechat-privacy";
 
 export {
   arrayBufferToBase64,
@@ -580,7 +583,11 @@ export class MemoirStreamingAsrClient {
       nativeMessage: message,
       errorKind: "recorder",
     });
-    this.options.callbacks.onError(readableMessage, clientError(readableMessage, "recorder"));
+    this.options.callbacks.onError(readableMessage, clientError(
+      readableMessage,
+      "recorder",
+      isRecorderPermissionDeniedMessage(message) ? "recorder_permission_denied" : "recorder_failed",
+    ));
     this.options.callbacks.onStatus("error");
     if (activeClient === this) {
       activeClient = null;

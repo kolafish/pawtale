@@ -19,7 +19,10 @@ import {
   type MemoirStreamingAsrClientEvent,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
-import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
+import {
+  createMemoirVoiceNoAnswerPrompt,
+  stopMemoirVoiceSession,
+} from "../../services/memoir-voice-session-api";
 import {
   canRequestFollowUp,
   latestPersistedAssistantMessageId,
@@ -398,7 +401,11 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     this.cancelFollowUpTTS();
     applyVoiceChatDataPatch(this, finishSessionStartPatch(this.data.recording));
     try {
-      if (this.runtime().voiceStreaming.hasClient()) await this.runtime().voiceStreaming.finishSession();
+      if (this.runtime().voiceStreaming.hasClient()) {
+        await this.runtime().voiceStreaming.finishSession();
+      } else {
+        await stopMemoirVoiceSession(this.data.voiceSessionId);
+      }
       const saved = await this.refreshVoiceSessionSnapshot();
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");

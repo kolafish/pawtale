@@ -99,6 +99,7 @@ export interface VoiceChatData {
   recoveryNotice: string;
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
+  recorderSettingsRequired: boolean;
   finishButtonText: string;
   storyGrowthNoticeState: "hidden" | "pending" | "ready" | "failed" | "needs_input" | "no_change";
   storyGrowthNoticeTitle: string;
@@ -248,6 +249,7 @@ export function initialVoiceChatData(): VoiceChatData {
     recoveryNotice: "",
     canReconnect: false,
     canFinishAfterDisconnect: false,
+    recorderSettingsRequired: false,
     finishButtonText: "保存离开",
     storyGrowthNoticeState: "hidden",
     storyGrowthNoticeTitle: "",
@@ -710,8 +712,17 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     narratorRecordButtonClass: `role-record-button narrator${roleRecordButtonSuffix}`,
     interviewerRecordButtonClass: `role-record-button interviewer${roleRecordButtonSuffix}`,
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
-    showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
-    showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
+    showRecoveryPanel: Boolean(
+      state.recoveryNotice
+      || state.canReconnect
+      || state.canFinishAfterDisconnect
+      || state.recorderSettingsRequired
+    ),
+    showRecoveryActions: Boolean(
+      state.canReconnect
+      || state.canFinishAfterDisconnect
+      || state.recorderSettingsRequired
+    ),
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
     showAssistantPanel,
     showCompletionIssuePanel,
@@ -893,9 +904,11 @@ export function voiceAuthorizationRequiredPatch(autoTriggered: boolean): VoiceCh
 export function voiceAuthorizationSyncFailedPatch(
   message: string,
   forRecording: boolean = false,
+  recorderSettingsRequired: boolean = false,
 ): VoiceChatPatch {
   return {
     error: message,
+    recorderSettingsRequired,
     primaryActionText: "继续说话",
     autoListenStateText: forRecording ? "录音授权失败" : "声纹授权同步失败",
   };
@@ -1082,6 +1095,7 @@ export function voiceChatErrorPatch(
     recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地讲述记录" : current.recoveryNotice,
     canReconnect: error?.kind === "connection",
     canFinishAfterDisconnect: error?.kind === "connection",
+    recorderSettingsRequired: error?.code === "recorder_permission_denied",
   };
   if (error?.state) {
     nextData.gatewayStateText = gatewayStateText(error.state);

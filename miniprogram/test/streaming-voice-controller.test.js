@@ -106,6 +106,22 @@ test("StreamingVoiceController forwards diagnostics and drops a closed socket cl
   assert.equal(controller.startRecording(), false);
 });
 
+test("StreamingVoiceController force closes a client after recorder failure", async () => {
+  const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
+  const statuses = [];
+  const controller = new StreamingVoiceController();
+
+  await controller.connect(connectOptions({
+    onStatus: (status) => statuses.push(status),
+  }));
+  const client = clients[0];
+  client.options.callbacks.onStatus("error");
+
+  assert.deepEqual(statuses, ["error"]);
+  assert.deepEqual(client.closeCalls, [{ force: true }]);
+  assert.equal(controller.hasClient(), false);
+});
+
 test("StreamingVoiceController proxies recording, auto-stop, and close to the current client", async () => {
   const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
   const controller = new StreamingVoiceController();

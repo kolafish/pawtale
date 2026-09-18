@@ -123,6 +123,10 @@ before(async () => {
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
   session.artifacts.mark("voice:setup:privacy-mocked");
+  await session.miniProgram.mockWxMethod("getSetting", {
+    authSetting: { "scope.record": true },
+  });
+  session.artifacts.mark("voice:setup:recorder-permission-mocked");
   await session.miniProgram.mockWxMethod("showModal", { confirm: false, cancel: true });
   session.artifacts.mark("voice:setup:modal-mocked");
   fixture.reset();
@@ -146,7 +150,7 @@ after(async () => {
       } catch (error) {
         teardownError = error;
       }
-      for (const method of ["getRecorderManager", "getPrivacySetting", "showModal"]) {
+      for (const method of ["getRecorderManager", "getPrivacySetting", "getSetting", "showModal"]) {
         try {
           await session.miniProgram.restoreWxMethod(method);
         } catch {
