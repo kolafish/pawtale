@@ -57,12 +57,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
 
 test("story maps server content into the hero, themes and book summary", () => {
   const view = storyViewData(snapshot());
-  assert.equal(view.memoir.progressDetail, "读读我的书");
-  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 200 字");
-  assert.equal(view.memoir.bookCharCountValue, "200");
-  assert.equal(view.memoir.bookCharCountUnit, "字");
-  assert.equal(view.memoir.bookChapterText, "已写成 1 章");
-  assert.equal(view.memoir.bookRecentText, "");
+  assert.equal(view.memoir.bookMetaText, "1 章 · 200 字");
   assert.equal(view.overview.growthStage, 2);
   assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
@@ -87,9 +82,7 @@ test("story distinguishes empty, organizing and section-less states", () => {
   const empty = storyViewData(snapshot({ chapters: [], book_readable: false, book_chapter_count: 0, book_char_count: 0, progress: null }));
   assert.equal(empty.overview.summaryText, "故事树还在等待第一段回忆");
   assert.equal(empty.overview.hasChapters, false);
-  assert.equal(empty.memoir.bookMetaText, "故事会在这里慢慢写成书");
-  assert.equal(empty.memoir.bookCharCountValue, "");
-  assert.equal(empty.memoir.bookChapterText, "故事正在慢慢写成书");
+  assert.equal(empty.memoir.bookMetaText, "正在整理");
   const noSections = storyViewData(snapshot({chapters:[{...snapshot().chapters[0], sections:[]}]}));
   assert.equal(noSections.chapters[0].hasSections, false);
   const organizing = storyViewData(snapshot({ chapters: [], book_readable: false, progress: progress({ material_count: 2 }) }));
@@ -127,10 +120,11 @@ test("story turns new sections into reader-facing growth results and focuses the
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
-  assert.equal(context.data.growthNoticeTitle, "你的书刚刚又长了一点");
+  assert.equal(context.data.growthNoticeTitle, "你的书又长了一点");
   assert.equal(context.data.growthNoticeText, "新增 1 个故事");
+  assert.equal(context.data.growthNoticeDetail, "");
+  assert.equal(context.data.growthNoticeMeta, "现在共 1 章 · 200 字");
   assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
-  assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/chapter-sprig.png");
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
   context.viewStoryGrowth();
@@ -277,8 +271,9 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
   assert.equal(context.data.growthNoticeTitle, "这段回忆刚刚又丰富了一些");
   assert.equal(context.data.growthNoticeText, "补充 1 个已有故事");
+  assert.equal(context.data.growthNoticeDetail, "");
+  assert.equal(context.data.growthNoticeMeta, "现在共 1 章 · 200 字");
   assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
-  assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/notice-enriched.png");
   context.onHide();
 });
 
@@ -353,8 +348,7 @@ test("story keeps readable chapter drafts available while the assembled book awa
     progress: progress({ status: "needs_input", readable_chapter_count: 0 }),
   }));
   assert.equal(view.chapters[0].readable, true);
-  assert.equal(view.memoir.progressDetail, "看看书稿");
-  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 200 字");
+  assert.equal(view.memoir.bookMetaText, "1 章 · 200 字");
 });
 
 const { homeStorySnapshotData } = require("../pages/home/home-story-state.ts");
@@ -404,25 +398,26 @@ test("home combines story and manuscript deltas without double counting assembly
     },
   ] });
   const homeData = homeStorySnapshotData(current, storyViewData(current));
-  assert.equal(homeData.growthNoticeTitle, "你的书刚刚又长了一点");
-  assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
+  assert.equal(homeData.growthNoticeTitle, "你的书又长了一点");
+  assert.equal(homeData.growthNoticeText, "+386 字");
+  assert.equal(homeData.growthNoticeDetail, "新增 1 个故事");
+  assert.equal(homeData.growthNoticeMeta, "现在共 1 章 · 200 字");
   assert.equal(homeData.growthNoticeContext, "《章节 2》有了新的内容");
-  assert.equal(homeData.story.memoir.bookRecentText, "最近又增加了 386 字");
 });
 
-test("book summary keeps large totals compact without losing exact growth feedback", () => {
-  const view = storyViewData(snapshot({
+test("book utility keeps large totals compact while growth feedback stays exact", () => {
+  const current = snapshot({
     book_char_count: 12_400,
     growth_events: [{
       event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z",
       book_char_count_delta: 286, changes: [{ kind: "book_updated" }],
     }],
-  }));
-  assert.equal(view.memoir.bookCharCountPrefix, "约");
-  assert.equal(view.memoir.bookCharCountValue, "1.2");
-  assert.equal(view.memoir.bookCharCountUnit, "万字");
-  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 约 1.2 万字");
-  assert.equal(view.memoir.bookRecentText, "最近又增加了 286 字");
+  });
+  const view = storyViewData(current);
+  const homeData = homeStorySnapshotData(current, view);
+  assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
+  assert.equal(homeData.growthNoticeText, "+286 字");
+  assert.equal(homeData.growthNoticeMeta, "现在共 1 章 · 约 1.2 万字");
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -432,10 +427,10 @@ test("closed issues disappear despite an old needs_input job; five readable draf
     book_readable: false, book_chapter_count: 0, book_issues: {review_count: 1, supplement_count: 0},
   });
   assert.equal(storyViewData(current).overview.summaryText, "5 个主题 · 5 个故事");
-  assert.equal(storyViewData(current).memoir.bookMetaText, "已写成 5 章 · 200 字");
+  assert.equal(storyViewData(current).memoir.bookMetaText, "5 章 · 200 字");
   current.book_readable = true;
   current.book_chapter_count = 3;
-  assert.equal(storyViewData(current).memoir.bookMetaText, "已写成 3 章 · 200 字");
+  assert.equal(storyViewData(current).memoir.bookMetaText, "3 章 · 200 字");
 });
 
 test("home story template exposes growth and counts without internal completion labels", () => {

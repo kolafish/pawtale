@@ -87,40 +87,18 @@
 
   <slot name="afterHero"></slot>
 
-  <view wx:if="{{showBook}}" class="book-card ui-card ui-card-borderless ui-pressable" bindtap="openBook"
-    hover-class="ui-subtle-action-hover" aria-role="button"
-    aria-label="{{story.memoir.progressDetail}}，{{story.memoir.bookMetaText}}{{story.memoir.bookRecentText ? '，' + story.memoir.bookRecentText : ''}}">
-    <view class="book-heading">
-      <text class="book-title">我的书</text>
-    </view>
-    <view class="book-body">
-      <view class="book-illustration-wrap" aria-hidden="true">
-        <image class="book-illustration" src="/assets/story-tree/book-sprout.png" mode="aspectFit" />
+  <view wx:if="{{showBook || canVoiceEdit}}" class="story-utilities">
+    <view wx:if="{{showBook}}" class="story-utility story-book-utility ui-pressable" bindtap="openBook"
+      hover-class="ui-subtle-action-hover" aria-role="button" aria-label="打开书稿，{{story.memoir.bookMetaText}}">
+      <view class="story-book-copy ui-tabular">
+        <text class="story-book-label">书稿</text>
+        <text class="story-book-meta"> · {{story.memoir.bookMetaText}}</text>
       </view>
-      <view class="book-result">
-        <view wx:if="{{story.memoir.bookCharCountValue}}" class="book-total-line ui-tabular">
-          <text wx:if="{{story.memoir.bookCharCountPrefix}}" class="book-total-prefix">{{story.memoir.bookCharCountPrefix}}</text>
-          <text class="book-total-value">{{story.memoir.bookCharCountValue}}</text>
-          <text class="book-total-unit">{{story.memoir.bookCharCountUnit}}</text>
-        </view>
-        <text wx:else class="book-awaiting">故事正在慢慢写成书</text>
-        <text class="book-chapter ui-tabular">{{story.memoir.bookChapterText}}</text>
-        <view wx:if="{{story.memoir.bookRecentText}}" class="book-recent">
-          <view class="book-recent-leaf" aria-hidden="true"></view>
-          <text class="book-recent-text ui-tabular">{{story.memoir.bookRecentText}}</text>
-        </view>
-        <view class="book-action">
-          <text>{{story.memoir.progressDetail}}</text>
-          <text class="book-action-arrow" aria-hidden="true">›</text>
-        </view>
-      </view>
+      <text class="story-utility-arrow" aria-hidden="true">›</text>
     </view>
-  </view>
-
-  <view wx:if="{{canVoiceEdit}}" class="story-utilities">
-    <view class="story-utility ui-pressable" bindtap="openTranscripts" hover-class="ui-subtle-action-hover"
+    <view wx:if="{{canVoiceEdit}}" class="story-utility story-secondary-utility ui-pressable" bindtap="openTranscripts" hover-class="ui-subtle-action-hover"
       aria-role="button" aria-label="查看全部回忆">全部回忆</view>
-    <view class="story-utility ui-pressable" bindtap="openVoiceEdit" hover-class="ui-subtle-action-hover"
+    <view wx:if="{{canVoiceEdit}}" class="story-utility story-secondary-utility ui-pressable" bindtap="openVoiceEdit" hover-class="ui-subtle-action-hover"
       aria-role="button" aria-label="用语音编辑故事">语音编辑</view>
   </view>
 </view>
