@@ -58,6 +58,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
 test("story maps server content into the hero, themes and book summary", () => {
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.bookMetaText, "1 章 · 200 字");
+  assert.equal(view.overview.title, "余仲尤的回忆录");
   assert.equal(view.overview.growthStage, 2);
   assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
@@ -177,18 +178,16 @@ test("story offers explicit retry and does not turn a refresh failure into job f
   context.onHide();
 });
 
-test("story opens the book and compact theme workspace", async () => {
-  const { page, calls } = loadStoryPage();
+test("story opens the compact theme workspace", async () => {
+  const { page } = loadStoryPage();
   const context = pageContext(page);
   const urls = [];
   global.wx.navigateTo = ({ url }) => urls.push(url);
   await context.onShow();
   context.setData({ loading: true });
-  context.openBook();
   context.openChapter({ detail: { chapterId: "chapter-1" } });
   context.openChapter({ detail: { chapterId: "chapter-2" } });
-  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project-1",
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
+  assert.deepEqual(urls, ["/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2"]);
   context.onHide();
 });
@@ -226,7 +225,6 @@ test("home shows a later readable draft after an earlier structure event was ack
   await context.onShow();
   current = snapshot({ growth_events: [{ event_id: "draft-ready", summary_text: "这一章已经整理好了", created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 0, changes: [{ kind: "chapter_updated", chapter_id: "chapter-1" }] }] });
   await context.loadHome(true);
-  assert.equal(context.data.bookReadable, true);
   assert.equal(context.data.progress.status, "ready");
   assert.equal(context.data.story.chapters[0].growthLabel, "");
   assert.doesNotMatch(context.data.growthNoticeText, /新长出/);
@@ -405,7 +403,7 @@ test("home combines story and manuscript deltas without double counting assembly
   assert.equal(homeData.growthNoticeContext, "《章节 2》有了新的内容");
 });
 
-test("book utility keeps large totals compact while growth feedback stays exact", () => {
+test("growth feedback keeps large book totals compact while preserving the exact delta", () => {
   const current = snapshot({
     book_char_count: 12_400,
     growth_events: [{
