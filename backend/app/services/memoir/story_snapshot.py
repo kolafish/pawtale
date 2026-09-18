@@ -10,6 +10,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirBookChapterDraftVersion,
     MemoirBookImagePlacement,
+    MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookPlanChapter,
     MemoirImageAsset,
@@ -212,7 +213,9 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
                 func.length(func.trim(MemoirBookOutputVersion.content)),
                 func.json_array_length(MemoirBookOutputVersion.chapter_snapshot_json),
                 MemoirBookOutputVersion.created_at,
+                MemoirBookOutput.title,
             )
+            .join(MemoirBookOutput, MemoirBookOutput.id == MemoirBookOutputVersion.output_id)
             .where(MemoirBookOutputVersion.project_id == project.id)
             .order_by(MemoirBookOutputVersion.version.desc())
             .limit(1)
@@ -221,6 +224,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     if book:
         result.book_char_count = book[0] if book[1] else 0
         result.updated_at = max(project.updated_at, book[2]).isoformat()
+        result.book_title = (book[3] or "").strip()
     result.book_readable = result.book_char_count > 0
     result.book_chapter_count = book[1] if book and result.book_readable else 0
     result.automation_events = await automation_events.list_automation_events(

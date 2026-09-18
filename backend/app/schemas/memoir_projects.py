@@ -11,7 +11,7 @@ from app.schemas.projects import ProjectResponse
 
 
 class MemoirProjectCreate(BaseModel):
-    title: str | None = None
+    title: str
     description: str | None = None
     elder_name: str | None = None
     narrator_gender: str | None = None
