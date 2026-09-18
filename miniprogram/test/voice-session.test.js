@@ -1269,7 +1269,43 @@ test("voice chat reconnects after microphone permission is enabled in settings",
   assert.equal(connectCalls, 1);
   assert.equal(context.data.recorderSettingsRequired, false);
   assert.equal(context.data.error, "");
-  assert.equal(context.data.recoveryNotice, "麦克风权限已开启，可以继续说话");
+  assert.match(context.data.recoveryNotice, /小程序录音权限已开启/);
+});
+
+test("voice chat keeps its healthy gateway after microphone permission is enabled", async () => {
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      openRecorderPermissionSettings: async () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "error",
+      error: "没有麦克风权限",
+      recorderSettingsRequired: true,
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+    },
+    async connectGateway() {
+      connectCalls += 1;
+      return true;
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.openRecorderSettings.call(context);
+
+  assert.equal(connectCalls, 0);
+  assert.equal(context.data.status, "ready");
+  assert.equal(context.data.recorderSettingsRequired, false);
 });
 
 test("voice chat stops active AI speech when the page is hidden", () => {

@@ -664,19 +664,22 @@ Component({
         });
         return;
       }
+      const hasClient = this.runtime().voiceStreaming.hasClient();
       applyVoiceChatDataPatch(this, {
         error: "",
         errorKindText: "",
-        status: "idle",
-        statusText: statusText("idle"),
+        status: hasClient ? "ready" : "idle",
+        statusText: statusText(hasClient ? "ready" : "idle"),
         primaryActionText: "开始说话",
         persistenceStateText: "等待识别",
-        recoveryNotice: "麦克风权限已开启，可以继续说话",
+        recoveryNotice: "小程序录音权限已开启。若仍无法录音，请在手机系统设置中允许微信使用麦克风。",
         recorderSettingsRequired: false,
         canReconnect: false,
         canFinishAfterDisconnect: false,
       });
-      await this.connectGateway();
+      if (!hasClient) {
+        await this.connectGateway();
+      }
     } catch (error) {
       applyVoiceChatDataPatch(this, {
         error: error instanceof Error ? error.message : "麦克风设置打开失败",
