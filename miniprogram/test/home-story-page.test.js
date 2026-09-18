@@ -59,6 +59,10 @@ test("story maps server content into the hero, themes and book summary", () => {
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.progressDetail, "读读我的书");
   assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 200 字");
+  assert.equal(view.memoir.bookCharCountValue, "200");
+  assert.equal(view.memoir.bookCharCountUnit, "字");
+  assert.equal(view.memoir.bookChapterText, "已写成 1 章");
+  assert.equal(view.memoir.bookRecentText, "");
   assert.equal(view.overview.growthStage, 2);
   assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
@@ -84,6 +88,8 @@ test("story distinguishes empty, organizing and section-less states", () => {
   assert.equal(empty.overview.summaryText, "故事树还在等待第一段回忆");
   assert.equal(empty.overview.hasChapters, false);
   assert.equal(empty.memoir.bookMetaText, "故事会在这里慢慢写成书");
+  assert.equal(empty.memoir.bookCharCountValue, "");
+  assert.equal(empty.memoir.bookChapterText, "故事正在慢慢写成书");
   const noSections = storyViewData(snapshot({chapters:[{...snapshot().chapters[0], sections:[]}]}));
   assert.equal(noSections.chapters[0].hasSections, false);
   const organizing = storyViewData(snapshot({ chapters: [], book_readable: false, progress: progress({ material_count: 2 }) }));
@@ -401,6 +407,22 @@ test("home combines story and manuscript deltas without double counting assembly
   assert.equal(homeData.growthNoticeTitle, "你的书刚刚又长了一点");
   assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
   assert.equal(homeData.growthNoticeContext, "《章节 2》有了新的内容");
+  assert.equal(homeData.story.memoir.bookRecentText, "最近又增加了 386 字");
+});
+
+test("book summary keeps large totals compact without losing exact growth feedback", () => {
+  const view = storyViewData(snapshot({
+    book_char_count: 12_400,
+    growth_events: [{
+      event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z",
+      book_char_count_delta: 286, changes: [{ kind: "book_updated" }],
+    }],
+  }));
+  assert.equal(view.memoir.bookCharCountPrefix, "约");
+  assert.equal(view.memoir.bookCharCountValue, "1.2");
+  assert.equal(view.memoir.bookCharCountUnit, "万字");
+  assert.equal(view.memoir.bookMetaText, "已写成 1 章 · 约 1.2 万字");
+  assert.equal(view.memoir.bookRecentText, "最近又增加了 286 字");
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
