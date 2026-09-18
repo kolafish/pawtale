@@ -190,7 +190,7 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert any(command.text == "外婆家的童年" for command in chapter_pages[0].commands)
 
     assert chapter_pages[1].body_page_number == 2
-    assert chapter_pages[1].header_title == "外婆的回忆录"
+    assert chapter_pages[1].header_title == "外婆回忆录"
     assert chapter_pages[1].show_footer is True
     assert all(
         "本章整理自" not in command.text
