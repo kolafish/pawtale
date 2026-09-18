@@ -28,9 +28,10 @@
         loading="{{voiceSearchTranscribing}}"
         disabled="{{voiceSearchDisabled}}"
         hover-class="search-control-hover"
-        aria-label="{{voiceSearchButtonText}}"
+        aria-label="{{voiceSearchRecording ? '停止语音搜索' : (voiceSearchTranscribing ? '正在识别语音搜索' : '开始语音搜索')}}"
       >
-        {{voiceSearchButtonText}}
+        <image class="voice-search-icon" src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
+        <text>{{voiceSearchButtonText}}</text>
       </button>
     </view>
     <view wx:if="{{showSearchChips}}" class="search-chips">
@@ -128,8 +129,8 @@
       </button>
     </view>
     <view class="record-footer">
-      <text class="{{item.storyStatusClass}}">{{item.storyStatusText}}</text>
-      <text class="detail-action">{{item.detailActionText}} ›</text>
+      <text class="record-status">{{item.storyStatusText}}</text>
+      <text class="detail-action" aria-hidden="true">›</text>
     </view>
   </view>
 

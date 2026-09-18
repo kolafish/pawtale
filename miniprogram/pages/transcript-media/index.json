@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "图片与分享视频",
+  "navigationBarTitleText": "做成图片或视频",
   "usingComponents": {
     "ai-task-progress": "/components/ai-task-progress/index"
   }

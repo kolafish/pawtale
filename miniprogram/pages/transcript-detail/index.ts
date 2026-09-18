@@ -62,6 +62,7 @@ definePage<TranscriptDetailData>()({
     error: "",
     utteranceId: "",
     item: null,
+    rawExpanded: false,
     questionExpanded: false,
     moreActionsExpanded: false,
     editReferenceExpanded: false,
@@ -85,6 +86,7 @@ definePage<TranscriptDetailData>()({
     const utteranceId = queryParam(options, "id");
     this.setData({
       utteranceId,
+      rawExpanded: false,
       questionExpanded: false,
       moreActionsExpanded: false,
       editReferenceExpanded: false,

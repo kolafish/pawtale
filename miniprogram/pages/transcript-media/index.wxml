@@ -1,6 +1,6 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">{{item ? (item.project_title || "我的回忆录") : "图片与分享视频"}}</text>
+    <text class="ui-page-context">{{item ? (item.project_title || "我的回忆录") : "做成图片或视频"}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
@@ -29,7 +29,7 @@
 
   <block wx:else>
     <view class="hero-panel">
-      <text class="record-title">图片与分享视频</text>
+      <text class="record-title">做成图片或视频</text>
       <text class="record-meta">从“{{item.titleText}}”的成书文字中选择片段，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
     </view>
 
