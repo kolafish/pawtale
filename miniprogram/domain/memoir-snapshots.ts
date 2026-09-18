@@ -77,6 +77,7 @@ export interface MemoirStoryGrowthEvent {
   event_id: string;
   summary_text: string;
   created_at: string;
+  book_char_count_delta: number;
   changes: MemoirStoryChange[];
 }
 

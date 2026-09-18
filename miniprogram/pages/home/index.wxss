@@ -302,6 +302,7 @@
 
 .home-growth-title,
 .home-growth-detail,
+.home-growth-context,
 .home-story-progress-title,
 .home-story-progress-detail {
   display: block;
@@ -321,6 +322,14 @@
   color: var(--ui-text-secondary);
   font-size: 24rpx;
   line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.home-growth-context {
+  margin-top: 3rpx;
+  color: var(--ui-text-muted);
+  font-size: 23rpx;
+  line-height: 1.45;
   text-wrap: pretty;
 }
 
@@ -346,6 +355,20 @@
 .home-inline-action.is-secondary {
   color: var(--ui-text-secondary);
   font-weight: 600;
+}
+
+.home-growth-actions .home-inline-action:not(.is-secondary) {
+  padding-right: 18rpx;
+  padding-left: 18rpx;
+  color: var(--ui-on-accent);
+  background: var(--ui-accent);
+  box-shadow: 0 6rpx 14rpx rgba(166, 76, 59, 0.14);
+}
+
+.home-growth-actions .home-inline-action.is-secondary {
+  padding-right: 18rpx;
+  padding-left: 18rpx;
+  box-shadow: 0 0 0 1rpx rgba(166, 76, 59, 0.24) inset;
 }
 
 .story-refresh-error,
@@ -421,6 +444,7 @@
 .large-text .narration-choice-action,
 .large-text .voice-auth-hint,
 .large-text .home-growth-detail,
+.large-text .home-growth-context,
 .large-text .home-story-progress-detail { font-size: 31rpx; }
 .large-text .voice-auth-copy,
 .large-text .voice-auth-link,

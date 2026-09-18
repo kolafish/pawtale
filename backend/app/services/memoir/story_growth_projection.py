@@ -14,6 +14,10 @@ def _ids(value: object) -> set[str]:
     return {item for item in value if isinstance(item, str)} if isinstance(value, list) else set()
 
 
+def _integer(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def story_growth_events(
     events: list[MemoirAutomationEventResponse],
     *,
@@ -55,6 +59,7 @@ def story_growth_events(
             event_id=event.id,
             summary_text=event.summary_text,
             created_at=event.created_at,
+            book_char_count_delta=_integer(event.metadata_json.get("book_char_count_delta")),
             changes=changes,
         ))
     return result

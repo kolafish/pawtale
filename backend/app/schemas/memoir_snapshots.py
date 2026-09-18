@@ -106,6 +106,7 @@ class MemoirStoryGrowthEvent(BaseModel):
     event_id: str
     summary_text: str
     created_at: datetime
+    book_char_count_delta: int = 0
     changes: list[MemoirStoryChange] = Field(default_factory=list)
 
 

@@ -64,6 +64,7 @@ test("story maps server content into the hero, themes and book summary", () => {
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
+  assert.equal(view.overview.growthAnimating, false);
   assert.equal("growthText" in view.overview, false);
   assert.equal(view.chapters[0].storyCountText, "1 个故事");
   assert.equal("statusText" in view.chapters[0], false);
@@ -114,13 +115,15 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("story marks new sections and focuses their parent theme only when the reader asks", async () => {
-  const event = { event_id: "growth-1", created_at: "2026-09-05T00:00:00Z", summary_text: "新长出了一个小节", changes: [{kind:"section_added",chapter_id:"chapter-2",section_id:"section-2"}] };
+test("story turns new sections into reader-facing growth results and focuses them on request", async () => {
+  const event = { event_id: "growth-1", created_at: "2026-09-05T00:00:00Z", summary_text: "新长出了一个小节", book_char_count_delta: 0, changes: [{kind:"section_added",chapter_id:"chapter-2",section_id:"section-2"}] };
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
-  assert.equal(context.data.growthNoticeText, "新长出 1 个故事：《章节 2 · 小节 2》");
+  assert.equal(context.data.growthNoticeTitle, "你的书刚刚又长了一点");
+  assert.equal(context.data.growthNoticeText, "新增 1 个故事");
+  assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
   assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/chapter-sprig.png");
   const targets = [];
   context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
@@ -221,7 +224,7 @@ test("home shows a later readable draft after an earlier structure event was ack
   const { page, calls } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   await context.onShow();
-  current = snapshot({ growth_events: [{ event_id: "draft-ready", summary_text: "这一章已经整理好了", created_at: "2026-09-05T01:00:00Z", changes: [{ kind: "chapter_updated", chapter_id: "chapter-1" }] }] });
+  current = snapshot({ growth_events: [{ event_id: "draft-ready", summary_text: "这一章已经整理好了", created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 0, changes: [{ kind: "chapter_updated", chapter_id: "chapter-1" }] }] });
   await context.loadHome(true);
   assert.equal(context.data.bookReadable, true);
   assert.equal(context.data.progress.status, "ready");
@@ -232,7 +235,7 @@ test("home shows a later readable draft after an earlier structure event was ack
 });
 
 function growth(id, kind = "section_added", chapterId = "chapter-2", sectionId = "section-2") {
-  return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", changes: [{ kind, chapter_id: chapterId, section_id: sectionId }] };
+  return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 0, changes: [{ kind, chapter_id: chapterId, section_id: sectionId }] };
 }
 
 test("growth animates once after initial data and never scrolls during a refresh", async () => {
@@ -247,8 +250,10 @@ test("growth animates once after initial data and never scrolls during a refresh
   current = snapshot({ growth_events: [growth("fresh", "section_updated"), growth("old")] });
   await context.loadHome(true);
   assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, true);
+  assert.equal(context.data.story.overview.growthAnimating, true);
   await context.loadHome(true);
   assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
+  assert.equal(context.data.story.overview.growthAnimating, false);
   context.onHide();
   await context.onShow();
   assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
@@ -264,7 +269,9 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters.length, 2);
   assert.equal(context.data.story.chapters[1].sections.length, 1);
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
-  assert.equal(context.data.growthNoticeText, "补充了 1 个已有故事");
+  assert.equal(context.data.growthNoticeTitle, "这段回忆刚刚又丰富了一些");
+  assert.equal(context.data.growthNoticeText, "补充 1 个已有故事");
+  assert.equal(context.data.growthNoticeContext, "《章节 2》有了新的内容");
   assert.equal(context.data.growthNoticeIcon, "/assets/story-tree/notice-enriched.png");
   context.onHide();
 });
@@ -372,6 +379,30 @@ test("home keeps chapter and book issue counts out of the story presentation", (
   assert.equal("reviewNoticeText" in homeData, false);
 });
 
+test("home combines story and manuscript deltas without double counting assembly events", () => {
+  const current = snapshot({ growth_events: [
+    {
+      event_id: "structure", summary_text: "故事树已更新", created_at: "2026-09-05T00:00:00Z",
+      book_char_count_delta: 0,
+      changes: [{ kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }],
+    },
+    {
+      event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z",
+      book_char_count_delta: 386,
+      changes: [{ kind: "chapter_updated", chapter_id: "chapter-2" }],
+    },
+    {
+      event_id: "book", summary_text: "书稿已更新", created_at: "2026-09-05T00:02:00Z",
+      book_char_count_delta: 0,
+      changes: [{ kind: "book_updated" }],
+    },
+  ] });
+  const homeData = homeStorySnapshotData(current, storyViewData(current));
+  assert.equal(homeData.growthNoticeTitle, "你的书刚刚又长了一点");
+  assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
+  assert.equal(homeData.growthNoticeContext, "《章节 2》有了新的内容");
+});
+
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
   const current = snapshot({
     chapters: Array.from({length: 5}, (_, i) => ({...snapshot().chapters[0], id: `chapter-${i}`})),
@@ -392,4 +423,6 @@ test("home story template exposes growth and counts without internal completion 
   );
   assert.doesNotMatch(template, /hero-growth-copy|story-status|statusText/);
   assert.match(template, /growthLabel/);
+  assert.match(template, /id="story-summary-toggle"/);
+  assert.doesNotMatch(template, /树上的故事/);
 });

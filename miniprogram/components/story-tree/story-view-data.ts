@@ -30,7 +30,6 @@ export interface StoryChapterView {
   storyCountText: string;
   readable: boolean;
   state: StoryChapterState;
-  featured: boolean;
   tone: StoryTone;
   highlighted: boolean;
   growthLabel: string;
@@ -45,7 +44,7 @@ export interface StoryOverviewView {
   growthImageSrc: string;
   themeTags: StoryThemeTagView[];
   hasChapters: boolean;
-  hasMoreChapters: boolean;
+  growthAnimating: boolean;
 }
 
 export interface StoryViewData {
@@ -68,7 +67,7 @@ export function emptyStoryViewData(): StoryViewData {
       growthImageSrc: STORY_TREE_STAGE_IMAGES[1],
       themeTags: [],
       hasChapters: false,
-      hasMoreChapters: false,
+      growthAnimating: false,
     },
     chapters: [],
   };
