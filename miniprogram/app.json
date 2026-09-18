@@ -32,11 +32,6 @@
     "downloadFile": 60000,
     "connectSocket": 60000
   },
-  "permission": {
-    "scope.record": {
-      "desc": "用于语音访谈录音、实时识别文字和留存音频"
-    }
-  },
   "style": "v2",
   "sitemapLocation": "sitemap.json"
 }

@@ -1,12 +1,19 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function privacyModule() {
   delete require.cache[require.resolve("../services/wechat-privacy.ts")];
   return require("../services/wechat-privacy.ts");
 }
+
+test("app config leaves recorder permission to the runtime scope request", () => {
+  const appConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+  assert.equal(appConfig.permission?.["scope.record"], undefined);
+});
 
 test("wechat privacy authorization passes when no privacy prompt is needed", async () => {
   let authorizeCalls = 0;
