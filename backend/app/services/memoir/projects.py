@@ -26,7 +26,6 @@ from app.services.memoir.project_ai_preferences import (
 from app.services.projects.access import load_project
 
 
-DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 DEFAULT_INTERVIEW_TYPE = "ai_interview"
@@ -247,7 +246,9 @@ async def create_mobile_memoir_project(
     user_id: str,
     req: MemoirProjectCreate,
 ) -> ProjectResponse:
-    title = (req.title or "").strip() or DEFAULT_MEMOIR_PROJECT_TITLE
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="回忆录名称不能为空")
     project = Project(
         user_id=user_id,
         type=ProjectType.MEMOIR.value,

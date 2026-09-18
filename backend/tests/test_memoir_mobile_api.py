@@ -36,6 +36,15 @@ async def test_mobile_memoir_project_list_starts_empty(client):
     assert first_data["projects"] == []
 
 
+async def test_mobile_memoir_project_requires_non_empty_title(client):
+    missing = await client.post("/api/mobile/memoir/projects", json={})
+    blank = await client.post("/api/mobile/memoir/projects", json={"title": "   "})
+
+    assert missing.status_code == 422
+    assert blank.status_code == 400
+    assert blank.json()["detail"] == "回忆录名称不能为空"
+
+
 async def test_mobile_memoir_voice_session_requires_explicit_project(client):
     response = await client.post(
         "/api/mobile/memoir/voice-sessions",
