@@ -92,11 +92,9 @@
     aria-label="{{story.memoir.progressDetail}}，{{story.memoir.bookMetaText}}{{story.memoir.bookRecentText ? '，' + story.memoir.bookRecentText : ''}}">
     <view class="book-heading">
       <text class="book-title">我的书</text>
-      <text class="book-subtitle">把生命的故事，留给未来的自己</text>
     </view>
     <view class="book-body">
       <view class="book-illustration-wrap" aria-hidden="true">
-        <view class="book-illustration-glow"></view>
         <image class="book-illustration" src="/assets/story-tree/book-sprout.png" mode="aspectFit" />
       </view>
       <view class="book-result">
