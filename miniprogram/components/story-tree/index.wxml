@@ -88,13 +88,35 @@
   <slot name="afterHero"></slot>
 
   <view wx:if="{{showBook}}" class="book-card ui-card ui-card-borderless ui-pressable" bindtap="openBook"
-    hover-class="ui-subtle-action-hover" aria-role="button" aria-label="{{story.memoir.progressDetail}}，{{story.memoir.bookMetaText}}">
-    <view class="book-symbol" aria-hidden="true"><text>书</text></view>
-    <view class="book-copy">
+    hover-class="ui-subtle-action-hover" aria-role="button"
+    aria-label="{{story.memoir.progressDetail}}，{{story.memoir.bookMetaText}}{{story.memoir.bookRecentText ? '，' + story.memoir.bookRecentText : ''}}">
+    <view class="book-heading">
       <text class="book-title">我的书</text>
-      <text class="book-meta ui-tabular">{{story.memoir.bookMetaText}}</text>
+      <text class="book-subtitle">把生命的故事，留给未来的自己</text>
     </view>
-    <view class="book-action"><text>{{story.memoir.progressDetail}}</text><text aria-hidden="true">›</text></view>
+    <view class="book-body">
+      <view class="book-illustration-wrap" aria-hidden="true">
+        <view class="book-illustration-glow"></view>
+        <image class="book-illustration" src="/assets/story-tree/book-sprout.png" mode="aspectFit" />
+      </view>
+      <view class="book-result">
+        <view wx:if="{{story.memoir.bookCharCountValue}}" class="book-total-line ui-tabular">
+          <text wx:if="{{story.memoir.bookCharCountPrefix}}" class="book-total-prefix">{{story.memoir.bookCharCountPrefix}}</text>
+          <text class="book-total-value">{{story.memoir.bookCharCountValue}}</text>
+          <text class="book-total-unit">{{story.memoir.bookCharCountUnit}}</text>
+        </view>
+        <text wx:else class="book-awaiting">故事正在慢慢写成书</text>
+        <text class="book-chapter ui-tabular">{{story.memoir.bookChapterText}}</text>
+        <view wx:if="{{story.memoir.bookRecentText}}" class="book-recent">
+          <view class="book-recent-leaf" aria-hidden="true"></view>
+          <text class="book-recent-text ui-tabular">{{story.memoir.bookRecentText}}</text>
+        </view>
+        <view class="book-action">
+          <text>{{story.memoir.progressDetail}}</text>
+          <text class="book-action-arrow" aria-hidden="true">›</text>
+        </view>
+      </view>
+    </view>
   </view>
 
   <view wx:if="{{canVoiceEdit}}" class="story-utilities">

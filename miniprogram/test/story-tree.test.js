@@ -53,6 +53,10 @@ test("tree template folds the complete story list into the hero without timeline
   assert.match(template, /class="story-list-expand/);
   assert.doesNotMatch(template, /树上的故事/);
   assert.match(template, /我的书/);
+  assert.match(template, /book-sprout\.png/);
+  assert.match(template, /bookCharCountValue/);
+  assert.match(template, /bookRecentText/);
+  assert.doesNotMatch(template, /class="book-symbol"/);
   assert.match(template, /name="heroAction"/);
   assert.match(template, /name="afterHero"/);
   assert.doesNotMatch(template, /chapter-node-number|小节|时间线/);

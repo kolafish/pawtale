@@ -4,9 +4,19 @@ import type { StoryTone, StoryViewData } from "./story-view-data";
 
 const STORY_TONES: StoryTone[] = ["clay", "sun", "leaf"];
 
-function formatBookChars(count: number): string {
-  if (count >= 10_000) return `约 ${(count / 10_000).toFixed(1)} 万字`;
-  return count ? `${count} 字` : "";
+function formatBookChars(count: number): {
+  value: string;
+  unit: string;
+  prefix: string;
+  summary: string;
+} {
+  if (count >= 10_000) {
+    const value = (count / 10_000).toFixed(1).replace(/\.0$/, "");
+    return { value, unit: "万字", prefix: "约", summary: `约 ${value} 万字` };
+  }
+  return count
+    ? { value: String(count), unit: "字", prefix: "", summary: `${count} 字` }
+    : { value: "", unit: "字", prefix: "", summary: "" };
 }
 
 export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
@@ -37,6 +47,10 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
   const bookChars = snapshot.book_char_count
     || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);
   const bookCharText = formatBookChars(bookChars);
+  const recentBookCharCountDelta = snapshot.growth_events.reduce(
+    (total, event) => total + Math.max(0, event.book_char_count_delta || 0),
+    0,
+  );
   const storyCount = chapters.reduce((total, chapter) => total + chapter.sections.length, 0);
   const materialCount = snapshot.progress?.material_count
     || snapshot.chapters.reduce((total, chapter) => total + chapter.material_count, 0);
@@ -46,8 +60,13 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       title: project?.title || "我的故事",
       progressDetail: snapshot.book_readable ? "读读我的书" : "看看书稿",
       bookMetaText: chapterCount
-        ? `已写成 ${chapterCount} 章${bookCharText ? ` · ${bookCharText}` : ""}`
+        ? `已写成 ${chapterCount} 章${bookCharText.summary ? ` · ${bookCharText.summary}` : ""}`
         : "故事会在这里慢慢写成书",
+      bookCharCountValue: bookCharText.value,
+      bookCharCountUnit: bookCharText.unit,
+      bookCharCountPrefix: bookCharText.prefix,
+      bookChapterText: chapterCount ? `已写成 ${chapterCount} 章` : "故事正在慢慢写成书",
+      bookRecentText: recentBookCharCountDelta ? `最近又增加了 ${recentBookCharCountDelta} 字` : "",
     },
     overview: {
       title: "我的故事树",
