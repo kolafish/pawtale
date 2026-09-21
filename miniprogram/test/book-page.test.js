@@ -203,23 +203,14 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
   );
 });
 
-test("book page exposes finished-book share entry points", () => {
+test("book page routes its PDF action to the export page", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const { page } = loadBookPage();
-  const context = pageContext(page, {
-    projectId: "project/1",
-    projectTitle: "外婆回忆录",
-    bookPreviewTitle: "外婆回忆录",
-    bookContentAvailable: true,
-  });
 
-  assert.match(pageWxml, /open-type="share"/);
+  assert.match(pageWxml, /data-action="reading_pdf"/);
+  assert.match(pageWxml, /bindtap="openBookExportPage"/);
   assert.match(pageWxml, /wx:if="{{bookContentAvailable}}"/);
-  assert.match(pageWxml, /分享成书/);
-  assert.deepEqual(page.onShareAppMessage.call(context), {
-    title: "送你一本《外婆回忆录》",
-    path: "/pages/book-reader/index?projectId=project%2F1&from=share_book",
-  });
+  assert.equal(page.onShareAppMessage, undefined);
   assert.equal(page.onShareTimeline, undefined);
 });
 

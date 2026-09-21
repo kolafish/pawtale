@@ -465,6 +465,7 @@ declare namespace WechatMiniprogram {
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
+    hideShareMenu?(): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
     previewImage(option: PreviewImageOption): void;
     enableAlertBeforeUnload?(option: { message: string }): void;
