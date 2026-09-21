@@ -108,7 +108,7 @@ textarea {
 .ui-section-heading {
   display: block;
   color: var(--ui-section-title);
-  font-size: var(--ui-font-action);
+  font-size: var(--ui-font-section-title);
   font-weight: 800;
   line-height: 1.35;
   font-family: var(--ui-font-editorial);
