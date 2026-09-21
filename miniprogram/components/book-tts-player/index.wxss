@@ -30,7 +30,7 @@
 
 .book-tts-title {
   color: var(--ui-text-primary);
-  font-size: 29rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 800;
   line-height: 1.4;
   text-wrap: balance;
@@ -39,7 +39,7 @@
 .book-tts-status {
   margin-top: 4rpx;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
   overflow-wrap: normal;
@@ -57,7 +57,7 @@
   border-radius: 12rpx;
   background: var(--ui-accent-surface);
   color: var(--ui-accent-strong);
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
   line-height: 1;
   transition-property: transform, opacity, background-color;
@@ -89,7 +89,7 @@
 .book-tts-highlight {
   margin-top: 20rpx;
   color: var(--ui-text-primary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   line-height: 1.68;
   white-space: pre-wrap;
   word-break: break-word;

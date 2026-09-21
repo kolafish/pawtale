@@ -29,7 +29,7 @@
   overflow: hidden;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
-  font-size: 38rpx;
+  font-size: var(--ui-font-page-title);
   font-weight: 800;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -39,7 +39,7 @@
 .header-subtitle {
   margin-top: 5rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -59,7 +59,7 @@
   border-radius: 16rpx;
   color: var(--ui-text-secondary);
   background: transparent;
-  font-size: 27rpx;
+  font-size: var(--ui-font-action);
   font-weight: 600;
   line-height: 1;
 }
@@ -76,7 +76,7 @@
 .story-loading {
   padding: 30rpx 20rpx;
   color: var(--ui-text-secondary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   text-align: center;
 }
 
@@ -144,7 +144,7 @@
   display: block;
   margin: 16rpx 8rpx -4rpx;
   color: var(--ui-success-text);
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
   font-weight: 650;
   line-height: 1.5;
   text-align: center;
@@ -170,7 +170,7 @@
 
 .narration-choice-kicker {
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 650;
   line-height: 1.45;
 }
@@ -182,7 +182,7 @@
   overflow: hidden;
   margin-top: 5rpx;
   color: var(--ui-text-primary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
   font-weight: 650;
   line-height: 1.55;
   text-wrap: pretty;
@@ -205,7 +205,7 @@
   align-items: center;
   justify-content: center;
   gap: 6rpx;
-  font-size: 26rpx;
+  font-size: var(--ui-font-action);
   font-weight: 750;
   line-height: 1.35;
 }
@@ -236,7 +236,7 @@
 }
 
 .narration-choice-plus {
-  font-size: 29rpx;
+  font-size: var(--ui-font-action);
   font-weight: 500;
   line-height: 1;
 }
@@ -257,16 +257,16 @@
 
 .voice-auth-copy,
 .voice-auth-link {
-  font-size: 29rpx;
+  font-size: var(--ui-font-body);
   font-weight: 650;
-  line-height: 1.45;
+  line-height: var(--ui-line-body);
 }
 
 .voice-auth-hint {
   display: block;
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -292,7 +292,7 @@
 
 .home-growth-title {
   color: var(--ui-text-primary);
-  font-size: 26rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 650;
   line-height: 1.45;
   text-wrap: balance;
@@ -300,7 +300,7 @@
 
 .home-story-progress-title {
   color: var(--ui-text-primary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
   line-height: 1.45;
 }
@@ -319,7 +319,7 @@
 .home-story-progress-detail {
   margin-top: 3rpx;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -327,7 +327,7 @@
 .home-growth-context {
   margin-top: 4rpx;
   color: var(--ui-text-muted);
-  font-size: 24rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -346,7 +346,7 @@
   border-radius: 14rpx;
   color: var(--ui-accent-strong);
   background: transparent;
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -383,7 +383,7 @@
   color: var(--ui-accent-strong);
   background: var(--ui-accent-surface);
   box-shadow: var(--ui-control-shadow);
-  font-size: 27rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
 }
 
@@ -420,22 +420,22 @@
 }
 
 .large-text .hello { font-size: 44rpx; }
-.large-text .header-subtitle { font-size: 31rpx; }
-.large-text .home-header-button { font-size: 31rpx; }
+.large-text .header-subtitle { font-size: var(--ui-font-large-body); }
+.large-text .home-header-button { font-size: var(--ui-font-large-body); }
 .large-text .hero-voice-action { min-height: 56px; }
 .large-text .hero-voice-label { font-size: 37rpx; }
-.large-text .narration-choice-kicker { font-size: 29rpx; }
+.large-text .narration-choice-kicker { font-size: var(--ui-font-large-meta); }
 .large-text .narration-choice-text,
 .large-text .narration-choice-action,
 .large-text .voice-auth-hint,
 .large-text .home-growth-context,
-.large-text .home-story-progress-detail { font-size: 31rpx; }
+.large-text .home-story-progress-detail { font-size: var(--ui-font-large-body); }
 .large-text .voice-auth-copy,
 .large-text .voice-auth-link,
 .large-text .home-growth-title,
 .large-text .home-story-progress-title { font-size: 34rpx; }
 .large-text .home-growth-value { font-size: 46rpx; }
-.large-text .home-inline-action { font-size: 30rpx; }
+.large-text .home-inline-action { font-size: var(--ui-font-large-body); }
 .large-text .continue-narration-button { min-height: 56px; font-size: 36rpx; }
 
 @media (max-width: 360px) {

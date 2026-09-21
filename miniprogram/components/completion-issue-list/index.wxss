@@ -23,7 +23,7 @@
 .friendly-group-title {
   margin-bottom: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 650;
   line-height: 34rpx;
 }
@@ -68,7 +68,7 @@
   flex: 1 1 auto;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 650;
   line-height: 46rpx;
   text-wrap: pretty;
@@ -89,7 +89,7 @@
   box-shadow:
     0 0 0 1rpx var(--ui-accent-border),
     0 6rpx 18rpx rgba(91, 63, 48, 0.04);
-  font-size: 27rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 40rpx;
   transition-property: transform, opacity;
@@ -123,7 +123,7 @@
   display: flex;
   align-items: center;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-meta);
   line-height: 34rpx;
   transition-property: opacity;
   transition-duration: 150ms;
@@ -141,9 +141,9 @@
 }
 
 .group-title {
-  font-size: 28rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
@@ -159,8 +159,8 @@
 .reason,
 .state {
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  line-height: 38rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .group-detail,
@@ -175,7 +175,7 @@
 }
 
 .question {
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 650;
   line-height: 42rpx;
 }
@@ -197,7 +197,7 @@
 .required-answer-label {
   margin-bottom: 10rpx;
   color: var(--ui-text-primary);
-  font-size: 25rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 38rpx;
 }
@@ -210,7 +210,7 @@
   justify-content: center;
   border: 1rpx solid var(--ui-accent);
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
 }
 
