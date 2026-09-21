@@ -141,7 +141,7 @@
           <text class="export-action-mark">文</text>
           <view class="export-action-copy">
             <text class="export-action-title">导出文本</text>
-            <text class="export-action-meta">方便复制与继续编辑</text>
+            <text class="export-action-meta">发送后方便复制与继续编辑</text>
           </view>
           <text class="export-action-arrow">›</text>
         </button>

@@ -24,6 +24,7 @@ import {
 import { listMemoirAutomationEvents } from "../../services/memoir-voice-session-api";
 import { optionalApiResource } from "../../services/request";
 import { returnToBook, routeAuthError } from "../../services/navigation";
+import { isShareFileMessageCancelError, shareLocalFileMessage } from "../../services/share";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   datasetChoice,
@@ -702,7 +703,7 @@ definePage<BookExportData>()({
       this.setData({ error: "章节内容已更新，请先更新书稿再导出" });
       return;
     }
-    this.setData({ bookExportBusyTarget: target, error: "" });
+    this.setData({ bookExportBusyTarget: target, error: "", exportNotice: "" });
     try {
       const filePath = await downloadMemoirBookOutputExport(
         this.data.projectId,
@@ -724,10 +725,18 @@ definePage<BookExportData>()({
             });
           });
         }
+      } else {
+        const title = trimText(this.data.bookManuscriptTitle || this.data.bookPreviewTitle || this.data.planTitle)
+          .replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "回忆录";
+        await shareLocalFileMessage({ filePath, fileName: `${title}.txt` });
       }
-      wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "文本已下载", icon: "success" });
+      wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "已打开微信分享", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (isShareFileMessageCancelError(error)) {
+        this.setData({ exportNotice: "已取消分享，可以重新导出文本。" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "导出失败" });
