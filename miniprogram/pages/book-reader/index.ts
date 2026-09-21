@@ -347,6 +347,9 @@ definePage<BookReaderData>()({
       return;
     }
     await this.loadBookReader(projectId, versionId);
+    if (queryParam(query, "listen") === "1" && !this.data.error && !this.data.bookViewingHistoricalVersion) {
+      void this.playReaderAudio();
+    }
   },
 
   onShow() {

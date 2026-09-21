@@ -56,19 +56,31 @@ import {
   latestBookTitle,
 } from "../book/book-design-model";
 import { PollingTimer } from "../../services/polling-timer";
+import { setPageNavigationTitle } from "../../services/page-navigation";
+
 interface BookExportDataset {
-  action?: string;
   format?: string;
   key?: string;
   layout?: string;
   target?: string;
   title?: string;
+  section?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<BookExportDataset>;
 type TextInputEvent = PageTextInputEvent<BookExportDataset>;
 type PickerEvent = PagePickerEvent<BookExportDataset>;
 type SwitchEvent = PageSwitchEvent<BookExportDataset>;
+type BookExportSection = "" | "export" | "title" | "editorial" | "layout" | "history" | "advanced";
+
+const SECTION_TITLES: Record<Exclude<BookExportSection, "">, string> = {
+  export: "导出设置",
+  title: "书名与封面",
+  editorial: "前言与后记",
+  layout: "版式与内容",
+  history: "历史版本",
+  advanced: "高级整理",
+};
 
 interface OpenDocumentOptions {
   filePath: string;
@@ -89,7 +101,6 @@ type BookExportData = BookOutputData & {
   projectId: string;
   planTitle: string;
   totalChapterCount: number;
-  bookPreviewChaptersExpanded: boolean;
   bookExportBusyTarget: string;
   bookExportShowSourceAppendix: boolean;
   bookTitleSaving: boolean;
@@ -97,12 +108,10 @@ type BookExportData = BookOutputData & {
   bookEditorialCopyBusyTarget: string;
   pageClass: string;
   generatingBook: boolean;
-  requestedAction: string;
   exportNotice: string;
-  exportActionHintText: string;
   bookEditorialCopyEventItem: BookAutomationEventView | null;
   bookOutputAvailable: boolean;
-  showBookSettings: boolean;
+  activeSection: BookExportSection;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
@@ -118,17 +127,7 @@ function exportNotice(action: string): string {
   if (action === "print_pdf") {
     return "打印版字号更大，适合装订保存。";
   }
-  return "可以先预览全书，再导出阅读版或打印版。";
-}
-
-function exportActionHint(action: string): string {
-  if (action === "print_pdf") {
-    return "适合拿去打印装订，页边距更宽。";
-  }
-  if (action === "text") {
-    return "导出纯文字，方便复制和继续编辑。";
-  }
-  return "适合微信分享和手机阅读。";
+  return "";
 }
 
 function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): string {
@@ -158,31 +157,26 @@ definePage<BookExportData>()({
     planTitle: "阅读与导出",
     totalChapterCount: 0,
     bookOutputAvailable: false,
-    bookPreviewChaptersExpanded: true,
     bookExportBusyTarget: "",
     bookExportShowSourceAppendix: true,
     bookTitleSaving: false,
     bookTitleSuggesting: false,
     bookEditorialCopyBusyTarget: "",
     generatingBook: false,
-    requestedAction: "preview",
     exportNotice: exportNotice("preview"),
-    exportActionHintText: exportActionHint("reading_pdf"),
     bookEditorialCopyEventItem: null,
-    showBookSettings: false,
+    activeSection: "",
     ...bookOutputData(null),
   },
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const action = queryParam(query, "action") || "preview";
-    const showBookSettings = queryParam(query, "settings") === "book";
+    const activeSection: BookExportSection = queryParam(query, "settings") === "book" ? "title" : "";
     this.setData({
       projectId,
-      requestedAction: action,
       exportNotice: exportNotice(action),
-      exportActionHintText: exportActionHint(action),
-      showBookSettings,
+      activeSection,
     });
     if (!projectId) {
       this.setData({ loadError: "缺少回忆录项目信息" });
@@ -193,6 +187,7 @@ definePage<BookExportData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
+    setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : "阅读与导出");
   },
 
   onUnload() {
@@ -208,7 +203,7 @@ definePage<BookExportData>()({
         optionalApiResource(getMemoirBookOutput(projectId)),
       ]);
       this.applyBookExportData(plan, output);
-      if (this.data.showBookSettings) {
+      if (this.data.activeSection === "title" || this.data.activeSection === "editorial") {
         await this.refreshBookEditorialCopyProgress();
       }
     } catch (error) {
@@ -307,10 +302,11 @@ definePage<BookExportData>()({
     }
     this.setData({
       planTitle: defaultTitle(plan, output),
-      totalChapterCount: includedChapterCount,
+      totalChapterCount: plan
+        ? includedChapterCount
+        : (outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length),
       bookOutputAvailable: Boolean(output?.latest_version),
       ...outputData,
-      bookPreviewChaptersExpanded: true,
       bookExportBusyTarget: "",
     });
   },
@@ -636,7 +632,6 @@ definePage<BookExportData>()({
       this.bookOutputVersion = version;
       this.setData({
         ...bookOutputData(this.bookOutput, version),
-        bookPreviewChaptersExpanded: true,
       });
     } catch (error) {
       if (routeAuthError(error, "login")) {
@@ -652,14 +647,6 @@ definePage<BookExportData>()({
     this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
   },
 
-  previewExportActionHint(event: DatasetEvent) {
-    this.setData({ exportActionHintText: exportActionHint(datasetString(event, "action")) });
-  },
-
-  toggleBookPreviewChapters() {
-    this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
-  },
-
   openBookReader() {
     if (!this.data.projectId || !this.data.bookContent) {
       return;
@@ -672,17 +659,44 @@ definePage<BookExportData>()({
     });
   },
 
+  openBookNarration() {
+    if (!this.data.projectId || !this.data.bookContent) return;
+    wx.navigateTo({
+      url: pageUrl("/pages/book-reader/index", {
+        projectId: this.data.projectId,
+        listen: "1",
+      }),
+    });
+  },
+
   openBookHome() {
     writeBookWorkspaceNavigationTarget("tools");
     returnToBook();
   },
 
-  toggleBookSettings() {
-    const showBookSettings = !this.data.showBookSettings;
-    this.setData({ showBookSettings });
-    if (showBookSettings) {
+  openSection(event: DatasetEvent) {
+    const section = datasetString(event, "section") as BookExportSection;
+    if (!section || !Object.prototype.hasOwnProperty.call(SECTION_TITLES, section)) return;
+    this.setData({ activeSection: section, error: "" });
+    setPageNavigationTitle(SECTION_TITLES[section]);
+    if (section === "title" || section === "editorial") {
       void this.refreshBookEditorialCopyProgress();
     }
+  },
+
+  async closeSection() {
+    if (this.data.activeSection === "title" || this.data.activeSection === "editorial") {
+      this.clearBookDesignAutosaveTimer();
+      if (bookDesignHasChanges(this.data)) {
+        await this.autosaveBookDesignSettings();
+        if (bookDesignHasChanges(this.data)) return;
+      }
+    }
+    if (this.data.activeSection === "history" && this.bookOutput) {
+      this.applyBookExportData(this.bookPlan, this.bookOutput);
+    }
+    this.setData({ activeSection: "", error: "" });
+    setPageNavigationTitle("阅读与导出");
   },
 
   async downloadBookOutputExport(event: DatasetEvent) {
@@ -691,9 +705,7 @@ definePage<BookExportData>()({
     const layout: MemoirBookOutputExportLayout = format === "pdf" && requestedLayout === "large_print"
       ? "large_print"
       : "standard";
-    const action = format === "txt" ? "text" : (layout === "large_print" ? "print_pdf" : "reading_pdf");
     const target = `book-export:${format}:${layout}`;
-    this.setData({ exportActionHintText: exportActionHint(action) });
     if (!this.data.projectId || this.data.bookExportBusyTarget) {
       return;
     }

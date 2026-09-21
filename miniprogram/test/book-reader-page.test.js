@@ -491,6 +491,19 @@ test("book reader reads the latest full book with saved book voice settings", as
   assert.equal(context.data.playbackError, "");
 });
 
+test("book reader starts existing narration when opened from the listen action", async () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+  let starts = 0;
+  context.playReaderAudio = async () => { starts += 1; };
+
+  await page.onLoad.call(context, { projectId: "project/1", listen: "1" });
+
+  assert.equal(context.data.loading, false);
+  assert.equal(context.readerText, "全书正文");
+  assert.equal(starts, 1);
+});
+
 test("book reader does not mismatch latest audio with historical text", async () => {
   let requestCount = 0;
   const { page } = loadBookReaderPage({
