@@ -6,9 +6,10 @@ import pytest
 from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.auth import SESSION_COOKIE_NAME, session_token_hash
 from app.clock import utcnow_naive
-from app.database import async_session_maker, get_db
+from app.database import get_db
 from app.main import app
 from app.models.users import AuthIdentity, AuthSession, User
 from app.routers.websocket_auth import authenticate_websocket
@@ -54,17 +55,18 @@ class TestAuthAPI:
         await test_db.commit()
         assert (await anonymous_client.get("/api/auth/me")).status_code == 401
 
-    async def test_websocket_auth_rejects_revoked_session(self, anonymous_client):
+    async def test_websocket_auth_rejects_revoked_session(self, anonymous_client, test_db):
         assert (await anonymous_client.post(
             "/api/auth/register",
             json={"email": "socket@example.com", "password": "password123"},
         )).status_code == 201
         token = anonymous_client.cookies[SESSION_COOKIE_NAME]
         socket = type("Socket", (), {"cookies": {SESSION_COOKIE_NAME: token}})()
-        async with async_session_maker() as db:
+        independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+        async with independent_sessions() as db:
             assert await authenticate_websocket(socket, db) is not None
         await anonymous_client.post("/api/auth/logout")
-        async with async_session_maker() as db:
+        async with independent_sessions() as db:
             assert await authenticate_websocket(socket, db) is None
 
     async def test_wechat_login_attempt_limit(self, anonymous_client, monkeypatch):
@@ -85,8 +87,10 @@ class TestAuthAPI:
             await asyncio.sleep(0.02)
             return WeChatSession(openid="concurrent-first-login")
 
+        independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
         async def independent_db():
-            async with async_session_maker() as db:
+            async with independent_sessions() as db:
                 yield db
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
