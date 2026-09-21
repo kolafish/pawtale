@@ -3,11 +3,14 @@
     <text>正在加载全书...</text>
   </view>
 
-  <view wx:elif="{{error}}" class="state-card error ui-card">
-    <text>{{error}}</text>
+  <view wx:elif="{{loadError}}" class="state-card error ui-card">
+    <text>{{loadError}}</text>
   </view>
 
   <block wx:else>
+    <view wx:if="{{error}}" class="state-card error ui-card">
+      <text>{{error}}</text>
+    </view>
     <view class="export-hero ui-card">
       <view class="export-hero-copy">
         <text class="eyebrow">成书中心</text>
