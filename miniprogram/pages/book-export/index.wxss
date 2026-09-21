@@ -244,7 +244,6 @@
 
 .book-editorial-copy-notice-head,
 .book-metadata-label-row { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
-.book-cover-style-value { flex: 0 0 auto; color: var(--ui-accent-strong); font-size: 22rpx; }
 .save-design-button {
   width: 100%;
   min-height: 88rpx;
@@ -550,6 +549,7 @@
 }
 
 .book-cover-style-label {
+  display: block;
   color: var(--ui-text-primary);
   font-size: 25rpx;
   font-weight: 700;
@@ -557,6 +557,7 @@
 }
 
 .book-cover-style-detail {
+  display: block;
   margin-top: 4rpx;
   color: var(--ui-text-secondary);
   font-size: 23rpx;

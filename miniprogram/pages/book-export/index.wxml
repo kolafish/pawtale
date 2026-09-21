@@ -156,7 +156,6 @@
               <text class="book-cover-style-label">封面风格</text>
               <text class="book-cover-style-detail">{{bookCoverStyleDetailText}}</text>
             </view>
-            <text class="book-cover-style-value">{{bookCoverStyleLabel}}</text>
           </view>
         </picker>
 
