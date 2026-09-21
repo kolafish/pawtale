@@ -7,7 +7,7 @@ const {
   restoreStorageEntries,
   shutdownE2ESession,
 } = require("../support/session");
-const { sleep } = require("../support/wait");
+const { sleep, waitForValue } = require("../support/wait");
 
 let session;
 let page;
@@ -172,11 +172,14 @@ test("chapter overview renders the story-first visual hierarchy", async () => {
     const hero = await page.$(".chapter-hero");
     const readAction = await page.$(".chapter-read-primary");
     const storyRows = await page.$$(".story-overview-row");
-    const issueList = await page.$("completion-issue-list");
-    const issueCard = issueList && await issueList.$(".friendly-chat-card");
+    const suggestions = await waitForValue(
+      () => page.$(".friendly-suggestions-card"),
+      Boolean,
+      { description: "补充建议卡片" },
+    );
     const editingEntry = await page.$(".editing-entry");
     assert.ok(hero, "章节概览应以故事成长卡开场");
-    assert.ok(issueCard, "补充建议应直接展示具体问题");
+    assert.equal((await (await suggestions.$(".friendly-section-title")).text()).trim(), "还想听您讲讲");
     assert.equal(storyRows.length, 2, "章节概览应展示故事而不是后台小节摘要");
     assert.deepEqual(
       await Promise.all(storyRows.map(async (row) => (
