@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.models.users import User
+from app.routers import dictation_gateway
 from app.routers.projects import dictation as dictation_router
 from app.services.asr.gateway import VoiceGatewaySession
 from app.services.asr.streaming import StreamingASREvent
@@ -65,9 +66,9 @@ async def test_article_dictation_accepts_only_owned_article_document(
         return object()
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
-    monkeypatch.setattr(dictation_router, "voice_gateway_capacity_manager", CapacityManager())
-    monkeypatch.setattr(dictation_router, "VoiceGatewaySession", GatewaySession)
-    monkeypatch.setattr(dictation_router, "create_realtime_volc_streaming_asr_client", create_asr)
+    monkeypatch.setattr(dictation_gateway, "voice_gateway_capacity_manager", CapacityManager())
+    monkeypatch.setattr(dictation_gateway, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(dictation_gateway, "create_realtime_volc_streaming_asr_client", create_asr)
 
     websocket = FakeWebSocket()
     await dictation_router.stream_article_dictation(

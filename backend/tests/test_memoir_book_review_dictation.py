@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.routers import dictation_gateway
 from app.routers.memoir import dictation as dictation_router
 
 
@@ -59,13 +60,13 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         available,
     )
     monkeypatch.setattr(
-        dictation_router,
+        dictation_gateway,
         "voice_gateway_capacity_manager",
         CapacityManager(),
     )
-    monkeypatch.setattr(dictation_router, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(dictation_gateway, "VoiceGatewaySession", GatewaySession)
     monkeypatch.setattr(
-        dictation_router,
+        dictation_gateway,
         "create_realtime_volc_streaming_asr_client",
         create_asr,
     )
