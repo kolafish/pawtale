@@ -37,6 +37,11 @@ class WeChatBindRequest(BaseModel):
     miniprogram: Literal["laoyu", "xiaoyu"] = "laoyu"
 
 
+class AuthDeleteRequest(BaseModel):
+    code: str
+    miniprogram: Literal["laoyu", "xiaoyu"] = "laoyu"
+
+
 class AuthSetCredentialsRequest(BaseModel):
     email: str
     password: str

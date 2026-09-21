@@ -73,6 +73,16 @@ export async function logoutBackendSession(): Promise<void> {
   clearSessionCookie();
 }
 
+export async function deleteAccountWithWeChat(): Promise<void> {
+  const code = await wxLoginCode();
+  await request<unknown>("/api/auth/me", {
+    method: "DELETE",
+    data: { code, miniprogram: "laoyu" },
+    timeoutProfile: "mutation",
+  });
+  clearSessionCookie();
+}
+
 export async function updateBackendProfile(input: UpdateProfileInput): Promise<BackendAuthUser> {
   return request<BackendAuthUser>("/api/auth/me", {
     method: "PATCH",

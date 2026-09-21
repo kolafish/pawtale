@@ -25,6 +25,7 @@ function loadMePage({
   mockModule("../services/auth.ts", {
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
     logoutBackendSession: async () => {},
+    deleteAccountWithWeChat: unmockedAsync("deleteAccountWithWeChat"),
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
@@ -99,6 +100,7 @@ function loadMePage({
     ...accessibilityExports,
   });
   mockModule("../services/voice-authorization.ts", {
+    clearVoiceAuthorizationConsentRecord: () => {},
     readVoiceAuthorizationConsentRecord: () => null,
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
     VOICE_AUTHORIZATION_VERSION: "2026-06-18",
@@ -500,6 +502,51 @@ test("me keeps the active session when server logout fails", async () => {
 
   assert.equal(context.data.loggedIn, true);
   assert.equal(context.data.loading, false);
+  assert.equal(context.data.error, "网络不可用");
+  assert.equal(cacheClearCount, 0);
+});
+
+test("me deletes the account only after confirmation and clears local user data", async () => {
+  let cacheClearCount = 0;
+  let consentClearCount = 0;
+  let deleteCount = 0;
+  global.wx = {
+    setStorageSync() {},
+    showModal(options) { options.success({ confirm: true }); },
+    showToast() {},
+  };
+  const { page } = loadMePage({
+    authExports: { deleteAccountWithWeChat: async () => { deleteCount += 1; } },
+    cacheExports: { clearCurrentUserMemoirSnapshots: () => { cacheClearCount += 1; } },
+    voiceAuthorizationExports: { clearVoiceAuthorizationConsentRecord: () => { consentClearCount += 1; } },
+  });
+  const context = pageContext(page, { loggedIn: true });
+
+  await page.deleteAccount.call(context);
+
+  assert.equal(deleteCount, 1);
+  assert.equal(cacheClearCount, 1);
+  assert.equal(consentClearCount, 1);
+  assert.equal(context.data.loggedIn, false);
+});
+
+test("me keeps account and local data when deletion is cancelled or fails", async () => {
+  let cacheClearCount = 0;
+  let confirmed = false;
+  global.wx = {
+    showModal(options) { options.success({ confirm: confirmed }); },
+  };
+  const { page } = loadMePage({
+    authExports: { deleteAccountWithWeChat: async () => { throw new Error("网络不可用"); } },
+    cacheExports: { clearCurrentUserMemoirSnapshots: () => { cacheClearCount += 1; } },
+  });
+  const context = pageContext(page, { loggedIn: true });
+
+  await page.deleteAccount.call(context);
+  assert.equal(context.data.loggedIn, true);
+  confirmed = true;
+  await page.deleteAccount.call(context);
+  assert.equal(context.data.loggedIn, true);
   assert.equal(context.data.error, "网络不可用");
   assert.equal(cacheClearCount, 0);
 });

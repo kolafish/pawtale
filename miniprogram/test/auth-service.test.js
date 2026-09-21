@@ -73,6 +73,33 @@ test("logout keeps the cookie if server revocation cannot be confirmed", async (
   delete global.wx;
 });
 
+test("account deletion requires a fresh WeChat code and clears the cookie only after success", async () => {
+  const requests = installWxMock((options) => {
+    assert.equal(options.url, "https://api.example.com/api/auth/me");
+    assert.equal(options.method, "DELETE");
+    assert.equal(options.timeout, 60000);
+    assert.deepEqual(options.data, { code: "wx-code-1", miniprogram: "laoyu" });
+    options.success({ statusCode: 204, data: "", cookies: [], header: {} });
+  });
+  global.wx.setStorageSync("pawtale_backend_cookie", "pawtale_session=active");
+  const { deleteAccountWithWeChat } = authModule();
+
+  await deleteAccountWithWeChat();
+  assert.equal(requests.length, 1);
+  assert.equal(global.wx.getStorageSync("pawtale_backend_cookie"), "");
+  delete global.wx;
+});
+
+test("account deletion preserves the cookie when the server cannot confirm deletion", async () => {
+  installWxMock((options) => options.fail({ errMsg: "request:fail network disconnected" }));
+  global.wx.setStorageSync("pawtale_backend_cookie", "pawtale_session=active");
+  const { deleteAccountWithWeChat } = authModule();
+
+  await assert.rejects(deleteAccountWithWeChat());
+  assert.equal(global.wx.getStorageSync("pawtale_backend_cookie"), "pawtale_session=active");
+  delete global.wx;
+});
+
 test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");

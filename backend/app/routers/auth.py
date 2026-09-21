@@ -24,6 +24,7 @@ from app.database import get_db
 from app.models.users import AuthIdentity, User
 from app.schemas.auth import (
     AuthLoginRequest,
+    AuthDeleteRequest,
     AuthRegisterRequest,
     AuthResponse,
     AuthSetCredentialsRequest,
@@ -33,6 +34,7 @@ from app.schemas.auth import (
     WeChatLoginRequest,
 )
 from app.services import user_avatars
+from app.services import account_deletion
 from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_wechat_login_code
 
 
@@ -312,6 +314,24 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)):
     return _user_response(current_user)
+
+
+@router.delete("/me", status_code=204)
+async def delete_me(
+    req: AuthDeleteRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_wechat_login_rate_limit(db, request.client.host if request.client else "unknown")
+    session = await _exchange_wechat_code(req.code, req.miniprogram)
+    provider = WECHAT_PROVIDERS[req.miniprogram]
+    identity = await _find_wechat_identity(db, provider, session.openid)
+    if identity is None or identity.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="微信身份与当前账号不匹配")
+    await account_deletion.delete_account(db, current_user)
+    clear_session_cookie(response)
 
 
 @router.patch("/me", response_model=UserResponse)
