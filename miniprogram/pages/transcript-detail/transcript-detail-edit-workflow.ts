@@ -18,10 +18,10 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { promptRequiredText } from "../../services/text-prompt";
+import { confirmDeleteTranscript } from "../../services/transcript-view-model";
 import {
   changedItem,
   confirmConvertQuestionToAnswer,
-  confirmDelete,
   confirmDiscardEdit,
   materialAssignmentOptions,
   materialAssignmentPatch,
@@ -520,7 +520,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
-    const confirmed = await confirmDelete(item);
+    const confirmed = await confirmDeleteTranscript(item.titleText || item.display_text || item.transcript_raw);
     if (!confirmed) {
       return;
     }

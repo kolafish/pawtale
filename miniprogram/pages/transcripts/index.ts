@@ -9,6 +9,7 @@ import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
+  deleteMemoirVoiceTranscript,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
   recoverMemoirVoiceTranscript,
@@ -27,6 +28,7 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
+  confirmDeleteTranscript,
   transcriptCreatedAtText,
   transcriptDurationText,
   transcriptTitleText,
@@ -48,6 +50,11 @@ interface SearchInputEvent {
   detail: {
     value: string;
   };
+}
+
+interface TranscriptTouchEvent extends DatasetEvent {
+  touches: Array<{ pageX: number; pageY: number }>;
+  changedTouches: Array<{ pageX: number; pageY: number }>;
 }
 
 interface TranscriptSearchFilters {
@@ -81,6 +88,8 @@ interface TranscriptsData {
   loading: boolean;
   needsLogin: boolean;
   recoveringId: string;
+  deletingId: string;
+  openSwipeId: string;
   error: string;
   items: TranscriptItemView[];
   total: number;
@@ -419,12 +428,16 @@ function replaceItem(
 definePage<TranscriptsData>()({
   loadToken: 0,
   searchDebounceTimer: null as number | null,
+  swipeStart: null as { id: string; x: number; y: number } | null,
+  swipeTapUntil: 0,
 
   data: {
     pageClass: "transcripts-page",
     loading: false,
     needsLogin: false,
     recoveringId: "",
+    deletingId: "",
+    openSwipeId: "",
     error: "",
     items: [],
     total: 0,
@@ -458,6 +471,7 @@ definePage<TranscriptsData>()({
   },
 
   async onShow() {
+    this.setData({ openSwipeId: "" });
     this.setData({ pageClass: accessibilityPageClass("transcripts-page") });
     await this.loadTranscripts(true);
     await this.revealStoredTranscriptTarget();
@@ -474,7 +488,7 @@ definePage<TranscriptsData>()({
     const searchQuery = this.data.searchQuery;
     const searchFilters = normalizedSearchFilters(this.data.searchFilters);
     const hasSearchCriteria = searchCriteriaActive(searchQuery, searchFilters);
-    setTranscriptsData(this, { loading: true, error: "" });
+    setTranscriptsData(this, { loading: true, error: "", ...(reset ? { openSwipeId: "" } : {}) });
     try {
       let activeProjectId = this.data.activeProjectId;
       let projectTitle = this.data.projectTitle;
@@ -568,7 +582,70 @@ definePage<TranscriptsData>()({
     if (!id) {
       return;
     }
+    if (Date.now() < this.swipeTapUntil) {
+      return;
+    }
+    if (this.data.openSwipeId) {
+      this.setData({ openSwipeId: "" });
+      return;
+    }
     wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
+  },
+
+  onCardTouchStart(event: TranscriptTouchEvent) {
+    const id = datasetString(event, "id");
+    const touch = event.touches[0];
+    this.swipeStart = id && touch ? { id, x: touch.pageX, y: touch.pageY } : null;
+  },
+
+  onCardTouchEnd(event: TranscriptTouchEvent) {
+    const start = this.swipeStart;
+    this.swipeStart = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || start.id !== datasetString(event, "id")) {
+      return;
+    }
+    const dx = touch.pageX - start.x;
+    const dy = touch.pageY - start.y;
+    if (Math.abs(dx) < 44 || Math.abs(dx) <= Math.abs(dy) * 1.2) {
+      return;
+    }
+    this.swipeTapUntil = Date.now() + 350;
+    this.setData({ openSwipeId: dx < 0 ? start.id : "" });
+  },
+
+  onCardTouchCancel() {
+    this.swipeStart = null;
+  },
+
+  async deleteTranscript(event: DatasetEvent) {
+    const id = datasetString(event, "id");
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (!item || this.data.deletingId || this.data.recoveringId) {
+      return;
+    }
+    this.setData({ deletingId: id });
+    try {
+      const confirmed = await confirmDeleteTranscript(item.summaryTitleText);
+      if (!confirmed) {
+        return;
+      }
+      await deleteMemoirVoiceTranscript(id);
+      const total = Math.max(0, this.data.total - 1);
+      setTranscriptsData(this, {
+        items: this.data.items.filter((candidate) => candidate.id !== id),
+        total,
+        offset: Math.max(0, this.data.offset - 1),
+        openSwipeId: "",
+        searchResultText: this.data.hasSearchCriteria ? `找到 ${total} 条相关记录` : "",
+      });
+      wx.showToast({ title: "已删除", icon: "success" });
+      await this.loadTranscripts(true);
+    } catch (error) {
+      setTranscriptsData(this, { error: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      this.setData({ deletingId: "" });
+    }
   },
 
   stopCardTap() {
