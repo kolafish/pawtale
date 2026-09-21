@@ -1,9 +1,10 @@
 import copy
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select, update
 
+from app.clock import utcnow_naive
 from app.models.memoir import MemoirEditingJob, MemoirImageAsset, MemoirBookImagePlacement
 from app.services.memoir import automatic_book_draft
 from app.services.memoir.transcript_projection import source_text_hash
@@ -126,7 +127,7 @@ async def test_draft_progress_preserves_deferred_need_from_older_growth_job(clie
         project_id=project_id,
         job_type="organize_material",
         status="succeeded",
-        run_after=datetime.utcnow() - timedelta(days=1),
+        run_after=utcnow_naive() - timedelta(days=1),
         dedupe_key="old-growth",
         result_json={
             "growth": {
@@ -144,7 +145,7 @@ async def test_draft_progress_preserves_deferred_need_from_older_growth_job(clie
         project_id=project_id,
         job_type="organize_material",
         status="succeeded",
-        run_after=datetime.utcnow(),
+        run_after=utcnow_naive(),
         dedupe_key="new-growth",
         result_json={},
     )
