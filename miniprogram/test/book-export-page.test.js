@@ -593,6 +593,60 @@ test("book export page downloads reading PDF with the standard layout", async ()
   assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
 });
 
+test("book export delivers TXT through WeChat file sharing", async () => {
+  const shared = [];
+  const toasts = [];
+  global.wx = {
+    shareFileMessage(options) {
+      shared.push(options);
+      options.success({ errMsg: "shareFileMessage:ok" });
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async () => "/tmp/book.txt",
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.downloadBookOutputExport.call(context, {
+    currentTarget: { dataset: { format: "txt" } },
+  });
+
+  assert.equal(shared[0].filePath, "/tmp/book.txt");
+  assert.equal(shared[0].fileName, "外婆回忆录.txt");
+  assert.equal(toasts[0].title, "已打开微信分享");
+  assert.equal(context.data.bookExportBusyTarget, "");
+});
+
+test("canceling TXT sharing does not report a successful download", async () => {
+  const toasts = [];
+  global.wx = {
+    shareFileMessage(options) {
+      options.fail({ errMsg: "shareFileMessage:fail cancel" });
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async () => "/tmp/book.txt",
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.downloadBookOutputExport.call(context, {
+    currentTarget: { dataset: { format: "txt" } },
+  });
+
+  assert.deepEqual(toasts, []);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.exportNotice, "已取消分享，可以重新导出文本。");
+  assert.equal(context.data.bookExportBusyTarget, "");
+});
+
 test("book export page assembles confirmed chapter drafts as a new full-book version", async () => {
   const requests = [];
   const toasts = [];
