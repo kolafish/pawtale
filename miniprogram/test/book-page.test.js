@@ -1048,7 +1048,7 @@ test("book page merges chapters and directs the user back to the workspace", asy
 
 test("book page opens automatically assembled drafts without chapter confirmation", () => {
   const urls = [];
-  global.wx = { navigateTo: ({ url }) => urls.push(url), reLaunch: ({url}) => urls.push(url) };
+  global.wx = { navigateTo: ({ url }) => urls.push(url) };
   const { page } = loadBookPage();
   const context = pageContext(page, { projectId: "project-1", projectTitle: "外婆回忆录" });
   page.applyPlan.call(context, samplePlan("confirmed"), {
@@ -1056,10 +1056,15 @@ test("book page opens automatically assembled drafts without chapter confirmatio
   });
   page.applyBookOutput.call(context, sampleBookOutput(1, "后台整理好的草稿"));
   page.openBookReader.call(context);
-  page.openStory.call(context);
   assert.equal(context.data.bookContentAvailable, true);
   assert.ok(urls[0].startsWith("/pages/book-reader/index?"));
-  assert.equal(urls[1], "/pages/home/index");
+  assert.equal(urls.length, 1);
+});
+
+test("book page omits the misleading progress shortcut but keeps progress in tools", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  assert.doesNotMatch(template, /后台整理进度|bindtap="openStory"/);
+  assert.match(template, /class="automation-title">整理进度</);
 });
 
 test("book page sends TTS voice and speed for chapter and outline audio", async () => {
