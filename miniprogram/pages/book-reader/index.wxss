@@ -400,6 +400,34 @@
   margin-top: 18rpx;
 }
 
+.reader-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 24rpx;
+}
+
+.reader-page-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 20rpx;
+  color: var(--ui-accent-strong);
+  font-size: 26rpx;
+}
+
+.reader-page-action[aria-disabled="true"] {
+  opacity: 0.35;
+}
+
+.reader-page-count {
+  color: var(--ui-text-secondary);
+  font-size: 25rpx;
+  font-variant-numeric: tabular-nums;
+}
+
 .reader-top-action-shell {
   padding-top: 22rpx;
   text-align: center;
