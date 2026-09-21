@@ -1,7 +1,5 @@
 import {
   type BackendAuthUser,
-  isValidEmail,
-  loginWithEmail,
   loginWithWeChat,
   updateBackendProfile,
 } from "../../services/auth";
@@ -33,10 +31,6 @@ interface ChooseAvatarEvent {
 
 interface LoginData {
   pageClass: string;
-  email: string;
-  password: string;
-  accountMode: boolean;
-  loading: boolean;
   wechatLoading: boolean;
   profileMode: boolean;
   profileSaving: boolean;
@@ -57,10 +51,6 @@ export function needsWeChatProfileSetup(user: BackendAuthUser): boolean {
 definePage<LoginData>()({
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
-    email: "",
-    password: "",
-    accountMode: false,
-    loading: false,
     wechatLoading: false,
     profileMode: false,
     profileSaving: false,
@@ -71,14 +61,6 @@ definePage<LoginData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
-  },
-
-  changeEmail(event: InputEvent) {
-    this.setData({ email: event.detail.value, error: "" });
-  },
-
-  changePassword(event: InputEvent) {
-    this.setData({ password: event.detail.value, error: "" });
   },
 
   changeProfileDisplayName(event: InputEvent) {
@@ -93,18 +75,8 @@ definePage<LoginData>()({
     this.setData({ profileAvatarPath: avatarPath, error: "" });
   },
 
-  toggleAccountMode() {
-    if (this.data.loading || this.data.wechatLoading) {
-      return;
-    }
-    this.setData({
-      accountMode: !this.data.accountMode,
-      error: "",
-    });
-  },
-
   async submitWeChat() {
-    if (this.data.loading || this.data.wechatLoading) {
+    if (this.data.wechatLoading) {
       return;
     }
     this.setData({ wechatLoading: true, error: "" });
@@ -158,32 +130,5 @@ definePage<LoginData>()({
       return;
     }
     relaunchHome();
-  },
-
-  async submitAccount() {
-    if (this.data.loading || this.data.wechatLoading) {
-      return;
-    }
-    const email = this.data.email.trim();
-    const password = this.data.password;
-    if (!email || !password) {
-      this.setData({ error: "请输入邮箱和密码" });
-      return;
-    }
-    if (!isValidEmail(email)) {
-      this.setData({ error: "请输入正确的邮箱地址" });
-      return;
-    }
-    this.setData({ loading: true, error: "" });
-    try {
-      await loginWithEmail({ email, password });
-      relaunchHome();
-    } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "登录失败",
-      });
-    } finally {
-      this.setData({ loading: false });
-    }
   },
 });

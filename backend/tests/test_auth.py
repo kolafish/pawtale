@@ -47,6 +47,30 @@ class TestAuthAPI:
         assert register.status_code == 400
         assert register.json()["detail"] == "邮箱格式不正确"
 
+    async def test_production_closes_email_account_routes(self, anonymous_client, monkeypatch):
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        for route, payload in (
+            ("/register", {"email": "author@example.com", "password": "password123"}),
+            ("/login", {"email": "author@example.com", "password": "password123"}),
+        ):
+            response = await anonymous_client.post(f"/api/auth{route}", json=payload)
+            assert response.status_code == 404
+
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: False)
+
+        async def exchange(_code, _miniprogram):
+            return WeChatSession(openid="wechat-only-production-test")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
+        assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "valid"})).status_code == 200
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        for route, payload in (
+            ("/set-credentials", {"email": "author@example.com", "password": "password123"}),
+            ("/wechat-bind", {"code": "valid"}),
+        ):
+            response = await anonymous_client.post(f"/api/auth{route}", json=payload)
+            assert response.status_code == 404
+
     async def test_project_routes_require_login(self, anonymous_client):
         response = await anonymous_client.get("/api/projects")
         assert response.status_code == 401

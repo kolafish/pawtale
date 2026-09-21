@@ -2,9 +2,7 @@ import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-sess
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirIdentity,
-  isValidEmail,
   logoutBackendSession,
-  setAccountCredentials,
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
@@ -42,7 +40,6 @@ interface MeData {
   avatarSaving: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
-  credentialsLoading: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -50,9 +47,6 @@ interface MeData {
   avatarUrl: string;
   email: string;
   accountEmailText: string;
-  passwordLoginEnabled: boolean;
-  credentialEmail: string;
-  credentialPassword: string;
   projectTitle: string;
   projectCount: number;
   voiceStatsProjectId: string;
@@ -64,7 +58,6 @@ interface MeData {
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationStatusText: string;
   largeTextEnabled: boolean;
-  showAccountSettings: boolean;
 }
 
 type InputEvent = PageTextInputEvent;
@@ -152,11 +145,6 @@ function loggedOutData(): Partial<MeData> {
     avatarSaving: false,
     email: "",
     accountEmailText: "",
-    passwordLoginEnabled: false,
-    credentialEmail: "",
-    credentialPassword: "",
-    credentialsLoading: false,
-    showAccountSettings: false,
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -179,7 +167,6 @@ definePage<MeData>()({
     avatarSaving: false,
     editingName: false,
     voiceStatsLoading: false,
-    credentialsLoading: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -187,9 +174,6 @@ definePage<MeData>()({
     avatarUrl: "",
     email: "",
     accountEmailText: "",
-    passwordLoginEnabled: false,
-    credentialEmail: "",
-    credentialPassword: "",
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -200,7 +184,6 @@ definePage<MeData>()({
     ...aiModelSettingsData(),
     ...voiceAuthorizationSettingsData(),
     largeTextEnabled: false,
-    showAccountSettings: false,
   },
 
   async onShow() {
@@ -228,8 +211,6 @@ definePage<MeData>()({
       const keepVoiceStats = Boolean(activeProjectId && this.data.voiceStatsProjectId === activeProjectId);
       this.setData({
         loggedIn: true,
-        credentialEmail: "",
-        credentialPassword: "",
         displayName,
         nameDraft: displayName,
         editingName: false,
@@ -237,7 +218,6 @@ definePage<MeData>()({
         avatarUrl: resolveBackendAvatarUrl(identity.avatar_url),
         email: identity.email,
         accountEmailText: accountEmailText(identity.email, identity.password_login_enabled),
-        passwordLoginEnabled: identity.password_login_enabled,
         projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
         ...(keepVoiceStats ? {} : {
@@ -264,55 +244,6 @@ definePage<MeData>()({
       });
     } finally {
       this.setData({ loading: false });
-    }
-  },
-
-  changeCredentialEmail(event: InputEvent) {
-    this.setData({ credentialEmail: event.detail.value, error: "" });
-  },
-
-  changeCredentialPassword(event: InputEvent) {
-    this.setData({ credentialPassword: event.detail.value, error: "" });
-  },
-
-  async submitCredentials() {
-    if (this.data.loading || this.data.credentialsLoading) {
-      return;
-    }
-    const email = this.data.credentialEmail.trim();
-    const password = this.data.credentialPassword;
-    if (!email || !password) {
-      this.setData({ error: "请输入邮箱和密码" });
-      return;
-    }
-    if (!isValidEmail(email)) {
-      this.setData({ error: "请输入正确的邮箱地址" });
-      return;
-    }
-    if (password.length < 8) {
-      this.setData({ error: "密码至少需要 8 位" });
-      return;
-    }
-    this.setData({ credentialsLoading: true, error: "" });
-    try {
-      const response = await setAccountCredentials({
-        email,
-        password,
-      });
-      if (response.needs_credentials) {
-        this.setData({ error: "账号还没有设置完成，请重新提交" });
-        return;
-      }
-      await this.loadMe();
-      if (this.data.loggedIn) {
-        wx.showToast({ title: "已登录", icon: "success" });
-      }
-    } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "保存账号失败",
-      });
-    } finally {
-      this.setData({ credentialsLoading: false });
     }
   },
 
@@ -379,7 +310,6 @@ definePage<MeData>()({
         avatarText: Array.from(normalizedName)[0] || "作",
         email: user.email,
         accountEmailText: accountEmailText(user.email, user.password_login_enabled),
-        passwordLoginEnabled: user.password_login_enabled,
         editingName: false,
       });
       wx.showToast({ title: "已保存", icon: "success" });
@@ -415,10 +345,6 @@ definePage<MeData>()({
       largeTextEnabled: settings.largeTextEnabled,
     });
     wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
-  },
-
-  toggleAccountSettings() {
-    this.setData({ showAccountSettings: !this.data.showAccountSettings });
   },
 
   openVoiceAuthorization() {

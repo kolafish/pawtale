@@ -23,10 +23,8 @@ function loadMePage({
   cacheExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
-    isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
     logoutBackendSession: async () => {},
-    setAccountCredentials: unmockedAsync("setAccountCredentials"),
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
@@ -172,17 +170,6 @@ test("me profile exposes WeChat avatar and nickname controls", () => {
   assert.match(pageWxml, /type="nickname"/);
 });
 
-test("me reveals account settings only when requested", () => {
-  const { page } = loadMePage();
-  const context = pageContext(page);
-
-  assert.equal(context.data.showAccountSettings, false);
-
-  page.toggleAccountSettings.call(context);
-
-  assert.equal(context.data.showAccountSettings, true);
-});
-
 test("me saves the local large text preference", () => {
   const savedLargeText = [];
   const toasts = [];
@@ -238,7 +225,6 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
   await page.loadMe.call(context);
 
   assert.equal(context.data.loggedIn, true);
-  assert.equal(context.data.passwordLoginEnabled, false);
   assert.equal(context.data.displayName, "微信昵称");
   assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
   assert.equal(context.data.accountEmailText, "微信账号登录");
@@ -458,81 +444,6 @@ test("me shows missing voice authorization consent as not agreed", () => {
   assert.equal(context.data.voiceAuthorizationStatusText, "未同意");
 });
 
-test("me validates email before setting Web login credentials", async () => {
-  let credentialsCalls = 0;
-  const { page } = loadMePage({
-    authExports: {
-      setAccountCredentials: async () => {
-        credentialsCalls += 1;
-        return {
-          user: {
-            id: "user-1",
-            email: "author@example.com",
-            password_login_enabled: true,
-            display_name: "作者",
-            created_at: "2026-06-15T00:00:00",
-          },
-          needs_credentials: false,
-        };
-      },
-    },
-  });
-  const context = pageContext(page, {
-    credentialEmail: "author",
-    credentialPassword: "password123",
-  });
-
-  await page.submitCredentials.call(context);
-
-  assert.equal(credentialsCalls, 0);
-  assert.match(context.data.error, /邮箱/);
-});
-
-test("me saves Web login credentials without overriding wechat nickname", async () => {
-  const credentialsCalls = [];
-  let refreshed = false;
-  const { page } = loadMePage({
-    authExports: {
-      setAccountCredentials: async (input) => {
-        credentialsCalls.push(input);
-        return {
-          user: {
-            id: "user-1",
-            email: input.email,
-            password_login_enabled: true,
-            display_name: "微信昵称",
-            created_at: "2026-06-15T00:00:00",
-          },
-          needs_credentials: false,
-        };
-      },
-    },
-  });
-  global.wx = {
-    showToast() {},
-  };
-  const context = {
-    ...pageContext(page, {
-      credentialEmail: " author@example.com ",
-      credentialPassword: "password123",
-    }),
-    async loadMe() {
-      refreshed = true;
-      this.setData({ loggedIn: true, passwordLoginEnabled: true });
-    },
-  };
-
-  await page.submitCredentials.call(context);
-
-  assert.deepEqual(credentialsCalls, [
-    {
-      email: "author@example.com",
-      password: "password123",
-    },
-  ]);
-  assert.equal(refreshed, true);
-  assert.equal(context.data.passwordLoginEnabled, true);
-});
 
 test("me keeps memoir management and voice settings as separate entries", () => {
   const navigations = [];

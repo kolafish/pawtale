@@ -402,8 +402,6 @@ test("builds voice gateway URLs from runtime backend config", () => {
       if (key === "pawtale_backend_config") {
         return {
           httpBaseUrl: "https://api.example.com/",
-          devEmail: "local@example.com",
-          devPassword: "secret",
         };
       }
       return "";
@@ -424,9 +422,6 @@ test("builds voice gateway URLs from runtime backend config", () => {
   assert.deepEqual(readBackendConfig(), {
     httpBaseUrl: "https://api.example.com/",
     wsBaseUrl: "wss://api.example.com/",
-    devEmail: "local@example.com",
-    devPassword: "secret",
-    devDisplayName: "本地作者",
   });
   assert.equal(
     voiceGatewayUrl("voice/1"),
@@ -822,9 +817,8 @@ test("streaming ASR connect rejects on socket error before open", async () => {
   delete global.wx;
 });
 
-test("streaming ASR connect times out while backend session check is pending", async () => {
+test("streaming ASR rejects a guest before connecting", async () => {
   let socketCalls = 0;
-  const statuses = [];
   global.wx = {
     getRecorderManager: recorderManagerStub,
     getStorageSync(key) {
@@ -832,8 +826,6 @@ test("streaming ASR connect times out while backend session check is pending", a
         return {
           httpBaseUrl: "http://backend.local:8000",
           wsBaseUrl: "ws://backend.local:8000",
-          devEmail: "local@example.com",
-          devPassword: "secret",
         };
       }
       if (key === "pawtale_backend_cookie") {
@@ -867,9 +859,7 @@ test("streaming ASR connect times out while backend session check is pending", a
     guidanceMode: "free_narration",
     connectTimeoutMs: 20,
     callbacks: {
-      onStatus(status) {
-        statuses.push(status);
-      },
+      onStatus() {},
       onEvent() {},
       onPartial() {},
       onFinal() {},
@@ -877,9 +867,8 @@ test("streaming ASR connect times out while backend session check is pending", a
     },
   });
 
-  await assert.rejects(client.connect(), /语音连接超时/);
+  await assert.rejects(client.connect(), /请先登录/);
 
-  assert.deepEqual(statuses, ["connecting"]);
   assert.equal(socketCalls, 0);
   delete global.wx;
 });

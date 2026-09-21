@@ -13,8 +13,6 @@ const {
 
 function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
   mockModule("../services/auth.ts", {
-    isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-    loginWithEmail: unmockedAsync("loginWithEmail"),
     loginWithWeChat: unmockedAsync("loginWithWeChat"),
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
@@ -39,16 +37,10 @@ test("login profile setup uses WeChat avatar and nickname components", () => {
   assert.match(template, /type="nickname"/);
 });
 
-test("login mode toggle stays inactive while a login request is running", () => {
-  const { page } = loadLoginPage();
-  const context = pageContext(page, {
-    accountMode: false,
-    wechatLoading: true,
-  });
-
-  page.toggleAccountMode.call(context);
-
-  assert.equal(context.data.accountMode, false);
+test("login page offers WeChat as its only sign-in action", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/login/index.wxml"), "utf8");
+  assert.match(template, /bindtap="submitWeChat"/);
+  assert.doesNotMatch(template, /bindtap="submitAccount"|account-login-toggle/);
 });
 
 test("login page relaunches home when the wechat profile is already complete", async () => {
@@ -162,63 +154,4 @@ test("login page saves selected wechat nickname and avatar before entering", asy
   assert.deepEqual(avatarUploads, ["wxfile://chosen-avatar"]);
   assert.deepEqual(relaunches, ["/pages/home/index"]);
   assert.equal(context.data.profileSaving, false);
-});
-
-test("login page validates email before Pawtale account login", async () => {
-  let loginCalls = 0;
-  const { page } = loadLoginPage({
-    authExports: {
-      loginWithEmail: async () => {
-        loginCalls += 1;
-        return {};
-      },
-    },
-  });
-  const context = pageContext(page, {
-    email: "author",
-    password: "password123",
-  });
-
-  await page.submitAccount.call(context);
-
-  assert.equal(loginCalls, 0);
-  assert.match(context.data.error, /邮箱/);
-});
-
-test("login page logs in with trimmed Pawtale account email", async () => {
-  const loginCalls = [];
-  const relaunches = [];
-  global.wx = {
-    reLaunch(options) {
-      relaunches.push(options.url);
-    },
-  };
-  const { page } = loadLoginPage({
-    authExports: {
-      loginWithEmail: async (input) => {
-        loginCalls.push(input);
-        return {
-          id: "user-1",
-          email: input.email,
-          password_login_enabled: true,
-          display_name: "作者",
-          created_at: "2026-06-15T00:00:00",
-        };
-      },
-    },
-  });
-  const context = pageContext(page, {
-    email: " author@example.com ",
-    password: "password123",
-  });
-
-  await page.submitAccount.call(context);
-
-  assert.deepEqual(loginCalls, [
-    {
-      email: "author@example.com",
-      password: "password123",
-    },
-  ]);
-  assert.deepEqual(relaunches, ["/pages/home/index"]);
 });

@@ -11,18 +11,19 @@ function authModule() {
 
 function installWxMock(handler) {
   const requests = [];
+  const storage = new Map();
   global.wx = {
     getStorageSync(key) {
       if (key === "pawtale_backend_config") {
         return { httpBaseUrl: "https://api.example.com" };
       }
-      return "";
+      return storage.get(key) || "";
     },
     getExtConfigSync() {
       return {};
     },
-    setStorageSync() {},
-    removeStorageSync() {},
+    setStorageSync(key, value) { storage.set(key, value); },
+    removeStorageSync(key) { storage.delete(key); },
     login(options) {
       options.success({ code: "wx-code-1", errMsg: "login:ok" });
     },
@@ -33,6 +34,34 @@ function installWxMock(handler) {
   };
   return requests;
 }
+
+test("missing session never auto-registers a development account", async () => {
+  const requests = installWxMock(() => {
+    throw new Error("guest request must not reach backend");
+  });
+  const { requestWithBackendSession } = authModule();
+
+  await assert.rejects(requestWithBackendSession("/api/mobile/memoir/me"), (error) => (
+    error.statusCode === 401 && error.message === "请先登录"
+  ));
+  assert.equal(requests.length, 0);
+  delete global.wx;
+});
+
+test("expired session is cleared without replaying the request", async () => {
+  const requests = installWxMock((options) => {
+    options.success({ statusCode: 401, data: { detail: "会话已过期" }, cookies: [], header: {} });
+  });
+  global.wx.setStorageSync("pawtale_backend_cookie", "pawtale_session=expired");
+  const { requestWithBackendSession } = authModule();
+
+  await assert.rejects(requestWithBackendSession("/api/mobile/memoir/me"), (error) => (
+    error.statusCode === 401
+  ));
+  assert.equal(requests.length, 1);
+  assert.equal(global.wx.getStorageSync("pawtale_backend_cookie"), "");
+  delete global.wx;
+});
 
 test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
@@ -66,15 +95,6 @@ test("loginWithWeChat exchanges wx login code through backend", async () => {
   delete global.wx;
 });
 
-test("isValidEmail validates basic email shape", () => {
-  const { isValidEmail } = authModule();
-
-  assert.equal(isValidEmail(" author@example.com "), true);
-  assert.equal(isValidEmail("author"), false);
-  assert.equal(isValidEmail("author@example"), false);
-  assert.equal(isValidEmail("author @example.com"), false);
-});
-
 test("loginWithWeChat does not depend on the retired getUserProfile result", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
@@ -106,45 +126,6 @@ test("loginWithWeChat does not depend on the retired getUserProfile result", asy
   assert.equal(requests.length, 1);
   assert.equal(response.user.display_name, "微信用户");
   assert.equal(response.user.avatar_url, undefined);
-  delete global.wx;
-});
-
-test("setAccountCredentials saves email password for current backend session", async () => {
-  const requests = installWxMock((options) => {
-    assert.equal(options.url, "https://api.example.com/api/auth/set-credentials");
-    assert.equal(options.method, "POST");
-    assert.deepEqual(options.data, {
-      email: "author@example.com",
-      password: "password123",
-      display_name: "微信昵称",
-    });
-    options.success({
-      statusCode: 200,
-      data: {
-        user: {
-          id: "user-1",
-          email: "author@example.com",
-          password_login_enabled: true,
-          display_name: "微信昵称",
-          created_at: "2026-06-15T00:00:00",
-        },
-        needs_credentials: false,
-      },
-      cookies: [],
-      header: {},
-    });
-  });
-  const { setAccountCredentials } = authModule();
-
-  const response = await setAccountCredentials({
-    email: "author@example.com",
-    password: "password123",
-    display_name: "微信昵称",
-  });
-
-  assert.equal(requests.length, 1);
-  assert.equal(response.user.email, "author@example.com");
-  assert.equal(response.needs_credentials, false);
   delete global.wx;
 });
 
