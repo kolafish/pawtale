@@ -76,10 +76,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
     this.syncDraftSectionUnloadAlert();
   },
 
-  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
-    this.openDraftSectionEditor(event);
-  },
-
   changeDraftSectionContent(event: PageTextInputEvent) {
     if (this.data.editingMode !== "manual") {
       return;

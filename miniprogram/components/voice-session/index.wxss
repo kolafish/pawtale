@@ -1649,12 +1649,6 @@
   line-height: 56rpx;
 }
 
-.voice-chat-page.large-text .history-count,
-.voice-chat-page.large-text .history-toggle-text {
-  font-size: 32rpx;
-  line-height: 48rpx;
-}
-
 .voice-chat-page.large-text .transcript-line {
   font-size: 40rpx;
   line-height: 68rpx;

@@ -209,7 +209,7 @@
               data-id="{{focusedSection.id}}"
               aria-role="button"
               aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-              bindtap="startDraftSectionEdit"
+              bindtap="openDraftSectionEditor"
             >
               <image class="focused-story-action-icon" src="/assets/chapter-workspace/pencil.svg" mode="aspectFit" />
               <text>自己修改</text>
