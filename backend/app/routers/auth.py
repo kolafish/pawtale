@@ -2,18 +2,21 @@ import hashlib
 import re
 import secrets
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
     clear_session_cookie,
+    check_wechat_login_rate_limit,
     get_current_user,
     hash_password,
     is_admin_user,
+    issue_session,
     normalize_email,
-    set_session_cookie,
+    revoke_session,
+    SESSION_COOKIE_NAME,
     verify_password,
 )
 from app.config import is_production_environment
@@ -91,6 +94,14 @@ async def _find_wechat_identity(
     )
 
 
+async def _lock_wechat_identity(db: AsyncSession, provider: str, session: WeChatSession) -> None:
+    identity_key = session.unionid or f"{provider}:{session.openid}"
+    lock_key = int.from_bytes(
+        hashlib.sha256(identity_key.encode("utf-8")).digest()[:8], "big", signed=True
+    )
+    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+
 async def _wechat_union_user_id(
     db: AsyncSession,
     unionid: str | None,
@@ -149,9 +160,9 @@ async def register(
         display_name=(req.display_name or email.split("@", 1)[0]).strip() or "作者",
     )
     db.add(user)
-    await db.commit()
+    await db.flush()
+    await issue_session(db, response, user.id)
     await db.refresh(user)
-    set_session_cookie(response, user.id)
     return _auth_response(user)
 
 
@@ -171,18 +182,21 @@ async def login(
         or not verify_password(req.password, user.password_hash)
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码不正确")
-    set_session_cookie(response, user.id)
+    await issue_session(db, response, user.id)
     return _auth_response(user)
 
 
 @router.post("/wechat-login", response_model=AuthResponse)
 async def wechat_login(
     req: WeChatLoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     provider = WECHAT_PROVIDERS[req.miniprogram]
+    await check_wechat_login_rate_limit(db, request.client.host if request.client else "unknown")
     session = await _exchange_wechat_code(req.code, req.miniprogram)
+    await _lock_wechat_identity(db, provider, session)
     identity = await _find_wechat_identity(db, provider, session.openid)
     union_user_id = await _wechat_union_user_id(db, session.unionid)
     if identity:
@@ -213,9 +227,9 @@ async def wechat_login(
         )
         db.add_all([user, identity])
 
-    await db.commit()
+    await db.flush()
+    await issue_session(db, response, user.id)
     await db.refresh(user)
-    set_session_cookie(response, user.id)
     return _auth_response(user)
 
 
@@ -283,7 +297,12 @@ async def set_credentials(
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+):
+    await revoke_session(db, session_cookie)
     clear_session_cookie(response)
 
 

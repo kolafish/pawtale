@@ -62,9 +62,12 @@ export async function logoutBackendSession(): Promise<void> {
       method: "POST",
       data: {},
     });
-  } finally {
-    clearSessionCookie();
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.statusCode !== 401) {
+      throw error;
+    }
   }
+  clearSessionCookie();
 }
 
 export async function updateBackendProfile(input: UpdateProfileInput): Promise<BackendAuthUser> {

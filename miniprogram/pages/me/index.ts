@@ -370,17 +370,14 @@ definePage<MeData>()({
     this.setData({ loading: true, error: "" });
     try {
       await logoutBackendSession();
-    } catch (error) {
-      console.warn("backend logout failed", error);
-    } finally {
       clearCurrentUserMemoirSnapshots();
       replaceMemoirStore({});
-      this.setData({
-        ...loggedOutData(),
-        loading: false,
-        error: "",
-      });
+      this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "已退出", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
+    } finally {
+      this.setData({ loading: false });
     }
   },
 });
