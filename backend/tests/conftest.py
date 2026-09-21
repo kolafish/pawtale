@@ -29,6 +29,25 @@ from app.migrations.postgres_runtime import (  # noqa: E402
 )
 
 
+def pytest_addoption(parser):
+    parser.addoption("--ci-fast", action="store_true", help="run fast CI tests and marked database smoke tests")
+
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--ci-fast"):
+        return
+    selected = []
+    deselected = []
+    for item in items:
+        uses_database = "test_db" in item.fixturenames or "postgres_schema" in item.fixturenames
+        if uses_database and item.get_closest_marker("ci_smoke") is None:
+            deselected.append(item)
+        else:
+            selected.append(item)
+    config.hook.pytest_deselected(items=deselected)
+    items[:] = selected
+
+
 def _assert_dedicated_postgres_test_database() -> None:
     if not POSTGRES_DATABASE_URL:
         raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for database/API tests")

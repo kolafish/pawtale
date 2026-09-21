@@ -1,6 +1,7 @@
 name: Backend
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "backend/**"
@@ -13,6 +14,10 @@ on:
       - "backend/**"
       - "scripts/test-backend.sh"
       - ".github/workflows/backend.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -50,4 +55,9 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements-dev.txt
       - run: ruff check app embedding_service tests scripts
-      - run: python -m pytest -q tests
+      - name: Fast cross-module smoke
+        if: github.event_name != 'workflow_dispatch'
+        run: python -m pytest -q --ci-fast tests
+      - name: Full suite on demand
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m pytest -q tests
