@@ -230,8 +230,14 @@ async def synchronize_book_output_title(
     if not canonical_title:
         raise ValueError("回忆录名称不能为空")
     output = await _load_output(db, project_id=project_id)
-    if not output or not output.versions:
+    if not output:
         return False
+    if not output.versions:
+        if output.title != canonical_title:
+            output.title = canonical_title
+            output.updated_at = utcnow_naive()
+            db.add(output)
+        return True
     latest = output.versions[-1]
     snapshot = [
         item for item in (latest.chapter_snapshot_json or [])
@@ -245,7 +251,9 @@ async def synchronize_book_output_title(
         snapshot=snapshot,
         cover_style_value=_stored_cover_style(latest),
     )
-    if content != latest.content or manuscript_json != latest.manuscript_json:
+    version_changed = content != latest.content or manuscript_json != latest.manuscript_json
+    title_changed = output.title != canonical_title
+    if version_changed:
         await append_book_output_version(
             db,
             output=output,
@@ -254,15 +262,16 @@ async def synchronize_book_output_title(
             manuscript_json=manuscript_json,
             created_by=created_by,
         )
-    if output.title != canonical_title:
+    if title_changed:
         output.title = canonical_title
         output.updated_at = utcnow_naive()
-    invalidate_book_output(output)
-    output.metadata_json = {
-        **(output.metadata_json or {}),
-        BOOK_TTS_CACHE_KEY: None,
-    }
-    db.add(output)
+    if version_changed or title_changed:
+        invalidate_book_output(output)
+        output.metadata_json = {
+            **(output.metadata_json or {}),
+            BOOK_TTS_CACHE_KEY: None,
+        }
+        db.add(output)
     return True
 
 
@@ -490,7 +499,9 @@ async def update_book_output(
         cover_style_value=cover_style,
         metadata_patch=metadata_patch,
     )
-    if content != latest.content or manuscript_json != latest.manuscript_json:
+    version_changed = content != latest.content or manuscript_json != latest.manuscript_json
+    title_changed = output.title != title
+    if version_changed:
         await append_book_output_version(
             db,
             output=output,
@@ -499,12 +510,14 @@ async def update_book_output(
             manuscript_json=manuscript_json,
             created_by=MemoirCreatedBy.USER,
         )
-    output.title = title
-    invalidate_book_output(output)
-    output.metadata_json = {
-        **(output.metadata_json or {}),
-        BOOK_TTS_CACHE_KEY: None,
-    }
+    if title_changed:
+        output.title = title
+    if version_changed or title_changed:
+        invalidate_book_output(output)
+        output.metadata_json = {
+            **(output.metadata_json or {}),
+            BOOK_TTS_CACHE_KEY: None,
+        }
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:
