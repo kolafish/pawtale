@@ -61,6 +61,8 @@ type BookReaderData = ReaderData & BookTTSState & {
   chapterId: string;
   versionId: string;
   readerMode: "book" | "chapter";
+  readerChapterIndex: number;
+  readerChapterTotal: number;
   readerTitle: string;
   readerSubtitle: string;
   readerMetaText: string;
@@ -74,7 +76,8 @@ type BookReaderData = ReaderData & BookTTSState & {
 
 type ReaderDatasetEvent = PageDatasetEvent<{
   chapterIndex?: string;
-  sectionIndex?: string;
+  chapterId?: string;
+  sectionId?: string;
 }>;
 
 interface ChapterParagraphRange {
@@ -88,6 +91,7 @@ interface ChapterParagraphRange {
 const SENTENCE_ENDINGS = "。！？!?";
 const SENTENCE_CLOSERS = "”’\"'」』】）)";
 const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
+const FLAT_READER_PAGE_CHARS = 6000;
 
 type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
@@ -98,6 +102,23 @@ function scrollReader(options: { selector?: string; scrollTop?: number }) {
   if (typeof pageScrollTo === "function") {
     pageScrollTo({ ...options, duration: 280 });
   }
+}
+
+function compactReaderChapter(chapter: BookOutputChapterPreviewView): BookOutputChapterPreviewView {
+  return {
+    ...chapter,
+    content: chapter.sections.length ? "" : chapter.content,
+    sections: chapter.sections.map((section) => ({ ...section, content: "" })),
+  };
+}
+
+function flatReaderPages(content: string): string[] {
+  const characters = Array.from(content);
+  const pages: string[] = [];
+  for (let index = 0; index < characters.length; index += FLAT_READER_PAGE_CHARS) {
+    pages.push(characters.slice(index, index + FLAT_READER_PAGE_CHARS).join(""));
+  }
+  return pages;
 }
 
 function textLength(value: string): number {
@@ -269,6 +290,9 @@ definePage<BookReaderData>()({
   playToken: 0,
   chapterParagraphRanges: [] as ChapterParagraphRange[],
   readerHighlightKey: "",
+  readerText: "",
+  bookChapters: [] as BookOutputChapterPreviewView[],
+  flatPages: [] as string[],
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -279,6 +303,8 @@ definePage<BookReaderData>()({
     chapterId: "",
     versionId: "",
     readerMode: "book",
+    readerChapterIndex: 0,
+    readerChapterTotal: 0,
     readerHighlightSectionId: "",
     readerHighlightParagraphIndex: -1,
     readerHighlightBefore: "",
@@ -339,7 +365,7 @@ definePage<BookReaderData>()({
       return;
     }
     if (!chapter.sections.length) {
-      scrollReader({ selector: `#reader-chapter-${chapterIndex}` });
+      this.showReaderChapter(this.bookChapters.findIndex((item) => item.chapterId === chapter.chapterId));
       return;
     }
     this.setData({
@@ -349,13 +375,35 @@ definePage<BookReaderData>()({
     });
   },
 
+  openReaderChapter(event: ReaderDatasetEvent) {
+    const chapterId = datasetString(event, "chapterId");
+    this.showReaderChapter(this.bookChapters.findIndex((item) => item.chapterId === chapterId));
+  },
+
+  showReaderChapter(index: number, sectionIndex?: number) {
+    if (this.data.readerMode !== "book" || index < 0 || index >= this.data.readerChapterTotal) return;
+    const chapter = this.bookChapters[index];
+    this.setData({
+      readerChapterIndex: index,
+      bookPreviewChapters: chapter ? [chapter] : [],
+      bookContent: chapter ? "" : this.flatPages[index] || "",
+    }, () => scrollReader({ selector: sectionIndex === undefined ? "#reader-body" : `#reader-section-${sectionIndex}` }));
+  },
+
+  previousReaderChapter() {
+    this.showReaderChapter(this.data.readerChapterIndex - 1);
+  },
+
+  nextReaderChapter() {
+    this.showReaderChapter(this.data.readerChapterIndex + 1);
+  },
+
   openReaderSection(event: ReaderDatasetEvent) {
-    const chapterIndex = datasetString(event, "chapterIndex");
-    const sectionIndex = datasetString(event, "sectionIndex");
-    if (!/^\d+$/.test(chapterIndex) || !/^\d+$/.test(sectionIndex)) {
-      return;
-    }
-    scrollReader({ selector: `#reader-section-${chapterIndex}-${sectionIndex}` });
+    const chapterId = datasetString(event, "chapterId");
+    const sectionId = datasetString(event, "sectionId");
+    const chapterIndex = this.bookChapters.findIndex((item) => item.chapterId === chapterId);
+    const sectionIndex = this.bookChapters[chapterIndex]?.sections.findIndex((item) => item.id === sectionId) ?? -1;
+    if (sectionIndex >= 0) this.showReaderChapter(chapterIndex, sectionIndex);
   },
 
   scrollReaderToTop() {
@@ -368,7 +416,7 @@ definePage<BookReaderData>()({
       this.stopPlayback();
       return;
     }
-    if (!this.data.projectId || !trimText(this.data.bookContent)) {
+    if (!this.data.projectId || !this.readerText) {
       return;
     }
     if (this.data.bookViewingHistoricalVersion) {
@@ -397,7 +445,7 @@ definePage<BookReaderData>()({
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
+      await this.playAudioFiles(response, target, token, this.readerText);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -487,8 +535,18 @@ definePage<BookReaderData>()({
       const version = versionId && versionId !== latestVersion?.id
         ? await getMemoirBookOutputVersion(projectId, versionId)
         : latestVersion;
-      this.setData(readerData(output, version));
-      if (!trimText(this.data.bookContent)) {
+      const data = readerData(output, version);
+      this.readerText = trimText(data.bookContent);
+      this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
+      this.flatPages = this.bookChapters.length ? [] : flatReaderPages(data.bookContent);
+      this.setData({
+        ...data,
+        bookContent: this.bookChapters.length ? "" : this.flatPages[0] || "",
+        bookPreviewChapters: this.bookChapters.slice(0, 1),
+        readerChapterIndex: 0,
+        readerChapterTotal: this.bookChapters.length || this.flatPages.length,
+      });
+      if (!this.readerText) {
         this.setData({ error: "这本书还没有生成成书内容。" });
       }
     } catch (error) {
@@ -507,11 +565,20 @@ definePage<BookReaderData>()({
     try {
       const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
       const data = chapterReaderData(workspace);
+      this.readerText = trimText(data.bookContent);
       this.chapterParagraphRanges = chapterParagraphRanges(
         data.bookPreviewChapters[0]?.sections || [],
       );
-      this.setData(data);
-      if (!trimText(this.data.bookContent)) {
+      this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
+      this.flatPages = [];
+      this.setData({
+        ...data,
+        bookContent: this.bookChapters.length ? "" : data.bookContent,
+        bookPreviewChapters: this.bookChapters,
+        readerChapterIndex: 0,
+        readerChapterTotal: 1,
+      });
+      if (!this.readerText) {
         this.setData({ error: "本章正文还没有生成。" });
       }
     } catch (error) {
