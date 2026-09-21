@@ -5,7 +5,11 @@
 }
 
 .delete-account-button {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 220rpx;
+  min-height: 80rpx;
   margin: 28rpx auto 0;
   padding: 12rpx 24rpx;
   border: 0;
