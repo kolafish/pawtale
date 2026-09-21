@@ -5,8 +5,8 @@ page {
   --ui-surface-soft: #faf7f2;
   --ui-surface-subtle: #f2ece4;
   --ui-text-primary: #302925;
-  --ui-text-secondary: #706761;
-  --ui-text-muted: #736963;
+  --ui-text-secondary: #625953;
+  --ui-text-muted: #6a6059;
   --ui-on-accent: #ffffff;
   --ui-section-title: #8d4d40;
   --ui-value-text: #5f5550;
@@ -32,6 +32,20 @@ page {
   --ui-page-inline: 32rpx;
   --ui-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --ui-font-editorial: "Songti SC", STSong, "Noto Serif CJK SC", serif;
+  /* Shared reading scale. Keep page display titles and decorative cover lettering local. */
+  --ui-font-caption: 26rpx;
+  --ui-font-meta: 28rpx;
+  --ui-font-body: 29rpx;
+  --ui-font-action: 30rpx;
+  --ui-font-list-title: 31rpx;
+  --ui-font-section-title: 35rpx;
+  --ui-font-page-title: 42rpx;
+  --ui-font-large-caption: 30rpx;
+  --ui-font-large-meta: 32rpx;
+  --ui-font-large-body: 34rpx;
+  --ui-font-large-list-title: 36rpx;
+  --ui-line-meta: 1.45;
+  --ui-line-body: 1.5;
   --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx);
   --ui-card-shadow:
     0 0 0 1rpx rgba(54, 42, 34, 0.035),
@@ -49,6 +63,7 @@ page {
   background: var(--ui-page-background);
   color: var(--ui-text-primary);
   font-family: var(--ui-font-sans);
+  line-height: var(--ui-line-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -93,7 +108,7 @@ textarea {
 .ui-section-heading {
   display: block;
   color: var(--ui-section-title);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
   line-height: 1.35;
   font-family: var(--ui-font-editorial);
@@ -208,14 +223,14 @@ button::after {
   min-width: 0;
   display: block;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-meta);
+  line-height: var(--ui-line-meta);
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
 
 .large-text .ui-page-context {
-  font-size: 30rpx;
+  font-size: var(--ui-font-large-body);
   line-height: 1.5;
 }
 
@@ -266,7 +281,7 @@ button::after {
 .ui-accessible-page.large-text .revision-summary,
 .ui-accessible-page.large-text .section-detail,
 .ui-accessible-page.large-text .status-detail {
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 1.6;
 }
 
@@ -292,7 +307,7 @@ button::after {
 .ui-accessible-page.large-text .section-meta,
 .ui-accessible-page.large-text .session-meta,
 .ui-accessible-page.large-text .summary-label {
-  font-size: 28rpx;
+  font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }
 
@@ -310,7 +325,7 @@ button::after {
 .ui-accessible-page.large-text .ui-version-option,
 .ui-accessible-page.large-text .ui-block-action {
   min-height: 48px;
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 1.4;
 }
 
@@ -341,7 +356,7 @@ button::after {
   justify-content: center;
   border-radius: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
 }
 
