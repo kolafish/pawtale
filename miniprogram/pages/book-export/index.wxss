@@ -189,11 +189,13 @@
 .list-row::after { border: 0; }
 .list-row:last-child { border-bottom: 0; }
 .export-row { min-height: 106rpx; }
+.export-row.is-disabled { pointer-events: none; opacity: 0.62; }
 .section-entry { cursor: pointer; }
 .row-title { font-size: 25rpx; font-weight: 600; line-height: 1.4; }
 .row-detail { margin-top: 4rpx; color: var(--ui-text-secondary); font-size: 22rpx; line-height: 1.4; text-wrap: pretty; }
 .row-value { max-width: 42%; margin-left: auto; overflow: hidden; color: var(--ui-text-secondary); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
 .row-arrow { flex: 0 0 auto; color: var(--ui-text-muted); font-size: 36rpx; font-weight: 300; line-height: 1; }
+.row-busy { flex: 0 0 auto; color: var(--ui-accent-strong); font-size: 22rpx; }
 
 .notice,
 .state-card {
