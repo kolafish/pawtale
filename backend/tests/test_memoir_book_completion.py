@@ -40,6 +40,8 @@ from app.services.memoir import (
     book_revision_proposals,
     book_review_jobs,
     book_reviews,
+    completion_interviews,
+    completion_issues,
     chapter_preparation_jobs,
     chapter_digests,
     chapter_generation,
@@ -380,6 +382,150 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
     assert review["candidate_issues"] == []
     assert len(review["structure_guidance"]) == 8
     assert "书名是否应" in review["structure_guidance"][0]
+
+
+def test_book_review_fingerprints_follow_questions_when_order_changes():
+    common = {
+        "issue_type": "clarity",
+        "priority": "medium",
+        "channel": "manual_review",
+        "reason": "需要用户判断",
+        "chapter_ids": ["chapter-1"],
+        "material_ids": [],
+    }
+    candidates = [
+        {**common, "question": question}
+        for question in ("问题 A？", "问题 B？")
+    ]
+    for candidate in candidates:
+        candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    def fingerprints(items):
+        return {
+            candidate["question"]: fingerprint
+            for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(items)
+        }
+
+    assert fingerprints(candidates) == fingerprints(list(reversed(candidates)))
+
+
+def test_book_review_does_not_invent_material_provenance():
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={"title": "故事"},
+        chapters=(
+            BookReviewChapter(
+                chapter_id="chapter-1",
+                title="第一章",
+                sort_order=1,
+                digest_id="digest-1",
+                digest_signature="signature-1",
+                digest={},
+                draft_version_id="version-1",
+                draft_hash="hash-1",
+                material_ids=frozenset({"unrelated-material", "another-material"}),
+            ),
+        ),
+        input_signature="book-signature",
+    )
+    review = normalize_book_review(
+        {
+            "summary": "需要补充后续。",
+            "candidate_issues": [
+                {
+                    "issue_type": "impact",
+                    "question": "后来这件事带来了什么变化？",
+                    "reason": "现有正文缺少后续。",
+                    "priority": "medium",
+                    "chapter_ids": ["C1"],
+                    "resolution": "new_material",
+                }
+            ],
+        },
+        context=context,
+    )
+    candidate = review["candidate_issues"][0]
+    assert candidate["chapter_ids"] == ["chapter-1"]
+    assert candidate["material_ids"] == []
+
+
+async def test_book_review_regeneration_preserves_confirmed_answer(
+    client, test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    candidate = {
+        "issue_type": "privacy",
+        "channel": "manual_review",
+        "question": "是否保留真实姓名？",
+        "reason": "需要用户决定。",
+        "priority": "high",
+        "chapter_ids": ["chapter-1"],
+        "material_ids": ["arbitrary-old-material"],
+        "resolution": "user_decision",
+    }
+    old_fingerprint = completion_issues.book_review_candidate_fingerprints([candidate])[0][0]
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question=candidate["question"],
+        reason=candidate["reason"],
+        priority="high",
+        fingerprint=old_fingerprint,
+        related_material_ids_json=["arbitrary-old-material"],
+        input_signature="same-review-input",
+        status="closed",
+        outcome="confirmed",
+        outcome_note="保留化名。",
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    issue_id = issue.id
+    candidate["material_ids"] = []
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    current = await completion_issues.sync_book_review_issues(
+        test_db,
+        project_id=project_id,
+        input_signature="same-review-input",
+        candidates=[candidate],
+    )
+    assert len(current) == 1
+    assert current[0].id == issue_id
+    assert current[0].fingerprint == candidate["fingerprint"]
+    assert current[0].outcome_note == "保留化名。"
+    assert current[0].related_chapter_ids_json == ["chapter-1"]
+    assert current[0].related_material_ids_json == []
+
+
+async def test_book_issue_uses_its_chapter_instead_of_unrelated_material(
+    client, test_db,
+):
+    project_id, chapters, sources = await _book(client, test_db, chapter_count=2)
+    response = await client.post(f"/api/memoir/projects/{project_id}/sections/bootstrap")
+    assert response.status_code == 200
+    target = await test_db.scalar(
+        select(MemoirSection).where(MemoirSection.chapter_id == chapters[1].id)
+    )
+    assert target is not None
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="clarity",
+        channel="interview",
+        question="后来发生了什么？",
+        reason="补充这章的后续",
+        priority="medium",
+        fingerprint="a" * 64,
+        related_material_ids_json=[sources[0]["utterance_id"]],
+        related_chapter_ids_json=[chapters[1].id],
+        input_signature="book-target-test",
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    assert await completion_interviews._target_section_id(test_db, issue=issue) == target.id
 
 
 def test_section_revision_keeps_whole_chapter_size_limit():
@@ -1788,7 +1934,8 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert issue is not None
     issue_id = issue.id
     assert issue.channel == "manual_review"
-    assert issue.related_material_ids_json
+    assert issue.related_material_ids_json == []
+    assert issue.related_chapter_ids_json == [chapter.id for chapter in chapters]
     current = await _completion_field(client, project_id, "book_review")
     assert current["id"] == review["id"]
     blocked = await client.post(

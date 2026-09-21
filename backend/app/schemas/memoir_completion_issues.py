@@ -25,6 +25,7 @@ class MemoirCompletionIssueResponse(BaseModel):
     reason: str
     priority: MemoirCompletionIssuePriority
     related_material_ids: list[str] = Field(default_factory=list)
+    related_chapter_ids: list[str] = Field(default_factory=list)
     input_signature: str
     status: MemoirCompletionIssueStatus
     active_session_id: str | None = None
