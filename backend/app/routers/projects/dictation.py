@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,13 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.domain.projects.types import ProjectType
 from app.models.projects import Document, DocumentGroup, Project
+from app.routers.dictation_gateway import run_dictation_gateway
 from app.routers.websocket_auth import authenticate_websocket, reject_websocket
-from app.services.asr.capacity import (
-    VoiceGatewayCapacityError,
-    voice_gateway_capacity_manager,
-)
-from app.services.asr.factory import create_realtime_volc_streaming_asr_client
-from app.services.asr.gateway import VoiceGatewaySession
 
 
 router = APIRouter()
@@ -41,43 +34,16 @@ async def stream_article_dictation(
         await reject_websocket(websocket, "article_dictation_unavailable")
         return
 
-    connection_id = str(uuid.uuid4())
-    capacity_session_id = f"article-dictation:{connection_id}"
-    try:
-        capacity_lease = await voice_gateway_capacity_manager.acquire(
-            current_user.id,
-            capacity_session_id,
-        )
-    except VoiceGatewayCapacityError as exc:
-        await reject_websocket(websocket, exc.code)
-        return
-
-    try:
-        await websocket.accept()
-
-        async def release_capacity_before_stopped(
-            _error_message: str | None,
-            _stop_reason: str,
-        ) -> None:
-            await capacity_lease.release()
-
-        session = VoiceGatewaySession(
-            client=websocket,
-            asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
-                current_user.id,
-                capacity_session_id,
-            ),
-            on_stop=release_capacity_before_stopped,
-            connection_id=connection_id,
-            diagnostics_context={
-                "gateway": "article_dictation",
-                "project_id": project_id,
-                "document_id": document_id,
-            },
-        )
-        await session.run()
-    finally:
-        await capacity_lease.release()
+    await run_dictation_gateway(
+        websocket,
+        user_id=current_user.id,
+        capacity_prefix="article-dictation",
+        diagnostics_context={
+            "gateway": "article_dictation",
+            "project_id": project_id,
+            "document_id": document_id,
+        },
+    )
 
 
 async def _article_document_is_available(
