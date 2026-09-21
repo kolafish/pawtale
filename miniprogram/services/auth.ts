@@ -7,6 +7,7 @@ import {
   type RequestOptions,
 } from "./request";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
+import { setMemoirCacheIdentity } from "../stores/session";
 
 export interface BackendAuthUser {
   id: string;
@@ -50,10 +51,12 @@ function wxLoginCode(): Promise<string> {
 
 export async function loginWithWeChat(): Promise<AuthResponse> {
   const code = await wxLoginCode();
-  return request<AuthResponse>("/api/auth/wechat-login", {
+  const response = await request<AuthResponse>("/api/auth/wechat-login", {
     method: "POST",
     data: { code },
   });
+  setMemoirCacheIdentity({ user_id: response.user.id });
+  return response;
 }
 
 export async function logoutBackendSession(): Promise<void> {

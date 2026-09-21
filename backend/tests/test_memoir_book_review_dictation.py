@@ -50,6 +50,9 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         return object()
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
+    async def authorized(_db, _user_id):
+        return True
+    monkeypatch.setattr(dictation_router, "has_current_voice_authorization_consent", authorized)
     monkeypatch.setattr(
         dictation_router,
         "_memoir_project_dictation_is_available",
@@ -103,6 +106,9 @@ async def test_memoir_project_dictation_rejects_unavailable_project(
         return False
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
+    async def authorized(_db, _user_id):
+        return True
+    monkeypatch.setattr(dictation_router, "has_current_voice_authorization_consent", authorized)
     monkeypatch.setattr(
         dictation_router,
         "_memoir_project_dictation_is_available",

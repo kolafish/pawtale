@@ -14,12 +14,16 @@ const PAGE_CLASS = "voice-authorization-page ui-page-shell ui-fixed-action-page 
 interface VoiceAuthorizationData {
   pageClass: string;
   version: string;
+  saving: boolean;
+  error: string;
 }
 
 definePage<VoiceAuthorizationData>()({
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     version: VOICE_AUTHORIZATION_VERSION,
+    saving: false,
+    error: "",
   },
 
   onShow() {
@@ -27,25 +31,34 @@ definePage<VoiceAuthorizationData>()({
   },
 
   async agreeAndBack() {
+    if (this.data.saving) return;
+    this.setData({ saving: true, error: "" });
     const consent = saveVoiceAuthorizationConsent(true);
     try {
       await syncVoiceAuthorizationConsent({ consent });
+      wx.showToast({ title: "已同意", icon: "success" });
+      setTimeout(() => {
+        wx.navigateBack({ delta: 1 });
+      }, 250);
     } catch (error) {
-      console.warn("sync voice authorization consent failed", error);
+      saveVoiceAuthorizationConsent(false);
+      this.setData({ error: error instanceof Error ? error.message : "授权保存失败，请重试" });
+    } finally {
+      this.setData({ saving: false });
     }
-    wx.showToast({ title: "已同意", icon: "success" });
-    setTimeout(() => {
-      wx.navigateBack({ delta: 1 });
-    }, 250);
   },
 
   async disagreeAndBack() {
+    if (this.data.saving) return;
+    this.setData({ saving: true, error: "" });
     const consent = saveVoiceAuthorizationConsent(false);
     try {
       await syncVoiceAuthorizationConsent({ consent });
+      wx.navigateBack({ delta: 1 });
     } catch (error) {
-      console.warn("sync voice authorization disagreement failed", error);
+      this.setData({ error: error instanceof Error ? error.message : "撤回授权失败，请重试" });
+    } finally {
+      this.setData({ saving: false });
     }
-    wx.navigateBack({ delta: 1 });
   },
 });

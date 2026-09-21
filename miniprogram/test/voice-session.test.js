@@ -248,9 +248,9 @@ test("voice chat blocks recording before voice authorization consent", () => {
 
   assert.equal(started, false);
   assert.equal(connectCalls, 0);
-  assert.match(context.data.error, /声纹授权协议/);
-  assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待声纹授权");
-  assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  assert.match(context.data.error, /语音采集与处理授权/);
+  assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待语音授权");
+  assert.equal(toasts[0].title, "请先同意语音授权");
 });
 
 test("voice chat ignores the microphone while the saved narration is being organized", () => {
@@ -1653,6 +1653,27 @@ test("voice chat syncs authorization consent before reconnecting", async () => {
   assert.deepEqual(syncedOptions, [{ sourceSessionId: "voice-1" }]);
   assert.equal(connectCalls, 1);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
+});
+
+test("voice chat records an explicit agreement before opening the recorder gateway", async () => {
+  const actions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      syncVoiceAuthorizationConsent: async (options) => { actions.push(options); return { id: "consent-1" }; },
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data, voiceSessionId: "voice-1", status: "idle" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    async syncVoiceAuthorizationAndConnect() { actions.push("connect"); },
+  };
+
+  await page.changeVoiceAuthorization.call(context, { detail: { value: ["voice_authorization"] } });
+
+  assert.equal(actions[0].consent.agreed, true);
+  assert.equal(actions[0].sourceSessionId, "voice-1");
+  assert.equal(actions[1], "connect");
 });
 
 test("voice chat uses conservative silence thresholds for automatic turn ending", async () => {

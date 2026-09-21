@@ -24,6 +24,7 @@ from app.services.asr.factory import create_realtime_volc_streaming_asr_client
 from app.services.asr.barge_in import BargeInDetector
 from app.services.asr.gateway import VoiceGatewaySession, VoiceGatewayStopReason
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir import voice_authorization as memoir_voice_authorization
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
@@ -44,6 +45,10 @@ async def mobile_memoir_voice_gateway(
         await _reject_websocket(websocket, "voice_gateway_auth_failed")
         return
     current_user_id = current_user.id
+
+    if not await memoir_voice_authorization.has_current_voice_authorization_consent(db, current_user_id):
+        await _reject_websocket(websocket, "voice_authorization_required")
+        return
 
     try:
         await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user_id)
@@ -133,6 +138,7 @@ async def mobile_memoir_voice_gateway(
             on_turn_start=persistence.set_turn_context,
             on_stop=on_stop,
             on_audio_frame=persistence.record_audio_frame,
+            authorize_audio=memoir_voice_authorization.audio_authorizer(db, current_user_id),
             on_asr_final=persistence.persist_final,
             text_normalizer=normalize_memoir_asr_text,
             allowed_speaker_roles=frozenset(

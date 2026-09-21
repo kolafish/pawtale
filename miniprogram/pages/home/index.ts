@@ -551,7 +551,11 @@ definePage<HomeData>()({
       error: agreed ? "" : this.data.error,
     }, () => this.measureNarration());
     void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
-      console.warn("sync voice authorization consent change failed", error);
+      if (agreed) saveVoiceAuthorizationConsent(false);
+      setHomeData(this, {
+        voiceAuthorizationAgreed: false,
+        error: error instanceof Error ? error.message : "语音授权保存失败",
+      });
     });
   },
 

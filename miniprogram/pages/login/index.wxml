@@ -9,7 +9,7 @@
 
   <view wx:if="{{!profileMode}}" class="login-panel">
     <text class="panel-title">欢迎登录</text>
-    <text class="panel-copy">使用微信账号登录，继续记录您的故事。</text>
+    <text class="panel-copy">使用微信账号登录。登录 code 将发送给后端用于识别账号；头像和昵称仅在您主动选择后保存。</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 

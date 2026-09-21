@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application_errors import ResourceNotFoundError
 from app.models.memoir import MemoirVoiceAuthorizationConsent, MemoirVoiceSession
@@ -12,6 +15,8 @@ from app.schemas.memoir_voice import (
 
 
 VOICE_AUTHORIZATION_CONSENT_TYPE = "voice_authorization"
+CURRENT_VOICE_AUTHORIZATION_VERSION = "2026-09-21"
+AUDIO_AUTHORIZATION_REFRESH_SECONDS = 1.0
 
 
 async def _assert_source_session_owner(db: AsyncSession, user_id: str, voice_session_id: str) -> None:
@@ -65,3 +70,28 @@ async def latest_voice_authorization_consent(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def has_current_voice_authorization_consent(db: AsyncSession, user_id: str) -> bool:
+    consent = await latest_voice_authorization_consent(
+        db, user_id, CURRENT_VOICE_AUTHORIZATION_VERSION
+    )
+    return bool(consent and consent.agreed)
+
+
+def audio_authorizer(db: AsyncSession, user_id: str) -> Callable[[], Awaitable[bool]]:
+    last_checked_at = 0.0
+    sessions = async_sessionmaker(db.bind, expire_on_commit=False)
+
+    async def authorized() -> bool:
+        nonlocal last_checked_at
+        now = time.monotonic()
+        if now - last_checked_at < AUDIO_AUTHORIZATION_REFRESH_SECONDS:
+            return True
+        async with sessions() as authorization_db:
+            consent = await has_current_voice_authorization_consent(authorization_db, user_id)
+        if consent:
+            last_checked_at = now
+        return consent
+
+    return authorized
