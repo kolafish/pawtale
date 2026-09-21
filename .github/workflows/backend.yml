@@ -1,7 +1,6 @@
 name: Backend
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
       - "backend/**"
@@ -56,8 +55,4 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: ruff check app embedding_service tests scripts
       - name: Fast cross-module smoke
-        if: github.event_name != 'workflow_dispatch'
         run: python -m pytest -q --ci-fast tests
-      - name: Full suite on demand
-        if: github.event_name == 'workflow_dispatch'
-        run: python -m pytest -q tests
