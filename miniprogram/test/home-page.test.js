@@ -1011,34 +1011,72 @@ test("home refreshes voice authorization consent from storage", () => {
   assert.equal(context.data.voiceAuthorizationAgreed, true);
 });
 
-test("home persists voice authorization checkbox changes", () => {
-  let savedValue = null;
+test("home waits for voice authorization to be saved before starting a session", async () => {
+  const consentWrite = deferred();
+  let storedConsent = false;
+  let creates = 0;
   const { page } = loadHomePage({
     voiceAuthorizationExports: {
-      saveVoiceAuthorizationConsent: (agreed = true) => {
-        savedValue = agreed;
-        return {
-          agreed,
-          version: "test",
-          agreedAt: "2026-06-18T00:00:00.000Z",
-        };
+      readVoiceAuthorizationConsent: () => storedConsent,
+      syncVoiceAuthorizationConsent: async ({ consent } = {}) => {
+        if (consent) {
+          await consentWrite.promise;
+          storedConsent = consent.agreed;
+        } else if (!storedConsent) {
+          throw new Error("授权还没有写入服务端");
+        }
+        return { id: "consent-1" };
+      },
+    },
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        creates += 1;
+        return { session: { id: "s1" } };
       },
     },
   });
-  const context = {
-    data: { ...page.data, error: "旧错误" },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  global.wx = { pageScrollTo() {} };
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
 
-  page.changeVoiceAuthorization.call(context, {
+  const saving = context.changeVoiceAuthorization({
     detail: { value: ["voice_authorization"] },
   });
-
-  assert.equal(savedValue, true);
+  assert.equal(context.data.voiceAuthorizationSaving, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
-  assert.equal(context.data.error, "");
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 0);
+  consentWrite.resolve();
+  await saving;
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(storedConsent, true);
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+  delete global.wx;
+});
+
+test("home keeps consent available for retry when saving fails", async () => {
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => false,
+      syncVoiceAuthorizationConsent: async () => { throw new Error("授权保存失败"); },
+    },
+  });
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
+
+  await context.changeVoiceAuthorization({ detail: { value: ["voice_authorization"] } });
+
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(context.data.voiceAuthorizationAgreed, false);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.equal(context.data.error, "授权保存失败");
 });
 
 test("home refreshes the saved project default for the current account and project", async () => {
