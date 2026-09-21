@@ -25,6 +25,13 @@
 .error {
   margin-bottom: 22rpx;
 }
+.book-cache-banner {
+  margin-bottom: 22rpx;
+}
+.book-cache-retry {
+  margin: 12rpx 0 0;
+  color: inherit;
+}
 .status-panel,
 .automation-panel,
 .empty-panel,

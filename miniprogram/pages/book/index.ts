@@ -131,6 +131,7 @@ type BookWorkspaceView = "chapters" | "tools";
 
 type BookPageData = BookHomeData & {
   pageClass: string;
+  showingCachedBook: boolean;
   bookWorkspaceView: BookWorkspaceView;
   planStructureBusyChapterId: string;
   planStructureBusyDirection: string;
@@ -149,6 +150,7 @@ definePage<BookPageData>()({
 
   data: {
     pageClass: "book-page",
+    showingCachedBook: false,
     bookWorkspaceView: "chapters",
     loading: false,
     needsLogin: false,
@@ -218,7 +220,7 @@ definePage<BookPageData>()({
     if (cached.payload) {
       this.applyBookSnapshot(cached.payload);
     } else {
-      this.setData({ loading: true, error: "" });
+      this.setData({ loading: true, error: "", showingCachedBook: false });
     }
     try {
       const snapshot = await getMemoirBookSnapshot();
@@ -234,6 +236,7 @@ definePage<BookPageData>()({
       }
       writeCachedMemoirBook(snapshot);
       this.applyBookSnapshot(snapshot);
+      this.setData({ showingCachedBook: false });
     } catch (error) {
       if (loadSequence !== this.bookLoadSequence) {
         return;
@@ -244,9 +247,11 @@ definePage<BookPageData>()({
         this.bookDraftsByChapterId = {};
         this.bookOutput = null;
         this.setData(guestBookData());
+        this.setData({ showingCachedBook: false });
         return;
       }
       if (showedCachedData) {
+        this.setData({ showingCachedBook: true });
         console.warn("refresh memoir book snapshot failed", error);
       } else {
         this.setData({ error: error instanceof Error ? error.message : "书稿页面加载失败" });
