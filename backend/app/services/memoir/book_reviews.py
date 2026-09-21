@@ -495,12 +495,6 @@ def normalize_book_review(
         )
         if not chapter_ids:
             continue
-        material_ids = [
-            min(chapter.material_ids)
-            for chapter in context.chapters
-            if chapter.chapter_id in chapter_ids
-            and chapter.material_ids
-        ]
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
         resolution = _compact(candidate.get("resolution"), limit=24)
@@ -516,22 +510,22 @@ def normalize_book_review(
             normalized_channel = "manual_review"
         else:
             normalized_channel = "interview"
-        issues.append(
-            {
-                "issue_type": issue_type,
-                "channel": normalized_channel,
-                "question": question,
-                "reason": reason,
-                "priority": (
-                    priority
-                    if priority in {"high", "medium", "low"}
-                    else "medium"
-                ),
-                "chapter_ids": chapter_ids,
-                "material_ids": material_ids,
-                "resolution": resolution,
-            }
-        )
+        issue = {
+            "issue_type": issue_type,
+            "channel": normalized_channel,
+            "question": question,
+            "reason": reason,
+            "priority": (
+                priority
+                if priority in {"high", "medium", "low"}
+                else "medium"
+            ),
+            "chapter_ids": chapter_ids,
+            "material_ids": [],
+            "resolution": resolution,
+        }
+        issue["fingerprint"] = completion_issues.stable_book_issue_fingerprint(issue)
+        issues.append(issue)
     model_guidance = _user_visible_string_list(
         payload.get("structure_guidance"),
         context=context,

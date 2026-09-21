@@ -980,6 +980,11 @@ class MemoirCompletionIssue(Base):
         default=list,
         nullable=False,
     )
+    related_chapter_ids_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
     input_signature: Mapped[str] = mapped_column(
         String(128),
         nullable=False,

@@ -84,6 +84,19 @@ def _disambiguate_issue_values(values: list[dict]) -> list[dict]:
     return result
 
 
+def stable_book_issue_fingerprint(candidate: dict) -> str:
+    """Identify a book question without depending on model output order."""
+    base = _issue_fingerprint(
+        scope=MemoirCompletionIssueScope.BOOK,
+        chapter_id=None,
+        issue_type=MemoirCompletionIssueType(candidate["issue_type"]),
+        related_material_ids=[],
+        related_scope_ids=candidate["chapter_ids"],
+    )
+    question = " ".join(candidate["question"].split())
+    return sha256(f"{base}:{question}".encode("utf-8")).hexdigest()
+
+
 def book_review_candidate_fingerprints(
     candidates: list[dict],
 ) -> list[tuple[str, dict]]:
@@ -140,13 +153,23 @@ def book_review_candidate_fingerprints(
         if candidate_key in seen_candidates:
             continue
         seen_candidates.add(candidate_key)
-        occurrence = occurrences.get(base_fingerprint, 0)
-        occurrences[base_fingerprint] = occurrence + 1
-        fingerprint = (
-            sha256(f"{base_fingerprint}:{occurrence}".encode("utf-8")).hexdigest()
-            if occurrence
-            else base_fingerprint
-        )
+        stored_fingerprint = candidate.get("fingerprint")
+        if (
+            isinstance(stored_fingerprint, str)
+            and len(stored_fingerprint) == 64
+            and all(char in "0123456789abcdef" for char in stored_fingerprint)
+        ):
+            fingerprint = stored_fingerprint
+        else:
+            # Reviews persisted before stable fingerprints retain their existing
+            # issue identities until they are regenerated.
+            occurrence = occurrences.get(base_fingerprint, 0)
+            occurrences[base_fingerprint] = occurrence + 1
+            fingerprint = (
+                sha256(f"{base_fingerprint}:{occurrence}".encode("utf-8")).hexdigest()
+                if occurrence
+                else base_fingerprint
+            )
         result.append((fingerprint, candidate))
     return result
 
@@ -166,7 +189,11 @@ def _response(
         question=issue.question,
         reason=issue.reason,
         priority=issue.priority,
-        related_material_ids=list(issue.related_material_ids_json),
+        related_material_ids=(
+            [] if issue.scope == MemoirCompletionIssueScope.BOOK.value
+            else list(issue.related_material_ids_json)
+        ),
+        related_chapter_ids=list(issue.related_chapter_ids_json),
         input_signature=issue.input_signature,
         status=issue.status,
         active_session_id=active_session_id,
@@ -297,9 +324,9 @@ async def sync_book_review_issues(
         channel = MemoirCompletionIssueChannel(candidate.get("channel"))
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
-        material_ids = [
+        chapter_ids = [
             str(value).strip()
-            for value in candidate.get("material_ids", [])
+            for value in candidate.get("chapter_ids", [])
             if str(value).strip()
         ]
         values.append(
@@ -313,7 +340,8 @@ async def sync_book_review_issues(
                 "reason": reason,
                 "priority": priority.value,
                 "fingerprint": fingerprint,
-                "related_material_ids_json": material_ids,
+                "related_material_ids_json": [],
+                "related_chapter_ids_json": chapter_ids,
                 "input_signature": input_signature,
             }
         )
@@ -331,8 +359,27 @@ async def sync_book_review_issues(
     by_fingerprint = {item.fingerprint: item for item in existing}
     fingerprints = {value["fingerprint"] for value in values}
     current: list[MemoirCompletionIssue] = []
+    migrated_ids: set[str] = set()
     for value in values:
         issue = by_fingerprint.get(value["fingerprint"])
+        if issue is None:
+            legacy_matches = [
+                item for item in existing
+                if item.id not in migrated_ids
+                and item.input_signature == input_signature
+                and item.issue_type == value["issue_type"]
+                and " ".join(item.question.split()) == " ".join(value["question"].split())
+                and item.fingerprint not in fingerprints
+                and (
+                    not item.related_chapter_ids_json
+                    or sorted(item.related_chapter_ids_json)
+                    == sorted(value["related_chapter_ids_json"])
+                )
+            ]
+            issue = legacy_matches[0] if len(legacy_matches) == 1 else None
+            if issue is not None:
+                issue.fingerprint = value["fingerprint"]
+                migrated_ids.add(issue.id)
         if issue is None:
             issue = MemoirCompletionIssue(**value)
             db.add(issue)
@@ -340,6 +387,10 @@ async def sync_book_review_issues(
             for field, field_value in value.items():
                 if field not in {"project_id", "fingerprint"}:
                     setattr(issue, field, field_value)
+            db.add(issue)
+        else:
+            issue.related_chapter_ids_json = value["related_chapter_ids_json"]
+            issue.related_material_ids_json = []
             db.add(issue)
         current.append(issue)
     now = utcnow_naive()

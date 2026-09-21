@@ -16,7 +16,6 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
-    MemoirBookReview,
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
@@ -27,7 +26,6 @@ from app.services.memoir import (
     book_output_versions,
     book_review_answer_state,
     book_reviews,
-    completion_issues,
 )
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
@@ -72,18 +70,10 @@ async def assemble_book_output(
     if decisions and not automatic:
         raise ValueError("book output requires resolving book review decisions")
     blocked_chapter_ids = {issue.chapter_id for issue in decisions if issue.chapter_id}
-    unresolved = {issue.fingerprint for issue in decisions if issue.scope == "book"}
-    # An unresolved decision outlives the review cache that first identified it.
-    decision_reviews = (await db.scalars(select(MemoirBookReview).where(
-        MemoirBookReview.project_id == project_id,
-        MemoirBookReview.input_signature.in_({issue.input_signature for issue in decisions if issue.scope == "book"}),
-    ))).all() if unresolved else []
-    for review in decision_reviews:
-        for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(review.review_json.get("candidate_issues", [])):
-            if fingerprint in unresolved:
-                blocked_chapter_ids.update(candidate.get("chapter_ids", []))
-                unresolved.discard(fingerprint)
-    if unresolved:
+    book_decisions = [issue for issue in decisions if issue.scope == "book"]
+    for issue in book_decisions:
+        blocked_chapter_ids.update(issue.related_chapter_ids_json)
+    if any(not issue.related_chapter_ids_json for issue in book_decisions):
         # Missing scope evidence cannot establish which chapters are safe to include.
         blocked_chapter_ids.update(chapter.id for chapter in chapters)
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
