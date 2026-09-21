@@ -29,6 +29,7 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
     getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
+    readMemoirBookShare: unmockedAsync("readMemoirBookShare"),
     ...voiceApiExports,
   });
   mockModule("../services/tts-settings.ts", {
@@ -82,6 +83,29 @@ test("book reader page loads the finished book by project id", async () => {
     ["我小时候常在院子里晒太阳。"],
   );
   assert.equal(context.data.error, "");
+});
+
+test("shared reader opens without owner access and hides owner-only narration", async () => {
+  const calls = [];
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: unmockedAsync("owner book API"),
+    readMemoirBookShare: async (token) => {
+      calls.push(token);
+      return sampleFinishedBook("只读分享正文");
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { shareToken: "family-token" });
+
+  assert.deepEqual(calls, ["family-token"]);
+  assert.equal(context.data.readerShared, true);
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.readerText, "只读分享正文");
+  assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.equal(context.data.error, "");
+  await page.playReaderAudio.call(context);
+  assert.equal(context.data.ttsBusyTarget, "");
 });
 
 test("reader paragraphs only honor line breaks saved by the language model", () => {

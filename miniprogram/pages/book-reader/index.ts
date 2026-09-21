@@ -14,6 +14,7 @@ import {
   createMemoirBookOutputTTS,
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
+  readMemoirBookShare,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
@@ -61,6 +62,7 @@ type BookReaderData = ReaderData & BookTTSState & {
   chapterId: string;
   versionId: string;
   readerMode: "book" | "chapter";
+  readerShared: boolean;
   readerChapterIndex: number;
   readerChapterTotal: number;
   readerTitle: string;
@@ -303,6 +305,7 @@ definePage<BookReaderData>()({
     chapterId: "",
     versionId: "",
     readerMode: "book",
+    readerShared: false,
     readerChapterIndex: 0,
     readerChapterTotal: 0,
     readerHighlightSectionId: "",
@@ -327,8 +330,13 @@ definePage<BookReaderData>()({
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
     const versionId = queryParam(query, "versionId");
+    const shareToken = queryParam(query, "shareToken");
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, versionId, readerMode });
+    this.setData({ projectId, chapterId, versionId, readerMode, readerShared: Boolean(shareToken) });
+    if (shareToken) {
+      await this.loadSharedBookReader(shareToken);
+      return;
+    }
     if (!projectId) {
       this.setData({ error: "缺少成书信息，暂时无法打开。" });
       return;
@@ -411,6 +419,7 @@ definePage<BookReaderData>()({
   },
 
   async playReaderAudio() {
+    if (this.data.readerShared) return;
     const target = this.data.readerMode;
     if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
       this.stopPlayback();
@@ -535,25 +544,39 @@ definePage<BookReaderData>()({
       const version = versionId && versionId !== latestVersion?.id
         ? await getMemoirBookOutputVersion(projectId, versionId)
         : latestVersion;
-      const data = readerData(output, version);
-      this.readerText = trimText(data.bookContent);
-      this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
-      this.flatPages = this.bookChapters.length ? [] : flatReaderPages(data.bookContent);
-      this.setData({
-        ...data,
-        bookContent: this.bookChapters.length ? "" : this.flatPages[0] || "",
-        bookPreviewChapters: this.bookChapters.slice(0, 1),
-        readerChapterIndex: 0,
-        readerChapterTotal: this.bookChapters.length || this.flatPages.length,
-      });
-      if (!this.readerText) {
-        this.setData({ error: "这本书还没有生成成书内容。" });
-      }
+      this.applyBookReaderOutput(output, version);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "成书打开失败" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  applyBookReaderOutput(output: MemoirBookOutput, version: MemoirBookOutputVersion | null = null) {
+    const data = readerData(output, version);
+    this.readerText = trimText(data.bookContent);
+    this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
+    this.flatPages = this.bookChapters.length ? [] : flatReaderPages(data.bookContent);
+    this.setData({
+      ...data,
+      bookContent: this.bookChapters.length ? "" : this.flatPages[0] || "",
+      bookPreviewChapters: this.bookChapters.slice(0, 1),
+      readerChapterIndex: 0,
+      readerChapterTotal: this.bookChapters.length || this.flatPages.length,
+    });
+    if (!this.readerText) this.setData({ error: "这本书还没有生成成书内容。" });
+  },
+
+  async loadSharedBookReader(token: string) {
+    this.stopPlayback();
+    this.setData({ loading: true, error: "", playbackError: "" });
+    try {
+      this.applyBookReaderOutput(await readMemoirBookShare(token));
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "分享链接已失效" });
     } finally {
       this.setData({ loading: false });
     }

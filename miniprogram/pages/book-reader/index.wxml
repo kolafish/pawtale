@@ -27,6 +27,7 @@
         </text>
         <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
         <view
+          wx:if="{{!readerShared}}"
           class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookViewingHistoricalVersion}}"

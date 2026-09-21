@@ -21,6 +21,9 @@ from app.schemas.memoir_book import (
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
+    MemoirBookShareCreateResponse,
+    MemoirBookShareReadRequest,
+    MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
@@ -40,12 +43,51 @@ from app.schemas.memoir_images import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
 from app.services.memoir import book_outputs as memoir_book_outputs
+from app.services.memoir import book_shares as memoir_book_shares
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
 from app.services.memoir import image_assets as memoir_image_assets
 
 
 router = APIRouter()
+
+
+@router.get("/projects/{project_id}/book-output/share", response_model=MemoirBookShareStatusResponse)
+async def get_mobile_memoir_book_share_status(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_shares.share_status(db, user_id=current_user.id, project_id=project_id)
+
+
+@router.post("/projects/{project_id}/book-output/share", response_model=MemoirBookShareCreateResponse)
+async def create_mobile_memoir_book_share(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_shares.create_share(db, user_id=current_user.id, project_id=project_id)
+
+
+@router.delete("/projects/{project_id}/book-output/share", status_code=204)
+async def revoke_mobile_memoir_book_share(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await memoir_book_shares.revoke_share(db, user_id=current_user.id, project_id=project_id)
+    return Response(status_code=204)
+
+
+@router.post("/book-shares/read", response_model=MemoirBookOutputResponse)
+async def read_mobile_memoir_book_share(
+    req: MemoirBookShareReadRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.read_share(db, req.token)
 
 
 @router.get("/projects/{project_id}/book-plan", response_model=MemoirBookPlanResponse)
