@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -211,21 +211,26 @@ async def _latest_draft_versions(
     *,
     project_id: str,
 ) -> dict[str, MemoirBookChapterDraftVersion]:
+    version = MemoirBookChapterDraftVersion
+    ranked = (
+        select(
+            version.id.label("id"),
+            func.row_number().over(
+                partition_by=version.chapter_id,
+                order_by=(version.version.desc(), version.created_at.desc(), version.id.desc()),
+            ).label("rank"),
+        )
+        .where(version.project_id == project_id)
+        .subquery()
+    )
     rows = (
         await db.scalars(
-            select(MemoirBookChapterDraftVersion)
-            .where(MemoirBookChapterDraftVersion.project_id == project_id)
-            .order_by(
-                MemoirBookChapterDraftVersion.chapter_id,
-                MemoirBookChapterDraftVersion.version,
-                MemoirBookChapterDraftVersion.created_at,
-            )
+            select(version)
+            .join(ranked, ranked.c.id == version.id)
+            .where(ranked.c.rank == 1)
         )
     ).all()
-    latest: dict[str, MemoirBookChapterDraftVersion] = {}
-    for row in rows:
-        latest[row.chapter_id] = row
-    return latest
+    return {row.chapter_id: row for row in rows}
 
 
 def _snapshot_material_ids(version: MemoirBookChapterDraftVersion) -> set[str]:
@@ -244,11 +249,13 @@ async def chapter_source_change_states_by_chapter(
     plan: MemoirBookPlan | None,
     *,
     valid_utterance_ids: set[str] | None = None,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    latest_versions: dict[str, MemoirBookChapterDraftVersion] | None = None,
 ) -> dict[str, ChapterSourceChangeState]:
     if plan is None:
         return {}
-    refs = await plan_source_ref_dicts_by_chapter(db, plan)
-    versions = await _latest_draft_versions(db, project_id=plan.project_id)
+    refs = source_refs_by_chapter if source_refs_by_chapter is not None else await plan_source_ref_dicts_by_chapter(db, plan)
+    versions = latest_versions if latest_versions is not None else await _latest_draft_versions(db, project_id=plan.project_id)
     result: dict[str, ChapterSourceChangeState] = {}
     for chapter in await _plan_chapters(db, plan):
         chapter_refs = refs.get(chapter.id, [])
