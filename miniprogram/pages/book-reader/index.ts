@@ -290,6 +290,7 @@ definePage<BookReaderData>()({
   audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
+  readerVisible: true,
   chapterParagraphRanges: [] as ChapterParagraphRange[],
   readerHighlightKey: "",
   readerText: "",
@@ -327,6 +328,7 @@ definePage<BookReaderData>()({
   },
 
   async onLoad(query: PageQuery = {}) {
+    this.readerVisible = true;
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
     const versionId = queryParam(query, "versionId");
@@ -347,21 +349,24 @@ definePage<BookReaderData>()({
       return;
     }
     await this.loadBookReader(projectId, versionId);
-    if (queryParam(query, "listen") === "1" && !this.data.error && !this.data.bookViewingHistoricalVersion) {
+    if (queryParam(query, "listen") === "1" && this.readerVisible && !this.data.error && !this.data.bookViewingHistoricalVersion) {
       void this.playReaderAudio();
     }
   },
 
   onShow() {
+    this.readerVisible = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     hideMiniProgramShareMenu();
   },
 
   onHide() {
+    this.readerVisible = false;
     this.stopPlayback();
   },
 
   onUnload() {
+    this.readerVisible = false;
     this.stopPlayback();
   },
 

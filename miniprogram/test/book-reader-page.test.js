@@ -504,6 +504,23 @@ test("book reader starts existing narration when opened from the listen action",
   assert.equal(starts, 1);
 });
 
+test("book reader does not start deferred narration after leaving the page", async () => {
+  let finishLoad;
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: () => new Promise((resolve) => { finishLoad = resolve; }),
+  });
+  const context = pageContext(page);
+  let starts = 0;
+  context.playReaderAudio = async () => { starts += 1; };
+
+  const loading = page.onLoad.call(context, { projectId: "project/1", listen: "1" });
+  page.onHide.call(context);
+  finishLoad(sampleFinishedBook());
+  await loading;
+
+  assert.equal(starts, 0);
+});
+
 test("book reader does not mismatch latest audio with historical text", async () => {
   let requestCount = 0;
   const { page } = loadBookReaderPage({
