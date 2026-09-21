@@ -63,6 +63,12 @@ async def test_account_deletion_removes_projects_sessions_consents_and_personal_
     avatar_dir = tmp_path / "user-avatars" / user_id
     avatar_dir.mkdir(parents=True)
     (avatar_dir / "old.jpg").write_bytes(b"avatar")
+    share_video_dir = tmp_path / "memoir" / "share-videos" / user_id
+    share_video_dir.mkdir(parents=True)
+    (share_video_dir / "orphan.mp4").write_bytes(b"video")
+    background_dir = tmp_path / "memoir" / "share-video-backgrounds" / "uploads" / user_id
+    background_dir.mkdir(parents=True)
+    (background_dir / "orphan.jpg").write_bytes(b"background")
     await test_db.commit()
 
     deleted = await anonymous_client.request("DELETE", "/api/auth/me", json={"code": "owner"})
@@ -74,6 +80,8 @@ async def test_account_deletion_removes_projects_sessions_consents_and_personal_
         assert (await test_db.scalars(select(model))).all() == []
     assert not audio_dir.exists()
     assert not avatar_dir.exists()
+    assert not share_video_dir.exists()
+    assert not background_dir.exists()
 
     anonymous_client.cookies.clear()
     new_login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "owner"})

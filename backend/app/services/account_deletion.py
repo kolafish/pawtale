@@ -52,6 +52,8 @@ async def delete_account(db: AsyncSession, user: User) -> None:
 
     for directory in (
         DATA_DIR / "memoir" / "audio" / user_id,
+        DATA_DIR / "memoir" / "share-videos" / user_id,
+        DATA_DIR / "memoir" / "share-video-backgrounds" / "uploads" / user_id,
         user_avatars.avatar_directory(user_id),
     ):
         try:
