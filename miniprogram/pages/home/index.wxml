@@ -53,7 +53,7 @@
               hover-class="{{voiceStartButtonHoverClass}}"
               aria-role="button"
               aria-label="接着上次的内容继续讲"
-              aria-disabled="{{loading || creatingVoice}}"
+              aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
             >
               <text>接着讲</text>
               <text class="narration-choice-arrow" aria-hidden="true">›</text>
@@ -65,7 +65,7 @@
               hover-class="{{voiceStartButtonHoverClass}}"
               aria-role="button"
               aria-label="讲一个新故事"
-              aria-disabled="{{loading || creatingVoice}}"
+              aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
             >
               <text class="narration-choice-plus" aria-hidden="true">＋</text>
               <text>讲个新故事</text>
@@ -80,7 +80,7 @@
           bindtap="startPrimaryVoiceChat"
           hover-class="{{voiceStartButtonHoverClass}}"
           aria-role="button"
-          aria-disabled="{{loading || creatingVoice}}"
+          aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
         >
           <text class="hero-voice-label">{{primaryVoiceButtonTitle}}</text>
           <text class="hero-voice-arrow" aria-hidden="true">›</text>
@@ -108,7 +108,7 @@
           <checkbox-group bindchange="changeVoiceAuthorization">
             <view class="voice-auth-row ui-consent-row">
               <label class="ui-consent-choice">
-                <checkbox value="voice_authorization" checked="{{voiceAuthorizationAgreed}}" color="#b65d49" />
+                <checkbox value="voice_authorization" checked="{{voiceAuthorizationAgreed}}" disabled="{{voiceAuthorizationSaving}}" color="#b65d49" />
                 <text class="voice-auth-copy">我已阅读并同意</text>
               </label>
               <view class="voice-auth-link ui-consent-link ui-pressable" catchtap="openVoiceAuthorization"
@@ -138,7 +138,7 @@
 
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
     <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration"
-      loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">
+      loading="{{creatingVoice}}" disabled="{{creatingVoice || voiceAuthorizationSaving}}" hover-class="voice-start-button-hover">
       <text>{{primaryVoiceButtonTitle}}</text><text class="continue-narration-arrow" aria-hidden="true">›</text>
     </button>
   </view>

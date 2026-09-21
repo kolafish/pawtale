@@ -44,9 +44,10 @@ import {
 import { pageUrl } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
-  saveVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_VERSION,
   VOICE_AUTHORIZATION_PAGE_URL,
+  type VoiceAuthorizationConsent,
 } from "../../services/voice-authorization";
 import {
   enableMiniProgramShareMenu,
@@ -83,6 +84,7 @@ interface HomeData extends HomeStoryData {
   selectedMode: NarrationMode;
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationRequested: boolean;
+  voiceAuthorizationSaving: boolean;
   greetingText: string;
   headerSubtitleText: string;
   voiceStartButtonClass: string;
@@ -144,11 +146,12 @@ export function homeResumeHint(item?: Pick<
 }
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
-  const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
+  const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.needsLogin ? "登录后开始"
     : !state.hasProject ? "种下我的故事"
+    : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
     : state.selectedMode === "book_completion" ? choice.action
     : state.hasStories ? "讲个新故事" : "讲第一个故事";
@@ -215,6 +218,7 @@ function applyHomeSnapshotData(
       showContinueNarration: false,
       voiceEntry: null,
       voiceAuthorizationRequested: false,
+      voiceAuthorizationSaving: false,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -256,6 +260,7 @@ definePage<HomeData>()({
     selectedMode: "free_narration",
     voiceAuthorizationAgreed: false,
     voiceAuthorizationRequested: false,
+    voiceAuthorizationSaving: false,
     greetingText: "你好，作者",
     headerSubtitleText: "每一个故事，都从一颗种子开始。",
     voiceStartButtonClass: "",
@@ -394,6 +399,7 @@ definePage<HomeData>()({
           hasProject: false,
           selectedMode: "free_narration",
           voiceAuthorizationRequested: false,
+          voiceAuthorizationSaving: false,
         });
         return;
       }
@@ -542,21 +548,39 @@ definePage<HomeData>()({
     });
   },
 
-  changeVoiceAuthorization(event: CheckboxChangeEvent) {
+  async changeVoiceAuthorization(event: CheckboxChangeEvent) {
+    if (this.data.voiceAuthorizationSaving) return;
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
-    const consent = saveVoiceAuthorizationConsent(agreed);
+    const consent: VoiceAuthorizationConsent = {
+      agreed,
+      version: VOICE_AUTHORIZATION_VERSION,
+      agreedAt: new Date().toISOString(),
+    };
+    const userId = this.data.userId;
+    const projectId = this.data.projectId;
     setHomeData(this, {
       voiceAuthorizationAgreed: consent.agreed,
-      voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
-      error: agreed ? "" : this.data.error,
+      voiceAuthorizationSaving: true,
+      error: "",
     }, () => this.measureNarration());
-    void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
-      if (agreed) saveVoiceAuthorizationConsent(false);
+    try {
+      await syncVoiceAuthorizationConsent({ consent });
+      if (userId !== this.data.userId || projectId !== this.data.projectId) return;
       setHomeData(this, {
-        voiceAuthorizationAgreed: false,
+        voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
+      });
+    } catch (error) {
+      if (userId !== this.data.userId || projectId !== this.data.projectId) return;
+      setHomeData(this, {
+        voiceAuthorizationAgreed: readVoiceAuthorizationConsent(),
+        voiceAuthorizationRequested: true,
         error: error instanceof Error ? error.message : "语音授权保存失败",
       });
-    });
+    } finally {
+      if (userId === this.data.userId && projectId === this.data.projectId) {
+        setHomeData(this, { voiceAuthorizationSaving: false });
+      }
+    }
   },
 
   openVoiceAuthorization() {
@@ -619,7 +643,7 @@ definePage<HomeData>()({
   },
 
   canStartVoiceChat(requireVoiceAuthorization = true) {
-    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry) {
+    if (this.data.loading || this.data.creatingVoice || this.data.voiceAuthorizationSaving || this.data.voiceEntry) {
       return false;
     }
     if (this.data.needsLogin) {
