@@ -2,7 +2,7 @@ from fastapi import WebSocket, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import SESSION_COOKIE_NAME, decode_session_token
+from app.auth import SESSION_COOKIE_NAME, session_user_id
 from app.models.users import User
 
 
@@ -10,7 +10,7 @@ async def authenticate_websocket(websocket: WebSocket, db: AsyncSession) -> User
     session_cookie = websocket.cookies.get(SESSION_COOKIE_NAME)
     if not session_cookie:
         return None
-    user_id = decode_session_token(session_cookie)
+    user_id = await session_user_id(db, session_cookie)
     if not user_id:
         return None
     result = await db.execute(select(User).where(User.id == user_id))

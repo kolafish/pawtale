@@ -487,3 +487,19 @@ test("me clears the current user's memoir snapshots on logout", async () => {
   assert.equal(cacheClearCount, 1);
   assert.equal(context.data.loggedIn, false);
 });
+
+test("me keeps the active session when server logout fails", async () => {
+  let cacheClearCount = 0;
+  const { page } = loadMePage({
+    authExports: { logoutBackendSession: async () => { throw new Error("网络不可用"); } },
+    cacheExports: { clearCurrentUserMemoirSnapshots: () => { cacheClearCount += 1; } },
+  });
+  const context = pageContext(page, { loggedIn: true });
+
+  await page.logout.call(context);
+
+  assert.equal(context.data.loggedIn, true);
+  assert.equal(context.data.loading, false);
+  assert.equal(context.data.error, "网络不可用");
+  assert.equal(cacheClearCount, 0);
+});

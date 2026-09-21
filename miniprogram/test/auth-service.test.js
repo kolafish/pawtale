@@ -63,6 +63,16 @@ test("expired session is cleared without replaying the request", async () => {
   delete global.wx;
 });
 
+test("logout keeps the cookie if server revocation cannot be confirmed", async () => {
+  installWxMock((options) => options.fail({ errMsg: "request:fail network disconnected" }));
+  global.wx.setStorageSync("pawtale_backend_cookie", "pawtale_session=active");
+  const { logoutBackendSession } = authModule();
+
+  await assert.rejects(logoutBackendSession());
+  assert.equal(global.wx.getStorageSync("pawtale_backend_cookie"), "pawtale_session=active");
+  delete global.wx;
+});
+
 test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
