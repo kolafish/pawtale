@@ -20,10 +20,8 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
-    _char_units,
     _render_pdf_pages,
     _text_units,
-    _truncate_units,
     _wrap_pdf_line,
 )
 from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
@@ -155,17 +153,48 @@ def _add_section_page(
     show_header: bool = False,
     show_footer: bool = False,
     body_numbering: bool = False,
+    compact: bool = False,
+    force_right_page: bool = False,
 ) -> None:
     if not content and not (heading or section_title):
         return
+    if (
+        force_right_page
+        and not builder.layout.reading_edition
+        and (len(builder.pages) + 1) % 2 == 0
+    ):
+        builder.new_page(show_header=False, show_footer=False)
     builder.new_page(
         section_title,
         show_header=show_header,
         show_footer=show_footer,
         body_numbering=body_numbering,
     )
-    builder.add_heading(heading or section_title)
-    if content:
+    page_heading = heading or section_title
+    if compact:
+        builder.add_text(
+            page_heading,
+            font_size=builder.layout.small_font_size + 2,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units,
+            spacing_after=8,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        )
+    else:
+        builder.add_heading(page_heading)
+    if content and compact:
+        compact_font_size = builder.layout.small_font_size + 1
+        builder.add_text(
+            content,
+            font_size=compact_font_size,
+            line_height=max(18, builder.layout.line_height - 3),
+            max_units=builder.layout.max_line_units + 2,
+            first_line_indent=compact_font_size * 2,
+            paragraph_spacing_after=4,
+            min_start_lines=1,
+            keep_last_lines=1,
+        )
+    elif content:
         builder.add_body_text(content)
 
 
@@ -609,7 +638,13 @@ def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title
         if kind == "title_page":
             _add_title_page(builder, title=title, content=_title_page_content(subtitle, content))
             continue
-        _add_section_page(builder, section_title=section_title, content=content)
+        _add_section_page(
+            builder,
+            section_title=section_title,
+            content=content,
+            compact=(kind == "generation_note" and not builder.layout.reading_edition),
+            force_right_page=(kind == "preface" and not builder.layout.reading_edition),
+        )
 
 
 def _chapter_title(chapter: dict[str, Any], fallback_index: int) -> str:
@@ -628,14 +663,7 @@ def _chapter_anchor(fallback_index: int) -> str:
 
 
 def _toc_line(entry: PDFTocEntry, layout: PDFLayout) -> str:
-    page_text = str(entry.page_number) if entry.page_number is not None else ""
-    label = f"第{_chinese_number(entry.index)}章　{entry.title}"
-    if not page_text:
-        return label
-    label = _truncate_units(label, max(8, layout.max_line_units - _text_units(page_text) - 4))
-    leader_units = layout.max_line_units - _text_units(label) - _text_units(page_text) - 2
-    leaders = "." * max(2, int(leader_units / _char_units(".")))
-    return f"{label} {leaders} {page_text}"
+    return f"第{_chinese_number(entry.index)}章　{entry.title}"
 
 
 def _chapter_toc_entries(
@@ -738,16 +766,6 @@ def _without_leading_quote_overlap(content: str, quote: str) -> str:
     return remainder or content
 
 
-def _without_embedded_quote_overlap(text: str, quote: str) -> str:
-    quote_key = _quote_overlap_key(quote)
-    if len(quote_key) < 8:
-        return text
-    cleaned = text
-    for suffix in ("。", "！", "？", "，", "；", ""):
-        cleaned = cleaned.replace(f"{quote_key}{suffix}", "")
-    return cleaned.strip()
-
-
 def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
     storage_path = _str(illustration.get("storage_path"))
     if not storage_path:
@@ -789,6 +807,8 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         title = _chapter_title(chapter, fallback_index)
         label = _chapter_label(chapter, fallback_index)
         anchor = _chapter_anchor(fallback_index)
+        if builder.layout.mirror_body_pages and (len(builder.pages) + 1) % 2 == 0:
+            builder.new_page(show_header=False, show_footer=False)
         builder.new_page(
             title,
             show_header=False,
@@ -799,7 +819,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             anchor=anchor,
             outline_title=f"{label} {title}",
         )
-        builder.add_spacer(2.5)
+        builder.add_spacer(4.0 if builder.layout.mirror_body_pages else 2.5)
         builder.add_text(
             label,
             font_size=builder.layout.small_font_size + 1,
@@ -812,7 +832,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             font_size=builder.layout.title_font_size,
             line_height=builder.layout.line_height + 12,
             max_units=max(10, builder.layout.max_line_units - 4),
-            spacing_after=12,
+            spacing_after=18 if builder.layout.mirror_body_pages else 12,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
@@ -831,12 +851,10 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
 
         quote = _chapter_pull_quote(chapter)
         if quote:
-            builder.add_quote(quote, spacing_after=6)
-
-        if not builder.layout.reading_edition:
-            intro = _without_embedded_quote_overlap(_str(chapter.get("intro")), quote)
-            if intro:
-                builder.add_body_text(intro, spacing_after=4)
+            builder.add_quote(
+                quote,
+                spacing_after=12 if builder.layout.mirror_body_pages else 6,
+            )
 
         illustrations = [
             _dict(item)
