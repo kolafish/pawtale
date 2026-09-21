@@ -528,7 +528,6 @@ test("chapter workspace routes browse and editing story entries to one detail st
   assert.match(editingSectionTemplate, /bindtap="openStorySection"/);
   assert.match(editingSectionTemplate, />查看与编辑故事</);
   assert.doesNotMatch(editingSectionTemplate, /class="draft-section-(?:actions|body)/);
-  assert.doesNotMatch(editingSectionTemplate, /bindtap="startDraftSectionEdit"/);
   assert.match(template, />已收入书稿</);
 });
 
@@ -684,7 +683,7 @@ test("chapter workspace blocks row actions while another operation is active", a
     currentTarget: { dataset: { id: "section-1" } },
   };
 
-  page.startDraftSectionEdit.call(context, sectionEvent);
+  page.openDraftSectionEditor.call(context, sectionEvent);
   await page.playDraftSection.call(context, sectionEvent);
 
   assert.equal(context.data.editingSectionId, "");
@@ -733,7 +732,7 @@ test("chapter workspace warns on native back while a section edit is unsaved", (
   const context = pageContext(page, { workspace: workspace() });
   const event = { currentTarget: { dataset: { id: "section-1" } } };
 
-  context.startDraftSectionEdit(event);
+  context.openDraftSectionEditor(event);
   context.changeDraftSectionContent({ detail: { value: "未保存的新正文" } });
   assert.match(alerts[0], /尚未保存/);
 
@@ -1218,13 +1217,13 @@ test("chapter workspace edits one small section with optimistic version control"
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  page.startDraftSectionEdit.call(context, {
+  page.openDraftSectionEditor.call(context, {
     currentTarget: { dataset: { id: "section-1" } },
   });
   page.changeDraftSectionContent.call(context, {
     detail: { value: "修改后的第一小节正文" },
   });
-  page.startDraftSectionEdit.call(context, {
+  page.openDraftSectionEditor.call(context, {
     currentTarget: { dataset: { id: "section-2" } },
   });
   assert.equal(context.data.editingSectionId, "section-1");
