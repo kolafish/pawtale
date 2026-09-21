@@ -29,7 +29,6 @@
 .panel-eyebrow,
 .panel-title,
 .panel-copy,
-.field-label,
 .profile-field-title,
 .profile-field-hint {
   display: block;
@@ -81,9 +80,7 @@
   text-wrap: pretty;
 }
 
-.primary-button,
-.mode-button,
-.secondary-button {
+.primary-button {
   width: 100%;
   min-height: 92rpx;
   margin: 28rpx 0 0;
@@ -93,17 +90,11 @@
   font-size: 29rpx;
 }
 
-.primary-button,
-.secondary-button {
+.primary-button {
   background: var(--ui-surface);
   color: var(--ui-text-primary);
   text-align: left;
   box-shadow: var(--ui-control-shadow);
-}
-
-.secondary-button {
-  color: var(--ui-accent-strong);
-  box-shadow: inset 0 0 0 2rpx var(--ui-accent-border);
 }
 
 .login-action-mark {
@@ -128,31 +119,11 @@
   transform: translateY(-1rpx);
 }
 
-.mode-button {
-  margin-top: 12rpx;
-  background: transparent;
-  color: var(--ui-text-secondary);
-  box-shadow: inset 0 0 0 1rpx var(--ui-divider);
-}
-
 .primary-button-hover {
   background: var(--ui-accent-surface-subtle);
   transform: scale(0.96);
 }
 
-.account-panel {
-  margin-top: 14rpx;
-  padding: 4rpx 24rpx 24rpx;
-  border-radius: var(--ui-radius-card);
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-}
-
-.field {
-  margin-top: 24rpx;
-}
-
-.field-label,
 .profile-field-title {
   color: var(--ui-text-primary);
   font-size: 27rpx;
@@ -160,7 +131,6 @@
   line-height: 1.4;
 }
 
-.field-input,
 .profile-name-input {
   min-height: 92rpx;
   margin-top: 12rpx;

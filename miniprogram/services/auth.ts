@@ -2,7 +2,6 @@ import type { MemoirIdentity } from "../domain/memoir";
 import {
   ApiError,
   clearSessionCookie,
-  readBackendConfig,
   readSessionCookie,
   request,
   type RequestOptions,
@@ -23,47 +22,13 @@ export interface AuthResponse {
   needs_credentials: boolean;
 }
 
-export interface LoginCredentials {
-  email: string;
-  password: string;
-}
-
-export interface RegisterCredentials extends LoginCredentials {
-  display_name?: string;
-}
-
-export interface SetCredentialsInput extends RegisterCredentials {}
-
 export interface UpdateProfileInput {
   display_name: string;
 }
 
-let backendSessionPromise: Promise<void> | null = null;
-
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   writeMemoirIdentitySnapshot(identity);
   return identity;
-}
-
-export function isValidEmail(email: string): boolean {
-  const normalized = email.trim();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
-}
-
-export async function loginWithEmail(credentials: LoginCredentials): Promise<BackendAuthUser> {
-  const response = await request<AuthResponse>("/api/auth/login", {
-    method: "POST",
-    data: credentials,
-  });
-  return response.user;
-}
-
-export async function registerWithEmail(credentials: RegisterCredentials): Promise<BackendAuthUser> {
-  const response = await request<AuthResponse>("/api/auth/register", {
-    method: "POST",
-    data: credentials,
-  });
-  return response.user;
 }
 
 function wxLoginCode(): Promise<string> {
@@ -91,13 +56,6 @@ export async function loginWithWeChat(): Promise<AuthResponse> {
   });
 }
 
-export async function setAccountCredentials(credentials: SetCredentialsInput): Promise<AuthResponse> {
-  return request<AuthResponse>("/api/auth/set-credentials", {
-    method: "POST",
-    data: credentials,
-  });
-}
-
 export async function logoutBackendSession(): Promise<void> {
   try {
     await request<unknown>("/api/auth/logout", {
@@ -116,39 +74,10 @@ export async function updateBackendProfile(input: UpdateProfileInput): Promise<B
   });
 }
 
-async function establishBackendSession(): Promise<void> {
-  const config = readBackendConfig();
-  if (!config.devEmail || !config.devPassword) {
+export async function ensureBackendSession(): Promise<void> {
+  if (!readSessionCookie()) {
     throw new ApiError(401, "请先登录", {});
   }
-
-  try {
-    await loginWithEmail({
-      email: config.devEmail,
-      password: config.devPassword,
-    });
-  } catch (error) {
-    if (!(error instanceof ApiError) || ![401, 404].includes(error.statusCode)) {
-      throw error;
-    }
-    await registerWithEmail({
-      email: config.devEmail,
-      password: config.devPassword,
-      display_name: config.devDisplayName || "本地作者",
-    });
-  }
-}
-
-export async function ensureBackendSession(): Promise<void> {
-  if (readSessionCookie()) {
-    return;
-  }
-  if (!backendSessionPromise) {
-    backendSessionPromise = establishBackendSession().finally(() => {
-      backendSessionPromise = null;
-    });
-  }
-  await backendSessionPromise;
 }
 
 export async function requestWithBackendSession<T>(
@@ -166,8 +95,7 @@ export async function requestWithBackendSession<T>(
     if (readSessionCookie() === attemptedSessionCookie) {
       clearSessionCookie();
     }
-    await ensureBackendSession();
-    return request<T>(path, options);
+    throw error;
   }
 }
 

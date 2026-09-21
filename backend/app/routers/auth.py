@@ -16,6 +16,7 @@ from app.auth import (
     set_session_cookie,
     verify_password,
 )
+from app.config import is_production_environment
 from app.database import get_db
 from app.models.users import AuthIdentity, User
 from app.schemas.auth import (
@@ -39,6 +40,11 @@ WECHAT_PROVIDERS = {
 }
 WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _require_development_account_auth() -> None:
+    if is_production_environment():
+        raise HTTPException(status_code=404, detail="接口不存在")
 
 
 def _validate_email(email: str) -> str:
@@ -129,6 +135,7 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     email = _validate_email(req.email)
     _validate_password(req.password)
 
@@ -154,6 +161,7 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     email = normalize_email(req.email)
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
@@ -217,6 +225,7 @@ async def wechat_bind(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     provider = WECHAT_PROVIDERS[req.miniprogram]
     session = await _exchange_wechat_code(req.code, req.miniprogram)
     identity = await _find_wechat_identity(db, provider, session.openid)
@@ -249,6 +258,7 @@ async def set_credentials(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     if current_user.password_login_enabled:
         raise HTTPException(status_code=409, detail="账号已设置登录凭据")
 

@@ -1,10 +1,4 @@
-import {
-  BACKEND_DEV_DISPLAY_NAME,
-  BACKEND_DEV_EMAIL,
-  BACKEND_DEV_PASSWORD,
-  BACKEND_HTTP_BASE_URL,
-  BACKEND_WS_BASE_URL,
-} from "../config";
+import { BACKEND_HTTP_BASE_URL, BACKEND_WS_BASE_URL } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type RequestTimeoutProfile = "telemetry" | "interactive" | "mutation" | "generation";
@@ -21,17 +15,11 @@ const REQUEST_TIMEOUT_MS: Record<RequestTimeoutProfile, number> = {
 export interface BackendRuntimeConfig {
   httpBaseUrl: string;
   wsBaseUrl: string;
-  devEmail: string;
-  devPassword: string;
-  devDisplayName: string;
 }
 
 export interface BackendRuntimeConfigInput {
   httpBaseUrl?: string;
   wsBaseUrl?: string;
-  devEmail?: string;
-  devPassword?: string;
-  devDisplayName?: string;
 }
 
 export interface RequestOptions {
@@ -98,9 +86,6 @@ function extConfig(): BackendRuntimeConfigInput {
   return {
     httpBaseUrl: stringFromConfig(ext.backendHttpBaseUrl),
     wsBaseUrl: stringFromConfig(ext.backendWsBaseUrl),
-    devEmail: stringFromConfig(ext.backendDevEmail),
-    devPassword: stringFromConfig(ext.backendDevPassword),
-    devDisplayName: stringFromConfig(ext.backendDevDisplayName),
   };
 }
 
@@ -137,18 +122,6 @@ export function readBackendConfig(): BackendRuntimeConfig {
   return {
     httpBaseUrl,
     wsBaseUrl,
-    devEmail:
-      stringFromConfig(stored.devEmail) ||
-      stringFromConfig(ext.devEmail) ||
-      stringFromConfig(BACKEND_DEV_EMAIL),
-    devPassword:
-      stringFromConfig(stored.devPassword) ||
-      stringFromConfig(ext.devPassword) ||
-      stringFromConfig(BACKEND_DEV_PASSWORD),
-    devDisplayName:
-      stringFromConfig(stored.devDisplayName) ||
-      stringFromConfig(ext.devDisplayName) ||
-      stringFromConfig(BACKEND_DEV_DISPLAY_NAME),
   };
 }
 
