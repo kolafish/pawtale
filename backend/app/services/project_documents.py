@@ -146,7 +146,7 @@ async def commit_created_document(db: AsyncSession, project_id: str, doc: Docume
         await storage.write_content(project_id, doc.id, content)
         file_written = True
         await db.commit()
-    except Exception:
+    except BaseException:
         await db.rollback()
         if file_written:
             await storage.delete_content(project_id, doc.id)
@@ -182,7 +182,7 @@ async def commit_document_update(
                 await storage.write_content(project_id, document_id, content)
                 doc.word_count = count_words(content)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             if snapshot is not None:
                 await _restore_content(project_id, document_id, snapshot)
@@ -197,7 +197,7 @@ async def delete_document(db: AsyncSession, project_id: str, doc: Document) -> N
             await storage.delete_content(project_id, document_id)
             await db.delete(doc)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             await _restore_content(project_id, document_id, snapshot)
             raise
@@ -214,7 +214,7 @@ async def delete_group(db: AsyncSession, project_id: str, group: DocumentGroup) 
                 await storage.delete_content(project_id, doc_id)
             await db.delete(group)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             for doc_id, snapshot in snapshots.items():
                 await _restore_content(project_id, doc_id, snapshot)
