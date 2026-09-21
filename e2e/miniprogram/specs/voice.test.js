@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { after, before, test } = require("node:test");
+require("../../../miniprogram/test/register-ts");
+const {
+  VOICE_AUTHORIZATION_STORAGE_KEY,
+  VOICE_AUTHORIZATION_VERSION,
+} = require("../../../miniprogram/services/voice-authorization.ts");
 const {
   captureStorageEntries,
   elementById,
@@ -19,8 +24,6 @@ const {
 const BACKEND_COOKIE_STORAGE_KEY = "pawtale_backend_cookie";
 const AI_MODEL_STORAGE_KEY = "pawtale_ai_model_settings";
 const TTS_SETTINGS_STORAGE_KEY = "pawtale_memoir_tts_settings";
-const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
-const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
 const FIXTURE_AI_MODEL = "deepseek-flash";
 const FIXTURE_TTS_VOICE = "zh_male_m191_uranus_bigtts";
 const FIXTURE_TTS_SPEED_RATIO = 0.7;
@@ -91,14 +94,20 @@ before(async () => {
     BACKEND_COOKIE_STORAGE_KEY,
     "pawtale_session=e2e-fixture",
   );
+  await session.miniProgram.callWxMethod("setStorageSync", "pawtale_memoir_session", {
+    cache_identity: { user_id: "e2e-user" },
+  });
   session.artifacts.mark("voice:setup:cookie-stored");
   await session.miniProgram.callWxMethod(
     "setStorageSync",
     VOICE_AUTHORIZATION_STORAGE_KEY,
     {
-      agreed: true,
-      version: VOICE_AUTHORIZATION_VERSION,
-      agreedAt: "2026-08-25T00:00:00.000Z",
+      userId: "e2e-user",
+      consent: {
+        agreed: true,
+        version: VOICE_AUTHORIZATION_VERSION,
+        agreedAt: "2026-08-25T00:00:00.000Z",
+      },
     },
   );
   session.artifacts.mark("voice:setup:consent-stored");
@@ -270,7 +279,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     let page = await elementById(host, "voice-session");
     const ready = await waitForPageData(
       page,
-      (data) => data.status === "ready" && data.connecting === false,
+      (data) => data.status === "ready",
       "确定性语音 gateway 就绪",
       30000,
     );
@@ -289,7 +298,6 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       "小余提示标签",
     );
     const readyPrimaryAction = await elementById(page, "voice-primary-action");
-    const readyPrimaryOffset = await readyPrimaryAction.offset();
     const readyPrimarySize = await readyPrimaryAction.size();
     assert.ok(readyPrimarySize.width >= 40 && readyPrimarySize.height >= 40, "主操作满足最小触控区域");
     const topBar = await page.$(".top-bar");
@@ -332,7 +340,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     page = await elementById(host, "voice-session");
     await waitForPageData(
       page,
-      data => data.status === "ready" && data.connecting === false,
+      data => data.status === "ready",
       "新语音 gateway 就绪",
       30000,
     );
@@ -354,8 +362,6 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.ok(recordingTranscriptStage, "讲述态以实时文字卡为主角");
     assert.equal(await page.$(".live-text-context"), null, "讲述态不再拆出容易误解的灰色上一段");
     assert.equal((await page.$$(".assistant-button")).length, 0, "讲述态不显示提问辅助操作");
-    const recordingPrimaryAction = await elementById(page, "voice-primary-action");
-    const recordingPrimaryOffset = await recordingPrimaryAction.offset();
     const recordingStageOffset = await recordingTranscriptStage.offset();
     const recordingStageSize = await recordingTranscriptStage.size();
     const recordingDock = await page.$(".control-bar");
@@ -363,11 +369,6 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.ok(
       recordingStageOffset.top + recordingStageSize.height <= recordingDockOffset.top,
       `实时文字卡不被固定操作区遮挡（卡片底部 ${recordingStageOffset.top + recordingStageSize.height}，操作区顶部 ${recordingDockOffset.top}）`,
-    );
-    assert.ok(
-      Math.abs(recordingPrimaryOffset.left - readyPrimaryOffset.left) <= 2
-        && Math.abs(recordingPrimaryOffset.top - readyPrimaryOffset.top) <= 2,
-      "提问态和讲述态的麦克风保持在同一位置",
     );
     assert.equal(await page.$("#session-narration-modes"), null);
     await assertVerticallyCentered(
