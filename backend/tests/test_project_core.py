@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models.audit import AuditDailyFeatureUsage, AuditEvent, AuditSession
@@ -55,6 +56,7 @@ class TestProjectAPI:
 
         assert response.status_code == 422
 
+    @pytest.mark.ci_smoke
     async def test_create_project(self, client):
         response = await client.post("/api/projects", json=project_payload("我的小说"))
         assert response.status_code == 201

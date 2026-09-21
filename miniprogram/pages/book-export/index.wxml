@@ -58,7 +58,9 @@
       </block>
 
       <block wx:else>
-        <view class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">‹　返回我的书</view>
+        <view wx:if="{{activeSection !== 'editorial'}}" class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">
+          <text class="subpage-back-arrow" aria-hidden="true">‹</text><text>返回我的书</text>
+        </view>
         <view wx:if="{{activeSection === 'export'}}" class="detail-card ui-card">
           <text class="section-title">导出设置</text>
           <text class="section-description">设置会应用于下次导出的 PDF。</text>
@@ -169,8 +171,8 @@
         </view>
         </view>
 
-        <view wx:if="{{activeSection === 'editorial'}}" class="detail-card ui-card">
-          <view class="detail-heading"><text class="section-title">前言与后记</text><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
+        <view wx:if="{{activeSection === 'editorial'}}" class="detail-card editorial-detail-card ui-card">
+          <view class="book-editorial-save-row"><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
         <view
           wx:if="{{bookEditorialCopyEventItem}}"
           class="book-editorial-copy-notice"
@@ -187,9 +189,9 @@
           </view>
           <text class="book-editorial-copy-notice-action">书稿工具</text>
         </view>
-        <view class="book-metadata-field">
-          <view class="book-metadata-label-row">
-            <text class="book-metadata-label">前言</text>
+        <view class="book-metadata-field book-editorial-section">
+          <view class="book-metadata-label-row book-editorial-label-row">
+            <text class="book-metadata-label book-editorial-label">前言</text>
             <button
               class="book-editorial-generate ui-button"
               data-target="preface"
@@ -197,11 +199,11 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交" : "重写"}}
+              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'preface'}}" class="book-editorial-generate-arrow">›</text>
             </button>
           </view>
           <textarea
-            class="book-metadata-textarea"
+            class="book-metadata-textarea book-editorial-textarea"
             value="{{bookPrefaceInput}}"
             placeholder="写给家人看的开篇说明"
             maxlength="600"
@@ -212,9 +214,9 @@
           />
         </view>
 
-        <view class="book-metadata-field">
-          <view class="book-metadata-label-row">
-            <text class="book-metadata-label">后记</text>
+        <view class="book-metadata-field book-editorial-section">
+          <view class="book-metadata-label-row book-editorial-label-row">
+            <text class="book-metadata-label book-editorial-label">后记</text>
             <button
               class="book-editorial-generate ui-button"
               data-target="afterword"
@@ -222,11 +224,11 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交" : "重写"}}
+              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'afterword'}}" class="book-editorial-generate-arrow">›</text>
             </button>
           </view>
           <textarea
-            class="book-metadata-textarea"
+            class="book-metadata-textarea book-editorial-textarea"
             value="{{bookAfterwordInput}}"
             placeholder="作为整本书结尾的一段话"
             maxlength="600"
@@ -237,9 +239,9 @@
           />
         </view>
 
-        <view class="book-metadata-field">
-          <view class="book-metadata-label-row">
-            <text class="book-metadata-label">封底摘录</text>
+        <view class="book-metadata-field book-editorial-section">
+          <view class="book-metadata-label-row book-editorial-label-row">
+            <text class="book-metadata-label book-editorial-label">封底摘要</text>
             <button
               class="book-editorial-generate ui-button"
               data-target="back_cover_quote"
@@ -247,27 +249,19 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交" : "重写"}}
+              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'back_cover_quote'}}" class="book-editorial-generate-arrow">›</text>
             </button>
           </view>
           <textarea
-            class="book-metadata-textarea compact"
+            class="book-metadata-textarea book-editorial-textarea compact"
             value="{{bookBackCoverQuoteInput}}"
-            placeholder="可以放一句正文原话"
+            placeholder="写一句适合放在封底的话"
             maxlength="80"
             auto-height
             disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
             data-key="back_cover_quote"
             bindinput="changeBookMetadataField"
           />
-        </view>
-        <view
-          class="save-design-button ui-block-action ui-pressable {{bookTitleSaving || bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
-          bindtap="saveBookDesignSettings"
-        >
-          {{bookTitleSaving ? "正在保存…" : "保存前言与后记"}}
         </view>
         </view>
 

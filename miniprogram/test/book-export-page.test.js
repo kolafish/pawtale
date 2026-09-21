@@ -292,6 +292,7 @@ test("book export opens focused settings, reading, and narration", async () => {
     navigateTo(options) {
       navigations.push(options.url);
     },
+    pageScrollTo() {},
   };
   const { page } = loadBookExportPage();
   const context = pageContext(page, {
@@ -315,6 +316,7 @@ test("book export opens focused settings, reading, and narration", async () => {
 });
 
 test("leaving history returns the book overview to the latest version", async () => {
+  global.wx = { pageScrollTo() {} };
   const { page } = loadBookExportPage();
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
@@ -327,6 +329,23 @@ test("leaving history returns the book overview to the latest version", async ()
   assert.equal(context.data.activeSection, "");
   assert.equal(context.data.bookViewingHistoricalVersion, false);
   assert.equal(context.data.bookSelectedVersionId, "book-output-version-2");
+});
+
+test("book settings return to the overview scroll position", async () => {
+  const scrolls = [];
+  global.wx = { pageScrollTo(options) { scrolls.push(options); } };
+  const { page } = loadBookExportPage();
+  const context = pageContext(page);
+
+  page.onPageScroll.call(context, { scrollTop: 920 });
+  page.openSection.call(context, { currentTarget: { dataset: { section: "editorial" } } });
+  page.onPageScroll.call(context, { scrollTop: 150 });
+  await page.closeSection.call(context);
+
+  assert.deepEqual(scrolls, [
+    { scrollTop: 0, duration: 0 },
+    { scrollTop: 920, duration: 0 },
+  ]);
 });
 
 test("book export does not save settings while viewing a historical version", async () => {

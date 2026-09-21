@@ -19,25 +19,66 @@ on:
       - "scripts/test-miniprogram.sh"
       - ".github/workflows/frontend.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        project: [frontend, miniprogram, xiaoyu-miniprogram]
-    defaults:
-      run:
-        working-directory: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: ${{ matrix.project }}/package-lock.json
-      - run: npm ci
-      - if: matrix.project == 'frontend'
-        run: bash ../scripts/test-frontend.sh
-      - if: matrix.project != 'frontend'
-        run: npm run typecheck && npm test
+          cache-dependency-path: |
+            frontend/package-lock.json
+            miniprogram/package-lock.json
+            xiaoyu-miniprogram/package-lock.json
+      - name: Test changed projects
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base=HEAD^1
+          else
+            base="$BEFORE_SHA"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$base"
+            fi
+          fi
+          git diff --name-only "$base" HEAD > "$RUNNER_TEMP/changed-files"
+
+          projects=()
+          if grep -Eq '^\.github/workflows/frontend\.yml$' "$RUNNER_TEMP/changed-files"; then
+            projects=(frontend miniprogram xiaoyu-miniprogram)
+          else
+            if grep -Eq '^(frontend/|scripts/test-frontend\.sh$)' "$RUNNER_TEMP/changed-files"; then
+              projects+=(frontend)
+            fi
+            if grep -Eq '^(miniprogram/|scripts/test-miniprogram\.sh$)' "$RUNNER_TEMP/changed-files"; then
+              projects+=(miniprogram)
+            fi
+            if grep -Eq '^xiaoyu-miniprogram/' "$RUNNER_TEMP/changed-files"; then
+              projects+=(xiaoyu-miniprogram)
+            fi
+          fi
+          if (( ${#projects[@]} == 0 )); then
+            echo 'No project selected for a triggered Frontend workflow' >&2
+            exit 1
+          fi
+
+          for project in "${projects[@]}"; do
+            npm --prefix "$project" ci
+            if [[ "$project" == frontend ]]; then
+              bash scripts/test-frontend.sh
+            else
+              npm --prefix "$project" run typecheck
+              npm --prefix "$project" test
+            fi
+          done

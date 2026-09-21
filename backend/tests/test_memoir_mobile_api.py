@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import func, select
 
 from app.domain.memoir.types import (
@@ -22,6 +23,7 @@ async def test_mobile_memoir_routes_require_login(anonymous_client):
     assert response.status_code == 401
 
 
+@pytest.mark.ci_smoke
 async def test_mobile_memoir_project_list_starts_empty(client):
     first = await client.get("/api/mobile/memoir/projects")
     second = await client.get("/api/mobile/memoir/projects")

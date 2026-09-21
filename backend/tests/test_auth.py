@@ -111,6 +111,7 @@ class TestAuthAPI:
         ).all()
         assert len(identities) == 1
 
+    @pytest.mark.ci_smoke
     async def test_register_me_and_logout(self, anonymous_client, test_db):
         register = await anonymous_client.post(
             "/api/auth/register",
