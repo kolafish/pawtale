@@ -58,7 +58,9 @@
       </block>
 
       <block wx:else>
-        <view class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">‹　返回我的书</view>
+        <view class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">
+          <text class="subpage-back-arrow" aria-hidden="true">‹</text><text>返回我的书</text>
+        </view>
         <view wx:if="{{activeSection === 'export'}}" class="detail-card ui-card">
           <text class="section-title">导出设置</text>
           <text class="section-description">设置会应用于下次导出的 PDF。</text>

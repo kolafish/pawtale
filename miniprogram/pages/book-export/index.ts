@@ -147,6 +147,7 @@ definePage<BookExportData>()({
   bookOutput: null as MemoirBookOutput | null,
   bookOutputVersion: null as MemoirBookOutputVersion | null,
   bookPlan: null as MemoirBookPlan | null,
+  overviewScrollTop: 0,
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -188,6 +189,12 @@ definePage<BookExportData>()({
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : "阅读与导出");
+  },
+
+  onPageScroll(event: { scrollTop: number }) {
+    if (!this.data.activeSection) {
+      this.overviewScrollTop = event.scrollTop;
+    }
   },
 
   onUnload() {
@@ -677,7 +684,9 @@ definePage<BookExportData>()({
   openSection(event: DatasetEvent) {
     const section = datasetString(event, "section") as BookExportSection;
     if (!section || !Object.prototype.hasOwnProperty.call(SECTION_TITLES, section)) return;
-    this.setData({ activeSection: section, error: "" });
+    this.setData({ activeSection: section, error: "" }, () => {
+      wx.pageScrollTo({ scrollTop: 0, duration: 0 });
+    });
     setPageNavigationTitle(SECTION_TITLES[section]);
     if (section === "title" || section === "editorial") {
       void this.refreshBookEditorialCopyProgress();
@@ -695,7 +704,10 @@ definePage<BookExportData>()({
     if (this.data.activeSection === "history" && this.bookOutput) {
       this.applyBookExportData(this.bookPlan, this.bookOutput);
     }
-    this.setData({ activeSection: "", error: "" });
+    const scrollTop = this.overviewScrollTop;
+    this.setData({ activeSection: "", error: "" }, () => {
+      wx.pageScrollTo({ scrollTop, duration: 0 });
+    });
     setPageNavigationTitle("阅读与导出");
   },
 
