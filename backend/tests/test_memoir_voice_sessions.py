@@ -12,6 +12,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirBookChapterDraftVersion,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirSectionMaterial,
@@ -477,12 +478,27 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         project_id=first["session"]["project_id"],
         source_ref=memoir_source_ref(first),
     )
-    await create_test_chapter_draft(
+    draft = await create_test_chapter_draft(
         test_db,
         project_id=first["session"]["project_id"],
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
         content="外婆家的院子里有一棵树。",
+    )
+    first_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+    )
+    assert first_version is not None
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=draft.project_id,
+            chapter_id=draft.chapter_id,
+            version=2,
+            content="外婆家院子里的树，陪我度过了整个童年。",
+            material_snapshot_json=first_version.material_snapshot_json,
+            section_snapshot_json=first_version.section_snapshot_json,
+        )
     )
     await add_test_section_materials(
         test_db,
@@ -525,7 +541,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert snapshot["session_count"] == 2
     assert snapshot["chapter_count"] == 1
     assert snapshot["confirmed_chapter_count"] == 1
-    assert snapshot["draft_word_count"] == len("外婆家的院子里有一棵树。")
+    assert snapshot["draft_word_count"] == len("外婆家院子里的树，陪我度过了整个童年。")
     assert snapshot["chapter_progress_items"] == [
         {
             "chapter_id": chapter.id,
@@ -538,7 +554,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
             "pending_new_source_count": 1,
             "removed_source_count": 1,
             "draft_status": "confirmed",
-            "draft_word_count": len("外婆家的院子里有一棵树。"),
+            "draft_word_count": len("外婆家院子里的树，陪我度过了整个童年。"),
         }
     ]
     assert snapshot["recent_automation_events"][0]["event_type"] == "chapter_draft_generated"
