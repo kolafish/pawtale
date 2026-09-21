@@ -109,6 +109,12 @@ export function saveVoiceAuthorizationConsent(agreed = true): VoiceAuthorization
   return consent;
 }
 
+export function clearVoiceAuthorizationConsentRecord(): void {
+  if (typeof wx !== "undefined" && typeof wx.removeStorageSync === "function") {
+    wx.removeStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY);
+  }
+}
+
 export async function syncVoiceAuthorizationConsent(
   options: SyncVoiceAuthorizationConsentOptions = {},
 ): Promise<VoiceAuthorizationConsentAudit> {

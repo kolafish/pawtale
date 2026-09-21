@@ -4,6 +4,21 @@
   padding: 24rpx 36rpx 120rpx;
 }
 
+.delete-account-button {
+  display: block;
+  margin: 28rpx auto 0;
+  padding: 12rpx 24rpx;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  text-decoration: underline;
+}
+
+.delete-account-button::after {
+  border: 0;
+}
+
 .guest-login-panel {
   padding: 48rpx 36rpx 34rpx;
   text-align: center;

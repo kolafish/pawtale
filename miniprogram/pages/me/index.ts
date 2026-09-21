@@ -2,6 +2,7 @@ import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-sess
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirIdentity,
+  deleteAccountWithWeChat,
   logoutBackendSession,
   updateBackendProfile,
 } from "../../services/auth";
@@ -18,6 +19,7 @@ import {
   saveLargeTextEnabled,
 } from "../../services/accessibility-settings";
 import {
+  clearVoiceAuthorizationConsentRecord,
   readVoiceAuthorizationConsentRecord,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
@@ -35,6 +37,7 @@ import {
 interface MeData {
   pageClass: string;
   loading: boolean;
+  deletingAccount: boolean;
   loggedIn: boolean;
   savingName: boolean;
   avatarSaving: boolean;
@@ -136,6 +139,7 @@ function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabl
 function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
+    deletingAccount: false,
     editingName: false,
     voiceStatsLoading: false,
     displayName: "",
@@ -162,6 +166,7 @@ definePage<MeData>()({
   data: {
     pageClass: "me-page",
     loading: false,
+    deletingAccount: false,
     loggedIn: false,
     savingName: false,
     avatarSaving: false,
@@ -378,6 +383,34 @@ definePage<MeData>()({
       this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  async deleteAccount() {
+    if (this.data.loading) return;
+    const confirmation = await new Promise<{ confirm: boolean }>((resolve) => {
+      wx.showModal({
+        title: "注销账号",
+        content: "注销后，账号、回忆录及录音资料将从在线服务中删除，无法在小程序恢复。请确认是否继续。",
+        confirmText: "确认注销",
+        confirmColor: "#b0473d",
+        success: resolve,
+        fail: () => resolve({ confirm: false }),
+      });
+    });
+    if (!confirmation.confirm) return;
+    this.setData({ loading: true, deletingAccount: true, error: "" });
+    try {
+      await deleteAccountWithWeChat();
+      clearCurrentUserMemoirSnapshots();
+      clearVoiceAuthorizationConsentRecord();
+      replaceMemoirStore({});
+      this.setData({ ...loggedOutData(), error: "" });
+      wx.showToast({ title: "账号已注销", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "注销失败，请稍后重试" });
+    } finally {
+      this.setData({ loading: false, deletingAccount: false });
     }
   },
 });
