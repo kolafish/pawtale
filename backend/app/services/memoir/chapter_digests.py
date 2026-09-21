@@ -41,6 +41,7 @@ from app.services.ai_workloads import (
     ai_text_workload_policy,
 )
 from app.services.memoir import completion_issues, section_digests
+from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -395,7 +396,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
         )
         for item in context.sections
     )
-    return f"""请通读回忆录章节“{context.chapter_title}”。
+    prompt = f"""请通读回忆录章节“{context.chapter_title}”。
 
 有序小章节：
 {sections}
@@ -429,15 +430,14 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。
 """
+    return checked_review_prompt(prompt, subject="章节")
 
 
 def normalize_chapter_digest(
-    payload: Any,
+    payload: dict[str, Any],
     *,
     section_references: ModelReferenceMap,
 ) -> dict:
-    if not isinstance(payload, dict):
-        raise ValueError("chapter digest AI did not return a JSON object")
     visible = section_references.render_text
     summary = _compact(visible(payload.get("summary")), limit=800)
     if not summary:

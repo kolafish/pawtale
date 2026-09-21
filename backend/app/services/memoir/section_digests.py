@@ -38,6 +38,7 @@ from app.services.ai_workloads import (
     AITextWorkload,
     ai_text_workload_policy,
 )
+from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -244,7 +245,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
         context.section_type,
         "根据这段内容本身的叙事意图判断，不套固定模板。",
     )
-    return f"""请审阅下面这个回忆录小章节。
+    prompt = f"""请审阅下面这个回忆录小章节。
 
 标题：{context.title}
 类型：{context.section_type}
@@ -279,15 +280,14 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 - material_ids 只能使用输入中出现的本次请求短编号 material_id。
 - 输入中只包含当前允许收录的素材。
 """
+    return checked_review_prompt(prompt, subject="小章节")
 
 
 def normalize_section_digest_payload(
-    payload: Any,
+    payload: dict[str, Any],
     *,
     material_references: ModelReferenceMap,
 ) -> dict:
-    if not isinstance(payload, dict):
-        raise ValueError("section digest AI did not return a JSON object")
     summary = _trim_text(payload.get("summary"), limit=600)
     focus = _trim_text(payload.get("focus"), limit=300)
     if not summary:
@@ -507,6 +507,8 @@ async def generate_or_reuse_section_digest(
             ai_model=ai_model,
             ai_client=client,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "memoir section digest generation failed section_id=%s",
