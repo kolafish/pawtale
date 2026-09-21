@@ -90,6 +90,7 @@ async def test_article_dictation_accepts_only_owned_article_document(
     }
     assert "on_audio_frame" not in calls["gateway"]
     assert "on_asr_final" not in calls["gateway"]
+    assert calls["gateway"]["authorize_audio"] is None
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]
     assert not await dictation_router._article_document_is_available(
