@@ -477,3 +477,13 @@ export interface MemoirBookOutput {
   created_at: string;
   updated_at: string;
 }
+
+export interface MemoirBookShareStatus {
+  active: boolean;
+  expires_at: string | null;
+}
+
+export interface MemoirBookShareCreated {
+  token: string;
+  expires_at: string;
+}

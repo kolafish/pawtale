@@ -70,6 +70,17 @@
       <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" data-action="preview" bindtap="openBookExportPage">
         <text>导出与成书设置</text><text class="progress-action-mark">›</text>
       </button>
+      <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" bindtap="openBookSharePanel">
+        <text>家人阅读链接</text><text class="progress-action-mark">›</text>
+      </button>
+    </view>
+    <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
+      <text>{{bookShareActive ? '已有有效链接。重新生成会让旧链接失效。' : '生成七天有效的阅读链接；家人只能阅读生成时的书稿。'}}</text>
+      <view class="actions-row">
+        <button class="ghost-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">{{bookShareActive ? '重新生成链接' : '生成链接'}}</button>
+        <button wx:if="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送给家人</button>
+        <button wx:if="{{bookShareActive}}" class="ghost-button small" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
+      </view>
     </view>
   </view>
 

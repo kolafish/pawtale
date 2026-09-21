@@ -23,11 +23,14 @@ import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
+  createMemoirBookShare,
   createMemoirBookPlanOutlineTTS,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
+  getMemoirBookShareStatus,
+  revokeMemoirBookShare,
   updateMemoirBookChapterTitle,
 } from "../../services/memoir-book-api";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
@@ -132,6 +135,10 @@ type BookWorkspaceView = "chapters" | "tools";
 type BookPageData = BookHomeData & {
   pageClass: string;
   showingCachedBook: boolean;
+  bookSharePanelOpen: boolean;
+  bookShareActive: boolean;
+  bookShareReady: boolean;
+  bookShareBusy: boolean;
   bookWorkspaceView: BookWorkspaceView;
   planStructureBusyChapterId: string;
   planStructureBusyDirection: string;
@@ -147,10 +154,15 @@ definePage<BookPageData>()({
   bookChapterSources: {} as BookChapterSources,
   bookDraftsByChapterId: {} as Record<string, MemoirBookChapterDraft | null>,
   bookOutput: null as MemoirBookOutput | null,
+  bookShareToken: "",
 
   data: {
     pageClass: "book-page",
     showingCachedBook: false,
+    bookSharePanelOpen: false,
+    bookShareActive: false,
+    bookShareReady: false,
+    bookShareBusy: false,
     bookWorkspaceView: "chapters",
     loading: false,
     needsLogin: false,
@@ -203,6 +215,77 @@ definePage<BookPageData>()({
     this.setData({ pageClass: accessibilityPageClass("book-page") });
     hideMiniProgramShareMenu();
     await this.loadBookHome();
+    if (this.data.bookSharePanelOpen) await this.refreshBookShareStatus();
+  },
+
+  onShareAppMessage() {
+    return {
+      title: this.bookShareToken ? `阅读《${this.data.bookPreviewTitle || "家庭回忆录"}》` : "老余口述",
+      path: this.bookShareToken
+        ? pageUrl("/pages/book-reader/index", { shareToken: this.bookShareToken })
+        : "/pages/home/index",
+    };
+  },
+
+  async openBookSharePanel() {
+    if (!this.data.projectId || !this.data.bookContentAvailable) return;
+    if (this.data.bookSharePanelOpen) {
+      this.setData({ bookSharePanelOpen: false });
+      return;
+    }
+    this.setData({ bookSharePanelOpen: true });
+    await this.refreshBookShareStatus();
+  },
+
+  async refreshBookShareStatus() {
+    if (!this.data.projectId) return;
+    this.setData({ bookShareBusy: true });
+    try {
+      const status = await getMemoirBookShareStatus(this.data.projectId);
+      if (!status.active) this.bookShareToken = "";
+      this.setData({
+        bookShareActive: status.active,
+        bookShareReady: status.active && Boolean(this.bookShareToken),
+      });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "分享状态读取失败" });
+      }
+    } finally {
+      this.setData({ bookShareBusy: false });
+    }
+  },
+
+  async createBookShare() {
+    if (!this.data.projectId || this.data.bookShareBusy) return;
+    this.setData({ bookShareBusy: true, error: "" });
+    try {
+      const share = await createMemoirBookShare(this.data.projectId);
+      this.bookShareToken = share.token;
+      this.setData({ bookShareActive: true, bookShareReady: true });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "生成分享链接失败" });
+      }
+    } finally {
+      this.setData({ bookShareBusy: false });
+    }
+  },
+
+  async revokeBookShare() {
+    if (!this.data.projectId || this.data.bookShareBusy) return;
+    this.setData({ bookShareBusy: true, error: "" });
+    try {
+      await revokeMemoirBookShare(this.data.projectId);
+      this.bookShareToken = "";
+      this.setData({ bookShareActive: false, bookShareReady: false });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "撤销分享链接失败" });
+      }
+    } finally {
+      this.setData({ bookShareBusy: false });
+    }
   },
 
   applyBookWorkspaceNavigationTarget() {
@@ -246,8 +329,9 @@ definePage<BookPageData>()({
         this.bookChapterSources = {};
         this.bookDraftsByChapterId = {};
         this.bookOutput = null;
+        this.bookShareToken = "";
         this.setData(guestBookData());
-        this.setData({ showingCachedBook: false });
+        this.setData({ showingCachedBook: false, bookSharePanelOpen: false, bookShareActive: false, bookShareReady: false });
         return;
       }
       if (showedCachedData) {
@@ -267,6 +351,10 @@ definePage<BookPageData>()({
     const identity = snapshot.identity;
     const projectId = identity.active_project_id;
     const projectTitle = identity.active_project?.title || "尚未创建回忆录";
+    if (projectId !== this.data.projectId) {
+      this.bookShareToken = "";
+      this.setData({ bookSharePanelOpen: false, bookShareActive: false, bookShareReady: false });
+    }
     this.setData({
       loading: false,
       error: "",

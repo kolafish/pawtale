@@ -622,3 +622,17 @@ class MemoirBookOutputResponse(BaseModel):
     versions: list[MemoirBookOutputVersionSummaryResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class MemoirBookShareStatusResponse(BaseModel):
+    active: bool
+    expires_at: datetime | None = None
+
+
+class MemoirBookShareCreateResponse(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+class MemoirBookShareReadRequest(BaseModel):
+    token: str

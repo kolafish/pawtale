@@ -8,6 +8,8 @@ import type {
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
   MemoirBookOutput,
+  MemoirBookShareCreated,
+  MemoirBookShareStatus,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -31,7 +33,32 @@ import {
   memoirRequest,
 } from "./memoir-api-client";
 import { downloadAuthenticatedFile } from "./authenticated-media";
-import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
+import { ApiError, cleanBaseUrl, readBackendConfig, request } from "./request";
+
+export function getMemoirBookShareStatus(projectId: string): Promise<MemoirBookShareStatus> {
+  return memoirRequest<MemoirBookShareStatus>(memoirProjectPath(projectId, "/book-output/share"));
+}
+
+export function createMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "POST",
+    invalidatesSnapshots: false,
+  });
+}
+
+export async function revokeMemoirBookShare(projectId: string): Promise<void> {
+  await memoirRequest<unknown>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "DELETE",
+    invalidatesSnapshots: false,
+  });
+}
+
+export function readMemoirBookShare(token: string): Promise<MemoirBookOutput> {
+  return request<MemoirBookOutput>("/api/mobile/memoir/book-shares/read", {
+    method: "POST",
+    data: { token },
+  });
+}
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);

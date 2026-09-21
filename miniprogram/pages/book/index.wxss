@@ -32,6 +32,17 @@
   margin: 12rpx 0 0;
   color: inherit;
 }
+.book-share-panel {
+  padding: 24rpx 30rpx;
+  border-top: 1rpx solid var(--ui-divider);
+  color: var(--ui-text-secondary);
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+.book-share-panel .actions-row {
+  margin-top: 18rpx;
+  flex-wrap: wrap;
+}
 .status-panel,
 .automation-panel,
 .empty-panel,

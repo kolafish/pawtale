@@ -151,6 +151,9 @@ function loadBookPage({
     generateMemoirBookPlan: unmockedAsync("generateMemoirBookPlan"),
     getMemoirBookChapterDraft: async () => null,
     getMemoirBookOutput: async () => null,
+    getMemoirBookShareStatus: unmockedAsync("getMemoirBookShareStatus"),
+    createMemoirBookShare: unmockedAsync("createMemoirBookShare"),
+    revokeMemoirBookShare: unmockedAsync("revokeMemoirBookShare"),
     getMemoirBookSnapshot: async () => {
       const identity = await getMemoirIdentity();
       return {
@@ -210,8 +213,41 @@ test("book page routes its PDF action to the export page", () => {
   assert.match(pageWxml, /data-action="reading_pdf"/);
   assert.match(pageWxml, /bindtap="openBookExportPage"/);
   assert.match(pageWxml, /wx:if="{{bookContentAvailable}}"/);
-  assert.equal(page.onShareAppMessage, undefined);
+  assert.deepEqual(page.onShareAppMessage.call(pageContext(page)), {
+    title: "老余口述",
+    path: "/pages/home/index",
+  });
   assert.equal(page.onShareTimeline, undefined);
+});
+
+test("book page shares only an explicitly created family link and revokes it", async () => {
+  const revoked = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      getMemoirBookShareStatus: async () => ({ active: false, expires_at: null }),
+      createMemoirBookShare: async () => ({ token: "family-secret", expires_at: "2026-09-28T00:00:00" }),
+      revokeMemoirBookShare: async (projectId) => { revoked.push(projectId); },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContentAvailable: true,
+    bookPreviewTitle: "外婆回忆录",
+  });
+
+  await page.openBookSharePanel.call(context);
+  assert.equal(context.data.bookShareActive, false);
+  assert.equal(context.data.bookShareReady, false);
+  await page.createBookShare.call(context);
+  assert.equal(context.data.bookShareReady, true);
+  assert.deepEqual(page.onShareAppMessage.call(context), {
+    title: "阅读《外婆回忆录》",
+    path: "/pages/book-reader/index?shareToken=family-secret",
+  });
+  await page.revokeBookShare.call(context);
+  assert.deepEqual(revoked, ["project/1"]);
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
 });
 
 test("book page routes chapter card actions to the chapter workspace", () => {
