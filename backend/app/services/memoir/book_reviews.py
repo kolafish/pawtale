@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirBookRevisionProposal,
     MemoirBookReview,
 )
 from app.models.projects import Project
@@ -670,30 +671,30 @@ async def generate_or_reuse_book_review(
                 "current_chapter_title": "",
             }
         )
-    previous = list(
-        (
-            await db.scalars(
-                select(MemoirBookReview).where(
-                    MemoirBookReview.project_id == project_id,
-                    MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
-                )
-            )
-        ).all()
+    old_review = (
+        MemoirBookReview.project_id == project_id,
+        MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
+        MemoirBookReview.input_signature != context.input_signature,
     )
-    for item in previous:
-        if (
-            item.input_signature != context.input_signature
-            and item.status == MemoirSemanticCacheStatus.READY.value
-        ):
-            item.status = MemoirSemanticCacheStatus.STALE.value
-            db.add(item)
-    existing = next(
-        (
-            item
-            for item in previous
-            if item.input_signature == context.input_signature
-        ),
-        None,
+    await db.execute(
+        update(MemoirBookReview)
+        .where(*old_review, MemoirBookReview.status == MemoirSemanticCacheStatus.READY.value)
+        .values(status=MemoirSemanticCacheStatus.STALE.value)
+    )
+    await db.execute(
+        delete(MemoirBookReview).where(
+            *old_review,
+            ~select(MemoirBookRevisionProposal.id)
+            .where(MemoirBookRevisionProposal.review_id == MemoirBookReview.id)
+            .exists(),
+        )
+    )
+    existing = await db.scalar(
+        select(MemoirBookReview).where(
+            MemoirBookReview.project_id == project_id,
+            MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
+            MemoirBookReview.input_signature == context.input_signature,
+        )
     )
     if (
         existing is not None

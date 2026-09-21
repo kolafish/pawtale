@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -386,26 +386,14 @@ async def _mark_previous_digests_stale(
     engine: str,
     current_signature: str,
 ) -> None:
-    digests = list(
-        (
-            await db.execute(
-                select(MemoirSectionDigest).where(
-                    MemoirSectionDigest.project_id == project_id,
-                    MemoirSectionDigest.section_id == section_id,
-                    MemoirSectionDigest.engine == engine,
-                    MemoirSectionDigest.input_signature != current_signature,
-                    MemoirSectionDigest.status
-                    == MemoirSemanticCacheStatus.READY.value,
-                )
-            )
-        ).scalars().all()
+    await db.execute(
+        delete(MemoirSectionDigest).where(
+            MemoirSectionDigest.project_id == project_id,
+            MemoirSectionDigest.section_id == section_id,
+            MemoirSectionDigest.engine == engine,
+            MemoirSectionDigest.input_signature != current_signature,
+        )
     )
-    for digest in digests:
-        digest.status = MemoirSemanticCacheStatus.STALE.value
-        digest.updated_at = datetime.now(UTC).replace(tzinfo=None)
-        db.add(digest)
-    if digests:
-        await db.flush()
 
 
 async def mark_section_digests_stale(
@@ -418,26 +406,14 @@ async def mark_section_digests_stale(
         return 0
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id)
-    digests = list(
-        (
-            await db.execute(
-                select(MemoirSectionDigest).where(
-                    MemoirSectionDigest.project_id == project_id,
-                    MemoirSectionDigest.section_id.in_(section_ids),
-                    MemoirSectionDigest.status
-                    == MemoirSemanticCacheStatus.READY.value,
-                )
-            )
-        ).scalars().all()
+    result = await db.execute(
+        delete(MemoirSectionDigest).where(
+            MemoirSectionDigest.project_id == project_id,
+            MemoirSectionDigest.section_id.in_(section_ids),
+        )
     )
-    now = datetime.now(UTC).replace(tzinfo=None)
-    for digest in digests:
-        digest.status = MemoirSemanticCacheStatus.STALE.value
-        digest.updated_at = now
-        db.add(digest)
-    if digests:
-        await db.flush()
-    return len(digests)
+    return result.rowcount
+
 
 
 async def _upsert_digest(
