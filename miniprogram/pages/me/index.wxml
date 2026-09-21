@@ -201,7 +201,8 @@
       bindtap="logout"
     >{{loading ? (deletingAccount ? "正在注销…" : "正在退出…") : "退出登录"}}</view>
     <button
-      class="delete-account-button ui-subtle-action-hover"
+      class="delete-account-button"
+      hover-class="ui-subtle-action-hover"
       disabled="{{loading}}"
       bindtap="deleteAccount"
     >注销账号</button>
