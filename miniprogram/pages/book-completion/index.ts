@@ -435,6 +435,7 @@ export function bookCompletionViewPatch(
 
 definePage<BookCompletionData>()({
   overviewPoller: pageRuntime(() => new PollingTimer(POLL_INTERVAL_MS)),
+  overviewLoadSequence: 0,
   pageVisible: false,
 
   data: {
@@ -489,11 +490,13 @@ definePage<BookCompletionData>()({
 
   onHide() {
     this.pageVisible = false;
+    this.overviewLoadSequence += 1;
     this.stopPolling();
   },
 
   onUnload() {
     this.pageVisible = false;
+    this.overviewLoadSequence += 1;
     this.stopPolling();
   },
 
@@ -521,6 +524,7 @@ definePage<BookCompletionData>()({
   },
 
   async loadOverview(silent = false) {
+    const loadSequence = ++this.overviewLoadSequence;
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
       return;
@@ -532,6 +536,9 @@ definePage<BookCompletionData>()({
       const overview = await getMemoirBookCompletionOverview(
         this.data.projectId,
       );
+      if (loadSequence !== this.overviewLoadSequence) {
+        return;
+      }
       const bulkCheckJob = overview.completion_job;
       const batchActive = bookCompletionJobActive(bulkCheckJob);
       const view = bookCompletionViewPatch(
@@ -659,6 +666,9 @@ definePage<BookCompletionData>()({
         }
       }
     } catch (error) {
+      if (loadSequence !== this.overviewLoadSequence) {
+        return;
+      }
       if (routeAuthError(error)) {
         return;
       }

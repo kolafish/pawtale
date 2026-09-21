@@ -84,6 +84,7 @@ type WxWithDocument = WechatMiniprogram.Wx & {
 
 type BookExportData = BookOutputData & {
   loading: boolean;
+  loadError: string;
   error: string;
   projectId: string;
   planTitle: string;
@@ -151,6 +152,7 @@ definePage<BookExportData>()({
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
+    loadError: "",
     error: "",
     projectId: "",
     planTitle: "阅读与导出",
@@ -183,7 +185,7 @@ definePage<BookExportData>()({
       showBookSettings,
     });
     if (!projectId) {
-      this.setData({ error: "缺少回忆录项目信息" });
+      this.setData({ loadError: "缺少回忆录项目信息" });
       return;
     }
     await this.loadBookExportPage(projectId);
@@ -199,7 +201,7 @@ definePage<BookExportData>()({
   },
 
   async loadBookExportPage(projectId: string) {
-    this.setData({ loading: true, error: "" });
+    this.setData({ loading: true, loadError: "", error: "" });
     try {
       const [plan, output] = await Promise.all([
         optionalApiResource(getMemoirBookPlan(projectId)),
@@ -213,7 +215,7 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "阅读与导出页加载失败" });
+      this.setData({ loadError: error instanceof Error ? error.message : "阅读与导出页加载失败" });
     } finally {
       this.setData({ loading: false });
     }

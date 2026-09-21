@@ -553,6 +553,28 @@ test("book completion refreshes all visible state with one snapshot request", as
   assert.equal(context.data.bookReview.id, "review-1");
 });
 
+test("book completion ignores an older overview after a newer refresh", async () => {
+  const requests = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionOverview: () => new Promise((resolve) => {
+        requests.push(resolve);
+      }),
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1" });
+
+  const firstLoad = page.loadOverview.call(context);
+  const secondLoad = page.loadOverview.call(context);
+  requests[1](completionSnapshot({ ...readyOverview(), headline: "新结果" }));
+  await secondLoad;
+  requests[0](completionSnapshot({ ...readyOverview(), headline: "旧结果" }));
+  await firstLoad;
+
+  assert.equal(context.data.headline, "新结果");
+});
+
 test("book completion can check only chapters that have not been checked", async () => {
   const batchRequests = [];
   const overview = readyOverview();

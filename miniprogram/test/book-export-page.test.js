@@ -128,6 +128,28 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal("chapters" in context.data, false);
 });
 
+test("book export keeps loaded content visible when suggesting titles fails", async () => {
+  const { page } = loadBookExportPage({
+    suggestMemoirBookOutputTitles: async () => {
+      throw new Error("起名失败");
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+
+  await page.suggestBookTitles.call(context);
+
+  assert.equal(context.data.error, "起名失败");
+  assert.equal(context.data.loadError, "");
+  assert.equal(context.data.bookContent, "全书第二版正文");
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/book-export/index.wxml"),
+    "utf8",
+  );
+  assert.match(template, /wx:elif="\{\{loadError\}\}"/);
+  assert.match(template, /<block wx:else>\s*<view wx:if="\{\{error\}\}"/);
+});
+
 test("book export page keeps a production-sized book within the page-data budget", () => {
   const output = sampleBookOutput();
   const chapterBody = "那年院子里的桂花开了，我们围在桌边听外婆慢慢讲从前。".repeat(200);
