@@ -43,7 +43,7 @@
             <view class="row-copy"><text class="row-title">纯文本</text><text class="row-detail">方便继续修改和保存</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:txt:standard'}}" class="row-busy">生成中…</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="export" bindtap="openSection">
-            <view class="row-copy"><text class="row-title">导出设置</text><text class="row-detail">是否附上原始讲述</text></view><text class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">导出设置</text><text class="row-detail">是否附上整理记录与原始讲述</text></view><text class="row-arrow">›</text>
           </view>
         </view>
 
@@ -65,7 +65,7 @@
           <text class="section-title">导出设置</text>
           <text class="section-description">设置会应用于下次导出的 PDF。</text>
           <view class="detail-setting-row">
-            <view class="row-copy"><text class="row-title">附上原始讲述</text><text class="row-detail">方便以后核对原话</text></view>
+            <view class="row-copy"><text class="row-title">附上整理记录与原始讲述</text><text class="row-detail">阅读版默认关闭，需要核对时可打开</text></view>
             <switch checked="{{bookExportShowSourceAppendix}}" color="#a35445" bindchange="toggleBookExportSourceAppendix" />
           </view>
         </view>

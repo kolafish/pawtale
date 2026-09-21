@@ -159,7 +159,7 @@ definePage<BookExportData>()({
     totalChapterCount: 0,
     bookOutputAvailable: false,
     bookExportBusyTarget: "",
-    bookExportShowSourceAppendix: true,
+    bookExportShowSourceAppendix: false,
     bookTitleSaving: false,
     bookTitleSuggesting: false,
     bookEditorialCopyBusyTarget: "",

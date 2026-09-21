@@ -571,6 +571,14 @@ def _title_page_content(subtitle: str, content: str) -> str:
 
 
 def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title: str, subtitle: str) -> None:
+    reading_sections = [
+        _dict(section)
+        for section in front_matter
+        if _str(_dict(section).get("kind")) in {"preface", "generation_note"}
+        and _section_enabled(_dict(section))
+        and _section_content(_dict(section))
+    ]
+    reading_front_matter_added = False
     for raw_section in front_matter:
         section = _dict(raw_section)
         if not _section_enabled(section):
@@ -578,6 +586,24 @@ def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title
         kind = _str(section.get("kind"))
         if kind == "cover":
             continue
+        if builder.layout.reading_edition:
+            if kind == "title_page":
+                continue
+            if kind in {"preface", "generation_note"}:
+                if not reading_front_matter_added and reading_sections:
+                    builder.new_page("写在前面", show_header=False, show_footer=False)
+                    for index, reading_section in enumerate(
+                        sorted(reading_sections, key=lambda item: item.get("kind") != "preface")
+                    ):
+                        heading = _section_title(reading_section, "书前说明")
+                        if index == 0:
+                            builder.add_heading(heading)
+                        else:
+                            builder.add_spacer(0.5)
+                            builder.add_section_heading(heading)
+                        builder.add_body_text(_section_content(reading_section))
+                    reading_front_matter_added = True
+                continue
         section_title = _section_title(section, "书前说明")
         content = _section_content(section)
         if kind == "title_page":
@@ -674,7 +700,7 @@ def _add_table_of_contents(
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
         for section_index, section_title in enumerate(
-            entry.section_titles,
+            () if builder.layout.reading_edition else entry.section_titles,
             start=1,
         ):
             builder.add_toc_row(
@@ -684,10 +710,7 @@ def _add_table_of_contents(
                     entry.anchor if entry.page_number is not None else None
                 ),
                 indent=18,
-                font_size=max(
-                    builder.layout.small_font_size,
-                    builder.layout.font_size - 3,
-                ),
+                font_size=max(builder.layout.small_font_size, builder.layout.font_size - 2),
             )
 
 
@@ -810,10 +833,10 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         if quote:
             builder.add_quote(quote, spacing_after=6)
 
-        intro = _str(chapter.get("intro"))
-        intro = _without_embedded_quote_overlap(intro, quote)
-        if intro:
-            builder.add_body_text(intro, spacing_after=4)
+        if not builder.layout.reading_edition:
+            intro = _without_embedded_quote_overlap(_str(chapter.get("intro")), quote)
+            if intro:
+                builder.add_body_text(intro, spacing_after=4)
 
         illustrations = [
             _dict(item)
@@ -945,18 +968,17 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
             )
     _add_unconfirmed_facts(builder, _list(back_matter.get("unconfirmed_facts")))
     appendix_sections: list[tuple[str, str]] = []
-    for key, fallback_title in [("interview_records", "讲述资料"), ("version_note", "版本与修订")]:
-        section = _dict(back_matter.get(key))
-        if _section_enabled(section):
-            content = _section_content(section)
-            if content:
-                appendix_sections.append((_section_title(section, fallback_title), content))
     if include_source_appendix:
-        section = _dict(back_matter.get("source_appendix"))
-        if _section_enabled(section):
-            content = _section_content(section)
-            if content:
-                appendix_sections.append((_section_title(section, "章节来源"), content))
+        for key, fallback_title in [
+            ("interview_records", "讲述资料"),
+            ("version_note", "版本与修订"),
+            ("source_appendix", "章节来源"),
+        ]:
+            section = _dict(back_matter.get(key))
+            if _section_enabled(section):
+                content = _section_content(section)
+                if content:
+                    appendix_sections.append((_section_title(section, fallback_title), content))
     _add_appendix_record_page(builder, appendix_sections)
 
 
@@ -1186,7 +1208,7 @@ def _build_manuscript_pdf_pages(
     include_source_appendix = (
         show_source_appendix
         if show_source_appendix is not None
-        else setting_source_appendix is not False
+        else not layout.reading_edition and setting_source_appendix is not False
     )
     back_cover_quote = _str(settings.get("back_cover_quote"))
     cover_style = _str(settings.get("cover_style")) or "classic_plain"
