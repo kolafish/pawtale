@@ -78,6 +78,7 @@ export async function deleteAccountWithWeChat(): Promise<void> {
   await request<unknown>("/api/auth/me", {
     method: "DELETE",
     data: { code, miniprogram: "laoyu" },
+    timeoutProfile: "mutation",
   });
   clearSessionCookie();
 }

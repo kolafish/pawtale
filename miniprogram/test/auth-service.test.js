@@ -77,6 +77,7 @@ test("account deletion requires a fresh WeChat code and clears the cookie only a
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/me");
     assert.equal(options.method, "DELETE");
+    assert.equal(options.timeout, 60000);
     assert.deepEqual(options.data, { code: "wx-code-1", miniprogram: "laoyu" });
     options.success({ statusCode: 204, data: "", cookies: [], header: {} });
   });
