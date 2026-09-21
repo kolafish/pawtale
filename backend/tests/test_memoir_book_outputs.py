@@ -696,6 +696,66 @@ async def test_project_title_update_replaces_existing_book_output_title(client, 
     assert output["latest_version"]["manuscript"]["profile"]["title"] == "我的故事"
 
 
+async def test_unchanged_titles_keep_book_audio_cache_and_version(client, test_db):
+    title = formal_book_title("外婆回忆录章节规划")
+    project_id = await ensure_mobile_memoir_project(client, title=title)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    primed = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": title}
+    )
+    assert primed.status_code == 200, primed.text
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    assert output is not None
+    latest_id = await test_db.scalar(
+        select(MemoirBookOutputVersion.id)
+        .where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+        .limit(1)
+    )
+    cache = {"cached_audio_file_id": "existing-audio"}
+    output.metadata_json = {**output.metadata_json, "book_tts": cache}
+    await test_db.commit()
+
+    project_update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}", json={"title": title}
+    )
+    assert project_update.status_code == 200, project_update.text
+    book_update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": title}
+    )
+    assert book_update.status_code == 200, book_update.text
+    await test_db.refresh(output)
+    assert output.metadata_json["book_tts"] == cache
+    current_id = await test_db.scalar(
+        select(MemoirBookOutputVersion.id)
+        .where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+        .limit(1)
+    )
+    assert current_id == latest_id
+
+
+async def test_project_title_updates_book_output_before_first_version(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client, title="旧名称")
+    plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    output = MemoirBookOutput(
+        project_id=project_id,
+        plan_id=plan.id,
+        title="旧名称",
+        status=MemoirOutputStatus.DRAFT.value,
+    )
+    test_db.add(output)
+    await test_db.commit()
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}", json={"title": "新的名称"}
+    )
+    assert response.status_code == 200, response.text
+    await test_db.refresh(output)
+    assert output.title == "新的名称"
+
+
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
     project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
