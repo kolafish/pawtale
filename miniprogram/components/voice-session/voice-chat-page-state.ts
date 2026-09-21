@@ -846,7 +846,7 @@ export function voiceChatSessionEntryPatch(options: {
 
 export function voiceAuthorizationWaitingPatch(): VoiceChatPatch {
   return {
-    statusText: "等待声纹授权",
+    statusText: "等待语音授权",
     autoListenStateText: "同意后才会自动收音",
   };
 }
@@ -884,9 +884,9 @@ export function voiceAuthorizationChangePatch(
 export function voiceAuthorizationRequiredPatch(autoTriggered: boolean): VoiceChatPatch {
   return {
     voiceAuthorizationAgreed: false,
-    error: "请先阅读并同意《声纹授权协议》后再开始录音",
+    error: "请先阅读并同意《语音采集与处理授权》后再开始录音",
     primaryActionText: "同意后开始说话",
-    autoListenStateText: autoTriggered ? "自动收音已暂停，等待声纹授权" : "同意后才会自动收音",
+    autoListenStateText: autoTriggered ? "自动收音已暂停，等待语音授权" : "同意后才会自动收音",
   };
 }
 
@@ -897,7 +897,7 @@ export function voiceAuthorizationSyncFailedPatch(
   return {
     error: message,
     primaryActionText: "继续说话",
-    autoListenStateText: forRecording ? "录音授权失败" : "声纹授权同步失败",
+    autoListenStateText: forRecording ? "录音授权失败" : "语音授权同步失败",
   };
 }
 

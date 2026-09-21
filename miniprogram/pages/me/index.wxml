@@ -143,12 +143,12 @@
         <view
           class="settings-nav-row"
           aria-role="button"
-          aria-label="查看声纹授权"
+          aria-label="查看语音授权"
           bindtap="openVoiceAuthorization"
           hover-class="settings-nav-row-hover"
         >
           <view class="settings-row-copy">
-            <text class="action-title">声纹授权</text>
+            <text class="action-title">语音授权</text>
             <text class="action-meta">{{voiceAuthorizationAgreed ? "已完成授权，点击查看协议详情。" : "开始语音前需要阅读并同意协议。"}}</text>
           </view>
           <view class="settings-row-tail">

@@ -112,7 +112,7 @@
                 <text class="voice-auth-copy">我已阅读并同意</text>
               </label>
               <view class="voice-auth-link ui-consent-link ui-pressable" catchtap="openVoiceAuthorization"
-                hover-class="ui-subtle-action-hover" aria-role="button" aria-label="查看声纹授权协议">《声纹授权协议》</view>
+                hover-class="ui-subtle-action-hover" aria-role="button" aria-label="查看语音采集与处理授权">《语音采集与处理授权》</view>
             </view>
           </checkbox-group>
           <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别、保存原始音频和整理故事。</text>

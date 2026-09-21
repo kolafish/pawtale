@@ -305,6 +305,15 @@ test("normalizes invalid gateway payloads into session errors", () => {
     },
   );
   assert.deepEqual(
+    classifyVoiceGatewayError({ type: "session.error", state: "failed", error: "voice_authorization_revoked" }),
+    {
+      kind: "connection",
+      code: "voice_authorization_revoked",
+      state: "failed",
+      message: "语音授权已撤回，本次录音已停止",
+    },
+  );
+  assert.deepEqual(
     classifyVoiceGatewayError({ type: "session.error", state: "failed", error: "voice_gateway_user_session_exists" }),
     {
       kind: "connection",

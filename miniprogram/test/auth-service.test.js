@@ -102,6 +102,7 @@ test("loginWithWeChat exchanges wx login code through backend", async () => {
   assert.equal(requests.length, 1);
   assert.equal(response.needs_credentials, true);
   assert.equal(response.user.password_login_enabled, false);
+  assert.equal(global.wx.getStorageSync("pawtale_memoir_session").cache_identity.user_id, "user-1");
   delete global.wx;
 });
 

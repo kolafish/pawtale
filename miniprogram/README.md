@@ -97,7 +97,7 @@ wx.setStorageSync("pawtale_backend_config", {
 - 开发/测试环境仍保留邮箱接口，供非公开 Web 开发使用；
 - session cookie 由后端管理；
 - 微信 AppSecret、ASR/TTS/LLM key 不得写入小程序、tracked 配置或文档示例；
-- 语音授权版本同时保存在本地和后端审计记录中。
+- 语音授权按当前用户保存在本地，后端审计记录是录音准入的事实源；撤回后新的录音连接会被拒绝，进行中的录音最迟在下一次授权检查时停止。
 
 ## 状态与恢复
 

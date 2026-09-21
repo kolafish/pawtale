@@ -18,6 +18,7 @@ from app.services.asr.factory import create_realtime_volc_streaming_asr_client
 from app.services.asr.gateway import VoiceGatewaySession
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.voice_authorization import audio_authorizer, has_current_voice_authorization_consent
 
 
 router = APIRouter(tags=["memoir-dictation"])
@@ -32,6 +33,9 @@ async def stream_memoir_project_dictation(
     current_user = await authenticate_websocket(websocket, db)
     if current_user is None:
         await reject_websocket(websocket, "voice_gateway_auth_failed")
+        return
+    if not await has_current_voice_authorization_consent(db, current_user.id):
+        await reject_websocket(websocket, "voice_authorization_required")
         return
     if not await _memoir_project_dictation_is_available(
         db,
@@ -68,6 +72,7 @@ async def stream_memoir_project_dictation(
                 capacity_session_id,
             ),
             text_normalizer=normalize_memoir_asr_text,
+            authorize_audio=audio_authorizer(db, current_user.id),
             on_stop=release_capacity_before_stopped,
             connection_id=connection_id,
             diagnostics_context={

@@ -77,6 +77,27 @@ def test_voice_gateway_validates_transcript_polish_level():
         )
 
 
+async def test_voice_gateway_stops_before_recording_when_consent_is_revoked():
+    client = FakeGatewayClient()
+
+    async def revoked() -> bool:
+        return False
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: FakeStreamingASRClient(),
+        authorize_audio=revoked,
+    )
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+
+    error = await _wait_for_event(client, "session.error")
+    await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+    assert error["error"] == "voice_authorization_revoked"
+
+
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -757,6 +778,45 @@ async def test_voice_gateway_masks_final_persistence_errors():
     assert stopped_with == ["asr_final_persistence_failed"]
 
 
+async def test_mobile_voice_gateway_rejects_missing_voice_consent(monkeypatch):
+    from app.routers.memoir import voice_gateway as voice_gateway_router
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def accept(self):
+            return None
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+        async def close(self, **_kwargs):
+            return None
+
+    async def authenticate(_websocket, _db):
+        return type("User", (), {"id": "user-1"})()
+
+    async def denied(_db, _user_id):
+        return False
+
+    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", authenticate)
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "has_current_voice_authorization_consent",
+        denied,
+    )
+    websocket = FakeWebSocket()
+
+    await voice_gateway_router.mobile_memoir_voice_gateway(websocket, "voice-1", object())
+
+    assert websocket.sent == [{
+        "type": "session.error",
+        "state": "failed",
+        "error": "voice_authorization_required",
+    }]
+
+
 async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch):
     from app.routers.memoir import voice_gateway as voice_gateway_router
 
@@ -836,6 +896,18 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     websocket = FakeWebSocket()
     db = object()
     monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+    async def authorized(_db: Any, _user_id: str) -> bool:
+        return True
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "has_current_voice_authorization_consent",
+        authorized,
+    )
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "audio_authorizer",
+        lambda _db, _user_id: authorized,
+    )
     monkeypatch.setattr(
         voice_gateway_router.memoir_voice_sessions,
         "get_voice_session_detail",

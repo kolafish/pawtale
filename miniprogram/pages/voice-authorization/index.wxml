@@ -26,12 +26,13 @@
 
     <view class="section">
       <text class="section-title ui-section-heading">五、你的选择</text>
-      <text class="paragraph">你可以不同意本协议。不同意时，语音聊天、录音和实时识别文字功能将不可用，但你仍可浏览小程序中不依赖麦克风的功能。你也可以停止录音，并按页面提供的删除或管理能力处理已生成的讲述记录和音频资料。</text>
+      <text class="paragraph">你可以不同意，也可以随时回到本页撤回同意。撤回后不能开始新的录音或实时识别，但已有的讲述记录和音频不会自动删除；你可以在回忆录中管理这些资料，或在“我的”页面注销账号。</text>
     </view>
   </view>
 
+  <view wx:if="{{error}}" class="ui-error-banner">{{error}}</view>
   <view class="actions ui-fixed-action-dock">
-    <button class="ghost-button ui-button" bindtap="disagreeAndBack">暂不同意</button>
-    <button class="primary-button ui-button" bindtap="agreeAndBack">同意并返回</button>
+    <button class="ghost-button ui-button" disabled="{{saving}}" bindtap="disagreeAndBack">不同意 / 撤回</button>
+    <button class="primary-button ui-button" disabled="{{saving}}" bindtap="agreeAndBack">{{saving ? "保存中" : "同意并返回"}}</button>
   </view>
 </view>

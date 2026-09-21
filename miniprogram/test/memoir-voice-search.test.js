@@ -323,7 +323,7 @@ test("voice search service stops before recording when authorization is missing"
     },
   });
 
-  await assert.rejects(recordMemoirVoiceSearchQuery(), /请先同意声纹授权协议/);
+  await assert.rejects(recordMemoirVoiceSearchQuery(), /请先同意语音授权/);
   delete global.wx;
 });
 

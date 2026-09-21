@@ -172,7 +172,7 @@ export async function recordMemoirVoiceSearchQuery(
   options: RecordMemoirVoiceSearchQueryOptions = {},
 ): Promise<string> {
   if (!(await ensureVoiceRecordingAuthorization())) {
-    throw new Error("请先同意声纹授权协议");
+    throw new Error("请先同意语音授权");
   }
   let noVoiceAutoStopped = false;
   const audio = await recordVoiceSearchAudio({

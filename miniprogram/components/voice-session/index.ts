@@ -350,13 +350,25 @@ Component({
       && !this.runtime().voiceStreaming.hasClient()
       && this.data.status !== "connecting"
     ) {
-      await this.syncVoiceAuthorizationAndConnect();
+      try {
+        await syncVoiceAuthorizationConsent({
+          consent,
+          sourceSessionId: this.data.voiceSessionId,
+        });
+        await this.syncVoiceAuthorizationAndConnect();
+      } catch (error) {
+        saveVoiceAuthorizationConsent(false);
+        const message = error instanceof Error ? error.message : "语音授权保存失败";
+        applyVoiceChatDataPatch(this, { ...voiceAuthorizationRequiredPatch(false), error: message });
+      }
     } else {
       void syncVoiceAuthorizationConsent({
         consent,
         sourceSessionId: this.data.voiceSessionId || undefined,
       }).catch((error) => {
-        console.warn("sync voice authorization consent change failed", error);
+        if (agreed) saveVoiceAuthorizationConsent(false);
+        const message = error instanceof Error ? error.message : "语音授权保存失败";
+        applyVoiceChatDataPatch(this, { ...voiceAuthorizationRequiredPatch(false), error: message });
       });
     }
   },
@@ -374,7 +386,7 @@ Component({
       return true;
     }
     applyVoiceChatDataPatch(this, voiceAuthorizationRequiredPatch(autoTriggered));
-    wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    wx.showToast({ title: "请先同意语音授权", icon: "none" });
     return false;
   },
 
@@ -392,7 +404,7 @@ Component({
       });
       return true;
     } catch (error) {
-      const fallback = forRecording ? "录音授权失败" : "声纹授权同步失败";
+      const fallback = forRecording ? "录音授权失败" : "语音授权同步失败";
       const message = error instanceof Error ? error.message : fallback;
       if (forRecording) {
         this.handleError(message, { kind: "recorder", code: "voice_recording_authorization_failed", message });
@@ -410,7 +422,7 @@ Component({
     if (this.runtime().pageSuspended || this.runtime().disposed) return false;
     if (!synced) {
       if (autoTriggered) {
-        applyVoiceChatDataPatch(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
+        applyVoiceChatDataPatch(this, { autoListenStateText: "自动收音已暂停，等待语音授权同步" });
       }
       return false;
     }

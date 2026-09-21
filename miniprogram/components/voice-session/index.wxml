@@ -89,7 +89,7 @@
   </view>
 
   <view wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
-    <text class="voice-auth-title">开始录音前需要声纹授权</text>
+    <text class="voice-auth-title">开始录音前需要语音授权</text>
     <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、小余语音回应、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
       <view class="voice-auth-row ui-consent-row">
@@ -106,8 +106,8 @@
           catchtap="openVoiceAuthorization"
           hover-class="ui-subtle-action-hover"
           aria-role="button"
-          aria-label="查看声纹授权协议"
-        >《声纹授权协议》</view>
+          aria-label="查看语音采集与处理授权"
+        >《语音采集与处理授权》</view>
       </view>
     </checkbox-group>
   </view>
