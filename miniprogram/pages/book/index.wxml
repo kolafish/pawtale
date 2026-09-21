@@ -13,6 +13,10 @@
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+  <view wx:if="{{showingCachedBook}}" class="book-cache-banner ui-error-banner">
+    <text>暂时无法获取最新书稿，当前显示上次保存的内容。</text>
+    <button class="book-cache-retry" size="mini" bindtap="loadBookHome">重试刷新</button>
+  </view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />

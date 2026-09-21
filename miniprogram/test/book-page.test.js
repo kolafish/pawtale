@@ -536,6 +536,52 @@ test("book page stays available when login is required", async () => {
   assert.deepEqual(switches, []);
 });
 
+test("book page labels a cached snapshot after refresh fails and clears it on retry", async () => {
+  const snapshot = {
+    server_revision: 1,
+    identity: {
+      active_project_id: "project/1",
+      active_project: { title: "外婆回忆录" },
+    },
+    plan: null,
+    drafts_by_chapter_id: {},
+    output: sampleBookOutput(1, "上次保存的书稿"),
+    automation_events: { items: [], total: 0, limit: 8 },
+    image_assets: { items: [], total: 0, ready_count: 0, included_count: 0, unused_count: 0 },
+  };
+  let fetchCount = 0;
+  const { page } = loadBookPage({
+    cacheExports: {
+      readCachedMemoirBook: () => ({ status: "hit", payload: snapshot, localInvalidationRevision: 0 }),
+    },
+    voiceApiExports: {
+      getMemoirBookSnapshot: async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) throw new Error("网络不可用");
+        return snapshot;
+      },
+    },
+  });
+  const context = pageContext(page);
+  const oldWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await page.loadBookHome.call(context);
+  } finally {
+    console.warn = oldWarn;
+  }
+
+  assert.equal(context.data.bookContentAvailable, true);
+  assert.equal(context.data.projectTitle, "外婆回忆录");
+  assert.equal(context.data.showingCachedBook, true);
+  assert.equal(context.data.error, "");
+
+  await page.loadBookHome.call(context);
+
+  assert.equal(fetchCount, 2);
+  assert.equal(context.data.showingCachedBook, false);
+});
+
 test("book page opens the transcript list as a secondary page", () => {
   const navigations = [];
   global.wx = {
