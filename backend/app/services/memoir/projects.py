@@ -1,6 +1,6 @@
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -129,10 +129,6 @@ def _memoir_project_options():
     )
 
 
-def _voice_text_char_count(text: str) -> int:
-    return len("".join(str(text or "").split()))
-
-
 def _project_response_with_voice_words(
     project: Project,
     voice_char_counts: dict[str, int],
@@ -154,7 +150,19 @@ async def _memoir_voice_char_counts(
     if not project_ids:
         return {}
     result = await db.execute(
-        select(MemoirChatMessage.project_id, MemoirChatMessage.content_text)
+        select(
+            MemoirChatMessage.project_id,
+            func.sum(
+                func.length(
+                    func.regexp_replace(
+                        MemoirChatMessage.content_text,
+                        "[[:space:]\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]",
+                        "",
+                        "g",
+                    )
+                )
+            ),
+        )
         .join(Project, MemoirChatMessage.project_id == Project.id)
         .where(
             Project.user_id == user_id,
@@ -163,11 +171,9 @@ async def _memoir_voice_char_counts(
             MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
             MemoirChatMessage.content_text != "",
         )
+        .group_by(MemoirChatMessage.project_id)
     )
-    counts: dict[str, int] = {}
-    for project_id, content_text in result.all():
-        counts[project_id] = counts.get(project_id, 0) + _voice_text_char_count(content_text)
-    return counts
+    return dict(result.all())
 
 
 async def _load_memoir_project_response(
