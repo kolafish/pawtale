@@ -8,7 +8,12 @@ const {
   pageContext,
 } = require("./page-harness");
 
-function loadProjectEditPage({ project, updateMemoirProject }) {
+function loadProjectEditPage({
+  project,
+  updateMemoirProject,
+  createMemoirProject = async () => project,
+  activateMemoirProject = async () => {},
+}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => ({
       id: "user-1",
@@ -20,8 +25,8 @@ function loadProjectEditPage({ project, updateMemoirProject }) {
   mockModule("../services/audit-tracker.ts", { trackAuditAction: () => {} });
   mockModule("../services/home-launch-state.ts", { markHomeLaunchProjectCreated: () => {} });
   mockModule("../services/memoir.ts", {
-    activateMemoirProject: async () => {},
-    createMemoirProject: async () => project,
+    activateMemoirProject,
+    createMemoirProject,
     listMemoirProjects: async () => ({
       active_project_id: project.id,
       active_project: project,
@@ -88,4 +93,43 @@ test("project edit loads and saves memoir-level interview and polish settings", 
   assert.equal(updates[0].payload.default_interview_type, "ai_interview");
   assert.equal(updates[0].payload.default_session_goal, "book_completion");
   assert.equal(updates[0].payload.transcript_polish_level, "medium");
+});
+
+test("project creation retries activation without creating a duplicate", async () => {
+  const project = { id: "project-1", title: "第一版" };
+  let creates = 0;
+  let activations = 0;
+  const updates = [];
+  global.wx = {
+    navigateBack() {},
+    setNavigationBarTitle() {},
+    showToast() {},
+  };
+  const { page } = loadProjectEditPage({
+    project,
+    createMemoirProject: async () => {
+      creates += 1;
+      return project;
+    },
+    activateMemoirProject: async () => {
+      activations += 1;
+      if (activations === 1) throw new Error("激活失败");
+    },
+    updateMemoirProject: async (id, input) => {
+      updates.push({ id, input });
+      return { ...project, title: input.title };
+    },
+  });
+  const context = pageContext(page, { title: "第一版" });
+
+  await context.saveProject();
+  assert.equal(creates, 1);
+  assert.match(context.data.error, /已创建.*激活失败/);
+
+  context.changeTitle({ detail: { value: "第二版" } });
+  await context.saveProject();
+  assert.equal(creates, 1);
+  assert.equal(activations, 2);
+  assert.deepEqual(updates.map(({ id, input }) => [id, input.title]), [["project-1", "第二版"]]);
+  assert.equal(context.pendingCreatedProject, null);
 });

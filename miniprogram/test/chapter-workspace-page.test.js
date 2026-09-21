@@ -723,6 +723,24 @@ test("chapter workspace protects unsaved edits before returning to the book flow
   assert.deepEqual(redirects, ["/pages/book/index"]);
 });
 
+test("chapter workspace warns on native back while a section edit is unsaved", () => {
+  const alerts = [];
+  global.wx = {
+    enableAlertBeforeUnload(options) { alerts.push(options.message); },
+    disableAlertBeforeUnload() { alerts.push("disabled"); },
+  };
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page, { workspace: workspace() });
+  const event = { currentTarget: { dataset: { id: "section-1" } } };
+
+  context.startDraftSectionEdit(event);
+  context.changeDraftSectionContent({ detail: { value: "未保存的新正文" } });
+  assert.match(alerts[0], /尚未保存/);
+
+  context.cancelDraftSectionEdit();
+  assert.equal(alerts.at(-1), "disabled");
+});
+
 test("chapter workspace expands materials under their section", async () => {
   installWx();
   const { page } = loadWorkspacePage();

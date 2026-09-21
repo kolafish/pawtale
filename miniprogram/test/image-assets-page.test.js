@@ -349,6 +349,29 @@ test("image assets page reveals secondary editing on demand and tracks caption c
   assert.equal(context.data.items[0].captionChanged, false);
 });
 
+test("image assets page keeps an unsaved caption through placement and clears it after saving", async () => {
+  const asset = imageAsset("asset-1", { caption: "原说明" });
+  const { page } = loadImageAssetsPage({
+    createMemoirBookImagePlacement: async () => ({ ...asset, include_in_book: true }),
+    updateMemoirImageAsset: async (_projectId, _assetId, input) => ({ ...asset, caption: input.caption }),
+  });
+  global.wx = { showToast() {} };
+  const context = pageContext(page, {
+    projectId: "project-1",
+    items: [imageAssetView(asset)],
+  });
+  const event = { currentTarget: { dataset: { id: "asset-1" } } };
+
+  context.onCaptionInput({ ...event, detail: { value: "新说明" } });
+  await context.placeNearSource(event);
+  assert.equal(context.data.items[0].captionDraft, "新说明");
+  assert.equal(context.data.items[0].captionChanged, true);
+
+  await context.saveCaption(event);
+  assert.equal(context.data.items[0].captionDraft, "新说明");
+  assert.equal(context.data.items[0].captionChanged, false);
+});
+
 test("image assets page places a source-linked illustration near its material", async () => {
   const asset = imageAsset("asset-1", { source_utterance_id: "utterance-1" });
   const placementCalls = [];

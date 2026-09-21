@@ -32,6 +32,7 @@ interface ChapterWorkspaceDraftHost {
   beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
   loadPageData(silent?: boolean): Promise<void>;
+  syncDraftSectionUnloadAlert(): void;
 }
 
 function defineChapterWorkspaceDraftMethods<TMethods extends object>(
@@ -72,6 +73,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       editingSectionContent: section.content,
       error: "",
     });
+    this.syncDraftSectionUnloadAlert();
   },
 
   startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
@@ -83,6 +85,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     this.setData({ editingSectionContent: event.detail.value });
+    this.syncDraftSectionUnloadAlert();
   },
 
   cancelDraftSectionEdit() {
@@ -90,6 +93,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+    this.syncDraftSectionUnloadAlert();
   },
 
   startDraftSectionAIEdit(event: PageDatasetEvent<{ id?: string }>) {
@@ -165,6 +169,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         },
       );
       this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+      this.syncDraftSectionUnloadAlert();
       await this.loadPageData(true);
       wx.showToast({ title: "故事已保存", icon: "success" });
     } catch (error) {
