@@ -185,6 +185,8 @@ definePage<ChapterWorkspacePageData>()({
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
+    wx.disableAlertBeforeUnload?.();
+    this.draftSectionUnloadAlertEnabled = false;
   },
 
   async onPullDownRefresh() {
@@ -252,6 +254,20 @@ definePage<ChapterWorkspacePageData>()({
     );
   },
 
+  draftSectionUnloadAlertEnabled: false,
+
+  syncDraftSectionUnloadAlert() {
+    if (typeof wx === "undefined" || typeof wx.enableAlertBeforeUnload !== "function") return;
+    const enabled = this.hasUnsavedSectionChanges();
+    if (enabled === this.draftSectionUnloadAlertEnabled) return;
+    this.draftSectionUnloadAlertEnabled = enabled;
+    if (enabled) {
+      wx.enableAlertBeforeUnload({ message: "尚未保存的故事正文会丢失，确定离开吗？" });
+    } else {
+      wx.disableAlertBeforeUnload?.();
+    }
+  },
+
   leaveAfterEditConfirmation(navigate: () => void) {
     if (!this.hasUnsavedSectionChanges()) {
       navigate();
@@ -264,6 +280,8 @@ definePage<ChapterWorkspacePageData>()({
       cancelText: "继续编辑",
       success: (result) => {
         if (result.confirm) {
+          wx.disableAlertBeforeUnload?.();
+          this.draftSectionUnloadAlertEnabled = false;
           navigate();
         }
       },
@@ -412,6 +430,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
+    this.syncDraftSectionUnloadAlert();
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }

@@ -185,6 +185,9 @@ function buildAssetView(
   current?: ImageAssetView,
 ): ImageAssetView {
   const localPath = current?.localPath || "";
+  const captionDraft = current?.captionChanged && trimText(current.captionDraft) !== trimText(asset.caption)
+    ? current.captionDraft
+    : trimText(asset.caption);
   return {
     ...asset,
     localPath,
@@ -195,8 +198,8 @@ function buildAssetView(
     statusText: statusText(asset),
     placementText: placementText(asset),
     createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
-    captionDraft: trimText(asset.caption),
-    captionChanged: false,
+    captionDraft,
+    captionChanged: trimText(captionDraft) !== trimText(asset.caption),
     detailsExpanded: current?.detailsExpanded || false,
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
