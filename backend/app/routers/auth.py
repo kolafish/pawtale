@@ -319,10 +319,12 @@ async def me(current_user: User = Depends(get_current_user)):
 @router.delete("/me", status_code=204)
 async def delete_me(
     req: AuthDeleteRequest,
+    request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await check_wechat_login_rate_limit(db, request.client.host if request.client else "unknown")
     session = await _exchange_wechat_code(req.code, req.miniprogram)
     provider = WECHAT_PROVIDERS[req.miniprogram]
     identity = await _find_wechat_identity(db, provider, session.openid)
