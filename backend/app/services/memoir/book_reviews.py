@@ -49,6 +49,7 @@ from app.services.memoir.book_output_manuscript import (
 )
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
 from app.services.memoir.chapter_generation import latest_chapter_draft_version
+from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -393,7 +394,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         )
         for chapter in context.chapters
     )
-    return f"""请通读下面这本回忆录。
+    prompt = f"""请通读下面这本回忆录。
 
 当前成书信息：
 {book_information_text(context.book_metadata)}
@@ -442,15 +443,14 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
+    return checked_review_prompt(prompt, subject="全书")
 
 
 def normalize_book_review(
-    payload: Any,
+    payload: dict[str, Any],
     *,
     context: BookReviewContext,
 ) -> dict:
-    if not isinstance(payload, dict):
-        raise ValueError("book review AI did not return a JSON object")
     summary = _user_visible_text(
         payload.get("summary"),
         context=context,

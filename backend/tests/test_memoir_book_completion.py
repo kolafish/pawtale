@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from httpx import Response
+from fastapi import HTTPException
 import pytest
 from sqlalchemy import func, select
 from app.services.ai_base import AITextServiceBase
@@ -53,6 +54,7 @@ from app.services.memoir.book_reviews import (
     BookReviewContext,
     normalize_book_review,
 )
+from app.services.memoir.prompt_budget import MAX_REVIEW_PROMPT_CHARS
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
 )
@@ -318,6 +320,32 @@ class LayeredBookAI(AITextServiceBase):
                 "editor_notes": [],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+def test_book_review_rejects_prompt_that_cannot_be_read_in_full():
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={},
+        chapters=(
+            BookReviewChapter(
+                chapter_id="chapter-1",
+                title="童年",
+                sort_order=0,
+                digest_id="digest-1",
+                digest_signature="digest-signature-1",
+                digest={"summary": "童年回忆"},
+                draft_version_id="version-1",
+                draft_hash="hash-1",
+                material_ids=frozenset(),
+                draft_content="回" * MAX_REVIEW_PROMPT_CHARS,
+            ),
+        ),
+        input_signature="review-signature",
+    )
+    with pytest.raises(HTTPException) as caught:
+        book_reviews.build_book_review_prompt(context)
+    assert caught.value.status_code == 422
 
 
 def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
