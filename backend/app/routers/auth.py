@@ -95,11 +95,14 @@ async def _find_wechat_identity(
 
 
 async def _lock_wechat_identity(db: AsyncSession, provider: str, session: WeChatSession) -> None:
-    identity_key = session.unionid or f"{provider}:{session.openid}"
-    lock_key = int.from_bytes(
-        hashlib.sha256(identity_key.encode("utf-8")).digest()[:8], "big", signed=True
-    )
-    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+    identity_keys = [f"openid:{provider}:{session.openid}"]
+    if session.unionid:
+        identity_keys.append(f"unionid:{session.unionid}")
+    for identity_key in identity_keys:
+        lock_key = int.from_bytes(
+            hashlib.sha256(identity_key.encode("utf-8")).digest()[:8], "big", signed=True
+        )
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
 async def _wechat_union_user_id(
