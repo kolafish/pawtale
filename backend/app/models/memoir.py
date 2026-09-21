@@ -985,6 +985,7 @@ class MemoirCompletionIssue(Base):
         default=list,
         nullable=False,
     )
+    resolution: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     input_signature: Mapped[str] = mapped_column(
         String(128),
         nullable=False,

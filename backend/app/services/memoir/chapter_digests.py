@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -534,31 +534,21 @@ async def generate_or_reuse_chapter_digest(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    previous = list(
-        (
-            await db.scalars(
-                select(MemoirChapterDigest).where(
-                    MemoirChapterDigest.project_id == project_id,
-                    MemoirChapterDigest.chapter_id == chapter_id,
-                    MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
-                )
-            )
-        ).all()
+    await db.execute(
+        delete(MemoirChapterDigest).where(
+            MemoirChapterDigest.project_id == project_id,
+            MemoirChapterDigest.chapter_id == chapter_id,
+            MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
+            MemoirChapterDigest.input_signature != context.input_signature,
+        )
     )
-    for item in previous:
-        if (
-            item.input_signature != context.input_signature
-            and item.status == MemoirSemanticCacheStatus.READY.value
-        ):
-            item.status = MemoirSemanticCacheStatus.STALE.value
-            db.add(item)
-    existing = next(
-        (
-            item
-            for item in previous
-            if item.input_signature == context.input_signature
-        ),
-        None,
+    existing = await db.scalar(
+        select(MemoirChapterDigest).where(
+            MemoirChapterDigest.project_id == project_id,
+            MemoirChapterDigest.chapter_id == chapter_id,
+            MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
+            MemoirChapterDigest.input_signature == context.input_signature,
+        )
     )
     if (
         existing is not None

@@ -39,6 +39,7 @@ from app.services.memoir import (
     book_revision_generation,
     book_revision_proposals,
     book_review_jobs,
+    book_review_answer_state,
     book_reviews,
     completion_interviews,
     completion_issues,
@@ -498,6 +499,42 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
     assert current[0].outcome_note == "保留化名。"
     assert current[0].related_chapter_ids_json == ["chapter-1"]
     assert current[0].related_material_ids_json == []
+    assert current[0].resolution == "user_decision"
+
+
+async def test_book_answer_reads_issue_without_review_candidate_history(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    review = MemoirBookReview(
+        project_id=project_id,
+        engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="current-review",
+        status="ready",
+        review_json={},
+    )
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="是否保留真实姓名？",
+        reason="需要用户决定。",
+        priority="high",
+        fingerprint="a" * 64,
+        related_material_ids_json=[],
+        related_chapter_ids_json=["chapter-1"],
+        resolution="user_decision",
+        input_signature="current-review",
+        status="closed",
+        outcome="confirmed",
+        outcome_note="使用化名。",
+    )
+    test_db.add_all([review, issue])
+    await test_db.flush()
+
+    context = await book_review_answer_state.load_answer_context(test_db, review=review)
+    assert len(context.answers) == 1
+    assert context.answers[0].chapter_ids == ("chapter-1",)
+    assert context.answers[0].resolution == "user_decision"
 
 
 async def test_book_issue_uses_its_chapter_instead_of_unrelated_material(

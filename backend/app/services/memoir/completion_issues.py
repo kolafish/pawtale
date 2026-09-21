@@ -342,6 +342,7 @@ async def sync_book_review_issues(
                 "fingerprint": fingerprint,
                 "related_material_ids_json": [],
                 "related_chapter_ids_json": chapter_ids,
+                "resolution": str(candidate.get("resolution") or "").strip(),
                 "input_signature": input_signature,
             }
         )
@@ -391,6 +392,7 @@ async def sync_book_review_issues(
         else:
             issue.related_chapter_ids_json = value["related_chapter_ids_json"]
             issue.related_material_ids_json = []
+            issue.resolution = value["resolution"]
             db.add(issue)
         current.append(issue)
     now = utcnow_naive()
