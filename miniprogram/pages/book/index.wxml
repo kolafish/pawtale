@@ -61,9 +61,6 @@
       <button wx:if="{{bookContentAvailable}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
         <text>阅读全书</text><text class="progress-action-mark">›</text>
       </button>
-      <button class="ghost-button small progress-action" bindtap="openStory">
-        <text>后台整理进度</text><text class="progress-action-mark">›</text>
-      </button>
       <button class="ghost-button small progress-action" bindtap="openBookCompletion">
         <text>查看待确认事项</text><text class="progress-action-mark">›</text>
       </button>

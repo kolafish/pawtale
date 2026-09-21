@@ -41,7 +41,6 @@ import {
   navigateToLogin,
   routeAuthError,
   returnToHome,
-  returnToStory,
 } from "../../services/navigation";
 import {
   datasetChoice,
@@ -1157,10 +1156,6 @@ definePage<BookPageData>()({
       writeTranscriptNavigationTarget(utteranceId);
     }
     navigateToTranscripts();
-  },
-
-  openStory() {
-    returnToStory(this.data.projectId);
   },
 
   openHome() {
