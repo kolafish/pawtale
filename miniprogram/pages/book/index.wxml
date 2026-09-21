@@ -3,12 +3,12 @@
     <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
     <button
       wx:if="{{bookContentAvailable}}"
-      class="book-share-button"
-      open-type="share"
-      data-share-kind="book"
+      class="book-export-button"
+      data-action="reading_pdf"
+      bindtap="openBookExportPage"
       hover-class="ui-accent-action-hover"
     >
-      分享成书
+      导出 PDF
     </button>
   </view>
 

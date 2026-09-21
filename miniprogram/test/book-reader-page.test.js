@@ -170,11 +170,11 @@ test("book reader previews and highlights one current chapter", async () => {
   );
 });
 
-test("book reader page shares the same finished-book route", async () => {
+test("book reader hides private content from system sharing", async () => {
   const shareMenuCalls = [];
   global.wx = {
-    showShareMenu(options) {
-      shareMenuCalls.push(options);
+    hideShareMenu() {
+      shareMenuCalls.push("hidden");
     },
   };
   try {
@@ -186,17 +186,9 @@ test("book reader page shares the same finished-book route", async () => {
     await page.onLoad.call(context, { projectId: "project/1" });
     page.onShow.call(context);
 
-    assert.deepEqual(shareMenuCalls, [{
-      menus: ["shareAppMessage", "shareTimeline"],
-    }]);
-    assert.deepEqual(page.onShareAppMessage.call(context), {
-      title: "送你一本《外婆回忆录》",
-      path: "/pages/book-reader/index?projectId=project%2F1&from=share_book",
-    });
-    assert.deepEqual(page.onShareTimeline.call(context), {
-      title: "送你一本《外婆回忆录》",
-      query: "projectId=project%2F1&from=share_book",
-    });
+    assert.deepEqual(shareMenuCalls, ["hidden"]);
+    assert.equal(page.onShareAppMessage, undefined);
+    assert.equal(page.onShareTimeline, undefined);
   } finally {
     delete global.wx;
   }

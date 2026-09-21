@@ -56,10 +56,7 @@ import {
   type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
-import {
-  bookShareAppMessage,
-  enableMiniProgramShareMenu,
-} from "../../services/share";
+import { hideMiniProgramShareMenu } from "../../services/share";
 import {
   applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
   playBookAudioFiles,
@@ -202,7 +199,7 @@ definePage<BookPageData>()({
   async onShow() {
     this.applyBookWorkspaceNavigationTarget();
     this.setData({ pageClass: accessibilityPageClass("book-page") });
-    enableMiniProgramShareMenu({ includeTimeline: false });
+    hideMiniProgramShareMenu();
     await this.loadBookHome();
   },
 
@@ -211,15 +208,6 @@ definePage<BookPageData>()({
     if (target) {
       this.setData({ bookWorkspaceView: target });
     }
-  },
-
-  onShareAppMessage() {
-    return bookShareAppMessage({
-      projectId: this.data.projectId,
-      projectTitle: this.data.projectTitle,
-      bookTitle: this.data.bookPreviewTitle || this.data.planTitle,
-      hasBookContent: this.data.bookContentAvailable,
-    });
   },
 
   async loadBookHome() {

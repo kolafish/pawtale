@@ -30,11 +30,7 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import {
-  bookShareAppMessage,
-  bookShareTimeline,
-  enableMiniProgramShareMenu,
-} from "../../services/share";
+import { hideMiniProgramShareMenu } from "../../services/share";
 import {
   bookReadingData,
   readingParagraphs,
@@ -321,9 +317,7 @@ definePage<BookReaderData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
-    if (this.data.readerMode === "book") {
-      enableMiniProgramShareMenu();
-    }
+    hideMiniProgramShareMenu();
   },
 
   onHide() {
@@ -332,22 +326,6 @@ definePage<BookReaderData>()({
 
   onUnload() {
     this.stopPlayback();
-  },
-
-  onShareAppMessage() {
-    return bookShareAppMessage({
-      projectId: this.data.projectId,
-      bookTitle: this.data.readerTitle,
-      hasBookContent: Boolean(this.data.bookContent),
-    });
-  },
-
-  onShareTimeline() {
-    return bookShareTimeline({
-      projectId: this.data.projectId,
-      bookTitle: this.data.readerTitle,
-      hasBookContent: Boolean(this.data.bookContent),
-    });
   },
 
   toggleTocChapter(event: ReaderDatasetEvent) {

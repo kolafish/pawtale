@@ -1,7 +1,7 @@
 .book-page {
   padding: 24rpx 32rpx 112rpx;
 }
-.book-share-button {
+.book-export-button {
   flex: 0 0 auto;
   min-width: 144rpx;
   min-height: 44px;
@@ -18,7 +18,7 @@
   transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
-.book-share-button:active {
+.book-export-button:active {
   transform: scale(0.96);
   opacity: 0.72;
 }
@@ -1144,7 +1144,7 @@
   font-size: 30rpx;
   line-height: 1.5;
 }
-.book-page.large-text .book-share-button,
+.book-page.large-text .book-export-button,
 .book-page.large-text .workspace-tab,
 .book-page.large-text .progress-action {
   min-height: 48px;
