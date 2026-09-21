@@ -44,7 +44,6 @@
   flex: 1;
 }
 
-.hero-label,
 .hero-title,
 .hero-subtitle,
 .hero-meta,
@@ -57,14 +56,6 @@
 .notice,
 .save-status {
   display: block;
-}
-
-.hero-label {
-  margin-bottom: 14rpx;
-  color: var(--ui-accent-strong);
-  font-size: 22rpx;
-  font-weight: 700;
-  letter-spacing: 0.03em;
 }
 
 .hero-title {
