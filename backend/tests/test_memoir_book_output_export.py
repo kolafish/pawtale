@@ -166,7 +166,9 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
         show_source_appendix=None,
     )
 
-    front_pages = pages[:4]
+    first_chapter_index = next(index for index, page in enumerate(pages) if page.anchor == "chapter-1")
+    front_pages = pages[:first_chapter_index]
+    assert len(front_pages) == 3
     assert all(not page.header_title for page in front_pages)
     assert all(page.body_page_number is None for page in front_pages)
     assert all(page.show_footer is False for page in front_pages)
@@ -175,10 +177,9 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert pages[0].decorations
     assert all(decoration.kind == "line" for decoration in pages[0].decorations)
     assert all(command.text != "口述：待补充" for command in pages[0].commands)
-    assert sum(
-        command.text == "根据口述访谈整理"
-        for command in front_pages[1].commands
-    ) == 1
+    assert any(command.text == "目录" for command in front_pages[-1].commands)
+    assert all(page.section_title != "扉页" for page in pages)
+    assert all(page.section_title != "附录" for page in pages)
 
     chapter_pages = [page for page in pages if page.section_title == "外婆家的童年"]
     assert chapter_pages[0].body_page_number == 1
@@ -432,8 +433,8 @@ def test_image_cover_styles_use_distinct_title_typography():
     navy_title = _text_command(navy_pages[0], "回望这一生")
     watercolor_subtitle = _text_command(watercolor_pages[0], "余晋口述回忆录")
     navy_subtitle = _text_command(navy_pages[0], "余晋口述回忆录")
-    watercolor_quote = _text_command(watercolor_pages[-1], "因为是家乡，")
-    navy_quote = _text_command(navy_pages[-1], "因为是家乡，")
+    watercolor_quote = next(command for command in watercolor_pages[-1].commands if "因为是家乡" in command.text)
+    navy_quote = next(command for command in navy_pages[-1].commands if "因为是家乡" in command.text)
 
     assert watercolor_title.font_name == PDF_SERIF_FONT_NAME
     assert navy_title.font_name == PDF_SERIF_BOLD_FONT_NAME
@@ -468,13 +469,7 @@ def test_table_of_contents_links_to_numbered_chapter_pages():
     assert page_command.target_anchor == "chapter-1"
     assert page_command.x > toc_command.x
     assert page_command.y == toc_command.y
-    section_command = next(
-        command
-        for command in toc_page.commands
-        if "院子里的日子" in command.text
-    )
-    assert section_command.text == "1.1　院子里的日子"
-    assert section_command.target_anchor == "chapter-1"
+    assert all("院子里的日子" not in command.text for command in toc_page.commands)
 
     chapter_page = next(page for page in pages if page.anchor == "chapter-1")
     assert any(

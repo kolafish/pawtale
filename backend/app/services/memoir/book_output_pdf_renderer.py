@@ -64,22 +64,24 @@ class PDFLayout:
     small_font_size: int
     max_line_units: int
     filename_suffix: str = ""
+    reading_edition: bool = False
 
 
 PDF_LAYOUTS = {
     MemoirBookOutputExportLayout.STANDARD: PDFLayout(
         page_width=420,
         page_height=595,
-        font_size=12,
-        line_height=21,
-        margin_x=46,
+        font_size=14,
+        line_height=24,
+        margin_x=44,
         margin_top=56,
         margin_bottom=56,
         title_font_size=24,
-        heading_font_size=18,
-        small_font_size=10,
-        max_line_units=26,
+        heading_font_size=19,
+        small_font_size=11,
+        max_line_units=22,
         filename_suffix="阅读版",
+        reading_edition=True,
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=420,
@@ -525,7 +527,10 @@ class PDFBookBuilder:
             text,
             font_size=self.layout.heading_font_size,
             line_height=self.layout.line_height + 4,
-            max_units=max(12, self.layout.max_line_units - 2),
+            max_units=min(
+                self.layout.max_line_units - 2,
+                (self.layout.page_width - self.layout.margin_x * 2) // self.layout.heading_font_size,
+            ),
             spacing_after=6,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
@@ -536,7 +541,10 @@ class PDFBookBuilder:
             text,
             font_size=self.layout.font_size + 2,
             line_height=self.layout.line_height + 2,
-            max_units=max(12, self.layout.max_line_units - 2),
+            max_units=min(
+                self.layout.max_line_units - 2,
+                (self.layout.page_width - self.layout.margin_x * 2) // (self.layout.font_size + 2),
+            ),
             spacing_after=5,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )

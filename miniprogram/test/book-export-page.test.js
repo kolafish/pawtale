@@ -648,7 +648,7 @@ test("book export page downloads reading PDF with the standard layout", async ()
   });
 
   assert.equal(exportCalls[0].layout, "standard");
-  assert.equal(exportCalls[0].showSourceAppendix, true);
+  assert.equal(exportCalls[0].showSourceAppendix, false);
   assert.equal(opened[0].filePath, "/tmp/reading.pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
 });
