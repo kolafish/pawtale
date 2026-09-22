@@ -7,6 +7,7 @@ import {
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
+import { getAICreditSummary, type AICreditSummary } from "../../services/billing";
 import { isAuthError, navigateToLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
@@ -43,6 +44,14 @@ interface MeData {
   avatarSaving: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
+  creditLoading: boolean;
+  creditAvailable: boolean;
+  creditError: string;
+  creditTotalText: string;
+  creditUsedText: string;
+  creditRemainingText: string;
+  creditProgressPercent: number;
+  rechargeQrVisible: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -104,6 +113,36 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
   };
 }
 
+function creditAmount(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+}
+
+function formatCreditAmount(value: unknown): string {
+  return creditAmount(value).toFixed(2);
+}
+
+function creditData(summary: AICreditSummary): Pick<
+  MeData,
+  | "creditAvailable"
+  | "creditError"
+  | "creditTotalText"
+  | "creditUsedText"
+  | "creditRemainingText"
+  | "creditProgressPercent"
+> {
+  const total = creditAmount(summary.total_credit_rmb);
+  const used = creditAmount(summary.used_rmb);
+  return {
+    creditAvailable: true,
+    creditError: "",
+    creditTotalText: formatCreditAmount(total),
+    creditUsedText: formatCreditAmount(used),
+    creditRemainingText: formatCreditAmount(summary.remaining_rmb),
+    creditProgressPercent: total > 0 ? Math.min(100, Math.max(0, Math.round((used / total) * 100))) : 0,
+  };
+}
+
 function aiModelSettingsData(): Pick<MeData, "aiModelLabel"> {
   const model = readSelectedAIModel();
   return {
@@ -142,6 +181,14 @@ function loggedOutData(): Partial<MeData> {
     deletingAccount: false,
     editingName: false,
     voiceStatsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: 0,
+    rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
     avatarText: "作",
@@ -172,6 +219,14 @@ definePage<MeData>()({
     avatarSaving: false,
     editingName: false,
     voiceStatsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: 0,
+    rechargeQrVisible: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -236,7 +291,9 @@ definePage<MeData>()({
         ...accessibilitySettingsData(),
       });
       if (activeProjectId) {
-        await this.loadVoiceStats(activeProjectId);
+        await Promise.all([this.loadVoiceStats(activeProjectId), this.loadAICreditSummary()]);
+      } else {
+        await this.loadAICreditSummary();
       }
     } catch (error) {
       if (isAuthError(error)) {
@@ -342,6 +399,32 @@ definePage<MeData>()({
       this.setData({ voiceStatsLoading: false });
     }
   },
+
+  async loadAICreditSummary() {
+    this.setData({ creditLoading: true, creditError: "" });
+    try {
+      const summary = await getAICreditSummary();
+      this.setData(creditData(summary));
+    } catch (error) {
+      console.warn("load AI credit summary failed", error);
+      this.setData({
+        creditAvailable: false,
+        creditError: error instanceof Error ? error.message : "额度暂时无法加载",
+      });
+    } finally {
+      this.setData({ creditLoading: false });
+    }
+  },
+
+  openRechargeQr() {
+    this.setData({ rechargeQrVisible: true });
+  },
+
+  closeRechargeQr() {
+    this.setData({ rechargeQrVisible: false });
+  },
+
+  stopRechargeQrTap() {},
 
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
