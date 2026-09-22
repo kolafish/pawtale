@@ -146,6 +146,8 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     assert ended["state"] == "ready"
     assert stopped["state"] == "stopped"
     assert stopped_with == [None]
+    assert session.total_audio_bytes == 3
+    assert session.total_audio_duration_seconds == 3 / (16_000 * 2)
 
 
 async def test_voice_gateway_logs_structured_diagnostics(caplog):

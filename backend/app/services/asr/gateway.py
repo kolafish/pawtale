@@ -116,6 +116,7 @@ class VoiceGatewaySession:
         self._turn_index = 0
         self._frame_count = 0
         self._audio_bytes = 0
+        self._total_audio_bytes = 0
         self._asr_event_count = 0
         self._asr_final_count = 0
         self._barge_in_factory = barge_in_detector_factory
@@ -341,6 +342,7 @@ class VoiceGatewaySession:
             return
         self._frame_count += 1
         self._audio_bytes += len(audio)
+        self._total_audio_bytes += len(audio)
         if self.on_audio_frame:
             try:
                 await self.on_audio_frame(audio)
@@ -550,6 +552,19 @@ class VoiceGatewaySession:
         if self._state == VoiceGatewayState.STOPPED:
             return "asr_session_stopped"
         return "asr_session_not_started"
+
+    @property
+    def total_audio_bytes(self) -> int:
+        return self._total_audio_bytes
+
+    @property
+    def total_audio_duration_seconds(self) -> float:
+        # The mini program sends 16 kHz, 16-bit, mono PCM frames.
+        return self._total_audio_bytes / (16_000 * 2)
+
+    @property
+    def terminal_error(self) -> str | None:
+        return self._terminal_error
 
     def _event(self, event_type: str, **payload: Any) -> dict[str, Any]:
         return {

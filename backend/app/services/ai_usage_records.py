@@ -58,6 +58,7 @@ async def record_ai_usage(
     status: str,
     cost: AICostEstimate,
     usage: NormalizedAIUsage | None = None,
+    input_characters: int | None = None,
     image_count: int | None = None,
     audio_duration_seconds: float | None = None,
     error_type: str | None = None,
@@ -82,6 +83,7 @@ async def record_ai_usage(
             cached_input_tokens=usage.cached_input_tokens,
             cache_write_input_tokens=usage.cache_write_input_tokens,
             reasoning_tokens=usage.reasoning_tokens,
+            input_characters=input_characters,
             image_count=image_count,
             audio_duration_ms=round(audio_duration_seconds * 1000) if audio_duration_seconds else None,
             estimated_cost_rmb=(

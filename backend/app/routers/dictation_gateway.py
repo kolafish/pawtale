@@ -14,6 +14,7 @@ from app.services.asr.capacity import (
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
 from app.services.asr.gateway import AudioAuthorizationHandler, VoiceGatewaySession
+from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.ai_credits import assert_ai_credit_available
 
 
@@ -30,6 +31,7 @@ async def run_dictation_gateway(
     text_normalizer: Callable[[str], str] = _identity_text,
     authorize_audio: AudioAuthorizationHandler | None = None,
 ) -> None:
+    session: VoiceGatewaySession | None = None
     try:
         await assert_ai_credit_available(user_id)
     except InsufficientAICreditError:
@@ -67,4 +69,12 @@ async def run_dictation_gateway(
         )
         await session.run()
     finally:
+        if session is not None:
+            audio_duration_seconds = float(getattr(session, "total_audio_duration_seconds", 0) or 0)
+            terminal_error = getattr(session, "terminal_error", None)
+            await record_volc_streaming_asr_usage(
+                audio_duration_seconds=audio_duration_seconds,
+                status="failed" if terminal_error else "succeeded",
+                error_type=terminal_error,
+            )
         await capacity_lease.release()

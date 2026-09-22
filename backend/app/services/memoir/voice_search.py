@@ -16,6 +16,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
+from app.services.asr.billing import record_volc_streaming_asr_usage
 
 
 MAX_VOICE_SEARCH_AUDIO_BYTES = 2 * 1024 * 1024
@@ -157,6 +158,7 @@ async def transcribe_voice_search_audio(
     audio: bytes,
     *,
     asr_client_factory: StreamingASRClientFactory,
+    mime_type: str = "audio/pcm",
 ) -> str:
     if not audio:
         raise VoiceSearchTranscriptionError("voice_search_audio_empty", "请先录一段搜索语音", 400)
@@ -167,6 +169,14 @@ async def transcribe_voice_search_audio(
     final_texts: list[str] = []
     latest_text = ""
     collect_task: asyncio.Task[None] | None = None
+    status = "failed"
+    error_type: str | None = None
+    normalized_mime_type = mime_type.split(";", 1)[0].strip().lower()
+    audio_duration_seconds = (
+        len(audio) / (16_000 * 2)
+        if normalized_mime_type in {"audio/pcm", "audio/x-pcm"}
+        else 0
+    )
 
     async def collect_events() -> None:
         nonlocal latest_text
@@ -189,11 +199,18 @@ async def transcribe_voice_search_audio(
         await asr_client.send_audio(audio)
         await asr_client.finish()
         await asyncio.wait_for(asyncio.shield(collect_task), timeout=ASR_SEARCH_DRAIN_TIMEOUT_SECONDS)
-    except VoiceSearchTranscriptionError:
+        transcript = (final_texts[-1] if final_texts else latest_text).strip()
+        if not transcript:
+            raise VoiceSearchTranscriptionError("asr_empty_transcript", "没有识别到搜索内容，请换个说法再试", 422)
+        status = "succeeded"
+    except VoiceSearchTranscriptionError as exc:
+        error_type = exc.code
         raise
     except asyncio.TimeoutError as exc:
+        error_type = type(exc).__name__
         raise VoiceSearchTranscriptionError("asr_finish_timeout", "语音识别超时，请重试", 504) from exc
     except Exception as exc:
+        error_type = type(exc).__name__
         raise VoiceSearchTranscriptionError(str(exc) or "asr_provider_error", "语音识别服务暂时不可用", 502) from exc
     finally:
         if collect_task is not None and not collect_task.done():
@@ -202,10 +219,12 @@ async def transcribe_voice_search_audio(
                 await collect_task
         with contextlib.suppress(Exception):
             await asr_client.close()
+        await record_volc_streaming_asr_usage(
+            audio_duration_seconds=audio_duration_seconds,
+            status=status,
+            error_type=error_type,
+        )
 
-    transcript = (final_texts[-1] if final_texts else latest_text).strip()
-    if not transcript:
-        raise VoiceSearchTranscriptionError("asr_empty_transcript", "没有识别到搜索内容，请换个说法再试", 422)
     return transcript
 
 
