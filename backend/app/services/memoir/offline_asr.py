@@ -14,6 +14,7 @@ from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
 from app.services.asr.factory import create_volc_streaming_asr_client
 from app.services.ai_costs import estimate_audio_cost
+from app.services.ai_usage_records import record_ai_usage
 from app.services.memoir.voice_transcript_recovery import (
     ASR_RECOVERY_PCM_BYTES_PER_SAMPLE,
     ASR_RECOVERY_PCM_SAMPLE_RATE,
@@ -189,66 +190,96 @@ async def _transcribe_with_stepfun(
     *,
     hotwords: Sequence[str],
 ) -> OfflineASRResult:
-    audio_format = _stepfun_audio_format(utterance)
     service = StepFunASRService()
     size_bytes = path.stat().st_size
-    if audio_format.type != "pcm" or size_bytes <= ASR_RECOVERY_PCM_SEGMENT_BYTES:
-        audio_bytes = await _read_audio_segment(path, start_byte=0, byte_count=size_bytes)
-        result = await service.transcribe(audio_bytes, audio_format, hotwords=list(hotwords))
-        duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
-        return OfflineASRResult(
-            provider=STEPFUN_OFFLINE_ASR_PROVIDER,
-            text=normalize_memoir_asr_text(result.text.strip()),
-            raw={
-                "provider": "stepfun",
-                "model": service.model,
-                "usage": result.usage,
-                "segment_count": 1,
-                "audio_duration_seconds": duration_seconds,
-                "estimated_cost": estimate_audio_cost(
-                    provider="stepfun",
-                    model=service.model,
-                    duration_seconds=duration_seconds,
-                ).as_dict(),
-            },
-        )
-
-    texts: list[str] = []
-    usages: list[dict[str, Any] | None] = []
-    start_byte = 0
-    segment_count = 0
-    while start_byte < size_bytes:
-        byte_count = min(ASR_RECOVERY_PCM_SEGMENT_BYTES, size_bytes - start_byte)
-        if byte_count % ASR_RECOVERY_PCM_BYTES_PER_SAMPLE:
-            byte_count -= byte_count % ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
-        if byte_count <= 0:
-            break
-        segment_count += 1
-        audio_bytes = await _read_audio_segment(path, start_byte=start_byte, byte_count=byte_count)
-        result = await service.transcribe(audio_bytes, audio_format, hotwords=list(hotwords))
-        text = normalize_memoir_asr_text(result.text.strip())
-        if text:
-            texts.append(text)
-        usages.append(result.usage)
-        start_byte += byte_count
-
     duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
-    return OfflineASRResult(
-        provider=STEPFUN_OFFLINE_ASR_PROVIDER,
-        text="\n".join(texts).strip(),
-        raw={
-            "provider": "stepfun",
-            "model": service.model,
-            "usage_by_segment": usages,
-            "segment_count": segment_count,
-            "audio_duration_seconds": duration_seconds,
-            "estimated_cost": estimate_audio_cost(
+    try:
+        audio_format = _stepfun_audio_format(utterance)
+        if audio_format.type != "pcm" or size_bytes <= ASR_RECOVERY_PCM_SEGMENT_BYTES:
+            audio_bytes = await _read_audio_segment(path, start_byte=0, byte_count=size_bytes)
+            result = await service.transcribe(audio_bytes, audio_format, hotwords=list(hotwords))
+            stepfun_cost = estimate_audio_cost(
                 provider="stepfun",
                 model=service.model,
                 duration_seconds=duration_seconds,
-            ).as_dict(),
-        },
-    )
+            )
+            await record_ai_usage(
+                provider="stepfun",
+                model=service.model,
+                status="succeeded",
+                cost=stepfun_cost,
+                audio_duration_seconds=duration_seconds,
+            )
+            return OfflineASRResult(
+                provider=STEPFUN_OFFLINE_ASR_PROVIDER,
+                text=normalize_memoir_asr_text(result.text.strip()),
+                raw={
+                    "provider": "stepfun",
+                    "model": service.model,
+                    "usage": result.usage,
+                    "segment_count": 1,
+                    "audio_duration_seconds": duration_seconds,
+                    "estimated_cost": stepfun_cost.as_dict(),
+                },
+            )
+
+        texts: list[str] = []
+        usages: list[dict[str, Any] | None] = []
+        start_byte = 0
+        segment_count = 0
+        while start_byte < size_bytes:
+            byte_count = min(ASR_RECOVERY_PCM_SEGMENT_BYTES, size_bytes - start_byte)
+            if byte_count % ASR_RECOVERY_PCM_BYTES_PER_SAMPLE:
+                byte_count -= byte_count % ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
+            if byte_count <= 0:
+                break
+            segment_count += 1
+            audio_bytes = await _read_audio_segment(path, start_byte=start_byte, byte_count=byte_count)
+            result = await service.transcribe(audio_bytes, audio_format, hotwords=list(hotwords))
+            text = normalize_memoir_asr_text(result.text.strip())
+            if text:
+                texts.append(text)
+            usages.append(result.usage)
+            start_byte += byte_count
+
+        stepfun_cost = estimate_audio_cost(
+            provider="stepfun",
+            model=service.model,
+            duration_seconds=duration_seconds,
+        )
+        await record_ai_usage(
+            provider="stepfun",
+            model=service.model,
+            status="succeeded",
+            cost=stepfun_cost,
+            audio_duration_seconds=duration_seconds,
+        )
+        return OfflineASRResult(
+            provider=STEPFUN_OFFLINE_ASR_PROVIDER,
+            text="\n".join(texts).strip(),
+            raw={
+                "provider": "stepfun",
+                "model": service.model,
+                "usage_by_segment": usages,
+                "segment_count": segment_count,
+                "audio_duration_seconds": duration_seconds,
+                "estimated_cost": stepfun_cost.as_dict(),
+            },
+        )
+    except Exception as exc:
+        await record_ai_usage(
+            provider="stepfun",
+            model=service.model,
+            status="failed",
+            cost=estimate_audio_cost(
+                provider="stepfun",
+                model=service.model,
+                duration_seconds=duration_seconds,
+            ),
+            audio_duration_seconds=duration_seconds,
+            error_type=type(exc).__name__,
+        )
+        raise
 
 
 async def run_offline_asr(request: OfflineASRRequest) -> list[OfflineASRResult]:

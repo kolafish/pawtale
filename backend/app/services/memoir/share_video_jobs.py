@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select, update
@@ -57,6 +58,7 @@ from app.services.memoir.share_video_alignment import (
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_transcripts import _load_owned_utterance
+from app.services.ai_usage_records import AIUsageContext
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
@@ -846,6 +848,12 @@ async def run_share_video_job_with_session(
     target_path = share_video_file_path(job)
     try:
         metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+        usage_context = AIUsageContext(
+            operation_id=str(uuid4()),
+            operation="memoir.share_video_generation",
+            user_id=job.user_id,
+            project_id=job.project_id,
+        )
 
         async def persist_background_progress(updated_metadata: ShareVideoJobMetadata) -> None:
             _set_job_metadata(job, updated_metadata)
@@ -858,6 +866,7 @@ async def run_share_video_job_with_session(
             persist_progress=persist_background_progress,
             ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
             volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
+            usage_context=usage_context,
         )
         background_image_path = prepared_background.image_path
         background_segments = prepared_background.segments
