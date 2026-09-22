@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import InsufficientAICreditError
 from app.database import get_db
 from app.domain.memoir.types import MemoirSpeakerRole
 from app.routers.websocket_auth import (
@@ -22,6 +23,7 @@ from app.services.asr.capacity import (
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
 from app.services.asr.barge_in import BargeInDetector
+from app.services.ai_credits import assert_ai_credit_available
 from app.services.asr.gateway import VoiceGatewaySession, VoiceGatewayStopReason
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_authorization as memoir_voice_authorization
@@ -45,6 +47,12 @@ async def mobile_memoir_voice_gateway(
         await _reject_websocket(websocket, "voice_gateway_auth_failed")
         return
     current_user_id = current_user.id
+
+    try:
+        await assert_ai_credit_available(current_user_id)
+    except InsufficientAICreditError:
+        await _reject_websocket(websocket, "ai_credit_insufficient")
+        return
 
     if not await memoir_voice_authorization.has_current_voice_authorization_consent(db, current_user_id):
         await _reject_websocket(websocket, "voice_authorization_required")
@@ -182,6 +190,12 @@ async def mobile_memoir_voice_assistant_turn_stream(
         await _reject_websocket(websocket, "voice_gateway_auth_failed")
         return
     current_user_id = current_user.id
+
+    try:
+        await assert_ai_credit_available(current_user_id)
+    except InsufficientAICreditError:
+        await _reject_websocket(websocket, "ai_credit_insufficient")
+        return
 
     try:
         await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user_id)

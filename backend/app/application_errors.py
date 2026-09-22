@@ -8,3 +8,7 @@ class InvalidRequestError(ApplicationError):
 
 class ResourceNotFoundError(ApplicationError):
     pass
+
+
+class InsufficientAICreditError(ApplicationError):
+    pass

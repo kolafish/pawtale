@@ -14,6 +14,7 @@ from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
 from app.services.asr.factory import create_volc_streaming_asr_client
 from app.services.ai_costs import estimate_audio_cost
+from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.ai_usage_records import record_ai_usage
 from app.services.memoir.voice_transcript_recovery import (
     ASR_RECOVERY_PCM_BYTES_PER_SAMPLE,
@@ -124,6 +125,7 @@ def _title_subject(title: str) -> str:
 
 
 async def _transcribe_with_volc(utterance: MemoirVoiceUtterance, path: Path) -> OfflineASRResult:
+    await assert_current_ai_credit_available()
     event = await transcribe_audio_path_for_recovery(
         path,
         asr_client_factory=lambda: create_volc_streaming_asr_client(
@@ -194,6 +196,7 @@ async def _transcribe_with_stepfun(
     size_bytes = path.stat().st_size
     duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
     try:
+        await assert_current_ai_credit_available()
         audio_format = _stepfun_audio_format(utterance)
         if audio_format.type != "pcm" or size_bytes <= ASR_RECOVERY_PCM_SEGMENT_BYTES:
             audio_bytes = await _read_audio_segment(path, start_byte=0, byte_count=size_bytes)

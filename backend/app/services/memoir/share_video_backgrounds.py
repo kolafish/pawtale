@@ -11,6 +11,7 @@ import httpx
 
 from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
+from app.services.ai_credits import assert_ai_credit_available
 from app.services.ai_costs import estimate_image_cost
 from app.services.ai_usage_records import AIUsageContext, record_ai_usage
 
@@ -392,6 +393,8 @@ async def get_or_generate_share_video_background(
         )
 
     try:
+        if usage_context and usage_context.user_id:
+            await assert_ai_credit_available(usage_context.user_id)
         image = await VolcArkImageGenerationService().generate(prompt.prompt)
     except Exception as exc:
         await record_ai_usage(
