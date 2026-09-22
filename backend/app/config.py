@@ -18,11 +18,6 @@ VALID_AI_TEXT_MODELS = {
     "deepseek-v4-pro",
     "volc-doubao-pro",
     "doubao-seed-2-0-pro-260215",
-    # Retained for legacy direct requests; removed from product selectors.
-    "claude-fable-5",
-    "claude-opus-4-8",
-    "claude-sonnet-4",
-    "claude-sonnet-4-6",
 }
 
 

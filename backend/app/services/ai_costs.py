@@ -104,6 +104,27 @@ class AITokenPricing:
     cache_hit_rmb_per_million: float | None = None
     cache_write_rmb_per_million: float | None = None
     source: str = "configured estimate"
+    # Optional context-length tiers. Each tuple is
+    # (max_input_tokens, input_rmb_per_million, output_rmb_per_million,
+    #  cache_hit_rmb_per_million, cache_write_rmb_per_million). A None max
+    # value is the final open-ended tier.
+    context_tiers: tuple[tuple[int | None, float, float, float | None, float | None], ...] = ()
+
+    def rates_for_input_tokens(
+        self,
+        input_tokens: int,
+    ) -> tuple[float, float, float | None, float | None]:
+        for max_input_tokens, input_rate, output_rate, cache_hit_rate, cache_write_rate in (
+            self.context_tiers
+        ):
+            if max_input_tokens is None or input_tokens <= max_input_tokens:
+                return input_rate, output_rate, cache_hit_rate, cache_write_rate
+        return (
+            self.input_rmb_per_million,
+            self.output_rmb_per_million,
+            self.cache_hit_rmb_per_million,
+            self.cache_write_rmb_per_million,
+        )
 
 
 CostStatus = Literal["estimated", "unknown"]
@@ -131,6 +152,15 @@ class AICostEstimate:
         if self.source:
             values["source"] = self.source
         return values
+
+
+@dataclass(frozen=True)
+class AIUnitPricing:
+    provider: str
+    model: str
+    unit: str
+    rmb_per_unit: float
+    source: str
 
 
 def _usd(
@@ -169,25 +199,37 @@ _PRICING: dict[tuple[str, str], AITokenPricing] = {
     ("volc_ark", "doubao-seed-2-0-pro-260215"): AITokenPricing(
         provider="volc_ark",
         model="doubao-seed-2-0-pro-260215",
-        input_rmb_per_million=6.0,
-        output_rmb_per_million=30.0,
-        cache_hit_rmb_per_million=1.2,
-        source="configured estimate; verify against Ark account pricing",
-    ),
-    ("claude", "claude-opus-4-8"): _usd(
-        "claude", "claude-opus-4-8", 15.0, 75.0,
-        cache_hit_usd=1.5, cache_write_usd=18.75,
-    ),
-    ("claude", "claude-sonnet-4-6"): _usd(
-        "claude", "claude-sonnet-4-6", 3.0, 15.0,
-        cache_hit_usd=0.3, cache_write_usd=3.75,
+        input_rmb_per_million=3.2,
+        output_rmb_per_million=16.0,
+        source="https://www.volcengine.com/docs/84458/1585097?lang=zh&redirect=1",
+        context_tiers=(
+            (32_000, 3.2, 16.0, None, None),
+            (128_000, 4.8, 24.0, None, None),
+            (None, 9.6, 48.0, None, None),
+        ),
     ),
 }
 _ALIASES = {
     ("deepseek", "deepseek"): "deepseek-flash",
     ("deepseek", "deepseek-v4-flash"): "deepseek-flash",
     ("volc_ark", "volc-doubao-pro"): "doubao-seed-2-0-pro-260215",
-    ("claude", "claude-sonnet-4"): "claude-sonnet-4-6",
+}
+
+_UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
+    ("volc_ark", "doubao-seedream-5-0-lite-260128"): AIUnitPricing(
+        provider="volc_ark",
+        model="doubao-seedream-5-0-lite-260128",
+        unit="image",
+        rmb_per_unit=0.22,
+        source="https://www.volcengine.com/product/ark",
+    ),
+    ("stepfun", "stepaudio-3-asr-max"): AIUnitPricing(
+        provider="stepfun",
+        model="stepaudio-3-asr-max",
+        unit="audio_hour",
+        rmb_per_unit=2.8,
+        source="https://platform.stepfun.com/docs/zh/guides/pricing/details",
+    ),
 }
 
 
@@ -210,19 +252,71 @@ def estimate_ai_cost(
         return AICostEstimate(None, "unknown", provider, model, "no pricing configured for provider/model")
     if normalized.input_tokens is None or normalized.output_tokens is None:
         return AICostEstimate(None, "unknown", provider, model, "provider returned incomplete token usage", pricing.source)
+    input_rate, output_rate, cache_hit_rate, cache_write_rate = pricing.rates_for_input_tokens(
+        normalized.input_tokens
+    )
     cached = normalized.cached_input_tokens
     cache_write = normalized.cache_write_input_tokens
     uncached = normalized.input_tokens - cached - cache_write
     if uncached < 0:
         return AICostEstimate(None, "unknown", provider, model, "provider token usage has an invalid cache breakdown", pricing.source)
-    if cached and pricing.cache_hit_rmb_per_million is None:
+    if cached and cache_hit_rate is None:
         return AICostEstimate(None, "unknown", provider, model, "cache hit pricing is not configured", pricing.source)
-    if cache_write and pricing.cache_write_rmb_per_million is None:
+    if cache_write and cache_write_rate is None:
         return AICostEstimate(None, "unknown", provider, model, "cache write pricing is not configured", pricing.source)
     amount = (
-        uncached * pricing.input_rmb_per_million
-        + cached * (pricing.cache_hit_rmb_per_million or 0.0)
-        + cache_write * (pricing.cache_write_rmb_per_million or 0.0)
-        + normalized.output_tokens * pricing.output_rmb_per_million
+        uncached * input_rate
+        + cached * (cache_hit_rate or 0.0)
+        + cache_write * (cache_write_rate or 0.0)
+        + normalized.output_tokens * output_rate
     ) / 1_000_000
     return AICostEstimate(round(amount, 6), "estimated", provider, model, source=pricing.source)
+
+
+def _unit_pricing(provider: str | None, model: str | None) -> AIUnitPricing | None:
+    if not provider or not model:
+        return None
+    key = (provider.strip().lower(), model.strip().lower())
+    return _UNIT_PRICING.get(key)
+
+
+def estimate_image_cost(
+    *,
+    provider: str | None,
+    model: str | None,
+    image_count: int = 1,
+) -> AICostEstimate:
+    pricing = _unit_pricing(provider, model)
+    if pricing is None or pricing.unit != "image":
+        return AICostEstimate(None, "unknown", provider, model, "no image pricing configured")
+    if image_count <= 0:
+        return AICostEstimate(None, "unknown", provider, model, "image count must be positive", pricing.source)
+    return AICostEstimate(
+        round(image_count * pricing.rmb_per_unit, 6),
+        "estimated",
+        provider,
+        model,
+        source=pricing.source,
+    )
+
+
+def estimate_audio_cost(
+    *,
+    provider: str | None,
+    model: str | None,
+    duration_seconds: float | int | None,
+) -> AICostEstimate:
+    pricing = _unit_pricing(provider, model)
+    if pricing is None or pricing.unit != "audio_hour":
+        return AICostEstimate(None, "unknown", provider, model, "no audio pricing configured")
+    if not isinstance(duration_seconds, (int, float)) or isinstance(duration_seconds, bool):
+        return AICostEstimate(None, "unknown", provider, model, "audio duration is required", pricing.source)
+    if duration_seconds <= 0:
+        return AICostEstimate(None, "unknown", provider, model, "audio duration must be positive", pricing.source)
+    return AICostEstimate(
+        round(float(duration_seconds) / 3600 * pricing.rmb_per_unit, 6),
+        "estimated",
+        provider,
+        model,
+        source=pricing.source,
+    )

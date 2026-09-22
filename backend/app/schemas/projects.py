@@ -366,8 +366,6 @@ class DocumentAIReviseMultiRequest(BaseModel):
     full_content: str | None = None
     models: list[str] = Field(
         default_factory=lambda: [
-            "claude-opus-4-8",
-            "claude-sonnet-4",
             "deepseek-flash",
             "deepseek-v4-pro",
             "doubao-seed-2-0-pro-260215",

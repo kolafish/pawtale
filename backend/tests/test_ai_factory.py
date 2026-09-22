@@ -18,9 +18,6 @@ VOLC_DEFAULT_MODEL = ai_factory.settings.volc_ark_model
         ("deepseek-v4-pro", DeepSeekTextService, "deepseek-v4-pro"),
         ("doubao-seed-2-0-pro-260215", VolcArkTextService, VOLC_DEFAULT_MODEL),
         ("volc-doubao-pro", VolcArkTextService, VOLC_DEFAULT_MODEL),
-        ("claude-fable-5", ClaudeTextService, "claude-fable-5"),
-        ("claude-opus-4-8", ClaudeTextService, "claude-opus-4-8"),
-        ("claude-sonnet-4", ClaudeTextService, "claude-sonnet-4-6"),
     ],
 )
 def test_get_ai_service_resolves_supported_models(model, expected_type, expected_model):
@@ -33,8 +30,6 @@ def test_get_ai_service_resolves_supported_models(model, expected_type, expected
 @pytest.mark.parametrize(
     ("default_model", "expected_type", "expected_model"),
     [
-        ("claude-fable-5", ClaudeTextService, "claude-fable-5"),
-        ("claude-opus-4-8", ClaudeTextService, "claude-opus-4-8"),
         ("deepseek", DeepSeekTextService, "deepseek-flash"),
         ("deepseek-flash", DeepSeekTextService, "deepseek-flash"),
         ("deepseek-v4-pro", DeepSeekTextService, "deepseek-v4-pro"),
@@ -61,7 +56,6 @@ def test_get_ai_service_rejects_invalid_model():
 def test_public_request_scope_forces_the_default_model():
     token = set_request_ai_model_scope(is_admin=False)
     try:
-        assert ai_factory.get_ai_service("claude-opus-4-8").model_name == "deepseek-flash"
         assert ai_factory.get_ai_service("deepseek-v4-pro").model_name == "deepseek-flash"
     finally:
         reset_request_ai_model_scope(token)
@@ -70,7 +64,8 @@ def test_public_request_scope_forces_the_default_model():
 def test_admin_request_scope_keeps_selected_model():
     token = set_request_ai_model_scope(is_admin=True)
     try:
-        assert ai_factory.get_ai_service("claude-opus-4-8").model_name == "claude-opus-4-8"
+        with pytest.raises(ai_factory.UnsupportedAIModelError):
+            ai_factory.get_ai_service("claude-opus-4-8")
     finally:
         reset_request_ai_model_scope(token)
 
