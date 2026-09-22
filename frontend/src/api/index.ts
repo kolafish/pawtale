@@ -358,7 +358,7 @@ export const memoirBookEditorApi = {
   generatePlan: (projectId: string, aiModel?: string) =>
     api.post<MemoirBookPlan>(
       `/memoir/projects/${projectId}/book-editor/plan/generate`,
-      { ai_model: aiModel, max_chapters: 8 },
+      { ai_model: aiModel },
     ).then(r => r.data),
   confirmPlan: (
     projectId: string,

@@ -570,7 +570,7 @@ definePage<BookPageData>()({
     }
     this.setData({ generatingPlan: true, error: "" });
     try {
-      const plan = await generateMemoirBookPlan(this.data.projectId, { max_chapters: 8 });
+      const plan = await generateMemoirBookPlan(this.data.projectId);
       this.applyPlan(plan);
       trackAuditAction("book.plan_generate", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "已生成章节", icon: "success" });

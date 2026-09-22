@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
@@ -1221,6 +1222,17 @@ async def place_material(
         )
         created_section = True
     elif target is None:
+        chapter_count = await db.scalar(
+            select(func.count(MemoirBookPlanChapter.id)).where(
+                MemoirBookPlanChapter.project_id == project_id,
+                MemoirBookPlanChapter.plan_id == plan.id,
+            )
+        )
+        if (chapter_count or 0) >= MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
+            )
         chapters = list(
             (
                 await db.scalars(

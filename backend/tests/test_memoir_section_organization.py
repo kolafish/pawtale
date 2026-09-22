@@ -1319,7 +1319,7 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
         plan_calls += 1
         title, chapters = chapters_from_payload({"title": "我的故事", "chapters": [
             {"title": "小时候", "source_indices": [1]}, {"title": "工作后", "source_indices": [2]},
-        ]}, sources=kwargs["sources"], max_chapters=8)
+        ]}, sources=kwargs["sources"])
         return GeneratedBookPlan(title=title, chapters=chapters, model="test", prompt="test")
 
     async def sections(_db, **kwargs):
