@@ -1,6 +1,7 @@
 import logging
 
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_access import restrict_requested_ai_model
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import (
     CLAUDE_FABLE_MODEL,
@@ -75,6 +76,7 @@ class AIServiceFactory:
             or settings.default_ai_model
             or DEFAULT_AI_TEXT_MODEL
         )
+        normalized_model = restrict_requested_ai_model(normalized_model)
         service = AIServiceFactory._service_for_model(normalized_model)
         AIServiceFactory._log_resolution(requested_model, service)
         return service
