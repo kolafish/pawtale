@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
@@ -653,7 +654,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
                 "version": data["sections"][0]["version"],
             }
         ],
-        "ai_model": "deepseek-v4-flash",
+        "ai_model": DEFAULT_AI_TEXT_MODEL,
     }
 
     queued = await client.post(url, json=payload)
@@ -666,7 +667,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
     assert state["status"] == "pending"
     assert state["material_count"] == 2
     assert state["batch_count"] == 1
-    assert state["requested_ai_model"] == "deepseek-v4-flash"
+    assert state["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -770,7 +771,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
                     "version": original_section["version"],
                 }
             ],
-            "ai_model": "deepseek-v4-flash",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -809,7 +810,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         for material in chapter_sections[0]["materials"]
     ] == [False, True]
     assert len(fake.prompts) == 2
-    assert requested_models == ["deepseek-v4-flash"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
     assert "先从全章视角设计" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert chapter_id not in fake.prompts[0]

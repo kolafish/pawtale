@@ -1,4 +1,6 @@
 import os
+import secrets
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,8 @@ if POSTGRES_DATABASE_URL:
 os.environ["APP_ENV"] = "test"
 
 from app.main import app  # noqa: E402
+from app.auth import SESSION_COOKIE_NAME, hash_password, session_token_hash  # noqa: E402
+from app.clock import utcnow_naive  # noqa: E402
 from app.database import (  # noqa: E402
     Base,
     create_database_engine,
@@ -24,6 +28,7 @@ from app.database import (  # noqa: E402
     register_models,
     settings,
 )
+from app.models.users import AuthSession, User  # noqa: E402
 from app.migrations.postgres_runtime import (  # noqa: E402
     assert_postgres_runtime_schema,
 )
@@ -73,7 +78,7 @@ def postgres_schema():
     yield
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def verified_postgres_schema(postgres_schema):
     """Verify the migrated runtime schema once for the whole test session."""
     test_settings = settings.model_copy(
@@ -107,9 +112,10 @@ async def test_db(verified_postgres_schema):
         expire_on_commit=False,
     )
     await _truncate_postgres_tables(engine)
+    # The next test truncates before use; repeating the same cleanup here only
+    # adds a second full-table operation to every database test.
     async with async_session() as session:
         yield session
-    await _truncate_postgres_tables(engine)
     await engine.dispose()
 
 
@@ -129,16 +135,43 @@ async def anonymous_client(test_db, tmp_path):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(scope="session")
+def test_user_password_hash():
+    """Calculate the test password once; authentication endpoints test hashing separately."""
+    return hash_password("password123")
+
+
 @pytest_asyncio.fixture
-async def client(anonymous_client):
+async def client(anonymous_client, test_db, test_user_password_hash):
     """创建已登录测试客户端，保持既有业务测试聚焦业务行为。"""
-    response = await anonymous_client.post(
-        "/api/auth/register",
-        json={
-            "email": "tester@example.com",
-            "password": "password123",
-            "display_name": "测试用户",
-        },
+    # Registration and password hashing have dedicated auth tests. Most cases
+    # only need an authenticated user, so create that state directly.
+    token = secrets.token_urlsafe(32)
+    user = User(
+        email="tester@example.com",
+        password_hash=test_user_password_hash,
+        display_name="测试用户",
     )
-    assert response.status_code == 201
+    test_db.add(user)
+    await test_db.flush()
+    test_db.add(
+        AuthSession(
+            token_hash=session_token_hash(token),
+            user_id=user.id,
+            expires_at=utcnow_naive() + timedelta(days=30),
+        )
+    )
+    await test_db.commit()
+    anonymous_client.cookies.set(SESSION_COOKIE_NAME, token)
     yield anonymous_client
+
+
+@pytest_asyncio.fixture
+async def admin_client(client, test_db):
+    """Promote the fixture user for workflows available only to administrators."""
+    response = await client.get("/api/auth/me")
+    user = await test_db.get(User, response.json()["id"])
+    assert user is not None
+    user.role = "admin"
+    await test_db.commit()
+    return client

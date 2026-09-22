@@ -6,6 +6,7 @@ from httpx import Response
 from fastapi import HTTPException
 import pytest
 from sqlalchemy import func, select
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
@@ -983,7 +984,7 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
     assert version_count == 1
 
 
-async def test_prepare_uses_and_remembers_the_selected_ai_model(
+async def test_prepare_uses_and_remembers_the_default_ai_model(
     client,
     test_db,
     monkeypatch,
@@ -999,15 +1000,15 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
 
     assert first.status_code == 200, first.text
     assert requested_models
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
     project = await test_db.get(Project, project_id)
     assert project is not None
-    assert project.metadata_json["ai_model"] == "claude-opus-4-8"
+    assert project.metadata_json["ai_model"] == DEFAULT_AI_TEXT_MODEL
 
     requested_models.clear()
     second = await _run_chapter_preparation(
@@ -1019,10 +1020,10 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
 
     assert second.status_code == 200, second.text
     assert requested_models
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
 
-async def test_chapter_preparation_job_reports_progress_and_selected_model(
+async def test_chapter_preparation_job_reports_progress_and_default_model(
     client,
     test_db,
     monkeypatch,
@@ -1037,7 +1038,7 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
         f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/jobs",
         json={
             "operation": "prepare",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -1046,7 +1047,7 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
     assert queued_body["status"] == "pending"
     assert queued_body["stage"] == "queued"
     assert queued_body["total_section_count"] == 1
-    assert queued_body["requested_ai_model"] == "claude-opus-4-8"
+    assert queued_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert queued_body["can_cancel"] is True
 
     overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
@@ -1074,10 +1075,10 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
     assert current_body["stage"] == "completed"
     assert current_body["completed_section_count"] == 1
     assert current_body["outcome"] == "completed"
-    assert current_body["requested_ai_model"] == "claude-opus-4-8"
+    assert current_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert current_body["resolved_ai_model"] == fake.model_name
     assert current_body["can_cancel"] is False
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
 
 async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
@@ -1498,7 +1499,7 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
         project_id=project_id,
         chapter_id=chapter_id,
         operation="rewrite",
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
 
     assert rewritten.status_code == 200, rewritten.text
@@ -1511,7 +1512,7 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     assert all("请把下面的原始讲述整理为回忆录章节" in prompt for prompt in fake.prompts)
     assert all(prompt.count("material_id: ") == 1 for prompt in fake.prompts)
     assert body["draft_sections"][0]["content"] == "这是已经存在的完整章节正文。"
-    assert requested_models == ["claude-opus-4-8"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
 
 
 async def test_section_revision_waits_for_apply_and_preserves_other_content(
@@ -1568,7 +1569,7 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         f"{base_path}/jobs",
         json={
             "operation": "plan",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
             "feedback": "把标题中的错字改正，并把标题缩短为“赛后回想”。",
         },
     )
@@ -1658,14 +1659,14 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     assert target_section.version == 2
     draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
     assert draft is not None
-    assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"
+    assert draft.metadata_json["last_requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert draft.metadata_json["last_resolved_ai_model"] == "test-layered-book"
     assert sources[0]["utterance_id"] not in fake.prompts[-1]
     assert added_source["utterance_id"] not in fake.prompts[-1]
     assert requested_models == [
-        "claude-opus-4-8",
-        "claude-opus-4-8",
-        "claude-opus-4-8",
+        DEFAULT_AI_TEXT_MODEL,
+        DEFAULT_AI_TEXT_MODEL,
+        DEFAULT_AI_TEXT_MODEL,
     ]
 
 
@@ -1976,13 +1977,13 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         client,
         test_db,
         project_id=project_id,
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
     assert generated.status_code == 200
     review = generated.json()
 
     assert review["status"] == "ready"
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
     book_prompt = next(prompt for prompt in fake.prompts if "请通读下面这本回忆录" in prompt)
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
@@ -2049,7 +2050,7 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
         json={
             "force_regenerate": False,
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -2112,9 +2113,9 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert completed_body["processed_chapter_count"] == 2
     assert completed_body["review_id"]
     assert completed_body["can_cancel"] is False
-    assert completed_body["requested_ai_model"] == "claude-opus-4-8"
+    assert completed_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert completed_body["resolved_ai_model"] == fake.model_name
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
     snapshot = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
@@ -2219,7 +2220,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         json={
             "include_answers": True,
             "action_ids": [],
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert queued.status_code == 202, queued.text
@@ -2241,7 +2242,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         json={
             "include_answers": True,
             "action_ids": [action_id],
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert retried.status_code == 202, retried.text
@@ -2281,7 +2282,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert "第1小节" in completed_body["summary"]
     assert "C1" not in completed_body["summary"]
     assert "S1" not in completed_body["summary"]
-    assert set(requested_models) == {None, "claude-opus-4-8"}
+    assert set(requested_models) == {None, DEFAULT_AI_TEXT_MODEL}
 
     versions = list(
         (
@@ -2332,7 +2333,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         f"revision-proposals/{completed_body['proposal_id']}/feedback/jobs",
         json={
             "feedback": "保留两段经历，但请统一相关人物的称谓。",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert feedback_job.status_code == 202, feedback_job.text
@@ -2382,7 +2383,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
 
     draft_job = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{completed_body['proposal_id']}/draft/jobs",
-        json={"ai_model": "claude-opus-4-8"},
+        json={"ai_model": DEFAULT_AI_TEXT_MODEL},
     )
     assert draft_job.status_code == 202, draft_job.text
     clear_editing_job_handlers()

@@ -1,3 +1,4 @@
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_calls import AIStructuredCallResult, AITextCallResult
 from project_helpers import create_project
 
@@ -25,7 +26,7 @@ async def test_article_ai_uses_template_free_article_workflows(client, monkeypat
         f"/api/projects/{project_id}/documents/{document_id}/ai-continue",
         json={
             "instruction": "接着说明空白带来的好处",
-            "ai_model": "deepseek",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
             "expected_content_revision": 1,
         },
     )
@@ -35,7 +36,7 @@ async def test_article_ai_uses_template_free_article_workflows(client, monkeypat
             "instruction": "表达得更简洁",
             "selected_text": "给生活留一点空白",
             "full_content": "今天想谈谈，为什么我们需要给生活留一点空白。",
-            "ai_model": "deepseek",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
             "expected_content_revision": 2,
         },
     )
@@ -43,13 +44,13 @@ async def test_article_ai_uses_template_free_article_workflows(client, monkeypat
         f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
         json={
             "instruction": "语气更自然",
-            "models": ["deepseek"],
+            "models": [DEFAULT_AI_TEXT_MODEL],
             "expected_content_revision": 2,
         },
     )
     reviewed = await client.post(
         f"/api/projects/{project_id}/documents/{document_id}/ai-review",
-        json={"ai_model": "deepseek", "expected_content_revision": 2},
+        json={"ai_model": DEFAULT_AI_TEXT_MODEL, "expected_content_revision": 2},
     )
 
     assert continued.status_code == 200
@@ -72,7 +73,7 @@ async def test_article_ai_uses_template_free_article_workflows(client, monkeypat
     assert "全文上下文" in revise_call["user_prompt"]
     assert "不要套用固定文章模板" in multi_call["system_prompt"]
     assert "不是回忆录事实完整性检查" in review_call["system_prompt"]
-    assert all(call["requested_model"] == "deepseek" for call in ai_client.calls)
+    assert all(call["requested_model"] == DEFAULT_AI_TEXT_MODEL for call in ai_client.calls)
 
     stale = await client.post(
         f"/api/projects/{project_id}/documents/{document_id}/ai-review",
