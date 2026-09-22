@@ -1114,6 +1114,7 @@ async def test_share_video_worker_retries_and_removes_partial_output(client, tes
     assert target_path.read_bytes() == b"final mp4"
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_deadline_fails_without_retry(
     client,
     test_db,
@@ -1188,6 +1189,7 @@ async def test_share_video_worker_deadline_fails_without_retry(
     assert not target_path.exists()
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_recovers_when_completion_write_stalls(
     client,
     test_db,
@@ -1727,6 +1729,7 @@ async def test_share_video_worker_reclaims_expired_lease_without_get_side_effect
     assert stored_job.lease_token == reclaimed.token
 
 
+@pytest.mark.db_independent
 async def test_postgres_share_video_claim_skips_locked_queue_head(client, test_db):
     if test_db.get_bind().dialect.name != "postgresql":
         pytest.skip("requires PostgreSQL row-level locking")

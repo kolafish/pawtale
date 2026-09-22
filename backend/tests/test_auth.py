@@ -55,6 +55,7 @@ class TestAuthAPI:
         await test_db.commit()
         assert (await anonymous_client.get("/api/auth/me")).status_code == 401
 
+    @pytest.mark.db_independent
     async def test_websocket_auth_rejects_revoked_session(self, anonymous_client, test_db):
         assert (await anonymous_client.post(
             "/api/auth/register",
@@ -80,6 +81,7 @@ class TestAuthAPI:
         assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "two"})).status_code == 200
         assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "three"})).status_code == 429
 
+    @pytest.mark.db_independent
     async def test_concurrent_first_wechat_login_uses_one_identity(
         self, anonymous_client, test_db, monkeypatch,
     ):

@@ -67,6 +67,7 @@ async def test_enqueue_editing_job_deduplicates_pending_job(test_db):
     assert second.payload_json == {"utterance_ids": ["u1"], "source": "updated"}
 
 
+@pytest.mark.db_independent
 async def test_enqueue_editing_job_deduplicates_concurrent_insert(test_db):
     session_maker = async_sessionmaker(
         test_db.bind,
@@ -405,6 +406,7 @@ async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test
     assert job.attempts == 2
 
 
+@pytest.mark.db_independent
 async def test_editing_job_claim_is_atomic_across_workers(test_db):
     session_maker = async_sessionmaker(
         test_db.bind,
@@ -448,6 +450,7 @@ async def test_editing_job_claim_is_atomic_across_workers(test_db):
         assert stored_job.attempts == 1
 
 
+@pytest.mark.db_independent
 async def test_postgres_editing_claim_skips_locked_queue_head(test_db):
     if test_db.get_bind().dialect.name != "postgresql":
         pytest.skip("requires PostgreSQL row-level locking")
@@ -495,6 +498,7 @@ async def test_postgres_editing_claim_skips_locked_queue_head(test_db):
     assert [lease.job_id for lease in leases] == [second.id]
 
 
+@pytest.mark.db_independent
 async def test_editing_worker_runs_claimed_jobs_concurrently(test_db):
     session_maker = async_sessionmaker(
         test_db.bind,
@@ -534,6 +538,7 @@ async def test_editing_worker_runs_claimed_jobs_concurrently(test_db):
     assert peak_handlers == 2
 
 
+@pytest.mark.db_independent
 async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(test_db):
     session_maker = async_sessionmaker(
         test_db.bind,
@@ -598,6 +603,7 @@ async def test_lease_heartbeat_cancels_work_after_ownership_is_lost():
     assert work_cancelled.is_set()
 
 
+@pytest.mark.db_independent
 async def test_source_arriving_during_execution_is_processed_by_next_durable_run(test_db):
     project = await _create_project(test_db)
     job = await enqueue_editing_job(test_db, project_id=project.id,
@@ -624,6 +630,7 @@ async def test_source_arriving_during_execution_is_processed_by_next_durable_run
     assert seen == ["first", "second"]
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("worker", [False, True])
 async def test_reclaimed_job_cannot_reset_its_total_deadline(test_db, worker):
     project = await _create_project(test_db)
