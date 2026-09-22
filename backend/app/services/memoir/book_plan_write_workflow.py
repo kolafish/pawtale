@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirSectionMaterialAssignedBy,
 )
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookChapterDraft,
@@ -230,6 +231,11 @@ async def _replace_plan(
     metadata_json: dict[str, object] | None = None,
     before_commit: Callable[[], Awaitable[None]] | None = None,
 ) -> MemoirBookPlanResponse:
+    if len(chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
+        )
     plan = await _load_plan(db, project_id)
     if not plan:
         plan = MemoirBookPlan(project_id=project_id)
@@ -303,7 +309,6 @@ async def generate_book_plan(
     generated = await _generate_book_plan_from_sources(
         project_title=project_title,
         sources=sources,
-        max_chapters=req.max_chapters,
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )

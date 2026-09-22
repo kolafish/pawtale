@@ -169,7 +169,6 @@ export interface MemoirBookPlan {
 
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
-  max_chapters?: number;
 }
 
 export interface MemoirBookChapterTitleUpdateRequest {

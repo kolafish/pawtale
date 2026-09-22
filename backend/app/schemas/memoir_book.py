@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_voice import (
     MemoirAutomationEventResponse as MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
@@ -64,19 +65,14 @@ class MemoirBookPlanChapterInput(BaseModel):
 
 class MemoirBookPlanGenerateRequest(BaseModel):
     ai_model: str | None = None
-    max_chapters: int = 8
-
-    @field_validator("max_chapters")
-    @classmethod
-    def _valid_max_chapters(cls, value: int) -> int:
-        if value < 1 or value > 12:
-            raise ValueError("章节数量需要在 1 到 12 之间")
-        return value
 
 
 class MemoirBookPlanConfirmRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterInput] = Field(min_length=1, max_length=12)
+    chapters: list[MemoirBookPlanChapterInput] = Field(
+        min_length=1,
+        max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
 
     @field_validator("title")
     @classmethod
@@ -105,7 +101,10 @@ class MemoirBookPlanChapterUpdateInput(MemoirBookPlanChapterInput):
 
 class MemoirBookPlanUpdateRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterUpdateInput] = Field(min_length=1, max_length=12)
+    chapters: list[MemoirBookPlanChapterUpdateInput] = Field(
+        min_length=1,
+        max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
 
     @field_validator("title")
     @classmethod
@@ -135,7 +134,11 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     target_chapter_id: str | None = None
     direction: Literal["up", "down"] | None = None
     target_position: Literal["first", "last"] | None = None
-    target_index: int | None = Field(default=None, ge=1, le=99)
+    target_index: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
     relative_chapter_id: str | None = None
     relative_position: Literal["before", "after"] | None = None
     title: str | None = None
