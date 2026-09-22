@@ -54,5 +54,5 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements-dev.txt
       - run: ruff check app embedding_service tests scripts
-      - name: Fast cross-module smoke
-        run: python -m pytest -q --ci-fast tests
+      - name: Full backend test suite
+        run: python -m pytest -q tests
