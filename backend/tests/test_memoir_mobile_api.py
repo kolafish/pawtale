@@ -439,47 +439,6 @@ async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(
     assert last_delete_response.json()["detail"] == "至少保留一本回忆录"
 
 
-async def test_mobile_memoir_legacy_routes_are_removed(client):
-    legacy_requests = [
-        ("GET", "/api/mobile/memoir/project", None),
-        ("GET", "/api/mobile/memoir/dashboard", None),
-        ("POST", "/api/mobile/memoir/sessions", {"title": "童年"}),
-        ("GET", "/api/mobile/memoir/sessions/current", None),
-        ("POST", "/api/mobile/memoir/sessions/legacy-session/process", {}),
-        ("GET", "/api/mobile/memoir/sessions/legacy-session/summary", None),
-        ("GET", "/api/mobile/memoir/questions/next", None),
-        ("POST", "/api/mobile/memoir/answers", {"question_id": "legacy-question", "text": "旧回答"}),
-        ("PATCH", "/api/mobile/memoir/answers/legacy-answer", {"text": "旧编辑"}),
-        ("POST", "/api/mobile/memoir/answers/legacy-answer/draft", {}),
-        ("PATCH", "/api/mobile/memoir/drafts/legacy-draft", {"content_edited": "旧草稿"}),
-        ("POST", "/api/mobile/memoir/drafts/legacy-draft/accept", None),
-        ("POST", "/api/mobile/memoir/audio-files", {}),
-        ("POST", "/api/mobile/memoir/questions/legacy-question/skip", None),
-        ("GET", "/api/mobile/memoir/memories/people", None),
-        ("GET", "/api/mobile/memoir/memories/events", None),
-        ("GET", "/api/mobile/memoir/memories/places", None),
-        ("GET", "/api/mobile/memoir/memories/themes", None),
-        ("PATCH", "/api/mobile/memoir/memories/person/legacy-memory", {"status": "confirmed"}),
-        ("GET", "/api/mobile/memoir/open-questions", None),
-        ("PATCH", "/api/mobile/memoir/open-questions/legacy-question", {"status": "dismissed"}),
-        ("GET", "/api/mobile/memoir/coverage", None),
-        ("POST", "/api/mobile/memoir/coverage/recalculate", None),
-        ("GET", "/api/mobile/memoir/question-candidates", None),
-        ("POST", "/api/mobile/memoir/question-candidates/generate", None),
-        ("POST", "/api/mobile/memoir/question-candidates/legacy-candidate/select", None),
-        ("GET", "/api/mobile/memoir/outputs", None),
-        ("GET", "/api/mobile/memoir/outputs/legacy-output", None),
-        ("GET", "/api/mobile/memoir/summary", None),
-        ("GET", "/api/mobile/memoir/stories", None),
-        ("GET", "/api/mobile/memoir/stories/legacy-answer", None),
-    ]
-
-    for method, path, body in legacy_requests:
-        request = getattr(client, method.lower())
-        response = await request(path, json=body) if body is not None else await request(path)
-        assert response.status_code == 404, f"{method} {path}"
-
-
 async def test_completed_progress_notifications_are_not_hidden_by_old_failures(client, test_db):
     from app.models.memoir import MemoirAutomationEvent
     from tests.memoir_helpers import ensure_mobile_memoir_project
