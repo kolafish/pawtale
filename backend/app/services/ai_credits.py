@@ -139,6 +139,9 @@ async def set_manual_credit_total(
         + account.manual_grant_rmb
         + account.recharged_credit_rmb
     )
+    minimum_total = _money(account.free_credit_rmb) + _money(account.recharged_credit_rmb)
+    if total < minimum_total:
+        raise ValueError("total_credit_rmb cannot be below existing non-manual credit")
     new_manual_grant = _money(
         total - _money(account.free_credit_rmb) - _money(account.recharged_credit_rmb)
     )
