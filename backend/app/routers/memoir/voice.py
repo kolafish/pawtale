@@ -419,6 +419,7 @@ async def transcribe_mobile_memoir_search_query(
                 current_user.id,
                 f"voice-search-{uuid.uuid4().hex}",
             ),
+            mime_type=req.mime_type,
         )
     except memoir_voice_search.VoiceSearchTranscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

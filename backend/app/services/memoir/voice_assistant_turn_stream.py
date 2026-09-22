@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import math
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 import uuid
@@ -18,6 +19,8 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_calls import stream_text_with_client
+from app.services.ai_costs import estimate_text_cost
+from app.services.ai_usage_records import record_ai_usage
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
@@ -694,19 +697,56 @@ class VoiceAssistantTurnStreamSession:
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
     ) -> None:
-        async with contextlib.aclosing(
-            chunk_text_for_tts(queued_text_chunks(text_queue, cancel_event), cancel_event)
-        ) as text_chunks:
-            await stream_tts_events(
-                client=self.client,
-                tts_client=tts_client,
-                text_chunks=text_chunks,
-                event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
-                voice=req.voice,
-                speed_ratio=req.speed_ratio,
-                cancel_event=cancel_event,
-                audio_protocol=req.audio_protocol,
-                on_chunk=artifacts.append_tts_chunk,
+        tts_character_count = 0
+
+        async def tracked_text_chunks() -> AsyncIterator[str]:
+            nonlocal tts_character_count
+            async for text in chunk_text_for_tts(
+                queued_text_chunks(text_queue, cancel_event),
+                cancel_event,
+            ):
+                tts_character_count += len(text)
+                yield text
+
+        try:
+            async with contextlib.aclosing(tracked_text_chunks()) as text_chunks:
+                await stream_tts_events(
+                    client=self.client,
+                    tts_client=tts_client,
+                    text_chunks=text_chunks,
+                    event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
+                    voice=req.voice,
+                    speed_ratio=req.speed_ratio,
+                    cancel_event=cancel_event,
+                    audio_protocol=req.audio_protocol,
+                    on_chunk=artifacts.append_tts_chunk,
+                )
+        except Exception as exc:
+            if tts_character_count > 0:
+                await record_ai_usage(
+                    provider=tts_client.provider_name,
+                    model=tts_client.model_name,
+                    status="failed",
+                    cost=estimate_text_cost(
+                        provider=tts_client.provider_name,
+                        model=tts_client.model_name,
+                        character_count=tts_character_count,
+                    ),
+                    input_characters=tts_character_count,
+                    error_type=type(exc).__name__,
+                )
+            raise
+        if tts_character_count > 0:
+            await record_ai_usage(
+                provider=tts_client.provider_name,
+                model=tts_client.model_name,
+                status="succeeded",
+                cost=estimate_text_cost(
+                    provider=tts_client.provider_name,
+                    model=tts_client.model_name,
+                    character_count=tts_character_count,
+                ),
+                input_characters=tts_character_count,
             )
 
     async def _persist_completed_turn(

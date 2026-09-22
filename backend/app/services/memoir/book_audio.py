@@ -17,6 +17,8 @@ from app.services.memoir.tts_alignment import (
 )
 from app.services.memoir.voice_tts import get_tts_client
 from app.services.memoir.voice_tts_types import TTSClient, TTS_UNAVAILABLE_MESSAGE
+from app.services.ai_costs import estimate_text_cost
+from app.services.ai_usage_records import record_ai_usage
 
 
 MAX_TTS_CHARS_PER_CHUNK = 900
@@ -211,7 +213,33 @@ async def synthesize_text_audio(
     duration_seconds: float | None = None
     try:
         for chunk in chunks:
-            result = await client.synthesize(chunk.text, voice=voice, speed_ratio=speed_ratio)
+            try:
+                result = await client.synthesize(chunk.text, voice=voice, speed_ratio=speed_ratio)
+            except Exception as exc:
+                await record_ai_usage(
+                    provider=client.provider_name,
+                    model=client.model_name,
+                    status="failed",
+                    cost=estimate_text_cost(
+                        provider=client.provider_name,
+                        model=client.model_name,
+                        character_count=len(chunk.text),
+                    ),
+                    input_characters=len(chunk.text),
+                    error_type=type(exc).__name__,
+                )
+                raise
+            await record_ai_usage(
+                provider=result.provider,
+                model=result.model,
+                status="succeeded",
+                cost=estimate_text_cost(
+                    provider=result.provider,
+                    model=result.model,
+                    character_count=len(chunk.text),
+                ),
+                input_characters=len(chunk.text),
+            )
             mime_type = result.mime_type
             provider = result.provider
             model = result.model

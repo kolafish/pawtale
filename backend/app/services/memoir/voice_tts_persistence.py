@@ -19,6 +19,8 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_to_json,
 )
 from app.services.memoir.voice_tts_codec import effective_tts_speed_ratio
+from app.services.ai_costs import estimate_text_cost
+from app.services.ai_usage_records import record_ai_usage
 from app.services.memoir.voice_tts_types import (
     TTSClient,
     TTSResult,
@@ -30,6 +32,28 @@ from app.services.memoir.voice_tts_types import (
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_tts_usage(
+    *,
+    provider: str,
+    model: str,
+    character_count: int,
+    status: str,
+    error_type: str | None = None,
+) -> None:
+    await record_ai_usage(
+        provider=provider,
+        model=model,
+        status=status,
+        cost=estimate_text_cost(
+            provider=provider,
+            model=model,
+            character_count=character_count,
+        ),
+        input_characters=character_count,
+        error_type=error_type,
+    )
 
 
 async def _load_assistant_message(
@@ -199,11 +223,31 @@ async def synthesize_assistant_message(
     text = message.content_text.strip()
     try:
         result = await client.synthesize(text, voice=req.voice, speed_ratio=req.speed_ratio)
-    except HTTPException:
+    except HTTPException as exc:
+        await _record_tts_usage(
+            provider=client.provider_name,
+            model=client.model_name,
+            character_count=len(text),
+            status="failed",
+            error_type=type(exc).__name__,
+        )
         raise
     except Exception as exc:
+        await _record_tts_usage(
+            provider=client.provider_name,
+            model=client.model_name,
+            character_count=len(text),
+            status="failed",
+            error_type=type(exc).__name__,
+        )
         logger.exception("TTS synthesis failed provider=%s model=%s", client.provider_name, client.model_name)
         raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
+    await _record_tts_usage(
+        provider=result.provider,
+        model=result.model,
+        character_count=len(text),
+        status="succeeded",
+    )
 
     staged_audio = await stage_audio_bytes(
         db,

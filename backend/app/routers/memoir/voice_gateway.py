@@ -22,6 +22,7 @@ from app.services.asr.capacity import (
     voice_gateway_capacity_manager,
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
+from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.asr.barge_in import BargeInDetector
 from app.services.ai_credits import assert_ai_credit_available
 from app.services.asr.gateway import VoiceGatewaySession, VoiceGatewayStopReason
@@ -77,6 +78,7 @@ async def mobile_memoir_voice_gateway(
         "gateway": "memoir_voice_session",
         "voice_session_id": voice_session_id,
     }
+    gateway_session: VoiceGatewaySession | None = None
     try:
         await websocket.accept()
         _log_voice_gateway_router_event(
@@ -161,6 +163,14 @@ async def mobile_memoir_voice_gateway(
         )
         await gateway_session.run()
     finally:
+        if gateway_session is not None:
+            audio_duration_seconds = float(getattr(gateway_session, "total_audio_duration_seconds", 0) or 0)
+            terminal_error = getattr(gateway_session, "terminal_error", None)
+            await record_volc_streaming_asr_usage(
+                audio_duration_seconds=audio_duration_seconds,
+                status="failed" if terminal_error else "succeeded",
+                error_type=terminal_error,
+            )
         try:
             if persistence is not None and discard_pending_audio:
                 await persistence.discard_pending_audio()

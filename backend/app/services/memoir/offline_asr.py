@@ -13,6 +13,7 @@ from app.services.asr import ASRAudioFormat, StepFunASRService
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
 from app.services.asr.factory import create_volc_streaming_asr_client
+from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.ai_costs import estimate_audio_cost
 from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.ai_usage_records import record_ai_usage
@@ -126,23 +127,39 @@ def _title_subject(title: str) -> str:
 
 async def _transcribe_with_volc(utterance: MemoirVoiceUtterance, path: Path) -> OfflineASRResult:
     await assert_current_ai_credit_available()
-    event = await transcribe_audio_path_for_recovery(
-        path,
-        asr_client_factory=lambda: create_volc_streaming_asr_client(
-            utterance.audio_file.user_id,
-            utterance.voice_session_id,
-        ),
-    )
-    return OfflineASRResult(
-        provider=VOLC_OFFLINE_ASR_PROVIDER,
-        text=normalize_memoir_asr_text((event.text or "").strip()),
-        raw={
-            "provider": "volc_streaming_asr",
-            "start_ms": event.start_ms,
-            "end_ms": event.end_ms,
-            "provider_payload": event.raw,
-        },
-    )
+    duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=path.stat().st_size)
+    try:
+        event = await transcribe_audio_path_for_recovery(
+            path,
+            asr_client_factory=lambda: create_volc_streaming_asr_client(
+                utterance.audio_file.user_id,
+                utterance.voice_session_id,
+            ),
+        )
+        await record_volc_streaming_asr_usage(
+            audio_duration_seconds=duration_seconds or 0,
+            status="succeeded",
+            provider=VOLC_OFFLINE_ASR_PROVIDER,
+        )
+        return OfflineASRResult(
+            provider=VOLC_OFFLINE_ASR_PROVIDER,
+            text=normalize_memoir_asr_text((event.text or "").strip()),
+            raw={
+                "provider": "volc_streaming_asr",
+                "start_ms": event.start_ms,
+                "end_ms": event.end_ms,
+                "provider_payload": event.raw,
+                "audio_duration_seconds": duration_seconds,
+            },
+        )
+    except Exception as exc:
+        await record_volc_streaming_asr_usage(
+            audio_duration_seconds=duration_seconds or 0,
+            status="failed",
+            provider=VOLC_OFFLINE_ASR_PROVIDER,
+            error_type=type(exc).__name__,
+        )
+        raise
 
 
 def _stepfun_audio_format(utterance: MemoirVoiceUtterance) -> ASRAudioFormat:

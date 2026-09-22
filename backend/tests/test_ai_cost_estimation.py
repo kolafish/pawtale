@@ -3,6 +3,7 @@ from app.services.ai_costs import (
     estimate_audio_cost,
     estimate_image_cost,
     estimate_ai_cost,
+    estimate_text_cost,
     normalize_ai_usage,
 )
 
@@ -88,6 +89,20 @@ def test_estimates_off_text_provider_costs_and_removes_claude_pricing():
         duration_seconds=90,
     )
     assert asr.amount_rmb == 0.07
+
+    realtime_asr = estimate_audio_cost(
+        provider="volc_streaming_asr",
+        model="volc.seedasr.sauc.duration",
+        duration_seconds=60,
+    )
+    assert realtime_asr.amount_rmb == 0.075
+
+    tts = estimate_text_cost(
+        provider="volc_tts",
+        model="seed-tts-2.0",
+        character_count=1_000,
+    )
+    assert tts.amount_rmb == 0.5
 
     claude = estimate_ai_cost(
         provider="claude",

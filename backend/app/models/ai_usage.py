@@ -38,6 +38,7 @@ class AIUsageRecord(Base):
     reasoning_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    input_characters: Mapped[int | None] = mapped_column(Integer, nullable=True)
     image_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_cost_rmb: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)

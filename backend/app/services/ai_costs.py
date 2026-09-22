@@ -230,6 +230,27 @@ _UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
         rmb_per_unit=2.8,
         source="https://platform.stepfun.com/docs/zh/guides/pricing/details",
     ),
+    ("volc_streaming_asr", "volc.seedasr.sauc.duration"): AIUnitPricing(
+        provider="volc_streaming_asr",
+        model="volc.seedasr.sauc.duration",
+        unit="audio_hour",
+        rmb_per_unit=4.5,
+        source="https://www.volcengine.com/product/ark",
+    ),
+    ("volc_streaming_asr_reprocess", "volc.seedasr.sauc.duration"): AIUnitPricing(
+        provider="volc_streaming_asr_reprocess",
+        model="volc.seedasr.sauc.duration",
+        unit="audio_hour",
+        rmb_per_unit=4.5,
+        source="https://www.volcengine.com/product/ark",
+    ),
+    ("volc_tts", "seed-tts-2.0"): AIUnitPricing(
+        provider="volc_tts",
+        model="seed-tts-2.0",
+        unit="text_character",
+        rmb_per_unit=0.0005,
+        source="https://www.volcengine.com/product/ark",
+    ),
 }
 
 
@@ -315,6 +336,28 @@ def estimate_audio_cost(
         return AICostEstimate(None, "unknown", provider, model, "audio duration must be positive", pricing.source)
     return AICostEstimate(
         round(float(duration_seconds) / 3600 * pricing.rmb_per_unit, 6),
+        "estimated",
+        provider,
+        model,
+        source=pricing.source,
+    )
+
+
+def estimate_text_cost(
+    *,
+    provider: str | None,
+    model: str | None,
+    character_count: int | None,
+) -> AICostEstimate:
+    pricing = _unit_pricing(provider, model)
+    if pricing is None or pricing.unit != "text_character":
+        return AICostEstimate(None, "unknown", provider, model, "no text pricing configured")
+    if not isinstance(character_count, int) or isinstance(character_count, bool):
+        return AICostEstimate(None, "unknown", provider, model, "text character count is required", pricing.source)
+    if character_count <= 0:
+        return AICostEstimate(None, "unknown", provider, model, "text character count must be positive", pricing.source)
+    return AICostEstimate(
+        round(character_count * pricing.rmb_per_unit, 6),
         "estimated",
         provider,
         model,
