@@ -62,7 +62,7 @@ class AIServiceFactory:
         Args:
             model: 模型名称 (deepseek / deepseek-flash / deepseek-v4-flash /
                   deepseek-v4-pro /
-                  doubao-seed-2-0-pro-260215 / claude-fable-5 /
+                  doubao-seed-2-0-pro-260215 /
                   claude-opus-4-8 / claude-sonnet-4)
                   如果为None，使用默认模型
 

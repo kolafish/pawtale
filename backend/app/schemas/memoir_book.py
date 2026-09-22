@@ -76,7 +76,7 @@ class MemoirBookPlanGenerateRequest(BaseModel):
 
 class MemoirBookPlanConfirmRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterInput]
+    chapters: list[MemoirBookPlanChapterInput] = Field(min_length=1, max_length=12)
 
     @field_validator("title")
     @classmethod
@@ -105,7 +105,7 @@ class MemoirBookPlanChapterUpdateInput(MemoirBookPlanChapterInput):
 
 class MemoirBookPlanUpdateRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterUpdateInput]
+    chapters: list[MemoirBookPlanChapterUpdateInput] = Field(min_length=1, max_length=12)
 
     @field_validator("title")
     @classmethod

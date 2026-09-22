@@ -1,5 +1,6 @@
 import { Bot, Bug, Columns, RefreshCw, Wand2, X } from 'lucide-react';
-import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import { getAIModelOptions } from '../constants/aiModels';
+import { useAppStore } from '../stores/appStore';
 import { AIDebugPanel } from './AIDebugPanel';
 import type { AIDebugInfo, SelectionRange } from '../types';
 
@@ -57,6 +58,7 @@ export function AIAssistPanel({
   revisionDebugInfo,
 }: AIAssistPanelProps) {
   const activeDebug = revisionDebugInfo || debugInfo;
+  const isAdmin = useAppStore((state) => state.isAdmin);
 
   return (
     <div className="w-[360px] flex-shrink-0 h-full bg-white border-l border-gray-200 flex flex-col">
@@ -169,7 +171,7 @@ export function AIAssistPanel({
               onChange={(e) => setAiModel(e.target.value)}
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500"
             >
-              {AI_MODEL_OPTIONS.map((item) => (
+              {getAIModelOptions(isAdmin).map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>

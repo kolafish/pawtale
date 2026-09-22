@@ -35,7 +35,15 @@ function loadVoiceSettingsPage({
   aiModelExports = {},
   accessibilityExports = {},
   ttsExports = {},
+  memoirCacheExports = {},
 } = {}) {
+  mockModule("../stores/memoir-cache.ts", {
+    readMemoirIdentitySnapshot: () => ({
+      identity: { role: "admin" },
+      isFresh: true,
+    }),
+    ...memoirCacheExports,
+  });
   mockModule("../services/ai-model-settings.ts", {
     AI_MODEL_OPTIONS: [
       {

@@ -9,7 +9,7 @@ import type {
   AnalyzedSetting,
 } from '../types';
 import { useAppStore } from '../stores/appStore';
-import { AI_MODEL_OPTIONS, type AiModelValue } from '../constants/aiModels';
+import { getAIModelOptions, type AiModelValue } from '../constants/aiModels';
 import { getErrorMessage } from '../utils/apiError';
 
 interface AnalyzeDialogProps {
@@ -21,7 +21,7 @@ interface AnalyzeDialogProps {
 type Stage = 'idle' | 'analyzing' | 'preview' | 'applying' | 'done';
 
 export function AnalyzeDialog({ projectId, onClose, onComplete }: AnalyzeDialogProps) {
-  const { defaultAiModel } = useAppStore();
+  const { defaultAiModel, isAdmin } = useAppStore();
   const [stage, setStage] = useState<Stage>('idle');
   const [error, setError] = useState<string | null>(null);
   const [aiModel, setAiModel] = useState<AiModelValue>(defaultAiModel);
@@ -125,7 +125,7 @@ export function AnalyzeDialog({ projectId, onClose, onComplete }: AnalyzeDialogP
                   onChange={(e) => setAiModel(e.target.value as AiModelValue)}
                   className="text-sm border border-gray-200 rounded-lg px-2 py-1 text-gray-700"
                 >
-                  {AI_MODEL_OPTIONS.map((m) => (
+                  {getAIModelOptions(isAdmin).map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
