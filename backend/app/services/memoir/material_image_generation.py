@@ -29,6 +29,7 @@ from app.schemas.memoir_images import (
     MemoirMaterialImageGenerationRequest,
 )
 from app.services.memoir import editing_jobs
+from app.services.ai_costs import estimate_image_cost
 from app.services.memoir.image_assets import AI_GENERATED_IMAGE_DISCLOSURE
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -462,6 +463,7 @@ async def run_material_image_generation_job(
         cache_hit = path.exists() and path.stat().st_size > 0
         resolved_model = asset.model
         usage: dict[str, object] = {}
+        estimated_cost: dict[str, object] = {}
         mime_type = mimetypes.guess_type(path.name)[0] or f"image/{extension}"
         if not cache_hit:
             image = await VolcArkImageGenerationService().generate(prompt)
@@ -475,6 +477,11 @@ async def run_material_image_generation_job(
             resolved_model = image.model
             usage = image.usage
             mime_type = image.mime_type or mime_type
+            estimated_cost = estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=resolved_model,
+                image_count=1,
+            ).as_dict()
 
         width, height = _image_dimensions(path)
         elapsed_seconds = perf_counter() - started_at
@@ -492,6 +499,7 @@ async def run_material_image_generation_job(
             "generation_elapsed_seconds": round(elapsed_seconds, 3),
             "generation_cache_hit": cache_hit,
             "generation_usage": usage,
+            "generation_estimated_cost": estimated_cost,
             "generation_error_type": "",
             "generation_error_message": "",
         }
@@ -507,6 +515,7 @@ async def run_material_image_generation_job(
                 "timeout_seconds": settings.volc_ark_image_timeout_seconds,
                 "elapsed_seconds": round(elapsed_seconds, 3),
                 "cache_hit": cache_hit,
+                "estimated_cost": estimated_cost,
             }
         )
     except asyncio.CancelledError:

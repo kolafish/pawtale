@@ -13,6 +13,7 @@ from app.services.asr import ASRAudioFormat, StepFunASRService
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
 from app.services.asr.factory import create_volc_streaming_asr_client
+from app.services.ai_costs import estimate_audio_cost
 from app.services.memoir.voice_transcript_recovery import (
     ASR_RECOVERY_PCM_BYTES_PER_SAMPLE,
     ASR_RECOVERY_PCM_SAMPLE_RATE,
@@ -161,6 +162,21 @@ def _stepfun_audio_format(utterance: MemoirVoiceUtterance) -> ASRAudioFormat:
     raise ValueError(f"unsupported StepFun ASR audio mime type: {mime_type or 'unknown'}")
 
 
+def _stepfun_audio_duration_seconds(
+    utterance: MemoirVoiceUtterance,
+    *,
+    audio_bytes: int | None = None,
+) -> float | None:
+    audio_file = utterance.audio_file
+    stored_duration = audio_file.duration_seconds if audio_file else None
+    if stored_duration and stored_duration > 0:
+        return float(stored_duration)
+    if audio_bytes and audio_file and audio_file.mime_type.lower() in {"audio/pcm", "audio/x-pcm"}:
+        bytes_per_second = ASR_RECOVERY_PCM_SAMPLE_RATE * ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
+        return audio_bytes / bytes_per_second
+    return None
+
+
 async def _read_audio_segment(path: Path, *, start_byte: int, byte_count: int) -> bytes:
     async with aiofiles.open(path, "rb") as file:
         await file.seek(start_byte)
@@ -179,10 +195,22 @@ async def _transcribe_with_stepfun(
     if audio_format.type != "pcm" or size_bytes <= ASR_RECOVERY_PCM_SEGMENT_BYTES:
         audio_bytes = await _read_audio_segment(path, start_byte=0, byte_count=size_bytes)
         result = await service.transcribe(audio_bytes, audio_format, hotwords=list(hotwords))
+        duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
         return OfflineASRResult(
             provider=STEPFUN_OFFLINE_ASR_PROVIDER,
             text=normalize_memoir_asr_text(result.text.strip()),
-            raw={"provider": "stepfun", "model": service.model, "usage": result.usage, "segment_count": 1},
+            raw={
+                "provider": "stepfun",
+                "model": service.model,
+                "usage": result.usage,
+                "segment_count": 1,
+                "audio_duration_seconds": duration_seconds,
+                "estimated_cost": estimate_audio_cost(
+                    provider="stepfun",
+                    model=service.model,
+                    duration_seconds=duration_seconds,
+                ).as_dict(),
+            },
         )
 
     texts: list[str] = []
@@ -204,6 +232,7 @@ async def _transcribe_with_stepfun(
         usages.append(result.usage)
         start_byte += byte_count
 
+    duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
     return OfflineASRResult(
         provider=STEPFUN_OFFLINE_ASR_PROVIDER,
         text="\n".join(texts).strip(),
@@ -212,6 +241,12 @@ async def _transcribe_with_stepfun(
             "model": service.model,
             "usage_by_segment": usages,
             "segment_count": segment_count,
+            "audio_duration_seconds": duration_seconds,
+            "estimated_cost": estimate_audio_cost(
+                provider="stepfun",
+                model=service.model,
+                duration_seconds=duration_seconds,
+            ).as_dict(),
         },
     )
 

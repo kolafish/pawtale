@@ -11,7 +11,14 @@ from app.services.ai_access import restrict_requested_ai_model
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
-DISABLED_AI_MODEL_ALIASES = frozenset({"claude-fable-5"})
+DISABLED_AI_MODEL_ALIASES = frozenset(
+    {
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4",
+        "claude-sonnet-4-6",
+    }
+)
 TRANSCRIPT_POLISH_LEVEL_METADATA_KEY = "transcript_polish_level"
 TEXT_POLISH_REQUIREMENTS = {
     MemoirTranscriptPolishLevel.LOW: (

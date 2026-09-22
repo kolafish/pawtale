@@ -367,12 +367,11 @@ def _text_ai_configured(ai_model: str | None) -> bool:
         return bool(settings.deepseek_api_key.strip())
     if model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
         return bool(settings.volc_ark_api_key.strip())
-    if model.startswith("claude") or not model:
-        return bool(settings.anthropic_auth_token.strip())
+    if not model:
+        return bool(settings.deepseek_api_key.strip() or settings.volc_ark_api_key.strip())
     return bool(
         settings.deepseek_api_key.strip()
         or settings.volc_ark_api_key.strip()
-        or settings.anthropic_auth_token.strip()
     )
 
 
