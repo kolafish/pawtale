@@ -72,6 +72,7 @@ async def test_mobile_memoir_identity_includes_active_project(client):
     assert data["projects"][0]["id"] == data["active_project_id"]
 
 
+@pytest.mark.db_transaction_boundary
 async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_db):
     created_response = await client.post(
         "/api/mobile/memoir/projects",

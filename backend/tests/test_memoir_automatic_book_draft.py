@@ -128,6 +128,7 @@ async def test_failed_chapter_is_not_automatically_reissued(client, test_db, mon
     assert parent.result_json["chapters"][chapter_id]["job_id"] == new_id
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("edited_during_generation", [False, True])
 async def test_automatic_generation_keeps_manual_text_as_candidate(
     client, test_db, monkeypatch, edited_during_generation
@@ -269,6 +270,7 @@ async def test_candidate_rejects_changed_source_and_interrupted_call_requires_re
     )
 
 
+@pytest.mark.db_independent
 async def test_new_privacy_decision_during_generation_prevents_publication(client, test_db, monkeypatch):
     project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
     generate = fake._call_llm

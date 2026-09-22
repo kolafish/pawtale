@@ -19,6 +19,7 @@ from app.services.memoir.voice_transcripts import CleanedTranscriptText
 from tests.memoir_helpers import create_test_voice_transcript
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("manual_text", ["小时候我住在奶奶家。", "我小时候住在外婆家。"])
 async def test_manual_edit_during_ai_correction_keeps_user_version(
     client, test_db, monkeypatch, manual_text,

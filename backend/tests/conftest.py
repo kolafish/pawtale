@@ -11,7 +11,8 @@ from alembic.config import Config
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
 if POSTGRES_DATABASE_URL:
@@ -91,6 +92,22 @@ async def verified_postgres_schema(postgres_schema):
         await engine.dispose()
 
 
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def test_engine(verified_postgres_schema):
+    """Share a loop-safe engine while keeping each test's data isolated by transaction."""
+    # NullPool avoids reusing asyncpg connections across pytest-asyncio's per-test loops.
+    engine = create_async_engine(
+        POSTGRES_DATABASE_URL,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+    )
+    await _truncate_postgres_tables(engine)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
 async def _truncate_postgres_tables(engine) -> None:
     register_models()
     table_names = ", ".join(f'"{name}"' for name in Base.metadata.tables)
@@ -99,24 +116,35 @@ async def _truncate_postgres_tables(engine) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_db(verified_postgres_schema):
-    """创建隔离的 PostgreSQL 测试会话。"""
-    register_models()
-    test_settings = settings.model_copy(
-        update={"app_env": "test", "database_url": POSTGRES_DATABASE_URL}
-    )
-    engine = create_database_engine(test_settings)
-    async_session = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
+async def test_db(request, test_engine):
+    """Run ordinary tests in a rollback-only transaction; isolate worker tests with truncation."""
+    if (
+        request.node.get_closest_marker("db_independent") is not None
+        or request.node.get_closest_marker("db_transaction_boundary") is not None
+    ):
+        async_session = async_sessionmaker(
+            test_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        async with async_session() as session:
+            yield session
+        await _truncate_postgres_tables(test_engine)
+        return
+
+    connection = await test_engine.connect()
+    transaction = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
         expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
     )
-    await _truncate_postgres_tables(engine)
-    # The next test truncates before use; repeating the same cleanup here only
-    # adds a second full-table operation to every database test.
-    async with async_session() as session:
+    try:
         yield session
-    await engine.dispose()
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
 
 
 @pytest_asyncio.fixture

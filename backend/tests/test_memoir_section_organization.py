@@ -1104,6 +1104,7 @@ async def test_section_update_rejects_stale_version(client, test_db):
     assert stale.status_code == 409
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "chapter_existing", "delete_section"])
 async def test_story_growth_discards_decisions_changed_during_model_wait(
     client, test_db, monkeypatch, change,
@@ -1253,6 +1254,7 @@ async def test_delete_section_compacts_remaining_order(client, test_db):
     assert remaining_orders == [0, 1]
 
 
+@pytest.mark.db_independent
 async def test_concurrent_section_creation_serializes_chapter_order(
     client, test_db,
 ):

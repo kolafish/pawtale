@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -18,6 +19,7 @@ from app.services.memoir.utterance_editing_pipeline import (
 from tests.memoir_helpers import create_test_voice_transcript
 
 
+@pytest.mark.db_transaction_boundary
 async def test_revision_events_are_monotonic_and_coalesced_per_transaction(test_db):
     project = Project(title="锁测试", type=ProjectType.MEMOIR.value)
     test_db.add(project)
@@ -66,6 +68,7 @@ async def test_editing_job_bookkeeping_does_not_advance_content_revision(test_db
     assert await project_data_revision(test_db, project) == baseline
 
 
+@pytest.mark.db_independent
 async def test_child_revision_does_not_wait_for_project_metadata_update(
     client,
     test_db,
@@ -111,6 +114,7 @@ async def test_background_model_resolution_is_read_only(test_db):
     assert not test_db.is_modified(project)
 
 
+@pytest.mark.db_independent
 async def test_transcript_guard_locks_without_emitting_content_revision(
     client,
     test_db,
