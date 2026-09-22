@@ -239,6 +239,7 @@ async def memoir_identity_response(
         id=user.id,
         email=user.email,
         password_login_enabled=user.password_login_enabled,
+        role=user.role,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         created_at=user.created_at,

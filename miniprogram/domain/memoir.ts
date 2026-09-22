@@ -5,6 +5,7 @@ export interface User {
   id: string;
   email: string;
   password_login_enabled: boolean;
+  role?: "user" | "admin";
   display_name: string;
   avatar_url?: string | null;
   storage_owner_id?: string;

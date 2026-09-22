@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { AI_MODEL_OPTIONS, type AiModelValue } from '../../constants/aiModels';
+import { getAIModelOptions, type AiModelValue } from '../../constants/aiModels';
 import { useAIRevision } from '../useAIRevision';
+import { useAppStore } from '../../stores/appStore';
 
 interface UseDraftRevisionArgs {
   projectId: string;
@@ -22,6 +23,7 @@ export function useDraftRevision({
   setIsReviewing,
 }: UseDraftRevisionArgs) {
   const revision = useAIRevision();
+  const isAdmin = useAppStore((state) => state.isAdmin);
 
   useEffect(() => {
     setIsReviewing(revision.isReviewing);
@@ -41,7 +43,7 @@ export function useDraftRevision({
 
   const requestMultiRevision = async () => {
     if (!currentDocumentId) return;
-    const models = AI_MODEL_OPTIONS.map((model) => model.value);
+    const models = getAIModelOptions(isAdmin).map((model) => model.value);
     await revision.requestMultiRevision(
       projectId,
       currentDocumentId,

@@ -24,11 +24,11 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 | `deepseek-flash` | DeepSeek V4.1 Flash OpenAI-compatible chat API |
 | `deepseek-v4-pro` | DeepSeek OpenAI-compatible chat API |
 | `doubao-seed-2-0-pro-260215` | Volc Ark Responses API |
-| `claude-fable-5` | Claude Fable 5 OpenAI-compatible relay |
+| `claude-fable-5` | 产品选择器已下线；仅保留兼容旧直连请求，历史回忆录项目值会回落到 `deepseek-flash` |
 | `claude-opus-4-8` | Claude Opus 4.8 OpenAI-compatible relay |
 | `claude-sonnet-4` | Claude Sonnet 4.6 兼容代理 |
 
-`AIServiceFactory.get_service(model)` 负责产品模型值到 transport 的映射。未知值回退到后端配置的默认模型。
+新项目和普通用户默认使用 `deepseek-flash`。管理员可以在 Web 端选择当前可用模型；Claude Fable 5 不再出现在模型选择器中。`AIServiceFactory.get_service(model)` 负责产品模型值到 transport 的映射，未知值会明确报错。
 历史值 `deepseek-v4-flash` 仍由后端兼容解析到 `deepseek-flash`，供已有项目和待重试任务平滑迁移。
 
 ## 统一接口

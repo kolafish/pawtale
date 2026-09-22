@@ -106,7 +106,7 @@ definePage<ProjectEditData>()({
     narratorOrigin: "",
     narratorAgeText: "",
     defaultNarrationMode: "free_narration",
-    transcriptPolishLevel: "low",
+    transcriptPolishLevel: "medium",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
@@ -138,7 +138,7 @@ definePage<ProjectEditData>()({
       narratorOrigin: "",
       narratorAgeText: "",
       defaultNarrationMode: "free_narration",
-      transcriptPolishLevel: "low",
+      transcriptPolishLevel: "medium",
     });
     setPageNavigationTitle("新建回忆录");
   },

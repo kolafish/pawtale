@@ -201,7 +201,7 @@ def _build_cleanup_prompt(
     source_text: str,
     *,
     context: MemoirTranscriptCleanupContext | None = None,
-    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW,
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
 ) -> str:
     context_block = _cleanup_context_block(context)
     polish_requirements = text_polish_requirements(transcript_polish_level)
@@ -264,7 +264,7 @@ async def generate_cleaned_transcript_text(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     context: MemoirTranscriptCleanupContext | None = None,
-    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW,
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
     strict: bool = True,
 ) -> CleanedTranscriptText:
     source_text = source_text.strip()

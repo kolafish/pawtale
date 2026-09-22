@@ -171,7 +171,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert created["title"] == "母亲的回忆"
     assert created["type"] == "memoir"
     assert created["groups"] == []
-    assert created["metadata_json"]["transcript_polish_level"] == "low"
+    assert created["metadata_json"]["transcript_polish_level"] == "medium"
     assert created["metadata_json"]["memoir_profile"] == {
         "narrator_name": "",
         "narrator_gender": "female",
