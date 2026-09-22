@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     # StepFun batch ASR for user-triggered material reprocessing and offline tools.
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com"
-    stepfun_asr_model: str = "stepaudio-2.5-asr"
+    stepfun_asr_model: str = "stepaudio-3-asr-max"
     stepfun_asr_timeout_seconds: float = 120.0
 
     # Memoir editing worker
