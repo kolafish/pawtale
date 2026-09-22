@@ -7,6 +7,12 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.services.ai_costs import (
+    AICostEstimate,
+    NormalizedAIUsage,
+    estimate_ai_cost,
+    normalize_ai_usage,
+)
 from app.services.ai_types import AITextClient
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.json_utils import extract_json_payload
@@ -51,6 +57,18 @@ class AITextCallResult:
     def is_truncated(self) -> bool:
         return self.finish_reason in TRUNCATED_FINISH_REASONS
 
+    @property
+    def normalized_usage(self) -> NormalizedAIUsage:
+        return normalize_ai_usage(self.usage)
+
+    @property
+    def cost_estimate(self) -> AICostEstimate:
+        return estimate_ai_cost(
+            provider=self.provider,
+            model=self.response_model or self.resolved_model,
+            usage=self.normalized_usage,
+        )
+
     def diagnostics(self) -> dict[str, object]:
         values: dict[str, object] = {
             "requested_model": self.requested_model,
@@ -65,6 +83,8 @@ class AITextCallResult:
         }
         if self.usage:
             values["usage"] = self.usage
+        values["normalized_usage"] = self.normalized_usage.as_dict()
+        values["estimated_cost"] = self.cost_estimate.as_dict()
         return values
 
 
