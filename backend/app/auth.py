@@ -14,6 +14,7 @@ from app.config import get_settings, is_production_environment
 from app.database import get_db
 from app.clock import utcnow_naive
 from app.models.users import AuthLoginAttempt, AuthSession, User
+from app.services.ai_access import set_request_ai_model_scope
 
 
 SESSION_COOKIE_NAME = "pawtale_session"
@@ -147,6 +148,7 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    set_request_ai_model_scope(is_admin=is_admin_user(user))
     return user
 
 
