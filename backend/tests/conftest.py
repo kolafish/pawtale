@@ -73,6 +73,19 @@ def postgres_schema():
     yield
 
 
+@pytest_asyncio.fixture(scope="session")
+async def verified_postgres_schema(postgres_schema):
+    """Verify the migrated runtime schema once for the whole test session."""
+    test_settings = settings.model_copy(
+        update={"app_env": "test", "database_url": POSTGRES_DATABASE_URL}
+    )
+    engine = create_database_engine(test_settings)
+    try:
+        await assert_postgres_runtime_schema(engine)
+    finally:
+        await engine.dispose()
+
+
 async def _truncate_postgres_tables(engine) -> None:
     register_models()
     table_names = ", ".join(f'"{name}"' for name in Base.metadata.tables)
@@ -81,7 +94,7 @@ async def _truncate_postgres_tables(engine) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_db(postgres_schema):
+async def test_db(verified_postgres_schema):
     """创建隔离的 PostgreSQL 测试会话。"""
     register_models()
     test_settings = settings.model_copy(
@@ -93,7 +106,6 @@ async def test_db(postgres_schema):
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    await assert_postgres_runtime_schema(engine)
     await _truncate_postgres_tables(engine)
     async with async_session() as session:
         yield session

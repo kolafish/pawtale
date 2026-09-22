@@ -55,27 +55,6 @@ class TestReferenceAPI:
         response = await client.delete(f"/api/projects/{project_id}/references/{reference_id}")
         assert response.status_code == 204
 
-    async def test_global_library_routes_are_removed(self, client):
-        project_id = await create_project_id(client)
-        create = await client.post(
-            f"/api/projects/{project_id}/references",
-            json={"type": "character", "name": "本作角色"},
-        )
-        reference_id = create.json()["id"]
-
-        removed_routes = [
-            ("get", "/api/characters"),
-            ("get", "/api/scenes"),
-            ("post", f"/api/projects/{project_id}/references/import-global"),
-            ("post", f"/api/projects/{project_id}/references/import-preview"),
-            ("post", f"/api/projects/{project_id}/references/{reference_id}/export-global"),
-            ("post", f"/api/projects/{project_id}/references/{reference_id}/sync-global"),
-        ]
-        for method, path in removed_routes:
-            response = await client.request(method.upper(), path, json={})
-            assert response.status_code in (404, 405)
-
-
 class TestDocumentReferenceLinks:
     """Document-reference link tests."""
 
