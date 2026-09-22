@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from app.application_errors import InsufficientAICreditError
 from app.routers.websocket_auth import reject_websocket
 from app.services.asr.capacity import (
     VoiceGatewayCapacityError,
@@ -13,6 +14,7 @@ from app.services.asr.capacity import (
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
 from app.services.asr.gateway import AudioAuthorizationHandler, VoiceGatewaySession
+from app.services.ai_credits import assert_ai_credit_available
 
 
 def _identity_text(text: str) -> str:
@@ -28,6 +30,11 @@ async def run_dictation_gateway(
     text_normalizer: Callable[[str], str] = _identity_text,
     authorize_audio: AudioAuthorizationHandler | None = None,
 ) -> None:
+    try:
+        await assert_ai_credit_available(user_id)
+    except InsufficientAICreditError:
+        await reject_websocket(websocket, "ai_credit_insufficient")
+        return
     connection_id = str(uuid.uuid4())
     capacity_session_id = f"{capacity_prefix}:{connection_id}"
     try:

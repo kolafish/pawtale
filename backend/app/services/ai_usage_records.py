@@ -6,7 +6,10 @@ from decimal import Decimal
 import logging
 from uuid import uuid4
 
+from sqlalchemy import select
+
 from app.database import async_session_maker
+from app.models.ai_credits import AICreditAccount, AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
 from app.services.ai_costs import AICostEstimate, NormalizedAIUsage
 
@@ -89,6 +92,32 @@ async def record_ai_usage(
         )
         async with async_session_maker() as db:
             db.add(record)
+            await db.flush()
+            if (
+                resolved_context.user_id
+                and status == "succeeded"
+                and cost.amount_rmb is not None
+                and Decimal(str(cost.amount_rmb)) > 0
+            ):
+                from app.services.ai_credits import ensure_ai_credit_account, USAGE_DEBIT
+
+                await ensure_ai_credit_account(db, resolved_context.user_id, commit=False)
+                account = await db.scalar(
+                    select(AICreditAccount)
+                    .where(AICreditAccount.user_id == resolved_context.user_id)
+                    .with_for_update()
+                )
+                if account is None:
+                    raise RuntimeError("AI credit account could not be initialized")
+                db.add(
+                    AICreditTransaction(
+                        user_id=resolved_context.user_id,
+                        transaction_type=USAGE_DEBIT,
+                        amount_rmb=-Decimal(str(cost.amount_rmb)),
+                        usage_record_id=record.id,
+                        operation_id=resolved_context.operation_id,
+                    )
+                )
             await db.commit()
     except Exception:
         logger.exception(

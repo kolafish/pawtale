@@ -30,6 +30,7 @@ from app.schemas.memoir_images import (
 )
 from app.services.memoir import editing_jobs
 from app.services.ai_costs import estimate_image_cost
+from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.ai_usage_records import (
     AIUsageContext,
     current_ai_usage_context,
@@ -481,6 +482,7 @@ async def run_material_image_generation_job(
             usage_context: AIUsageContext | None = None
             usage_context = current_ai_usage_context()
             try:
+                await assert_current_ai_credit_available()
                 image = await VolcArkImageGenerationService().generate(prompt)
             except Exception as exc:
                 await record_ai_usage(

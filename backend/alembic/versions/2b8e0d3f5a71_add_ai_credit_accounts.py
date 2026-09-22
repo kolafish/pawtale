@@ -31,6 +31,12 @@ def upgrade() -> None:
             nullable=False,
             server_default="0",
         ),
+        sa.Column(
+            "manual_grant_rmb",
+            sa.Numeric(14, 6),
+            nullable=False,
+            server_default="0",
+        ),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )

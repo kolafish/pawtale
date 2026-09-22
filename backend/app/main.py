@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.application_errors import (
     ApplicationError,
+    InsufficientAICreditError,
     InvalidRequestError,
     ResourceNotFoundError,
 )
@@ -78,6 +79,7 @@ async def application_error_handler(_request, exc: ApplicationError):
     status_code = {
         InvalidRequestError: 400,
         ResourceNotFoundError: 404,
+        InsufficientAICreditError: 402,
     }[type(exc)]
     return JSONResponse(status_code=status_code, content={"detail": str(exc)})
 

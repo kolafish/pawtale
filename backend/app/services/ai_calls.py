@@ -15,6 +15,7 @@ from app.services.ai_costs import (
 )
 from app.services.ai_types import AITextClient
 from app.services.ai_streaming import AITextStreamChunk
+from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.ai_usage_records import record_ai_usage
 from app.services.json_utils import extract_json_payload
 
@@ -227,6 +228,7 @@ async def generate_text_with_client(
     max_tokens: int,
     timeout: float,
 ) -> AITextCallResult:
+    await assert_current_ai_credit_available()
     try:
         result = await client.generate_text(
             system_prompt,
@@ -272,6 +274,7 @@ async def stream_text_with_client(
     max_tokens: int,
     timeout: float,
 ) -> AsyncIterator[AITextStreamChunk]:
+    await assert_current_ai_credit_available()
     provider = getattr(client, "provider_name", None)
     resolved_model = getattr(client, "model_name", requested_model)
     mismatch_logged = False
@@ -361,6 +364,7 @@ async def generate_structured_with_client(
     timeout: float,
     max_attempts: int,
 ) -> AIStructuredCallResult[StructuredModel]:
+    await assert_current_ai_credit_available()
     try:
         result = await client.generate_structured(
             system_prompt,
