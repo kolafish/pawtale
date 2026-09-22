@@ -30,6 +30,13 @@ from app.schemas.memoir_images import (
 )
 from app.services.memoir import editing_jobs
 from app.services.ai_costs import estimate_image_cost
+from app.services.ai_usage_records import (
+    AIUsageContext,
+    current_ai_usage_context,
+    record_ai_usage,
+    reset_ai_usage_context,
+    set_ai_usage_context,
+)
 from app.services.memoir.image_assets import AI_GENERATED_IMAGE_DISCLOSURE
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -466,7 +473,32 @@ async def run_material_image_generation_job(
         estimated_cost: dict[str, object] = {}
         mime_type = mimetypes.guess_type(path.name)[0] or f"image/{extension}"
         if not cache_hit:
-            image = await VolcArkImageGenerationService().generate(prompt)
+            usage_token = set_ai_usage_context(
+                user_id=asset.user_id,
+                project_id=asset.project_id,
+                operation="memoir.material_image_generation",
+            )
+            usage_context: AIUsageContext | None = None
+            usage_context = current_ai_usage_context()
+            try:
+                image = await VolcArkImageGenerationService().generate(prompt)
+            except Exception as exc:
+                await record_ai_usage(
+                    provider=VolcArkImageGenerationService.provider_name,
+                    model=asset.model or settings.volc_ark_image_model.strip() or "unknown",
+                    status="failed",
+                    cost=estimate_image_cost(
+                        provider=VolcArkImageGenerationService.provider_name,
+                        model=asset.model or settings.volc_ark_image_model.strip(),
+                        image_count=1,
+                    ),
+                    image_count=1,
+                    error_type=type(exc).__name__,
+                    context=usage_context,
+                )
+                raise
+            finally:
+                reset_ai_usage_context(usage_token)
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
             try:
@@ -477,11 +509,20 @@ async def run_material_image_generation_job(
             resolved_model = image.model
             usage = image.usage
             mime_type = image.mime_type or mime_type
-            estimated_cost = estimate_image_cost(
+            image_cost = estimate_image_cost(
                 provider=VolcArkImageGenerationService.provider_name,
                 model=resolved_model,
                 image_count=1,
-            ).as_dict()
+            )
+            estimated_cost = image_cost.as_dict()
+            await record_ai_usage(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=resolved_model,
+                status="succeeded",
+                cost=image_cost,
+                image_count=1,
+                context=usage_context,
+            )
 
         width, height = _image_dimensions(path)
         elapsed_seconds = perf_counter() - started_at

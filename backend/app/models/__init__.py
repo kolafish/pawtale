@@ -1,6 +1,7 @@
 from app.database import Base
 
 from . import (  # noqa: F401
+    ai_usage,
     audit,
     git_sync,
     memoir,

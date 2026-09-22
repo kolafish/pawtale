@@ -5,7 +5,7 @@ import hmac
 import secrets
 from datetime import timedelta
 
-from fastapi import Cookie, Depends, HTTPException, Response, status
+from fastapi import Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import case, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from app.database import get_db
 from app.clock import utcnow_naive
 from app.models.users import AuthLoginAttempt, AuthSession, User
 from app.services.ai_access import set_request_ai_model_scope
+from app.services.ai_usage_records import set_ai_usage_context
 
 
 SESSION_COOKIE_NAME = "pawtale_session"
@@ -136,6 +137,7 @@ def clear_session_cookie(response: Response) -> None:
 
 
 async def get_current_user(
+    request: Request,
     session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -149,6 +151,11 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     set_request_ai_model_scope(is_admin=is_admin_user(user))
+    set_ai_usage_context(
+        user_id=user.id,
+        operation=request.url.path,
+        project_id=request.path_params.get("project_id"),
+    )
     return user
 
 

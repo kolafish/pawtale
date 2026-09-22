@@ -37,6 +37,7 @@ from app.services.memoir.share_video_metadata import (
     ShareVideoSceneAssetMetadata,
     ShareVideoScenePlanMetadata,
 )
+from app.services.ai_usage_records import AIUsageContext
 
 
 ProgressCallback = Callable[[ShareVideoJobMetadata], Awaitable[None]]
@@ -129,6 +130,7 @@ async def prepare_share_video_background(
     persist_progress: ProgressCallback,
     ai_background_enabled: bool,
     volc_ark_api_key: str,
+    usage_context: AIUsageContext | None = None,
 ) -> PreparedShareVideoBackground:
     background_source = normalize_share_video_background_source(metadata.background_source)
     background_style = normalize_share_video_background_style(metadata.background_style)
@@ -213,6 +215,7 @@ async def prepare_share_video_background(
                 asset = await get_or_generate_share_video_background(
                     scene_source_text,
                     background_style,
+                    usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError as exc:
                 errors.append(f"{scene.index + 1}: {str(exc)[:120]}")
@@ -283,7 +286,11 @@ async def prepare_share_video_background(
         await persist_progress(metadata)
     else:
         try:
-            background = await get_or_generate_share_video_background(job.selected_text, background_style)
+            background = await get_or_generate_share_video_background(
+                job.selected_text,
+                background_style,
+                usage_context=usage_context,
+            )
         except ShareVideoBackgroundGenerationError as exc:
             metadata.background_status = "failed"
             metadata.background_scene_count = 0

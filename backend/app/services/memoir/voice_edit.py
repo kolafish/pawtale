@@ -26,7 +26,7 @@ from app.schemas.memoir_voice_edit import (
     VoiceEditApplyRequest, VoiceEditApplyResponse, VoiceEditItem, VoiceEditOperation,
     VoiceEditPreviewRequest, VoiceEditPreviewResponse, VoiceEditProposal,
 )
-from app.services.ai_calls import AIStructuredOutputError
+from app.services.ai_calls import AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_error_metadata, ai_text_timeout_seconds, ai_user_error_message
 from app.services.ai_types import AITextClient
@@ -213,7 +213,17 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     await db.commit()
     started = time.monotonic()
     try:
-        generated = await client.generate_structured(system, payload, output_model=VoiceEditProposal, requested_model=model, temperature=0, max_tokens=policy.max_tokens, timeout=timeout, max_attempts=1)
+        generated = await generate_structured_with_client(
+            client,
+            system,
+            payload,
+            output_model=VoiceEditProposal,
+            requested_model=model,
+            temperature=0,
+            max_tokens=policy.max_tokens,
+            timeout=timeout,
+            max_attempts=1,
+        )
     except (AIStructuredOutputError, AIProviderTimeoutError, httpx.HTTPError) as exc:
         logger.warning("voice_edit_failed diagnostics=%s", ai_error_metadata(exc, requested_model=model, provider=client.provider_name, resolved_model=client.model_name, timeout_seconds=timeout, elapsed_ms=round((time.monotonic() - started) * 1000)))
         raise HTTPException(502, ai_user_error_message(exc, "没有得到可用的修改结果，请重新说一下")) from exc
