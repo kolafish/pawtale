@@ -13,7 +13,14 @@ from app.database import engine
 from app.migrations.postgres_runtime import (
     assert_postgres_runtime_schema as assert_runtime_schema,
 )
-from app.routers import audit_router, auth_router, github_router, memoir_router, projects_router
+from app.routers import (
+    audit_router,
+    auth_router,
+    billing_router,
+    github_router,
+    memoir_router,
+    projects_router,
+)
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop
 from app.services.memoir.share_video_jobs import share_video_worker_loop
@@ -78,6 +85,7 @@ async def application_error_handler(_request, exc: ApplicationError):
 # 注册路由
 app.include_router(auth_router)
 app.include_router(audit_router)
+app.include_router(billing_router)
 app.include_router(github_router)
 app.include_router(memoir_router)
 app.include_router(projects_router)
