@@ -93,44 +93,60 @@
     wx:for="{{items}}"
     wx:key="id"
     id="{{item.anchorId}}"
-    class="{{item.cardClass}} ui-card"
+    class="transcript-swipe-row {{openSwipeId === item.id ? 'is-swiped' : ''}} {{highlightedId === item.id ? 'highlighted' : ''}}"
     data-id="{{item.id}}"
-    bindtap="openTranscriptDetail"
-    hover-class="transcript-card-hover"
-    aria-role="button"
-    aria-label="{{item.cardAriaLabel}}"
+    bindtouchstart="onCardTouchStart"
+    bindtouchend="onCardTouchEnd"
+    bindtouchcancel="onCardTouchCancel"
   >
-    <text class="record-meta">{{item.recordMetaText}}</text>
-    <text class="record-title">{{item.summaryTitleText}}</text>
-
-    <text class="summary-preview">
-      <text
-        wx:for="{{item.summarySegments}}"
-        wx:for-item="segment"
-        wx:for-index="segmentIndex"
-        wx:key="segmentIndex"
-        class="search-hit-{{segment.highlight}}"
-      >{{segment.text}}</text>
-    </text>
-
+    <button
+      class="swipe-delete"
+      data-id="{{item.id}}"
+      catchtap="deleteTranscript"
+      disabled="{{deletingId !== '' || openSwipeId !== item.id}}"
+      aria-hidden="{{openSwipeId !== item.id}}"
+      aria-label="删除{{item.summaryTitleText}}"
+    ><text>删除</text></button>
     <view
-      wx:if="{{item.canRecoverTranscription}}"
-      class="recovery-row"
-      catchtap="stopCardTap"
+      class="{{item.cardClass}} ui-card"
+      data-id="{{item.id}}"
+      bindtap="openTranscriptDetail"
+      hover-class="transcript-card-hover"
+      aria-role="button"
+      aria-label="{{item.cardAriaLabel}}"
     >
-      <button
-        class="small-primary"
-        data-id="{{item.id}}"
-        catchtap="recoverTranscript"
-        loading="{{item.recoverButtonLoading}}"
-        disabled="{{item.recoverButtonDisabled}}"
+      <text class="record-meta">{{item.recordMetaText}}</text>
+      <text class="record-title">{{item.summaryTitleText}}</text>
+
+      <text class="summary-preview">
+        <text
+          wx:for="{{item.summarySegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="search-hit-{{segment.highlight}}"
+        >{{segment.text}}</text>
+      </text>
+
+      <view
+        wx:if="{{item.canRecoverTranscription}}"
+        class="recovery-row"
+        catchtap="stopCardTap"
       >
-        {{item.recoverButtonText}}
-      </button>
-    </view>
-    <view class="record-footer">
-      <text class="record-status">{{item.storyStatusText}}</text>
-      <text class="detail-action" aria-hidden="true">›</text>
+        <button
+          class="small-primary"
+          data-id="{{item.id}}"
+          catchtap="recoverTranscript"
+          loading="{{item.recoverButtonLoading}}"
+          disabled="{{item.recoverButtonDisabled}}"
+        >
+          <text>{{item.recoverButtonText}}</text>
+        </button>
+      </view>
+      <view class="record-footer">
+        <text class="record-status">{{item.storyStatusText}}</text>
+        <text class="detail-action" aria-hidden="true">›</text>
+      </view>
     </view>
   </view>
 
