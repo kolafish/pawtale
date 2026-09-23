@@ -50,7 +50,7 @@ interface MeData {
   creditTotalText: string;
   creditUsedText: string;
   creditRemainingText: string;
-  creditProgressPercent: number;
+  creditProgressPercent: string;
   rechargeQrVisible: boolean;
   error: string;
   displayName: string;
@@ -139,7 +139,7 @@ function creditData(summary: AICreditSummary): Pick<
     creditTotalText: formatCreditAmount(total),
     creditUsedText: formatCreditAmount(used),
     creditRemainingText: formatCreditAmount(summary.remaining_rmb),
-    creditProgressPercent: total > 0 ? Math.min(100, Math.max(0, Math.round((used / total) * 100))) : 0,
+    creditProgressPercent: (total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0).toFixed(1),
   };
 }
 
@@ -187,7 +187,7 @@ function loggedOutData(): Partial<MeData> {
     creditTotalText: "0.00",
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
-    creditProgressPercent: 0,
+    creditProgressPercent: "0.0",
     rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
@@ -225,7 +225,7 @@ definePage<MeData>()({
     creditTotalText: "0.00",
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
-    creditProgressPercent: 0,
+    creditProgressPercent: "0.0",
     rechargeQrVisible: false,
     error: "",
     displayName: "",
