@@ -219,7 +219,10 @@
   top: 0;
   left: 0;
   bottom: 0;
+  box-sizing: border-box;
   width: 144rpx;
+  min-width: 144rpx;
+  max-width: 144rpx;
   min-height: 88rpx;
   margin: 0;
   padding: 0;
