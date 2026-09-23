@@ -88,6 +88,10 @@
   padding: 0 16rpx;
   border: 0;
   border-radius: var(--ui-radius-control);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   background: transparent;
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
@@ -212,11 +216,11 @@
   color: var(--ui-accent-strong);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 1.4;
-  text-align: left;
+  text-align: center;
   transition-property: transform, opacity, background-color;
   transition-duration: 150ms;
   transition-timing-function: ease-out;

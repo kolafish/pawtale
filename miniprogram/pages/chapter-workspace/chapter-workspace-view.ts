@@ -446,9 +446,13 @@ export function chapterWorkspaceViewPatch(
     chapterStoryCountText: narrativeSectionCount
       ? `${narrativeSectionCount} 个故事`
       : "故事正在生长",
-    chapterStoryDetail: chapterHasReadableDraft
-      ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
-      : "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+    chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
+      ? "本章有新变化，旧正文还在。更新后请再读一遍并确认。"
+      : summary.state === "draft_ready"
+        ? "正文已整理好，先通读；满意后确认这一章。"
+        : chapterHasReadableDraft
+          ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
+          : "讲过的回忆都在这里，整理好后就可以慢慢读了。",
     chapterHasReadableDraft,
     chapterEditingHint: pendingAssignmentCount
       ? `${pendingAssignmentCount} 段回忆待整理`

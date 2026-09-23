@@ -22,7 +22,14 @@
         />
       </view>
       <view
-        wx:if="{{chapterHasReadableDraft}}"
+        wx:if="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
+        class="chapter-read-primary chapter-next-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="showDraftUpdate"
+      >去更新正文</view>
+      <view
+        wx:elif="{{chapterHasReadableDraft}}"
         class="chapter-read-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -38,6 +45,20 @@
         aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
+      <view
+        wx:if="{{canConfirmChapter}}"
+        class="chapter-hero-followup ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="confirmChapter"
+      ><text>读完满意后，确认这一章</text><text>›</text></view>
+      <view
+        wx:elif="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
+        class="chapter-hero-followup ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="openChapterPreview"
+      ><text>阅读当前版本</text><text>›</text></view>
     </view>
 
     <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">

@@ -1503,6 +1503,32 @@ test("chapter workspace confirms the current structured draft without an assembl
   assert.equal(toasts[0].title, "本章正文已确认");
 });
 
+test("chapter workspace exposes confirmation and update paths from the chapter summary", async () => {
+  const { scrolls } = installWx();
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+      completion_summary: summary({ state: "not_started" }),
+    }),
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+
+  page.showDraftUpdate.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-sections");
+
+  context.setData({ editingToolsExpanded: false, nextAction: { ...context.data.nextAction, kind: "review_draft" } });
+  await page.runNextAction.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-sections");
+
+  const template = fs.readFileSync(path.join(__dirname, "../pages/chapter-workspace/index.wxml"), "utf8");
+  assert.match(template, /bindtap="showDraftUpdate"/);
+  assert.match(template, /bindtap="confirmChapter"/);
+});
+
 test("required review keeps an existing draft from being confirmed", async () => {
   installWx();
   const reviewSummary = summary({

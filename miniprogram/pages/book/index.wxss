@@ -6,13 +6,16 @@
   min-width: 144rpx;
   min-height: 44px;
   margin: 0;
-  padding: 0 8rpx 0 20rpx;
+  padding: 0 14rpx;
   border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 700;
-  line-height: 44px;
+  line-height: 1.3;
   white-space: nowrap;
   transition-property: transform, opacity;
   transition-duration: 150ms;
@@ -99,10 +102,6 @@
   line-height: 1.25;
 }
 .status-pill {
-  background: var(--ui-success-surface);
-  color: var(--ui-success-text);
-}
-.chapter-summary-status.confirmed {
   background: var(--ui-success-surface);
   color: var(--ui-success-text);
 }
@@ -296,11 +295,14 @@
   margin: 0;
   padding: 0 10rpx;
   border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-caption);
   font-weight: 600;
-  line-height: 80rpx;
+  line-height: 1.3;
 }
 .automation-clear:active {
   transform: scale(0.96);
@@ -472,6 +474,9 @@
   margin: 0;
   padding: 0 12rpx;
   border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface);
   box-shadow: var(--ui-control-shadow);
@@ -697,28 +702,38 @@
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
-.chapter-summary-status {
-  flex: 0 0 auto;
-  max-width: 164rpx;
-  padding: 7rpx 12rpx;
-  border-radius: 999rpx;
+.chapter-summary-guidance {
+  padding: 14rpx 18rpx;
+  border-radius: var(--ui-radius-control);
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
+}
+.chapter-summary-guidance.needs-action {
   background: var(--ui-warning-surface);
   color: var(--ui-warning-text);
-  font-size: var(--ui-font-caption);
-  font-weight: 600;
-  line-height: 1.25;
-  text-align: center;
 }
-.chapter-summary-status text {
-  display: block;
+.chapter-summary-guidance.is-complete {
+  padding: 0 2rpx;
+  color: var(--ui-text-secondary);
 }
-.chapter-summary-status-hint {
-  margin-top: 2rpx;
-  font-size: var(--ui-font-caption);
+.chapter-summary-guidance.is-complete .chapter-summary-guidance-label {
+  color: var(--ui-success-text);
+}
+.chapter-summary-guidance-label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.chapter-summary-guidance-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
 }
 .chapter-summary-error,
-.chapter-audio-status,
-.draft-pending {
+.chapter-audio-status {
   display: block;
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-body);
@@ -729,23 +744,21 @@
 .chapter-audio-status {
   color: var(--ui-text-secondary);
 }
-.draft-pending {
-  margin-top: 10rpx;
-}
-.draft-pending.compact {
-  margin-top: 0;
-}
 .chapter-summary-actions {
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 10rpx;
   padding-top: 14rpx;
   border-top: 1rpx solid var(--ui-divider);
 }
 .chapter-summary-actions .primary-button,
 .chapter-summary-actions .ghost-button {
-  flex: 0 1 auto;
   width: auto;
-  min-width: 164rpx;
+}
+.chapter-summary-actions .primary-button {
+  flex: 1 1 auto;
+}
+.chapter-summary-actions .ghost-button {
+  flex: 0 0 138rpx;
 }
 .chapter-order-panel {
   overflow: hidden;
@@ -864,6 +877,9 @@
   margin: 0;
   padding: 0 16rpx;
   border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface);
   box-shadow: var(--ui-control-shadow);
@@ -1225,16 +1241,17 @@
 .book-page.large-text .section-count,
 .book-page.large-text .chapter-order-index,
 .book-page.large-text .chapter-order-edit,
-.book-page.large-text .chapter-summary-status,
-.book-page.large-text .chapter-summary-status-hint,
 .book-page.large-text .chapter-summary-error,
 .book-page.large-text .chapter-audio-status,
 .book-page.large-text .chapter-index,
 .book-page.large-text .source-ref-label,
 .book-page.large-text .source-split-toggle,
-.book-page.large-text .draft-pending,
 .book-page.large-text .image-assets-entry-count {
   font-size: var(--ui-font-large-meta);
+  line-height: 1.5;
+}
+.book-page.large-text .chapter-summary-guidance {
+  font-size: var(--ui-font-large-body);
   line-height: 1.5;
 }
 .book-page.large-text .automation-ack,

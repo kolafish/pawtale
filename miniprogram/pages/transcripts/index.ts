@@ -9,6 +9,7 @@ import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
+  deleteMemoirVoiceTranscript,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
   recoverMemoirVoiceTranscript,
@@ -33,6 +34,7 @@ import {
   transcriptTitleText,
   type TranscriptTextSegment,
 } from "../../services/transcript-view-model";
+import { confirmDeleteTranscript } from "../../services/transcript-delete-confirmation";
 import {
   datasetString,
   pageUrl,
@@ -49,6 +51,11 @@ interface SearchInputEvent {
   detail: {
     value: string;
   };
+}
+
+interface TranscriptTouchEvent extends DatasetEvent {
+  touches: Array<{ pageX: number; pageY: number }>;
+  changedTouches: Array<{ pageX: number; pageY: number }>;
 }
 
 interface TranscriptSearchFilters {
@@ -82,6 +89,8 @@ interface TranscriptsData {
   loading: boolean;
   needsLogin: boolean;
   recoveringId: string;
+  deletingId: string;
+  openSwipeId: string;
   error: string;
   items: TranscriptItemView[];
   total: number;
@@ -189,7 +198,7 @@ function withTranscriptRuntimeState(
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
-    recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
+    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : "把录音转成文字",
   };
 }
 
@@ -364,9 +373,9 @@ function toViewItem(
     item.is_included_in_book
     || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
   );
-  const summaryTitleText = transcriptTitleText(item);
+  const summaryTitleText = canRecoverTranscription ? "录音已保存，等待生成文字" : transcriptTitleText(item);
   const summaryPreviewText = canRecoverTranscription
-    ? "恢复转写后即可继续整理。"
+    ? "点击下方按钮，把已保存的录音转成文字。"
     : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
@@ -377,7 +386,7 @@ function toViewItem(
     || includedChapter?.title.trim()
     || "";
   const storyStatusText = canRecoverTranscription
-    ? "待转写"
+    ? "等待生成文字"
     : (isIncludedInBook
       ? `已收进：${includedLocationText || "故事树"}`
       : (item.section_assignment
@@ -398,7 +407,7 @@ function toViewItem(
     canRecoverTranscription,
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
-    recoverButtonText: "恢复转写",
+    recoverButtonText: "把录音转成文字",
     storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
     cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，打开详情`,
@@ -420,6 +429,8 @@ function replaceItem(
 definePage<TranscriptsData>()({
   loadToken: 0,
   searchDebounceTimer: null as number | null,
+  swipeStart: null as { id: string; x: number; y: number } | null,
+  swipeTapUntil: 0,
   voiceSearchToken: 0,
   voiceSearchVisible: true,
 
@@ -428,6 +439,8 @@ definePage<TranscriptsData>()({
     loading: false,
     needsLogin: false,
     recoveringId: "",
+    deletingId: "",
+    openSwipeId: "",
     error: "",
     items: [],
     total: 0,
@@ -478,7 +491,7 @@ definePage<TranscriptsData>()({
     const searchQuery = this.data.searchQuery;
     const searchFilters = normalizedSearchFilters(this.data.searchFilters);
     const hasSearchCriteria = searchCriteriaActive(searchQuery, searchFilters);
-    setTranscriptsData(this, { loading: true, error: "" });
+    setTranscriptsData(this, { loading: true, error: "", ...(reset ? { openSwipeId: "" } : {}) });
     try {
       let activeProjectId = this.data.activeProjectId;
       let projectTitle = this.data.projectTitle;
@@ -572,7 +585,70 @@ definePage<TranscriptsData>()({
     if (!id) {
       return;
     }
+    if (Date.now() < this.swipeTapUntil) {
+      return;
+    }
+    if (this.data.openSwipeId) {
+      this.setData({ openSwipeId: "" });
+      return;
+    }
     wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
+  },
+
+  onCardTouchStart(event: TranscriptTouchEvent) {
+    const id = datasetString(event, "id");
+    const touch = event.touches[0];
+    this.swipeStart = id && touch ? { id, x: touch.pageX, y: touch.pageY } : null;
+  },
+
+  onCardTouchEnd(event: TranscriptTouchEvent) {
+    const start = this.swipeStart;
+    this.swipeStart = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || start.id !== datasetString(event, "id")) {
+      return;
+    }
+    const dx = touch.pageX - start.x;
+    const dy = touch.pageY - start.y;
+    if (Math.abs(dx) < 44 || Math.abs(dx) <= Math.abs(dy) * 1.2) {
+      return;
+    }
+    this.swipeTapUntil = Date.now() + 350;
+    this.setData({ openSwipeId: dx > 0 ? start.id : "" });
+  },
+
+  onCardTouchCancel() {
+    this.swipeStart = null;
+  },
+
+  async deleteTranscript(event: DatasetEvent) {
+    const id = datasetString(event, "id");
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (!item || this.data.deletingId || this.data.recoveringId) {
+      return;
+    }
+    this.setData({ deletingId: id });
+    try {
+      const confirmed = await confirmDeleteTranscript(item.summaryTitleText);
+      if (!confirmed) {
+        return;
+      }
+      await deleteMemoirVoiceTranscript(id);
+      const total = Math.max(0, this.data.total - 1);
+      setTranscriptsData(this, {
+        items: this.data.items.filter((candidate) => candidate.id !== id),
+        total,
+        offset: Math.max(0, this.data.offset - 1),
+        openSwipeId: "",
+        searchResultText: this.data.hasSearchCriteria ? `找到 ${total} 条相关记录` : "",
+      });
+      wx.showToast({ title: "已删除", icon: "success" });
+      await this.loadTranscripts(true);
+    } catch (error) {
+      setTranscriptsData(this, { error: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      this.setData({ deletingId: "" });
+    }
   },
 
   stopCardTap() {
@@ -721,9 +797,9 @@ definePage<TranscriptsData>()({
         items: replaceItem(this.data.items, recovered, this.data.searchQuery),
       });
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "已恢复转写", icon: "success" });
+      wx.showToast({ title: "录音已转成文字", icon: "success" });
     } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "恢复转写失败" });
+      setTranscriptsData(this, { error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {
       setTranscriptsData(this, { recoveringId: "" });
     }
