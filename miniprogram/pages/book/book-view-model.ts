@@ -71,16 +71,14 @@ export interface BookChapterView extends Pick<
   pendingCompletionSourceCount: number;
   pendingNewSourceCount: number;
   removedSourceCount: number;
-  sourceChangeNotice: string;
   draftAvailable: boolean;
   draftConfirmed: boolean;
   draftCharCount: number;
   draftChanged: boolean;
-  draftStatusText: string;
-  draftStatusHintText: string;
   draftVersionText: string;
   draftActionText: string;
-  draftActionHintText: string;
+  chapterGuidanceText: string;
+  chapterNeedsAction: boolean;
   draftBusy: boolean;
   draftError: string;
 }
@@ -249,28 +247,22 @@ export function latestDraftContent(draft: MemoirBookChapterDraft | null): string
   return draft?.latest_version?.content || "";
 }
 
-export function draftStatusText(draft: MemoirBookChapterDraft | null): string {
-  if (!draft?.latest_version) {
-    return "未生成";
-  }
-  return draft.status === "confirmed" ? "已确认" : "待确认";
-}
-
-function draftStatusHintText(
+export function chapterGuidanceText(
   draft: MemoirBookChapterDraft | null,
+  changeNotice: string,
   pendingCount = 0,
   removedCount = 0,
 ): string {
   if (!draft?.latest_version) {
-    return "先生成正文后再确认";
+    return "正文还没准备好，进入章节页查看整理进度。";
   }
   if (pendingCount || removedCount) {
-    return "当前正文还没有包含最新素材";
+    return `${changeNotice}。更新正文后，再确认这一章。`;
   }
   if (draft.status === "confirmed") {
-    return "修改后需要重新确认";
+    return "需要时仍可阅读或修改。";
   }
-  return "确认前可继续修改";
+  return "读读这一章，满意后再确认。";
 }
 
 export function sourceChangeNotice(
@@ -279,52 +271,34 @@ export function sourceChangeNotice(
   completionCount = 0,
   newCount = 0,
 ): string {
-  if (removedCount) {
-    return `${removedCount} 条原始讲述已删除，章节稿需要更新`;
-  }
   const ordinaryCount = newCount || (
     completionCount ? Math.max(0, pendingCount - completionCount) : pendingCount
   );
-  if (completionCount && ordinaryCount) {
-    return `${completionCount} 条补充回答、${ordinaryCount} 条新增讲述待写入正文`;
+  const changes: string[] = [];
+  if (removedCount) {
+    changes.push(`${removedCount} 条讲述已删除`);
   }
   if (completionCount) {
-    return `${completionCount} 条补充回答待写入正文`;
+    changes.push(`${completionCount} 条补充回答尚未写入正文`);
   }
   if (ordinaryCount) {
-    return `${ordinaryCount} 条新增讲述待补写`;
+    changes.push(`${ordinaryCount} 条新增讲述尚未写入正文`);
   }
-  return "";
+  return changes.join("，");
 }
 
 export function draftActionText(
-  _draft: MemoirBookChapterDraft | null,
+  draft: MemoirBookChapterDraft | null,
   pendingCount: number,
   removedCount = 0,
-  completionCount = 0,
 ): string {
-  if (pendingCount && !removedCount) {
-    return completionCount ? "更新本章正文" : "补写新增";
+  if (!draft?.latest_version) {
+    return "查看整理进度";
   }
-  return "编辑正文";
-}
-
-function draftActionHintText(
-  _draft: MemoirBookChapterDraft | null,
-  pendingCount: number,
-  removedCount = 0,
-  completionCount = 0,
-): string {
-  if (removedCount) {
-    return "会保留剩余讲述并更新正文";
+  if (pendingCount || removedCount) {
+    return "更新正文";
   }
-  if (completionCount) {
-    return "用补充回答重新整理完整正文";
-  }
-  if (pendingCount) {
-    return "直接把新增讲述写入正文";
-  }
-  return "";
+  return draft.status === "confirmed" ? "阅读或修改" : "阅读并确认";
 }
 
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
@@ -1014,16 +988,15 @@ function chapterSummaryMetaText(
     | "sourceCount"
     | "draftCharCount"
     | "draftAvailable"
-    | "draftStatusText"
   >,
 ): string {
   const sourceText = bookOralSourceCountText(chapter.sourceCount);
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
   const sectionText = chapter.sectionCount ? `${chapter.sectionCount} 个小节 · ` : "";
   if (!chapter.draftAvailable) {
-    return `${inclusionText}${sectionText}${sourceText} · 尚未生成正文`;
+    return `${inclusionText}${sectionText}${sourceText}`;
   }
-  return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
+  return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字`;
 }
 
 export function bookOutlineNarrationText(
@@ -1066,10 +1039,11 @@ export function buildChapterViews(
         (section) => section.status === "active" && section.include_in_book !== false,
       ).length;
       const draftCharCount = trimText(content).length;
-      const statusText = (
-        assignedPendingCount || assignedRemovedCount
-          ? "需更新"
-          : draftStatusText(draft)
+      const changeNotice = sourceChangeNotice(
+        assignedPendingCount,
+        assignedRemovedCount,
+        assignedCompletionCount,
+        assignedNewCount,
       );
       const viewBase = {
         include_in_book: chapter.include_in_book !== false,
@@ -1077,7 +1051,6 @@ export function buildChapterViews(
         sourceCount: chapter.source_refs.length,
         draftCharCount,
         draftAvailable: Boolean(draft?.latest_version),
-        draftStatusText: statusText,
       };
       return {
         id: chapter.id,
@@ -1104,34 +1077,24 @@ export function buildChapterViews(
         pendingCompletionSourceCount: assignedCompletionCount,
         pendingNewSourceCount: assignedNewCount,
         removedSourceCount: assignedRemovedCount,
-        sourceChangeNotice: sourceChangeNotice(
-          assignedPendingCount,
-          assignedRemovedCount,
-          assignedCompletionCount,
-          assignedNewCount,
-        ),
         draftAvailable: Boolean(draft?.latest_version),
         draftConfirmed: draft?.status === "confirmed",
         draftCharCount,
         draftChanged: false,
-        draftStatusText: statusText,
-        draftStatusHintText: draftStatusHintText(
+        chapterGuidanceText: chapterGuidanceText(
           draft,
+          changeNotice,
           assignedPendingCount,
           assignedRemovedCount,
+        ),
+        chapterNeedsAction: Boolean(
+          assignedPendingCount || assignedRemovedCount || draft?.status !== "confirmed",
         ),
         draftVersionText: draftVersionText(draft),
         draftActionText: draftActionText(
           draft,
           assignedPendingCount,
           assignedRemovedCount,
-          assignedCompletionCount,
-        ),
-        draftActionHintText: draftActionHintText(
-          draft,
-          assignedPendingCount,
-          assignedRemovedCount,
-          assignedCompletionCount,
         ),
         draftBusy: false,
         draftError: "",

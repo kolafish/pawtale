@@ -410,6 +410,30 @@
     0 12rpx 28rpx rgba(148, 69, 53, 0.18);
 }
 
+.chapter-hero-followup {
+  min-height: 80rpx;
+  margin-top: 10rpx;
+  padding: 10rpx 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-body);
+  font-weight: 700;
+  line-height: var(--ui-line-body);
+  transition-property: transform, opacity;
+  transition-duration: 150ms;
+}
+
+.chapter-hero-followup:active {
+  transform: scale(0.96);
+}
+
+.chapter-hero-followup.is-disabled {
+  opacity: 0.55;
+}
+
 .friendly-section-title {
   min-width: 0;
   color: var(--ui-text-primary);
