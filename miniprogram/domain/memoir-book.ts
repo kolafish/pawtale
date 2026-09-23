@@ -282,7 +282,15 @@ export interface MemoirBookAudioResponse {
   alignment?: TTSAlignmentSegment[];
 }
 
-export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard" | "navy_gilt";
+export type MemoirBookCoverStyle =
+  | "classic_plain"
+  | "warm_gray"
+  | "dark_album"
+  | "moonlit_courtyard"
+  | "navy_gilt"
+  | "heritage_classic"
+  | "warm_journal"
+  | "modern_minimal";
 
 export interface MemoirBookOutputUpdateRequest {
   title?: string | null;

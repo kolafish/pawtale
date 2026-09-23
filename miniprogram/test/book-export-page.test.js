@@ -113,6 +113,10 @@ test("book layout section exposes preview, selection, and custom controls", () =
   assert.match(template, /data-section="layout" bindtap="openSection"/);
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="previewBookLayout"/);
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="selectBookLayout"/);
+  assert.match(template, /src="\{\{option.coverPreviewImage\}\}"/);
+  assert.match(template, /src="\{\{option.ornamentThumbnail\}\}"/);
+  assert.match(template, /src="\{\{bookCoverStylePreviewImage\}\}"/);
+  assert.match(template, /预览整套 PDF/);
   assert.match(template, /data-key="font_scale" bindchange="changeBookCustomLayout"/);
   assert.match(template, /data-key="line_spacing" bindchange="changeBookCustomLayout"/);
   assert.match(template, /data-key="page_margin" bindchange="changeBookCustomLayout"/);
@@ -379,7 +383,7 @@ test("book export page saves full-book metadata and cover style", async () => {
 
   assert.deepEqual(
     context.data.bookCoverStyleOptions.map((option) => option.value),
-    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"],
+    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt", "heritage_classic", "warm_journal", "modern_minimal"],
   );
 
   page.changeBookTitle.call(context, {
@@ -785,7 +789,7 @@ test("book layout preview opens the chosen PDF without saving, then selection up
   assert.equal(context.data.bookLayoutTemplate, "photo_memory");
 });
 
-test("new interior templates can each be previewed and selected", async () => {
+test("new complete templates preview without saving and apply cover with interior", async () => {
   const output = sampleBookOutput();
   const downloads = [];
   const updates = [];
@@ -801,6 +805,7 @@ test("new interior templates can each be previewed and selected", async () => {
     updateMemoirBookOutput: async (_projectId, payload) => {
       updates.push(payload);
       output.latest_version.manuscript.profile.template = payload.manuscript_template;
+      output.latest_version.manuscript.render_settings.cover_style = payload.cover_style;
       return output;
     },
   });
@@ -816,6 +821,11 @@ test("new interior templates can each be previewed and selected", async () => {
     const option = context.data.bookLayoutOptions.find((item) => item.value === template);
     assert.equal(option?.label, label);
     assert.equal(option?.previewClass, previewClass);
+    assert.equal(option?.coverStyle, template);
+    assert.equal(option?.coverPreviewImage, `/assets/book_covers/${template}.jpg`);
+    assert.equal(option?.ornamentThumbnail, `/assets/book_ornaments/${template}.png`);
+    assert.ok(fs.existsSync(path.join(__dirname, `../assets/book_covers/${template}.jpg`)));
+    assert.ok(fs.existsSync(path.join(__dirname, `../assets/book_ornaments/${template}.png`)));
     const event = { currentTarget: { dataset: { template } } };
     await page.previewBookLayout.call(context, event);
     assert.deepEqual(downloads.at(-1), [
@@ -824,10 +834,69 @@ test("new interior templates can each be previewed and selected", async () => {
     ]);
     assert.equal(updates.length, downloads.length - 1);
     await page.selectBookLayout.call(context, event);
-    assert.deepEqual(updates.at(-1), { manuscript_template: template });
+    assert.deepEqual(updates.at(-1), { manuscript_template: template, cover_style: template });
     assert.equal(context.data.bookManuscriptTemplateLabel, label);
     assert.equal(context.data.bookLayoutTemplate, template);
+    assert.equal(context.data.bookCoverStyle, template);
+    assert.equal(context.data.bookCoverStylePreviewImage, `/assets/book_covers/${template}.jpg`);
   }
+});
+
+test("double tapping a complete template waits for cover autosave and saves only once", async () => {
+  const output = sampleBookOutput();
+  output.latest_version.manuscript.profile.template = "heritage_classic";
+  output.latest_version.manuscript.render_settings.cover_style = "heritage_classic";
+  const updates = [];
+  let releaseAutosave;
+  const autosaveGate = new Promise((resolve) => { releaseAutosave = resolve; });
+  global.wx = { showToast() {} };
+  const { page } = loadBookExportPage({
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      updates.push(payload);
+      if (!payload.manuscript_template) await autosaveGate;
+      if (payload.manuscript_template) {
+        output.latest_version.manuscript.profile.template = payload.manuscript_template;
+      }
+      if (payload.cover_style) {
+        output.latest_version.manuscript.render_settings.cover_style = payload.cover_style;
+      }
+      return output;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+  const event = { currentTarget: { dataset: { template: "heritage_classic" } } };
+
+  await page.selectBookLayout.call(context, event);
+  assert.deepEqual(updates, []);
+
+  page.changeBookCoverStyle.call(context, { detail: { value: "1" } });
+  assert.equal(context.data.bookCoverStyle, "warm_gray");
+  assert.equal(context.data.bookCoverStyleChanged, true);
+  const firstSelection = page.selectBookLayout.call(context, event);
+  assert.equal(context.data.bookLayoutBusyTarget, "save:heritage_classic");
+  assert.equal(updates.length, 1);
+  await page.selectBookLayout.call(context, event);
+  assert.equal(updates.length, 1);
+  releaseAutosave();
+  await firstSelection;
+
+  assert.equal(updates.length, 2);
+  assert.equal(updates[0].cover_style, "warm_gray");
+  assert.deepEqual(updates[1], {
+    manuscript_template: "heritage_classic",
+    cover_style: "heritage_classic",
+  });
+  assert.equal(context.data.bookCoverStyle, "heritage_classic");
+  assert.equal(context.data.bookCoverStyleChanged, false);
+  assert.equal(context.bookDesignAutosaveTimer, null);
+
+  const nextEvent = { currentTarget: { dataset: { template: "warm_journal" } } };
+  await Promise.all([
+    page.selectBookLayout.call(context, nextEvent),
+    page.selectBookLayout.call(context, nextEvent),
+  ]);
+  assert.equal(updates.filter((payload) => payload.manuscript_template === "warm_journal").length, 1);
 });
 
 test("book layout cannot be previewed or selected for a plain text legacy book", async () => {

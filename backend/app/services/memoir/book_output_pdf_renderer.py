@@ -782,6 +782,7 @@ class PDFBookBuilder:
         color: PDFColor | None = None,
         font_name: str | None = None,
         char_spacing: float = 0.0,
+        x_offset: int = 0,
     ) -> int:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         current_y = y
@@ -790,7 +791,7 @@ class PDFBookBuilder:
             page.commands.append(
                 PDFTextCommand(
                     text=line,
-                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing),
+                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing) + x_offset,
                     y=current_y,
                     font_size=font_size,
                     color=color,

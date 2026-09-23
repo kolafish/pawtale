@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.models.memoir import MemoirBookOutputVersion
 from app.schemas.memoir_book import (
+    MemoirBookCoverStyle,
     MemoirBookCustomLayout,
     MemoirBookManuscript,
     MemoirBookManuscriptBackMatter,
@@ -56,6 +57,14 @@ SUPPORTED_BOOK_COVER_STYLES = {
     "dark_album",
     "moonlit_courtyard",
     "navy_gilt",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+}
+TEMPLATE_COVER_STYLES: dict[MemoirBookManuscriptTemplate, MemoirBookCoverStyle] = {
+    "heritage_classic": "heritage_classic",
+    "warm_journal": "warm_journal",
+    "modern_minimal": "modern_minimal",
 }
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 BOOK_MANUSCRIPT_TEMPLATES = {
@@ -157,6 +166,10 @@ def formal_book_title(raw_title: str) -> str:
 
 def cover_style(value: str | None) -> str:
     return value if value in SUPPORTED_BOOK_COVER_STYLES else DEFAULT_BOOK_COVER_STYLE
+
+
+def template_cover_style(template: MemoirBookManuscriptTemplate | None) -> MemoirBookCoverStyle | None:
+    return TEMPLATE_COVER_STYLES.get(template) if template is not None else None
 
 
 def project_narrator_name(project: object) -> str:
