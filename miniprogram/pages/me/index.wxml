@@ -112,7 +112,7 @@
             <text class="overview-stat-label">录音</text>
           </view>
         </view>
-        <text class="overview-stats-hint">这里统计已转成文字的讲述；待转写录音也会显示在讲述记录列表中。</text>
+        <text class="overview-stats-hint">这里统计已转成文字的讲述；尚未生成文字的录音也会显示在讲述记录列表中。</text>
 
       </view>
     </view>

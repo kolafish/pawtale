@@ -18,10 +18,10 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { promptRequiredText } from "../../services/text-prompt";
+import { confirmDeleteTranscript } from "../../services/transcript-delete-confirmation";
 import {
   changedItem,
   confirmConvertQuestionToAnswer,
-  confirmDelete,
   confirmDiscardEdit,
   materialAssignmentOptions,
   materialAssignmentPatch,
@@ -400,9 +400,9 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
       this.setData({ item: toViewItem(recovered) });
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "已恢复转写", icon: "success" });
+      wx.showToast({ title: "录音已转成文字", icon: "success" });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "恢复转写失败" });
+      this.setData({ error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {
       this.setData({ recovering: false });
     }
@@ -520,7 +520,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
-    const confirmed = await confirmDelete(item);
+    const confirmed = await confirmDeleteTranscript(item.titleText || item.display_text || item.transcript_raw);
     if (!confirmed) {
       return;
     }
