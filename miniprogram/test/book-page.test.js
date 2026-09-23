@@ -319,7 +319,7 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   const navigations = [];
   const actionSheets = [];
   const audioCalls = [];
-  const tapIndexes = [0, 3, 99];
+  const tapIndexes = [2, 99, 99];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
@@ -348,13 +348,11 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
-    ["整理本章", "修改章名", "AI 重新起名", "朗读", "不收入本书"],
-    ["整理本章", "修改章名", "AI 重新起名", "朗读", "不收入本书"],
-    ["整理本章", "修改章名", "AI 重新起名", "不收入本书"],
+    ["修改章名", "AI 重新起名", "朗读", "不收入本书"],
+    ["修改章名", "AI 重新起名", "朗读", "不收入本书"],
+    ["修改章名", "AI 重新起名", "不收入本书"],
   ]);
-  assert.deepEqual(navigations, [
-    "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter-1",
-  ]);
+  assert.deepEqual(navigations, []);
   assert.deepEqual(audioCalls, ["chapter-1"]);
 });
 
@@ -388,7 +386,7 @@ test("book page hides and restores a chapter without deleting its content", asyn
   });
   await flushAsyncWork();
 
-  assert.deepEqual(actionSheets[0], ["整理本章", "修改章名", "AI 重新起名", "不收入本书"]);
+  assert.deepEqual(actionSheets[0], ["修改章名", "AI 重新起名", "不收入本书"]);
   assert.deepEqual(calls[0], {
     projectId: "project/1",
     data: {
@@ -406,7 +404,7 @@ test("book page hides and restores a chapter without deleting its content", asyn
   });
   await flushAsyncWork();
 
-  assert.deepEqual(actionSheets[1], ["整理本章", "修改章名", "AI 重新起名", "恢复收入本书"]);
+  assert.deepEqual(actionSheets[1], ["修改章名", "AI 重新起名", "恢复收入本书"]);
   assert.equal(calls[1].data.include_in_book, true);
   assert.equal(context.data.chapters[1].include_in_book, true);
   assert.equal(context.data.totalChapterCount, 2);
@@ -492,13 +490,33 @@ test("book page progress counts generated and confirmed chapters", () => {
   });
 
   assert.equal(mod.bookProgressText(chapters), "1/2 章已确认，2 章已有正文");
-  assert.equal(chapters[0].draftStatusText, "已确认");
-  assert.equal(chapters[1].draftStatusText, "待确认");
+  assert.equal(chapters[0].chapterNeedsAction, false);
+  assert.equal(chapters[0].chapterGuidanceText, "需要时仍可阅读或修改。");
+  assert.equal(chapters[0].draftActionText, "阅读或修改");
+  assert.equal(chapters[1].chapterNeedsAction, true);
+  assert.equal(chapters[1].chapterGuidanceText, "读读这一章，满意后再确认。");
+  assert.equal(chapters[1].draftActionText, "阅读并确认");
+  assert.doesNotMatch(chapters[0].chapterSummaryMetaText, /已确认|待确认/);
   assert.equal("draft" in chapters[0], false);
   assert.equal("draftContent" in chapters[0], false);
   assert.equal("source_refs" in chapters[0], false);
   assert.equal("sections" in chapters[0], false);
   assert.equal("metadata_json" in chapters[0], false);
+});
+
+test("book page directs chapters without a draft to their existing workspace", () => {
+  const { mod } = loadBookPage();
+  const [chapter] = mod.buildChapterViews(samplePlan("confirmed"));
+
+  assert.equal(chapter.chapterNeedsAction, true);
+  assert.equal(chapter.chapterGuidanceText, "正文还没准备好，进入章节页查看整理进度。");
+  assert.equal(chapter.draftActionText, "查看整理进度");
+  assert.doesNotMatch(chapter.chapterSummaryMetaText, /未生成|待确认/);
+
+  const planWithNewSource = samplePlan("confirmed");
+  planWithNewSource.chapters[0].pending_source_count = 1;
+  const [unpreparedChapter] = mod.buildChapterViews(planWithNewSource);
+  assert.equal(unpreparedChapter.draftActionText, "查看整理进度");
 });
 
 test("book page excludes hidden chapters from full-book generation readiness", () => {
@@ -723,9 +741,9 @@ test("book page marks assigned sources as supplemental chapter work", () => {
   });
 
   assert.equal(chapters[0].pendingSourceCount, 1);
-  assert.equal(chapters[0].sourceChangeNotice, "1 条新增讲述待补写");
-  assert.equal(chapters[0].draftActionText, "补写新增");
-  assert.equal(chapters[0].draftStatusText, "需更新");
+  assert.equal(chapters[0].chapterGuidanceText, "1 条新增讲述尚未写入正文。更新正文后，再确认这一章。");
+  assert.equal(chapters[0].draftActionText, "更新正文");
+  assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
 test("book page labels completion answers separately from new narration", () => {
@@ -740,9 +758,9 @@ test("book page labels completion answers separately from new narration", () => 
 
   assert.equal(chapters[0].pendingCompletionSourceCount, 2);
   assert.equal(chapters[0].pendingNewSourceCount, 0);
-  assert.equal(chapters[0].sourceChangeNotice, "2 条补充回答待写入正文");
-  assert.equal(chapters[0].draftActionText, "更新本章正文");
-  assert.equal(chapters[0].draftStatusText, "需更新");
+  assert.equal(chapters[0].chapterGuidanceText, "2 条补充回答尚未写入正文。更新正文后，再确认这一章。");
+  assert.equal(chapters[0].draftActionText, "更新正文");
+  assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
 test("book page shows the number of visible sections in each chapter", () => {
@@ -767,7 +785,15 @@ test("book page marks deleted chapter sources for review", () => {
 
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
-  assert.equal(chapters[0].sourceChangeNotice, "1 条原始讲述已删除，章节稿需要更新");
+  assert.equal(chapters[0].chapterGuidanceText, "1 条讲述已删除。更新正文后，再确认这一章。");
+  assert.equal(chapters[0].draftActionText, "更新正文");
+
+  plan.chapters[0].pending_source_count = 1;
+  plan.chapters[0].pending_new_source_count = 1;
+  const [changedChapter] = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "draft", "第一版正文"),
+  });
+  assert.match(changedChapter.chapterGuidanceText, /1 条讲述已删除，1 条新增讲述尚未写入正文/);
 });
 
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {

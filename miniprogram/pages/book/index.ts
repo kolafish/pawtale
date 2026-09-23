@@ -636,16 +636,6 @@ definePage<BookPageData>()({
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId) });
   },
 
-  async runChapterPrimaryAction(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId) {
-      this.setData({ error: "缺少章节信息" });
-      return;
-    }
-    this.openChapterEditor(event);
-  },
-
   toggleChapterStructureEditing() {
     if (this.data.stage !== "drafting" || !this.bookPlan || this.data.updatingPlanStructure) {
       return;
@@ -668,10 +658,6 @@ definePage<BookPageData>()({
       return;
     }
     const actions: Array<{ label: string; run: () => unknown }> = [];
-    actions.push({
-      label: "整理本章",
-      run: () => wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId) }),
-    });
     actions.push({
       label: "修改章名",
       run: () => this.editChapterTitleById(chapterId),

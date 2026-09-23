@@ -527,6 +527,19 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
+  showDraftUpdate() {
+    if (
+      !this.data.workspace?.draft_needs_rewrite
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    this.setData({ editingToolsExpanded: true }, () => {
+      scrollToSection("#chapter-sections");
+    });
+  },
+
   openStorySection(
     event: PageDatasetEvent<{ id?: string }>,
   ) {
@@ -571,7 +584,9 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
-      scrollToSection("#chapter-draft");
+      this.setData({ editingToolsExpanded: true }, () => {
+        scrollToSection("#chapter-sections");
+      });
     }
   },
 

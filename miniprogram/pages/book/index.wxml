@@ -394,7 +394,7 @@
       <view class="section-head-copy">
         <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节正文"}}</text>
         <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
-        <text wx:else class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
+        <text wx:else class="section-count">已完成 {{confirmedDraftCount}}/{{totalChapterCount}} 章</text>
       </view>
       <view
         class="section-head-action chapter-order-toggle {{updatingPlanStructure ? 'is-locked' : ''}}"
@@ -466,12 +466,11 @@
               <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
               <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
             </view>
-            <view class="chapter-summary-status {{item.draftStatusText === '已确认' ? 'confirmed' : ''}}">
-              <text>{{item.draftStatusText}}</text>
-              <text wx:if="{{item.draftStatusText === '已确认'}}" class="chapter-summary-status-hint">可继续修改</text>
-            </view>
           </view>
-          <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending compact">{{item.sourceChangeNotice}}</text>
+          <view class="chapter-summary-guidance {{item.chapterNeedsAction ? 'needs-action' : 'is-complete'}}">
+            <text class="chapter-summary-guidance-label">{{item.chapterNeedsAction ? '下一步' : '已确认'}}</text>
+            <text class="chapter-summary-guidance-text">{{item.chapterGuidanceText}}</text>
+          </view>
           <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
           <text
             wx:if="{{ttsBusyTarget === item.ttsTarget || playingTarget === item.ttsTarget}}"
@@ -483,7 +482,7 @@
             <button
               class="primary-button small"
               data-id="{{item.id}}"
-              bindtap="runChapterPrimaryAction"
+              bindtap="openChapterEditor"
               loading="{{item.draftBusy}}"
               disabled="{{updatingPlanStructure || item.draftBusy}}"
             >
@@ -496,7 +495,7 @@
               bindtap="openChapterMoreActions"
               disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget || titleBusyTarget === item.id}}"
             >
-              {{titleBusyTarget === item.id ? "正在改名" : (ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "章节操作"))}}
+              {{titleBusyTarget === item.id ? "正在改名" : (ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "更多"))}}
             </button>
           </view>
         </view>
