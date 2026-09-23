@@ -58,7 +58,7 @@
       </block>
 
       <block wx:else>
-        <view wx:if="{{activeSection !== 'editorial'}}" class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">
+        <view class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">
           <text class="subpage-back-arrow" aria-hidden="true">‹</text><text>返回我的书</text>
         </view>
         <view wx:if="{{activeSection === 'export'}}" class="detail-card ui-card">
