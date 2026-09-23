@@ -26,6 +26,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFImageCommand,
     PDFLayout,
     MemoirBookOutputExportLayout,
+    configured_pdf_layout,
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
@@ -146,6 +147,52 @@ def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) 
 
 def _text_command(page, text: str):
     return next(command for command in page.commands if command.text == text)
+
+
+def test_manuscript_design_changes_chapter_and_body_pdf_layout():
+    manuscript = _sample_manuscript("这是正文，留给家人阅读。")
+    base = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    designs = {
+        template: configured_pdf_layout(base, template=template)
+        for template in ("classic_family", "photo_memory", "oral_archive")
+    }
+    rendered = {}
+    for template, layout in designs.items():
+        pages = _build_manuscript_pdf_pages(
+            title="外婆回忆录",
+            content="外婆回忆录",
+            manuscript=manuscript,
+            layout=layout,
+        )
+        chapter_page = next(page for page in pages if page.anchor == "chapter-1")
+        title = _text_command(chapter_page, "外婆家的童年")
+        body = next(
+            command
+            for page in pages
+            for command in page.commands
+            if command.text == "这是正文，留给家人阅读。"
+        )
+        rendered[template] = (title.font_size, body.font_size, body.x, body.y)
+
+    assert len(set(rendered.values())) == 3
+    assert rendered["photo_memory"][0] > rendered["classic_family"][0]
+    assert rendered["oral_archive"][1] < rendered["classic_family"][1]
+
+    custom = configured_pdf_layout(
+        base,
+        template="custom",
+        custom_layout={"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"},
+    )
+    assert custom.font_size > base.font_size
+    assert custom.line_height > base.line_height
+    assert custom.margin_x > base.margin_x
+    assert custom.max_line_units < base.max_line_units
+
+    print_base = PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT]
+    for template in (*designs, "custom"):
+        print_layout = configured_pdf_layout(print_base, template=template)
+        assert print_layout.mirror_body_pages is True
+        assert print_layout.inner_margin_delta == print_base.inner_margin_delta
 
 
 def test_pdf_cover_styles_are_selectable_across_schema_service_and_export():

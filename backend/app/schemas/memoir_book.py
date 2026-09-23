@@ -360,6 +360,18 @@ class MemoirBookAudioResponse(BaseModel):
 
 
 MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"]
+MemoirBookManuscriptTemplate = Literal["classic_family", "photo_memory", "oral_archive", "custom"]
+MemoirBookCustomFontScale = Literal["standard", "large"]
+MemoirBookCustomLineSpacing = Literal["compact", "standard", "relaxed"]
+MemoirBookCustomPageMargin = Literal["narrow", "standard", "wide"]
+
+
+class MemoirBookCustomLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    font_scale: MemoirBookCustomFontScale = "standard"
+    line_spacing: MemoirBookCustomLineSpacing = "standard"
+    page_margin: MemoirBookCustomPageMargin = "standard"
 
 
 class MemoirBookOutputUpdateRequest(BaseModel):
@@ -371,6 +383,8 @@ class MemoirBookOutputUpdateRequest(BaseModel):
     afterword: str | None = None
     back_cover_quote: str | None = None
     cover_style: MemoirBookCoverStyle | None = None
+    manuscript_template: MemoirBookManuscriptTemplate | None = None
+    custom_layout: MemoirBookCustomLayout | None = None
 
     @field_validator("title")
     @classmethod
@@ -507,7 +521,7 @@ class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
 
 
 class MemoirBookManuscriptProfile(BaseModel):
-    template: Literal["classic_family", "photo_memory", "oral_archive"] = "classic_family"
+    template: MemoirBookManuscriptTemplate = "classic_family"
     title: str
     subtitle: str = ""
     narrator_name: str = ""
@@ -591,6 +605,7 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     cover_style: MemoirBookCoverStyle = "classic_plain"
     back_cover_quote: str = ""
     editorial_copy_model: str | None = None
+    custom_layout: MemoirBookCustomLayout = Field(default_factory=MemoirBookCustomLayout)
 
 
 class MemoirBookManuscriptBackMatter(BaseModel):
@@ -602,7 +617,7 @@ class MemoirBookManuscriptBackMatter(BaseModel):
 
 
 class MemoirBookManuscript(BaseModel):
-    schema_version: int = 2
+    schema_version: int = 3
     profile: MemoirBookManuscriptProfile
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)

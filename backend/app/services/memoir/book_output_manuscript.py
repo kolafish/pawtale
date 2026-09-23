@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.models.memoir import MemoirBookOutputVersion
 from app.schemas.memoir_book import (
+    MemoirBookCustomLayout,
     MemoirBookManuscript,
     MemoirBookManuscriptBackMatter,
     MemoirBookManuscriptChapter,
@@ -14,6 +15,7 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptRenderSettings,
     MemoirBookManuscriptSection,
     MemoirBookManuscriptSourceRef,
+    MemoirBookManuscriptTemplate,
     MemoirBookOutputSectionResponse,
     MemoirBookOutputSectionTableOfContentsItemResponse,
     MemoirBookOutputTableOfContentsItemResponse,
@@ -56,6 +58,7 @@ SUPPORTED_BOOK_COVER_STYLES = {
     "navy_gilt",
 }
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
+BOOK_MANUSCRIPT_TEMPLATES = {"classic_family", "photo_memory", "oral_archive", "custom"}
 
 
 def positive_int(value: object) -> int:
@@ -257,6 +260,22 @@ def stored_manuscript_metadata(stored: object) -> dict[str, str]:
     }
 
 
+def stored_manuscript_design(stored: object) -> tuple[MemoirBookManuscriptTemplate, MemoirBookCustomLayout]:
+    manuscript = stored if isinstance(stored, dict) else {}
+    profile = manuscript.get("profile")
+    profile = profile if isinstance(profile, dict) else {}
+    template = profile.get("template")
+    if not isinstance(template, str) or template not in BOOK_MANUSCRIPT_TEMPLATES:
+        template = "classic_family"
+    settings = manuscript.get("render_settings")
+    settings = settings if isinstance(settings, dict) else {}
+    try:
+        custom_layout = MemoirBookCustomLayout.model_validate(settings.get("custom_layout") or {})
+    except ValueError:
+        custom_layout = MemoirBookCustomLayout()
+    return template, custom_layout
+
+
 def request_book_metadata_patch(req: object) -> dict[str, str]:
     fields_set = getattr(req, "model_fields_set", set())
     patch: dict[str, str] = {}
@@ -340,6 +359,8 @@ def manuscript_from_snapshot(
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
+    template: MemoirBookManuscriptTemplate = "classic_family",
+    custom_layout: MemoirBookCustomLayout | None = None,
     metadata: dict[str, str] | None = None,
     chapter_illustrations_by_chapter: dict[str, list[dict[str, object]]] | None = None,
     image_appendix: list[dict[str, object]] | None = None,
@@ -412,6 +433,7 @@ def manuscript_from_snapshot(
     source_count = sum(item.source_count for item in toc)
     return MemoirBookManuscript(
         profile=MemoirBookManuscriptProfile(
+            template=template,
             title=book_title,
             subtitle=subtitle,
             narrator_name=narrator_name,
@@ -466,6 +488,7 @@ def manuscript_from_snapshot(
             cover_style=cover_style(cover_style_value),
             back_cover_quote=back_cover_quote,
             editorial_copy_model=editorial_copy.model if editorial_copy else None,
+            custom_layout=custom_layout or MemoirBookCustomLayout(),
         ),
     )
 
@@ -499,9 +522,11 @@ def editable_manuscript(
 ) -> MemoirBookManuscript | None:
     if isinstance(stored, dict) and stored:
         try:
-            return MemoirBookManuscript.model_validate(
+            manuscript = MemoirBookManuscript.model_validate(
                 sanitize_manuscript_payload(title=title, manuscript=stored)
             )
+            manuscript.schema_version = 3
+            return manuscript
         except ValueError:
             pass
     return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
@@ -515,6 +540,8 @@ def updated_manuscript_payload(
     snapshot: list[dict[str, object]],
     cover_style_value: str | None,
     metadata_patch: dict[str, str] | None = None,
+    manuscript_template: MemoirBookManuscriptTemplate | None = None,
+    custom_layout: MemoirBookCustomLayout | None = None,
 ) -> dict[str, object]:
     manuscript = editable_manuscript(
         title=title,
@@ -526,6 +553,10 @@ def updated_manuscript_payload(
         return {}
     metadata = effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)
     manuscript.profile.title = title
+    if manuscript_template is not None:
+        manuscript.profile.template = manuscript_template
+    if custom_layout is not None:
+        manuscript.render_settings.custom_layout = custom_layout
     manuscript.profile.subtitle = metadata["subtitle"]
     manuscript.profile.narrator_name = metadata["narrator_name"]
     manuscript.profile.prepared_by = metadata["prepared_by"]

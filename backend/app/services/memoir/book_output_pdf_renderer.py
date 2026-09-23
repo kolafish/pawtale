@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
@@ -102,6 +102,57 @@ PDF_LAYOUTS = {
         inner_margin_delta=10,
     ),
 }
+
+
+def configured_pdf_layout(
+    base: PDFLayout,
+    *,
+    template: str,
+    custom_layout: dict[str, str] | None = None,
+) -> PDFLayout:
+    """Apply a manuscript design while retaining the reading/print page behavior."""
+    if template == "classic_family":
+        return base
+    if template == "photo_memory":
+        font_delta, line_delta, margin_delta = 0, 5, 10
+        title_delta, heading_delta, small_delta = 6, 3, 0
+    elif template == "oral_archive":
+        font_delta, line_delta, margin_delta = -1, -3, -6
+        title_delta, heading_delta, small_delta = -2, -1, -1
+    elif template == "custom":
+        choices = custom_layout or {}
+        font_delta = 2 if choices.get("font_scale") == "large" else 0
+        line_delta = {"compact": -3, "standard": 0, "relaxed": 5}.get(
+            choices.get("line_spacing"), 0
+        ) + font_delta
+        margin_delta = {"narrow": -10, "standard": 0, "wide": 12}.get(
+            choices.get("page_margin"), 0
+        )
+        title_delta, heading_delta, small_delta = font_delta + 2, font_delta, font_delta
+    else:
+        return base
+
+    font_size = base.font_size + font_delta
+    margin_x = base.margin_x + margin_delta
+    max_line_units = round(
+        base.max_line_units
+        * (base.page_width - margin_x * 2)
+        / (base.page_width - base.margin_x * 2)
+        * base.font_size
+        / font_size
+    )
+    return replace(
+        base,
+        font_size=font_size,
+        line_height=max(font_size + 5, base.line_height + line_delta),
+        margin_x=margin_x,
+        margin_top=base.margin_top + margin_delta,
+        margin_bottom=base.margin_bottom + margin_delta,
+        title_font_size=base.title_font_size + title_delta,
+        heading_font_size=base.heading_font_size + heading_delta,
+        small_font_size=base.small_font_size + small_delta,
+        max_line_units=max(12, max_line_units),
+    )
 
 
 @dataclass

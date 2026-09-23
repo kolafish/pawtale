@@ -954,9 +954,9 @@ Digest 和 Review 的展示原则：
 
 ### 9.3 Manuscript 结构
 
-当前 `manuscript_json` schema version 为 2，主要包括：
+当前 `manuscript_json` schema version 为 3，主要包括：
 
-- `profile`：书名、副标题、口述者、整理者、隐私说明、AI 说明；
+- `profile`：书稿版式预设、书名、副标题、口述者、整理者、隐私说明、AI 说明；
 - `front_matter`：扉页、序言等；
 - `table_of_contents`：章和小节目录；
 - `chapters`：
@@ -970,7 +970,7 @@ Digest 和 Review 的展示原则：
   - illustrations；
 - `image_appendix`；
 - `back_matter`：后记、访谈记录、版本说明、未确认事实、来源附录；
-- `render_settings`：A5、阅读/印刷布局、字号、页眉、照片模式、封面风格。
+- `render_settings`：A5、阅读/印刷布局、字号、页眉、照片模式、封面风格，以及自定义版式的字号、行距和页边距。PDF 导出保留阅读版/打印版差异，并叠加当前书稿版式；预览参数只影响当次渲染，不写入书稿版本。
 
 ### 9.4 当前展示和编辑
 
@@ -983,6 +983,7 @@ Digest 和 Review 的展示原则：
 - 章节引言和金句编辑；
 - 全书朗读相关能力；
 - PDF / TXT 导出；
+- 选择书稿版式、预览实际 PDF 排版并保存自定义字号、行距和页边距；
 - stale 状态提示。
 
 建议继续强化：

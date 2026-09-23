@@ -10,6 +10,10 @@ from app.database import get_db
 from app.models.users import User
 from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
+    MemoirBookCustomFontScale,
+    MemoirBookCustomLineSpacing,
+    MemoirBookCustomPageMargin,
+    MemoirBookManuscriptTemplate,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
     MemoirBookChapterDraftResponse,
@@ -599,6 +603,10 @@ async def export_mobile_memoir_book_output(
     ),
     version_id: str | None = None,
     show_source_appendix: bool | None = None,
+    preview_template: MemoirBookManuscriptTemplate | None = None,
+    preview_font_scale: MemoirBookCustomFontScale | None = None,
+    preview_line_spacing: MemoirBookCustomLineSpacing | None = None,
+    preview_page_margin: MemoirBookCustomPageMargin | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -610,6 +618,16 @@ async def export_mobile_memoir_book_output(
         layout=layout,
         version_id=version_id,
         show_source_appendix=show_source_appendix,
+        preview_template=preview_template,
+        preview_custom_layout_patch={
+            key: value
+            for key, value in (
+                ("font_scale", preview_font_scale),
+                ("line_spacing", preview_line_spacing),
+                ("page_margin", preview_page_margin),
+            )
+            if value is not None
+        },
     )
     return Response(
         content=export_file.content,

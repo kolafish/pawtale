@@ -518,6 +518,9 @@ function manuscriptBackSectionContent(manuscript: MemoirBookManuscript | null, k
 }
 
 function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefined): string {
+  if (template === "custom") {
+    return "自定义版式";
+  }
   if (template === "photo_memory") {
     return "家庭纪念版";
   }

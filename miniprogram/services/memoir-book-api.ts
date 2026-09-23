@@ -14,6 +14,7 @@ import type {
   MemoirBookEditorialCopyJobsResponse,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
+  MemoirBookLayoutPreview,
   MemoirBookOutputUpdateRequest,
   MemoirBookOutputVersion,
   MemoirBookPlan,
@@ -388,6 +389,7 @@ export function memoirBookOutputExportUrl(
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
+  preview?: MemoirBookLayoutPreview,
 ): string {
   const config = readBackendConfig();
   if (!config.httpBaseUrl) {
@@ -397,6 +399,14 @@ export function memoirBookOutputExportUrl(
   if (format === "pdf") {
     params.push(`layout=${encodeURIComponent(layout)}`);
     params.push(`show_source_appendix=${showSourceAppendix ? "true" : "false"}`);
+    if (preview) {
+      params.push(`preview_template=${encodeURIComponent(preview.template)}`);
+      if (preview.template === "custom" && preview.custom_layout) {
+        params.push(`preview_font_scale=${encodeURIComponent(preview.custom_layout.font_scale)}`);
+        params.push(`preview_line_spacing=${encodeURIComponent(preview.custom_layout.line_spacing)}`);
+        params.push(`preview_page_margin=${encodeURIComponent(preview.custom_layout.page_margin)}`);
+      }
+    }
   }
   if (versionId) {
     params.push(`version_id=${encodeURIComponent(versionId)}`);
@@ -410,8 +420,9 @@ export function downloadMemoirBookOutputExport(
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
+  preview?: MemoirBookLayoutPreview,
 ): Promise<string> {
-  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix);
+  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix, preview);
   return downloadAuthenticatedFile(url, {
     timeoutProfile: "export",
     failureMessage: "文件下载失败",

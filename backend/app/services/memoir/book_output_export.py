@@ -20,6 +20,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
+    configured_pdf_layout,
     _render_pdf_pages,
     _text_units,
     _wrap_pdf_line,
@@ -1336,6 +1337,13 @@ def render_book_output_export(
     export_title = _export_title(title, manuscript)
     if export_format == MemoirBookOutputExportFormat.PDF:
         pdf_layout = PDF_LAYOUTS.get(layout, PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
+        manuscript_profile = _dict(_dict(manuscript).get("profile"))
+        manuscript_settings = _dict(_dict(manuscript).get("render_settings"))
+        pdf_layout = configured_pdf_layout(
+            pdf_layout,
+            template=_str(manuscript_profile.get("template")) or "classic_family",
+            custom_layout=_dict(manuscript_settings.get("custom_layout")),
+        )
         return ExportFile(
             filename=_book_export_filename(export_title, version, "pdf", layout),
             media_type="application/pdf",
