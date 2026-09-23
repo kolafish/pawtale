@@ -3412,10 +3412,13 @@ test("failed saving and finishing in the background never navigate away or claim
 });
 
 
-test("a closed voice client returns home only when the persisted session confirms it stopped", async () => {
-  for (const status of [null, "active", "stopped"]) {
-    const routes = [], errors = [];
-    global.wx = { reLaunch: options => routes.push(options.url) };
+test("a closed voice client exits only after the persisted session reaches a terminal state", async () => {
+  for (const status of [null, "active", "stopped", "failed"]) {
+    const routes = [], errors = [], toasts = [];
+    global.wx = {
+      reLaunch: options => routes.push(options.url),
+      showToast: options => toasts.push(options.title),
+    };
     const page = loadVoiceChatPage();
     const context = { ...page, pageSuspended: false,
       data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
@@ -3434,12 +3437,43 @@ test("a closed voice client returns home only when the persisted session confirm
       assert.deepEqual(routes, []);
       assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: false, finished: true, voiceSessionId: "voice-1" } }]);
       assert.equal(context.data.persistenceStateText, "已保存");
+    } else if (status === "failed") {
+      assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "transcripts", voiceSessionId: "voice-1" } }]);
+      assert.deepEqual(toasts, ["本次保存异常，请核对记录"]);
+      assert.deepEqual(errors, []);
     } else {
       assert.deepEqual(routes, []);
       assert.notEqual(context.data.persistenceStateText, "已保存");
       assert.equal(errors.length, 1);
     }
   }
+});
+
+test("ASR failure during finish exits to saved records when server confirms failed", async () => {
+  const toasts = [];
+  global.wx = { showToast: options => toasts.push(options.title) };
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
+      hasClient: () => true,
+      finishSession: async () => { throw Error("ASR 超时"); },
+    },
+    refreshVoiceSessionSnapshot: async () => ({ session: { status: "failed" }, utterances: [{ audio_file_id: "audio-1" }] }),
+    stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
+  };
+
+  await context.finishSession();
+
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "transcripts", voiceSessionId: "voice-1" } }]);
+  assert.deepEqual(toasts, ["本次保存异常，请核对记录"]);
+  assert.equal(context.data.finishingSession, false);
+  assert.notEqual(context.data.persistenceStateText, "已保存");
 });
 
 test("a created voice session stops through REST when the first WebSocket never connected", async () => {

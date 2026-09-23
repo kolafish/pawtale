@@ -91,6 +91,7 @@ export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   runtime(): VoiceSessionRuntime;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
   exitSession(detail: VoiceSessionExit): void;
+  exitFailedSession(): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
@@ -409,6 +410,10 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
           saved = await this.refreshVoiceSessionSnapshot();
         }
       }
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");
         return;
@@ -420,7 +425,11 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         ? { destination: "completion", explainSaved: true }
         : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0, finished: true });
     } catch (error) {
-      await this.refreshVoiceSessionSnapshot();
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
       applyVoiceChatDataPatch(this, { finishingSession: false });

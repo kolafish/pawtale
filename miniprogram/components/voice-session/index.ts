@@ -119,6 +119,10 @@ Component({
       this.triggerEvent("exit", { ...detail, voiceSessionId: this.data.voiceSessionId });
     }
   },
+  exitFailedSession() {
+    wx.showToast({ title: "本次保存异常，请核对记录", icon: "none" });
+    this.exitSession({ destination: "transcripts" });
+  },
 
   completionIssues() {
     const runtime = this.runtime();
@@ -449,7 +453,7 @@ Component({
         throw new Error("这次讲述不属于当前回忆录，请重新进入。");
       }
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
-      this.runtime().sessionStopConfirmed = detail.session.status === "stopped";
+      this.runtime().sessionStopConfirmed = detail.session.status === "stopped" || detail.session.status === "failed";
       this.applyVoiceSessionDetail(detail);
       await this.refreshCompletionIssue();
       this.reconcilePendingClose(detail);
@@ -599,6 +603,10 @@ Component({
         await stopMemoirVoiceSession(this.data.voiceSessionId);
       }
       const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");
         return;
@@ -611,7 +619,11 @@ Component({
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       this.exitSession({ destination: "completion" });
     } catch (error) {
-      await this.refreshVoiceSessionSnapshot();
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
       applyVoiceChatDataPatch(this, { finishingSession: false });
@@ -671,8 +683,7 @@ Component({
         return;
       }
       if (saved.session.status === "failed") {
-        wx.showToast({ title: "本次保存异常，请核对记录", icon: "none" });
-        this.exitSession({ destination: "transcripts" });
+        this.exitFailedSession();
         return;
       }
       if (saved.session.status !== "stopped") {
