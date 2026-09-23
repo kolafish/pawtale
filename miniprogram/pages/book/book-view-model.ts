@@ -72,7 +72,6 @@ export interface BookChapterView extends Pick<
   pendingNewSourceCount: number;
   removedSourceCount: number;
   draftAvailable: boolean;
-  draftConfirmed: boolean;
   draftCharCount: number;
   draftChanged: boolean;
   draftVersionText: string;
@@ -208,7 +207,7 @@ export interface BookHomeData {
   chapters: BookChapterView[];
   chapterStructureEditing: boolean;
   splitSourceSelections: Record<string, string[]>;
-  confirmedDraftCount: number;
+  readyDraftCount: number;
   totalChapterCount: number;
   progressText: string;
   titleBusyTarget: string;
@@ -257,12 +256,9 @@ export function chapterGuidanceText(
     return "正文还没准备好，进入章节页查看整理进度。";
   }
   if (pendingCount || removedCount) {
-    return `${changeNotice}。更新正文后，再确认这一章。`;
+    return `${changeNotice}。相关内容待更新，当前正文仍可阅读。`;
   }
-  if (draft.status === "confirmed") {
-    return "需要时仍可阅读或修改。";
-  }
-  return "读读这一章，满意后再确认。";
+  return "正文已更新，可以阅读或修改。";
 }
 
 export function sourceChangeNotice(
@@ -296,9 +292,9 @@ export function draftActionText(
     return "查看整理进度";
   }
   if (pendingCount || removedCount) {
-    return "更新正文";
+    return "查看更新状态";
   }
-  return draft.status === "confirmed" ? "阅读或修改" : "阅读并确认";
+  return "阅读或修改";
 }
 
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
@@ -592,7 +588,7 @@ function backMatterSections(manuscript: MemoirBookManuscript): MemoirBookManuscr
 
 function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string {
   if (!manuscript) {
-    return "按已确认章节生成基础书稿";
+    return "按已整理章节生成基础书稿";
   }
   const settings = manuscript.render_settings;
   const pageSize = settings.page_size === "a5" ? "A5" : "默认纸张";
@@ -796,7 +792,7 @@ export function bookReadingData(
     bookPreviewTocItems: bookOutputTocItems(output, selectedVersion),
     bookPreviewChapters: bookOutputChapterPreviews(output, selectedVersion),
     bookManuscriptTitle: trimText(manuscript?.profile.title || title),
-    bookManuscriptSubtitle: trimText(manuscript?.profile.subtitle || "根据已确认章节整理"),
+    bookManuscriptSubtitle: trimText(manuscript?.profile.subtitle || "根据已有章节编排"),
     bookVersionText: selectedBookOutputVersionText(output, selectedVersion),
     bookViewingHistoricalVersion: viewingHistorical,
     bookVersionNotice: bookVersionNotice(output, viewingHistorical),
@@ -952,19 +948,19 @@ function decorateChapterStructureOptions(
 
 function chapterStateData(chapters: BookChapterView[]): Pick<
   BookHomeData,
-  "confirmedDraftCount" | "totalChapterCount" | "progressText"
+  "readyDraftCount" | "totalChapterCount" | "progressText"
 > {
   const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
-  const confirmedDraftCount = includedChapters.filter(
+  const readyDraftCount = includedChapters.filter(
     (chapter) => (
-      chapter.draftConfirmed
+      chapter.draftAvailable
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
   ).length;
   const totalChapterCount = includedChapters.length;
   return {
-    confirmedDraftCount,
+    readyDraftCount,
     totalChapterCount,
     progressText: bookProgressText(chapters),
   };
@@ -977,7 +973,7 @@ export function chapterCollectionData(
 ): Pick<
   BookHomeData,
   | "chapters"
-  | "confirmedDraftCount"
+  | "readyDraftCount"
   | "totalChapterCount"
   | "progressText"
 > {
@@ -1062,7 +1058,7 @@ export function buildChapterViews(
         sectionCount,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
-        draftAvailable: Boolean(draft?.latest_version),
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
       };
       return {
         id: chapter.id,
@@ -1089,8 +1085,7 @@ export function buildChapterViews(
         pendingCompletionSourceCount: assignedCompletionCount,
         pendingNewSourceCount: assignedNewCount,
         removedSourceCount: assignedRemovedCount,
-        draftAvailable: Boolean(draft?.latest_version),
-        draftConfirmed: draft?.status === "confirmed",
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
         draftCharCount,
         draftChanged: false,
         chapterGuidanceText: chapterGuidanceText(
@@ -1100,7 +1095,7 @@ export function buildChapterViews(
           assignedRemovedCount,
         ),
         chapterNeedsAction: Boolean(
-          assignedPendingCount || assignedRemovedCount || draft?.status !== "confirmed",
+          assignedPendingCount || assignedRemovedCount || !draft?.latest_version?.content?.trim(),
         ),
         draftVersionText: draftVersionText(draft),
         draftActionText: draftActionText(
@@ -1120,15 +1115,15 @@ export function bookProgressText(chapters: BookChapterView[]): string {
   if (!includedChapters.length) {
     return "还没有章节";
   }
-  const confirmed = includedChapters.filter(
+  const ready = includedChapters.filter(
     (chapter) => (
-      chapter.draftConfirmed
+      chapter.draftAvailable
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
   ).length;
   const generated = includedChapters.filter((chapter) => chapter.draftAvailable).length;
-  return `${confirmed}/${includedChapters.length} 章已确认，${generated} 章已有正文`;
+  return `${ready}/${includedChapters.length} 章正文已更新，${generated} 章已有正文`;
 }
 
 export function planStage(plan: MemoirBookPlan | null): BookStage {
@@ -1158,7 +1153,7 @@ export function guestBookData(): Partial<BookHomeData> {
     stageText: stageText("empty"),
     chapters: [],
     chapterStructureEditing: false,
-    confirmedDraftCount: 0,
+    readyDraftCount: 0,
     totalChapterCount: 0,
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},

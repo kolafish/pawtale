@@ -8,7 +8,7 @@ from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
-from app.models.memoir import MemoirChatMessage
+from app.models.memoir import MemoirBookChapterDraft, MemoirChatMessage
 from app.models.projects import DocumentGroup, Project
 from app.models.users import User
 from app.schemas.memoir_projects import (
@@ -22,6 +22,7 @@ import app.services.project_documents as project_docs
 from app.services.memoir import project_deletion
 from app.services.memoir import book_outputs
 from app.services.memoir.project_ai_preferences import (
+    project_transcript_polish_level,
     remember_project_transcript_polish_level,
 )
 from app.services.projects.access import load_project
@@ -292,9 +293,19 @@ async def update_mobile_memoir_project(
         )
     if req.description is not None:
         project.description = req.description
+    previous_polish_level = project_transcript_polish_level(project)
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
     if _field_was_set(req, "transcript_polish_level") and req.transcript_polish_level:
         remember_project_transcript_polish_level(project, req.transcript_polish_level)
+    if project_transcript_polish_level(project) != previous_polish_level:
+        existing_draft = await db.scalar(
+            select(MemoirBookChapterDraft.id)
+            .where(MemoirBookChapterDraft.project_id == project_id)
+            .limit(1)
+        )
+        if existing_draft is not None:
+            from app.services.memoir.automatic_book_draft import schedule_book_draft
+            await schedule_book_draft(db, project_id=project_id, source="polish_level")
     project.updated_at = utcnow_naive()
     await db.commit()
     return await _load_memoir_project_response(db, project.id, user_id)

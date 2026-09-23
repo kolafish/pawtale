@@ -322,7 +322,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(context.data.sectionViews[0].expanded, false);
   assert.equal(context.data.sectionViews[0].metaText, "1 段回忆");
   assert.equal(context.data.sectionViews[0].draftContent, "十八岁那年，我第一次离开家。");
-  assert.equal(context.data.canConfirmChapter, true);
+  assert.equal("canConfirmChapter" in context.data, false);
   assert.equal(context.data.editingToolsExpanded, false);
   assert.deepEqual(navigationTitles, ["第一次离家"]);
   assert.doesNotMatch(
@@ -528,7 +528,7 @@ test("chapter workspace routes browse and editing story entries to one detail st
   assert.match(editingSectionTemplate, /bindtap="openStorySection"/);
   assert.match(editingSectionTemplate, />查看与编辑故事</);
   assert.doesNotMatch(editingSectionTemplate, /class="draft-section-(?:actions|body)/);
-  assert.match(template, />已收入书稿</);
+  assert.match(template, />本章正文已更新</);
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {
@@ -1039,7 +1039,7 @@ test("chapter workspace keeps pending materials optional and opens their editor"
     "1 个故事 · 1 段回忆 · 1 段待整理",
   );
   assert.equal(context.data.chapterEditingHint, "1 段回忆待整理");
-  assert.equal(context.data.canConfirmChapter, true);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 
   page.openMaterialEditor.call(context, {
     currentTarget: {
@@ -1338,7 +1338,7 @@ test("chapter workspace opens the full chapter reading preview", async () => {
   ]);
 });
 
-test("chapter workspace does not confirm a legacy flat draft without section boundaries", async () => {
+test("chapter workspace keeps a legacy flat draft readable without section boundaries", async () => {
   installWx();
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({ draft_sections: [] }),
@@ -1350,7 +1350,7 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
     chapterId: "chapter-1",
   });
 
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 });
 
 test("legacy flat draft exposes direct section draft regeneration when ready", async () => {
@@ -1384,11 +1384,11 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.equal(
     context.data.draftRecoveryTitle,
-    "现在可以更新 1 个有变化的故事",
+    "现在可以更新相关故事",
   );
   assert.equal(
     context.data.draftRecoveryActionText,
-    "更新 1 个有变化的故事",
+    "更新相关故事",
   );
   assert.equal(context.data.draftRecoveryActionKind, "rewrite");
 
@@ -1431,7 +1431,7 @@ test("chapter rewrite reports persisted section progress at its action surface",
   });
 
   assert.equal(context.data.operationKind, "rewrite_chapter");
-  assert.equal(context.data.chapterPreparationTitle, "正在更新有变化的故事");
+  assert.equal(context.data.chapterPreparationTitle, "正在更新相关故事");
   assert.match(context.data.chapterPreparationDetail, /已更新 3\/9 个故事/);
   assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
   assert.equal(context.data.chapterPreparationProgress, 33);
@@ -1454,7 +1454,7 @@ test("chapter workspace does not confirm a draft after its section structure cha
     chapterId: "chapter-1",
   });
 
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 });
 
 test("chapter workspace explains that an old draft is preserved after regrouping", async () => {
@@ -1482,28 +1482,21 @@ test("chapter workspace explains that an old draft is preserved after regrouping
   assert.match(context.data.rewriteNoticeDetail, /旧正文没有丢失/);
   assert.match(
     context.data.rewriteNoticeDetail,
-    /当前 1 个内容发生变化的故事/,
+    /1 个故事的素材或结构发生变化/,
   );
 });
 
-test("chapter workspace confirms the current structured draft without an assembly step", async () => {
-  const { toasts } = installWx();
-  const calls = [];
-  const { page } = loadWorkspacePage({
-    voiceApiExports: {
-      confirmMemoirBookChapterDraft: async (...args) => calls.push(args),
-    },
-  });
+test("chapter workspace reads the current structured draft without a confirmation step", async () => {
+  const { navigations } = installWx();
+  const { page } = loadWorkspacePage();
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
-
-  await page.confirmChapter.call(context);
-
-  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
-  assert.equal(toasts[0].title, "本章正文已确认");
+  page.openChapterPreview.call(context);
+  assert.match(navigations.at(-1), /\/pages\/book-reader\/index/);
+  assert.equal(typeof page.confirmChapter, "undefined");
 });
 
-test("chapter workspace exposes confirmation and update paths from the chapter summary", async () => {
+test("chapter workspace exposes current draft and update paths from the chapter summary", async () => {
   const { scrolls } = installWx();
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({
@@ -1526,10 +1519,10 @@ test("chapter workspace exposes confirmation and update paths from the chapter s
 
   const template = fs.readFileSync(path.join(__dirname, "../pages/chapter-workspace/index.wxml"), "utf8");
   assert.match(template, /bindtap="showDraftUpdate"/);
-  assert.match(template, /bindtap="confirmChapter"/);
+  assert.doesNotMatch(template, /bindtap="confirmChapter"/);
 });
 
-test("required review keeps an existing draft from being confirmed", async () => {
+test("required review keeps its decision visible alongside an existing draft", async () => {
   installWx();
   const reviewSummary = summary({
     state: "needs_input",
@@ -1555,7 +1548,7 @@ test("required review keeps an existing draft from being confirmed", async () =>
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.nextAction.kind, "confirm");
 });
 
 test("chapter workspace derives readable review text without mutating the API response", () => {
@@ -1649,14 +1642,14 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   assert.equal(context.data.narrativeSectionCount, 4);
   assert.equal(
     context.data.rewriteDraftActionText,
-    "更新 1 个有变化的故事",
+    "更新相关故事",
   );
   assert.equal(
     context.data.rewriteDraftBusyText,
-    "正在更新 1 个故事…",
+    "正在更新相关故事…",
   );
-  assert.match(context.data.rewriteNoticeDetail, /只重新生成当前 1 个/);
-  assert.match(context.data.rewriteNoticeDetail, /其他故事沿用现有正文/);
+  assert.match(context.data.rewriteNoticeDetail, /重点更新相关内容/);
+  assert.match(context.data.rewriteNoticeDetail, /有联系的故事衔接/);
   context.data.operationKind = "prepare";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
@@ -1666,8 +1659,8 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
-  assert.equal(modals.at(-1).title, "更新 1 个有变化的故事");
-  assert.match(modals.at(-1).content, /只重新生成当前 1 个/);
+  assert.equal(modals.at(-1).title, "更新相关故事");
+  assert.match(modals.at(-1).content, /有联系的故事衔接/);
   assert.equal(modals.at(-1).confirmText, "更新正文");
   assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");

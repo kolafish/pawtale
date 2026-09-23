@@ -27,7 +27,7 @@
         aria-role="button"
         aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
         bindtap="showDraftUpdate"
-      >去更新正文</view>
+      >查看更新状态</view>
       <view
         wx:elif="{{chapterHasReadableDraft}}"
         class="chapter-read-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
@@ -46,14 +46,7 @@
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
       <view
-        wx:if="{{canConfirmChapter}}"
-        class="chapter-hero-followup ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-        bindtap="confirmChapter"
-      ><text>读完满意后，确认这一章</text><text>›</text></view>
-      <view
-        wx:elif="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
+        wx:if="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
         class="chapter-hero-followup ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -62,8 +55,8 @@
     </view>
 
     <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
-      <text class="section-kicker">后台整理的新稿</text>
-      <text class="status-detail">当前稿仍在使用。对照下面的变化后，再决定是否采用新稿。</text>
+      <text class="section-kicker">这次更新需要您判断</text>
+      <text class="status-detail">当前稿仍可阅读。请核对下面的变化，再决定是否采用新稿。</text>
       <text class="candidate-summary">{{candidateSummaryText}}</text>
       <block wx:if="{{candidateComparisonAvailable}}">
         <view class="candidate-switch ui-version-switch" aria-label="查看范围">
@@ -115,7 +108,7 @@
         </text>
       </view>
       <text wx:else class="candidate-content" selectable="{{true}}">{{candidateWholeContent}}</text>
-      <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">采用这版新稿</button>
+      <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">确认并采用新稿</button>
     </view>
 
     <view wx:if="{{!focusedSectionId && !editingToolsExpanded && sectionViews.length}}" class="content-card story-overview-card ui-card ui-card-borderless">
@@ -483,19 +476,11 @@
         </block>
       </view>
 
-      <view
-        wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action ui-pressable {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{!canConfirmChapter || operationKind !== '' || editingSectionId !== ''}}"
-        bindtap="confirmChapter"
-      >{{operationKind === "confirm_chapter" ? "正在收入书稿…" : "把这一章收入书稿"}}</view>
-
-      <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
+      <view wx:if="{{chapterHasReadableDraft && !workspace.draft_needs_rewrite && (workspace.completion_summary.state === 'confirmed' || workspace.completion_summary.state === 'draft_ready')}}" class="chapter-finished">
         <view class="chapter-finished-action ui-pressable" aria-role="button" bindtap="returnToBookFlow">
           <view class="chapter-finished-copy">
-            <text class="chapter-finished-title">已收入书稿</text>
-            <text class="chapter-finished-detail">有新变化时，整理好后可以再次更新</text>
+            <text class="chapter-finished-title">本章正文已更新</text>
+            <text class="chapter-finished-detail">有新讲述时，相关故事会继续整理</text>
           </view>
           <text class="chapter-finished-arrow">›</text>
         </view>

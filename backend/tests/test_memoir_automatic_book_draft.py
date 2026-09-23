@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
 from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
+from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import automatic_book_draft, chapter_generation, chapter_preparation_jobs
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -128,9 +129,82 @@ async def test_failed_chapter_is_not_automatically_reissued(client, test_db, mon
     assert parent.result_json["chapters"][chapter_id]["job_id"] == new_id
 
 
+async def test_stale_generation_requeues_without_reusing_its_checkpoint(client, test_db, monkeypatch):
+    project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    child_id = parent.result_json["chapters"][chapter_id]["job_id"]
+
+    async def stale(*args, **kwargs):
+        raise chapter_generation.ChapterGenerationStale("base changed")
+
+    monkeypatch.setattr(chapter_preparation_jobs.book_completion, "prepare_chapter", stale)
+    assert not await run_test_editing_job(test_db, child_id)
+    child = await test_db.get(MemoirEditingJob, child_id)
+    assert child.status == "skipped"
+    assert child.result_json == {"stage": "cancelled", "outcome": "stale"}
+
+    assert not await run_test_editing_job(test_db, parent_id)
+    replacement_id = parent.result_json["chapters"][chapter_id]["job_id"]
+    assert replacement_id != child_id
+    replacement = await test_db.get(MemoirEditingJob, replacement_id)
+    assert replacement.status == "pending"
+    assert "checkpoint_sections" not in replacement.result_json
+
+
+async def test_polish_setting_change_schedules_one_refresh_for_existing_draft(client, test_db, monkeypatch):
+    project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
+    await chapter_generation.generate_and_save_chapter_draft(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+        editorial_guidance=[], ai_client=fake,
+    )
+    await test_db.commit()
+    scheduled: list[str] = []
+
+    async def record_schedule(db, *, project_id, source):
+        scheduled.append(source)
+
+    monkeypatch.setattr(automatic_book_draft, "schedule_book_draft", record_schedule)
+    for _ in range(2):
+        response = await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}",
+            json={"transcript_polish_level": "high"},
+        )
+        assert response.status_code == 200, response.text
+    assert scheduled == ["polish_level"]
+
+
+async def test_old_confirmation_candidate_is_requeued_under_automatic_policy(client, test_db, monkeypatch):
+    project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
+    _, version = await chapter_generation.generate_and_save_chapter_draft(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+        editorial_guidance=[], ai_client=fake,
+    )
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+    )
+    old = MemoirEditingJob(
+        project_id=project_id, chapter_id=chapter_id,
+        job_type="prepare_chapter", dedupe_key=f"prepare-chapter:{chapter_id}",
+        status="succeeded", run_after=utcnow_naive(),
+        payload_json={"input_signature": context.input_signature},
+        result_json={"outcome": "needs_review", "candidate_content": "旧的整章候选稿", "candidate_base_version_id": version.id},
+    )
+    test_db.add(old)
+    await test_db.commit()
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    state = await chapter_preparation_jobs.enqueue_chapter_preparation_job(
+        test_db, user_id=user_id, project_id=project_id, chapter_id=chapter_id,
+        req=MemoirChapterPreparationJobRequest(operation="prepare"), automatic=True,
+    )
+    assert state["job_id"] != old.id
+    assert state["status"] == "pending"
+
+
 @pytest.mark.db_independent
 @pytest.mark.parametrize("edited_during_generation", [False, True])
-async def test_automatic_generation_keeps_manual_text_as_candidate(
+async def test_automatic_generation_preserves_manual_text_or_discards_stale_output(
     client, test_db, monkeypatch, edited_during_generation
 ):
     project_id, chapter_id, section_id, fake, _ = await _setup(client, test_db, monkeypatch)
@@ -162,9 +236,6 @@ async def test_automatic_generation_keeps_manual_text_as_candidate(
 
     if not edited_during_generation:
         manual_id = await manual_edit()
-    section = await test_db.get(MemoirSection, section_id)
-    section.version += 1
-    await test_db.commit()
     original = fake._call_llm
 
     async def generate(*args, **kwargs):
@@ -174,14 +245,22 @@ async def test_automatic_generation_keeps_manual_text_as_candidate(
         return await original(*args, **kwargs)
 
     monkeypatch.setattr(fake, "_call_llm", generate)
-    with pytest.raises(chapter_generation.ChapterDraftCandidateReady) as caught:
+    expected = (
+        chapter_generation.ChapterGenerationStale
+        if edited_during_generation
+        else chapter_generation.ChapterDraftCandidateReady
+    )
+    with pytest.raises(expected) as caught:
         await chapter_generation.generate_and_save_chapter_draft(
-            test_db, project_id=project_id, chapter_id=chapter_id, editorial_guidance=[], ai_client=fake, automatic=True
+            test_db, project_id=project_id, chapter_id=chapter_id, editorial_guidance=[],
+            ai_client=fake, automatic=True, force_refresh=True,
         )
     latest = await chapter_generation.latest_chapter_draft_version(
         test_db, project_id=project_id, chapter_id=chapter_id
     )
     assert latest.id == manual_id and latest.content == "这是我亲手改的正文。"
+    if edited_during_generation:
+        return
     job = MemoirEditingJob(
         project_id=project_id,
         chapter_id=chapter_id,

@@ -1178,10 +1178,6 @@ button[disabled]:active {
   margin-top: 24rpx;
 }
 
-.confirm-chapter-action {
-  margin-top: 30rpx;
-}
-
 .chapter-finished {
   margin-top: 30rpx;
   border-top: 1rpx solid var(--ui-divider);

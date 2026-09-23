@@ -11,7 +11,10 @@ from app.models.memoir import (
     MemoirBookPlanChapter, MemoirCompletionIssue, MemoirEditingJob, MemoirSection,
     MemoirSectionMaterial,
 )
-from app.schemas.memoir_book import MemoirBookOutputUpdateRequest
+from app.schemas.memoir_book import (
+    MemoirBookOutputChapterEditorialCopyUpdateRequest,
+    MemoirBookOutputUpdateRequest,
+)
 from app.services.memoir import automatic_book_draft, book_outputs, book_output_versions, chapter_generation, sections
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_job
@@ -38,7 +41,7 @@ async def _ready_book(client, db, monkeypatch):
     return project_id, chapter_id, section_id, fake, parent
 
 
-async def _add_narration(client, db, project_id, section_id):
+async def _add_narration(client, db, project_id, section_id, fake=None):
     added = await create_test_voice_transcript(
         client, db, "后来我又想起了爬山路上的一件小事。", project_id=project_id,
     )
@@ -46,6 +49,10 @@ async def _add_narration(client, db, project_id, section_id):
         db, project_id=project_id, section_id=section_id, utterance_id=added["utterance_id"],
         assigned_by=MemoirSectionMaterialAssignedBy.USER, assignment_reason="user_supplement",
     )
+    if fake is not None:
+        # The fake controls citation count, while the real prompt contains
+        # earlier unused material as well as this new narration.
+        fake.draft_material_ids = ["include-all"] * 100
     await automatic_book_draft.schedule_book_draft(db, project_id=project_id)
     await db.commit()
 
@@ -57,9 +64,9 @@ async def _snapshot(client):
 
 
 async def test_supplement_keeps_previous_book_during_generation_and_failure(client, test_db, monkeypatch):
-    project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
     old = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     data = await _snapshot(client)
     assert data["book_readable"] and data["book_chapter_count"] == 1
@@ -121,7 +128,7 @@ async def test_book_design_changes_allow_future_automatic_prose(client, test_db,
         return json.dumps(value, ensure_ascii=False)
 
     monkeypatch.setattr(fake, "_call_llm", new_prose)
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     assert await run_test_editing_job(test_db, parent.result_json["chapters"][chapter_id]["job_id"])
     await run_test_editing_job(test_db, parent_id)
@@ -137,11 +144,11 @@ async def test_book_design_changes_allow_future_automatic_prose(client, test_db,
 
 @pytest.mark.parametrize("change", ["accept", "source", "manual_edit"])
 async def test_candidate_is_actionable_on_home_and_disappears_when_resolved_or_obsolete(client, test_db, monkeypatch, change):
-    project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
     parent_id = parent.id
     latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter_id)
     latest.created_by = "user"
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     child_id = parent.result_json["chapters"][chapter_id]["job_id"]
     assert await run_test_editing_job(test_db, child_id)
@@ -155,7 +162,7 @@ async def test_candidate_is_actionable_on_home_and_disappears_when_resolved_or_o
         response = await client.post(f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{child_id}/candidate/accept")
         assert response.status_code == 200, response.text
     elif change == "source":
-        await _add_narration(client, test_db, project_id, section_id)
+        await _add_narration(client, test_db, project_id, section_id, fake)
     else:
         await test_db.refresh(latest)
         values = {key: copy.deepcopy(getattr(latest, key)) for key in (
@@ -199,3 +206,87 @@ async def test_design_changes_preserve_accepted_book_revisions(client, test_db, 
         req=MemoirBookOutputUpdateRequest(title="给家人看的回忆"))
     result = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert result.preserved_manual and result.output_version_id == updated.latest_version.id
+
+
+async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(client, test_db):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    drafts = [
+        await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT,
+        )
+        for chapter in chapters
+    ]
+    await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    await book_outputs.update_book_output_chapter_editorial_copy(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        req=MemoirBookOutputChapterEditorialCopyUpdateRequest(
+            intro="我亲自写的章首语。",
+            pull_quote="那年，我参加了第1次学校比赛。",
+        ),
+    )
+
+    async def revise_chapter(index: int, suffix: str, *, new_material_id: str | None = None):
+        draft, old = drafts[index]
+        section_snapshots = copy.deepcopy(old.section_snapshot_json)
+        section_snapshots[0]["content"] += suffix
+        used_material_ids = copy.deepcopy(old.used_material_ids_json)
+        if new_material_id:
+            section_snapshots[0]["used_material_ids"].append(new_material_id)
+            used_material_ids.append(new_material_id)
+        updated = MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapters[index].id,
+            version=old.version + 1,
+            content=old.content + suffix,
+            created_by=MemoirCreatedBy.AI.value,
+            input_signature=old.input_signature,
+            used_material_ids_json=used_material_ids,
+            material_snapshot_json=copy.deepcopy(old.material_snapshot_json),
+            section_snapshot_json=section_snapshots,
+        )
+        test_db.add(updated)
+        await test_db.commit()
+        drafts[index] = (draft, updated)
+
+    for suffix in ("第一次补充。", "第二次补充。"):
+        await revise_chapter(1, suffix)
+        result = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+        assert not result.preserved_manual
+        version = await test_db.get(MemoirBookOutputVersion, result.output_version_id)
+        chapter = version.manuscript_json["chapters"][0]
+        assert chapter["intro"] == "我亲自写的章首语。"
+        assert chapter["pull_quotes"][0]["text"] == "那年，我参加了第1次学校比赛。"
+        assert suffix in result.content
+
+    await revise_chapter(0, "本章统一润色。")
+    polished = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    polished_version = await test_db.get(MemoirBookOutputVersion, polished.output_version_id)
+    assert "本章统一润色。" in polished.content
+    assert polished_version.manuscript_json["chapters"][0]["intro"] == "我亲自写的章首语。"
+
+    added = await create_test_voice_transcript(
+        client, test_db, "后来我又讲了一次比赛经历。", project_id=project_id,
+    )
+    await sections.assign_material_to_section(
+        test_db,
+        project_id=project_id,
+        section_id=drafts[0][1].section_snapshot_json[0]["section_id"],
+        utterance_id=added["utterance_id"],
+        assigned_by=MemoirSectionMaterialAssignedBy.USER,
+        assignment_reason="user_supplement",
+    )
+    await revise_chapter(0, "本章补充。", new_material_id=added["utterance_id"])
+    protected = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert protected.preserved_manual
+    assert "本章补充。" not in protected.content

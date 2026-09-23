@@ -5,7 +5,6 @@ import {
 } from "../../services/audio-playback";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-book-api";
@@ -175,30 +174,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
     } finally {
       this.finishOperation("save_draft_section", sectionId);
-    }
-  },
-
-  async confirmChapter() {
-    if (
-      !this.data.canConfirmChapter
-      || Boolean(this.data.editingSectionId)
-    ) {
-      return;
-    }
-    if (!this.beginOperation("confirm_chapter")) {
-      return;
-    }
-    try {
-      await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
-      await this.loadPageData(true);
-      wx.showToast({ title: "本章正文已确认", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
-    } finally {
-      this.finishOperation("confirm_chapter");
     }
   },
 

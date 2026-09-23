@@ -225,11 +225,11 @@ test("book completion overview page is registered", () => {
   );
 });
 
-test("book completion overview exposes confirmed chapter progress and one action per chapter", () => {
+test("book completion overview exposes readable chapter progress and one action per chapter", () => {
   const { bookCompletionViewPatch } = loadBookCompletionPage().mod;
   const patch = bookCompletionViewPatch(readyOverview());
 
-  assert.equal(patch.progressText, "1 / 2 章正文已确认");
+  assert.equal(patch.progressText, "1 / 2 章正文已更新");
   assert.equal(patch.chapters[0].actionText, "确认");
   assert.equal(patch.chapters[1].actionText, "查看正文");
   assert.equal(patch.canReviewBook, false);

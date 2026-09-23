@@ -551,7 +551,7 @@ test("book page builds outline narration for saved chapter titles", () => {
   );
 });
 
-test("book page progress counts generated and confirmed chapters", () => {
+test("book page counts current readable chapters without a confirmation gate", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
   const chapters = mod.buildChapterViews(plan, {
@@ -559,13 +559,13 @@ test("book page progress counts generated and confirmed chapters", () => {
     "chapter-2": sampleDraft(1, "draft"),
   });
 
-  assert.equal(mod.bookProgressText(chapters), "1/2 章已确认，2 章已有正文");
+  assert.equal(mod.bookProgressText(chapters), "2/2 章正文已更新，2 章已有正文");
   assert.equal(chapters[0].chapterNeedsAction, false);
-  assert.equal(chapters[0].chapterGuidanceText, "需要时仍可阅读或修改。");
+  assert.equal(chapters[0].chapterGuidanceText, "正文已更新，可以阅读或修改。");
   assert.equal(chapters[0].draftActionText, "阅读或修改");
-  assert.equal(chapters[1].chapterNeedsAction, true);
-  assert.equal(chapters[1].chapterGuidanceText, "读读这一章，满意后再确认。");
-  assert.equal(chapters[1].draftActionText, "阅读并确认");
+  assert.equal(chapters[1].chapterNeedsAction, false);
+  assert.equal(chapters[1].chapterGuidanceText, "正文已更新，可以阅读或修改。");
+  assert.equal(chapters[1].draftActionText, "阅读或修改");
   assert.doesNotMatch(chapters[0].chapterSummaryMetaText, /已确认|待确认/);
   assert.equal("draft" in chapters[0], false);
   assert.equal("draftContent" in chapters[0], false);
@@ -600,9 +600,9 @@ test("book page excludes hidden chapters from full-book generation readiness", (
     "chapter-2": sampleDraft(1, "draft"),
   });
 
-  assert.equal(context.data.confirmedDraftCount, 1);
+  assert.equal(context.data.readyDraftCount, 1);
   assert.equal(context.data.totalChapterCount, 1);
-  assert.equal(context.data.progressText, "1/1 章已确认，1 章已有正文");
+  assert.equal(context.data.progressText, "1/1 章正文已更新，1 章已有正文");
   assert.equal("plan" in context.data, false);
 });
 
@@ -811,8 +811,8 @@ test("book page marks assigned sources as supplemental chapter work", () => {
   });
 
   assert.equal(chapters[0].pendingSourceCount, 1);
-  assert.equal(chapters[0].chapterGuidanceText, "1 条新增讲述尚未写入正文。更新正文后，再确认这一章。");
-  assert.equal(chapters[0].draftActionText, "更新正文");
+  assert.match(chapters[0].chapterGuidanceText, /新增讲述尚未写入正文.*当前正文仍可阅读/);
+  assert.equal(chapters[0].draftActionText, "查看更新状态");
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -828,8 +828,8 @@ test("book page labels completion answers separately from new narration", () => 
 
   assert.equal(chapters[0].pendingCompletionSourceCount, 2);
   assert.equal(chapters[0].pendingNewSourceCount, 0);
-  assert.equal(chapters[0].chapterGuidanceText, "2 条补充回答尚未写入正文。更新正文后，再确认这一章。");
-  assert.equal(chapters[0].draftActionText, "更新正文");
+  assert.match(chapters[0].chapterGuidanceText, /补充回答尚未写入正文.*当前正文仍可阅读/);
+  assert.equal(chapters[0].draftActionText, "查看更新状态");
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -855,8 +855,8 @@ test("book page marks deleted chapter sources for review", () => {
 
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
-  assert.equal(chapters[0].chapterGuidanceText, "1 条讲述已删除。更新正文后，再确认这一章。");
-  assert.equal(chapters[0].draftActionText, "更新正文");
+  assert.match(chapters[0].chapterGuidanceText, /讲述已删除.*当前正文仍可阅读/);
+  assert.equal(chapters[0].draftActionText, "查看更新状态");
 
   plan.chapters[0].pending_source_count = 1;
   plan.chapters[0].pending_new_source_count = 1;

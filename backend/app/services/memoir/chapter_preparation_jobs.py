@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import MemoirCreatedBy, MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import MemoirBookChapterDraftVersion, MemoirEditingJob
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import chapter_digests, chapter_generation, editing_jobs
@@ -223,15 +223,29 @@ async def enqueue_chapter_preparation_job(
     previous_result = dict(existing.result_json or {}) if existing else {}
     previous_payload = dict(existing.payload_json or {}) if existing else {}
     from app.services.memoir import completion_issues
-    decision_resolved = previous_result.get("outcome") == "needs_input" and not any(
-        issue.channel == "manual_review" for issue in await completion_issues.list_issues(
+    manual_review_pending = any(
+        issue.channel == "manual_review"
+        for issue in await completion_issues.list_issues(
             db, project_id=project_id, chapter_id=chapter_id,
+        )
+    )
+    decision_resolved = previous_result.get("outcome") == "needs_input" and not manual_review_pending
+    obsolete_approval_candidate = bool(
+        previous_result.get("outcome") == "needs_review"
+        and latest is not None
+        and latest.created_by != MemoirCreatedBy.USER.value
+        and not manual_review_pending
+        and not any(
+            isinstance(section, dict) and section.get("user_edited") is True
+            for section in (latest.section_snapshot_json or [])
         )
     )
     if (
         automatic
         and not retry
         and not decision_resolved
+        and not obsolete_approval_candidate
+        and previous_result.get("outcome") != "stale"
         and existing is not None
         and (
             previous_payload.get("input_signature") == job_input_signature
@@ -473,6 +487,14 @@ async def run_chapter_preparation_job(
         progress.update(ready.candidate)
         progress.update(stage="completed", outcome="needs_review")
         return EditingJobResult(result_json=progress)
+    except chapter_generation.ChapterGenerationStale:
+        # A narration or manual edit won the race with generation. Discard its
+        # checkpoint and let the existing parent job enqueue from the new base.
+        await db.rollback()
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={"stage": "cancelled", "outcome": "stale"},
+        )
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,

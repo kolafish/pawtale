@@ -368,8 +368,8 @@ function chapterView(
     not_started: "待检查",
     preparing: "正在检查",
     needs_input: "需要确认",
-    draft_ready: "等待通读",
-    confirmed: "已经确认",
+    draft_ready: "正文可读",
+    confirmed: "正文可读",
     failed: "检查未完成",
   }[item.state];
   const busy = (
@@ -385,7 +385,7 @@ function chapterView(
       ? "查看进度"
       : (busy
       ? "正在检查"
-      : (item.state === "confirmed"
+      : (item.state === "confirmed" || item.state === "draft_ready"
         ? "查看正文"
         : (item.next_action.action_text || "查看本章"))),
     chapterClass: `chapter-item ${item.state}`,
@@ -420,7 +420,7 @@ export function bookCompletionViewPatch(
     headline: overview.headline,
     detail: overview.detail,
     progressText: overview.total_chapters
-      ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已确认`
+      ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已更新`
       : "还没有章节",
     chapters: overview.chapters.map(
       (item) => chapterView(item, preparingChapterId, recheckingAll),
@@ -641,7 +641,7 @@ definePage<BookCompletionData>()({
               ? "已停止全书检查"
               : (checkedChapters.some((item) => item.state === "needs_input")
                 ? "发现需要补充的内容"
-                : (checkedChapters.every((item) => item.state === "confirmed")
+                : (checkedChapters.every((item) => item.state === "confirmed" || item.state === "draft_ready")
                   ? "暂未发现待补内容"
                   : "检查完成，请查看结果")));
           wx.showToast({ title: toastTitle, icon: "none" });

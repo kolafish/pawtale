@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
 from typing import Any
@@ -43,7 +43,6 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.book_output_snapshots import chapter_version_is_protected
 from app.services.memoir import automation_events
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
@@ -88,6 +87,7 @@ class ChapterMaterialInput:
     material_order: int
     transcript_version_id: str | None
     text: str
+    assigned_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +124,7 @@ class GeneratedChapterSection:
     title: str
     content: str
     used_material_ids: tuple[str, ...]
+    user_edited: bool = False
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,9 @@ class GeneratedChapter:
 class ChapterDraftGenerationPlan:
     target_context: ChapterGenerationContext
     preserved_sections: tuple[GeneratedChapterSection, ...]
+    previous_sections: tuple[GeneratedChapterSection, ...]
+    protected_target_section_ids: tuple[str, ...]
+    has_unmapped_manual_content: bool
     previous_model: str | None
 
 
@@ -158,6 +162,21 @@ class _GeneratedChapterOutput(BaseModel):
     sections: list[_GeneratedChapterSectionOutput] = Field(min_length=1)
     missing_source_candidates: list[str] = Field(default_factory=list)
     editor_notes: list[str] = Field(default_factory=list)
+
+
+class _RelatedSectionTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section_id: str
+    new_evidence: str
+    existing_evidence: str
+    reason: str
+
+
+class _RelatedSectionSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[_RelatedSectionTarget] = Field(default_factory=list)
 
 
 ChapterGenerationProgressCallback = Callable[
@@ -214,6 +233,7 @@ def _generated_chapter_checkpoint(
                 "section_version": inputs[section.section_id].section_version,
                 "content": section.content,
                 "used_material_ids": list(section.used_material_ids),
+                **({"user_edited": True} if section.user_edited else {}),
             }
             for section in generated.sections
         ],
@@ -272,6 +292,7 @@ def _generated_chapter_from_checkpoint(
                 title=expected.title,
                 content=content,
                 used_material_ids=used,
+                user_edited=raw_section.get("user_edited") is True,
             )
         )
         used_material_ids.update(used)
@@ -303,10 +324,73 @@ def chapter_generation_checkpoint_section_count(
     return len(generated.sections) if generated is not None else 0
 
 
+def _previous_draft_section(
+    section: ChapterSectionInput,
+    snapshot: object,
+) -> GeneratedChapterSection | None:
+    if not isinstance(snapshot, dict) or snapshot.get("section_id") != section.section_id:
+        return None
+    content = str(snapshot.get("content") or "").strip()
+    raw_used = snapshot.get("used_material_ids")
+    if not content or not isinstance(raw_used, list):
+        return None
+    used = tuple(value for value in raw_used if isinstance(value, str) and value)
+    if not used or len(used) != len(raw_used):
+        return None
+    if set(used) - {material.material_id for material in section.materials}:
+        return None
+    return GeneratedChapterSection(
+        section_id=section.section_id,
+        title=section.title,
+        content=content,
+        used_material_ids=used,
+        user_edited=snapshot.get("user_edited") is True,
+    )
+
+
+def _legacy_source_snapshot_matches(
+    section: ChapterSectionInput,
+    snapshot: dict[str, object],
+    latest: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    """Old signatures also included chapter title, style, and section order.
+
+    Only recover from a change to those fields when every current material was
+    cited and its recorded transcript/hash/order still matches. A partially
+    cited old section cannot prove that an uncited source is unchanged.
+    """
+    raw_materials = getattr(latest, "material_snapshot_json", None)
+    if not isinstance(raw_materials, list):
+        return False
+    saved = [
+        item for item in raw_materials
+        if isinstance(item, dict) and item.get("section_id") == section.section_id
+    ]
+    used = snapshot.get("used_material_ids")
+    if (
+        not isinstance(used, list)
+        or len(saved) != len(section.materials)
+        or set(used) != {material.material_id for material in section.materials}
+        or len(used) != len(section.materials)
+    ):
+        return False
+    saved_by_id = {str(item.get("material_id") or ""): item for item in saved}
+    if len(saved_by_id) != len(saved):
+        return False
+    return all(
+        (record := saved_by_id.get(material.material_id)) is not None
+        and record.get("transcript_version_id") == material.transcript_version_id
+        and record.get("text_hash") == semantic_text_hash(material.text)
+        and record.get("material_order") == material.material_order
+        for material in section.materials
+    )
+
+
 def _preserved_draft_section(
     context: ChapterGenerationContext,
     section: ChapterSectionInput,
     snapshot: object,
+    latest: MemoirBookChapterDraftVersion | None,
 ) -> GeneratedChapterSection | None:
     if not isinstance(snapshot, dict):
         return None
@@ -314,47 +398,28 @@ def _preserved_draft_section(
         snapshot.get("section_id") != section.section_id
         or snapshot.get("title") != section.title
         or snapshot.get("section_type") != section.section_type
-        or snapshot.get("section_version") != section.section_version
-        or snapshot.get("sort_order") != section.sort_order
     ):
         return None
-    content = str(snapshot.get("content") or "").strip()
-    raw_used = snapshot.get("used_material_ids")
-    if not content or not isinstance(raw_used, list):
+    previous = _previous_draft_section(section, snapshot)
+    if previous is None:
         return None
-    used_material_ids = tuple(
-        value
-        for value in raw_used
-        if isinstance(value, str) and value
-    )
-    current_material_ids = tuple(
-        material.material_id for material in section.materials
-    )
-    allowed_material_ids = {
-        *current_material_ids,
-    }
-    if (
-        not used_material_ids
-        or len(used_material_ids) != len(raw_used)
-        or set(used_material_ids) - allowed_material_ids
-    ):
+    signature = snapshot.get("input_signature")
+    if signature not in {
+        _section_input_signature(context, section),
+        _legacy_section_input_signature(context, section, engine="v2"),
+        _legacy_section_input_signature(context, section, engine="v3"),
+    } and not _legacy_source_snapshot_matches(section, snapshot, latest):
         return None
-    if snapshot.get("input_signature") != _section_input_signature(
-        context,
-        section,
-    ):
-        return None
-    return GeneratedChapterSection(
-        section_id=section.section_id,
-        title=section.title,
-        content=content,
-        used_material_ids=used_material_ids,
-    )
+    return previous
 
 
 def chapter_draft_generation_plan(
     context: ChapterGenerationContext,
     latest: MemoirBookChapterDraftVersion | None,
+    *,
+    force_refresh: bool = False,
+    refresh_unedited: bool = False,
+    additional_target_section_ids: set[str] | None = None,
 ) -> ChapterDraftGenerationPlan:
     snapshots = (
         list(latest.section_snapshot_json)
@@ -376,20 +441,64 @@ def chapter_draft_generation_plan(
 
     preserved_sections: list[GeneratedChapterSection] = []
     target_sections: list[ChapterSectionInput] = []
+    previous_sections: list[GeneratedChapterSection] = []
+    protected_target_section_ids: list[str] = []
+    legacy_user_edit = bool(
+        latest is not None
+        and getattr(latest, "created_by", None) == MemoirCreatedBy.USER.value
+        and not any(
+            isinstance(snapshot, dict) and snapshot.get("user_edited") is True
+            for snapshot in snapshots
+        )
+    )
+    unmapped_manual_content = bool(
+        latest is not None
+        and getattr(latest, "created_by", None) == MemoirCreatedBy.USER.value
+        and str(getattr(latest, "content", "")).strip() != "\n\n".join(
+            str(snapshot.get("content") or "").strip()
+            for snapshot in snapshots if isinstance(snapshot, dict)
+        ).strip()
+    )
     for section in context.sections:
+        snapshot = snapshots_by_id.get(section.section_id)
+        safe_style_refresh = bool(
+            refresh_unedited
+            and not legacy_user_edit
+            and isinstance(snapshot, dict)
+            and snapshot.get("user_edited") is not True
+        )
         preserved = (
-            None
-            if section.section_id in duplicate_ids
+            None if (
+                force_refresh
+                or safe_style_refresh
+                or section.section_id in duplicate_ids
+                or section.section_id in (additional_target_section_ids or set())
+            )
             else _preserved_draft_section(
                 context,
                 section,
                 snapshots_by_id.get(section.section_id),
+                latest,
             )
         )
         if preserved is None:
             target_sections.append(section)
+            previous = _previous_draft_section(
+                section, snapshots_by_id.get(section.section_id)
+            )
+            if previous is not None:
+                previous_sections.append(previous)
+            if isinstance(snapshot, dict) and (
+                snapshot.get("user_edited") is True or legacy_user_edit
+            ):
+                protected_target_section_ids.append(section.section_id)
         else:
-            preserved_sections.append(preserved)
+            preserved_sections.append(
+                replace(preserved, user_edited=True)
+                if legacy_user_edit else preserved
+            )
+    if unmapped_manual_content:
+        protected_target_section_ids = [section.section_id for section in target_sections]
 
     target_materials = tuple(
         material
@@ -407,8 +516,127 @@ def chapter_draft_generation_plan(
             polish_level=context.polish_level,
         ),
         preserved_sections=tuple(preserved_sections),
+        previous_sections=tuple(previous_sections),
+        protected_target_section_ids=tuple(protected_target_section_ids),
+        has_unmapped_manual_content=unmapped_manual_content,
         previous_model=latest.model if latest is not None else None,
     )
+
+
+def _changed_material_ids(
+    context: ChapterGenerationContext,
+    latest: MemoirBookChapterDraftVersion | None,
+) -> set[str]:
+    if latest is None:
+        return set()
+    saved = {
+        str(item.get("material_id")): item
+        for item in (getattr(latest, "material_snapshot_json", None) or [])
+        if isinstance(item, dict) and item.get("material_id")
+    }
+    latest_at = getattr(latest, "created_at", None)
+    changed: set[str] = set()
+    for material in context.materials:
+        prior = saved.get(material.material_id)
+        newly_assigned = bool(
+            isinstance(latest_at, datetime)
+            and isinstance(material.assigned_at, datetime)
+            and material.assigned_at > latest_at
+        )
+        changed_text = bool(
+            prior is not None
+            and (
+                prior.get("transcript_version_id") != material.transcript_version_id
+                or prior.get("text_hash") != semantic_text_hash(material.text)
+            )
+        )
+        if newly_assigned or changed_text:
+            changed.add(material.material_id)
+    return changed
+
+
+async def select_related_sections(
+    context: ChapterGenerationContext,
+    plan: ChapterDraftGenerationPlan,
+    *,
+    changed_material_ids: set[str],
+    ai_model: str | None,
+    ai_client: AITextClient | None,
+) -> dict[str, str]:
+    """Find existing text requiring a concrete transition or duplicate fix.
+
+    This is a bounded editorial judgment, not a new persisted job state. A
+    failed or vague selection leaves the source-affected sections as the only
+    targets; it never makes the whole chapter an implicit rewrite.
+    """
+    candidates = [section for section in plan.preserved_sections if not section.user_edited]
+    new_materials = [
+        material for material in plan.target_context.materials
+        if material.material_id in changed_material_ids
+    ]
+    if not candidates or not new_materials:
+        return {}
+    references = ModelReferenceMap("S", (section.section_id for section in candidates))
+    changed_text = "\n".join(material.text for material in new_materials)
+    candidates_by_id = {section.section_id: section for section in candidates}
+    candidate_blocks = "\n\n".join(
+        f"section_id: {references.encode(section.section_id)}\n"
+        f"标题：{section.title}\n"
+        f"现有正文节选：{section.content[:280]}"
+        f"{' …… ' + section.content[-280:] if len(section.content) > 560 else ''}"
+        for section in candidates
+    )
+    prompt = f"""新讲述已经归入《{context.chapter_title}》的相关小节。请判断其他现有小节是否确实需要局部调整，以避免具体事实重复或修正明确的前后衔接。普通主题相似、风格统一、整体润色都不足以选择旧小节；可以返回空数组。
+
+新讲述原文：
+{changed_text[:4800]}
+
+其他小节：
+{candidate_blocks}
+
+严格返回 JSON：{{"sections":[{{"section_id":"S1","new_evidence":"新讲述中连续引用的具体短语","existing_evidence":"该小节节选中连续引用的具体短语","reason":"说明两处事实的关系以及应如何局部调整"}}]}}
+每条证据必须从对应文字原样摘取至少 4 个字符；只选有两处具体证据的小节，不必选择相邻节，也不要默认选择全部小节。"""
+    policy = ai_text_workload_policy(AITextWorkload.LONG_GENERATION_STRUCTURED)
+    try:
+        response = await generate_structured_with_client(
+            ai_client or get_ai_service(ai_model),
+            "你是一位谨慎的回忆录编辑，只判断新素材与现有小节的具体内容关系。",
+            prompt,
+            output_model=_RelatedSectionSelection,
+            requested_model=ai_model,
+            temperature=0.1,
+            max_tokens=min(policy.max_tokens, 1200),
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=1,
+        )
+    except (AIProviderTimeoutError, ValueError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning(
+            "memoir related section selection failed chapter_id=%s error=%s",
+            context.chapter_id,
+            exc,
+        )
+        return {}
+    selected: dict[str, str] = {}
+    for item in response.value.sections:
+        try:
+            section_id = references.decode(item.section_id)
+        except ValueError:
+            continue
+        previous = candidates_by_id.get(section_id)
+        new_evidence = item.new_evidence.strip()
+        existing_evidence = item.existing_evidence.strip()
+        reason = " ".join(item.reason.split())[:240]
+        if (
+            previous is None
+            or len(new_evidence) < 4
+            or len(existing_evidence) < 4
+            or len(reason) < 12
+            or new_evidence not in changed_text
+            or existing_evidence not in previous.content
+        ):
+            continue
+        selected[section_id] = reason
+    return selected
 
 
 def chapter_draft_is_current(
@@ -431,6 +659,47 @@ def chapter_draft_is_current(
         not plan.target_context.sections
         and len(plan.preserved_sections) == len(context.sections)
     )
+
+
+def _render_policy_tag(context: ChapterGenerationContext) -> str:
+    return f"{CHAPTER_GENERATION_ENGINE}:polish={context.polish_level.value}"
+
+
+def chapter_draft_render_policy_current(
+    context: ChapterGenerationContext,
+    latest: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    if latest is None:
+        return False
+    prompt_snapshot = str(getattr(latest, "prompt_snapshot", "") or "")
+    if prompt_snapshot.startswith(f"{CHAPTER_GENERATION_ENGINE}:polish="):
+        recorded = prompt_snapshot.split(":polish=", 1)[1].split(":", 1)[0]
+        return recorded == context.polish_level.value
+    if prompt_snapshot.startswith("llm_layered_sectioned_chapter_draft_v2"):
+        return context.polish_level == MemoirTranscriptPolishLevel.MEDIUM
+    if prompt_snapshot.startswith(CHAPTER_GENERATION_ENGINE):
+        snapshots = {
+            str(item.get("section_id")): item
+            for item in (latest.section_snapshot_json or [])
+            if isinstance(item, dict) and item.get("section_id")
+        }
+        matched_levels: list[MemoirTranscriptPolishLevel] = []
+        for section in context.sections:
+            snapshot = snapshots.get(section.section_id)
+            if not isinstance(snapshot, dict):
+                continue
+            for level in MemoirTranscriptPolishLevel:
+                prior_context = replace(context, polish_level=level)
+                if snapshot.get("input_signature") == _legacy_section_input_signature(
+                    prior_context, section, engine="v3"
+                ):
+                    matched_levels.append(level)
+                    break
+        if matched_levels:
+            return all(level == context.polish_level for level in matched_levels)
+    # Older imported or manually assembled drafts may not record a render
+    # policy. Unknown provenance alone is not evidence to rewrite every story.
+    return True
 
 
 def chapter_draft_sources_still_included(
@@ -461,7 +730,11 @@ async def load_chapter_draft_generation_plan(
         project_id=context.project_id,
         chapter_id=context.chapter_id,
     )
-    return chapter_draft_generation_plan(context, latest)
+    return chapter_draft_generation_plan(
+        context,
+        latest,
+        refresh_unedited=not chapter_draft_render_policy_current(context, latest),
+    )
 
 
 def chapter_generation_context(
@@ -502,6 +775,7 @@ def chapter_generation_context(
                 material_order=material.sort_order,
                 transcript_version_id=material.transcript_version_id,
                 text=text,
+                assigned_at=material.created_at,
             )
             section_materials.append(item)
             materials.append(item)
@@ -593,6 +867,7 @@ def build_chapter_generation_prompt(
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
     revision_instruction: str = "",
+    source_update_reason: str = "",
     previous_section_context: str = "",
 ) -> str:
     section_refs = ModelReferenceMap(
@@ -668,6 +943,15 @@ def build_chapter_generation_prompt(
 - 用户在指令中明确给出的事实更正可以采用；除此之外仍只能使用下方原始讲述中的事实。
 - 用户只要求“补充更多细节”却没有说出具体事实、且原始讲述也不支持时，不得自行虚构，应放入 missing_source_candidates。
 - 不要在正文里复述用户指令，也不要解释修改过程。
+"""
+    elif current_section_content:
+        reason = source_update_reason or "本小节的原始讲述发生了变化。"
+        revision = f"""
+现有小节正文：
+{current_section_content}
+
+本次局部更新原因：{reason}
+请在现有正文基础上融入下方素材或调整必要的衔接。保留仍受素材支持的事实、用户原有表达和无关段落；只改与本次变化有关的文字。若素材不支持原有表述，不要延续该表述。标题保持输入标题。
 """
     return f"""请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。
 
@@ -961,8 +1245,11 @@ async def generate_chapter(
     progress_callback: ChapterGenerationProgressCallback | None = None,
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     preserved_sections: tuple[GeneratedChapterSection, ...] = (),
+    previous_sections: tuple[GeneratedChapterSection, ...] = (),
     preserved_model: str | None = None,
     section_continuity: dict[str, ChapterSectionContinuity] | None = None,
+    related_section_reasons: dict[str, str] | None = None,
+    changed_material_ids: set[str] | None = None,
 ) -> GeneratedChapter:
     client = (
         ai_client or get_ai_service(ai_model)
@@ -971,6 +1258,9 @@ async def generate_chapter(
     target_section_ids = {section.section_id for section in context.sections}
     preserved_by_id = {
         section.section_id: section for section in preserved_sections
+    }
+    previous_by_id = {
+        section.section_id: section for section in previous_sections
     }
     full_section_ids = [section.section_id for section in full_sections]
     if (
@@ -1057,10 +1347,26 @@ async def generate_chapter(
                         else None
                     ),
                 ),
+                current_section_content=(
+                    previous_by_id[section.section_id].content
+                    if section.section_id in previous_by_id else ""
+                ),
+                source_update_reason=(related_section_reasons or {}).get(
+                    section.section_id, ""
+                ),
+                required_material_ids={
+                    material.material_id for material in section.materials
+                    if material.material_id in (changed_material_ids or set())
+                },
                 ai_model=ai_model,
                 ai_client=client,
             )
             current = generated_section.sections[0]
+            if section.section_id in previous_by_id:
+                current = replace(
+                    current,
+                    user_edited=previous_by_id[section.section_id].user_edited,
+                )
             generated_target_sections.append(current)
             generated_targets_by_id[current.section_id] = current
             missing_source_candidates.extend(
@@ -1100,6 +1406,8 @@ async def generate_chapter_section(
     preceding_section_context: str = "",
     current_section_content: str = "",
     revision_instruction: str = "",
+    source_update_reason: str = "",
+    required_material_ids: set[str] | None = None,
     allow_title_revision: bool | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
@@ -1112,6 +1420,7 @@ async def generate_chapter_section(
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
         revision_instruction=revision_instruction,
+        source_update_reason=source_update_reason,
         previous_section_context=preceding_section_context,
     )
     last_error: Exception | None = None
@@ -1151,6 +1460,10 @@ async def generate_chapter_section(
                     else allow_title_revision
                 ),
             )
+            if required_material_ids and not required_material_ids.issubset(
+                generated.sections[0].used_material_ids
+            ):
+                raise ValueError("本次新增或变更的讲述未纳入小节正文")
             _reject_repeated_section_boundary(
                 previous_section_content,
                 generated.sections[0].content,
@@ -1225,40 +1538,19 @@ def _snapshot(
     ]
 
 
-def _section_source_snapshot(
-    section: ChapterSectionInput,
-) -> list[dict[str, object]]:
-    return [
-        {
-            "material_id": material.material_id,
-            "section_id": material.section_id,
-            "transcript_version_id": material.transcript_version_id,
-            "text_hash": semantic_text_hash(material.text),
-            "section_order": material.section_order,
-            "material_order": material.material_order,
-        }
-        for material in section.materials
-    ]
-
-
 def _section_input_signature(
     context: ChapterGenerationContext,
     section: ChapterSectionInput,
 ) -> str:
+    # This identifies the source of one section, not the rendering policy for
+    # an entire chapter. Engine/polish changes and chapter/section reordering
+    # must not make unchanged narration look like newly supplied material.
     return semantic_json_signature(
         {
-            "engine": CHAPTER_GENERATION_ENGINE,
-            "polish_level": context.polish_level.value,
-            "chapter": {
-                "id": context.chapter_id,
-                "title": context.chapter_title,
-            },
             "section": {
                 "id": section.section_id,
                 "title": section.title,
                 "type": section.section_type,
-                "version": section.section_version,
-                "sort_order": section.sort_order,
             },
             "materials": [
                 {
@@ -1271,6 +1563,37 @@ def _section_input_signature(
             ],
         }
     )
+
+
+def _legacy_section_input_signature(
+    context: ChapterGenerationContext,
+    section: ChapterSectionInput,
+    *,
+    engine: str,
+) -> str:
+    payload: dict[str, object] = {
+        "engine": f"llm_layered_sectioned_chapter_draft_{engine}",
+        "chapter": {"id": context.chapter_id, "title": context.chapter_title},
+        "section": {
+            "id": section.section_id,
+            "title": section.title,
+            "type": section.section_type,
+            "version": section.section_version,
+            "sort_order": section.sort_order,
+        },
+        "materials": [
+            {
+                "material_id": material.material_id,
+                "transcript_version_id": material.transcript_version_id,
+                "text_hash": semantic_text_hash(material.text),
+                "material_order": material.material_order,
+            }
+            for material in section.materials
+        ],
+    }
+    if engine == "v3":
+        payload["polish_level"] = context.polish_level.value
+    return semantic_json_signature(payload)
 
 
 def _section_snapshot(
@@ -1294,6 +1617,7 @@ def _section_snapshot(
             ),
             "content": section.content,
             "used_material_ids": list(section.used_material_ids),
+            **({"user_edited": True} if section.user_edited else {}),
         }
         for section in generated.sections
     ]
@@ -1310,6 +1634,7 @@ async def generate_and_save_chapter_draft(
     checkpoint: dict[str, object] | None = None,
     progress_callback: ChapterGenerationProgressCallback | None = None,
     automatic: bool = False,
+    force_refresh: bool = False,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
     before = await load_chapter_generation_context(
         db,
@@ -1322,16 +1647,45 @@ async def generate_and_save_chapter_draft(
         chapter_id=chapter_id,
     )
     base_version_id = latest_before.id if latest_before else None
-    draft_before = await db.scalar(select(MemoirBookChapterDraft).where(
-        MemoirBookChapterDraft.chapter_id == chapter_id,
-    ))
-    protected = chapter_version_is_protected(draft_before, latest_before)
-    plan = chapter_draft_generation_plan(before, latest_before)
+    style_refresh = automatic and not chapter_draft_render_policy_current(
+        before, latest_before
+    ) and latest_before is not None
+    plan = chapter_draft_generation_plan(
+        before,
+        latest_before,
+        force_refresh=force_refresh,
+        refresh_unedited=style_refresh,
+    )
+    changed_material_ids = _changed_material_ids(before, latest_before)
     continuity = await load_section_continuity(db, context=before)
     # Generation uses immutable context snapshots. Release all read locks and
     # the connection before the slow provider phase; the write phase below
     # locks the chapter and revalidates the input signature.
     await db.commit()
+    related_reasons: dict[str, str] = (
+        {
+            section.section_id: (
+                f"润色等级已调整为 {before.polish_level.value}；"
+                "请按新强度整理本节语言，保留事实、细节和个人表达。"
+            )
+            for section in plan.target_context.sections
+        }
+        if style_refresh else {}
+    )
+    if automatic and not force_refresh and not style_refresh and plan.target_context.sections:
+        related_reasons = await select_related_sections(
+            before,
+            plan,
+            changed_material_ids=changed_material_ids,
+            ai_model=ai_model,
+            ai_client=ai_client,
+        )
+        if related_reasons:
+            plan = chapter_draft_generation_plan(
+                before,
+                latest_before,
+                additional_target_section_ids=set(related_reasons),
+            )
     generated = await generate_chapter(
         plan.target_context,
         editorial_guidance=editorial_guidance,
@@ -1341,8 +1695,11 @@ async def generate_and_save_chapter_draft(
         progress_callback=progress_callback,
         chapter_sections=before.sections,
         preserved_sections=plan.preserved_sections,
+        previous_sections=() if force_refresh else plan.previous_sections,
         preserved_model=plan.previous_model,
         section_continuity=continuity,
+        related_section_reasons=related_reasons,
+        changed_material_ids=set() if force_refresh else changed_material_ids,
     )
     db.expire_all()
     await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
@@ -1352,6 +1709,8 @@ async def generate_and_save_chapter_draft(
         chapter_id=chapter_id,
     )
     if after.input_signature != before.input_signature:
+        if automatic:
+            raise ChapterGenerationStale("生成期间章节素材已变化")
         raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
     latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
     changed = (latest.id if latest else None) != base_version_id
@@ -1361,9 +1720,15 @@ async def generate_and_save_chapter_draft(
         MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
         MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
     ).limit(1)) if automatic else None
-    if changed and not automatic:
+    if changed:
+        if automatic:
+            raise ChapterGenerationStale("生成期间章节正文已变化")
         raise HTTPException(status_code=409, detail="生成期间正文已被修改，原稿已保留，请刷新")
-    if automatic and (protected or changed or blocking_issue):
+    if automatic and (
+        plan.protected_target_section_ids
+        or plan.has_unmapped_manual_content
+        or blocking_issue
+    ):
         candidate = {
             **_generated_chapter_checkpoint(before, generated, current_section=None),
             "candidate_content": generated.content,
@@ -1371,6 +1736,10 @@ async def generate_and_save_chapter_draft(
         }
         raise ChapterDraftCandidateReady(candidate)
     return await _save_generated_draft(db, context=before, generated=generated)
+
+
+class ChapterGenerationStale(Exception):
+    """The pending output is obsolete; rerun the existing preparation job."""
 
 
 class ChapterDraftCandidateReady(Exception):
@@ -1414,6 +1783,7 @@ async def _save_generated_draft(
     if (
         latest is not None
         and latest.input_signature == before.input_signature
+        and latest.prompt_snapshot == _render_policy_tag(before)
         and latest.content.strip() == generated.content.strip()
         and list(latest.section_snapshot_json) == section_snapshot
     ):
@@ -1426,7 +1796,7 @@ async def _save_generated_draft(
         content=generated.content,
         created_by=MemoirCreatedBy.AI.value,
         model=generated.model,
-        prompt_snapshot=CHAPTER_GENERATION_ENGINE,
+        prompt_snapshot=_render_policy_tag(context),
         feedback=None,
         input_signature=before.input_signature,
         used_material_ids_json=list(generated.used_material_ids),
@@ -1602,6 +1972,7 @@ async def apply_chapter_section_candidate(
         "sort_order": target_input.sort_order,
         "input_signature": _section_input_signature(context, target_input),
         "content": content,
+        "user_edited": True,
         "used_material_ids": list(
             latest_sections[target_index].get("used_material_ids", [])
         ),
@@ -1634,7 +2005,7 @@ async def apply_chapter_section_candidate(
         content=revised_content,
         created_by=MemoirCreatedBy.AI.value,
         model=resolved_ai_model,
-        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section_revision_workbench",
+        prompt_snapshot=f"{_render_policy_tag(context)}:section_revision_workbench",
         feedback=feedback.strip() or f"AI 修改小节《{target_input.title}》",
         input_signature=context.input_signature,
         used_material_ids_json=used_material_ids,
