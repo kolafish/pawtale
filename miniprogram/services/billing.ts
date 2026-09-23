@@ -11,6 +11,22 @@ export interface AICreditSummary {
   unpriced_success_count: number;
 }
 
+export interface AIUsageDetail {
+  id: string;
+  purpose: string;
+  cost_rmb: number | string;
+  created_at: string;
+}
+
+export interface AIUsageDetailResponse {
+  items: AIUsageDetail[];
+  has_more: boolean;
+}
+
 export function getAICreditSummary(): Promise<AICreditSummary> {
   return memoirRequest<AICreditSummary>("/api/billing/ai-credit-summary");
+}
+
+export function getAIUsageDetails(offset: number): Promise<AIUsageDetailResponse> {
+  return memoirRequest<AIUsageDetailResponse>(`/api/billing/ai-usage?offset=${offset}`);
 }

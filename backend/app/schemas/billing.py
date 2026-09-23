@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +26,18 @@ class AICreditSummaryResponse(BaseModel):
             "unpriced_success_count": 0,
         }
     })
+
+
+class AIUsageDetailItem(BaseModel):
+    id: str
+    purpose: str
+    cost_rmb: Decimal
+    created_at: datetime
+
+
+class AIUsageDetailResponse(BaseModel):
+    items: list[AIUsageDetailItem]
+    has_more: bool
 
 
 class AICreditGrantRequest(BaseModel):
