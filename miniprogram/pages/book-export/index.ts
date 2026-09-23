@@ -44,7 +44,6 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import {
-  BOOK_COVER_STYLE_OPTIONS,
   bookOutputData,
   trimText,
   type BookOutputData,
@@ -56,7 +55,6 @@ import {
   bookMetadataChanged,
   currentBookMetadataPayload,
   isBookLevelEditorialCopyTarget,
-  latestBookCoverStyle,
   latestBookTitle,
 } from "../book/book-design-model";
 import { PollingTimer } from "../../services/polling-timer";
@@ -125,9 +123,9 @@ function editorialCopyJobView(job: MemoirBookEditorialCopyJob): BookEditorialCop
 
 const SECTION_TITLES: Record<Exclude<BookExportSection, "">, string> = {
   export: "导出设置",
-  title: "书名与封面",
+  title: "书名与信息",
   editorial: "前言与后记",
-  layout: "版式与内容",
+  layout: "封面与版式",
   history: "历史版本",
   advanced: "高级整理",
 };
@@ -149,25 +147,44 @@ interface BookLayoutOption {
   label: string;
   description: string;
   previewClass: string;
-  coverStyle?: MemoirBookCoverStyle;
-  coverPreviewImage?: string;
-  ornamentThumbnail?: string;
+  coverStyle: MemoirBookCoverStyle;
+  coverPreviewImage: string;
+  ornamentThumbnail: string;
 }
 
-const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = ([
-  { value: "classic_family", label: "素雅书籍版", description: "留白舒展，适合安静地读故事", previewClass: "classic" },
-  { value: "photo_memory", label: "家庭纪念版", description: "更大的章首页，留出回忆的呼吸感", previewClass: "memory" },
-  { value: "oral_archive", label: "口述档案版", description: "紧凑清楚，方便对照和保存", previewClass: "archive" },
-  { value: "heritage_classic", label: "典藏文集版", description: "典藏封面、章首页和小节纹饰成套", previewClass: "heritage", coverStyle: "heritage_classic", ornamentThumbnail: "/assets/book_ornaments/heritage_classic.png" },
-  { value: "warm_journal", label: "家书手记版", description: "暖色封面、章题和引语装饰成套", previewClass: "journal", coverStyle: "warm_journal", ornamentThumbnail: "/assets/book_ornaments/warm_journal.png" },
-  { value: "modern_minimal", label: "现代简约版", description: "简约封面、章序和分节标记成套", previewClass: "modern", coverStyle: "modern_minimal", ornamentThumbnail: "/assets/book_ornaments/modern_minimal.png" },
-  { value: "custom", label: "自定义版式", description: "按自己的阅读习惯调整正文", previewClass: "custom" },
-] as BookLayoutOption[]).map((option) => ({
-  ...option,
-  coverPreviewImage: BOOK_COVER_STYLE_OPTIONS.find((cover) => cover.value === option.coverStyle)?.previewImage,
-}));
+const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = [
+  {
+    value: "heritage_classic",
+    label: "典藏文集版",
+    description: "银杏纹样与典雅章首页，适合家族故事",
+    previewClass: "heritage",
+    coverStyle: "heritage_classic",
+    coverPreviewImage: "/assets/book_covers/heritage_classic.jpg",
+    ornamentThumbnail: "/assets/book_ornaments/heritage_classic.png",
+  },
+  {
+    value: "warm_journal",
+    label: "家书手记版",
+    description: "信笺、桂花与温暖的阅读节奏",
+    previewClass: "journal",
+    coverStyle: "warm_journal",
+    coverPreviewImage: "/assets/book_covers/warm_journal.jpg",
+    ornamentThumbnail: "/assets/book_ornaments/warm_journal.png",
+  },
+  {
+    value: "modern_minimal",
+    label: "现代简约版",
+    description: "深青封面与清晰的章节层级",
+    previewClass: "modern",
+    coverStyle: "modern_minimal",
+    coverPreviewImage: "/assets/book_covers/modern_minimal.jpg",
+    ornamentThumbnail: "/assets/book_ornaments/modern_minimal.png",
+  },
+];
 
-const BOOK_LAYOUT_TEMPLATES = BOOK_LAYOUT_OPTIONS.map((option) => option.value);
+const BOOK_LAYOUT_TEMPLATES: readonly MemoirBookManuscriptTemplate[] = [
+  ...BOOK_LAYOUT_OPTIONS.map((option) => option.value), "custom",
+];
 const CUSTOM_FONT_SCALE_OPTIONS: { value: MemoirBookCustomLayout["font_scale"]; label: string }[] = [
   { value: "standard", label: "标准" },
   { value: "large", label: "大字" },
@@ -247,6 +264,9 @@ type BookExportData = BookOutputData & {
   bookLayoutPageMarginIndex: number;
   bookLayoutCustomChanged: boolean;
   bookLayoutBusyTarget: string;
+  bookLayoutFeedbackTarget: string;
+  bookLayoutFeedbackText: string;
+  bookLayoutFeedbackError: boolean;
   bookLayoutSampleTitle: string;
   bookLayoutSampleExcerpt: string;
   bookLayoutSampleSectionTitle: string;
@@ -320,6 +340,9 @@ definePage<BookExportData>()({
     bookLayoutPageMarginIndex: 1,
     bookLayoutCustomChanged: false,
     bookLayoutBusyTarget: "",
+    bookLayoutFeedbackTarget: "",
+    bookLayoutFeedbackText: "",
+    bookLayoutFeedbackError: false,
     bookLayoutSampleTitle: "那些年的故事",
     bookLayoutSampleExcerpt: "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
     bookLayoutSampleSectionTitle: "院子里的夏天",
@@ -589,25 +612,6 @@ definePage<BookExportData>()({
     this.scheduleBookDesignAutosave();
   },
 
-  changeBookCoverStyle(event: PickerEvent) {
-    const index = pickerIndex(event);
-    const option = this.data.bookCoverStyleOptions[index];
-    if (!option) {
-      return;
-    }
-    this.setData({
-      bookCoverStyle: option.value,
-      bookCoverStylePreviewClass: option.previewClass,
-      bookCoverStylePreviewImage: option.previewImage || "",
-      bookCoverStyleIndex: index,
-      bookCoverStyleLabel: option.label,
-      bookCoverStyleDetailText: option.detailText,
-      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.bookOutput),
-      error: "",
-    });
-    this.scheduleBookDesignAutosave();
-  },
-
   scheduleBookDesignAutosave() {
     this.clearBookDesignAutosaveTimer();
     if (!this.bookOutput?.latest_version || this.data.bookViewingHistoricalVersion) {
@@ -673,7 +677,6 @@ definePage<BookExportData>()({
       this.setData({ error: "书名不能为空", bookDesignSaveStatusText: "保存失败" });
       return;
     }
-    const coverStyle = this.data.bookCoverStyle;
     const metadata = currentBookMetadataPayload(this.data, true);
     this.setData({ bookTitleSaving: true, bookDesignSaveStatusText: "保存中", error: "" });
     try {
@@ -685,11 +688,8 @@ definePage<BookExportData>()({
         preface: metadata.preface,
         afterword: metadata.afterword,
         back_cover_quote: metadata.back_cover_quote,
-        cover_style: coverStyle,
       });
       this.applyBookExportData(this.bookPlan, output);
-      const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
-        || this.data.bookCoverStyleOptions[0];
       this.setData({
         bookTitleInput: title,
         bookSubtitleInput: metadata.subtitle,
@@ -700,16 +700,6 @@ definePage<BookExportData>()({
         bookBackCoverQuoteInput: metadata.back_cover_quote,
         bookTitleChanged: false,
         bookMetadataChanged: false,
-        bookCoverStyle: option.value,
-        bookCoverStylePreviewClass: option.previewClass,
-        bookCoverStylePreviewImage: option.previewImage || "",
-        bookCoverStyleIndex: Math.max(
-          0,
-          this.data.bookCoverStyleOptions.findIndex((candidate) => candidate.value === option.value),
-        ),
-        bookCoverStyleLabel: option.label,
-        bookCoverStyleDetailText: option.detailText,
-        bookCoverStyleChanged: false,
         bookDesignSaveStatusText: "已自动保存",
       });
     } catch (error) {
@@ -819,7 +809,6 @@ definePage<BookExportData>()({
       const output = await updateMemoirBookOutput(this.data.projectId, {
         title: trimText(this.data.bookTitleInput) || undefined,
         ...metadata,
-        cover_style: this.data.bookCoverStyle,
       });
       this.applyBookExportData(this.bookPlan, output);
       this.setData({ exportNotice: "已根据各章确认正文更新全书稿。" });
@@ -896,21 +885,34 @@ definePage<BookExportData>()({
   },
 
   async previewBookLayout(event: DatasetEvent) {
-    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "classic_family");
+    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget) return;
     if (!this.bookOutput?.latest_version) {
-      this.setData({ error: "请先生成书稿" });
+      this.setData({
+        error: "请先生成书稿",
+        bookLayoutFeedbackTarget: template,
+        bookLayoutFeedbackText: "请先生成书稿",
+        bookLayoutFeedbackError: true,
+      });
       return;
     }
     if (!this.data.bookManuscriptAvailable) {
-      this.setData({ error: "请先更新书稿，再预览版式" });
+      this.setData({
+        error: "请先更新书稿，再预览版式",
+        bookLayoutFeedbackTarget: template,
+        bookLayoutFeedbackText: "请先更新书稿，再预览版式",
+        bookLayoutFeedbackError: true,
+      });
       return;
     }
-    if (this.bookOutput.is_stale) {
-      this.setData({ error: "章节内容已更新，请先更新书稿再预览版式" });
-      return;
-    }
-    this.setData({ bookLayoutBusyTarget: `preview:${template}`, error: "" });
+    const isStale = this.bookOutput.is_stale;
+    this.setData({
+      bookLayoutBusyTarget: `preview:${template}`,
+      bookLayoutFeedbackTarget: template,
+      bookLayoutFeedbackText: isStale ? "正在预览上次保存的书稿…" : "正在生成预览…",
+      bookLayoutFeedbackError: false,
+      error: "",
+    });
     try {
       const filePath = await downloadMemoirBookOutputExport(
         this.data.projectId,
@@ -921,16 +923,20 @@ definePage<BookExportData>()({
         { template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined },
       );
       await openBookPdf(filePath);
+      this.setData({
+        bookLayoutFeedbackText: isStale ? "PDF 已打开；章节更新尚未收录" : "PDF 已打开",
+      });
     } catch (error) {
       if (routeAuthError(error, "login")) return;
-      this.setData({ error: error instanceof Error ? error.message : "版式预览失败" });
+      const message = error instanceof Error ? error.message : "版式预览失败";
+      this.setData({ error: message, bookLayoutFeedbackText: message, bookLayoutFeedbackError: true });
     } finally {
       this.setData({ bookLayoutBusyTarget: "" });
     }
   },
 
   async selectBookLayout(event: DatasetEvent) {
-    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "classic_family");
+    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
     const option = BOOK_LAYOUT_OPTIONS.find((candidate) => candidate.value === template);
     const coverStyle = option?.coverStyle;
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget || this.data.bookTitleSaving) return;
@@ -951,19 +957,30 @@ definePage<BookExportData>()({
       && (!coverStyle || this.data.bookCoverStyle === coverStyle)
       && (template !== "custom" || !this.data.bookLayoutCustomChanged)
     ) return;
-    this.setData({ bookLayoutBusyTarget: `save:${template}`, error: "" });
+    this.setData({
+      bookLayoutBusyTarget: `save:${template}`,
+      bookLayoutFeedbackTarget: template,
+      bookLayoutFeedbackText: "正在应用版式…",
+      bookLayoutFeedbackError: false,
+      error: "",
+    });
     try {
-      if (!(await this.ensureBookDesignSavedForEditorialCopy())) return;
+      if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+        this.setData({ bookLayoutFeedbackText: this.data.error || "请先保存书名与信息", bookLayoutFeedbackError: true });
+        return;
+      }
       const output = await updateMemoirBookOutput(this.data.projectId, {
         manuscript_template: template,
         ...(coverStyle ? { cover_style: coverStyle } : {}),
         ...(template === "custom" ? { custom_layout: this.data.bookCustomLayout } : {}),
       });
       this.applyBookExportData(this.bookPlan, output);
+      this.setData({ bookLayoutFeedbackText: "版式已应用" });
       wx.showToast({ title: "书稿版式已保存", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) return;
-      this.setData({ error: error instanceof Error ? error.message : "保存书稿版式失败" });
+      const message = error instanceof Error ? error.message : "保存书稿版式失败";
+      this.setData({ error: message, bookLayoutFeedbackText: message, bookLayoutFeedbackError: true });
     } finally {
       this.setData({ bookLayoutBusyTarget: "" });
     }

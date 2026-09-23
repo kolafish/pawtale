@@ -108,7 +108,7 @@ test("book export overview binds reading, narration, and focused settings withou
   assert.doesNotMatch(template, /bookPreviewTocItems|bookManuscriptStructureItems|bookManuscriptChapterItems/);
 });
 
-test("book layout section exposes preview, selection, and custom controls", () => {
+test("book design section shows one curated gallery and keeps custom reading controls", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
   assert.match(template, /data-section="layout" bindtap="openSection"/);
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="previewBookLayout"/);
@@ -116,7 +116,9 @@ test("book layout section exposes preview, selection, and custom controls", () =
   assert.match(template, /src="\{\{option.coverPreviewImage\}\}"/);
   assert.match(template, /src="\{\{option.ornamentThumbnail\}\}"/);
   assert.match(template, /src="\{\{bookCoverStylePreviewImage\}\}"/);
-  assert.match(template, /预览整套 PDF/);
+  assert.doesNotMatch(template, /bindchange="changeBookCoverStyle"/);
+  assert.doesNotMatch(template, /预览整套 PDF|预览阅读版 PDF/);
+  assert.match(template, /bookLayoutFeedbackTarget === option.value/);
   assert.match(template, /data-key="font_scale" bindchange="changeBookCustomLayout"/);
   assert.match(template, /data-key="line_spacing" bindchange="changeBookCustomLayout"/);
   assert.match(template, /data-key="page_margin" bindchange="changeBookCustomLayout"/);
@@ -370,7 +372,7 @@ test("book export does not save settings while viewing a historical version", as
   assert.equal(updateCalls, 0);
 });
 
-test("book export page saves full-book metadata and cover style", async () => {
+test("book export page saves book metadata without changing the selected cover", async () => {
   const updates = [];
   const { page } = loadBookExportPage({
     updateMemoirBookOutput: async (projectId, payload) => {
@@ -380,11 +382,6 @@ test("book export page saves full-book metadata and cover style", async () => {
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
-
-  assert.deepEqual(
-    context.data.bookCoverStyleOptions.map((option) => option.value),
-    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt", "heritage_classic", "warm_journal", "modern_minimal"],
-  );
 
   page.changeBookTitle.call(context, {
     currentTarget: { dataset: {} },
@@ -402,11 +399,6 @@ test("book export page saves full-book metadata and cover style", async () => {
     currentTarget: { dataset: { key: "preface" } },
     detail: { value: "写给家人的开篇。" },
   });
-  page.changeBookCoverStyle.call(context, {
-    currentTarget: { dataset: {} },
-    detail: { value: "3" },
-  });
-
   await page.saveBookDesignSettings.call(context);
 
   assert.deepEqual(updates[0], {
@@ -419,12 +411,11 @@ test("book export page saves full-book metadata and cover style", async () => {
       preface: "写给家人的开篇。",
       afterword: "这些故事还可以继续补充。",
       back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "moonlit_courtyard",
     },
   });
   assert.equal(context.data.bookTitleChanged, false);
   assert.equal(context.data.bookMetadataChanged, false);
-  assert.equal(context.data.bookCoverStyleChanged, false);
+  assert.equal(context.data.bookCoverStyle, "classic_plain");
   assert.equal(context.data.bookDesignSaveStatusText, "已自动保存");
 });
 
@@ -744,51 +735,6 @@ test("book export page downloads reading PDF with the standard layout", async ()
   assert.equal(toasts[0].title, "PDF 已打开");
 });
 
-test("book layout preview opens the chosen PDF without saving, then selection updates the book", async () => {
-  const output = sampleBookOutput();
-  const downloads = [];
-  const updates = [];
-  const opened = [];
-  global.wx = {
-    openDocument(options) {
-      opened.push(options.filePath);
-      options.success();
-    },
-    showToast() {},
-  };
-  const { page } = loadBookExportPage({
-    downloadMemoirBookOutputExport: async (...args) => {
-      downloads.push(args);
-      return "/tmp/book-layout-preview.pdf";
-    },
-    updateMemoirBookOutput: async (_projectId, payload) => {
-      updates.push(payload);
-      output.latest_version.manuscript.profile.template = payload.manuscript_template;
-      return output;
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
-  page.applyBookExportData.call(context, samplePlan(), output);
-
-  await page.previewBookLayout.call(context, {
-    currentTarget: { dataset: { template: "photo_memory" } },
-  });
-  assert.deepEqual(downloads[0], [
-    "project/1", "pdf", "book-output-version-2", "standard", false,
-    { template: "photo_memory", custom_layout: undefined },
-  ]);
-  assert.deepEqual(opened, ["/tmp/book-layout-preview.pdf"]);
-  assert.deepEqual(updates, []);
-  assert.equal(context.data.bookManuscriptTemplateLabel, "素雅书籍版");
-
-  await page.selectBookLayout.call(context, {
-    currentTarget: { dataset: { template: "photo_memory" } },
-  });
-  assert.deepEqual(updates, [{ manuscript_template: "photo_memory" }]);
-  assert.equal(context.data.bookManuscriptTemplateLabel, "家庭纪念版");
-  assert.equal(context.data.bookLayoutTemplate, "photo_memory");
-});
-
 test("new complete templates preview without saving and apply cover with interior", async () => {
   const output = sampleBookOutput();
   const downloads = [];
@@ -811,6 +757,10 @@ test("new complete templates preview without saving and apply cover with interio
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), output);
+  assert.deepEqual(
+    context.data.bookLayoutOptions.map((option) => option.value),
+    ["heritage_classic", "warm_journal", "modern_minimal"],
+  );
 
   const newTemplates = [
     ["heritage_classic", "典藏文集版", "heritage"],
@@ -833,6 +783,8 @@ test("new complete templates preview without saving and apply cover with interio
       { template, custom_layout: undefined },
     ]);
     assert.equal(updates.length, downloads.length - 1);
+    assert.equal(context.data.bookLayoutFeedbackTarget, template);
+    assert.equal(context.data.bookLayoutFeedbackText, "PDF 已打开");
     await page.selectBookLayout.call(context, event);
     assert.deepEqual(updates.at(-1), { manuscript_template: template, cover_style: template });
     assert.equal(context.data.bookManuscriptTemplateLabel, label);
@@ -842,7 +794,51 @@ test("new complete templates preview without saving and apply cover with interio
   }
 });
 
-test("double tapping a complete template waits for cover autosave and saves only once", async () => {
+test("stale books still start PDF preview and show progress beside the chosen template", async () => {
+  const output = sampleBookOutput();
+  output.is_stale = true;
+  const opened = [];
+  let finishDownload;
+  const download = new Promise((resolve) => { finishDownload = resolve; });
+  global.wx = {
+    openDocument(options) { opened.push(options.filePath); options.success(); },
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: () => download,
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+
+  const preview = page.previewBookLayout.call(context, {
+    currentTarget: { dataset: { template: "heritage_classic" } },
+  });
+  assert.equal(context.data.bookLayoutBusyTarget, "preview:heritage_classic");
+  assert.equal(context.data.bookLayoutFeedbackText, "正在预览上次保存的书稿…");
+  finishDownload("/tmp/stale-book-preview.pdf");
+  await preview;
+  assert.deepEqual(opened, ["/tmp/stale-book-preview.pdf"]);
+  assert.equal(context.data.bookLayoutFeedbackText, "PDF 已打开；章节更新尚未收录");
+  assert.equal(context.data.bookLayoutBusyTarget, "");
+});
+
+test("PDF preview failure is shown beside the tapped template", async () => {
+  global.wx = {};
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async () => { throw new Error("downloadFile 合法域名未配置"); },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.previewBookLayout.call(context, {
+    currentTarget: { dataset: { template: "warm_journal" } },
+  });
+  assert.equal(context.data.bookLayoutFeedbackTarget, "warm_journal");
+  assert.equal(context.data.bookLayoutFeedbackText, "downloadFile 合法域名未配置");
+  assert.equal(context.data.bookLayoutFeedbackError, true);
+  assert.equal(context.data.bookLayoutBusyTarget, "");
+});
+
+test("double tapping a complete template waits for title autosave and saves only once", async () => {
   const output = sampleBookOutput();
   output.latest_version.manuscript.profile.template = "heritage_classic";
   output.latest_version.manuscript.render_settings.cover_style = "heritage_classic";
@@ -853,11 +849,13 @@ test("double tapping a complete template waits for cover autosave and saves only
   const { page } = loadBookExportPage({
     updateMemoirBookOutput: async (_projectId, payload) => {
       updates.push(payload);
-      if (!payload.manuscript_template) await autosaveGate;
+      if (payload.title) {
+        await autosaveGate;
+        output.title = payload.title;
+        output.latest_version.manuscript.profile.title = payload.title;
+      }
       if (payload.manuscript_template) {
         output.latest_version.manuscript.profile.template = payload.manuscript_template;
-      }
-      if (payload.cover_style) {
         output.latest_version.manuscript.render_settings.cover_style = payload.cover_style;
       }
       return output;
@@ -865,16 +863,10 @@ test("double tapping a complete template waits for cover autosave and saves only
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), output);
-  const event = { currentTarget: { dataset: { template: "heritage_classic" } } };
-
-  await page.selectBookLayout.call(context, event);
-  assert.deepEqual(updates, []);
-
-  page.changeBookCoverStyle.call(context, { detail: { value: "1" } });
-  assert.equal(context.data.bookCoverStyle, "warm_gray");
-  assert.equal(context.data.bookCoverStyleChanged, true);
+  page.changeBookTitle.call(context, { detail: { value: "外婆的新书" } });
+  const event = { currentTarget: { dataset: { template: "warm_journal" } } };
   const firstSelection = page.selectBookLayout.call(context, event);
-  assert.equal(context.data.bookLayoutBusyTarget, "save:heritage_classic");
+  assert.equal(context.data.bookLayoutBusyTarget, "save:warm_journal");
   assert.equal(updates.length, 1);
   await page.selectBookLayout.call(context, event);
   assert.equal(updates.length, 1);
@@ -882,21 +874,14 @@ test("double tapping a complete template waits for cover autosave and saves only
   await firstSelection;
 
   assert.equal(updates.length, 2);
-  assert.equal(updates[0].cover_style, "warm_gray");
+  assert.equal(updates[0].title, "外婆的新书");
+  assert.equal("cover_style" in updates[0], false);
   assert.deepEqual(updates[1], {
-    manuscript_template: "heritage_classic",
-    cover_style: "heritage_classic",
+    manuscript_template: "warm_journal",
+    cover_style: "warm_journal",
   });
-  assert.equal(context.data.bookCoverStyle, "heritage_classic");
-  assert.equal(context.data.bookCoverStyleChanged, false);
+  assert.equal(context.data.bookCoverStyle, "warm_journal");
   assert.equal(context.bookDesignAutosaveTimer, null);
-
-  const nextEvent = { currentTarget: { dataset: { template: "warm_journal" } } };
-  await Promise.all([
-    page.selectBookLayout.call(context, nextEvent),
-    page.selectBookLayout.call(context, nextEvent),
-  ]);
-  assert.equal(updates.filter((payload) => payload.manuscript_template === "warm_journal").length, 1);
 });
 
 test("book layout cannot be previewed or selected for a plain text legacy book", async () => {
@@ -910,7 +895,7 @@ test("book layout cannot be previewed or selected for a plain text legacy book",
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), output);
-  const event = { currentTarget: { dataset: { template: "photo_memory" } } };
+  const event = { currentTarget: { dataset: { template: "heritage_classic" } } };
 
   await page.previewBookLayout.call(context, event);
   assert.equal(context.data.error, "请先更新书稿，再预览版式");
@@ -1064,7 +1049,6 @@ test("book export page assembles confirmed chapter drafts as a new full-book ver
       preface: "这些故事来自家里的讲述。",
       afterword: "这些故事还可以继续补充。",
       back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "classic_plain",
     },
   });
   assert.equal(context.data.generatingBook, false);

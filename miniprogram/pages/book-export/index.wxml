@@ -20,7 +20,8 @@
               <text class="hero-meta">{{totalChapterCount}}章 · {{bookCharCount || 0}}字</text>
             </view>
             <view class="hero-cover {{bookCoverStylePreviewClass}}" aria-hidden="true">
-              <image class="hero-cover-branch" src="/assets/book-reader/hero-branch.png" mode="aspectFit" />
+              <image wx:if="{{bookCoverStylePreviewImage}}" class="hero-cover-image" src="{{bookCoverStylePreviewImage}}" mode="aspectFill" />
+              <image wx:else class="hero-cover-branch" src="/assets/book-reader/hero-branch.png" mode="aspectFit" />
               <text class="hero-cover-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
             </view>
           </view>
@@ -49,9 +50,9 @@
 
         <view class="overview-card ui-card">
           <text class="section-title">书的设置</text>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="title" bindtap="openSection"><text class="row-title">书名与封面</text><text class="row-value">{{bookManuscriptTitle || bookPreviewTitle}}</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="title" bindtap="openSection"><text class="row-title">书名与信息</text><text class="row-value">{{bookManuscriptTitle || bookPreviewTitle}}</text><text class="row-arrow">›</text></view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="editorial" bindtap="openSection"><text class="row-title">前言与后记</text><text class="row-value">{{bookPrefaceInput && bookAfterwordInput ? '已填写' : '待完善'}}</text><text class="row-arrow">›</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="layout" bindtap="openSection"><text class="row-title">版式与内容</text><text class="row-value">{{bookManuscriptTemplateLabel}}</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="layout" bindtap="openSection"><text class="row-title">封面与版式</text><text class="row-value">{{bookManuscriptTemplateLabel}}</text><text class="row-arrow">›</text></view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="history" bindtap="openSection"><text class="row-title">历史版本</text><text class="row-value">{{bookVersionOptions.length}}个版本</text><text class="row-arrow">›</text></view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="advanced" bindtap="openSection"><text class="row-title">高级整理</text><text class="row-arrow">›</text></view>
         </view>
@@ -71,7 +72,7 @@
         </view>
 
         <view wx:if="{{activeSection === 'title'}}" class="detail-card ui-card">
-          <view class="detail-heading"><text class="section-title">书名与封面</text><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
+          <view class="detail-heading"><text class="section-title">书名与信息</text><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
           <text class="book-title-sync-hint">这里修改的书名，也会同步为回忆录名称</text>
         <view class="book-title-editor">
           <input
@@ -142,33 +143,13 @@
             />
           </view>
         </view>
-        <picker
-          mode="selector"
-          range="{{bookCoverStyleOptions}}"
-          range-key="label"
-          value="{{bookCoverStyleIndex}}"
-          disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
-          bindchange="changeBookCoverStyle"
-        >
-          <view class="book-cover-style-picker">
-            <view class="book-cover-preview {{bookCoverStylePreviewClass}}">
-              <image wx:if="{{bookCoverStylePreviewImage}}" class="book-cover-preview-image" src="{{bookCoverStylePreviewImage}}" mode="aspectFill" />
-              <text class="book-cover-preview-title">{{bookTitleInput || bookPreviewTitle || "回忆录"}}</text>
-            </view>
-            <view class="book-cover-style-copy">
-              <text class="book-cover-style-label">封面风格</text>
-              <text class="book-cover-style-detail">{{bookCoverStyleDetailText}}</text>
-            </view>
-          </view>
-        </picker>
-
         <view
           class="save-design-button ui-block-action ui-pressable {{bookTitleSaving || bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
           bindtap="saveBookDesignSettings"
         >
-          {{bookTitleSaving ? "正在保存…" : "保存书名与封面"}}
+          {{bookTitleSaving ? "正在保存…" : "保存书名与信息"}}
         </view>
         </view>
 
@@ -267,15 +248,16 @@
         </view>
 
         <view wx:if="{{activeSection === 'layout'}}" class="detail-card ui-card">
-          <text class="section-title">版式与内容</text>
-          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">典藏文集、家书手记和现代简约可整套更换封面与内页；其他版式沿用当前封面。应用整套后，仍可在「书名与封面」单独调整封面。版式用于阅读版和打印版 PDF；预览整套时会临时显示配套封面，不会保存选择。</text>
+          <text class="section-title">封面与版式</text>
+          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">挑选一套封面、封底和内页。预览 PDF 不会保存选择，点使用后才会应用到这本书。</text>
           <text wx:else class="section-description">这份旧书稿还没有版式结构。请先更新书稿，再选择或预览版式。</text>
-          <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前内页</text><text>{{bookManuscriptTemplateLabel}}</text></view>
+          <text wx:if="{{bookManuscriptAvailable && bookStaleNotice}}" class="layout-preview-note">章节已有更新；预览使用上次保存的书稿。</text>
+          <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前版式</text><text>{{bookManuscriptTemplateLabel}}</text></view>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-option-list">
-            <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{bookLayoutTemplate === option.value ? (option.coverStyle && bookCoverStyle !== option.coverStyle ? 'is-interior-selected' : 'is-selected') : ''}}">
-              <view class="layout-option-main {{option.coverStyle ? 'has-cover' : ''}}">
+            <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle ? 'is-selected' : ''}}">
+              <view class="layout-option-main has-cover">
                 <view class="layout-option-visuals">
-                  <view wx:if="{{option.coverStyle}}" class="layout-cover-preview">
+                  <view class="layout-cover-preview">
                     <view class="layout-cover-art {{option.previewClass}}" aria-hidden="true">
                       <image class="layout-cover-image" src="{{option.coverPreviewImage}}" mode="aspectFill" />
                       <text class="layout-cover-kicker">家庭回忆录</text>
@@ -285,41 +267,51 @@
                     <text class="layout-preview-caption">封面</text>
                   </view>
                   <view class="layout-interior-preview">
-                    <view class="layout-sample {{option.previewClass}} {{option.value === 'custom' ? 'font-' + bookCustomLayout.font_scale + ' space-' + bookCustomLayout.line_spacing + ' margin-' + bookCustomLayout.page_margin : ''}}" aria-hidden="true">
+                    <view class="layout-sample {{option.previewClass}}" aria-hidden="true">
                       <text class="layout-sample-kicker">{{option.value === 'modern_minimal' ? '01' : '第一章'}}</text>
                       <text class="layout-sample-title">{{bookLayoutSampleTitle}}</text>
-                      <view wx:if="{{option.ornamentThumbnail}}" class="layout-sample-ornament-art"><image src="{{option.ornamentThumbnail}}" mode="aspectFit" /></view>
-                      <view wx:else class="layout-sample-rule"><text class="layout-sample-ornament">◇</text></view>
+                      <view class="layout-sample-ornament-art"><image src="{{option.ornamentThumbnail}}" mode="aspectFit" /></view>
                       <text class="layout-sample-body">{{bookLayoutSampleExcerpt}}</text>
                       <text class="layout-sample-section">{{bookLayoutSampleSectionTitle}}</text>
                       <text class="layout-sample-quote">{{bookLayoutSampleQuote}}</text>
                     </view>
-                    <text wx:if="{{option.coverStyle}}" class="layout-preview-caption">内页</text>
+                    <text class="layout-preview-caption">内页</text>
                   </view>
                 </view>
                 <view class="layout-option-copy">
                   <text class="layout-option-title">{{option.label}}</text>
                   <text class="layout-option-description">{{option.description}}</text>
-                  <text wx:if="{{bookLayoutTemplate === option.value}}" class="layout-selected-label">{{option.coverStyle ? (bookCoverStyle === option.coverStyle ? '整套已使用' : '内页已使用 · 封面已调整') : '当前版式'}}</text>
+                  <text wx:if="{{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle}}" class="layout-selected-label">当前使用</text>
                 </view>
               </view>
-              <view wx:if="{{option.value === 'custom'}}" class="layout-custom-controls">
-                <picker mode="selector" range="{{bookLayoutFontScaleOptions}}" range-key="label" value="{{bookLayoutFontScaleIndex}}" data-key="font_scale" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
-                  <view class="layout-custom-row"><text>正文字号</text><text>{{bookLayoutFontScaleOptions[bookLayoutFontScaleIndex].label}} ›</text></view>
-                </picker>
-                <picker mode="selector" range="{{bookLayoutLineSpacingOptions}}" range-key="label" value="{{bookLayoutLineSpacingIndex}}" data-key="line_spacing" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
-                  <view class="layout-custom-row"><text>行距</text><text>{{bookLayoutLineSpacingOptions[bookLayoutLineSpacingIndex].label}} ›</text></view>
-                </picker>
-                <picker mode="selector" range="{{bookLayoutPageMarginOptions}}" range-key="label" value="{{bookLayoutPageMarginIndex}}" data-key="page_margin" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
-                  <view class="layout-custom-row"><text>页边距</text><text>{{bookLayoutPageMarginOptions[bookLayoutPageMarginIndex].label}} ›</text></view>
-                </picker>
-                <text wx:if="{{bookLayoutTemplate === 'custom' && bookLayoutCustomChanged}}" class="layout-custom-hint">调整尚未保存，预览满意后点保存调整。</text>
-              </view>
               <view class="layout-option-actions">
-                <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}" disabled="{{!!bookLayoutBusyTarget || !!bookExportBusyTarget}}">{{option.coverStyle ? '预览整套 PDF' : '预览阅读版 PDF'}}</button>
-                <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{!!bookLayoutBusyTarget || !!bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === option.value && (!option.coverStyle || bookCoverStyle === option.coverStyle) && (option.value !== 'custom' || !bookLayoutCustomChanged))}}">{{bookLayoutTemplate === option.value && option.value === 'custom' && bookLayoutCustomChanged ? '保存调整' : (bookLayoutTemplate === option.value && (!option.coverStyle || bookCoverStyle === option.coverStyle) ? '已使用' : (option.coverStyle ? '使用整套' : '使用此版式'))}}</button>
+                <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
+                <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle)}}">{{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle ? '已使用' : '使用此版式'}}</button>
               </view>
+              <text wx:if="{{bookLayoutFeedbackTarget === option.value && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
             </view>
+          </view>
+          <view wx:if="{{bookManuscriptAvailable}}" class="layout-custom-panel">
+            <text class="layout-option-title">自定义阅读排版</text>
+            <text class="layout-option-description">保留当前封面，调整正文的字号、行距和页边距。</text>
+            <text wx:if="{{bookLayoutTemplate === 'custom'}}" class="layout-selected-label">当前使用</text>
+            <view class="layout-custom-controls">
+              <picker mode="selector" range="{{bookLayoutFontScaleOptions}}" range-key="label" value="{{bookLayoutFontScaleIndex}}" data-key="font_scale" bindchange="changeBookCustomLayout" disabled="{{bookLayoutBusyTarget !== ''}}">
+                <view class="layout-custom-row"><text>正文字号</text><text>{{bookLayoutFontScaleOptions[bookLayoutFontScaleIndex].label}} ›</text></view>
+              </picker>
+              <picker mode="selector" range="{{bookLayoutLineSpacingOptions}}" range-key="label" value="{{bookLayoutLineSpacingIndex}}" data-key="line_spacing" bindchange="changeBookCustomLayout" disabled="{{bookLayoutBusyTarget !== ''}}">
+                <view class="layout-custom-row"><text>行距</text><text>{{bookLayoutLineSpacingOptions[bookLayoutLineSpacingIndex].label}} ›</text></view>
+              </picker>
+              <picker mode="selector" range="{{bookLayoutPageMarginOptions}}" range-key="label" value="{{bookLayoutPageMarginIndex}}" data-key="page_margin" bindchange="changeBookCustomLayout" disabled="{{bookLayoutBusyTarget !== ''}}">
+                <view class="layout-custom-row"><text>页边距</text><text>{{bookLayoutPageMarginOptions[bookLayoutPageMarginIndex].label}} ›</text></view>
+              </picker>
+              <text wx:if="{{bookLayoutTemplate === 'custom' && bookLayoutCustomChanged}}" class="layout-custom-hint">调整尚未保存，预览满意后点保存调整。</text>
+            </view>
+            <view class="layout-option-actions">
+              <button class="layout-action preview ui-button" data-template="custom" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:custom'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
+              <button class="layout-action select ui-button" data-template="custom" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:custom'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === 'custom' && !bookLayoutCustomChanged)}}">{{bookLayoutTemplate === 'custom' && !bookLayoutCustomChanged ? '已使用' : '保存调整'}}</button>
+            </view>
+            <text wx:if="{{bookLayoutFeedbackTarget === 'custom' && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
           </view>
           <text class="layout-content-title">书稿内容</text>
           <view class="detail-info-row"><text>章节</text><text>{{totalChapterCount}}章</text></view>

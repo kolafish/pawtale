@@ -152,63 +152,45 @@ export interface BookManuscriptChapterView {
   contentPreview: string;
 }
 
-export interface BookCoverStyleOptionView {
+interface BookCoverStyleOptionView {
   value: MemoirBookCoverStyle;
-  label: string;
-  detailText: string;
   previewClass: string;
   previewImage?: string;
 }
 
-export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
+const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
   {
     value: "classic_plain",
-    label: "旧纸棕",
-    detailText: "米白纸色、深褐字和细线，适合默认成书",
     previewClass: "classic-plain",
   },
   {
     value: "warm_gray",
-    label: "暖灰书稿",
-    detailText: "暖灰底、深灰字，更像整理后的手稿",
     previewClass: "warm-gray",
   },
   {
     value: "dark_album",
-    label: "旧书封面",
-    detailText: "深灰褐底、浅色字，适合更庄重的纪念册",
     previewClass: "dark-album",
   },
   {
     value: "moonlit_courtyard",
-    label: "月下庭院",
-    detailText: "水墨庭院底图、墨褐标题，适合家庭回忆录默认封面封底",
     previewClass: "moonlit-courtyard",
   },
   {
     value: "navy_gilt",
-    label: "深蓝烫金",
-    detailText: "深蓝布面底图、金色标题和边框，适合更庄重的纪念册",
     previewClass: "navy-gilt",
   },
   {
     value: "heritage_classic",
-    label: "典藏文集封面",
-    detailText: "与典藏文集内页配套，也可以单独选用",
     previewClass: "heritage-classic",
     previewImage: "/assets/book_covers/heritage_classic.jpg",
   },
   {
     value: "warm_journal",
-    label: "家书手记封面",
-    detailText: "与家书手记内页配套，也可以单独选用",
     previewClass: "warm-journal",
     previewImage: "/assets/book_covers/warm_journal.jpg",
   },
   {
     value: "modern_minimal",
-    label: "现代简约封面",
-    detailText: "与现代简约内页配套，也可以单独选用",
     previewClass: "modern-minimal",
     previewImage: "/assets/book_covers/modern_minimal.jpg",
   },
@@ -721,22 +703,17 @@ function selectedBookCoverStyle(
   return option ? option.value : "classic_plain";
 }
 
-export function bookCoverStyleData(
+function bookCoverStyleData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
 ) {
   const style = selectedBookCoverStyle(output, selectedVersion);
-  const index = Math.max(0, BOOK_COVER_STYLE_OPTIONS.findIndex((option) => option.value === style));
-  const option = BOOK_COVER_STYLE_OPTIONS[index] || BOOK_COVER_STYLE_OPTIONS[0];
+  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style)
+    || BOOK_COVER_STYLE_OPTIONS[0];
   return {
     bookCoverStyle: option.value,
     bookCoverStylePreviewClass: option.previewClass,
     bookCoverStylePreviewImage: option.previewImage || "",
-    bookCoverStyleIndex: index,
-    bookCoverStyleLabel: option.label,
-    bookCoverStyleDetailText: option.detailText,
-    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
-    bookCoverStyleChanged: false,
   };
 }
 
