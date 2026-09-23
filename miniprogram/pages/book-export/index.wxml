@@ -285,7 +285,7 @@
                 </view>
               </view>
               <view class="layout-option-actions">
-                <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}">预览 PDF</button>
+                <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
                 <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle)}}">{{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle ? '已使用' : '使用此版式'}}</button>
               </view>
               <text wx:if="{{bookLayoutFeedbackTarget === option.value && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
@@ -308,7 +308,7 @@
               <text wx:if="{{bookLayoutTemplate === 'custom' && bookLayoutCustomChanged}}" class="layout-custom-hint">调整尚未保存，预览满意后点保存调整。</text>
             </view>
             <view class="layout-option-actions">
-              <button class="layout-action preview ui-button" data-template="custom" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:custom'}}">预览 PDF</button>
+              <button class="layout-action preview ui-button" data-template="custom" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:custom'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
               <button class="layout-action select ui-button" data-template="custom" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:custom'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === 'custom' && !bookLayoutCustomChanged)}}">{{bookLayoutTemplate === 'custom' && !bookLayoutCustomChanged ? '已使用' : '保存调整'}}</button>
             </view>
             <text wx:if="{{bookLayoutFeedbackTarget === 'custom' && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
