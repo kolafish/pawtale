@@ -370,6 +370,15 @@
   border: 0;
 }
 
+.credit-usage-day-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+}
+
 .credit-usage-row {
   display: flex;
   align-items: center;

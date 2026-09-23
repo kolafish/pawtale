@@ -139,12 +139,18 @@
           {{creditUsageExpanded ? "收起使用明细" : "查看使用明细"}}
         </button>
         <view wx:if="{{creditUsageExpanded}}" class="credit-usage-list">
-          <view wx:for="{{creditUsageItems}}" wx:key="id" class="credit-usage-row">
-            <view class="credit-usage-copy">
-              <text class="action-title">{{item.purpose}}</text>
-              <text class="action-meta">{{item.timeText}}</text>
+          <view wx:for="{{creditUsageDays}}" wx:for-item="day" wx:key="dateText" class="credit-usage-day">
+            <view class="credit-usage-day-head">
+              <text>{{day.dateText}}</text>
+              <text class="ui-tabular">当日合计 -¥{{day.amountText}}</text>
             </view>
-            <text class="credit-usage-amount ui-tabular">-¥{{item.amountText}}</text>
+            <view wx:for="{{day.purposes}}" wx:for-item="group" wx:key="purpose" class="credit-usage-row">
+              <view class="credit-usage-copy">
+                <text class="action-title">{{group.purpose}}</text>
+                <text class="action-meta">{{group.count}} 次</text>
+              </view>
+              <text class="credit-usage-amount ui-tabular">-¥{{group.amountText}}</text>
+            </view>
           </view>
           <text wx:if="{{creditUsageLoading}}" class="credit-usage-message">正在加载…</text>
           <text wx:if="{{creditUsageError}}" class="credit-usage-message">{{creditUsageError}}</text>
