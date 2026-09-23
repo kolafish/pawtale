@@ -8,7 +8,7 @@ import {
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
 import { getAICreditSummary, type AICreditSummary } from "../../services/billing";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
   aiModelLabel,
@@ -462,6 +462,7 @@ definePage<MeData>()({
       replaceMemoirStore({});
       this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "已退出", icon: "success" });
+      relaunchLogin();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
     } finally {
@@ -490,6 +491,7 @@ definePage<MeData>()({
       replaceMemoirStore({});
       this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "账号已注销", icon: "success" });
+      relaunchLogin();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "注销失败，请稍后重试" });
     } finally {

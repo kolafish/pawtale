@@ -494,11 +494,16 @@ test("me keeps memoir management and voice settings as separate entries", () => 
   ]);
 });
 
-test("me clears the current user's memoir snapshots on logout", async () => {
+test("me clears the current user's memoir snapshots and old page stack on logout", async () => {
   let cacheClearCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     setStorageSync() {},
     showToast() {},
+    reLaunch(options) {
+      assert.equal(cacheClearCount, 1);
+      pageStack.splice(0, pageStack.length, options.url);
+    },
   };
   const { page } = loadMePage({
     cacheExports: {
@@ -516,10 +521,15 @@ test("me clears the current user's memoir snapshots on logout", async () => {
 
   assert.equal(cacheClearCount, 1);
   assert.equal(context.data.loggedIn, false);
+  assert.deepEqual(pageStack, ["/pages/login/index"]);
 });
 
 test("me keeps the active session when server logout fails", async () => {
   let cacheClearCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
+  global.wx = {
+    reLaunch(options) { pageStack.splice(0, pageStack.length, options.url); },
+  };
   const { page } = loadMePage({
     authExports: { logoutBackendSession: async () => { throw new Error("网络不可用"); } },
     cacheExports: { clearCurrentUserMemoirSnapshots: () => { cacheClearCount += 1; } },
@@ -532,16 +542,23 @@ test("me keeps the active session when server logout fails", async () => {
   assert.equal(context.data.loading, false);
   assert.equal(context.data.error, "网络不可用");
   assert.equal(cacheClearCount, 0);
+  assert.deepEqual(pageStack, ["/pages/home/index", "/pages/me/index"]);
 });
 
-test("me deletes the account only after confirmation and clears local user data", async () => {
+test("me deletes the account only after confirmation and clears local data and page stack", async () => {
   let cacheClearCount = 0;
   let consentClearCount = 0;
   let deleteCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     setStorageSync() {},
     showModal(options) { options.success({ confirm: true }); },
     showToast() {},
+    reLaunch(options) {
+      assert.equal(cacheClearCount, 1);
+      assert.equal(consentClearCount, 1);
+      pageStack.splice(0, pageStack.length, options.url);
+    },
   };
   const { page } = loadMePage({
     authExports: { deleteAccountWithWeChat: async () => { deleteCount += 1; } },
@@ -556,13 +573,16 @@ test("me deletes the account only after confirmation and clears local user data"
   assert.equal(cacheClearCount, 1);
   assert.equal(consentClearCount, 1);
   assert.equal(context.data.loggedIn, false);
+  assert.deepEqual(pageStack, ["/pages/login/index"]);
 });
 
 test("me keeps account and local data when deletion is cancelled or fails", async () => {
   let cacheClearCount = 0;
   let confirmed = false;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     showModal(options) { options.success({ confirm: confirmed }); },
+    reLaunch(options) { pageStack.splice(0, pageStack.length, options.url); },
   };
   const { page } = loadMePage({
     authExports: { deleteAccountWithWeChat: async () => { throw new Error("网络不可用"); } },
@@ -577,4 +597,5 @@ test("me keeps account and local data when deletion is cancelled or fails", asyn
   assert.equal(context.data.loggedIn, true);
   assert.equal(context.data.error, "网络不可用");
   assert.equal(cacheClearCount, 0);
+  assert.deepEqual(pageStack, ["/pages/home/index", "/pages/me/index"]);
 });
