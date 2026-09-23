@@ -11,8 +11,12 @@ from app.services.file_exports import ExportFile, safe_filename
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_output_pdf_renderer import (
     PDF_LAYOUTS,
+    PDF_HERITAGE_ACCENT,
+    PDF_MODERN_ACCENT,
+    PDF_SANS_FONT_NAME,
     PDF_SERIF_BOLD_FONT_NAME,
     PDF_SERIF_FONT_NAME,
+    PDF_WARM_ACCENT,
     PDFBookBuilder,
     PDFColor,
     PDFLayout,
@@ -802,6 +806,114 @@ def _add_illustrations(
         _add_illustration(builder, illustration)
 
 
+def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, index: int) -> None:
+    layout = builder.layout
+    template = layout.manuscript_template
+    title_max_units = max(
+        6,
+        min(
+            layout.max_line_units - 4,
+            (layout.page_width - 2 * layout.margin_x - layout.inner_margin_delta)
+            // layout.title_font_size,
+        ),
+    )
+    long_title = len(_wrap_pdf_line(title, title_max_units)) > 4
+    if template == "heritage_classic":
+        opening_spacer = 2.5 if long_title else (5 if layout.mirror_body_pages else 3)
+        builder.add_spacer(opening_spacer)
+        builder.add_centered(
+            label,
+            font_size=layout.small_font_size + 2,
+            line_height=layout.line_height,
+            max_units=layout.max_line_units,
+            spacing_after=11,
+            font_name=PDF_SERIF_FONT_NAME,
+            char_spacing=1.2,
+        )
+        builder.add_centered(
+            title,
+            font_size=layout.title_font_size,
+            line_height=layout.line_height + 12,
+            max_units=title_max_units,
+            spacing_after=20,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        )
+        ornament_y = builder.y + 9
+        middle = layout.page_width / 2
+        for x in (middle - 63, middle + 14):
+            builder.add_decoration(
+                kind="line", x=x, y=ornament_y, width=49, height=0,
+                color=PDF_HERITAGE_ACCENT, line_width=0.55,
+            )
+        builder.add_centered_at(
+            "◇", y=ornament_y - 5, font_size=10,
+            line_height=layout.line_height, color=PDF_HERITAGE_ACCENT,
+        )
+        builder.y -= 10
+        return
+    if template == "warm_journal":
+        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
+        builder.add_spacer(opening_spacer)
+        builder.add_text(
+            label, font_size=layout.small_font_size + 1,
+            line_height=layout.line_height, spacing_after=9,
+            font_name=PDF_SERIF_FONT_NAME, color=PDF_WARM_ACCENT,
+        )
+        builder.add_text(
+            title, font_size=layout.title_font_size,
+            line_height=layout.line_height + 12,
+            max_units=title_max_units,
+            spacing_after=19, font_name=PDF_SERIF_BOLD_FONT_NAME,
+            color=(0.27, 0.17, 0.13),
+        )
+        builder.add_decoration(
+            kind="line", x=builder._content_left(), y=builder.y + 8,
+            width=min(150, layout.page_width - 2 * layout.margin_x),
+            height=0, color=PDF_WARM_ACCENT, line_width=1.1,
+        )
+        builder.y -= 13
+        return
+    if template == "modern_minimal":
+        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
+        builder.add_spacer(opening_spacer)
+        builder.add_text(
+            f"{index:02}", font_size=layout.small_font_size + 2,
+            line_height=layout.line_height, spacing_after=13,
+            font_name=PDF_SANS_FONT_NAME, color=PDF_MODERN_ACCENT,
+        )
+        builder.add_text(
+            title, font_size=layout.title_font_size,
+            line_height=layout.line_height + 12,
+            max_units=title_max_units,
+            spacing_after=19, font_name=PDF_SANS_FONT_NAME,
+            color=(0.10, 0.15, 0.17),
+        )
+        builder.add_decoration(
+            kind="line", x=builder._content_left(), y=builder.y + 8,
+            width=layout.page_width - 2 * layout.margin_x,
+            height=0, color=(0.72, 0.78, 0.79), line_width=0.65,
+        )
+        builder.y -= 13
+        return
+
+    builder.add_spacer(4.0 if layout.mirror_body_pages else 2.5)
+    builder.add_text(
+        label,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        spacing_after=6,
+    )
+    builder.add_text(
+        title,
+        font_size=layout.title_font_size,
+        line_height=layout.line_height + 12,
+        max_units=title_max_units,
+        spacing_after=18 if layout.mirror_body_pages else 12,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+    )
+
+
 def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
     for fallback_index, raw_chapter in enumerate(chapters, start=1):
         chapter = _dict(raw_chapter)
@@ -820,21 +932,9 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             anchor=anchor,
             outline_title=f"{label} {title}",
         )
-        builder.add_spacer(4.0 if builder.layout.mirror_body_pages else 2.5)
-        builder.add_text(
-            label,
-            font_size=builder.layout.small_font_size + 1,
-            line_height=builder.layout.line_height,
-            max_units=builder.layout.max_line_units,
-            spacing_after=6,
-        )
-        builder.add_text(
-            title,
-            font_size=builder.layout.title_font_size,
-            line_height=builder.layout.line_height + 12,
-            max_units=max(10, builder.layout.max_line_units - 4),
-            spacing_after=18 if builder.layout.mirror_body_pages else 12,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        _add_chapter_opening(
+            builder, title=title, label=label,
+            index=_int(chapter.get("index"), fallback_index),
         )
 
         hints = [

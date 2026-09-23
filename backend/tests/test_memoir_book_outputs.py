@@ -723,6 +723,39 @@ async def test_book_manuscript_design_saves_and_preview_does_not_change_selectio
     )
 
 
+async def test_new_manuscript_templates_save_and_preserve_cover_during_preview(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    cover = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"cover_style": "navy_gilt"},
+    )
+    assert cover.status_code == 200
+
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        selected = await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}/book-output",
+            json={"manuscript_template": template},
+        )
+        assert selected.status_code == 200
+        version = selected.json()["latest_version"]
+        assert version["manuscript"]["profile"]["template"] == template
+        assert version["manuscript"]["render_settings"]["cover_style"] == "navy_gilt"
+
+        preview = await client.get(
+            f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+            "?format=pdf&preview_template=classic_family"
+        )
+        current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+        assert preview.status_code == 200
+        assert preview.content.startswith(b"%PDF-")
+        assert current.status_code == 200
+        assert current.json()["latest_version"]["id"] == version["id"]
+        assert current.json()["latest_version"]["manuscript"]["profile"]["template"] == template
+        assert current.json()["latest_version"]["manuscript"]["render_settings"]["cover_style"] == "navy_gilt"
+
+
 async def test_book_manuscript_design_rejects_unsupported_values(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)

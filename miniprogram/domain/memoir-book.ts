@@ -363,7 +363,14 @@ export interface MemoirBookOutputTableOfContentsItem {
   sections: MemoirBookOutputSectionTableOfContentsItem[];
 }
 
-export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive" | "custom";
+export type MemoirBookManuscriptTemplate =
+  | "classic_family"
+  | "photo_memory"
+  | "oral_archive"
+  | "heritage_classic"
+  | "warm_journal"
+  | "modern_minimal"
+  | "custom";
 
 export interface MemoirBookCustomLayout {
   font_scale: "standard" | "large";

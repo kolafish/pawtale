@@ -58,7 +58,15 @@ SUPPORTED_BOOK_COVER_STYLES = {
     "navy_gilt",
 }
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
-BOOK_MANUSCRIPT_TEMPLATES = {"classic_family", "photo_memory", "oral_archive", "custom"}
+BOOK_MANUSCRIPT_TEMPLATES = {
+    "classic_family",
+    "photo_memory",
+    "oral_archive",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+    "custom",
+}
 
 
 def positive_int(value: object) -> int:

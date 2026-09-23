@@ -785,6 +785,51 @@ test("book layout preview opens the chosen PDF without saving, then selection up
   assert.equal(context.data.bookLayoutTemplate, "photo_memory");
 });
 
+test("new interior templates can each be previewed and selected", async () => {
+  const output = sampleBookOutput();
+  const downloads = [];
+  const updates = [];
+  global.wx = {
+    openDocument(options) { options.success(); },
+    showToast() {},
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (...args) => {
+      downloads.push(args);
+      return "/tmp/interior-layout-preview.pdf";
+    },
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      updates.push(payload);
+      output.latest_version.manuscript.profile.template = payload.manuscript_template;
+      return output;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+
+  const newTemplates = [
+    ["heritage_classic", "典藏文集版", "heritage"],
+    ["warm_journal", "家书手记版", "journal"],
+    ["modern_minimal", "现代简约版", "modern"],
+  ];
+  for (const [template, label, previewClass] of newTemplates) {
+    const option = context.data.bookLayoutOptions.find((item) => item.value === template);
+    assert.equal(option?.label, label);
+    assert.equal(option?.previewClass, previewClass);
+    const event = { currentTarget: { dataset: { template } } };
+    await page.previewBookLayout.call(context, event);
+    assert.deepEqual(downloads.at(-1), [
+      "project/1", "pdf", "book-output-version-2", "standard", false,
+      { template, custom_layout: undefined },
+    ]);
+    assert.equal(updates.length, downloads.length - 1);
+    await page.selectBookLayout.call(context, event);
+    assert.deepEqual(updates.at(-1), { manuscript_template: template });
+    assert.equal(context.data.bookManuscriptTemplateLabel, label);
+    assert.equal(context.data.bookLayoutTemplate, template);
+  }
+});
+
 test("book layout cannot be previewed or selected for a plain text legacy book", async () => {
   const output = sampleBookOutput();
   output.latest_version.manuscript = null;

@@ -527,6 +527,15 @@ function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefi
   if (template === "oral_archive") {
     return "口述档案版";
   }
+  if (template === "heritage_classic") {
+    return "典藏文集版";
+  }
+  if (template === "warm_journal") {
+    return "家书手记版";
+  }
+  if (template === "modern_minimal") {
+    return "现代简约版";
+  }
   return "素雅书籍版";
 }
 

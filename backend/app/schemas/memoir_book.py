@@ -360,7 +360,15 @@ class MemoirBookAudioResponse(BaseModel):
 
 
 MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"]
-MemoirBookManuscriptTemplate = Literal["classic_family", "photo_memory", "oral_archive", "custom"]
+MemoirBookManuscriptTemplate = Literal[
+    "classic_family",
+    "photo_memory",
+    "oral_archive",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+    "custom",
+]
 MemoirBookCustomFontScale = Literal["standard", "large"]
 MemoirBookCustomLineSpacing = Literal["compact", "standard", "relaxed"]
 MemoirBookCustomPageMargin = Literal["narrow", "standard", "wide"]
