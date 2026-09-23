@@ -15,6 +15,7 @@ interface EditData {
   error: string;
   message: string;
   preview: VoiceEditPreview | null;
+  splitConfirmation: VoiceEditItem | null;
   items: Array<VoiceEditItem & { selected: boolean }>;
   selectedCount: number;
 }
@@ -23,7 +24,7 @@ definePage<EditData>()({
   data: {
     pageClass: accessibilityPageClass("voice-edit-page ui-page-shell ui-accessible-page"),
     projectId: "", projectTitle: "", gatewayUrl: "", instruction: "",
-    loading: false, applying: false, error: "", message: "", preview: null, items: [], selectedCount: 0,
+    loading: false, applying: false, error: "", message: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0,
   },
   requestSequence: 0,
 
@@ -39,7 +40,7 @@ definePage<EditData>()({
 
   onHide() {
     this.requestSequence++;
-    this.setData({ loading: false, applying: false, preview: null, items: [], selectedCount: 0 });
+    this.setData({ loading: false, applying: false, preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
   },
 
   onUnload() { this.onHide(); },
@@ -48,20 +49,23 @@ definePage<EditData>()({
     if (this.data.loading || this.data.applying) return;
     const clarification = this.data.preview?.questions.length && !this.data.items.length
       ? this.data.preview : null;
-    this.setData({ instruction: event.detail.value, preview: clarification, items: [], selectedCount: 0, message: "", error: "" });
+    this.setData({ instruction: event.detail.value, preview: clarification, splitConfirmation: null, items: [], selectedCount: 0, message: "", error: "" });
   },
 
   async submitInstruction(event?: { detail?: { value?: string } }) {
     const instruction = String(event?.detail?.value ?? this.data.instruction).trim();
     if (!instruction || !this.data.projectId || this.data.loading || this.data.applying) return;
     const sequence = ++this.requestSequence;
-    this.setData({ instruction, loading: true, error: "", message: "", preview: null, items: [], selectedCount: 0 });
+    this.setData({ instruction, loading: true, error: "", message: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
     try {
       await ensureMemoirBackendSession();
       if (sequence !== this.requestSequence) return;
       const preview = await previewVoiceEdit(this.data.projectId, instruction);
       if (sequence !== this.requestSequence) return;
-      this.setData({ preview, items: preview.operations.map(item => ({ ...item, selected: true })), selectedCount: preview.operations.length });
+      const splitConfirmation = preview.questions.length === 0 && preview.operations.length === 1
+        && preview.operations[0].action === "split_chapter" && preview.operations[0].section_ids?.length
+        ? preview.operations[0] : null;
+      this.setData({ preview, splitConfirmation, items: preview.operations.map(item => ({ ...item, selected: true })), selectedCount: preview.operations.length });
     } catch (error) {
       if (sequence === this.requestSequence) this.setData({ error: error instanceof Error ? error.message : "没有得到修改结果，请重试" });
     } finally {
@@ -76,22 +80,29 @@ definePage<EditData>()({
     this.setData({ items, selectedCount: items.filter(item => item.selected).length });
   },
 
+  restartInstruction() {
+    if (this.data.loading || this.data.applying) return;
+    this.requestSequence++;
+    this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, message: "", error: "" });
+  },
+
   async apply() {
     if (!this.data.preview || this.data.applying || !this.data.selectedCount) return;
     const sequence = ++this.requestSequence;
-    const operations = this.data.items.filter(item => item.selected).map(({ action, target_ref, new_title, utterance_ids }) => ({
+    const operations = this.data.items.filter(item => item.selected).map(({ action, target_ref, new_title, utterance_ids, section_ids }) => ({
       action, target_ref, new_title,
-      ...(action === "split_chapter" ? { utterance_ids } : {}),
+      ...(action === "split_chapter" && section_ids?.length ? { section_ids } : {}),
+      ...(action === "split_chapter" && utterance_ids?.length ? { utterance_ids } : {}),
     }));
     this.setData({ applying: true, error: "" });
     try {
       const result = await applyVoiceEdit(this.data.projectId, this.data.preview.signature, operations);
       if (sequence !== this.requestSequence) return;
-      this.setData({ message: result.message, preview: null, items: [], selectedCount: 0, instruction: "" });
+      this.setData({ message: result.message, preview: null, splitConfirmation: null, items: [], selectedCount: 0, instruction: "" });
     } catch (error) {
       if (sequence !== this.requestSequence) return;
       // A lost response may follow a successful commit. Do not replay the old batch.
-      this.setData({ preview: null, items: [], selectedCount: 0, error: `${error instanceof Error ? error.message : "未收到修改结果"}。请先回到故事查看当前内容，再提出修改。` });
+      this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, error: `${error instanceof Error ? error.message : "未收到修改结果"}。请先回到故事查看当前内容，再提出修改。` });
     } finally {
       if (sequence === this.requestSequence) this.setData({ applying: false });
     }

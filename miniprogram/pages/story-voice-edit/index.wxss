@@ -22,6 +22,12 @@
 .edit-operation-title { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
 .edit-detail { margin-top: 8rpx; white-space: pre-wrap; }
 
+.edit-split-summary, .edit-split-caption, .edit-split-title { display: block; }
+.edit-split-summary { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.6; white-space: pre-wrap; text-wrap: pretty; }
+.edit-split-title-block { margin-top: 24rpx; padding: 20rpx 24rpx; border-radius: var(--ui-radius-inner); background: var(--ui-surface-soft); }
+.edit-split-caption { color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.5; }
+.edit-split-title { margin-top: 6rpx; color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+
 .edit-apply {
   margin-top: 20rpx;
   border-radius: var(--ui-radius-control);
@@ -34,7 +40,9 @@
 }
 
 .edit-message { display: block; background: var(--ui-success-surface); color: var(--ui-success-text); box-shadow: none; font-size: var(--ui-font-body); line-height: 1.55; }
+.edit-restart { min-height: 88rpx; margin-top: 10rpx; background: transparent; color: var(--ui-text-secondary); font-size: var(--ui-font-body); }
 .edit-back { min-height: 88rpx; margin-top: 22rpx; background: transparent; color: var(--ui-section-title); font-size: var(--ui-font-action); font-weight: 700; }
 .large-text .edit-title { font-size: 48rpx; }
 .large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: var(--ui-font-large-list-title); }
 .large-text .edit-operation-title, .large-text .edit-reply, .large-text .edit-question { font-size: 36rpx; }
+.large-text .edit-split-summary, .large-text .edit-split-title { font-size: 36rpx; }

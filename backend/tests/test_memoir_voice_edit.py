@@ -7,12 +7,12 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
-    MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlan,
+    MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookPlan,
     MemoirBookPlanChapter, MemoirEditingJob, MemoirSection, MemoirSectionMaterial,
     MemoirVoiceSession, MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.schemas.memoir_voice_edit import VoiceEditOperation, VoiceEditProposal
+from app.schemas.memoir_voice_edit import VoiceEditApplyRequest, VoiceEditOperation, VoiceEditProposal
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.memoir.voice_edit import _story
@@ -67,8 +67,8 @@ async def story(client, test_db):
     return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
 
 
-async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False):
-    fake = FakeAI({"operations": operations, "questions": questions or [], "reply": "请看看这些修改。"})
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, reply="请看看这些修改。"):
+    fake = FakeAI({"operations": operations, "questions": questions or [], "reply": reply})
     requested = []
 
     def factory(model):
@@ -83,7 +83,12 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
 
 async def apply(client, story, preview_data, operations=None):
     chosen = operations if operations is not None else [
-        {k: op[k] for k in ("action", "target_ref", "new_title")} for op in preview_data["operations"]
+        {
+            **{k: op[k] for k in ("action", "target_ref", "new_title")},
+            **({"utterance_ids": op["utterance_ids"]} if op.get("utterance_ids") else {}),
+            **({"section_ids": op["section_ids"]} if op.get("section_ids") else {}),
+        }
+        for op in preview_data["operations"]
     ]
     return await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/apply", json={"signature": preview_data["signature"], "operations": chosen})
 
@@ -246,6 +251,157 @@ async def test_split_chapter_preview_moves_only_confirmed_whole_utterances(
         if any(section["ref"] == material["section_ref"] and section["chapter_ref"] == source_chapter for section in after["sections"])
     }
     assert (await apply(client, story, data, operations=[operation])).status_code == 409
+
+
+async def test_split_chapter_moves_last_two_sections_without_collapsing_them(
+    client, test_db, monkeypatch, story,
+):
+    source_chapter = story["chapters"][2]
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    moved_sections = []
+    expected_links = {}
+    included_ids = []
+    for order in range(1, 11):
+        section = MemoirSection(
+            id=f"00000000-0000-0000-0000-{1000 - order:012d}",
+            project_id=story["pid"], chapter_id=source_chapter,
+            title={9: "辞职后的日常：运动与做饭", 10: "重拾羽毛球：找搭子"}.get(order, f"工作经历{order}"),
+            sort_order=order,
+        )
+        test_db.add(section)
+        await test_db.flush()
+        if order < 9:
+            continue
+        moved_sections.append(section)
+        for material_order in range(3):
+            utterance = MemoirVoiceUtterance(
+                voice_session_id=session.id,
+                transcript_raw=f"小节{order}的第{material_order + 1}条讲述。",
+            )
+            test_db.add(utterance)
+            await test_db.flush()
+            included = material_order < 2
+            link = MemoirSectionMaterial(
+                project_id=story["pid"], section_id=section.id,
+                utterance_id=utterance.id, sort_order=material_order,
+                include_in_book=included,
+            )
+            test_db.add(link)
+            await test_db.flush()
+            expected_links[link.id] = (section.id, utterance.id, included)
+            if included:
+                included_ids.append(utterance.id)
+    source_draft = await test_db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == source_chapter))
+    source_draft.status = "confirmed"
+    plan_row = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == story["pid"]))
+    output = MemoirBookOutput(
+        project_id=story["pid"], plan_id=plan_row.id,
+        title="我的回忆录", status="accepted",
+    )
+    test_db.add(output)
+    await test_db.commit()
+
+    before = await _story(test_db, story["pid"])
+    assert [section["ref"] for section in before["sections"] if section["chapter_ref"] == source_chapter][-2:] == [
+        section.id for section in moved_sections
+    ]
+    operation = {
+        "action": "split_chapter", "target_ref": source_chapter,
+        "section_ids": [section.id for section in moved_sections],
+    }
+    response, _ = await preview(
+        client, monkeypatch, story, [operation],
+        instruction="把第三章最后两个小节里辞职后运动、做饭和羽毛球这些放到新章节。",
+        supports_chapter_split=True,
+        reply="第三章有 11 个小节，请您逐条阅读这些讲述，再告诉我是否要移动；还请您想一个新章节名称。" * 5,
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["questions"] == []
+    assert len(data["operations"]) == 1
+    item = data["operations"][0]
+    assert item["new_title"] == "辞职后的日常与重拾羽毛球"
+    assert item["section_ids"] == [section.id for section in moved_sections]
+    assert item["utterance_ids"] == []
+    assert "第3章「早晨日常」" in item["label"]
+    assert "辞职后的日常" in item["label"] and "重拾羽毛球" in item["label"]
+    assert "讲述全文" not in item["detail"]
+    assert "小节9的第1条讲述" not in item["detail"]
+    assert "新章节名" in data["reply"]
+    assert len(data["reply"]) < 30
+
+    result = await apply(client, story, data)
+    assert result.status_code == 200, result.text
+    plan = (await client.get(f"/api/mobile/memoir/projects/{story['pid']}/book-plan")).json()
+    new_chapter = next(chapter for chapter in plan["chapters"] if chapter["title"] == item["new_title"])
+    assert new_chapter["sort_order"] == 3
+    assert {ref["utterance_id"] for ref in new_chapter["source_refs"]} == set(included_ids)
+    assert {ref["utterance_id"] for ref in plan["chapters"][2]["source_refs"]} == {story["materials"][2]}
+    for index, section in enumerate(moved_sections):
+        await test_db.refresh(section)
+        assert section.chapter_id == new_chapter["id"]
+        assert section.sort_order == index
+        assert section.version > 1
+    links = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.id.in_(expected_links)
+    ))).all())
+    assert {link.id: (link.section_id, link.utterance_id, link.include_in_book) for link in links} == expected_links
+    await test_db.refresh(source_draft)
+    await test_db.refresh(output)
+    assert source_draft.status == "draft"
+    assert output.status == "draft"
+    assert (await apply(client, story, data)).status_code == 409
+
+
+async def test_split_section_preview_rejects_changed_section(client, test_db, monkeypatch, story):
+    chapter = story["chapters"][1]
+    section = await test_db.get(MemoirSection, story["sections"][1])
+    extra = await test_db.get(MemoirSection, story["sections"][3])
+    wrong, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": chapter,
+        "section_ids": [story["sections"][2]], "new_title": "童年往事",
+    }], supports_chapter_split=True)
+    assert wrong.status_code == 422
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": chapter,
+        "section_ids": [section.id, extra.id], "new_title": "童年往事",
+    }], supports_chapter_split=True)
+    assert response.status_code == 422  # the original chapter would have no included source left
+
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    utterance = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw="在外婆家过暑假。")
+    test_db.add(utterance)
+    await test_db.flush()
+    test_db.add(MemoirSectionMaterial(project_id=story["pid"], section_id=extra.id, utterance_id=utterance.id))
+    await test_db.commit()
+    extra.include_in_book = False
+    await test_db.commit()
+    hidden, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": chapter,
+        "section_ids": [extra.id], "new_title": "外婆家的夏天",
+    }], supports_chapter_split=True)
+    assert hidden.status_code == 422
+    extra.include_in_book = True
+    await test_db.commit()
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": chapter,
+        "section_ids": [extra.id], "new_title": "外婆家的夏天",
+    }], supports_chapter_split=True)
+    assert response.status_code == 200, response.text
+    extra.title = "修改后的小节"
+    extra.version += 1
+    await test_db.commit()
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    assert len((await _story(test_db, story["pid"]))["chapters"]) == 3
+
+
+async def test_split_title_fallback_rejects_unknown_chapter(client, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": "not-a-chapter",
+        "utterance_ids": [story["materials"][2]],
+    }], supports_chapter_split=True)
+    assert response.status_code == 422
 
 
 async def test_split_chapter_rejects_wrong_or_complete_source_selection(
@@ -528,11 +684,22 @@ async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, t
     {"action": "regenerate_chapter_sections", "target_ref": "c", "new_title": "新小节"},
     {"action": "split_chapter", "target_ref": "c", "new_title": "新章节"},
     {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "utterance_ids": ["u", "u"]},
+    {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "section_ids": ["s", "s"]},
+    {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "section_ids": ["s"], "utterance_ids": ["u"]},
+    {"action": "delete_chapter", "target_ref": "c", "section_ids": ["s"]},
     {"action": "execute_sql", "target_ref": "c"},
 ])
 def test_operation_contract_rejects_unexecutable_actions(data):
     with pytest.raises(ValidationError):
         VoiceEditOperation.model_validate(data)
+
+
+def test_apply_contract_requires_concrete_split_title():
+    with pytest.raises(ValidationError):
+        VoiceEditApplyRequest.model_validate({
+            "signature": "{}",
+            "operations": [{"action": "split_chapter", "target_ref": "c", "section_ids": ["s"]}],
+        })
 
 
 def test_provider_string_arrays_are_not_interpreted_as_actions():

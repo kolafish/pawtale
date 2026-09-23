@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirSectionMaterialAssignedBy,
+    MemoirSectionStatus,
 )
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.models.memoir import (
@@ -26,6 +27,8 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirEditingJob,
     MemoirImageAsset,
+    MemoirSection,
+    MemoirSectionMaterial,
 )
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
@@ -71,6 +74,7 @@ from app.services.memoir.book_structure_commands import (
 )
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.sections import sync_materials_to_chapters
+from app.services.memoir.section_digests import mark_section_digests_stale
 
 
 @dataclass(frozen=True)
@@ -688,6 +692,74 @@ async def update_book_plan(
     return await _plan_response(db, refreshed)
 
 
+async def _selected_sections_for_chapter_split(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    section_ids: list[str],
+) -> tuple[list[MemoirSection], list[MemoirSection], list[str]]:
+    source_sections = list((await db.scalars(
+        select(MemoirSection)
+        .where(MemoirSection.project_id == project_id, MemoirSection.chapter_id == chapter_id)
+        .order_by(MemoirSection.sort_order, MemoirSection.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).all())
+    selected_id_set = set(section_ids)
+    selected = [section for section in source_sections if section.id in selected_id_set]
+    if len(selected) != len(section_ids) or any(
+        section.status != MemoirSectionStatus.ACTIVE.value or not section.include_in_book
+        for section in selected
+    ):
+        raise HTTPException(status_code=400, detail="要移动的小节不在原章节的当前收录内容中")
+
+    links = list((await db.scalars(
+        select(MemoirSectionMaterial)
+        .where(MemoirSectionMaterial.project_id == project_id, MemoirSectionMaterial.section_id.in_(section_ids))
+        .order_by(MemoirSectionMaterial.section_id, MemoirSectionMaterial.sort_order, MemoirSectionMaterial.id)
+        .with_for_update()
+    )).all())
+    included_by_section: dict[str, list[str]] = {section_id: [] for section_id in section_ids}
+    for link in links:
+        if link.include_in_book:
+            included_by_section[link.section_id].append(link.utterance_id)
+    selected_source_ids = [
+        utterance_id
+        for section in selected
+        for utterance_id in included_by_section[section.id]
+    ]
+    return source_sections, selected, selected_source_ids
+
+
+async def _move_split_sections(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    source_sections: list[MemoirSection],
+    selected_sections: list[MemoirSection],
+    new_chapter_id: str,
+) -> None:
+    selected_ids = {section.id for section in selected_sections}
+    for index, section in enumerate(selected_sections):
+        section.chapter_id = new_chapter_id
+        section.sort_order = index
+        section.version += 1
+        db.add(section)
+    await db.flush()
+    for index, section in enumerate(section for section in source_sections if section.id not in selected_ids):
+        if section.sort_order != index:
+            section.sort_order = index
+            section.version += 1
+            db.add(section)
+            await db.flush()
+    await mark_section_digests_stale(
+        db,
+        project_id=project_id,
+        section_ids=selected_ids,
+    )
+
+
 async def apply_book_plan_structure_command(
     db: AsyncSession,
     *,
@@ -698,6 +770,10 @@ async def apply_book_plan_structure_command(
     commit: bool = True,
 ) -> MemoirBookPlanResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    if req.section_ids and req.type != "split_chapter":
+        raise HTTPException(status_code=400, detail="只有拆分章节可以选择小节")
+    if req.section_ids and req.utterance_ids:
+        raise HTTPException(status_code=400, detail="拆分章节不能同时选择小节和讲述")
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -733,8 +809,25 @@ async def apply_book_plan_structure_command(
     await db.flush()
 
     now = datetime.now(UTC).isoformat()
-    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
 
+    source_sections: list[MemoirSection] = []
+    selected_sections: list[MemoirSection] = []
+    if req.section_ids:
+        chapter_id = _require_command_chapter_id(req)
+        source_sections, selected_sections, selected_source_ids = await _selected_sections_for_chapter_split(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            section_ids=req.section_ids,
+        )
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+    if req.section_ids:
+        source_ids = set(_source_ref_utterance_ids(refs_by_chapter.get(chapter_id, [])))
+        if not selected_source_ids or not set(selected_source_ids) < source_ids:
+            raise HTTPException(status_code=400, detail="拆分时新旧章节都至少需要保留 1 条收录讲述")
+        req = req.model_copy(update={"utterance_ids": selected_source_ids})
+
+    old_chapter_ids = {chapter.id for chapter in chapters}
     mutation = _apply_book_structure_command(
         plan=plan,
         chapters=chapters,
@@ -754,7 +847,23 @@ async def apply_book_plan_structure_command(
     _renumber_chapters(chapters)
     for chapter in chapters:
         db.add(chapter)
-    if mutation.changed_chapter_ids or mutation.deleted_chapters:
+    if selected_sections:
+        new_chapter_id = next(chapter.id for chapter in chapters if chapter.id not in old_chapter_ids)
+        await db.flush()
+        await _move_split_sections(
+            db,
+            project_id=project_id,
+            source_sections=source_sections,
+            selected_sections=selected_sections,
+            new_chapter_id=new_chapter_id,
+        )
+        output = await db.scalar(
+            select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+        )
+        if output is not None:
+            invalidate_book_output(output)
+            db.add(output)
+    elif mutation.changed_chapter_ids or mutation.deleted_chapters:
         await db.flush()
         await sync_materials_to_chapters(
             db,

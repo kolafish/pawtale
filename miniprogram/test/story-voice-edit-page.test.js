@@ -98,11 +98,44 @@ test("chapter split keeps its selected utterances when the user confirms", async
   const { context, calls } = setup({ preview: async () => split });
   await context.submitInstruction({ detail: { value: "把第三章的日常放到新章" } });
   assert.equal(context.data.items[0].detail, "运动、做饭");
+  assert.equal(context.data.splitConfirmation, null);
   await context.apply();
   assert.deepEqual(calls.applies, [["p1", "split-sig", [{
     action: "split_chapter", target_ref: "c3", new_title: "辞职后的日常",
     utterance_ids: ["u1", "u2"],
   }]]]);
+});
+
+test("section-based chapter split presents one confirmation and applies the chosen sections", async () => {
+  const split = {
+    signature: "section-split-sig", reply: "一段较长的模型说明", questions: [],
+    operations: [{
+      action: "split_chapter", target_ref: "c3", new_title: "辞职后的日常",
+      section_ids: ["s1", "s2"], label: "第三章的两个日常小节", detail: "运动与做饭；羽毛球",
+    }],
+  };
+  const { context, calls } = setup({ preview: async () => split });
+  await context.submitInstruction({ detail: { value: "把第三章最近的日常放到新章节" } });
+  assert.equal(context.data.splitConfirmation.new_title, "辞职后的日常");
+  assert.equal(context.data.selectedCount, 1);
+  assert.equal(calls.applies.length, 0);
+
+  context.restartInstruction();
+  assert.equal(context.data.splitConfirmation, null);
+  assert.equal(context.data.preview, null);
+  assert.equal(context.data.instruction, "把第三章最近的日常放到新章节");
+  await context.submitInstruction({ detail: { value: "把第三章两个日常小节放到新章节" } });
+  await context.apply();
+  assert.deepEqual(calls.applies, [["p1", "section-split-sig", [{
+    action: "split_chapter", target_ref: "c3", new_title: "辞职后的日常",
+    section_ids: ["s1", "s2"],
+  }]]]);
+  assert.equal(context.data.splitConfirmation, null);
+
+  const template = fs.readFileSync(path.join(__dirname, "../pages/story-voice-edit/index.wxml"), "utf8");
+  assert.match(template, /hidden="\{\{splitConfirmation !== null\}\}"/);
+  assert.match(template, /wx:if="\{\{splitConfirmation\}\}"/);
+  assert.match(template, /\{\{splitConfirmation\.new_title\}\}/);
 });
 
 test("a specific clarification stays visible and can be answered with the original request", async () => {
