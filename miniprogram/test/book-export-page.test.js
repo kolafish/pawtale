@@ -785,6 +785,27 @@ test("book layout preview opens the chosen PDF without saving, then selection up
   assert.equal(context.data.bookLayoutTemplate, "photo_memory");
 });
 
+test("book layout cannot be previewed or selected for a plain text legacy book", async () => {
+  const output = sampleBookOutput();
+  output.latest_version.manuscript = null;
+  const downloads = [];
+  const updates = [];
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (...args) => downloads.push(args),
+    updateMemoirBookOutput: async (...args) => updates.push(args),
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+  const event = { currentTarget: { dataset: { template: "photo_memory" } } };
+
+  await page.previewBookLayout.call(context, event);
+  assert.equal(context.data.error, "请先更新书稿，再预览版式");
+  await page.selectBookLayout.call(context, event);
+  assert.equal(context.data.error, "请先更新书稿，再选择版式");
+  assert.deepEqual(downloads, []);
+  assert.deepEqual(updates, []);
+});
+
 test("custom book layout previews pending changes and saves all three controls", async () => {
   const output = sampleBookOutput();
   const updates = [];

@@ -502,6 +502,8 @@ async def update_book_output(
         manuscript_template=req.manuscript_template,
         custom_layout=req.custom_layout,
     )
+    if (req.manuscript_template is not None or req.custom_layout is not None) and not manuscript_json:
+        raise HTTPException(status_code=400, detail="请先更新书稿，再选择版式")
     version_changed = content != latest.content or manuscript_json != latest.manuscript_json
     title_changed = output.title != title
     if version_changed:
@@ -749,6 +751,8 @@ async def export_book_output_file(
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
     )
+    if (preview_template is not None or preview_custom_layout_patch) and not manuscript:
+        raise HTTPException(status_code=400, detail="请先更新书稿，再预览版式")
     if manuscript and (preview_template is not None or preview_custom_layout_patch):
         manuscript = manuscript.model_copy(deep=True)
         if preview_template is not None:

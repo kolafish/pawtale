@@ -741,6 +741,30 @@ async def test_book_manuscript_design_rejects_unsupported_values(client, test_db
     assert preview.status_code == 422
 
 
+async def test_book_manuscript_design_requires_structured_manuscript(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    version.content = "已有的纯文字正文"
+    version.chapter_snapshot_json = []
+    version.manuscript_json = {}
+    await test_db.commit()
+
+    update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "photo_memory"},
+    )
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_template=photo_memory"
+    )
+
+    assert update.status_code == 400
+    assert preview.status_code == 400
+    assert update.json()["detail"] == "请先更新书稿，再选择版式"
+    assert preview.json()["detail"] == "请先更新书稿，再预览版式"
+
+
 async def test_book_manuscript_design_survives_new_book_assembly(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)

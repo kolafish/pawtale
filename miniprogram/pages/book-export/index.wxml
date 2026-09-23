@@ -267,9 +267,10 @@
 
         <view wx:if="{{activeSection === 'layout'}}" class="detail-card ui-card">
           <text class="section-title">版式与内容</text>
-          <text class="section-description">选择书稿版式，应用到阅读版和打印版 PDF。卡片是版式示意，点预览查看实际效果；预览不会保存选择。</text>
-          <view class="layout-current"><text>当前使用</text><text>{{bookManuscriptTemplateLabel}}</text></view>
-          <view class="layout-option-list">
+          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">选择书稿版式，应用到阅读版和打印版 PDF。卡片是版式示意，点预览查看实际效果；预览不会保存选择。</text>
+          <text wx:else class="section-description">这份旧书稿还没有版式结构。请先更新书稿，再选择或预览版式。</text>
+          <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前使用</text><text>{{bookManuscriptTemplateLabel}}</text></view>
+          <view wx:if="{{bookManuscriptAvailable}}" class="layout-option-list">
             <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{bookLayoutTemplate === option.value ? 'is-selected' : ''}}">
               <view class="layout-option-main">
                 <view class="layout-sample {{option.previewClass}} {{option.value === 'custom' ? 'font-' + bookCustomLayout.font_scale + ' space-' + bookCustomLayout.line_spacing + ' margin-' + bookCustomLayout.page_margin : ''}}" aria-hidden="true">

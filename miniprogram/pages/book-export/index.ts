@@ -883,6 +883,10 @@ definePage<BookExportData>()({
       this.setData({ error: "请先生成书稿" });
       return;
     }
+    if (!this.data.bookManuscriptAvailable) {
+      this.setData({ error: "请先更新书稿，再预览版式" });
+      return;
+    }
     if (this.bookOutput.is_stale) {
       this.setData({ error: "章节内容已更新，请先更新书稿再预览版式" });
       return;
@@ -911,6 +915,10 @@ definePage<BookExportData>()({
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget || this.data.bookTitleSaving) return;
     if (!this.bookOutput?.latest_version) {
       this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    if (!this.data.bookManuscriptAvailable) {
+      this.setData({ error: "请先更新书稿，再选择版式" });
       return;
     }
     if (this.data.bookViewingHistoricalVersion) {
