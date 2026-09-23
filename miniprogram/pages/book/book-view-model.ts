@@ -157,6 +157,7 @@ export interface BookCoverStyleOptionView {
   label: string;
   detailText: string;
   previewClass: string;
+  previewImage?: string;
 }
 
 export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
@@ -189,6 +190,27 @@ export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
     label: "深蓝烫金",
     detailText: "深蓝布面底图、金色标题和边框，适合更庄重的纪念册",
     previewClass: "navy-gilt",
+  },
+  {
+    value: "heritage_classic",
+    label: "典藏文集封面",
+    detailText: "与典藏文集内页配套，也可以单独选用",
+    previewClass: "heritage-classic",
+    previewImage: "/assets/book_covers/heritage_classic.jpg",
+  },
+  {
+    value: "warm_journal",
+    label: "家书手记封面",
+    detailText: "与家书手记内页配套，也可以单独选用",
+    previewClass: "warm-journal",
+    previewImage: "/assets/book_covers/warm_journal.jpg",
+  },
+  {
+    value: "modern_minimal",
+    label: "现代简约封面",
+    detailText: "与现代简约内页配套，也可以单独选用",
+    previewClass: "modern-minimal",
+    previewImage: "/assets/book_covers/modern_minimal.jpg",
   },
 ];
 
@@ -709,6 +731,7 @@ export function bookCoverStyleData(
   return {
     bookCoverStyle: option.value,
     bookCoverStylePreviewClass: option.previewClass,
+    bookCoverStylePreviewImage: option.previewImage || "",
     bookCoverStyleIndex: index,
     bookCoverStyleLabel: option.label,
     bookCoverStyleDetailText: option.detailText,

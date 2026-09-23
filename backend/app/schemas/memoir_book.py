@@ -359,7 +359,16 @@ class MemoirBookAudioResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
-MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"]
+MemoirBookCoverStyle = Literal[
+    "classic_plain",
+    "warm_gray",
+    "dark_album",
+    "moonlit_courtyard",
+    "navy_gilt",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+]
 MemoirBookManuscriptTemplate = Literal[
     "classic_family",
     "photo_memory",

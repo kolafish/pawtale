@@ -61,6 +61,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
+    template_cover_style as _template_cover_style,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
     updated_manuscript_payload as _updated_manuscript_payload,
@@ -489,7 +490,10 @@ async def update_book_output(
     if project.title != title:
         project.title = title
         project.updated_at = utcnow_naive()
-    cover_style = _cover_style(req.cover_style) if "cover_style" in fields_set and req.cover_style else _stored_cover_style(latest)
+    if "cover_style" in fields_set and req.cover_style:
+        cover_style = _cover_style(req.cover_style)
+    else:
+        cover_style = _template_cover_style(req.manuscript_template) or _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     manuscript_json = _updated_manuscript_payload(
@@ -757,6 +761,9 @@ async def export_book_output_file(
         manuscript = manuscript.model_copy(deep=True)
         if preview_template is not None:
             manuscript.profile.template = preview_template
+            matching_cover = _template_cover_style(preview_template)
+            if matching_cover is not None:
+                manuscript.render_settings.cover_style = matching_cover
         elif preview_custom_layout_patch:
             manuscript.profile.template = "custom"
         if preview_custom_layout_patch:

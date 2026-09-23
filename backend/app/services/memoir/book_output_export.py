@@ -33,6 +33,7 @@ from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
 
 
 PDF_BOOK_COVER_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "book_covers"
+PDF_BOOK_ORNAMENT_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "book_ornaments"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,47 @@ PDF_COVER_STYLES: dict[str, PDFCoverStyle] = {
         cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "navy_gilt_cover.jpg",
         back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "navy_gilt_back_cover.jpg",
     ),
+    "heritage_classic": PDFCoverStyle(
+        background=(0.93, 0.88, 0.78),
+        text=(0.26, 0.19, 0.13),
+        line=PDF_HERITAGE_ACCENT,
+        subtle_line=(0.72, 0.61, 0.48),
+        image_layout="artwork",
+        cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "heritage_classic_cover.jpg",
+        back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "heritage_classic_back_cover.jpg",
+    ),
+    "warm_journal": PDFCoverStyle(
+        background=(0.96, 0.90, 0.83),
+        text=(0.32, 0.20, 0.16),
+        line=PDF_WARM_ACCENT,
+        subtle_line=(0.75, 0.58, 0.47),
+        image_layout="artwork",
+        cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "warm_journal_cover.jpg",
+        back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "warm_journal_back_cover.jpg",
+    ),
+    "modern_minimal": PDFCoverStyle(
+        background=(0.08, 0.13, 0.15),
+        text=(0.93, 0.94, 0.90),
+        line=(0.68, 0.79, 0.78),
+        subtle_line=(0.49, 0.63, 0.63),
+        image_layout="artwork",
+        cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "modern_minimal_cover.jpg",
+        back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "modern_minimal_back_cover.jpg",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class PDFArtworkCoverTypography:
+    font_name: str
+    title_size_delta: int
+    title_char_spacing: float
+
+
+PDF_ARTWORK_COVER_TYPOGRAPHY = {
+    "heritage_classic": PDFArtworkCoverTypography(PDF_SERIF_BOLD_FONT_NAME, 14, 1.2),
+    "warm_journal": PDFArtworkCoverTypography(PDF_SERIF_FONT_NAME, 15, 1.0),
+    "modern_minimal": PDFArtworkCoverTypography(PDF_SANS_FONT_NAME, 18, 1.2),
 }
 
 
@@ -456,6 +498,130 @@ def _add_navy_gilt_cover_page(
     )
 
 
+def _add_artwork_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    title: str,
+    subtitle: str,
+    narrator_name: str,
+    prepared_by: str,
+    style: PDFCoverStyle,
+    cover_style: str,
+) -> None:
+    typography = PDF_ARTWORK_COVER_TYPOGRAPHY[cover_style]
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    builder.add_centered_at(
+        "家庭回忆录",
+        y=layout.page_height - 137,
+        font_size=layout.small_font_size + 3,
+        line_height=layout.line_height,
+        color=style.text,
+        font_name=typography.font_name,
+        char_spacing=2.1,
+    )
+
+    # Keep the generated artwork text-free. Fit the user's actual title into its
+    # clear center, so a longer title does not collide with the credits below.
+    long_warm_title = cover_style == "warm_journal" and _text_units(title) > 28
+    title_y = layout.page_height - (183 if long_warm_title else 203)
+    title_size = layout.title_font_size + typography.title_size_delta
+    title_margin = 80 if long_warm_title else max(layout.margin_x, 56)
+    while True:
+        title_units = max(
+            5,
+            int(
+                (layout.page_width - 2 * title_margin)
+                / (title_size + typography.title_char_spacing)
+            ),
+        )
+        title_lines = _wrap_pdf_line(title, title_units)
+        if len(title_lines) * (title_size + 10) <= 185 or title_size <= 18:
+            break
+        title_size -= 2
+    title_next_y = builder.add_centered_at(
+        title,
+        y=title_y,
+        font_size=title_size,
+        line_height=title_size + 10,
+        max_units=title_units,
+        spacing_after=11,
+        color=style.text,
+        font_name=typography.font_name,
+        char_spacing=typography.title_char_spacing,
+        x_offset=-16 if long_warm_title else 0,
+    )
+    credit_y = layout.margin_bottom + 72
+    if subtitle:
+        subtitle_size = layout.font_size + 2
+        subtitle_line_height = subtitle_size + 8
+        subtitle_units = max(
+            9,
+            int((layout.page_width - 2 * max(layout.margin_x, 56)) / (subtitle_size + 1)),
+        )
+        subtitle_lines = _wrap_pdf_line(subtitle, subtitle_units)
+        available_lines = max(
+            0, int((title_next_y - credit_y - 70) // subtitle_line_height) + 1
+        )
+        if len(subtitle_lines) > available_lines and available_lines:
+            subtitle_lines = subtitle_lines[:available_lines]
+            subtitle_lines[-1] = subtitle_lines[-1].rstrip("，。 ")[:-1] + "…"
+        for line in subtitle_lines[:available_lines]:
+            title_next_y = builder.add_centered_at(
+                line,
+                y=title_next_y,
+                font_size=subtitle_size,
+                line_height=subtitle_line_height,
+                max_units=subtitle_units,
+                color=style.text,
+                font_name=typography.font_name,
+                char_spacing=0.8,
+                x_offset=-12 if long_warm_title else 0,
+            )
+
+    builder.add_decoration(
+        kind="line",
+        x=layout.page_width / 2 - 35,
+        y=credit_y + 54,
+        width=70,
+        height=0,
+        color=style.line,
+        line_width=0.5,
+    )
+    if narrator_name:
+        builder.add_centered_at(
+            f"口述：{narrator_name}",
+            y=credit_y + 23,
+            font_size=layout.small_font_size + 1,
+            line_height=layout.line_height,
+            color=style.text,
+            font_name=typography.font_name,
+        )
+    builder.add_centered_at(
+        f"整理：{prepared_by or '家人'}",
+        y=credit_y,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        color=style.text,
+        font_name=typography.font_name,
+    )
+    builder.add_centered_at(
+        _today_date_text()[:4],
+        y=layout.margin_bottom + 22,
+        font_size=layout.small_font_size,
+        line_height=layout.line_height,
+        color=style.text,
+        font_name=typography.font_name,
+        char_spacing=1.8,
+    )
+
+
 def _add_cover_page(
     builder: PDFBookBuilder,
     *,
@@ -466,6 +632,17 @@ def _add_cover_page(
     cover_style: str,
 ) -> None:
     style = _cover_style(cover_style)
+    if style.cover_background_image and style.image_layout == "artwork":
+        _add_artwork_cover_page(
+            builder,
+            title=title,
+            subtitle=subtitle,
+            narrator_name=narrator_name,
+            prepared_by=prepared_by,
+            style=style,
+            cover_style=cover_style,
+        )
+        return
     if style.cover_background_image and style.image_layout == "navy_gilt":
         _add_navy_gilt_cover_page(
             builder,
@@ -806,6 +983,28 @@ def _add_illustrations(
         _add_illustration(builder, illustration)
 
 
+def _add_chapter_artwork(builder: PDFBookBuilder, *, template: str, centered: bool) -> bool:
+    layout = builder.layout
+    if builder.y - 32 < layout.margin_bottom:
+        return False
+    page = builder.current_page
+    assert page is not None
+    width = 140
+    height = 45
+    x = (layout.page_width - width) / 2 if centered else builder._content_left()
+    page.images.append(
+        PDFImageCommand(
+            path=PDF_BOOK_ORNAMENT_ASSET_DIR / f"{template}.png",
+            x=x,
+            y=builder.y - 9,
+            width=width,
+            height=height,
+        )
+    )
+    builder.y -= 23
+    return True
+
+
 def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, index: int) -> None:
     layout = builder.layout
     template = layout.manuscript_template
@@ -819,7 +1018,9 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
     )
     long_title = len(_wrap_pdf_line(title, title_max_units)) > 4
     if template == "heritage_classic":
-        opening_spacer = 2.5 if long_title else (5 if layout.mirror_body_pages else 3)
+        opening_spacer = (
+            1.5 if layout.mirror_body_pages else 2.5
+        ) if long_title else (5 if layout.mirror_body_pages else 3)
         builder.add_spacer(opening_spacer)
         builder.add_centered(
             label,
@@ -838,18 +1039,7 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
             spacing_after=20,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
-        ornament_y = builder.y + 9
-        middle = layout.page_width / 2
-        for x in (middle - 63, middle + 14):
-            builder.add_decoration(
-                kind="line", x=x, y=ornament_y, width=49, height=0,
-                color=PDF_HERITAGE_ACCENT, line_width=0.55,
-            )
-        builder.add_centered_at(
-            "◇", y=ornament_y - 5, font_size=10,
-            line_height=layout.line_height, color=PDF_HERITAGE_ACCENT,
-        )
-        builder.y -= 10
+        _add_chapter_artwork(builder, template=template, centered=True)
         return
     if template == "warm_journal":
         opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
@@ -866,12 +1056,7 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
             spacing_after=19, font_name=PDF_SERIF_BOLD_FONT_NAME,
             color=(0.27, 0.17, 0.13),
         )
-        builder.add_decoration(
-            kind="line", x=builder._content_left(), y=builder.y + 8,
-            width=min(150, layout.page_width - 2 * layout.margin_x),
-            height=0, color=PDF_WARM_ACCENT, line_width=1.1,
-        )
-        builder.y -= 13
+        _add_chapter_artwork(builder, template=template, centered=False)
         return
     if template == "modern_minimal":
         opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
@@ -888,12 +1073,14 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
             spacing_after=19, font_name=PDF_SANS_FONT_NAME,
             color=(0.10, 0.15, 0.17),
         )
+        ornament_x = builder._content_left()
+        has_artwork = _add_chapter_artwork(builder, template=template, centered=False)
         builder.add_decoration(
-            kind="line", x=builder._content_left(), y=builder.y + 8,
-            width=layout.page_width - 2 * layout.margin_x,
+            kind="line", x=ornament_x + (148 if has_artwork else 0),
+            y=builder.y + (35 if has_artwork else 8),
+            width=layout.page_width - 2 * layout.margin_x - (148 if has_artwork else 0),
             height=0, color=(0.72, 0.78, 0.79), line_width=0.65,
         )
-        builder.y -= 13
         return
 
     builder.add_spacer(4.0 if layout.mirror_body_pages else 2.5)
@@ -1117,12 +1304,14 @@ def _watercolor_back_cover_quote_lines(quote: str, *, max_units: int) -> list[st
     return _wrap_pdf_line(cleaned, max_units)
 
 
-def _add_back_cover_brand_signature(builder: PDFBookBuilder, *, style: PDFCoverStyle) -> None:
+def _add_back_cover_brand_signature(
+    builder: PDFBookBuilder, *, style: PDFCoverStyle, y_offset: int = 0
+) -> None:
     background_luminance = sum(style.background) / len(style.background)
     variant = "light" if background_luminance < 0.45 else "dark"
     logo_width = 122
     logo_height = 30
-    logo_y = builder.layout.margin_bottom + 36
+    logo_y = builder.layout.margin_bottom + 36 + y_offset
     page = builder.current_page
     assert page is not None
     page.images.append(
@@ -1136,7 +1325,7 @@ def _add_back_cover_brand_signature(builder: PDFBookBuilder, *, style: PDFCoverS
     )
     builder.add_centered_at(
         BRAND_ATTRIBUTION,
-        y=builder.layout.margin_bottom + 19,
+        y=builder.layout.margin_bottom + 19 + y_offset,
         font_size=builder.layout.small_font_size,
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
@@ -1146,7 +1335,7 @@ def _add_back_cover_brand_signature(builder: PDFBookBuilder, *, style: PDFCoverS
     )
     builder.add_centered_at(
         f"整理于 {_today_month_text()}",
-        y=builder.layout.margin_bottom,
+        y=builder.layout.margin_bottom + y_offset,
         font_size=builder.layout.small_font_size,
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
@@ -1207,8 +1396,56 @@ def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDF
     _add_back_cover_brand_signature(builder, style=style)
 
 
+def _add_artwork_back_cover(
+    builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle, cover_style: str
+) -> None:
+    typography = PDF_ARTWORK_COVER_TYPOGRAPHY[cover_style]
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.back_cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    quote_lines = _watercolor_back_cover_quote_lines(
+        quote, max_units=max(14, layout.max_line_units - 4)
+    )
+    if len(quote_lines) > 10:
+        quote_lines = _wrap_pdf_line(
+            "".join(quote_lines), max(14, layout.max_line_units - 4)
+        )
+    quote_size = layout.font_size + (3 if len(quote_lines) <= 6 else 1)
+    quote_y = layout.page_height - 160
+    quote_line_height = quote_size + 9
+    brand_offset = 25 if cover_style == "warm_journal" else 0
+    brand_top = layout.margin_bottom + 36 + brand_offset + 30
+    max_quote_lines = max(1, int((quote_y - brand_top - 12) // quote_line_height) + 1)
+    if len(quote_lines) > max_quote_lines:
+        quote_lines = quote_lines[:max_quote_lines]
+        last_line = quote_lines[-1].rstrip("，。 ")
+        quote_lines[-1] = f"{last_line[:-1]}…"
+    for line in quote_lines:
+        quote_y = builder.add_centered_at(
+            line,
+            y=quote_y,
+            font_size=quote_size,
+            line_height=quote_line_height,
+            max_units=layout.max_line_units,
+            color=style.text,
+            font_name=typography.font_name,
+            char_spacing=0.7,
+        )
+    _add_back_cover_brand_signature(
+        builder, style=style, y_offset=brand_offset
+    )
+
+
 def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
     style = _cover_style(cover_style)
+    if style.back_cover_background_image and style.image_layout == "artwork":
+        _add_artwork_back_cover(builder, quote=quote, style=style, cover_style=cover_style)
+        return
     if style.back_cover_background_image and style.image_layout == "navy_gilt":
         _add_navy_gilt_back_cover(builder, quote=quote, style=style)
         return
