@@ -1,15 +1,6 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
-    <button
-      wx:if="{{bookContentAvailable}}"
-      class="book-export-button"
-      data-action="reading_pdf"
-      bindtap="openBookExportPage"
-      hover-class="ui-accent-action-hover"
-    >
-      导出 PDF
-    </button>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
@@ -68,15 +59,20 @@
         <text>导出与成书设置</text><text class="progress-action-mark">›</text>
       </button>
       <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" bindtap="openBookSharePanel">
-        <text>家人阅读链接</text><text class="progress-action-mark">›</text>
+        <text>分享给家人</text><text class="progress-action-mark">›</text>
       </button>
     </view>
     <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
-      <text>{{bookShareActive ? '已有有效链接。重新生成会让旧链接失效。' : '生成七天有效的阅读链接；家人只能阅读生成时的书稿。'}}</text>
-      <view class="actions-row">
-        <button class="ghost-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">{{bookShareActive ? '重新生成链接' : '生成链接'}}</button>
-        <button wx:if="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送给家人</button>
-        <button wx:if="{{bookShareActive}}" class="ghost-button small" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
+      <text class="book-share-description">{{bookShareStatusKnown ? bookShareDescription : (bookShareBusy ? '正在读取阅读链接…' : '暂时无法读取阅读链接，请重试。')}}</text>
+      <view class="book-share-primary-action">
+        <button wx:if="{{!bookShareStatusKnown}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
+        <button wx:elif="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送给家人</button>
+        <button wx:elif="{{!bookShareActive}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
+        <button wx:else class="primary-button small" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
+      </view>
+      <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
+        <button class="book-share-manage-button" disabled="{{bookShareBusy}}" bindtap="regenerateBookShare">重新生成</button>
+        <button class="book-share-manage-button is-danger" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
       </view>
     </view>
   </view>

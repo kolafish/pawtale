@@ -206,13 +206,12 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
   );
 });
 
-test("book page routes its PDF action to the export page", () => {
+test("book page keeps one export and settings entry", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const { page } = loadBookPage();
 
-  assert.match(pageWxml, /data-action="reading_pdf"/);
-  assert.match(pageWxml, /bindtap="openBookExportPage"/);
-  assert.match(pageWxml, /wx:if="{{bookContentAvailable}}"/);
+  assert.equal((pageWxml.match(/bindtap="openBookExportPage"/g) || []).length, 1);
+  assert.match(pageWxml, /导出与成书设置/);
   assert.deepEqual(page.onShareAppMessage.call(pageContext(page)), {
     title: "老余口述",
     path: "/pages/home/index",
@@ -244,10 +243,83 @@ test("book page shares only an explicitly created family link and revokes it", a
     title: "阅读《外婆回忆录》",
     path: "/pages/book-reader/index?shareToken=family-secret",
   });
+  global.wx = { showModal: ({ success }) => success({ confirm: true }) };
   await page.revokeBookShare.call(context);
   assert.deepEqual(revoked, ["project/1"]);
   assert.equal(context.data.bookShareReady, false);
   assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
+});
+
+test("book page restores an existing family link for sharing without regenerating it", async () => {
+  let createCount = 0;
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      getMemoirBookShareStatus: async () => ({
+        active: true,
+        token: "v1.existing-share",
+        expires_at: "2026-09-28T00:00:00",
+      }),
+      createMemoirBookShare: async () => { createCount += 1; throw new Error("unexpected regeneration"); },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContentAvailable: true,
+    bookPreviewTitle: "外婆回忆录",
+  });
+
+  await page.openBookSharePanel.call(context);
+  assert.equal(context.data.bookShareActive, true);
+  assert.equal(context.data.bookShareReady, true);
+  assert.deepEqual(page.onShareAppMessage.call(context), {
+    title: "阅读《外婆回忆录》",
+    path: "/pages/book-reader/index?shareToken=v1.existing-share",
+  });
+  assert.equal(createCount, 0);
+});
+
+test("book page never shares a previous project's link after the active project changes", async () => {
+  let resolveStatus;
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      getMemoirBookShareStatus: () => new Promise((resolve) => { resolveStatus = resolve; }),
+    },
+  });
+  const context = pageContext(page, { projectId: "first-project", bookContentAvailable: true });
+
+  const opening = page.openBookSharePanel.call(context);
+  context.setData({ projectId: "second-project" });
+  resolveStatus({ active: true, token: "first-project-link", expires_at: "2026-09-28T00:00:00" });
+  await opening;
+
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
+});
+
+test("book page asks before replacing an existing family link", async () => {
+  let createCount = 0;
+  let confirm = false;
+  global.wx = { showModal: ({ success }) => success({ confirm }) };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookShare: async () => {
+        createCount += 1;
+        return { token: "next-link", expires_at: "2026-09-29T00:00:00" };
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookShareActive: true,
+    bookShareStatusKnown: true,
+  });
+
+  await page.regenerateBookShare.call(context);
+  assert.equal(createCount, 0);
+  confirm = true;
+  await page.regenerateBookShare.call(context);
+  assert.equal(createCount, 1);
+  assert.equal(context.bookShareToken, "next-link");
 });
 
 test("book page routes chapter card actions to the chapter workspace", () => {
@@ -435,12 +507,10 @@ test("book page routes reading and export actions to their focused pages", () =>
 
   page.openBookReader.call(context);
   page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "preview" } } });
-  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "reading_pdf" } } });
 
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1",
     "/pages/book-export/index?projectId=project%2F1&action=preview",
-    "/pages/book-export/index?projectId=project%2F1&action=reading_pdf",
   ]);
 });
 
