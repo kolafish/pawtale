@@ -655,17 +655,45 @@ Component({
   },
 
   async finishAfterDisconnect() {
+    if (this.data.finishingSession) return;
+    applyVoiceChatDataPatch(this, { finishingSession: true, recording: false, error: "" });
     this.runtime().voiceStreaming.close({ force: true });
-    await this.refreshVoiceSessionSnapshot();
-    applyVoiceChatDataPatch(this, {
-      recording: false,
-      status: "closed",
-      statusText: statusText("closed"),
-      primaryActionText: "已保存",
-      canReconnect: false,
-      canFinishAfterDisconnect: false,
-    });
-    this.exitSession({ destination: "transcripts" });
+    try {
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (!saved) {
+        applyVoiceChatDataPatch(this, {
+          error: "暂时无法确认服务端保存状态，请检查网络后重试。",
+          persistenceStateText: "保存状态待确认",
+          recoveryNotice: "最后一句可能尚未保存，请重新连接或稍后重试",
+          canReconnect: true,
+          canFinishAfterDisconnect: true,
+        });
+        return;
+      }
+      if (saved.session.status === "failed") {
+        wx.showToast({ title: "本次保存异常，请核对记录", icon: "none" });
+        this.exitSession({ destination: "transcripts" });
+        return;
+      }
+      if (saved.session.status !== "stopped") {
+        applyVoiceChatDataPatch(this, {
+          error: "服务端尚未确认讲述结束，最后一句可能未保存；请重新连接或稍后重试。",
+          persistenceStateText: "保存状态待确认",
+          recoveryNotice: "讲述仍在进行中，请核对保存状态",
+          canReconnect: true,
+          canFinishAfterDisconnect: true,
+        });
+        return;
+      }
+      applyVoiceChatDataPatch(this, {
+        recording: false,
+        canReconnect: false,
+        canFinishAfterDisconnect: false,
+      });
+      this.exitSession({ destination: "transcripts" });
+    } finally {
+      applyVoiceChatDataPatch(this, { finishingSession: false });
+    }
   },
 
   maybeGenerateOpeningFollowUp() {
@@ -673,6 +701,7 @@ Component({
       this.data.interviewType === "human_interview"
       || this.data.sessionGoal === "book_completion"
       || this.runtime().pageSuspended
+      || this.data.finishingSession
       || this.data.followUpLoading
     ) {
       return;

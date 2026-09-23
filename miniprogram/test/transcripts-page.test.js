@@ -24,6 +24,7 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
   mockModule("../services/memoir-voice-search.ts", {
     recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
+    cancelMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
 
@@ -702,6 +703,39 @@ test("transcripts page stops active voice search recording on second tap", async
   await page.startVoiceSearch.call(context);
 
   assert.deepEqual(stops, ["stop"]);
+});
+
+test("transcripts page cancels voice search on hide or unload and ignores its late result", async () => {
+  for (const lifecycle of ["onHide", "onUnload"]) {
+    const recording = deferred();
+    const cancels = [];
+    const parseCalls = [];
+    const { page } = loadTranscriptsPage({
+      voiceSearchExports: {
+        recordMemoirVoiceSearchQuery: () => recording.promise,
+        cancelMemoirVoiceSearchRecording: () => cancels.push("cancel"),
+      },
+      voiceApiExports: {
+        parseMemoirVoiceSearchQuery: async (query) => {
+          parseCalls.push(query);
+          throw new Error("late search must not be parsed");
+        },
+      },
+    });
+    const context = pageContext(page);
+
+    const search = page.startVoiceSearch.call(context);
+    assert.equal(context.data.voiceSearchRecording, true);
+    page[lifecycle].call(context);
+    recording.resolve("外婆家的院子");
+    await search;
+
+    assert.deepEqual(cancels, ["cancel"]);
+    assert.deepEqual(parseCalls, []);
+    assert.equal(context.data.voiceSearchRecording, false);
+    assert.equal(context.data.voiceSearchTranscribing, false);
+    assert.equal(context.data.error, "");
+  }
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

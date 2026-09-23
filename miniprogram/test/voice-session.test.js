@@ -3442,6 +3442,66 @@ test("a closed voice client returns home only when the persisted session confirm
   }
 });
 
+test("a created voice session stops through REST when the first WebSocket never connected", async () => {
+  const stops = [];
+  let refreshes = 0;
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      stopMemoirVoiceSession: async (sessionId) => stops.push(sessionId),
+    },
+  });
+  const context = { ...page, pageSuspended: false,
+    data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
+      hasClient: () => false,
+    },
+    refreshVoiceSessionSnapshot: async () => ({
+      session: { status: ++refreshes === 1 ? "created" : "stopped" },
+      utterances: [],
+    }),
+    stopCompletionIssueRefresh() {},
+    cancelFollowUpTTS() {},
+  };
+
+  await context.finishSession();
+
+  assert.deepEqual(stops, ["voice-1"]);
+  assert.equal(refreshes, 2);
+  assert.equal(context.data.persistenceStateText, "已保存");
+  assert.equal(context.events[0]?.detail.destination, "story");
+});
+
+test("viewing records after disconnect exits only after the server confirms the session stopped", async () => {
+  for (const status of [null, "active", "stopped"]) {
+    const page = loadVoiceChatPage();
+    const context = { ...page, pageSuspended: false,
+      data: { ...page.data, voiceSessionId: "voice-1", canFinishAfterDisconnect: true,
+        persistenceStateText: "已保存", recording: true },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      voiceStreaming: { close() {} },
+      refreshVoiceSessionSnapshot: async () => status ? { session: { status }, utterances: [] } : null,
+    };
+
+    await context.finishAfterDisconnect();
+
+    assert.equal(context.data.finishingSession, false);
+    assert.equal(context.data.recording, false);
+    if (status === "stopped") {
+      assert.equal(context.events[0]?.detail.destination, "transcripts");
+      assert.equal(context.data.canFinishAfterDisconnect, false);
+    } else {
+      assert.deepEqual(context.events, []);
+      assert.equal(context.data.canFinishAfterDisconnect, true);
+      assert.match(context.data.error, /保存状态|尚未确认/);
+      assert.equal(context.data.persistenceStateText, "保存状态待确认");
+    }
+  }
+});
+
 test("detaching a voice component during hydration cannot connect or update a later instance", async () => {
   let resolveSnapshot;
   let connects = 0;

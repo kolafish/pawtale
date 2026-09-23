@@ -23,6 +23,7 @@ import {
   readTranscriptNavigationTarget,
 } from "../../services/transcript-navigation";
 import {
+  cancelMemoirVoiceSearchRecording,
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
@@ -419,6 +420,8 @@ function replaceItem(
 definePage<TranscriptsData>()({
   loadToken: 0,
   searchDebounceTimer: null as number | null,
+  voiceSearchToken: 0,
+  voiceSearchVisible: true,
 
   data: {
     pageClass: "transcripts-page",
@@ -458,6 +461,7 @@ definePage<TranscriptsData>()({
   },
 
   async onShow() {
+    this.voiceSearchVisible = true;
     this.setData({ pageClass: accessibilityPageClass("transcripts-page") });
     await this.loadTranscripts(true);
     await this.revealStoredTranscriptTarget();
@@ -634,6 +638,8 @@ definePage<TranscriptsData>()({
       stopMemoirVoiceSearchRecording();
       return;
     }
+    const token = ++this.voiceSearchToken;
+    const isCurrent = () => this.voiceSearchVisible && token === this.voiceSearchToken;
     setTranscriptsData(this, {
       voiceSearchRecording: true,
       voiceSearchTranscribing: false,
@@ -642,7 +648,9 @@ definePage<TranscriptsData>()({
     });
     try {
       const query = await recordMemoirVoiceSearchQuery({
+        isCancelled: () => !isCurrent(),
         onRecordingEnd: () => {
+          if (!isCurrent()) return;
           setTranscriptsData(this, {
             voiceSearchRecording: false,
             voiceSearchTranscribing: true,
@@ -650,10 +658,13 @@ definePage<TranscriptsData>()({
           });
         },
       });
+      if (!isCurrent()) return;
       setTranscriptsData(this, { voiceSearchStatusText: "正在理解搜索需求" });
       const parsed = await parseMemoirVoiceSearchQuery(query);
+      if (!isCurrent()) return;
       const parsedFilters = filtersFromParsedSearch(parsed);
       await this.applySearch(parsed.query || query, parsedFilters, parsed);
+      if (!isCurrent()) return;
       trackAuditAction(
         "transcript.voice_search",
         { has_filters: searchCriteriaActive(parsed.query || query, parsedFilters) },
@@ -661,14 +672,35 @@ definePage<TranscriptsData>()({
       );
       wx.showToast({ title: "已识别", icon: "success" });
     } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "语音搜索失败" });
+      if (isCurrent()) {
+        setTranscriptsData(this, { error: error instanceof Error ? error.message : "语音搜索失败" });
+      }
     } finally {
+      if (isCurrent()) {
+        setTranscriptsData(this, {
+          voiceSearchRecording: false,
+          voiceSearchTranscribing: false,
+          voiceSearchStatusText: "",
+        });
+      }
+    }
+  },
+
+  cancelVoiceSearch() {
+    this.voiceSearchVisible = false;
+    this.voiceSearchToken += 1;
+    if (this.data.voiceSearchRecording || this.data.voiceSearchTranscribing) {
+      cancelMemoirVoiceSearchRecording();
       setTranscriptsData(this, {
         voiceSearchRecording: false,
         voiceSearchTranscribing: false,
         voiceSearchStatusText: "",
       });
     }
+  },
+
+  onHide() {
+    this.cancelVoiceSearch();
   },
 
   async recoverTranscript(event: DatasetEvent) {
@@ -702,9 +734,7 @@ definePage<TranscriptsData>()({
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
-    if (this.data.voiceSearchRecording) {
-      stopMemoirVoiceSearchRecording();
-    }
+    this.cancelVoiceSearch();
   },
 
   openLogin() {
