@@ -11,7 +11,7 @@ from app.models.memoir import MemoirVoiceUtterance
 from app.models.projects import Project
 from app.services.asr import ASRAudioFormat, StepFunASRService
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.audio_files import audio_file_duration_seconds, audio_file_path
 from app.services.asr.factory import create_volc_streaming_asr_client
 from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.ai_costs import estimate_audio_cost
@@ -127,7 +127,7 @@ def _title_subject(title: str) -> str:
 
 async def _transcribe_with_volc(utterance: MemoirVoiceUtterance, path: Path) -> OfflineASRResult:
     await assert_current_ai_credit_available()
-    duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=path.stat().st_size)
+    duration_seconds = _stepfun_audio_duration_seconds(utterance, path=path)
     try:
         event = await transcribe_audio_path_for_recovery(
             path,
@@ -185,16 +185,10 @@ def _stepfun_audio_format(utterance: MemoirVoiceUtterance) -> ASRAudioFormat:
 def _stepfun_audio_duration_seconds(
     utterance: MemoirVoiceUtterance,
     *,
-    audio_bytes: int | None = None,
+    path: Path,
 ) -> float | None:
     audio_file = utterance.audio_file
-    stored_duration = audio_file.duration_seconds if audio_file else None
-    if stored_duration and stored_duration > 0:
-        return float(stored_duration)
-    if audio_bytes and audio_file and audio_file.mime_type.lower() in {"audio/pcm", "audio/x-pcm"}:
-        bytes_per_second = ASR_RECOVERY_PCM_SAMPLE_RATE * ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
-        return audio_bytes / bytes_per_second
-    return None
+    return audio_file_duration_seconds(audio_file, path) if audio_file else None
 
 
 async def _read_audio_segment(path: Path, *, start_byte: int, byte_count: int) -> bytes:
@@ -211,7 +205,7 @@ async def _transcribe_with_stepfun(
 ) -> OfflineASRResult:
     service = StepFunASRService()
     size_bytes = path.stat().st_size
-    duration_seconds = _stepfun_audio_duration_seconds(utterance, audio_bytes=size_bytes)
+    duration_seconds = _stepfun_audio_duration_seconds(utterance, path=path)
     try:
         await assert_current_ai_credit_available()
         audio_format = _stepfun_audio_format(utterance)

@@ -1,10 +1,19 @@
 import asyncio
 import base64
+from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
+from app.application_errors import InsufficientAICreditError
+from app.auth import get_current_user
+from app.database import get_db
 from app.services.ai_base import AITextServiceBase
 from app.services.asr.streaming import StreamingASREvent
+from app.schemas.memoir_voice import MemoirVoiceSearchTranscriptionRequest
+from app.routers.memoir.voice import router as memoir_voice_router, transcribe_mobile_memoir_search_query
+from app.services.memoir.voice_authorization import CURRENT_VOICE_AUTHORIZATION_VERSION
 from app.services.memoir.voice_search import (
     MAX_VOICE_SEARCH_AUDIO_BYTES,
     ParsedVoiceSearchQuery,
@@ -64,10 +73,18 @@ async def test_transcribe_mobile_memoir_search_query_route(client, monkeypatch):
         calls.append(audio)
         return "外婆家的院子"
 
+    async def allow_credit(_user_id: str) -> None:
+        return None
+
     monkeypatch.setattr(
         "app.routers.memoir.voice.memoir_voice_search.transcribe_voice_search_audio",
         fake_transcribe,
     )
+    monkeypatch.setattr("app.routers.memoir.voice.assert_ai_credit_available", allow_credit)
+    assert (await client.post(
+        "/api/mobile/memoir/voice-authorization-consent",
+        json={"version": CURRENT_VOICE_AUTHORIZATION_VERSION, "agreed": True},
+    )).status_code == 201
 
     response = await client.post(
         "/api/mobile/memoir/search-query/transcribe",
@@ -77,6 +94,109 @@ async def test_transcribe_mobile_memoir_search_query_route(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"transcript": "外婆家的院子"}
     assert calls == [b"pcm"]
+
+
+async def test_search_transcription_http_rejects_revoked_voice_consent(monkeypatch):
+    async def no_consent(_db, _user_id: str) -> bool:
+        return False
+
+    async def should_not_run(*_args, **_kwargs):
+        raise AssertionError("ASR or credit check started without voice consent")
+
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_authorization.has_current_voice_authorization_consent",
+        no_consent,
+    )
+    monkeypatch.setattr("app.routers.memoir.voice.assert_ai_credit_available", should_not_run)
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_search.transcribe_voice_search_audio",
+        should_not_run,
+    )
+    async def fake_db():
+        return object()
+
+    async def fake_user():
+        return SimpleNamespace(id="speaker")
+
+    app = FastAPI()
+    app.include_router(memoir_voice_router, prefix="/api/mobile/memoir")
+    app.dependency_overrides[get_db] = fake_db
+    app.dependency_overrides[get_current_user] = fake_user
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/mobile/memoir/search-query/transcribe",
+            json={"audio_base64": base64.b64encode(b"pcm").decode("ascii"), "mime_type": "audio/pcm"},
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "请先同意语音授权"
+
+
+async def test_search_transcription_rejects_exhausted_credit_before_asr(monkeypatch):
+    async def has_consent(_db, _user_id: str) -> bool:
+        return True
+
+    async def no_credit(_user_id: str) -> None:
+        raise InsufficientAICreditError("AI 额度已用尽")
+
+    async def should_not_transcribe(*_args, **_kwargs):
+        raise AssertionError("ASR started without AI credit")
+
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_authorization.has_current_voice_authorization_consent",
+        has_consent,
+    )
+    monkeypatch.setattr("app.routers.memoir.voice.assert_ai_credit_available", no_credit)
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_search.transcribe_voice_search_audio",
+        should_not_transcribe,
+    )
+    request = MemoirVoiceSearchTranscriptionRequest(
+        audio_base64=base64.b64encode(b"pcm").decode("ascii"), mime_type="audio/pcm",
+    )
+
+    with pytest.raises(InsufficientAICreditError):
+        await transcribe_mobile_memoir_search_query(
+            request, db=object(), current_user=SimpleNamespace(id="speaker"),
+        )
+
+
+async def test_search_transcription_checks_consent_and_credit_before_asr(monkeypatch):
+    calls = []
+
+    async def has_consent(_db, user_id: str) -> bool:
+        calls.append(("consent", user_id))
+        return True
+
+    async def allow_credit(user_id: str) -> None:
+        calls.append(("credit", user_id))
+
+    async def transcribe(audio: bytes, *, asr_client_factory, mime_type: str) -> str:
+        calls.append(("asr", audio, mime_type))
+        return "外婆家的院子"
+
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_authorization.has_current_voice_authorization_consent",
+        has_consent,
+    )
+    monkeypatch.setattr("app.routers.memoir.voice.assert_ai_credit_available", allow_credit)
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.memoir_voice_search.transcribe_voice_search_audio",
+        transcribe,
+    )
+    request = MemoirVoiceSearchTranscriptionRequest(
+        audio_base64=base64.b64encode(b"pcm").decode("ascii"), mime_type="audio/pcm",
+    )
+
+    response = await transcribe_mobile_memoir_search_query(
+        request, db=object(), current_user=SimpleNamespace(id="speaker"),
+    )
+
+    assert response.transcript == "外婆家的院子"
+    assert calls == [
+        ("consent", "speaker"),
+        ("credit", "speaker"),
+        ("asr", b"pcm", "audio/pcm"),
+    ]
 
 
 async def test_transcribe_mobile_memoir_search_query_rejects_invalid_base64(client):
