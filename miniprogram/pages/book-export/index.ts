@@ -342,9 +342,7 @@ definePage<BookExportData>()({
         return;
       }
       this.setData({ bookEditorialCopyStatusError: "任务进度暂时无法更新，请稍后再试" });
-      if (EDITORIAL_TARGETS.some((target) => previous[target]?.active)) {
-        this.scheduleBookEditorialCopyPoll();
-      }
+      this.scheduleBookEditorialCopyPoll();
     } finally {
       this.bookEditorialCopyRefreshing = false;
     }
@@ -355,7 +353,10 @@ definePage<BookExportData>()({
       this.bookEditorialCopyPoller.pending
       || !this.bookEditorialCopyPageVisible
       || this.data.activeSection !== "editorial"
-      || !EDITORIAL_TARGETS.some((target) => this.data.bookEditorialCopyJobs[target]?.active)
+      || (
+        !this.data.bookEditorialCopyStatusError
+        && !EDITORIAL_TARGETS.some((target) => this.data.bookEditorialCopyJobs[target].active)
+      )
     ) {
       return;
     }

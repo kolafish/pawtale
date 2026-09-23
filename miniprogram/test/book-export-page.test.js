@@ -637,7 +637,6 @@ test("book export marks job status as stale when refresh fails and retries", asy
     },
   });
   const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
-  page.applyBookEditorialCopyJobs.call(context, [running]);
 
   await page.refreshBookEditorialCopyProgress.call(context);
   assert.equal(context.data.bookEditorialCopyStatusError, "任务进度暂时无法更新，请稍后再试");
