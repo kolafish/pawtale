@@ -153,6 +153,9 @@ const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = [
   { value: "classic_family", label: "素雅书籍版", description: "留白舒展，适合安静地读故事", previewClass: "classic" },
   { value: "photo_memory", label: "家庭纪念版", description: "更大的章首页，留出回忆的呼吸感", previewClass: "memory" },
   { value: "oral_archive", label: "口述档案版", description: "紧凑清楚，方便对照和保存", previewClass: "archive" },
+  { value: "heritage_classic", label: "典藏文集版", description: "典雅章首页，以细线分隔小节", previewClass: "heritage" },
+  { value: "warm_journal", label: "家书手记版", description: "暖色章题与引语侧线，适合家庭故事", previewClass: "journal" },
+  { value: "modern_minimal", label: "现代简约版", description: "清晰的章序与小节标记，阅读利落", previewClass: "modern" },
   { value: "custom", label: "自定义版式", description: "按自己的阅读习惯调整正文", previewClass: "custom" },
 ];
 
@@ -238,6 +241,8 @@ type BookExportData = BookOutputData & {
   bookLayoutBusyTarget: string;
   bookLayoutSampleTitle: string;
   bookLayoutSampleExcerpt: string;
+  bookLayoutSampleSectionTitle: string;
+  bookLayoutSampleQuote: string;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
@@ -309,6 +314,8 @@ definePage<BookExportData>()({
     bookLayoutBusyTarget: "",
     bookLayoutSampleTitle: "那些年的故事",
     bookLayoutSampleExcerpt: "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
+    bookLayoutSampleSectionTitle: "院子里的夏天",
+    bookLayoutSampleQuote: "家里的故事，总会有人记得。",
     ...bookOutputData(null),
   },
 
@@ -490,6 +497,8 @@ definePage<BookExportData>()({
       bookLayoutCustomChanged: false,
       bookLayoutSampleTitle: outputData.bookPreviewChapters[0]?.title || "那些年的故事",
       bookLayoutSampleExcerpt: outputData.bookPreviewChapters[0]?.excerpt || "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
+      bookLayoutSampleSectionTitle: (outputData.bookPreviewChapters[0]?.sections?.[0]?.title || "院子里的夏天").slice(0, 30),
+      bookLayoutSampleQuote: (output?.latest_version?.manuscript?.chapters?.[0]?.pull_quotes?.[0]?.text || "家里的故事，总会有人记得。").slice(0, 48),
       bookExportBusyTarget: "",
     });
   },

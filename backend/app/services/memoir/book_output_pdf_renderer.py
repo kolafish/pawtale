@@ -43,6 +43,9 @@ PDF_EMBEDDED_IMAGE_JPEG_QUALITY = 90
 PDFColor = tuple[float, float, float]
 PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
 PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
+PDF_HERITAGE_ACCENT: PDFColor = (0.47, 0.35, 0.25)
+PDF_WARM_ACCENT: PDFColor = (0.56, 0.34, 0.25)
+PDF_MODERN_ACCENT: PDFColor = (0.19, 0.30, 0.33)
 
 
 class MemoirBookOutputExportLayout(StrEnum):
@@ -67,6 +70,7 @@ class PDFLayout:
     reading_edition: bool = False
     mirror_body_pages: bool = False
     inner_margin_delta: int = 0
+    manuscript_template: str = "classic_family"
 
 
 PDF_LAYOUTS = {
@@ -119,6 +123,15 @@ def configured_pdf_layout(
     elif template == "oral_archive":
         font_delta, line_delta, margin_delta = -1, -3, -6
         title_delta, heading_delta, small_delta = -2, -1, -1
+    elif template == "heritage_classic":
+        font_delta, line_delta, margin_delta = 0, 2, 6
+        title_delta, heading_delta, small_delta = 3, 1, 0
+    elif template == "warm_journal":
+        font_delta, line_delta, margin_delta = 0, 3, 2
+        title_delta, heading_delta, small_delta = 2, 1, 0
+    elif template == "modern_minimal":
+        font_delta, line_delta, margin_delta = 0, 2, 4
+        title_delta, heading_delta, small_delta = 4, 1, 0
     elif template == "custom":
         choices = custom_layout or {}
         font_delta = 2 if choices.get("font_scale") == "large" else 0
@@ -152,6 +165,7 @@ def configured_pdf_layout(
         heading_font_size=base.heading_font_size + heading_delta,
         small_font_size=base.small_font_size + small_delta,
         max_line_units=max(12, max_line_units),
+        manuscript_template=template,
     )
 
 
@@ -530,6 +544,7 @@ class PDFBookBuilder:
         keep_last_lines: int = 1,
         target_anchor: str | None = None,
         font_name: str | None = None,
+        color: PDFColor | None = None,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -564,6 +579,7 @@ class PDFBookBuilder:
                         font_size=font_size,
                         target_anchor=target_anchor,
                         font_name=font_name,
+                        color=color,
                     )
                 )
                 self.y -= line_height
@@ -580,20 +596,73 @@ class PDFBookBuilder:
             spacing_after=spacing_after,
             min_start_lines=2,
             keep_last_lines=2,
+            font_name=(
+                PDF_SANS_FONT_NAME
+                if self.layout.manuscript_template == "modern_minimal"
+                else None
+            ),
         )
 
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
+        template = self.layout.manuscript_template
+        first_page_index = max(0, len(self.pages) - 1)
+        first_page_command_count = len(self.current_page.commands) if self.current_page else 0
         self.add_text(
             f"“{text}”",
             font_size=max(self.layout.small_font_size + 1, self.layout.font_size - 2),
             line_height=self.layout.line_height,
             max_units=self.layout.max_line_units,
-            indent=12,
+            indent=18 if template in {"heritage_classic", "warm_journal"} else 12,
             paragraph_spacing_after=0,
             spacing_after=spacing_after,
             min_start_lines=2,
             keep_last_lines=2,
+            font_name=PDF_SANS_FONT_NAME if template == "modern_minimal" else None,
+            color={
+                "heritage_classic": PDF_HERITAGE_ACCENT,
+                "warm_journal": PDF_WARM_ACCENT,
+                "modern_minimal": PDF_MODERN_ACCENT,
+            }.get(template),
         )
+        if template not in {"heritage_classic", "warm_journal", "modern_minimal"}:
+            return
+        for page_index, page in enumerate(self.pages[first_page_index:], start=first_page_index):
+            quote_lines = page.commands[
+                first_page_command_count if page_index == first_page_index else 0 :
+            ]
+            if not quote_lines:
+                continue
+            top = max(line.y for line in quote_lines)
+            bottom = min(line.y for line in quote_lines)
+            left = min(line.x for line in quote_lines)
+            if template == "modern_minimal":
+                page.decorations.append(
+                    PDFDecorationCommand(
+                        kind="line",
+                        x=left,
+                        y=top + 16,
+                        width=min(70, self.layout.page_width - left - self.layout.margin_x),
+                        height=0,
+                        color=PDF_MODERN_ACCENT,
+                        line_width=1.1,
+                    )
+                )
+            else:
+                page.decorations.append(
+                    PDFDecorationCommand(
+                        kind="line",
+                        x=left - 10,
+                        y=bottom - 4,
+                        width=0,
+                        height=top - bottom + self.layout.font_size + 8,
+                        color=(
+                            PDF_HERITAGE_ACCENT
+                            if template == "heritage_classic"
+                            else PDF_WARM_ACCENT
+                        ),
+                        line_width=0.65 if template == "heritage_classic" else 2.2,
+                    )
+                )
 
     def add_heading(self, text: str) -> None:
         self._ensure_space(3)
@@ -610,18 +679,66 @@ class PDFBookBuilder:
         )
 
     def add_section_heading(self, text: str) -> None:
-        self._ensure_space(3)
+        template = self.layout.manuscript_template
+        font_size = self.layout.font_size + 2
+        indent = 11 if template in {"warm_journal", "modern_minimal"} else 0
+        max_units = min(
+            self.layout.max_line_units - 2,
+            (
+                self.layout.page_width
+                - self.layout.margin_x * 2
+                - self.layout.inner_margin_delta
+                - indent
+            ) // font_size,
+        )
+        self._ensure_space(
+            max(3, len(_wrap_pdf_line(text.strip(), max_units)) + 1)
+            if template in {"heritage_classic", "warm_journal", "modern_minimal"}
+            else 3
+        )
+        heading_y = self.y
+        heading_x = self._content_left()
         self.add_text(
             text,
-            font_size=self.layout.font_size + 2,
+            font_size=font_size,
             line_height=self.layout.line_height + 2,
-            max_units=min(
-                self.layout.max_line_units - 2,
-                (self.layout.page_width - self.layout.margin_x * 2) // (self.layout.font_size + 2),
+            max_units=max_units,
+            indent=indent,
+            spacing_after=(
+                16 if template in {"heritage_classic", "modern_minimal"}
+                else 8 if template == "warm_journal" else 5
             ),
-            spacing_after=5,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
+            font_name=(
+                PDF_SANS_FONT_NAME
+                if template == "modern_minimal"
+                else PDF_SERIF_BOLD_FONT_NAME
+            ),
+            color={
+                "heritage_classic": PDF_HERITAGE_ACCENT,
+                "warm_journal": PDF_WARM_ACCENT,
+                "modern_minimal": PDF_MODERN_ACCENT,
+            }.get(template),
         )
+        if template == "heritage_classic":
+            self.add_decoration(
+                kind="line", x=heading_x, y=self.y + 17, width=74, height=0,
+                color=PDF_HERITAGE_ACCENT, line_width=0.5,
+            )
+        elif template in {"warm_journal", "modern_minimal"}:
+            self.add_decoration(
+                kind="rect",
+                x=heading_x,
+                y=heading_y - 3,
+                width=3 if template == "warm_journal" else 4,
+                height=font_size + 3,
+                color=PDF_WARM_ACCENT if template == "warm_journal" else PDF_MODERN_ACCENT,
+            )
+            if template == "modern_minimal":
+                self.add_decoration(
+                    kind="line", x=heading_x, y=self.y + 17,
+                    width=self.layout.page_width - 2 * self.layout.margin_x,
+                    height=0, color=(0.83, 0.86, 0.86), line_width=0.5,
+                )
 
     def add_centered(
         self,
@@ -759,6 +876,16 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
     commands: list[PDFTextCommand] = []
     mirrored_body = layout.mirror_body_pages and page.body_page_number is not None
     outer_margin = max(0, layout.margin_x - layout.inner_margin_delta)
+    accent_color = {
+        "heritage_classic": PDF_HERITAGE_ACCENT,
+        "warm_journal": PDF_WARM_ACCENT,
+        "modern_minimal": PDF_MODERN_ACCENT,
+    }.get(layout.manuscript_template, PDF_HEADER_TEXT)
+    running_font = (
+        PDF_SERIF_FONT_NAME
+        if layout.manuscript_template in {"heritage_classic", "warm_journal"}
+        else PDF_SANS_FONT_NAME
+    )
     if page.header_title:
         header_y = layout.page_height - 28
         header_font_size = max(8, layout.small_font_size - 1)
@@ -775,8 +902,8 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                         ),
                         header_y,
                         header_font_size,
-                        color=PDF_HEADER_TEXT,
-                        font_name=PDF_SANS_FONT_NAME,
+                        color=accent_color,
+                        font_name=running_font,
                     )
                 )
         elif mirrored_body:
@@ -786,8 +913,8 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                     outer_margin,
                     header_y,
                     header_font_size,
-                    color=PDF_HEADER_TEXT,
-                    font_name=PDF_SANS_FONT_NAME,
+                    color=accent_color,
+                    font_name=running_font,
                 )
             )
         else:
@@ -797,8 +924,8 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                     layout.margin_x,
                     header_y,
                     header_font_size,
-                    color=PDF_HEADER_TEXT,
-                    font_name=PDF_SANS_FONT_NAME,
+                    color=accent_color,
+                    font_name=running_font,
                 )
             )
             if page.section_title:
@@ -808,13 +935,17 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                         _right_aligned_x(page.section_title[:14], layout, header_font_size),
                         header_y,
                         header_font_size,
-                        color=PDF_HEADER_TEXT,
-                        font_name=PDF_SANS_FONT_NAME,
+                        color=accent_color,
+                        font_name=running_font,
                     )
                 )
     commands.extend(page.commands)
     if page.show_footer and page.body_page_number is not None:
-        footer = str(page.body_page_number)
+        footer = {
+            "heritage_classic": f"· {page.body_page_number} ·",
+            "warm_journal": f"{page.body_page_number}",
+            "modern_minimal": f"{page.body_page_number:02}",
+        }.get(layout.manuscript_template, str(page.body_page_number))
         if layout.mirror_body_pages:
             footer_x = (
                 outer_margin
@@ -831,8 +962,8 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                 footer_x,
                 24,
                 layout.small_font_size,
-                color=PDF_HEADER_TEXT,
-                font_name=PDF_SANS_FONT_NAME,
+                color=accent_color,
+                font_name=running_font,
             )
         )
     return commands

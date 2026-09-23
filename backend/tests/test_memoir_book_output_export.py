@@ -1,12 +1,19 @@
+from hashlib import sha256
 from typing import get_args
 
 from PIL import Image
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from app.schemas.memoir_book import MemoirBookCoverStyle
+from app.schemas.memoir_book import (
+    MemoirBookCoverStyle,
+    MemoirBookManuscriptProfile,
+    MemoirBookManuscriptTemplate,
+)
 from app.services.memoir import book_output_export
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
+from app.services.memoir.book_output_manuscript import stored_manuscript_design
 from app.services.memoir.book_output_export import (
     PDF_COVER_STYLES,
     MemoirBookOutputExportFormat,
@@ -18,6 +25,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
     PDF_LAYOUTS,
+    PDF_SANS_FONT_NAME,
     PDF_SANS_FONT_PATH,
     PDF_SERIF_BOLD_FONT_PATH,
     PDF_SERIF_BOLD_FONT_NAME,
@@ -27,6 +35,8 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFLayout,
     MemoirBookOutputExportLayout,
     configured_pdf_layout,
+    _pdf_page_commands,
+    _register_pdf_font,
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
@@ -193,6 +203,109 @@ def test_manuscript_design_changes_chapter_and_body_pdf_layout():
         print_layout = configured_pdf_layout(print_base, template=template)
         assert print_layout.mirror_body_pages is True
         assert print_layout.inner_margin_delta == print_base.inner_margin_delta
+
+
+def test_additional_manuscript_templates_render_distinct_inner_pages_and_preserve_cover():
+    templates = ("heritage_classic", "warm_journal", "modern_minimal")
+    assert set(templates).issubset(get_args(MemoirBookManuscriptTemplate))
+    pdf_hashes = set()
+    section_styles = set()
+    for template in templates:
+        assert MemoirBookManuscriptProfile(template=template, title="外婆回忆录").template == template
+        assert stored_manuscript_design({"profile": {"template": template}})[0] == template
+        manuscript = _sample_manuscript("这是正文，留给家人阅读。", cover_style="dark_album")
+        manuscript["profile"]["template"] = template
+        layout = configured_pdf_layout(
+            PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template
+        )
+        pages = _build_manuscript_pdf_pages(
+            title="外婆回忆录", content="外婆回忆录", manuscript=manuscript,
+            layout=layout,
+        )
+        assert pages[0].background_color == PDF_COVER_STYLES["dark_album"].background
+        assert pages[-1].background_color == PDF_COVER_STYLES["dark_album"].background
+        chapter = next(page for page in pages if page.anchor == "chapter-1")
+        title = _text_command(chapter, "外婆家的童年")
+        section = _text_command(chapter, "院子里的日子")
+        quote = _text_command(chapter, "“我小时候常在外婆家的院子里晒太阳。”")
+        body = _text_command(chapter, "这是正文，留给家人阅读。")
+        section_styles.add((section.font_name, section.color, section.x))
+        assert quote.color is not None
+        assert chapter.decorations
+        footer = _pdf_page_commands(chapter, page_number=pages.index(chapter) + 1, layout=layout)[-1]
+        assert str(chapter.body_page_number) in footer.text
+        if template == "heritage_classic":
+            assert title.x > section.x
+            assert any(command.text == "◇" for command in chapter.commands)
+            assert footer.text.startswith("· ")
+        elif template == "warm_journal":
+            assert title.x == section.x - 11
+            assert any(decoration.line_width == 2.2 for decoration in chapter.decorations)
+        else:
+            assert title.font_name == PDF_SANS_FONT_NAME
+            assert section.font_name == PDF_SANS_FONT_NAME
+            assert body.font_name == PDF_SANS_FONT_NAME
+            assert any(command.text == "01" for command in chapter.commands)
+            assert footer.text == "01"
+
+        export = render_book_output_export(
+            title="外婆回忆录", version=1, content="外婆回忆录",
+            manuscript=manuscript, export_format=MemoirBookOutputExportFormat.PDF,
+        )
+        assert export.content.startswith(b"%PDF-")
+        pdf_hashes.add(sha256(export.content).digest())
+
+    assert len(section_styles) == len(templates)
+    assert len(pdf_hashes) == len(templates)
+
+
+def test_long_new_template_headings_stay_within_reading_and_print_margins():
+    _register_pdf_font()
+    long_title = "外婆家的童年与那段留在心里的夏日旧时光" * 4
+    long_section = "院子里那些很久以后依然记得的日子" * 3
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        for export_layout in (
+            MemoirBookOutputExportLayout.STANDARD,
+            MemoirBookOutputExportLayout.LARGE_PRINT,
+        ):
+            manuscript = _sample_manuscript("这是正文，留给家人阅读。")
+            manuscript["profile"]["template"] = template
+            manuscript["chapters"][0]["title"] = long_title
+            manuscript["chapters"][0]["sections"][0]["title"] = long_section
+            layout = configured_pdf_layout(PDF_LAYOUTS[export_layout], template=template)
+            pages = _build_manuscript_pdf_pages(
+                title="外婆回忆录", content="外婆回忆录",
+                manuscript=manuscript, layout=layout,
+            )
+            chapter_pages = [page for page in pages if page.section_title == long_title]
+            assert chapter_pages
+            title_lines = [
+                command for page in chapter_pages for command in page.commands
+                if command.font_size == layout.title_font_size and command.text in long_title
+            ]
+            section_lines = [
+                command for page in chapter_pages for command in page.commands
+                if command.font_size == layout.font_size + 2 and command.text in long_section
+            ]
+            assert len(title_lines) > 1
+            assert len(section_lines) > 1
+            assert "".join(command.text for command in title_lines) == long_title
+            assert "".join(command.text for command in section_lines) == long_section
+            assert all(command in chapter_pages[0].commands for command in title_lines)
+            for page_number, page in enumerate(pages, start=1):
+                if page not in chapter_pages:
+                    continue
+                inset = (
+                    layout.inner_margin_delta if page_number % 2 else -layout.inner_margin_delta
+                ) if layout.mirror_body_pages else 0
+                right_edge = layout.page_width - layout.margin_x + inset
+                for command in page.commands:
+                    if command not in title_lines and command not in section_lines:
+                        continue
+                    font_name = command.font_name or PDF_SERIF_FONT_NAME
+                    width = pdfmetrics.stringWidth(command.text, font_name, command.font_size)
+                    width += command.char_spacing * max(0, len(command.text) - 1)
+                    assert command.x + width <= right_edge + 1
 
 
 def test_pdf_cover_styles_are_selectable_across_schema_service_and_export():
