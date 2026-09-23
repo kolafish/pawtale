@@ -373,7 +373,7 @@ test("transcripts page opens transcript detail from a record card", () => {
 
 });
 
-test("transcripts card swipes right to reveal deletion without opening detail, and left to close", () => {
+test("transcripts card swipes left to reveal deletion without opening detail, and right to close", () => {
   const navigations = [];
   global.wx = { navigateTo: (options) => navigations.push(options) };
   const { page } = loadTranscriptsPage();
@@ -391,13 +391,13 @@ test("transcripts card swipes right to reveal deletion without opening detail, a
   start(210, 100);
   end(190, 180);
   assert.equal(context.data.openSwipeId, "");
-  start(110, 100);
-  end(210, 105);
+  start(210, 100);
+  end(110, 105);
   tap();
   assert.equal(context.data.openSwipeId, "utterance-1");
   assert.deepEqual(navigations, []);
-  start(210, 100);
-  end(110, 105);
+  start(110, 100);
+  end(210, 105);
   assert.equal(context.data.openSwipeId, "");
 });
 

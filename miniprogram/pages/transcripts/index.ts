@@ -614,7 +614,7 @@ definePage<TranscriptsData>()({
       return;
     }
     this.swipeTapUntil = Date.now() + 350;
-    this.setData({ openSwipeId: dx > 0 ? start.id : "" });
+    this.setData({ openSwipeId: dx < 0 ? start.id : "" });
   },
 
   onCardTouchCancel() {
