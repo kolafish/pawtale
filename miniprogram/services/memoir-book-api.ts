@@ -11,6 +11,7 @@ import type {
   MemoirBookShareCreated,
   MemoirBookShareStatus,
   MemoirBookOutputEditorialCopyRegenerateRequest,
+  MemoirBookEditorialCopyJobsResponse,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutputUpdateRequest,
@@ -359,6 +360,14 @@ export function enqueueMemoirBookOutputEditorialCopyGeneration(
     memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
     data,
     { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookEditorialCopyJobs(
+  projectId: string,
+): Promise<MemoirBookEditorialCopyJobsResponse> {
+  return memoirRequest<MemoirBookEditorialCopyJobsResponse>(
+    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
   );
 }
 
