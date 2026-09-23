@@ -60,18 +60,22 @@ router = APIRouter()
 @router.get("/projects/{project_id}/book-output/share", response_model=MemoirBookShareStatusResponse)
 async def get_mobile_memoir_book_share_status(
     project_id: str,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    response.headers["Cache-Control"] = "no-store"
     return await memoir_book_shares.share_status(db, user_id=current_user.id, project_id=project_id)
 
 
 @router.post("/projects/{project_id}/book-output/share", response_model=MemoirBookShareCreateResponse)
 async def create_mobile_memoir_book_share(
     project_id: str,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    response.headers["Cache-Control"] = "no-store"
     return await memoir_book_shares.create_share(db, user_id=current_user.id, project_id=project_id)
 
 

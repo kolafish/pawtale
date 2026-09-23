@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import re
 import secrets
 from datetime import timedelta
 
@@ -10,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import session_token_hash
 from app.clock import utcnow_naive
+from app.config import get_settings
 from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare
 from app.schemas.memoir_book import (
@@ -24,6 +28,18 @@ from app.services.memoir.book_output_versions import book_output_version_title
 
 
 SHARE_LIFETIME = timedelta(days=7)
+STABLE_TOKEN_PATTERN = re.compile(r"v1\.([0-9a-f-]{36})\.([0-9a-f]{64})\Z")
+
+
+def _stable_token(output_id: str, token_hash: str) -> str:
+    # Legacy shares retain only a hash; bind a recoverable token to that hash
+    # without making the stored hash usable as a public link.
+    signature = hmac.new(
+        get_settings().app_secret_key.encode("utf-8"),
+        f"memoir-book-share:v1\0{output_id}\0{token_hash}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"v1.{output_id}.{signature}"
 
 
 async def _owned_output(db: AsyncSession, user_id: str, project_id: str) -> MemoirBookOutput:
@@ -38,7 +54,11 @@ async def share_status(db: AsyncSession, *, user_id: str, project_id: str) -> Me
     output = await _owned_output(db, user_id, project_id)
     share = await db.get(MemoirBookShare, output.id, populate_existing=True)
     active = share is not None and share.expires_at > utcnow_naive()
-    return MemoirBookShareStatusResponse(active=active, expires_at=share.expires_at if active else None)
+    return MemoirBookShareStatusResponse(
+        active=active,
+        expires_at=share.expires_at if active else None,
+        token=_stable_token(share.output_id, share.token_hash) if active else None,
+    )
 
 
 async def create_share(db: AsyncSession, *, user_id: str, project_id: str) -> MemoirBookShareCreateResponse:
@@ -52,12 +72,13 @@ async def create_share(db: AsyncSession, *, user_id: str, project_id: str) -> Me
     if version is None or not version.content.strip():
         raise HTTPException(status_code=409, detail="请先生成可阅读的书稿")
     token = secrets.token_urlsafe(32)
+    token_hash = session_token_hash(token)
     now = utcnow_naive()
     expires_at = now + SHARE_LIFETIME
     statement = insert(MemoirBookShare).values(
         output_id=output.id,
         version_id=version.id,
-        token_hash=session_token_hash(token),
+        token_hash=token_hash,
         expires_at=expires_at,
         created_at=now,
     )
@@ -65,13 +86,13 @@ async def create_share(db: AsyncSession, *, user_id: str, project_id: str) -> Me
         index_elements=[MemoirBookShare.output_id],
         set_={
             "version_id": version.id,
-            "token_hash": session_token_hash(token),
+            "token_hash": token_hash,
             "expires_at": expires_at,
             "created_at": now,
         },
     ))
     await db.commit()
-    return MemoirBookShareCreateResponse(token=token, expires_at=expires_at)
+    return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash), expires_at=expires_at)
 
 
 async def revoke_share(db: AsyncSession, *, user_id: str, project_id: str) -> None:
@@ -82,13 +103,19 @@ async def revoke_share(db: AsyncSession, *, user_id: str, project_id: str) -> No
 
 async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     invalid = HTTPException(status_code=404, detail="分享链接已失效")
-    if len(token) != 43:
+    stable_match = STABLE_TOKEN_PATTERN.fullmatch(token)
+    if stable_match:
+        output_id = stable_match.group(1)
+        share = await db.get(MemoirBookShare, output_id, populate_existing=True)
+        if share is None or not hmac.compare_digest(token, _stable_token(share.output_id, share.token_hash)):
+            raise invalid
+    elif len(token) == 43:
+        share = await db.scalar(select(MemoirBookShare).where(
+            MemoirBookShare.token_hash == session_token_hash(token),
+        ))
+    else:
         raise invalid
-    share = await db.scalar(select(MemoirBookShare).where(
-        MemoirBookShare.token_hash == session_token_hash(token),
-        MemoirBookShare.expires_at > utcnow_naive(),
-    ))
-    if share is None:
+    if share is None or share.expires_at <= utcnow_naive():
         raise invalid
     output = await db.get(MemoirBookOutput, share.output_id)
     version = await db.get(MemoirBookOutputVersion, share.version_id)

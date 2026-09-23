@@ -660,6 +660,7 @@ class MemoirBookOutputResponse(BaseModel):
 class MemoirBookShareStatusResponse(BaseModel):
     active: bool
     expires_at: datetime | None = None
+    token: str | None = None
 
 
 class MemoirBookShareCreateResponse(BaseModel):

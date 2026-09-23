@@ -509,6 +509,7 @@ export interface MemoirBookOutput {
 export interface MemoirBookShareStatus {
   active: boolean;
   expires_at: string | null;
+  token: string | null;
 }
 
 export interface MemoirBookShareCreated {
