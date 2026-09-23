@@ -74,6 +74,7 @@
 .theme-tag {
   position: absolute;
   z-index: 2;
+  pointer-events: none;
   box-sizing: border-box;
   max-width: 210rpx;
   min-height: 58rpx;

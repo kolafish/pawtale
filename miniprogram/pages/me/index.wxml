@@ -89,7 +89,7 @@
           <view class="project-overview-main">
             <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
             <text class="action-meta">
-              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条讲述记录") : "还没有讲述记录")) : "创建第一本回忆录并设置讲述资料"}}
+              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 段文字讲述") : "还没有文字讲述")) : "创建第一本回忆录并设置讲述资料"}}
             </text>
           </view>
         </view>
@@ -101,7 +101,7 @@
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{utteranceCount}}</text>
-            <text class="overview-stat-label">讲述记录</text>
+            <text class="overview-stat-label">文字讲述</text>
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{totalUserCharCount}}</text>
@@ -112,6 +112,7 @@
             <text class="overview-stat-label">录音</text>
           </view>
         </view>
+        <text class="overview-stats-hint">这里统计已转成文字的讲述；待转写录音也会显示在讲述记录列表中。</text>
 
       </view>
     </view>
@@ -236,7 +237,7 @@
   <view wx:if="{{rechargeQrVisible}}" class="recharge-qr-mask" catchtap="closeRechargeQr">
     <view class="recharge-qr-sheet" catchtap="stopRechargeQrTap">
       <text class="recharge-qr-title">添加微信充值</text>
-      <text class="recharge-qr-copy">请扫码添加微信，并提供你在小程序中的账号信息。</text>
+      <text class="recharge-qr-copy">长按二维码识别并添加微信，提供你在小程序中的账号信息。</text>
       <image
         class="recharge-qr-image"
         src="/assets/recharge-wechat-qr.jpg"

@@ -98,9 +98,9 @@ function formatAudioDuration(totalSeconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const restSeconds = seconds % 60;
   if (!minutes) {
-    return `${restSeconds} 秒`;
+    return `${restSeconds}秒`;
   }
-  return `${minutes} 分 ${restSeconds} 秒`;
+  return `${minutes}分${restSeconds}秒`;
 }
 
 function voiceStatsData(progress: MemoirVoiceProgressResponse) {

@@ -3,7 +3,7 @@
     <text class="ui-page-context">{{item ? (item.project_title || "我的回忆录") : "讲述记录"}}</text>
   </view>
 
-  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+  <view wx:if="{{error && item}}" class="error ui-error-banner">{{error}}</view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后查看讲述</text>
@@ -17,6 +17,14 @@
 
   <view wx:elif="{{loading && !item}}" class="empty-panel">
     <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{error && !item}}" class="empty-panel">
+    <text class="empty-title">{{utteranceId ? "暂时无法读取这段讲述" : "无法打开这段讲述"}}</text>
+    <text class="empty-copy">{{error}}</text>
+    <view wx:if="{{utteranceId}}" class="actions-row">
+      <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadTranscript">重新加载</button>
+    </view>
   </view>
 
   <view wx:elif="{{!item}}" class="empty-panel">

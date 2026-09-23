@@ -427,6 +427,7 @@
   font-family: inherit;
   font-size: var(--ui-font-meta);
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .overview-stat-label {
@@ -436,6 +437,15 @@
   font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.3;
+}
+
+.overview-stats-hint {
+  display: block;
+  margin-top: 22rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .settings-list {
@@ -564,6 +574,10 @@
 .me-page.large-text .overview-stat-label {
   font-size: var(--ui-font-large-body);
   line-height: 1.4;
+}
+
+.me-page.large-text .overview-stats-hint {
+  font-size: var(--ui-font-large-meta);
 }
 
 .me-page.large-text .action-title,

@@ -384,7 +384,7 @@ test("me keeps existing voice stats while refreshing the same project", async ()
   assert.equal(context.data.sessionCount, 7);
   assert.equal(context.data.utteranceCount, 42);
   assert.equal(context.data.totalUserCharCount, 1500);
-  assert.equal(context.data.totalAudioText, "20 分 0 秒");
+  assert.equal(context.data.totalAudioText, "20分0秒");
   assert.equal(context.data.voiceStatsLoading, false);
 });
 
@@ -435,7 +435,7 @@ test("me loads voice stats only for the active project", async () => {
   assert.equal(context.data.projectCount, 2);
   assert.equal(context.data.voiceStatsProjectId, "project-current");
   assert.equal(context.data.sessionCount, 4);
-  assert.equal(context.data.totalAudioText, "6 分 0 秒");
+  assert.equal(context.data.totalAudioText, "6分0秒");
 });
 
 test("me shows voice authorization status and opens agreement", () => {
