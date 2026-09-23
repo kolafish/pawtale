@@ -16,6 +16,7 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftRevisionRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
+    MemoirBookOutputEditorialCopyGenerationJobListResponse,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputResponse,
@@ -511,6 +512,22 @@ async def regenerate_mobile_memoir_book_output_editorial_copy(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/book-output/editorial-copy/regenerate/jobs",
+    response_model=MemoirBookOutputEditorialCopyGenerationJobListResponse,
+)
+async def list_mobile_memoir_book_output_editorial_copy_generation_jobs(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_generation_jobs.list_book_editorial_copy_generation_jobs(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
     )
 
 

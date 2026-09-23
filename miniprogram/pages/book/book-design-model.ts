@@ -1,6 +1,6 @@
 import type {
   MemoirBookCoverStyle,
-  MemoirBookEditorialCopyTarget,
+  MemoirBookEditorialCopyJobTarget,
   MemoirBookOutput,
 } from "../../domain/memoir-book";
 import {
@@ -99,7 +99,7 @@ export function bookEditorialCopyBlockedMessage(
   return "";
 }
 
-export function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
+export function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyJobTarget {
   return target === "preface" || target === "afterword" || target === "back_cover_quote";
 }
 

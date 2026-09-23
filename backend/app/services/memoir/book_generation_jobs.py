@@ -18,10 +18,13 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.models.projects import Project
 from app.schemas.memoir_book import (
+    MemoirBookLevelEditorialCopyTarget,
+    MemoirBookOutputEditorialCopyGenerationJobListResponse,
+    MemoirBookOutputEditorialCopyGenerationJobResponse,
     MemoirBookOutputEditorialCopyRegenerateRequest,
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
-from app.services.memoir import automation_events
+from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
@@ -35,6 +38,11 @@ ACTIVE_JOB_STATUSES = {
     MemoirEditingJobStatus.PENDING.value,
     MemoirEditingJobStatus.RUNNING.value,
 }
+BOOK_LEVEL_EDITORIAL_COPY_TARGETS: tuple[MemoirBookLevelEditorialCopyTarget, ...] = (
+    "preface",
+    "afterword",
+    "back_cover_quote",
+)
 
 
 def _safe_str(value: object) -> str:
@@ -277,6 +285,38 @@ async def enqueue_book_editorial_copy_generation_job(
     )
     await db.commit()
     return automation_events.event_response(event)
+
+
+async def list_book_editorial_copy_generation_jobs(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> MemoirBookOutputEditorialCopyGenerationJobListResponse:
+    await load_memoir_project(db, project_id, user_id)
+    items: list[MemoirBookOutputEditorialCopyGenerationJobResponse] = []
+    for target in BOOK_LEVEL_EDITORIAL_COPY_TARGETS:
+        job = await editing_jobs.load_project_editing_job(
+            db,
+            project_id=project_id,
+            job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
+            dedupe_key=_editorial_copy_dedupe_key(
+                project_id,
+                MemoirBookOutputEditorialCopyRegenerateRequest(targets=[target]),
+            ),
+        )
+        if job is None:
+            continue
+        items.append(
+            MemoirBookOutputEditorialCopyGenerationJobResponse(
+                target=target,
+                job_id=job.id,
+                status=MemoirEditingJobStatus(job.status),
+                error_message=job.error_message,
+                updated_at=job.updated_at,
+            )
+        )
+    return MemoirBookOutputEditorialCopyGenerationJobListResponse(items=items)
 
 
 def _job_request_payload(job: MemoirEditingJob) -> dict:
