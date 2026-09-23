@@ -13,6 +13,7 @@ import type {
   MemoirBookPlanChapterInput,
 } from "../../domain/memoir-book";
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
+import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import {
   sourceRefKey,
 } from "../../services/memoir-book-sources";
@@ -741,16 +742,26 @@ function selectedBookOutputVersionText(
   return selected ? `已修改 ${selected.version} 次` : "尚未生成全书";
 }
 
-export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
+export function bookOutputStaleNotice(
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): string {
   if (!output?.is_stale) {
     return "";
   }
   const titles = (output.stale_chapter_titles || []).filter(Boolean).slice(0, 2);
-  if (!titles.length) {
-    return "章节内容已更新，请重新整理一版。";
-  }
   const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
-  return `章节「${titles.join("、")}」${suffix}已更新，请重新整理一版。`;
+  const subject = titles.length ? `「${titles.join("、")}」${suffix}` : "章节内容";
+  if (progress?.status === "needs_input") {
+    return `${subject}已更新。请点「查看待确认事项」处理，全书会在处理后自动更新。`;
+  }
+  if (progress?.status === "failed") {
+    return `${subject}已更新，后台整理遇到问题。请点「查看待确认事项」查看原因并重试。`;
+  }
+  if (progress?.status === "processing") {
+    return `${subject}已更新，后台正在整理新版全书。`;
+  }
+  return `${subject}已更新，全书会在后台自动更新；如迟迟未完成，请点「查看待确认事项」。`;
 }
 
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
@@ -825,7 +836,10 @@ export function bookOutputData(
 
 export type BookOutputData = ReturnType<typeof bookOutputData>;
 
-export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
+export function bookHomeOutputData(
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): Pick<
   BookHomeData,
   | "bookContentAvailable"
   | "bookCharCount"
@@ -833,11 +847,13 @@ export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
   | "bookStaleNotice"
 > {
   const content = latestBookContent(output);
+  const emptyBookContent = `${trimText(output?.title || "")}\n\n目录`;
+  const available = Boolean(content && trimText(content) !== emptyBookContent);
   return {
-    bookContentAvailable: Boolean(content),
-    bookCharCount: trimText(content).length,
+    bookContentAvailable: available,
+    bookCharCount: available ? trimText(content).length : 0,
     bookPreviewTitle: bookOutputPreviewTitle(output),
-    bookStaleNotice: bookOutputStaleNotice(output),
+    bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
 }
 

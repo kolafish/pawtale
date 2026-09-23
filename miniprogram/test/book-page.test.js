@@ -506,6 +506,8 @@ test("book page routes reading and export actions to their focused pages", () =>
   );
 
   page.openBookReader.call(context);
+  context.data.bookStaleNotice = "章节已更新";
+  page.openBookReader.call(context);
   page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "preview" } } });
 
   assert.deepEqual(navigations, [
@@ -624,11 +626,23 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(data.bookContentAvailable, true);
   assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
-  assert.equal(data.bookStaleNotice, "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。");
+  assert.match(data.bookStaleNotice, /外婆家的童年.*第一次离家.*自动更新/);
+  assert.match(data.bookStaleNotice, /查看待确认事项/);
+
+  page.applyBookOutput.call(context, output, { status: "needs_input" });
+  assert.match(context.data.bookStaleNotice, /处理后自动更新/);
+  page.applyBookOutput.call(context, output, { status: "processing" });
+  assert.match(context.data.bookStaleNotice, /正在整理新版全书/);
   assert.equal("bookPreviewChapters" in data, false);
   assert.equal("bookTitleInput" in data, false);
   assert.equal("bookOutput" in data, false);
   assert.equal("bookContent" in data, false);
+
+  page.applyBookOutput.call(context, sampleBookOutput(4, "外婆回忆录\n\n目录", true, ["外婆家的童年"]));
+  assert.equal(context.data.bookContentAvailable, false);
+  assert.equal(context.data.bookCharCount, 0);
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  assert.match(template, /bookContentAvailable && !bookStaleNotice/);
 
   page.applyPlan.call(context, samplePlan("draft"));
   assert.equal(context.bookOutput, null);

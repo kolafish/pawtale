@@ -26,6 +26,7 @@ export interface MemoirBookSnapshot {
   plan?: MemoirBookPlan | null;
   drafts_by_chapter_id: Record<string, MemoirBookChapterDraft | null>;
   output?: MemoirBookOutput | null;
+  progress?: MemoirDraftProgress | null;
   automation_events: MemoirAutomationEventListResponse;
   image_assets: MemoirImageAssetListResponse;
   share_video_counts: MemoirShareVideoCount[];
