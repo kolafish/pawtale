@@ -1,9 +1,10 @@
 import { memoirAIRequest, memoirNarrativeProjectPath, memoirRequest } from "./memoir-api-client";
 
 export interface VoiceEditOperation {
-  action: "delete_chapter" | "delete_section" | "delete_material" | "rename_chapter" | "rename_section" | "regenerate_chapter_sections";
+  action: "delete_chapter" | "delete_section" | "delete_material" | "rename_chapter" | "rename_section" | "regenerate_chapter_sections" | "split_chapter";
   target_ref: string;
   new_title: string | null;
+  utterance_ids?: string[];
 }
 
 export interface VoiceEditItem extends VoiceEditOperation {

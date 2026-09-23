@@ -46,7 +46,9 @@ definePage<EditData>()({
 
   changeInstruction(event: { detail: { value: string } }) {
     if (this.data.loading || this.data.applying) return;
-    this.setData({ instruction: event.detail.value, preview: null, items: [], selectedCount: 0, message: "", error: "" });
+    const clarification = this.data.preview?.questions.length && !this.data.items.length
+      ? this.data.preview : null;
+    this.setData({ instruction: event.detail.value, preview: clarification, items: [], selectedCount: 0, message: "", error: "" });
   },
 
   async submitInstruction(event?: { detail?: { value?: string } }) {
@@ -77,7 +79,10 @@ definePage<EditData>()({
   async apply() {
     if (!this.data.preview || this.data.applying || !this.data.selectedCount) return;
     const sequence = ++this.requestSequence;
-    const operations = this.data.items.filter(item => item.selected).map(({ action, target_ref, new_title }) => ({ action, target_ref, new_title }));
+    const operations = this.data.items.filter(item => item.selected).map(({ action, target_ref, new_title, utterance_ids }) => ({
+      action, target_ref, new_title,
+      ...(action === "split_chapter" ? { utterance_ids } : {}),
+    }));
     this.setData({ applying: true, error: "" });
     try {
       const result = await applyVoiceEdit(this.data.projectId, this.data.preview.signature, operations);

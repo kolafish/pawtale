@@ -87,6 +87,40 @@ test("chapter section regeneration is shown as a confirmable operation", async (
   assert.equal(context.data.message, "已开始重新整理小节，可在章节工作台查看进度。");
 });
 
+test("chapter split keeps its selected utterances when the user confirms", async () => {
+  const split = {
+    signature: "split-sig", reply: "请确认要拆出的讲述。", questions: [],
+    operations: [{
+      action: "split_chapter", target_ref: "c3", new_title: "辞职后的日常",
+      utterance_ids: ["u1", "u2"], label: "拆出两条讲述", detail: "运动、做饭",
+    }],
+  };
+  const { context, calls } = setup({ preview: async () => split });
+  await context.submitInstruction({ detail: { value: "把第三章的日常放到新章" } });
+  assert.equal(context.data.items[0].detail, "运动、做饭");
+  await context.apply();
+  assert.deepEqual(calls.applies, [["p1", "split-sig", [{
+    action: "split_chapter", target_ref: "c3", new_title: "辞职后的日常",
+    utterance_ids: ["u1", "u2"],
+  }]]]);
+});
+
+test("a specific clarification stays visible and can be answered with the original request", async () => {
+  const { context, calls } = setup({ preview: async () => ({
+    signature: "{}", reply: "还需要确定要修改的具体内容。", operations: [],
+    questions: ["第三章里，您要拆出运动那条，还是做饭那条讲述？"],
+  }) });
+  const original = "把第三章的一些日常放到新章节";
+  await context.submitInstruction({ detail: { value: original } });
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.preview.questions.length, 1);
+  assert.equal(context.data.selectedCount, 0);
+  context.changeInstruction({ detail: { value: `${original}\n运动和做饭两条都要。` } });
+  assert.equal(context.data.preview.questions.length, 1);
+  await context.submitInstruction();
+  assert.deepEqual(calls.previews[1], ["p1", `${original}\n运动和做饭两条都要。`]);
+});
+
 test("editing the command discards its previous operations", async () => {
   const { context, calls } = setup();
   context.changeInstruction({ detail: { value: "删掉测试录音" } });
