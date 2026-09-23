@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
-from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
+from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirBookOutputVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import automatic_book_draft, chapter_generation, chapter_preparation_jobs
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
@@ -480,11 +480,13 @@ async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_de
     from tests.test_memoir_book_completion import _book, _create_current_draft
 
     project_id, chapters, _ = await _book(client, test_db, chapter_count=5)
+    versions = {}
     for chapter in chapters:
-        await _create_current_draft(
+        _, version = await _create_current_draft(
             test_db, project_id=project_id, chapter_id=chapter.id,
             status=MemoirBookChapterDraftStatus.DRAFT,
         )
+        versions[chapter.id] = version.id
     test_db.add_all([
         MemoirCompletionIssue(
             project_id=project_id, scope="book", issue_type="structure",
@@ -505,6 +507,17 @@ async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_de
     assert old.chapter_snapshot_json == []
     job = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
     job.status = "succeeded"
+    job.result_json = {
+        "stage": "needs_attention",
+        "chapters": {
+            chapter.id: {"status": "ready", "draft_version_id": versions[chapter.id]}
+            for chapter in chapters
+        },
+        "output_id": old.output_id,
+        "output_version_id": old.output_version_id,
+        "omitted_chapter_ids": old.omitted_chapter_ids,
+        "review_status": "succeeded",
+    }
     await test_db.commit()
 
     assert await automatic_book_draft.reconcile_books_omitted_by_editorial_review(test_db) == 1
@@ -512,12 +525,22 @@ async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_de
     assert job.status == "pending"
     assert await automatic_book_draft.reconcile_books_omitted_by_editorial_review(test_db) == 0
 
-    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
-    await test_db.commit()
-    assert assembled.omitted_chapter_ids == [chapters[-1].id]
-    assert [item["chapter_id"] for item in assembled.chapter_snapshot_json] == [
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.result_json["review_job_id"] is None
+    assert job.result_json["omitted_chapter_ids"] == [chapters[-1].id]
+    assert [item["chapter_id"] for item in (
+        await test_db.get(MemoirBookOutputVersion, job.result_json["output_version_id"])
+    ).chapter_snapshot_json] == [
         chapter.id for chapter in chapters[:-1]
     ]
+    privacy_issue = await test_db.scalar(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.issue_type == "privacy",
+    ))
+    assert privacy_issue.status == "open"
     response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
     assert response.status_code == 200
     assert response.json()["is_stale"] is False
