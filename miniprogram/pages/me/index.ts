@@ -7,7 +7,12 @@ import {
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
-import { getAICreditSummary, type AICreditSummary } from "../../services/billing";
+import {
+  getAICreditSummary,
+  getAIUsageDetails,
+  type AICreditSummary,
+  type AIUsageDetail,
+} from "../../services/billing";
 import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
@@ -35,6 +40,13 @@ import {
   userDisplayName,
 } from "../../services/user-display-name";
 
+interface CreditUsageViewItem {
+  id: string;
+  purpose: string;
+  amountText: string;
+  timeText: string;
+}
+
 interface MeData {
   pageClass: string;
   loading: boolean;
@@ -51,6 +63,11 @@ interface MeData {
   creditUsedText: string;
   creditRemainingText: string;
   creditProgressPercent: string;
+  creditUsageExpanded: boolean;
+  creditUsageLoading: boolean;
+  creditUsageError: string;
+  creditUsageItems: CreditUsageViewItem[];
+  creditUsageHasMore: boolean;
   rechargeQrVisible: boolean;
   error: string;
   displayName: string;
@@ -122,6 +139,19 @@ function formatCreditAmount(value: unknown): string {
   return creditAmount(value).toFixed(2);
 }
 
+function creditUsageViewItem(item: AIUsageDetail): CreditUsageViewItem {
+  const date = new Date(item.created_at);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return {
+    id: item.id,
+    purpose: item.purpose,
+    amountText: creditAmount(item.cost_rmb).toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1"),
+    timeText: Number.isNaN(date.getTime())
+      ? ""
+      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  };
+}
+
 function creditData(summary: AICreditSummary): Pick<
   MeData,
   | "creditAvailable"
@@ -188,6 +218,11 @@ function loggedOutData(): Partial<MeData> {
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
     creditProgressPercent: "0.0",
+    creditUsageExpanded: false,
+    creditUsageLoading: false,
+    creditUsageError: "",
+    creditUsageItems: [],
+    creditUsageHasMore: false,
     rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
@@ -226,6 +261,11 @@ definePage<MeData>()({
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
     creditProgressPercent: "0.0",
+    creditUsageExpanded: false,
+    creditUsageLoading: false,
+    creditUsageError: "",
+    creditUsageItems: [],
+    creditUsageHasMore: false,
     rechargeQrVisible: false,
     error: "",
     displayName: "",
@@ -280,6 +320,11 @@ definePage<MeData>()({
         accountEmailText: accountEmailText(identity.email, identity.password_login_enabled),
         projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
+        creditUsageExpanded: false,
+        creditUsageLoading: false,
+        creditUsageError: "",
+        creditUsageItems: [],
+        creditUsageHasMore: false,
         ...(keepVoiceStats ? {} : {
           voiceStatsProjectId: activeProjectId,
           sessionCount: 0,
@@ -413,6 +458,53 @@ definePage<MeData>()({
       });
     } finally {
       this.setData({ creditLoading: false });
+    }
+  },
+
+  async toggleCreditUsageDetails() {
+    if (this.data.creditUsageExpanded) {
+      this.setData({ creditUsageExpanded: false });
+      return;
+    }
+    this.setData({ creditUsageExpanded: true });
+    await this.loadCreditUsageDetails(true);
+  },
+
+  async loadMoreCreditUsageDetails() {
+    await this.loadCreditUsageDetails();
+  },
+
+  async loadCreditUsageDetails(reset = false) {
+    if (this.data.creditUsageLoading) {
+      return;
+    }
+    const email = this.data.email;
+    const offset = reset ? 0 : this.data.creditUsageItems.length;
+    this.setData({
+      creditUsageLoading: true,
+      creditUsageError: "",
+      ...(reset ? { creditUsageItems: [], creditUsageHasMore: false } : {}),
+    });
+    try {
+      const page = await getAIUsageDetails(offset);
+      if (this.data.email !== email || !this.data.creditUsageExpanded) {
+        return;
+      }
+      const items = page.items.map(creditUsageViewItem);
+      this.setData({
+        creditUsageItems: reset ? items : [...this.data.creditUsageItems, ...items],
+        creditUsageHasMore: page.has_more,
+      });
+    } catch (error) {
+      if (this.data.email === email && this.data.creditUsageExpanded) {
+        this.setData({
+          creditUsageError: error instanceof Error ? error.message : "使用明细暂时无法加载",
+        });
+      }
+    } finally {
+      if (this.data.email === email) {
+        this.setData({ creditUsageLoading: false });
+      }
     }
   },
 

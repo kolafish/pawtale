@@ -122,6 +122,7 @@ function loadMePage({
       used_rmb: 0,
       remaining_rmb: 10,
     }),
+    getAIUsageDetails: unmockedAsync("getAIUsageDetails"),
     ...billingExports,
   });
 
@@ -155,6 +156,33 @@ test("me shows AI credit usage percentage to one decimal place", async () => {
   assert.equal(context.data.creditProgressPercent, "0.3");
   assert.equal(context.data.creditUsedText, "0.03");
   assert.equal(context.data.creditRemainingText, "9.97");
+});
+
+test("me shows and pages through charged AI usage details", async () => {
+  const offsets = [];
+  const { page } = loadMePage({
+    billingExports: {
+      getAIUsageDetails: async (offset) => {
+        offsets.push(offset);
+        return offset === 0
+          ? { items: [{ id: "usage-1", purpose: "语音朗读", cost_rmb: "0.003000", created_at: "2026-09-23T00:00:00Z" }], has_more: true }
+          : { items: [{ id: "usage-2", purpose: "语音访谈", cost_rmb: "0.000001", created_at: "2026-09-22T00:00:00Z" }], has_more: false };
+      },
+    },
+  });
+  const context = { ...page, ...pageContext(page, { loggedIn: true, email: "owner@example.com" }) };
+
+  await page.toggleCreditUsageDetails.call(context);
+  assert.equal(context.data.creditUsageExpanded, true);
+  assert.deepEqual(context.data.creditUsageItems.map(({ purpose, amountText }) => [purpose, amountText]), [
+    ["语音朗读", "0.003"],
+  ]);
+  assert.equal(context.data.creditUsageHasMore, true);
+
+  await page.loadMoreCreditUsageDetails.call(context);
+  assert.deepEqual(offsets, [0, 1]);
+  assert.equal(context.data.creditUsageItems[1].amountText, "0.000001");
+  assert.equal(context.data.creditUsageHasMore, false);
 });
 
 test("me shows the single guest login entry when the session is missing", async () => {
