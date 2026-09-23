@@ -182,6 +182,7 @@ test("voice edit gives the model a generation deadline, uses mutation writes and
   await api.previewVoiceEdit("p1", "原话");
   await api.applyVoiceEdit("p1", "sig", []);
   assert.equal(calls[0][0], "ai");
+  assert.equal(calls[0][2].supports_chapter_split, true);
   assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");

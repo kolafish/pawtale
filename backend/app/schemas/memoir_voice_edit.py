@@ -51,6 +51,7 @@ class VoiceEditProposal(BaseModel):
 class VoiceEditPreviewRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=2000)
     ai_model: str | None = None
+    supports_chapter_split: bool = False
 
 
 class VoiceEditItem(VoiceEditOperation):

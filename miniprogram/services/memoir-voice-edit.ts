@@ -20,8 +20,8 @@ export interface VoiceEditPreview {
 }
 
 export function previewVoiceEdit(projectId: string, instruction: string): Promise<VoiceEditPreview> {
-  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string }>(
-    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction },
+  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string; supports_chapter_split: boolean }>(
+    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction, supports_chapter_split: true },
     { timeoutProfile: "generation", invalidatesSnapshots: false },
   );
 }

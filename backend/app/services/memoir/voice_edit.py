@@ -264,7 +264,14 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     client = ai_client or get_ai_service(model)
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     timeout = ai_text_timeout_seconds(policy.timeout_profile)
-    system = SYSTEM_PROMPT + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
+    client_capability = (
+        ""
+        if req.supports_chapter_split else
+        "\n当前小程序客户端不能执行 split_chapter。遇到把部分讲述移到新章节的要求时，"
+        "不要转换成 regenerate_chapter_sections 或其他操作；operations 和 questions 均留空，"
+        "reply 说明当前版本暂时不能用语音拆分章节。"
+    )
+    system = SYSTEM_PROMPT + client_capability + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
     # The proposal and its signatures are immutable snapshots. Do not retain a
     # database transaction while the model is producing the preview.
     await db.commit()
@@ -285,6 +292,11 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
         logger.warning("voice_edit_failed diagnostics=%s", ai_error_metadata(exc, requested_model=model, provider=client.provider_name, resolved_model=client.model_name, timeout_seconds=timeout, elapsed_ms=round((time.monotonic() - started) * 1000)))
         raise HTTPException(502, ai_user_error_message(exc, "没有得到可用的修改结果，请重新说一下")) from exc
     proposal = generated.value
+    if not req.supports_chapter_split and any(op.action == "split_chapter" for op in proposal.operations):
+        return VoiceEditPreviewResponse(
+            signature="{}", operations=[], questions=[],
+            reply="当前小程序版本暂时不能通过语音把部分讲述拆成新章节。",
+        )
     uncertain = {ref for q in proposal.questions for ref in q.target_refs}
     if proposal.operations and (
         any(not question.target_refs for question in proposal.questions)
