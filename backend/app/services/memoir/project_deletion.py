@@ -230,7 +230,26 @@ def _delete_media_paths(storage_paths: set[str]) -> None:
             logger.warning("Failed to delete memoir project media path=%s", path, exc_info=True)
 
 
-async def delete_project(db: AsyncSession, project: Project) -> None:
+async def _delete_project_media(
+    *, project_id: str, audio_files_to_delete: list[AudioFile], media_paths: set[str],
+) -> None:
+    try:
+        await audio_files.delete_audio_file_paths(audio_files_to_delete)
+        _delete_media_paths(media_paths)
+    except Exception:
+        logger.warning(
+            "Failed to delete memoir project files project_id=%s",
+            project_id,
+            exc_info=True,
+        )
+
+
+async def delete_project(
+    db: AsyncSession,
+    project: Project,
+    *,
+    post_commit_cleanups: list[project_documents.PostCommitCleanup] | None = None,
+) -> None:
     project_id = project.id
     audio_candidates = await _project_audio_files(db, project_id=project_id)
     image_candidates = list(
@@ -322,17 +341,26 @@ async def delete_project(db: AsyncSession, project: Project) -> None:
                 )
             )
         remaining_media_paths = await _remaining_media_paths(db)
-        await project_documents.delete_project(db, project)
+        await project_documents.delete_project(
+            db, project, post_commit_cleanups=post_commit_cleanups,
+        )
     except Exception:
         await db.rollback()
         raise
 
-    try:
-        await audio_files.delete_audio_file_paths(deletable_audio)
-        _delete_media_paths(media_candidates - remaining_media_paths)
-    except Exception:
-        logger.warning(
-            "Failed to delete memoir project files project_id=%s",
-            project_id,
-            exc_info=True,
-        )
+    media_paths = media_candidates - remaining_media_paths
+    if post_commit_cleanups is not None:
+        async def cleanup_media() -> None:
+            await _delete_project_media(
+                project_id=project_id,
+                audio_files_to_delete=deletable_audio,
+                media_paths=media_paths,
+            )
+
+        post_commit_cleanups.append(cleanup_media)
+        return
+    await _delete_project_media(
+        project_id=project_id,
+        audio_files_to_delete=deletable_audio,
+        media_paths=media_paths,
+    )
