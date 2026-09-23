@@ -5,12 +5,14 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.services.ai_base import AITextServiceBase
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -962,7 +964,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         ),
     )
 
-    async def fail_background_generation(_selected_text, _style_id):
+    async def fail_background_generation(_selected_text, _style_id, *, usage_context=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -1113,6 +1115,7 @@ async def test_share_video_worker_retries_and_removes_partial_output(client, tes
     assert target_path.read_bytes() == b"final mp4"
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_deadline_fails_without_retry(
     client,
     test_db,
@@ -1187,6 +1190,7 @@ async def test_share_video_worker_deadline_fails_without_retry(
     assert not target_path.exists()
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_recovers_when_completion_write_stalls(
     client,
     test_db,
@@ -1527,7 +1531,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     project = await test_db.get(Project, created["session"]["project_id"])
-    project.metadata_json = {"ai_model": "claude-opus-4-8"}
+    project.metadata_json = {"ai_model": DEFAULT_AI_TEXT_MODEL}
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
     )
@@ -1545,7 +1549,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         assert selected_text == text
         assert duration_ms == 36_000
         assert len(char_timings) == len(text)
-        assert ai_model == "claude-opus-4-8"
+        assert ai_model == DEFAULT_AI_TEXT_MODEL
         return share_video_scene_planner.ShareVideoScenePlan(
             provider="fake_llm",
             model="fake-scene-planner",
@@ -1583,7 +1587,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_dir = tmp_path / "backgrounds"
     image_dir.mkdir()
 
-    async def fake_background(selected_text, style_id):
+    async def fake_background(selected_text, style_id, *, usage_context=None):
         image_calls.append((selected_text, style_id))
         image_path = image_dir / f"scene-{len(image_calls)}.png"
         image_path.write_bytes(b"fake image")
@@ -1726,6 +1730,7 @@ async def test_share_video_worker_reclaims_expired_lease_without_get_side_effect
     assert stored_job.lease_token == reclaimed.token
 
 
+@pytest.mark.db_independent
 async def test_postgres_share_video_claim_skips_locked_queue_head(client, test_db):
     if test_db.get_bind().dialect.name != "postgresql":
         pytest.skip("requires PostgreSQL row-level locking")
@@ -1829,6 +1834,14 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(
         client,
@@ -1910,6 +1923,14 @@ async def test_mobile_memoir_recovers_long_unfinalized_audio_in_segments(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.ASR_RECOVERY_PCM_SEGMENT_BYTES", 32000)
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(
@@ -2463,7 +2484,7 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup",
-        json={"ai_model": "deepseek", "transcript_polish_level": "high"},
+        json={"ai_model": DEFAULT_AI_TEXT_MODEL, "transcript_polish_level": "high"},
     )
 
     assert response.status_code == 200
@@ -2494,7 +2515,7 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     )
     assert topic_map_job is not None
     assert topic_map_job.payload_json["material_ids"] == [created["utterance_id"]]
-    assert topic_map_job.payload_json["ai_model"] == "deepseek"
+    assert topic_map_job.payload_json["ai_model"] == DEFAULT_AI_TEXT_MODEL
 
 
 async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, test_db, monkeypatch):
@@ -2504,7 +2525,7 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
         text="他是我的儿子，名字叫刘凯峰，今年10岁。",
     )
     project = await test_db.get(Project, created["session"]["project_id"])
-    project.metadata_json = {"ai_model": "claude-opus-4-8"}
+    project.metadata_json = {"ai_model": DEFAULT_AI_TEXT_MODEL}
     await test_db.commit()
     ai_client = CapturingAIClient(
         json.dumps(
@@ -2565,7 +2586,7 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     assert data["requires_confirmation"] is True
     assert data["provider"] == "fake-ai"
     assert data["model"] == "fake-cleaner"
-    assert requested_models == ["claude-opus-4-8"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
     assert ai_client.call_kwargs["timeout"] == 180.0
     assert "只能改用户修正指令明确指出" in ai_client.prompt
     assert "passage 表示指定片段改写" in ai_client.prompt

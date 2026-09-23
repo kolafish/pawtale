@@ -89,7 +89,7 @@
           <view class="project-overview-main">
             <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
             <text class="action-meta">
-              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条讲述记录") : "还没有讲述记录")) : "创建第一本回忆录并设置讲述资料"}}
+              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 段文字讲述") : "还没有文字讲述")) : "创建第一本回忆录并设置讲述资料"}}
             </text>
           </view>
         </view>
@@ -101,7 +101,7 @@
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{utteranceCount}}</text>
-            <text class="overview-stat-label">讲述记录</text>
+            <text class="overview-stat-label">文字讲述</text>
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{totalUserCharCount}}</text>
@@ -112,7 +112,33 @@
             <text class="overview-stat-label">录音</text>
           </view>
         </view>
+        <text class="overview-stats-hint">这里统计已转成文字的讲述；尚未生成文字的录音也会显示在讲述记录列表中。</text>
 
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="setting-header">
+        <text class="section-title ui-section-heading">AI 使用额度</text>
+        <text class="setting-current stats-refresh">{{creditLoading ? "更新中" : " "}}</text>
+      </view>
+      <view wx:if="{{creditAvailable}}" class="credit-card ui-card ui-card-borderless">
+        <view class="credit-card-head">
+          <view>
+            <text class="action-title">当前可用 ¥{{creditRemainingText}}</text>
+            <text class="action-meta">已使用 ¥{{creditUsedText}} / ¥{{creditTotalText}}</text>
+          </view>
+          <text class="credit-percent ui-tabular">{{creditProgressPercent}}%</text>
+        </view>
+        <view class="credit-progress-track" aria-label="AI 额度已使用 {{creditProgressPercent}}%">
+          <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
+        </view>
+        <text class="credit-hint">额度按 AI 实际调用成本计算。余额用尽后，可添加微信联系管理员。</text>
+        <button class="credit-recharge-button support-action ui-pressable" bindtap="openRechargeQr">添加微信充值</button>
+      </view>
+      <view wx:elif="{{creditError}}" class="credit-card ui-card ui-card-borderless credit-card-error">
+        <text class="action-meta">{{creditError}}</text>
+        <button class="credit-retry-button support-action ui-pressable" bindtap="loadAICreditSummary">重新加载</button>
       </view>
     </view>
 
@@ -207,4 +233,19 @@
       bindtap="deleteAccount"
     >注销账号</button>
   </block>
+
+  <view wx:if="{{rechargeQrVisible}}" class="recharge-qr-mask" catchtap="closeRechargeQr">
+    <view class="recharge-qr-sheet" catchtap="stopRechargeQrTap">
+      <text class="recharge-qr-title">添加微信充值</text>
+      <text class="recharge-qr-copy">长按二维码识别并添加微信，提供你在小程序中的账号信息。</text>
+      <image
+        class="recharge-qr-image"
+        src="/assets/recharge-wechat-qr.jpg"
+        mode="widthFix"
+        show-menu-by-longpress
+        aria-label="微信二维码"
+      />
+      <button class="credit-retry-button support-action ui-pressable" bindtap="closeRechargeQr">关闭</button>
+    </view>
+  </view>
 </view>

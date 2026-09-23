@@ -24,6 +24,7 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
   mockModule("../services/memoir-voice-search.ts", {
     recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
+    cancelMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
 
@@ -326,11 +327,12 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   await page.loadTranscripts.call(context, true);
 
   const item = context.data.items[0];
-  assert.equal(item.summaryTitleText, "音频已保存，等待转写");
-  assert.equal(item.summaryPreviewText, "恢复转写后即可继续整理。");
+  assert.equal(item.summaryTitleText, "录音已保存，等待生成文字");
+  assert.equal(item.summaryPreviewText, "点击下方按钮，把已保存的录音转成文字。");
   assert.equal(item.recordMetaText, "07-01 15:38 · 8 秒");
   assert.equal("recoveryNoticeText" in item, false);
-  assert.equal(item.storyStatusText, "待转写");
+  assert.equal(item.storyStatusText, "等待生成文字");
+  assert.equal(item.recoverButtonText, "把录音转成文字");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
   assert.match(item.cardAriaLabel, /打开详情$/);
   global.wx = {
@@ -347,7 +349,7 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(context.data.items[0].canRecoverTranscription, false);
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 8 秒 · 14 字");
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
-  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
+  assert.deepEqual(toasts, [{ title: "录音已转成文字", icon: "success" }]);
 });
 
 test("transcripts page opens transcript detail from a record card", () => {
@@ -370,7 +372,7 @@ test("transcripts page opens transcript detail from a record card", () => {
 
 });
 
-test("transcripts card swipes left to reveal deletion without opening detail, and right to close", () => {
+test("transcripts card swipes right to reveal deletion without opening detail, and left to close", () => {
   const navigations = [];
   global.wx = { navigateTo: (options) => navigations.push(options) };
   const { page } = loadTranscriptsPage();
@@ -388,13 +390,13 @@ test("transcripts card swipes left to reveal deletion without opening detail, an
   start(210, 100);
   end(190, 180);
   assert.equal(context.data.openSwipeId, "");
-  start(210, 100);
-  end(110, 105);
+  start(110, 100);
+  end(210, 105);
   tap();
   assert.equal(context.data.openSwipeId, "utterance-1");
   assert.deepEqual(navigations, []);
-  start(110, 100);
-  end(210, 105);
+  start(210, 100);
+  end(110, 105);
   assert.equal(context.data.openSwipeId, "");
 });
 
@@ -780,6 +782,39 @@ test("transcripts page stops active voice search recording on second tap", async
   await page.startVoiceSearch.call(context);
 
   assert.deepEqual(stops, ["stop"]);
+});
+
+test("transcripts page cancels voice search on hide or unload and ignores its late result", async () => {
+  for (const lifecycle of ["onHide", "onUnload"]) {
+    const recording = deferred();
+    const cancels = [];
+    const parseCalls = [];
+    const { page } = loadTranscriptsPage({
+      voiceSearchExports: {
+        recordMemoirVoiceSearchQuery: () => recording.promise,
+        cancelMemoirVoiceSearchRecording: () => cancels.push("cancel"),
+      },
+      voiceApiExports: {
+        parseMemoirVoiceSearchQuery: async (query) => {
+          parseCalls.push(query);
+          throw new Error("late search must not be parsed");
+        },
+      },
+    });
+    const context = pageContext(page);
+
+    const search = page.startVoiceSearch.call(context);
+    assert.equal(context.data.voiceSearchRecording, true);
+    page[lifecycle].call(context);
+    recording.resolve("外婆家的院子");
+    await search;
+
+    assert.deepEqual(cancels, ["cancel"]);
+    assert.deepEqual(parseCalls, []);
+    assert.equal(context.data.voiceSearchRecording, false);
+    assert.equal(context.data.voiceSearchTranscribing, false);
+    assert.equal(context.data.error, "");
+  }
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

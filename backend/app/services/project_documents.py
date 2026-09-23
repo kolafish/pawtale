@@ -1,5 +1,6 @@
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -21,6 +22,9 @@ import app.services.content_storage as storage
 
 class ContentRevisionConflict(Exception):
     pass
+
+
+PostCommitCleanup = Callable[[], Awaitable[None]]
 
 
 def count_words(text: str) -> int:
@@ -221,7 +225,24 @@ async def delete_group(db: AsyncSession, project_id: str, group: DocumentGroup) 
             raise
 
 
-async def delete_project(db: AsyncSession, project: Project) -> None:
+async def delete_project(
+    db: AsyncSession,
+    project: Project,
+    *,
+    post_commit_cleanups: list[PostCommitCleanup] | None = None,
+) -> None:
+    if post_commit_cleanups is not None:
+        # Account deletion holds the project lock until its one final commit.
+        await db.delete(project)
+        await db.flush()
+        project_id = project.id
+
+        async def cleanup_project_dir() -> None:
+            await storage.delete_project_dir(project_id)
+
+        post_commit_cleanups.append(cleanup_project_dir)
+        return
+
     async with storage.project_content_lock(project.id):
         source = storage.PROJECTS_DIR / project.id
         backup = source.parent / f".{project.id}.{uuid4().hex}.delete-backup"

@@ -1,10 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart3, FolderOpen, LogOut, UserCircle } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
 import { UserAuditDashboard } from './audit/UserAuditDashboard';
-import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import { getAIModelOptions } from '../constants/aiModels';
 import type { User } from '../types';
 import { useDraftSaves } from '../hooks/project/draftSaves';
 
@@ -17,7 +17,11 @@ export function Layout({ user, onLogout }: LayoutProps) {
   const queryClient = useQueryClient();
   const drafts = useDraftSaves();
   const [navigationError, setNavigationError] = useState('');
-  const { defaultAiModel, setDefaultAiModel, closeProject } = useAppStore();
+  const { defaultAiModel, setDefaultAiModel, closeProject, isAdmin, setIsAdmin } = useAppStore();
+  useEffect(() => {
+    setIsAdmin(user.role === 'admin');
+    if (user.role !== 'admin') setDefaultAiModel('deepseek-flash');
+  }, [setDefaultAiModel, setIsAdmin, user.role]);
   const [activeView, setActiveView] = useState<'workspace' | 'audit'>('workspace');
   const canViewAudit = user.role === 'admin';
   const currentView = canViewAudit ? activeView : 'workspace';
@@ -96,7 +100,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
               onChange={(e) => setDefaultAiModel(e.target.value as typeof defaultAiModel)}
               className="text-sm px-2 py-1.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-pink-500"
             >
-              {AI_MODEL_OPTIONS.map((option) => (
+              {getAIModelOptions(isAdmin).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

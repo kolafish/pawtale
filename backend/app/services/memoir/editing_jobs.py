@@ -20,6 +20,8 @@ from app.domain.memoir.types import (
     MemoirEditingJobType,
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.projects import Project
+from app.services.ai_usage_records import reset_ai_usage_context, set_ai_usage_context
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -580,6 +582,14 @@ async def run_editing_job(
                 error_message="后台任务暂不支持此操作，请联系管理员",
             )
             return False
+        project_user_id = await db.scalar(
+            select(Project.user_id).where(Project.id == job.project_id)
+        )
+        usage_token = set_ai_usage_context(
+            user_id=project_user_id,
+            project_id=job.project_id,
+            operation=f"memoir.job.{job.job_type}",
+        )
         handler_task = asyncio.create_task(handler(db, job))
         try:
             done, _pending = await asyncio.wait(
@@ -593,6 +603,7 @@ async def run_editing_job(
             if not handler_task.done():
                 handler_task.cancel()
                 await asyncio.gather(handler_task, return_exceptions=True)
+            reset_ai_usage_context(usage_token)
         marked = await _mark_job(
             db,
             job,

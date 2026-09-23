@@ -1,6 +1,7 @@
 import asyncio
 from datetime import timedelta
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -55,13 +56,18 @@ class TestAuthAPI:
         await test_db.commit()
         assert (await anonymous_client.get("/api/auth/me")).status_code == 401
 
+    @pytest.mark.db_independent
     async def test_websocket_auth_rejects_revoked_session(self, anonymous_client, test_db):
         assert (await anonymous_client.post(
             "/api/auth/register",
             json={"email": "socket@example.com", "password": "password123"},
         )).status_code == 201
         token = anonymous_client.cookies[SESSION_COOKIE_NAME]
-        socket = type("Socket", (), {"cookies": {SESSION_COOKIE_NAME: token}})()
+        socket = SimpleNamespace(
+            cookies={SESSION_COOKIE_NAME: token},
+            url=SimpleNamespace(path="/api/auth/test-websocket"),
+            path_params={},
+        )
         independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
         async with independent_sessions() as db:
             assert await authenticate_websocket(socket, db) is not None
@@ -80,6 +86,7 @@ class TestAuthAPI:
         assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "two"})).status_code == 200
         assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "three"})).status_code == 429
 
+    @pytest.mark.db_independent
     async def test_concurrent_first_wechat_login_uses_one_identity(
         self, anonymous_client, test_db, monkeypatch,
     ):
@@ -111,6 +118,7 @@ class TestAuthAPI:
         ).all()
         assert len(identities) == 1
 
+    @pytest.mark.ci_smoke
     async def test_register_me_and_logout(self, anonymous_client, test_db):
         register = await anonymous_client.post(
             "/api/auth/register",

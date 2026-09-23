@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -906,7 +907,7 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
         f"chapters/{chapter.id}/jobs",
         json={
             "operation": "prepare",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert queued.status_code == 202, queued.text
@@ -947,7 +948,7 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     assert chapter_digest is not None
     assert chapter_digest.status == MemoirSemanticCacheStatus.FAILED.value
     generation = chapter_digest.digest_json["generation"]
-    assert generation["requested_model"] == "claude-opus-4-8"
+    assert generation["requested_model"] == DEFAULT_AI_TEXT_MODEL
     assert generation["provider"] == "test"
     assert generation["model"] == "test-chapter"
     assert generation["engine"] == chapter_digests.CHAPTER_DIGEST_ENGINE

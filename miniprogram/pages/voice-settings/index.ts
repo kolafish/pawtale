@@ -1,11 +1,13 @@
 import { definePage } from "../../services/page-definition";
 import {
   AI_MODEL_OPTIONS,
+  DEFAULT_AI_MODEL,
   aiModelLabel,
   readSelectedAIModel,
   saveSelectedAIModel,
   type AIModelOption,
 } from "../../services/ai-model-settings";
+import { readMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import {
   accessibilityPageClass,
   readAccessibilitySettings,
@@ -59,16 +61,27 @@ interface SwitchChangeEvent {
 
 const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
 
+function currentUserIsAdmin(): boolean {
+  try {
+    return readMemoirIdentitySnapshot().identity?.role === "admin";
+  } catch {
+    return false;
+  }
+}
+
 function voiceSettingsData(): VoiceSettingsData {
   const accessibility = readAccessibilitySettings();
   const profiles = readTTSSettingsProfiles();
-  const aiModel = readSelectedAIModel();
+  const isAdmin = currentUserIsAdmin();
+  const aiModel = isAdmin ? readSelectedAIModel() : DEFAULT_AI_MODEL;
   return {
     pageClass: accessibilityPageClass("voice-settings-page", accessibility.largeTextEnabled),
     autoBargeInEnabled: accessibility.autoBargeInEnabled,
     aiModel,
     aiModelLabel: aiModelLabel(aiModel),
-    aiModelOptions: AI_MODEL_OPTIONS,
+    aiModelOptions: isAdmin
+      ? AI_MODEL_OPTIONS
+      : AI_MODEL_OPTIONS.filter((option) => option.value === DEFAULT_AI_MODEL),
     chatTTSVoice: profiles.chat.voice,
     chatTTSSpeedRatio: profiles.chat.speedRatio,
     bookTTSVoice: profiles.book.voice,
@@ -98,6 +111,9 @@ definePage<VoiceSettingsData>()({
   },
 
   selectAIModel(event: SettingsEvent) {
+    if (!currentUserIsAdmin()) {
+      return;
+    }
     const model = saveSelectedAIModel(datasetString(event, "model"));
     this.setData({
       aiModel: model,

@@ -18,6 +18,7 @@ from app.domain.projects.types import ProjectType
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.services.ai_types import AITextClient
+from app.services.ai_usage_records import reset_ai_usage_context, set_ai_usage_context
 from app.services.memoir.multi_asr_verification import (
     MultiASRVerificationRequest,
     verify_multi_asr_transcripts,
@@ -419,7 +420,7 @@ async def _has_user_edited_version(db: AsyncSession, utterance_id: str) -> bool:
     )
 
 
-async def reprocess_offline_asr_utterance(
+async def _reprocess_offline_asr_utterance(
     db: AsyncSession,
     *,
     utterance_id: str,
@@ -541,6 +542,39 @@ async def reprocess_offline_asr_utterance(
         **recognition_metadata,
         "corrected_text_length": len(corrected_text),
     }
+
+
+async def reprocess_offline_asr_utterance(
+    db: AsyncSession,
+    *,
+    utterance_id: str,
+    ai_model: str | None = None,
+    transcript_polish_level: str | None = None,
+    providers: Sequence[str] | str = DEFAULT_OFFLINE_ASR_PROVIDERS,
+    asr_runner: ASRRunner | None = None,
+    ai_client: AITextClient | None = None,
+) -> dict[str, object]:
+    utterance = await load_reprocess_utterance(db, utterance_id)
+    if utterance is None or utterance.voice_session.project is None:
+        raise ValueError("material utterance no longer exists")
+    project = utterance.voice_session.project
+    token = set_ai_usage_context(
+        user_id=project.user_id,
+        project_id=project.id,
+        operation="memoir.offline_asr_reprocess",
+    )
+    try:
+        return await _reprocess_offline_asr_utterance(
+            db,
+            utterance_id=utterance_id,
+            ai_model=ai_model,
+            transcript_polish_level=transcript_polish_level,
+            providers=providers,
+            asr_runner=asr_runner,
+            ai_client=ai_client,
+        )
+    finally:
+        reset_ai_usage_context(token)
 
 
 async def reprocess_offline_asr(

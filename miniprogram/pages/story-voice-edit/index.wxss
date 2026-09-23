@@ -7,19 +7,19 @@
 }
 
 .edit-book, .edit-title, .edit-hint, .edit-reply, .edit-detail { display: block; }
-.edit-book { margin-bottom: 10rpx; color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: 25rpx; font-weight: 700; letter-spacing: 0.03em; }
-.edit-title { margin-bottom: 10rpx; color: var(--ui-text-primary); font-family: var(--ui-font-editorial); font-size: 42rpx; font-weight: 700; line-height: 1.35; text-wrap: balance; }
-.edit-hint, .edit-detail { color: var(--ui-text-secondary); font-size: 27rpx; line-height: 1.65; text-wrap: pretty; }
+.edit-book { margin-bottom: 10rpx; color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: var(--ui-font-action); font-weight: 700; letter-spacing: 0.03em; }
+.edit-title { margin-bottom: 10rpx; color: var(--ui-text-primary); font-family: var(--ui-font-editorial); font-size: var(--ui-font-page-title); font-weight: 700; line-height: 1.35; text-wrap: balance; }
+.edit-hint, .edit-detail { color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.65; text-wrap: pretty; }
 .voice-edit-page .ui-error-banner { margin-top: 20rpx; }
 .edit-result { margin-top: 28rpx; padding: 28rpx; }
-.edit-reply, .edit-question { font-size: 29rpx; line-height: 1.72; white-space: pre-wrap; text-wrap: pretty; }
+.edit-reply, .edit-question { font-size: var(--ui-font-action); line-height: 1.72; white-space: pre-wrap; text-wrap: pretty; }
 .edit-reply { color: var(--ui-text-primary); }
 .edit-question { margin-top: 16rpx; padding-left: 18rpx; border-left: 3rpx solid var(--ui-accent-border); color: var(--ui-section-title); }
 .edit-operation { min-height: 96rpx; padding: 22rpx 0; display: flex; align-items: flex-start; gap: 16rpx; }
 .edit-operation + .edit-operation { border-top: 1rpx solid var(--ui-divider); }
 .edit-operation checkbox { margin-top: 4rpx; }
 .edit-operation-copy { min-width: 0; flex: 1; }
-.edit-operation-title { color: var(--ui-text-primary); font-size: 29rpx; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
+.edit-operation-title { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
 .edit-detail { margin-top: 8rpx; white-space: pre-wrap; }
 
 .edit-apply {
@@ -28,13 +28,13 @@
   background: var(--ui-surface-soft);
   color: var(--ui-accent-strong);
   box-shadow: inset 5rpx 0 var(--ui-accent), var(--ui-control-shadow);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.edit-message { display: block; background: var(--ui-success-surface); color: var(--ui-success-text); box-shadow: none; font-size: 28rpx; line-height: 1.55; }
-.edit-back { min-height: 88rpx; margin-top: 22rpx; background: transparent; color: var(--ui-section-title); font-size: 27rpx; font-weight: 700; }
+.edit-message { display: block; background: var(--ui-success-surface); color: var(--ui-success-text); box-shadow: none; font-size: var(--ui-font-body); line-height: 1.55; }
+.edit-back { min-height: 88rpx; margin-top: 22rpx; background: transparent; color: var(--ui-section-title); font-size: var(--ui-font-action); font-weight: 700; }
 .large-text .edit-title { font-size: 48rpx; }
-.large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: 32rpx; }
+.large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: var(--ui-font-large-list-title); }
 .large-text .edit-operation-title, .large-text .edit-reply, .large-text .edit-question { font-size: 36rpx; }

@@ -24,6 +24,7 @@ import {
   readTranscriptNavigationTarget,
 } from "../../services/transcript-navigation";
 import {
+  cancelMemoirVoiceSearchRecording,
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
@@ -197,7 +198,7 @@ function withTranscriptRuntimeState(
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
-    recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
+    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : "把录音转成文字",
   };
 }
 
@@ -372,9 +373,9 @@ function toViewItem(
     item.is_included_in_book
     || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
   );
-  const summaryTitleText = transcriptTitleText(item);
+  const summaryTitleText = canRecoverTranscription ? "录音已保存，等待生成文字" : transcriptTitleText(item);
   const summaryPreviewText = canRecoverTranscription
-    ? "恢复转写后即可继续整理。"
+    ? "点击下方按钮，把已保存的录音转成文字。"
     : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
@@ -385,7 +386,7 @@ function toViewItem(
     || includedChapter?.title.trim()
     || "";
   const storyStatusText = canRecoverTranscription
-    ? "待转写"
+    ? "等待生成文字"
     : (isIncludedInBook
       ? `已收进：${includedLocationText || "故事树"}`
       : (item.section_assignment
@@ -406,7 +407,7 @@ function toViewItem(
     canRecoverTranscription,
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
-    recoverButtonText: "恢复转写",
+    recoverButtonText: "把录音转成文字",
     storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
     cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，打开详情`,
@@ -430,6 +431,8 @@ definePage<TranscriptsData>()({
   searchDebounceTimer: null as number | null,
   swipeStart: null as { id: string; x: number; y: number } | null,
   swipeTapUntil: 0,
+  voiceSearchToken: 0,
+  voiceSearchVisible: true,
 
   data: {
     pageClass: "transcripts-page",
@@ -472,6 +475,7 @@ definePage<TranscriptsData>()({
 
   async onShow() {
     this.setData({ openSwipeId: "" });
+    this.voiceSearchVisible = true;
     this.setData({ pageClass: accessibilityPageClass("transcripts-page") });
     await this.loadTranscripts(true);
     await this.revealStoredTranscriptTarget();
@@ -611,7 +615,7 @@ definePage<TranscriptsData>()({
       return;
     }
     this.swipeTapUntil = Date.now() + 350;
-    this.setData({ openSwipeId: dx < 0 ? start.id : "" });
+    this.setData({ openSwipeId: dx > 0 ? start.id : "" });
   },
 
   onCardTouchCancel() {
@@ -711,6 +715,8 @@ definePage<TranscriptsData>()({
       stopMemoirVoiceSearchRecording();
       return;
     }
+    const token = ++this.voiceSearchToken;
+    const isCurrent = () => this.voiceSearchVisible && token === this.voiceSearchToken;
     setTranscriptsData(this, {
       voiceSearchRecording: true,
       voiceSearchTranscribing: false,
@@ -719,7 +725,9 @@ definePage<TranscriptsData>()({
     });
     try {
       const query = await recordMemoirVoiceSearchQuery({
+        isCancelled: () => !isCurrent(),
         onRecordingEnd: () => {
+          if (!isCurrent()) return;
           setTranscriptsData(this, {
             voiceSearchRecording: false,
             voiceSearchTranscribing: true,
@@ -727,10 +735,13 @@ definePage<TranscriptsData>()({
           });
         },
       });
+      if (!isCurrent()) return;
       setTranscriptsData(this, { voiceSearchStatusText: "正在理解搜索需求" });
       const parsed = await parseMemoirVoiceSearchQuery(query);
+      if (!isCurrent()) return;
       const parsedFilters = filtersFromParsedSearch(parsed);
       await this.applySearch(parsed.query || query, parsedFilters, parsed);
+      if (!isCurrent()) return;
       trackAuditAction(
         "transcript.voice_search",
         { has_filters: searchCriteriaActive(parsed.query || query, parsedFilters) },
@@ -738,14 +749,35 @@ definePage<TranscriptsData>()({
       );
       wx.showToast({ title: "已识别", icon: "success" });
     } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "语音搜索失败" });
+      if (isCurrent()) {
+        setTranscriptsData(this, { error: error instanceof Error ? error.message : "语音搜索失败" });
+      }
     } finally {
+      if (isCurrent()) {
+        setTranscriptsData(this, {
+          voiceSearchRecording: false,
+          voiceSearchTranscribing: false,
+          voiceSearchStatusText: "",
+        });
+      }
+    }
+  },
+
+  cancelVoiceSearch() {
+    this.voiceSearchVisible = false;
+    this.voiceSearchToken += 1;
+    if (this.data.voiceSearchRecording || this.data.voiceSearchTranscribing) {
+      cancelMemoirVoiceSearchRecording();
       setTranscriptsData(this, {
         voiceSearchRecording: false,
         voiceSearchTranscribing: false,
         voiceSearchStatusText: "",
       });
     }
+  },
+
+  onHide() {
+    this.cancelVoiceSearch();
   },
 
   async recoverTranscript(event: DatasetEvent) {
@@ -766,9 +798,9 @@ definePage<TranscriptsData>()({
         items: replaceItem(this.data.items, recovered, this.data.searchQuery),
       });
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "已恢复转写", icon: "success" });
+      wx.showToast({ title: "录音已转成文字", icon: "success" });
     } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "恢复转写失败" });
+      setTranscriptsData(this, { error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {
       setTranscriptsData(this, { recoveringId: "" });
     }
@@ -779,9 +811,7 @@ definePage<TranscriptsData>()({
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
-    if (this.data.voiceSearchRecording) {
-      stopMemoirVoiceSearchRecording();
-    }
+    this.cancelVoiceSearch();
   },
 
   openLogin() {

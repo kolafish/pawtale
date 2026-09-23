@@ -7,7 +7,8 @@ import {
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import { getAICreditSummary, type AICreditSummary } from "../../services/billing";
+import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
   aiModelLabel,
@@ -43,6 +44,14 @@ interface MeData {
   avatarSaving: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
+  creditLoading: boolean;
+  creditAvailable: boolean;
+  creditError: string;
+  creditTotalText: string;
+  creditUsedText: string;
+  creditRemainingText: string;
+  creditProgressPercent: string;
+  rechargeQrVisible: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -89,9 +98,9 @@ function formatAudioDuration(totalSeconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const restSeconds = seconds % 60;
   if (!minutes) {
-    return `${restSeconds} 秒`;
+    return `${restSeconds}秒`;
   }
-  return `${minutes} 分 ${restSeconds} 秒`;
+  return `${minutes}分${restSeconds}秒`;
 }
 
 function voiceStatsData(progress: MemoirVoiceProgressResponse) {
@@ -101,6 +110,36 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
     utteranceCount: snapshot?.valid_utterance_count ?? progress.utterance_count,
     totalUserCharCount: snapshot?.source_char_count ?? progress.total_user_char_count,
     totalAudioText: formatAudioDuration(snapshot?.total_audio_seconds ?? progress.total_audio_seconds),
+  };
+}
+
+function creditAmount(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+}
+
+function formatCreditAmount(value: unknown): string {
+  return creditAmount(value).toFixed(2);
+}
+
+function creditData(summary: AICreditSummary): Pick<
+  MeData,
+  | "creditAvailable"
+  | "creditError"
+  | "creditTotalText"
+  | "creditUsedText"
+  | "creditRemainingText"
+  | "creditProgressPercent"
+> {
+  const total = creditAmount(summary.total_credit_rmb);
+  const used = creditAmount(summary.used_rmb);
+  return {
+    creditAvailable: true,
+    creditError: "",
+    creditTotalText: formatCreditAmount(total),
+    creditUsedText: formatCreditAmount(used),
+    creditRemainingText: formatCreditAmount(summary.remaining_rmb),
+    creditProgressPercent: (total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0).toFixed(1),
   };
 }
 
@@ -142,6 +181,14 @@ function loggedOutData(): Partial<MeData> {
     deletingAccount: false,
     editingName: false,
     voiceStatsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: "0.0",
+    rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
     avatarText: "作",
@@ -172,6 +219,14 @@ definePage<MeData>()({
     avatarSaving: false,
     editingName: false,
     voiceStatsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: "0.0",
+    rechargeQrVisible: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -236,7 +291,9 @@ definePage<MeData>()({
         ...accessibilitySettingsData(),
       });
       if (activeProjectId) {
-        await this.loadVoiceStats(activeProjectId);
+        await Promise.all([this.loadVoiceStats(activeProjectId), this.loadAICreditSummary()]);
+      } else {
+        await this.loadAICreditSummary();
       }
     } catch (error) {
       if (isAuthError(error)) {
@@ -343,6 +400,32 @@ definePage<MeData>()({
     }
   },
 
+  async loadAICreditSummary() {
+    this.setData({ creditLoading: true, creditError: "" });
+    try {
+      const summary = await getAICreditSummary();
+      this.setData(creditData(summary));
+    } catch (error) {
+      console.warn("load AI credit summary failed", error);
+      this.setData({
+        creditAvailable: false,
+        creditError: error instanceof Error ? error.message : "额度暂时无法加载",
+      });
+    } finally {
+      this.setData({ creditLoading: false });
+    }
+  },
+
+  openRechargeQr() {
+    this.setData({ rechargeQrVisible: true });
+  },
+
+  closeRechargeQr() {
+    this.setData({ rechargeQrVisible: false });
+  },
+
+  stopRechargeQrTap() {},
+
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
     this.setData({
@@ -379,6 +462,7 @@ definePage<MeData>()({
       replaceMemoirStore({});
       this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "已退出", icon: "success" });
+      relaunchLogin();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
     } finally {
@@ -407,6 +491,7 @@ definePage<MeData>()({
       replaceMemoirStore({});
       this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "账号已注销", icon: "success" });
+      relaunchLogin();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "注销失败，请稍后重试" });
     } finally {

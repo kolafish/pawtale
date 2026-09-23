@@ -10,7 +10,7 @@
   border-radius: 18rpx;
   background: var(--ui-surface);
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
   box-shadow: var(--ui-card-shadow);
 }
@@ -50,7 +50,7 @@
   display: block;
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
 }
 
 .section {
@@ -82,7 +82,7 @@
 
 .section-kicker {
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 36rpx;
 }
@@ -96,7 +96,7 @@
 
 .topic-headline {
   margin-top: 10rpx;
-  font-size: 40rpx;
+  font-size: var(--ui-font-page-title);
   line-height: 54rpx;
   text-wrap: balance;
 }
@@ -104,14 +104,14 @@
 .topic-detail {
   margin-top: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-wrap: pretty;
 }
 
 .section-meta {
   color: var(--ui-value-text);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   line-height: 44rpx;
 }
 
@@ -125,16 +125,16 @@
 
 .map-note-title {
   color: var(--ui-accent-strong);
-  font-size: 27rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
-  line-height: 38rpx;
+  line-height: 1.4;
 }
 
 .map-note-text {
   margin-top: 8rpx;
   color: var(--ui-value-text);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -151,9 +151,9 @@
 
 .module-title {
   color: var(--ui-text-secondary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-section-title);
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 1.4;
 }
 
 .topic-list {
@@ -184,7 +184,7 @@
   border-radius: 999rpx;
   background: var(--ui-surface-subtle);
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 32rpx;
   text-align: center;
@@ -209,7 +209,7 @@
 .topic-intent {
   margin-top: 14rpx;
   color: var(--ui-text-primary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-wrap: pretty;
 }
@@ -217,8 +217,8 @@
 .state-detail {
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 38rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -229,7 +229,7 @@
   margin-top: 20rpx;
   padding: 0 20rpx;
   border-radius: var(--ui-radius-control);
-  font-size: 27rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 40rpx;
   transition-property: transform, background-color, box-shadow, opacity;
@@ -293,8 +293,8 @@
 .empty-state {
   display: block;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .session-meta {
@@ -308,7 +308,7 @@
   border-radius: 18rpx;
   background: var(--ui-accent-surface);
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
   flex: 0 0 auto;
 }
@@ -326,7 +326,7 @@
   border-radius: 999rpx;
   background: var(--ui-accent-surface-subtle);
   color: var(--ui-value-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-body);
   font-weight: 800;
 }
 
@@ -341,7 +341,7 @@
 
 .error {
   margin-top: 24rpx;
-  font-size: 26rpx;
+  font-size: var(--ui-font-body);
 }
 
 .large-text .topic-headline {
@@ -364,6 +364,6 @@
 .large-text .state-detail,
 .large-text .topic-start-action,
 .large-text .topic-choice-action {
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 48rpx;
 }

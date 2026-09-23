@@ -14,7 +14,7 @@
 .flow-context-label {
   min-width: 0;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   line-height: 34rpx;
   overflow-wrap: anywhere;
 }
@@ -23,13 +23,16 @@
   flex: 0 0 auto;
   min-height: 44px;
   margin: 0;
-  padding: 0 6rpx 0 18rpx;
+  padding: 0 12rpx;
   border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   color: var(--ui-accent-strong);
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
   font-weight: 600;
-  line-height: 44px;
+  line-height: 1.3;
 }
 
 .page-intro {
@@ -53,7 +56,7 @@
 
 .page-kicker {
   color: var(--ui-accent);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 38rpx;
 }
@@ -61,7 +64,7 @@
 .page-title {
   margin-top: 8rpx;
   font-family: var(--ui-font-editorial);
-  font-size: 40rpx;
+  font-size: var(--ui-font-page-title);
   font-weight: 700;
   line-height: 1.4;
   letter-spacing: 0.02em;
@@ -71,7 +74,7 @@
 .page-detail {
   margin-top: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-wrap: pretty;
 }
@@ -79,9 +82,9 @@
 .progress-text {
   margin-top: 14rpx;
   color: var(--ui-success-text);
-  font-size: 26rpx;
+  font-size: var(--ui-font-body);
   font-weight: 600;
-  line-height: 38rpx;
+  line-height: var(--ui-line-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -111,7 +114,7 @@
 
 .book-review-kicker {
   color: var(--ui-accent);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 34rpx;
 }
@@ -126,8 +129,8 @@
 
 .book-review-summary {
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .book-review-summary {
@@ -142,24 +145,24 @@
 
 .review-group-title {
   color: var(--ui-text-primary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 1.4;
 }
 
 .review-list-item {
   margin-top: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   font-variant-numeric: tabular-nums;
 }
 
 .review-complete {
   margin-top: 24rpx;
   color: var(--ui-success-text);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .editorial-actions {
@@ -178,7 +181,7 @@
 .editorial-actions-detail {
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 38rpx;
 }
 
@@ -207,14 +210,14 @@
 .editorial-action-type,
 .editorial-action-check {
   color: var(--ui-accent-strong);
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 34rpx;
 }
 
 .editorial-action-title {
   margin-top: 10rpx;
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 40rpx;
   font-variant-numeric: tabular-nums;
@@ -223,14 +226,14 @@
 .editorial-action-reason {
   margin-top: 8rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 38rpx;
 }
 
 .editorial-actions-warning {
   margin-top: 16rpx;
   color: var(--ui-danger-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
   line-height: 36rpx;
 }
 
@@ -258,8 +261,8 @@
 .completion-notice-detail {
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -309,7 +312,7 @@
   background: var(--ui-surface);
   box-shadow: var(--ui-control-shadow);
   color: var(--ui-text-primary);
-  font-size: 26rpx;
+  font-size: var(--ui-font-action);
   font-weight: 600;
   text-align: left;
   transition-property: transform, background-color, box-shadow;
@@ -396,7 +399,7 @@
 
 .chapter-order,
 .chapter-state {
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   line-height: 34rpx;
 }
 
@@ -438,8 +441,8 @@
 .chapter-detail {
   margin-top: 8rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -454,7 +457,7 @@
   box-sizing: border-box;
   border-top: 1rpx solid var(--ui-divider);
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-action);
   font-weight: 600;
   line-height: 38rpx;
 }
@@ -484,7 +487,7 @@
 .empty-state {
   margin-top: 30rpx;
   padding: 26rpx 24rpx;
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
 }
 

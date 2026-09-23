@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from app.services.ai_base import AITextServiceBase
-from app.config import get_settings
+from app.config import DEFAULT_AI_TEXT_MODEL, get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -83,7 +83,7 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     await stream_client.push(
         {
             "type": "turn.start",
-            "ai_model": "fake-model",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
             "voice": "S_test_voice",
             "speed_ratio": 1.1,
         }
@@ -94,11 +94,11 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
 
     assert ready["state"] == "ready"
     assert started["ai_provider"] == "fake-ai"
-    assert started["requested_ai_model"] == "fake-model"
+    assert started["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert started["resolved_ai_model"] == "fake-stream-model"
     assert started["audio_protocol"] == "pcm_frame"
     assert completed["state"] == "completed"
-    assert completed["requested_ai_model"] == "fake-model"
+    assert completed["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert completed["resolved_ai_model"] == "fake-stream-model"
     assert completed["response_ai_model"] == "fake-stream-model"
     assert completed["ai_model_mismatch"] is False
@@ -156,7 +156,7 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["source"] == "ai.streaming_assistant_turn"
     assert assistant_message.metadata_json["turn_pipeline"] == "streaming_llm_tts"
     assert assistant_message.metadata_json["provider"] == "fake-ai"
-    assert assistant_message.metadata_json["requested_model"] == "fake-model"
+    assert assistant_message.metadata_json["requested_model"] == DEFAULT_AI_TEXT_MODEL
     assert assistant_message.metadata_json["resolved_model"] == "fake-stream-model"
     assert assistant_message.metadata_json["response_model"] == "fake-stream-model"
     assert assistant_message.metadata_json["model_mismatch"] is False

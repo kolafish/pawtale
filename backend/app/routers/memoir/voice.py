@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
+from app.services.ai_credits import assert_ai_credit_available
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_images import (
@@ -406,12 +407,16 @@ async def play_mobile_memoir_audio_file(
 @router.post("/search-query/transcribe", response_model=MemoirVoiceSearchTranscriptionResponse)
 async def transcribe_mobile_memoir_search_query(
     req: MemoirVoiceSearchTranscriptionRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     try:
         audio = base64.b64decode(req.audio_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=400, detail="搜索语音格式无效") from exc
+    if not await memoir_voice_authorization.has_current_voice_authorization_consent(db, current_user.id):
+        raise HTTPException(status_code=403, detail="请先同意语音授权")
+    await assert_ai_credit_available(current_user.id)
     try:
         transcript = await memoir_voice_search.transcribe_voice_search_audio(
             audio,
@@ -419,6 +424,7 @@ async def transcribe_mobile_memoir_search_query(
                 current_user.id,
                 f"voice-search-{uuid.uuid4().hex}",
             ),
+            mime_type=req.mime_type,
         )
     except memoir_voice_search.VoiceSearchTranscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

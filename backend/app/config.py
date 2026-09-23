@@ -10,7 +10,7 @@ DEFAULT_APP_SECRET_KEY = "dev-secret-key-change-in-production"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale"
 MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
-DEFAULT_AI_TEXT_MODEL = "claude-opus-4-8"
+DEFAULT_AI_TEXT_MODEL = "deepseek-flash"
 VALID_AI_TEXT_MODELS = {
     "deepseek",
     "deepseek-flash",
@@ -18,10 +18,6 @@ VALID_AI_TEXT_MODELS = {
     "deepseek-v4-pro",
     "volc-doubao-pro",
     "doubao-seed-2-0-pro-260215",
-    "claude-fable-5",
-    "claude-opus-4-8",
-    "claude-sonnet-4",
-    "claude-sonnet-4-6",
 }
 
 
@@ -87,7 +83,7 @@ class Settings(BaseSettings):
     # StepFun batch ASR for user-triggered material reprocessing and offline tools.
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com"
-    stepfun_asr_model: str = "stepaudio-2.5-asr"
+    stepfun_asr_model: str = "stepaudio-3-asr-max"
     stepfun_asr_timeout_seconds: float = 120.0
 
     # Memoir editing worker

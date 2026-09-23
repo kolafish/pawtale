@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
@@ -653,7 +654,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
                 "version": data["sections"][0]["version"],
             }
         ],
-        "ai_model": "deepseek-v4-flash",
+        "ai_model": DEFAULT_AI_TEXT_MODEL,
     }
 
     queued = await client.post(url, json=payload)
@@ -666,7 +667,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
     assert state["status"] == "pending"
     assert state["material_count"] == 2
     assert state["batch_count"] == 1
-    assert state["requested_ai_model"] == "deepseek-v4-flash"
+    assert state["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -770,7 +771,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
                     "version": original_section["version"],
                 }
             ],
-            "ai_model": "deepseek-v4-flash",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -809,7 +810,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         for material in chapter_sections[0]["materials"]
     ] == [False, True]
     assert len(fake.prompts) == 2
-    assert requested_models == ["deepseek-v4-flash"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
     assert "先从全章视角设计" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert chapter_id not in fake.prompts[0]
@@ -1103,6 +1104,7 @@ async def test_section_update_rejects_stale_version(client, test_db):
     assert stale.status_code == 409
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "chapter_existing", "delete_section"])
 async def test_story_growth_discards_decisions_changed_during_model_wait(
     client, test_db, monkeypatch, change,
@@ -1252,6 +1254,7 @@ async def test_delete_section_compacts_remaining_order(client, test_db):
     assert remaining_orders == [0, 1]
 
 
+@pytest.mark.db_independent
 async def test_concurrent_section_creation_serializes_chapter_order(
     client, test_db,
 ):
@@ -1319,7 +1322,7 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
         plan_calls += 1
         title, chapters = chapters_from_payload({"title": "我的故事", "chapters": [
             {"title": "小时候", "source_indices": [1]}, {"title": "工作后", "source_indices": [2]},
-        ]}, sources=kwargs["sources"], max_chapters=8)
+        ]}, sources=kwargs["sources"])
         return GeneratedBookPlan(title=title, chapters=chapters, model="test", prompt="test")
 
     async def sections(_db, **kwargs):

@@ -104,6 +104,7 @@
       data-id="{{item.id}}"
       catchtap="deleteTranscript"
       disabled="{{deletingId !== ''}}"
+      aria-hidden="{{openSwipeId !== item.id}}"
       aria-label="删除{{item.summaryTitleText}}"
     ><text>删除</text></button>
     <view

@@ -612,7 +612,7 @@ function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string
   const pageSize = settings.page_size === "a5" ? "A5" : "默认纸张";
   const layout = settings.layout === "print" ? "打印排版" : "阅读排版";
   const header = settings.show_headers ? "含页眉" : "无页眉";
-  const appendix = settings.show_source_appendix ? "附上原始讲述" : "隐藏原始讲述";
+  const appendix = settings.show_source_appendix ? "附上整理记录" : "隐藏整理记录";
   return [pageSize, layout, header, appendix].join(" · ");
 }
 

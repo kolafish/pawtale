@@ -21,6 +21,7 @@ function loadMePage({
   voiceAuthorizationExports = {},
   profileExports = {},
   cacheExports = {},
+  billingExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
@@ -115,6 +116,14 @@ function loadMePage({
     clearCurrentUserMemoirSnapshots: () => {},
     ...cacheExports,
   });
+  mockModule("../services/billing.ts", {
+    getAICreditSummary: async () => ({
+      total_credit_rmb: 10,
+      used_rmb: 0,
+      remaining_rmb: 10,
+    }),
+    ...billingExports,
+  });
 
   return loadPageModule("../pages/me/index.ts");
 }
@@ -128,6 +137,25 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+test("me shows AI credit usage percentage to one decimal place", async () => {
+  const { page } = loadMePage({
+    billingExports: {
+      getAICreditSummary: async () => ({
+        total_credit_rmb: 10,
+        used_rmb: 0.03,
+        remaining_rmb: 9.97,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadAICreditSummary.call(context);
+
+  assert.equal(context.data.creditProgressPercent, "0.3");
+  assert.equal(context.data.creditUsedText, "0.03");
+  assert.equal(context.data.creditRemainingText, "9.97");
+});
 
 test("me shows the single guest login entry when the session is missing", async () => {
   const { ApiError } = require("../services/request.ts");
@@ -356,7 +384,7 @@ test("me keeps existing voice stats while refreshing the same project", async ()
   assert.equal(context.data.sessionCount, 7);
   assert.equal(context.data.utteranceCount, 42);
   assert.equal(context.data.totalUserCharCount, 1500);
-  assert.equal(context.data.totalAudioText, "20 分 0 秒");
+  assert.equal(context.data.totalAudioText, "20分0秒");
   assert.equal(context.data.voiceStatsLoading, false);
 });
 
@@ -407,7 +435,7 @@ test("me loads voice stats only for the active project", async () => {
   assert.equal(context.data.projectCount, 2);
   assert.equal(context.data.voiceStatsProjectId, "project-current");
   assert.equal(context.data.sessionCount, 4);
-  assert.equal(context.data.totalAudioText, "6 分 0 秒");
+  assert.equal(context.data.totalAudioText, "6分0秒");
 });
 
 test("me shows voice authorization status and opens agreement", () => {
@@ -466,11 +494,16 @@ test("me keeps memoir management and voice settings as separate entries", () => 
   ]);
 });
 
-test("me clears the current user's memoir snapshots on logout", async () => {
+test("me clears the current user's memoir snapshots and old page stack on logout", async () => {
   let cacheClearCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     setStorageSync() {},
     showToast() {},
+    reLaunch(options) {
+      assert.equal(cacheClearCount, 1);
+      pageStack.splice(0, pageStack.length, options.url);
+    },
   };
   const { page } = loadMePage({
     cacheExports: {
@@ -488,10 +521,15 @@ test("me clears the current user's memoir snapshots on logout", async () => {
 
   assert.equal(cacheClearCount, 1);
   assert.equal(context.data.loggedIn, false);
+  assert.deepEqual(pageStack, ["/pages/login/index"]);
 });
 
 test("me keeps the active session when server logout fails", async () => {
   let cacheClearCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
+  global.wx = {
+    reLaunch(options) { pageStack.splice(0, pageStack.length, options.url); },
+  };
   const { page } = loadMePage({
     authExports: { logoutBackendSession: async () => { throw new Error("网络不可用"); } },
     cacheExports: { clearCurrentUserMemoirSnapshots: () => { cacheClearCount += 1; } },
@@ -504,16 +542,23 @@ test("me keeps the active session when server logout fails", async () => {
   assert.equal(context.data.loading, false);
   assert.equal(context.data.error, "网络不可用");
   assert.equal(cacheClearCount, 0);
+  assert.deepEqual(pageStack, ["/pages/home/index", "/pages/me/index"]);
 });
 
-test("me deletes the account only after confirmation and clears local user data", async () => {
+test("me deletes the account only after confirmation and clears local data and page stack", async () => {
   let cacheClearCount = 0;
   let consentClearCount = 0;
   let deleteCount = 0;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     setStorageSync() {},
     showModal(options) { options.success({ confirm: true }); },
     showToast() {},
+    reLaunch(options) {
+      assert.equal(cacheClearCount, 1);
+      assert.equal(consentClearCount, 1);
+      pageStack.splice(0, pageStack.length, options.url);
+    },
   };
   const { page } = loadMePage({
     authExports: { deleteAccountWithWeChat: async () => { deleteCount += 1; } },
@@ -528,13 +573,16 @@ test("me deletes the account only after confirmation and clears local user data"
   assert.equal(cacheClearCount, 1);
   assert.equal(consentClearCount, 1);
   assert.equal(context.data.loggedIn, false);
+  assert.deepEqual(pageStack, ["/pages/login/index"]);
 });
 
 test("me keeps account and local data when deletion is cancelled or fails", async () => {
   let cacheClearCount = 0;
   let confirmed = false;
+  const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
     showModal(options) { options.success({ confirm: confirmed }); },
+    reLaunch(options) { pageStack.splice(0, pageStack.length, options.url); },
   };
   const { page } = loadMePage({
     authExports: { deleteAccountWithWeChat: async () => { throw new Error("网络不可用"); } },
@@ -549,4 +597,5 @@ test("me keeps account and local data when deletion is cancelled or fails", asyn
   assert.equal(context.data.loggedIn, true);
   assert.equal(context.data.error, "网络不可用");
   assert.equal(cacheClearCount, 0);
+  assert.deepEqual(pageStack, ["/pages/home/index", "/pages/me/index"]);
 });

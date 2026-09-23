@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select, update
@@ -15,7 +16,11 @@ from app.clock import utcnow_naive
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
-from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoOutput
+from app.models.memoir import (
+    MemoirMaterialShareVideo,
+    MemoirShareVideoOutput,
+    MemoirVoiceUtterance,
+)
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirShareVideoJobCreateRequest,
@@ -53,6 +58,7 @@ from app.services.memoir.share_video_alignment import (
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_transcripts import _load_owned_utterance
+from app.services.ai_usage_records import AIUsageContext
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
@@ -61,9 +67,69 @@ _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
 logger = logging.getLogger(__name__)
 
+_ACTIVE_SHARE_VIDEO_STATUSES = frozenset(
+    {
+        MemoirShareVideoJobStatus.PENDING.value,
+        MemoirShareVideoJobStatus.RUNNING.value,
+    }
+)
+
 
 class ShareVideoLeaseLostError(RuntimeError):
     pass
+
+
+def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
+    return (
+        metadata.ai_model or "",
+        metadata.background_source,
+        metadata.background_style,
+        metadata.background_mode,
+        metadata.background_effective_mode,
+        metadata.custom_background_asset_id or "",
+        metadata.background_status,
+    )
+
+
+async def _find_active_duplicate_share_video_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_id: str,
+    utterance_id: str,
+    audio_file_id: str,
+    text_hash: str,
+    start_char: int,
+    end_char: int,
+    start_ms: int,
+    end_ms: int,
+    metadata: ShareVideoJobMetadata,
+) -> MemoirMaterialShareVideo | None:
+    candidates = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                MemoirMaterialShareVideo.user_id == user_id,
+                MemoirMaterialShareVideo.utterance_id == utterance_id,
+                MemoirMaterialShareVideo.audio_file_id == audio_file_id,
+                MemoirMaterialShareVideo.text_hash == text_hash,
+                MemoirMaterialShareVideo.start_char == start_char,
+                MemoirMaterialShareVideo.end_char == end_char,
+                MemoirMaterialShareVideo.start_ms == start_ms,
+                MemoirMaterialShareVideo.end_ms == end_ms,
+                MemoirMaterialShareVideo.status.in_(_ACTIVE_SHARE_VIDEO_STATUSES),
+            )
+            .order_by(MemoirMaterialShareVideo.created_at.desc())
+        )
+    ).all()
+    request_signature = _share_video_options_signature(metadata)
+    for candidate in candidates:
+        if _share_video_options_signature(
+            ShareVideoJobMetadata.from_json(candidate.metadata_json)
+        ) == request_signature:
+            return candidate
+    return None
 
 
 def _set_job_metadata(job: MemoirMaterialShareVideo, metadata: ShareVideoJobMetadata) -> None:
@@ -239,6 +305,46 @@ async def create_share_video_job(
         else background_orchestration.effective_background_mode(background_mode, duration_ms)
     )
 
+    metadata = ShareVideoJobMetadata(
+        alignment_strategy=alignment.strategy,
+        alignment_confidence=alignment.confidence,
+        char_timings=alignment.char_timings[start_char:end_char],
+        ai_model=selected_ai_model,
+        background_source=background_source,
+        background_style=background_style,
+        background_mode=background_mode,
+        background_effective_mode=effective_background_mode,
+        custom_background_asset_id=custom_background_asset_id,
+        background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
+        background_status=background_orchestration.initial_background_status(
+            background_source,
+            ai_background_enabled=get_settings().memoir_share_video_ai_background_enabled,
+        ),
+    )
+
+    # The utterance row serializes identical requests so two quick submissions
+    # cannot both pass the active-job check and start duplicate video work.
+    await db.execute(
+        select(MemoirVoiceUtterance.id)
+        .where(MemoirVoiceUtterance.id == utterance.id)
+        .with_for_update()
+    )
+    duplicate = await _find_active_duplicate_share_video_job(
+        db,
+        project_id=utterance.voice_session.project_id,
+        user_id=user_id,
+        utterance_id=utterance.id,
+        audio_file_id=audio_file.id,
+        text_hash=alignment.text_hash,
+        start_char=start_char,
+        end_char=end_char,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        metadata=metadata,
+    )
+    if duplicate is not None:
+        return _job_response(duplicate)
+
     job = MemoirMaterialShareVideo(
         project_id=utterance.voice_session.project_id,
         utterance_id=utterance.id,
@@ -253,22 +359,7 @@ async def create_share_video_job(
         end_char=end_char,
         start_ms=start_ms,
         end_ms=end_ms,
-        metadata_json=ShareVideoJobMetadata(
-            alignment_strategy=alignment.strategy,
-            alignment_confidence=alignment.confidence,
-            char_timings=alignment.char_timings[start_char:end_char],
-            ai_model=selected_ai_model,
-            background_source=background_source,
-            background_style=background_style,
-            background_mode=background_mode,
-            background_effective_mode=effective_background_mode,
-            custom_background_asset_id=custom_background_asset_id,
-            background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
-            background_status=background_orchestration.initial_background_status(
-                background_source,
-                ai_background_enabled=get_settings().memoir_share_video_ai_background_enabled,
-            ),
-        ).to_json(),
+        metadata_json=metadata.to_json(),
     )
     db.add(job)
     await db.commit()
@@ -757,6 +848,12 @@ async def run_share_video_job_with_session(
     target_path = share_video_file_path(job)
     try:
         metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+        usage_context = AIUsageContext(
+            operation_id=str(uuid4()),
+            operation="memoir.share_video_generation",
+            user_id=job.user_id,
+            project_id=job.project_id,
+        )
 
         async def persist_background_progress(updated_metadata: ShareVideoJobMetadata) -> None:
             _set_job_metadata(job, updated_metadata)
@@ -769,6 +866,7 @@ async def run_share_video_job_with_session(
             persist_progress=persist_background_progress,
             ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
             volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
+            usage_context=usage_context,
         )
         background_image_path = prepared_background.image_path
         background_segments = prepared_background.segments

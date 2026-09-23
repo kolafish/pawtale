@@ -20,10 +20,8 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
-    _char_units,
     _render_pdf_pages,
     _text_units,
-    _truncate_units,
     _wrap_pdf_line,
 )
 from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
@@ -155,17 +153,48 @@ def _add_section_page(
     show_header: bool = False,
     show_footer: bool = False,
     body_numbering: bool = False,
+    compact: bool = False,
+    force_right_page: bool = False,
 ) -> None:
     if not content and not (heading or section_title):
         return
+    if (
+        force_right_page
+        and not builder.layout.reading_edition
+        and (len(builder.pages) + 1) % 2 == 0
+    ):
+        builder.new_page(show_header=False, show_footer=False)
     builder.new_page(
         section_title,
         show_header=show_header,
         show_footer=show_footer,
         body_numbering=body_numbering,
     )
-    builder.add_heading(heading or section_title)
-    if content:
+    page_heading = heading or section_title
+    if compact:
+        builder.add_text(
+            page_heading,
+            font_size=builder.layout.small_font_size + 2,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units,
+            spacing_after=8,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        )
+    else:
+        builder.add_heading(page_heading)
+    if content and compact:
+        compact_font_size = builder.layout.small_font_size + 1
+        builder.add_text(
+            content,
+            font_size=compact_font_size,
+            line_height=max(18, builder.layout.line_height - 3),
+            max_units=builder.layout.max_line_units + 2,
+            first_line_indent=compact_font_size * 2,
+            paragraph_spacing_after=4,
+            min_start_lines=1,
+            keep_last_lines=1,
+        )
+    elif content:
         builder.add_body_text(content)
 
 
@@ -571,6 +600,14 @@ def _title_page_content(subtitle: str, content: str) -> str:
 
 
 def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title: str, subtitle: str) -> None:
+    reading_sections = [
+        _dict(section)
+        for section in front_matter
+        if _str(_dict(section).get("kind")) in {"preface", "generation_note"}
+        and _section_enabled(_dict(section))
+        and _section_content(_dict(section))
+    ]
+    reading_front_matter_added = False
     for raw_section in front_matter:
         section = _dict(raw_section)
         if not _section_enabled(section):
@@ -578,12 +615,36 @@ def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title
         kind = _str(section.get("kind"))
         if kind == "cover":
             continue
+        if builder.layout.reading_edition:
+            if kind == "title_page":
+                continue
+            if kind in {"preface", "generation_note"}:
+                if not reading_front_matter_added and reading_sections:
+                    builder.new_page("写在前面", show_header=False, show_footer=False)
+                    for index, reading_section in enumerate(
+                        sorted(reading_sections, key=lambda item: item.get("kind") != "preface")
+                    ):
+                        heading = _section_title(reading_section, "书前说明")
+                        if index == 0:
+                            builder.add_heading(heading)
+                        else:
+                            builder.add_spacer(0.5)
+                            builder.add_section_heading(heading)
+                        builder.add_body_text(_section_content(reading_section))
+                    reading_front_matter_added = True
+                continue
         section_title = _section_title(section, "书前说明")
         content = _section_content(section)
         if kind == "title_page":
             _add_title_page(builder, title=title, content=_title_page_content(subtitle, content))
             continue
-        _add_section_page(builder, section_title=section_title, content=content)
+        _add_section_page(
+            builder,
+            section_title=section_title,
+            content=content,
+            compact=(kind == "generation_note" and not builder.layout.reading_edition),
+            force_right_page=(kind == "preface" and not builder.layout.reading_edition),
+        )
 
 
 def _chapter_title(chapter: dict[str, Any], fallback_index: int) -> str:
@@ -602,14 +663,7 @@ def _chapter_anchor(fallback_index: int) -> str:
 
 
 def _toc_line(entry: PDFTocEntry, layout: PDFLayout) -> str:
-    page_text = str(entry.page_number) if entry.page_number is not None else ""
-    label = f"第{_chinese_number(entry.index)}章　{entry.title}"
-    if not page_text:
-        return label
-    label = _truncate_units(label, max(8, layout.max_line_units - _text_units(page_text) - 4))
-    leader_units = layout.max_line_units - _text_units(label) - _text_units(page_text) - 2
-    leaders = "." * max(2, int(leader_units / _char_units(".")))
-    return f"{label} {leaders} {page_text}"
+    return f"第{_chinese_number(entry.index)}章　{entry.title}"
 
 
 def _chapter_toc_entries(
@@ -674,7 +728,7 @@ def _add_table_of_contents(
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
         for section_index, section_title in enumerate(
-            entry.section_titles,
+            () if builder.layout.reading_edition else entry.section_titles,
             start=1,
         ):
             builder.add_toc_row(
@@ -684,10 +738,7 @@ def _add_table_of_contents(
                     entry.anchor if entry.page_number is not None else None
                 ),
                 indent=18,
-                font_size=max(
-                    builder.layout.small_font_size,
-                    builder.layout.font_size - 3,
-                ),
+                font_size=max(builder.layout.small_font_size, builder.layout.font_size - 2),
             )
 
 
@@ -713,16 +764,6 @@ def _without_leading_quote_overlap(content: str, quote: str) -> str:
         return content
     remainder = stripped[len(quote_key) :].lstrip("，。！？；：、,.!?;: \n")
     return remainder or content
-
-
-def _without_embedded_quote_overlap(text: str, quote: str) -> str:
-    quote_key = _quote_overlap_key(quote)
-    if len(quote_key) < 8:
-        return text
-    cleaned = text
-    for suffix in ("。", "！", "？", "，", "；", ""):
-        cleaned = cleaned.replace(f"{quote_key}{suffix}", "")
-    return cleaned.strip()
 
 
 def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
@@ -766,6 +807,8 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         title = _chapter_title(chapter, fallback_index)
         label = _chapter_label(chapter, fallback_index)
         anchor = _chapter_anchor(fallback_index)
+        if builder.layout.mirror_body_pages and (len(builder.pages) + 1) % 2 == 0:
+            builder.new_page(show_header=False, show_footer=False)
         builder.new_page(
             title,
             show_header=False,
@@ -776,7 +819,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             anchor=anchor,
             outline_title=f"{label} {title}",
         )
-        builder.add_spacer(2.5)
+        builder.add_spacer(4.0 if builder.layout.mirror_body_pages else 2.5)
         builder.add_text(
             label,
             font_size=builder.layout.small_font_size + 1,
@@ -789,7 +832,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             font_size=builder.layout.title_font_size,
             line_height=builder.layout.line_height + 12,
             max_units=max(10, builder.layout.max_line_units - 4),
-            spacing_after=12,
+            spacing_after=18 if builder.layout.mirror_body_pages else 12,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
@@ -808,12 +851,10 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
 
         quote = _chapter_pull_quote(chapter)
         if quote:
-            builder.add_quote(quote, spacing_after=6)
-
-        intro = _str(chapter.get("intro"))
-        intro = _without_embedded_quote_overlap(intro, quote)
-        if intro:
-            builder.add_body_text(intro, spacing_after=4)
+            builder.add_quote(
+                quote,
+                spacing_after=12 if builder.layout.mirror_body_pages else 6,
+            )
 
         illustrations = [
             _dict(item)
@@ -945,18 +986,17 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
             )
     _add_unconfirmed_facts(builder, _list(back_matter.get("unconfirmed_facts")))
     appendix_sections: list[tuple[str, str]] = []
-    for key, fallback_title in [("interview_records", "讲述资料"), ("version_note", "版本与修订")]:
-        section = _dict(back_matter.get(key))
-        if _section_enabled(section):
-            content = _section_content(section)
-            if content:
-                appendix_sections.append((_section_title(section, fallback_title), content))
     if include_source_appendix:
-        section = _dict(back_matter.get("source_appendix"))
-        if _section_enabled(section):
-            content = _section_content(section)
-            if content:
-                appendix_sections.append((_section_title(section, "章节来源"), content))
+        for key, fallback_title in [
+            ("interview_records", "讲述资料"),
+            ("version_note", "版本与修订"),
+            ("source_appendix", "章节来源"),
+        ]:
+            section = _dict(back_matter.get(key))
+            if _section_enabled(section):
+                content = _section_content(section)
+                if content:
+                    appendix_sections.append((_section_title(section, fallback_title), content))
     _add_appendix_record_page(builder, appendix_sections)
 
 
@@ -1186,7 +1226,7 @@ def _build_manuscript_pdf_pages(
     include_source_appendix = (
         show_source_appendix
         if show_source_appendix is not None
-        else setting_source_appendix is not False
+        else not layout.reading_edition and setting_source_appendix is not False
     )
     back_cover_quote = _str(settings.get("back_cover_quote"))
     cover_style = _str(settings.get("cover_style")) or "classic_plain"

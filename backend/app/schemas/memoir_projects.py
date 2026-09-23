@@ -20,7 +20,7 @@ class MemoirProjectCreate(BaseModel):
     default_guidance_mode: MemoirGuidanceMode | None = None
     default_interview_type: MemoirInterviewType | None = None
     default_session_goal: MemoirSessionGoal | None = None
-    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
 
     @field_validator("narrator_age")
     @classmethod

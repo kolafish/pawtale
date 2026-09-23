@@ -108,7 +108,7 @@ class ChapterGenerationContext:
     sections: tuple[ChapterSectionInput, ...]
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
 
 
 @dataclass(frozen=True)

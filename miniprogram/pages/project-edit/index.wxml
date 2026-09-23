@@ -33,13 +33,16 @@
 
     <view class="field">
       <text class="field-label ui-section-heading">性别</text>
-      <view class="segmented">
+      <view class="segmented" aria-role="radiogroup" aria-label="主人公性别">
         <view
           wx:for="{{genderOptions}}"
           wx:key="value"
           class="segment ui-pressable {{narratorGender === item.value ? 'selected' : ''}}"
           data-gender="{{item.value}}"
           bindtap="selectGender"
+          aria-role="radio"
+          aria-checked="{{narratorGender === item.value}}"
+          aria-label="{{item.label}}"
         >
           <text>{{item.label}}</text>
         </view>

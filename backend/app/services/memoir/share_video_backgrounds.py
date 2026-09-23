@@ -11,6 +11,9 @@ import httpx
 
 from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
+from app.services.ai_credits import assert_ai_credit_available
+from app.services.ai_costs import estimate_image_cost
+from app.services.ai_usage_records import AIUsageContext, record_ai_usage
 
 
 DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
@@ -362,6 +365,8 @@ class VolcArkImageGenerationService:
 async def get_or_generate_share_video_background(
     selected_text: str,
     style_id: str | None,
+    *,
+    usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
     normalized_style = normalize_share_video_background_style(style_id)
@@ -387,7 +392,37 @@ async def get_or_generate_share_video_background(
             cache_hit=True,
         )
 
-    image = await VolcArkImageGenerationService().generate(prompt.prompt)
+    try:
+        if usage_context and usage_context.user_id:
+            await assert_ai_credit_available(usage_context.user_id)
+        image = await VolcArkImageGenerationService().generate(prompt.prompt)
+    except Exception as exc:
+        await record_ai_usage(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=model or "unknown",
+            status="failed",
+            cost=estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=model,
+                image_count=1,
+            ),
+            image_count=1,
+            error_type=type(exc).__name__,
+            context=usage_context,
+        )
+        raise
+    await record_ai_usage(
+        provider=VolcArkImageGenerationService.provider_name,
+        model=image.model,
+        status="succeeded",
+        cost=estimate_image_cost(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=image.model,
+            image_count=1,
+        ),
+        image_count=1,
+        context=usage_context,
+    )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")

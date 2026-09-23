@@ -7,8 +7,16 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.services.ai_costs import (
+    AICostEstimate,
+    NormalizedAIUsage,
+    estimate_ai_cost,
+    normalize_ai_usage,
+)
 from app.services.ai_types import AITextClient
 from app.services.ai_streaming import AITextStreamChunk
+from app.services.ai_credits import assert_current_ai_credit_available
+from app.services.ai_usage_records import record_ai_usage
 from app.services.json_utils import extract_json_payload
 
 
@@ -51,6 +59,18 @@ class AITextCallResult:
     def is_truncated(self) -> bool:
         return self.finish_reason in TRUNCATED_FINISH_REASONS
 
+    @property
+    def normalized_usage(self) -> NormalizedAIUsage:
+        return normalize_ai_usage(self.usage)
+
+    @property
+    def cost_estimate(self) -> AICostEstimate:
+        return estimate_ai_cost(
+            provider=self.provider,
+            model=self.response_model or self.resolved_model,
+            usage=self.normalized_usage,
+        )
+
     def diagnostics(self) -> dict[str, object]:
         values: dict[str, object] = {
             "requested_model": self.requested_model,
@@ -65,6 +85,8 @@ class AITextCallResult:
         }
         if self.usage:
             values["usage"] = self.usage
+        values["normalized_usage"] = self.normalized_usage.as_dict()
+        values["estimated_cost"] = self.cost_estimate.as_dict()
         return values
 
 
@@ -206,14 +228,40 @@ async def generate_text_with_client(
     max_tokens: int,
     timeout: float,
 ) -> AITextCallResult:
-    return await client.generate_text(
-        system_prompt,
-        user_prompt,
-        requested_model=requested_model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
+    await assert_current_ai_credit_available()
+    try:
+        result = await client.generate_text(
+            system_prompt,
+            user_prompt,
+            requested_model=requested_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.warning("AI text call failed provider=%s model=%s", getattr(client, "provider_name", None), getattr(client, "model_name", requested_model))
+        await record_ai_usage(
+            provider=getattr(client, "provider_name", None) or "unknown",
+            model=getattr(client, "model_name", None) or requested_model or "unknown",
+            status="failed",
+            cost=AICostEstimate(
+                None,
+                "unknown",
+                getattr(client, "provider_name", None),
+                getattr(client, "model_name", None) or requested_model,
+                reason="AI call failed before a billable response was returned",
+            ),
+            error_type=type(exc).__name__,
+        )
+        raise
+    await record_ai_usage(
+        provider=result.provider or "unknown",
+        model=result.response_model or result.resolved_model or requested_model or "unknown",
+        status="succeeded",
+        cost=result.cost_estimate,
+        usage=result.normalized_usage,
     )
+    return result
 
 
 async def stream_text_with_client(
@@ -226,32 +274,53 @@ async def stream_text_with_client(
     max_tokens: int,
     timeout: float,
 ) -> AsyncIterator[AITextStreamChunk]:
+    await assert_current_ai_credit_available()
     provider = getattr(client, "provider_name", None)
     resolved_model = getattr(client, "model_name", requested_model)
     mismatch_logged = False
-    async for chunk in client.stream_llm(
-        system_prompt,
-        user_prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-    ):
-        enriched = replace(
-            chunk,
-            provider=provider,
-            requested_model=requested_model,
-            resolved_model=resolved_model,
-        )
-        if enriched.model_mismatch and not mismatch_logged:
-            logger.warning(
-                "AI streaming response model differs from resolved model "
-                "requested=%s resolved=%s response=%s",
-                requested_model or "<default>",
-                resolved_model,
-                enriched.response_model,
+    last_chunk: AITextStreamChunk | None = None
+    try:
+        async for chunk in client.stream_llm(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        ):
+            enriched = replace(
+                chunk,
+                provider=provider,
+                requested_model=requested_model,
+                resolved_model=resolved_model,
             )
-            mismatch_logged = True
-        yield enriched
+            last_chunk = enriched
+            if enriched.model_mismatch and not mismatch_logged:
+                logger.warning(
+                    "AI streaming response model differs from resolved model "
+                    "requested=%s resolved=%s response=%s",
+                    requested_model or "<default>",
+                    resolved_model,
+                    enriched.response_model,
+                )
+                mismatch_logged = True
+            yield enriched
+    except Exception as exc:
+        await record_ai_usage(
+            provider=provider or "unknown",
+            model=resolved_model or requested_model or "unknown",
+            status="failed",
+            cost=AICostEstimate(None, "unknown", provider, resolved_model or requested_model, reason="AI stream failed"),
+            error_type=type(exc).__name__,
+        )
+        raise
+    if last_chunk is not None:
+        await record_ai_usage(
+            provider=last_chunk.provider or "unknown",
+            model=last_chunk.response_model or last_chunk.resolved_model or requested_model or "unknown",
+            status="succeeded",
+            cost=last_chunk.cost_estimate,
+            usage=last_chunk.normalized_usage,
+        )
 
 
 def validate_structured_response(
@@ -295,13 +364,38 @@ async def generate_structured_with_client(
     timeout: float,
     max_attempts: int,
 ) -> AIStructuredCallResult[StructuredModel]:
-    return await client.generate_structured(
-        system_prompt,
-        user_prompt,
-        output_model=output_model,
-        requested_model=requested_model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        max_attempts=max_attempts,
+    await assert_current_ai_credit_available()
+    try:
+        result = await client.generate_structured(
+            system_prompt,
+            user_prompt,
+            output_model=output_model,
+            requested_model=requested_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            max_attempts=max_attempts,
+        )
+    except Exception as exc:
+        await record_ai_usage(
+            provider=getattr(client, "provider_name", None) or "unknown",
+            model=getattr(client, "model_name", None) or requested_model or "unknown",
+            status="failed",
+            cost=AICostEstimate(
+                None,
+                "unknown",
+                getattr(client, "provider_name", None),
+                getattr(client, "model_name", None) or requested_model,
+                reason="structured AI call failed before a billable response was returned",
+            ),
+            error_type=type(exc).__name__,
+        )
+        raise
+    await record_ai_usage(
+        provider=result.response.provider or "unknown",
+        model=result.response.response_model or result.response.resolved_model or requested_model or "unknown",
+        status="succeeded",
+        cost=result.response.cost_estimate,
+        usage=result.response.normalized_usage,
     )
+    return result

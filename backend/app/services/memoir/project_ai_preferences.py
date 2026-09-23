@@ -4,11 +4,21 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.models.projects import Project
+from app.services.ai_access import restrict_requested_ai_model
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
+DISABLED_AI_MODEL_ALIASES = frozenset(
+    {
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4",
+        "claude-sonnet-4-6",
+    }
+)
 TRANSCRIPT_POLISH_LEVEL_METADATA_KEY = "transcript_polish_level"
 TEXT_POLISH_REQUIREMENTS = {
     MemoirTranscriptPolishLevel.LOW: (
@@ -45,12 +55,15 @@ def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
 
 def resolve_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
     requested = (requested_ai_model or "").strip()
-    return requested or project_ai_model(project)
+    selected = requested or project_ai_model(project)
+    if selected and selected.lower() in DISABLED_AI_MODEL_ALIASES:
+        return DEFAULT_AI_TEXT_MODEL
+    return restrict_requested_ai_model(selected) if selected else None
 
 
 def select_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
     selected = resolve_project_ai_model(project, requested_ai_model)
-    remember_project_ai_model(project, requested_ai_model)
+    remember_project_ai_model(project, selected)
     return selected
 
 
@@ -69,7 +82,7 @@ def normalize_transcript_polish_level(
     try:
         return MemoirTranscriptPolishLevel(value)
     except (TypeError, ValueError):
-        return MemoirTranscriptPolishLevel.LOW
+        return MemoirTranscriptPolishLevel.MEDIUM
 
 
 def text_polish_requirements(

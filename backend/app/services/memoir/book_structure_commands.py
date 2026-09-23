@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter
 from app.schemas.memoir_book import MemoirBookPlanStructureCommandRequest
 from app.services.memoir.book_plan_sources import (
@@ -61,6 +62,11 @@ def apply_book_structure_command(
     if req.type == "merge_chapters":
         return _merge_chapters(plan, chapters, req, source_refs_by_chapter=source_refs_by_chapter)
     if req.type == "split_chapter":
+        if len(chapters) >= MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
+            )
         return _split_chapter(
             plan,
             chapters,

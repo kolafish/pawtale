@@ -54,7 +54,7 @@
         <view wx:if="{{materialImageError}}" class="share-video-error">
           <text>{{materialImageError}}</text>
         </view>
-        <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments">
+        <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments" aria-label="选择连续文字片段">
           <view
             wx:for="{{shareVideoSegments}}"
             wx:for-item="segment"
@@ -63,6 +63,9 @@
             class="share-video-segment {{segment.className}}"
             data-index="{{segment.arrayIndex}}"
             bindtap="selectShareVideoSegment"
+            aria-role="button"
+            aria-pressed="{{segment.selected}}"
+            aria-disabled="{{!segment.selectable}}"
           >
             <text class="share-video-segment-text">{{segment.text}}</text>
             <text class="share-video-segment-meta">{{segment.timeRangeText}} · {{segment.durationText}}</text>
@@ -88,13 +91,16 @@
             <text class="voice-edit-label">视频背景</text>
             <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
           </view>
-          <view class="share-video-background-options">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="视频背景">
             <view
               wx:for="{{shareVideoBackgroundSourceOptions}}"
               wx:key="value"
               class="share-video-background-option {{item.value === shareVideoBackgroundSource ? 'selected' : ''}}"
               data-background-source="{{item.value}}"
               bindtap="selectShareVideoBackgroundSource"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoBackgroundSource}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
@@ -108,13 +114,16 @@
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
           <text class="share-video-background-help">直接图片使用完整构图；视频选择 AI 背景时，会另行为字幕保留留白。</text>
-          <view class="share-video-background-options">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
               wx:key="value"
               class="share-video-background-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
               data-background-style="{{item.value}}"
               bindtap="selectShareVideoBackgroundStyle"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoBackgroundStyle}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
@@ -127,13 +136,16 @@
             <text class="voice-edit-label">视频画面模式</text>
             <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
           </view>
-          <view class="share-video-background-options">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="视频画面模式">
             <view
               wx:for="{{shareVideoBackgroundModeOptions}}"
               wx:key="value"
               class="share-video-background-option {{item.value === shareVideoBackgroundMode ? 'selected' : ''}}"
               data-background-mode="{{item.value}}"
               bindtap="selectShareVideoBackgroundMode"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoBackgroundMode}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>

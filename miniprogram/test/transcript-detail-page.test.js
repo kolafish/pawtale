@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { ApiError } = require("../services/request.ts");
 const {
   mockMemoirApiModules,
   clearModule,
@@ -308,6 +309,48 @@ test("transcript detail page loads a single transcript", async () => {
   assert.equal(context.data.moreActionsExpanded, false);
 });
 
+test("transcript detail distinguishes a failed load from a missing record and can retry", async () => {
+  let attempts = 0;
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("网络连接失败，请检查网络后重试");
+        return sampleTranscript(id);
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-retry" });
+  assert.equal(context.data.item, null);
+  assert.equal(context.data.error, "网络连接失败，请检查网络后重试");
+
+  await page.loadTranscript.call(context);
+  assert.equal(attempts, 2);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.item.id, "utterance-retry");
+
+  const template = fs.readFileSync(path.join(__dirname, "../pages/transcript-detail/index.wxml"), "utf8");
+  assert.match(template, /wx:elif="\{\{error && !item\}\}"[\s\S]*?bindtap="loadTranscript">重新加载/);
+});
+
+test("transcript detail shows the missing state only for a missing record", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async () => {
+        throw new ApiError(404, "讲述记录不存在", {});
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-deleted" });
+  assert.equal(context.data.item, null);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.loading, false);
+});
+
 test("transcript detail page keeps long original narration collapsed until requested", async () => {
   const longRawText = "那年夏天我们一起去了老家的院子，外婆坐在门口给我们讲以前的事情。".repeat(4);
   const { page } = loadTranscriptDetailPage({
@@ -400,12 +443,12 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   await page.onLoad.call(context, { id: "utterance-pending" });
 
   assert.equal(context.data.item.titleText, "音频已保存");
-  assert.equal(context.data.item.transcriptionNoticeText, "这段录音已经安全保存，恢复转写后即可继续整理。");
-  assert.equal(context.data.item.heroStatusText, "等待转写");
+  assert.equal(context.data.item.transcriptionNoticeText, "录音已保存。把它转成文字后，就可以继续整理。");
+  assert.equal(context.data.item.heroStatusText, "等待生成文字");
   assert.equal(context.data.item.heroStatusClass, "pending");
   assert.equal(context.data.item.displayCountText, "尚未生成");
   assert.equal(context.data.item.rawCountText, "尚未转写");
-  assert.equal(context.data.item.locationTitleText, "等待转写");
+  assert.equal(context.data.item.locationTitleText, "等待生成文字");
   assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.canPlayAnswerAudio, true);
   assert.equal(context.data.item.canRecoverTranscription, true);
@@ -425,7 +468,7 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(context.data.item.canRecoverTranscription, false);
   assert.equal(context.data.item.titleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.item.displayCountText, "14 字");
-  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
+  assert.deepEqual(toasts, [{ title: "录音已转成文字", icon: "success" }]);
 });
 
 test("transcript detail page labels human interviewer questions", async () => {

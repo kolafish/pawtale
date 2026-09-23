@@ -87,6 +87,16 @@ test("book export page is registered", () => {
   assert.equal(pageJson.navigationBarTitleText, "阅读与导出");
 });
 
+test("book export overview binds reading, narration, and focused settings without duplicating the book", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
+
+  assert.match(template, /bindtap="openBookReader"/);
+  assert.match(template, /bindtap="openBookNarration"/);
+  assert.match(template, /data-section="title" bindtap="openSection"/);
+  assert.match(template, /data-section="advanced" bindtap="openSection"/);
+  assert.doesNotMatch(template, /bookPreviewTocItems|bookManuscriptStructureItems|bookManuscriptChapterItems/);
+});
+
 test("book export page loads plan and output from query project", async () => {
   const calls = [];
   const { page } = loadBookExportPage({
@@ -108,9 +118,7 @@ test("book export page loads plan and output from query project", async () => {
     ["output", "project/1"],
   ]);
   assert.equal(context.data.projectId, "project/1");
-  assert.equal(context.data.requestedAction, "print_pdf");
   assert.equal(context.data.exportNotice, "打印版字号更大，适合装订保存。");
-  assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
   assert.equal(context.data.bookPreviewChapters[0].sections.length, 2);
@@ -221,7 +229,7 @@ test("book export opens book settings when linked from whole-book review", async
     settings: "book",
   });
 
-  assert.equal(context.data.showBookSettings, true);
+  assert.equal(context.data.activeSection, "title");
   assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
   assert.equal(outputLoads, 1);
 });
@@ -269,27 +277,22 @@ test("book export page counts only chapters included in the final book", () => {
   assert.equal(context.data.totalChapterCount, 1);
 });
 
-test("book export page explains the selected export action", () => {
+test("book export uses the finished book for chapter count when the plan is unavailable", () => {
   const { page } = loadBookExportPage();
   const context = pageContext(page);
 
-  page.previewExportActionHint.call(context, {
-    currentTarget: { dataset: { action: "text" } },
-  });
-  assert.equal(context.data.exportActionHintText, "导出纯文字，方便复制和继续编辑。");
+  page.applyBookExportData.call(context, null, sampleBookOutput());
 
-  page.previewExportActionHint.call(context, {
-    currentTarget: { dataset: { action: "reading_pdf" } },
-  });
-  assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
+  assert.equal(context.data.totalChapterCount, 1);
 });
 
-test("book export keeps advanced settings collapsed and opens immersive reading", () => {
+test("book export opens focused settings, reading, and narration", async () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
     },
+    pageScrollTo() {},
   };
   const { page } = loadBookExportPage();
   const context = pageContext(page, {
@@ -298,13 +301,50 @@ test("book export keeps advanced settings collapsed and opens immersive reading"
     bookSelectedVersionId: "book-output-version-2",
   });
 
-  assert.equal(context.data.showBookSettings, false);
-  page.toggleBookSettings.call(context);
-  assert.equal(context.data.showBookSettings, true);
+  assert.equal(context.data.activeSection, "");
+  page.openSection.call(context, { currentTarget: { dataset: { section: "export" } } });
+  assert.equal(context.data.activeSection, "export");
+  await page.closeSection.call(context);
+  assert.equal(context.data.activeSection, "");
 
   page.openBookReader.call(context);
+  page.openBookNarration.call(context);
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1&versionId=book-output-version-2",
+    "/pages/book-reader/index?projectId=project%2F1&listen=1",
+  ]);
+});
+
+test("leaving history returns the book overview to the latest version", async () => {
+  global.wx = { pageScrollTo() {} };
+  const { page } = loadBookExportPage();
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.openSection.call(context, { currentTarget: { dataset: { section: "history" } } });
+
+  await page.changeBookOutputVersion.call(context, { detail: { value: "1" } });
+  assert.equal(context.data.bookViewingHistoricalVersion, true);
+  await page.closeSection.call(context);
+
+  assert.equal(context.data.activeSection, "");
+  assert.equal(context.data.bookViewingHistoricalVersion, false);
+  assert.equal(context.data.bookSelectedVersionId, "book-output-version-2");
+});
+
+test("book settings return to the overview scroll position", async () => {
+  const scrolls = [];
+  global.wx = { pageScrollTo(options) { scrolls.push(options); } };
+  const { page } = loadBookExportPage();
+  const context = pageContext(page);
+
+  page.onPageScroll.call(context, { scrollTop: 920 });
+  page.openSection.call(context, { currentTarget: { dataset: { section: "editorial" } } });
+  page.onPageScroll.call(context, { scrollTop: 150 });
+  await page.closeSection.call(context);
+
+  assert.deepEqual(scrolls, [
+    { scrollTop: 0, duration: 0 },
+    { scrollTop: 920, duration: 0 },
   ]);
 });
 
@@ -576,7 +616,6 @@ test("book export page downloads selected PDF layout and source appendix setting
   assert.equal(opened[0].filePath, "/tmp/book.pdf");
   assert.equal(opened[0].fileType, "pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
-  assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookExportBusyTarget, "");
 });
 
@@ -609,10 +648,9 @@ test("book export page downloads reading PDF with the standard layout", async ()
   });
 
   assert.equal(exportCalls[0].layout, "standard");
-  assert.equal(exportCalls[0].showSourceAppendix, true);
+  assert.equal(exportCalls[0].showSourceAppendix, false);
   assert.equal(opened[0].filePath, "/tmp/reading.pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
-  assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
 });
 
 test("book export delivers TXT through WeChat file sharing", async () => {

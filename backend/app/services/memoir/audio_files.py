@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 import uuid
+import wave
 
 import aiofiles
 import aiofiles.os
@@ -16,6 +17,8 @@ MEMOIR_AUDIO_DIR = DATA_DIR / "memoir" / "audio"
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".pcm"}
+_PCM_SAMPLE_RATE = 16000
+_PCM_BYTES_PER_SAMPLE = 2
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,26 @@ def audio_file_path(audio_file: AudioFile) -> Path:
     except ValueError:
         return DATA_DIR / storage_path
     return MEMOIR_AUDIO_DIR / relative_path
+
+
+def audio_file_duration_seconds(audio_file: AudioFile, path: Path) -> float | None:
+    """Return a measured duration, or None when the audio format cannot be measured."""
+    stored_duration = audio_file.duration_seconds
+    if stored_duration is not None and stored_duration > 0:
+        return float(stored_duration)
+
+    mime_type = audio_file.mime_type.split(";", 1)[0].strip().lower()
+    if mime_type in {"audio/pcm", "audio/x-pcm"}:
+        return path.stat().st_size / (_PCM_SAMPLE_RATE * _PCM_BYTES_PER_SAMPLE)
+    if mime_type in {"audio/wav", "audio/x-wav", "audio/wave"}:
+        try:
+            with wave.open(str(path), "rb") as wav:
+                frame_rate = wav.getframerate()
+                if frame_rate > 0:
+                    return wav.getnframes() / frame_rate
+        except (EOFError, OSError, wave.Error):
+            return None
+    return None
 
 
 def _validate_duration(duration_seconds: int | None) -> None:

@@ -29,6 +29,7 @@ from app.schemas.projects import (
 )
 from app.services import ai_project_analysis, ai_revision, ai_story
 from app.services.article import ai as article_ai
+from app.services.ai_access import restrict_requested_ai_model
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_factory import get_ai_service
 import app.services.project_documents as project_docs
@@ -472,6 +473,8 @@ async def ai_revise_document_multi(
     if not original_text:
         raise HTTPException(status_code=400, detail="没有可修改的内容")
 
+    models = list(dict.fromkeys(restrict_requested_ai_model(model) for model in req.models))
+
     async def revise_with_model(model: str) -> DocumentAIReviseMultiResultItem:
         try:
             ai_service = get_ai_service(model)
@@ -495,7 +498,7 @@ async def ai_revise_document_multi(
             logger.exception("AI revise-multi failed for model=%s doc=%s", model, document_id)
             return DocumentAIReviseMultiResultItem(ai_model=model, error=str(e))
 
-    results = await asyncio.gather(*(revise_with_model(model) for model in req.models))
+    results = await asyncio.gather(*(revise_with_model(model) for model in models))
     await _check_revision_unchanged(db, doc, base_content_revision)
 
     return DocumentAIReviseMultiResponse(

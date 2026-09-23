@@ -51,8 +51,15 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         return object()
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
+
+    async def credit_available(_user_id):
+        return None
+
+    monkeypatch.setattr(dictation_gateway, "assert_ai_credit_available", credit_available)
+
     async def authorized(_db, _user_id):
         return True
+
     monkeypatch.setattr(dictation_router, "has_current_voice_authorization_consent", authorized)
     monkeypatch.setattr(
         dictation_router,
