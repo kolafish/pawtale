@@ -40,11 +40,16 @@ import {
   userDisplayName,
 } from "../../services/user-display-name";
 
-interface CreditUsageViewItem {
-  id: string;
+interface CreditUsagePurposeGroup {
   purpose: string;
+  count: number;
   amountText: string;
-  timeText: string;
+}
+
+interface CreditUsageDayGroup {
+  dateText: string;
+  amountText: string;
+  purposes: CreditUsagePurposeGroup[];
 }
 
 interface MeData {
@@ -66,7 +71,8 @@ interface MeData {
   creditUsageExpanded: boolean;
   creditUsageLoading: boolean;
   creditUsageError: string;
-  creditUsageItems: CreditUsageViewItem[];
+  creditUsageItems: AIUsageDetail[];
+  creditUsageDays: CreditUsageDayGroup[];
   creditUsageHasMore: boolean;
   rechargeQrVisible: boolean;
   error: string;
@@ -139,17 +145,39 @@ function formatCreditAmount(value: unknown): string {
   return creditAmount(value).toFixed(2);
 }
 
-function creditUsageViewItem(item: AIUsageDetail): CreditUsageViewItem {
-  const date = new Date(item.created_at);
+function formatUsageAmount(micros: number): string {
+  return (micros / 1_000_000).toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1");
+}
+
+function creditUsageDayGroups(items: AIUsageDetail[]): CreditUsageDayGroup[] {
   const pad = (value: number) => String(value).padStart(2, "0");
-  return {
-    id: item.id,
-    purpose: item.purpose,
-    amountText: creditAmount(item.cost_rmb).toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1"),
-    timeText: Number.isNaN(date.getTime())
-      ? ""
-      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  };
+  const days = new Map<string, {
+    amountMicros: number;
+    purposes: Map<string, { count: number; amountMicros: number }>;
+  }>();
+  for (const item of items) {
+    const date = new Date(item.created_at);
+    const dateText = Number.isNaN(date.getTime())
+      ? "日期未知"
+      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const amountMicros = Math.round(creditAmount(item.cost_rmb) * 1_000_000);
+    const day = days.get(dateText) || { amountMicros: 0, purposes: new Map() };
+    const purpose = day.purposes.get(item.purpose) || { count: 0, amountMicros: 0 };
+    purpose.count += 1;
+    purpose.amountMicros += amountMicros;
+    day.amountMicros += amountMicros;
+    day.purposes.set(item.purpose, purpose);
+    days.set(dateText, day);
+  }
+  return Array.from(days, ([dateText, day]) => ({
+    dateText,
+    amountText: formatUsageAmount(day.amountMicros),
+    purposes: Array.from(day.purposes, ([purpose, group]) => ({
+      purpose,
+      count: group.count,
+      amountText: formatUsageAmount(group.amountMicros),
+    })),
+  }));
 }
 
 function creditData(summary: AICreditSummary): Pick<
@@ -222,6 +250,7 @@ function loggedOutData(): Partial<MeData> {
     creditUsageLoading: false,
     creditUsageError: "",
     creditUsageItems: [],
+    creditUsageDays: [],
     creditUsageHasMore: false,
     rechargeQrVisible: false,
     displayName: "",
@@ -265,6 +294,7 @@ definePage<MeData>()({
     creditUsageLoading: false,
     creditUsageError: "",
     creditUsageItems: [],
+    creditUsageDays: [],
     creditUsageHasMore: false,
     rechargeQrVisible: false,
     error: "",
@@ -324,6 +354,7 @@ definePage<MeData>()({
         creditUsageLoading: false,
         creditUsageError: "",
         creditUsageItems: [],
+        creditUsageDays: [],
         creditUsageHasMore: false,
         ...(keepVoiceStats ? {} : {
           voiceStatsProjectId: activeProjectId,
@@ -483,16 +514,17 @@ definePage<MeData>()({
     this.setData({
       creditUsageLoading: true,
       creditUsageError: "",
-      ...(reset ? { creditUsageItems: [], creditUsageHasMore: false } : {}),
+      ...(reset ? { creditUsageItems: [], creditUsageDays: [], creditUsageHasMore: false } : {}),
     });
     try {
       const page = await getAIUsageDetails(offset);
       if (this.data.email !== email || !this.data.creditUsageExpanded) {
         return;
       }
-      const items = page.items.map(creditUsageViewItem);
+      const items = reset ? page.items : [...this.data.creditUsageItems, ...page.items];
       this.setData({
-        creditUsageItems: reset ? items : [...this.data.creditUsageItems, ...items],
+        creditUsageItems: items,
+        creditUsageDays: creditUsageDayGroups(items),
         creditUsageHasMore: page.has_more,
       });
     } catch (error) {

@@ -158,15 +158,21 @@ test("me shows AI credit usage percentage to one decimal place", async () => {
   assert.equal(context.data.creditRemainingText, "9.97");
 });
 
-test("me shows and pages through charged AI usage details", async () => {
+test("me groups charged AI usage by date and purpose across pages", async () => {
   const offsets = [];
   const { page } = loadMePage({
     billingExports: {
       getAIUsageDetails: async (offset) => {
         offsets.push(offset);
         return offset === 0
-          ? { items: [{ id: "usage-1", purpose: "语音朗读", cost_rmb: "0.003000", created_at: "2026-09-23T00:00:00Z" }], has_more: true }
-          : { items: [{ id: "usage-2", purpose: "语音访谈", cost_rmb: "0.000001", created_at: "2026-09-22T00:00:00Z" }], has_more: false };
+          ? { items: [
+            { id: "usage-1", purpose: "语音朗读", cost_rmb: "0.003000", created_at: "2026-09-23T12:00:00Z" },
+            { id: "usage-2", purpose: "语音访谈", cost_rmb: "0.020000", created_at: "2026-09-23T11:00:00Z" },
+          ], has_more: true }
+          : { items: [
+            { id: "usage-3", purpose: "语音朗读", cost_rmb: "0.000001", created_at: "2026-09-23T10:00:00Z" },
+            { id: "usage-4", purpose: "语音朗读", cost_rmb: "0.200000", created_at: "2026-09-22T12:00:00Z" },
+          ], has_more: false };
       },
     },
   });
@@ -174,14 +180,22 @@ test("me shows and pages through charged AI usage details", async () => {
 
   await page.toggleCreditUsageDetails.call(context);
   assert.equal(context.data.creditUsageExpanded, true);
-  assert.deepEqual(context.data.creditUsageItems.map(({ purpose, amountText }) => [purpose, amountText]), [
-    ["语音朗读", "0.003"],
+  assert.equal(context.data.creditUsageDays.length, 1);
+  assert.equal(context.data.creditUsageDays[0].amountText, "0.023");
+  assert.deepEqual(context.data.creditUsageDays[0].purposes.map(({ purpose, count, amountText }) => [purpose, count, amountText]), [
+    ["语音朗读", 1, "0.003"],
+    ["语音访谈", 1, "0.02"],
   ]);
   assert.equal(context.data.creditUsageHasMore, true);
 
   await page.loadMoreCreditUsageDetails.call(context);
-  assert.deepEqual(offsets, [0, 1]);
-  assert.equal(context.data.creditUsageItems[1].amountText, "0.000001");
+  assert.deepEqual(offsets, [0, 2]);
+  assert.equal(context.data.creditUsageDays.length, 2);
+  assert.equal(context.data.creditUsageDays[0].amountText, "0.023001");
+  assert.deepEqual(context.data.creditUsageDays[0].purposes[0], {
+    purpose: "语音朗读", count: 2, amountText: "0.003001",
+  });
+  assert.equal(context.data.creditUsageDays[1].purposes[0].amountText, "0.20");
   assert.equal(context.data.creditUsageHasMore, false);
 });
 
