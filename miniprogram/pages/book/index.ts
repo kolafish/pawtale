@@ -198,6 +198,8 @@ definePage<BookPageData>()({
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
+    bookIncludedChapterCount: 0,
+    bookPartialNotice: "",
     bookPreviewTitle: "",
     bookStaleNotice: "",
     ttsBusyTarget: "",

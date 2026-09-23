@@ -38,9 +38,12 @@
         <text class="status-pill">{{stageText}}</text>
       </view>
       <text class="status-meta">
-        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookStaleNotice ? "整本书待更新" : (bookContentAvailable ? "已生成书稿" : progressText)}}
+        <text wx:if="{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount}}">{{bookIncludedChapterCount}}/{{totalChapterCount}} 章可读</text>
+        <text wx:else>{{totalChapterCount}} 章</text>
+        · {{bookCharCount || 0}} 字 · {{bookStaleNotice ? "整本书待更新" : (bookContentAvailable ? "已生成书稿" : progressText)}}
       </text>
       <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
+      <text wx:if="{{bookPartialNotice}}" class="progress-note">{{bookPartialNotice}}</text>
       <image
         class="book-header-illustration"
         src="/assets/memoir-book-header.png"
@@ -50,7 +53,7 @@
     </view>
     <view class="progress-actions">
       <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
-        <text>阅读全书</text><text class="progress-action-mark">›</text>
+        <text>{{bookPartialNotice ? "阅读当前书稿" : "阅读全书"}}</text><text class="progress-action-mark">›</text>
       </button>
       <button class="ghost-button small progress-action" bindtap="openBookCompletion">
         <text>查看待确认事项</text><text class="progress-action-mark">›</text>

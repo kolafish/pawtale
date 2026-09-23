@@ -10,22 +10,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
 from app.config import get_settings
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirBookPlanStatus,
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
 from app.models.memoir import (
     MemoirBookChapterDraft,
+    MemoirBookOutput,
     MemoirBookPlanChapter,
+    MemoirCompletionIssue,
     MemoirEditingJob,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
-from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
-from app.services.memoir.editing_jobs import EditingJobResult
-from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, completion_issues, editing_jobs
 from app.services.memoir.book_output_snapshots import (
     legacy_chapter_version_needs_upgrade,
+    load_book_plan_drafts,
     protected_legacy_chapter_version,
+    readable_chapter_versions,
 )
+from app.services.memoir.book_output_versions import load_latest_book_output_version
+from app.services.memoir.book_plan_sources import included_book_chapters
+from app.services.memoir.editing_jobs import EditingJobResult
+from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -61,6 +73,54 @@ async def schedule_book_draft(db: AsyncSession, *, project_id: str, source: str 
         preserve_progress=True,
         reschedule_running=True,
     )
+
+
+async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
+    """Requeue completed drafts that predate the nonblocking editorial policy."""
+    project_ids = (await db.scalars(
+        select(MemoirCompletionIssue.project_id)
+        .where(
+            MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+            MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+            MemoirCompletionIssue.issue_type.not_in(completion_issues.BLOCKING_BOOK_ISSUE_TYPES),
+        )
+        .distinct()
+    )).all()
+    scheduled = 0
+    for project_id in project_ids:
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+        if output is None:
+            continue
+        latest = await load_latest_book_output_version(db, output_id=output.id)
+        if latest is None:
+            continue
+        plan = await load_book_plan_drafts(db, project_id=project_id)
+        if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+            continue
+        included = included_book_chapters(plan)
+        blocked = await completion_issues.open_blocking_book_chapter_ids(
+            db, project_id=project_id, all_chapter_ids=(chapter.id for chapter in included),
+        )
+        safe_readable = {
+            chapter.id for chapter, _ in readable_chapter_versions(plan, allow_partial=True)
+            if chapter.id not in blocked
+        }
+        stored = {
+            item.get("chapter_id") for item in (latest.chapter_snapshot_json or [])
+            if isinstance(item, dict)
+        }
+        if not (safe_readable - stored or stored & blocked):
+            continue
+        job = await db.scalar(select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        ).order_by(MemoirEditingJob.updated_at.desc()).limit(1))
+        if job is None or job.status != MemoirEditingJobStatus.SUCCEEDED.value:
+            continue
+        await schedule_book_draft(db, project_id=project_id, source="assembly_policy")
+        scheduled += 1
+    await db.commit()
+    return scheduled
 
 
 async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:

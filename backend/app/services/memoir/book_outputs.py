@@ -40,6 +40,7 @@ from app.services.memoir import (
     book_editorial_actions,
     book_review_answer_state,
     book_reviews,
+    completion_issues,
 )
 from app.services.memoir.book_audio import (
     audio_cache_payload,
@@ -281,13 +282,17 @@ def _current_book_snapshot(
     plan: MemoirBookPlan,
     *,
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    blocked_chapter_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         return [], ["章节规划"]
     chapters = included_book_chapters(plan)
+    blocked_ids = blocked_chapter_ids or set()
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
-    for index, chapter in enumerate(chapters, start=1):
+    for chapter in chapters:
+        if chapter.id in blocked_ids:
+            continue
         version = latest_chapter_version(chapter.draft)
         if (
             not chapter.draft
@@ -307,7 +312,7 @@ def _current_book_snapshot(
             chapter_snapshot(
                 chapter,
                 version,
-                chapter_index=index,
+                chapter_index=len(snapshot) + 1,
                 source_refs=(source_refs_by_chapter or {}).get(chapter.id),
             )
         )
@@ -348,10 +353,12 @@ def _output_stale_chapter_titles(
     plan: MemoirBookPlan,
     *,
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    blocked_chapter_ids: set[str] | None = None,
 ) -> list[str]:
     current_snapshot, unavailable_titles = _current_book_snapshot(
         plan,
         source_refs_by_chapter=source_refs_by_chapter,
+        blocked_chapter_ids=blocked_chapter_ids,
     )
     latest_version = output.versions[-1] if output.versions else None
     return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
@@ -462,6 +469,11 @@ async def book_output_response_or_none(
                 output,
                 plan,
                 source_refs_by_chapter=refs_by_chapter,
+                blocked_chapter_ids=await completion_issues.open_blocking_book_chapter_ids(
+                    db,
+                    project_id=project_id,
+                    all_chapter_ids=(chapter.id for chapter in included_book_chapters(plan)),
+                ),
             )
         ),
     )

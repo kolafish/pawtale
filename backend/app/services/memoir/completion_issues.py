@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -32,6 +33,44 @@ _PRIORITY_ORDER = {
     MemoirCompletionIssuePriority.MEDIUM.value: 1,
     MemoirCompletionIssuePriority.LOW.value: 2,
 }
+
+
+BLOCKING_BOOK_ISSUE_TYPES = frozenset({
+    MemoirCompletionIssueType.PRIVACY.value,
+    MemoirCompletionIssueType.CONFLICT.value,
+})
+
+
+def blocking_book_chapter_ids(
+    issues: Iterable[MemoirCompletionIssue],
+    all_chapter_ids: Iterable[str],
+) -> set[str]:
+    blocked: set[str] = set()
+    for issue in issues:
+        if issue.issue_type not in BLOCKING_BOOK_ISSUE_TYPES:
+            continue
+        if issue.chapter_id:
+            blocked.add(issue.chapter_id)
+        elif issue.scope == MemoirCompletionIssueScope.BOOK.value:
+            if not issue.related_chapter_ids_json:
+                return set(all_chapter_ids)
+            blocked.update(issue.related_chapter_ids_json)
+    return blocked
+
+
+async def open_blocking_book_chapter_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    all_chapter_ids: Iterable[str],
+) -> set[str]:
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+        MemoirCompletionIssue.issue_type.in_(BLOCKING_BOOK_ISSUE_TYPES),
+    ))).all()
+    return blocking_book_chapter_ids(issues, all_chapter_ids)
 
 
 def _issue_fingerprint(

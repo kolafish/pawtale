@@ -474,6 +474,61 @@ async def test_editorial_review_questions_do_not_hide_readable_book_or_export(cl
     assert "这是已经存在的完整章节正文。" in exported.text
 
 
+async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_decision(client, test_db):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=5)
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT,
+        )
+    test_db.add_all([
+        MemoirCompletionIssue(
+            project_id=project_id, scope="book", issue_type="structure",
+            channel="manual_review", question="需要调整结构吗？", priority="medium",
+            related_chapter_ids_json=[chapter.id for chapter in chapters],
+            fingerprint="1" * 64, input_signature="review",
+        ),
+        MemoirCompletionIssue(
+            project_id=project_id, scope="book", issue_type="privacy",
+            channel="manual_review", question="是否收录私人经历？", priority="high",
+            related_chapter_ids_json=[chapters[-1].id],
+            fingerprint="2" * 64, input_signature="review",
+        ),
+    ])
+    old = await assemble_book_output(
+        test_db, project_id=project_id, eligible_chapter_ids=set(), automatic=True,
+    )
+    assert old.chapter_snapshot_json == []
+    job = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    job.status = "succeeded"
+    await test_db.commit()
+
+    assert await automatic_book_draft.reconcile_books_omitted_by_editorial_review(test_db) == 1
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    assert await automatic_book_draft.reconcile_books_omitted_by_editorial_review(test_db) == 0
+
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    assert assembled.omitted_chapter_ids == [chapters[-1].id]
+    assert [item["chapter_id"] for item in assembled.chapter_snapshot_json] == [
+        chapter.id for chapter in chapters[:-1]
+    ]
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert response.status_code == 200
+    assert response.json()["is_stale"] is False
+    assert len(response.json()["latest_version"]["manuscript"]["chapters"]) == 4
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt"
+    )
+    assert exported.status_code == 200
+    assert chapters[-1].title not in exported.text
+
+
 async def test_automatic_book_snapshot_keeps_legacy_flat_chapter_while_upgrade_needs_review(
     client,
     test_db,

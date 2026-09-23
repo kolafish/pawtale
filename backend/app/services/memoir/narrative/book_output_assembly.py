@@ -11,7 +11,6 @@ from app.domain.memoir.types import (
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
-    MemoirCompletionIssueType,
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
@@ -28,6 +27,7 @@ from app.services.memoir import (
     book_output_versions,
     book_review_answer_state,
     book_reviews,
+    completion_issues,
 )
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
@@ -216,20 +216,13 @@ async def assemble_book_output(
     ))).all()
     blocking_decisions = [
         issue for issue in decisions
-        if issue.issue_type in {
-            MemoirCompletionIssueType.PRIVACY.value,
-            MemoirCompletionIssueType.CONFLICT.value,
-        }
+        if issue.issue_type in completion_issues.BLOCKING_BOOK_ISSUE_TYPES
     ]
     if blocking_decisions and not automatic:
         raise ValueError("book output requires resolving book review decisions")
-    blocked_chapter_ids = {issue.chapter_id for issue in blocking_decisions if issue.chapter_id}
-    book_decisions = [issue for issue in blocking_decisions if issue.scope == "book"]
-    for issue in book_decisions:
-        blocked_chapter_ids.update(issue.related_chapter_ids_json)
-    if any(not issue.related_chapter_ids_json for issue in book_decisions):
-        # Missing scope evidence cannot establish which chapters are safe to include.
-        blocked_chapter_ids.update(chapter.id for chapter in chapters)
+    blocked_chapter_ids = completion_issues.blocking_book_chapter_ids(
+        blocking_decisions, (chapter.id for chapter in chapters),
+    )
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
     omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]
     answer_context = await book_review_answer_state.load_answer_context(db, review=current_review) if current_review else None
