@@ -413,6 +413,7 @@
   font-weight: 700;
 }
 
+.chapter-item.draft_ready .chapter-state,
 .chapter-item.confirmed .chapter-state {
   color: var(--ui-success-text);
 }

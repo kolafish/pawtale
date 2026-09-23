@@ -192,7 +192,7 @@ definePage<BookPageData>()({
     chapters: [],
     chapterStructureEditing: false,
     splitSourceSelections: {},
-    confirmedDraftCount: 0,
+    readyDraftCount: 0,
     totalChapterCount: 0,
     progressText: "还没有章节",
     titleBusyTarget: "",

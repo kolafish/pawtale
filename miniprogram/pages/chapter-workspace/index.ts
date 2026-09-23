@@ -116,7 +116,6 @@ definePage<ChapterWorkspacePageData>()({
     sectionViews: [],
     retainedDraftSectionCount: 0,
     expandedSectionIds: {},
-    canConfirmChapter: false,
     operationKind: "",
     operationTargetId: "",
     chapterPreparationJob: null,

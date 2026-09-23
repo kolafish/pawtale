@@ -390,7 +390,7 @@
       <view class="section-head-copy">
         <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节正文"}}</text>
         <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
-        <text wx:else class="section-count">已完成 {{confirmedDraftCount}}/{{totalChapterCount}} 章</text>
+        <text wx:else class="section-count">已更新 {{readyDraftCount}}/{{totalChapterCount}} 章</text>
       </view>
       <view
         class="section-head-action chapter-order-toggle {{updatingPlanStructure ? 'is-locked' : ''}}"
@@ -464,7 +464,7 @@
             </view>
           </view>
           <view class="chapter-summary-guidance {{item.chapterNeedsAction ? 'needs-action' : 'is-complete'}}">
-            <text class="chapter-summary-guidance-label">{{item.chapterNeedsAction ? '下一步' : '已确认'}}</text>
+            <text class="chapter-summary-guidance-label">{{item.chapterNeedsAction ? (item.draftAvailable ? '待更新' : '整理中') : '已更新'}}</text>
             <text class="chapter-summary-guidance-text">{{item.chapterGuidanceText}}</text>
           </view>
           <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
