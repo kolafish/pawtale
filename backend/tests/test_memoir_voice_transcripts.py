@@ -5,6 +5,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -1833,6 +1834,14 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(
         client,
@@ -1914,6 +1923,14 @@ async def test_mobile_memoir_recovers_long_unfinalized_audio_in_segments(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.ASR_RECOVERY_PCM_SEGMENT_BYTES", 32000)
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(

@@ -22,7 +22,9 @@ from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, Memoir
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirVoiceTranscriptItemResponse
 from app.services.memoir import voice_transcript_correction
-from app.services.memoir.audio_files import audio_file_path
+from app.services.ai_credits import assert_ai_credit_available
+from app.services.asr.billing import record_volc_streaming_asr_usage
+from app.services.memoir.audio_files import audio_file_duration_seconds, audio_file_path
 from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import (
@@ -74,9 +76,25 @@ async def recover_voice_transcript_from_audio(
     if not path.exists():
         raise HTTPException(status_code=404, detail="音频文件不存在，无法恢复转写")
 
-    recovered_event = await transcribe_audio_path_for_recovery(
-        path,
-        asr_client_factory=asr_client_factory,
+    duration_seconds = audio_file_duration_seconds(audio_file, path)
+    if duration_seconds is None or duration_seconds <= 0:
+        raise HTTPException(status_code=422, detail="音频时长无法确认，暂时不能恢复转写")
+    await assert_ai_credit_available(user_id)
+    try:
+        recovered_event = await transcribe_audio_path_for_recovery(
+            path,
+            asr_client_factory=asr_client_factory,
+        )
+    except Exception as exc:
+        await record_volc_streaming_asr_usage(
+            audio_duration_seconds=duration_seconds,
+            status="failed",
+            error_type=type(exc).__name__,
+        )
+        raise
+    await record_volc_streaming_asr_usage(
+        audio_duration_seconds=duration_seconds,
+        status="succeeded",
     )
     await _apply_recovered_transcript(
         db,
