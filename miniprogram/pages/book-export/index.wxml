@@ -173,22 +173,7 @@
 
         <view wx:if="{{activeSection === 'editorial'}}" class="detail-card editorial-detail-card ui-card">
           <view class="book-editorial-save-row"><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
-        <view
-          wx:if="{{bookEditorialCopyEventItem}}"
-          class="book-editorial-copy-notice"
-          aria-role="button"
-          bindtap="openBookHome"
-        >
-          <view class="book-editorial-copy-notice-copy">
-            <view class="book-editorial-copy-notice-head">
-              <text class="book-editorial-copy-notice-title">{{bookEditorialCopyEventItem.titleText}}</text>
-              <text class="book-editorial-copy-notice-status">{{bookEditorialCopyEventItem.statusText}}</text>
-            </view>
-            <text class="book-editorial-copy-notice-text">{{bookEditorialCopyEventItem.summaryText}}</text>
-            <text wx:if="{{bookEditorialCopyEventItem.detailText}}" class="book-editorial-copy-notice-detail">{{bookEditorialCopyEventItem.detailText}}</text>
-          </view>
-          <text class="book-editorial-copy-notice-action">书稿工具</text>
-        </view>
+        <text wx:if="{{bookEditorialCopyStatusError}}" class="book-editorial-status-error">{{bookEditorialCopyStatusError}}</text>
         <view class="book-metadata-field book-editorial-section">
           <view class="book-metadata-label-row book-editorial-label-row">
             <text class="book-metadata-label book-editorial-label">前言</text>
@@ -196,11 +181,16 @@
               class="book-editorial-generate ui-button"
               data-target="preface"
               loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookEditorialCopyJobs.preface.active || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'preface'}}" class="book-editorial-generate-arrow">›</text>
+              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交…" : (bookEditorialCopyJobs.preface.active ? "任务进行中" : "请小余重写")}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'preface' && !bookEditorialCopyJobs.preface.active}}" class="book-editorial-generate-arrow">›</text>
             </button>
+          </view>
+          <view wx:if="{{bookEditorialCopyJobs.preface.visible}}" class="book-editorial-job-status {{bookEditorialCopyJobs.preface.status}}">
+            <view class="book-editorial-job-dot" aria-hidden="true"></view>
+            <text>{{bookEditorialCopyJobs.preface.statusText}}</text>
+            <text wx:if="{{bookEditorialCopyJobs.preface.errorText}}" class="book-editorial-job-error">{{bookEditorialCopyJobs.preface.errorText}}</text>
           </view>
           <textarea
             class="book-metadata-textarea book-editorial-textarea"
@@ -221,11 +211,16 @@
               class="book-editorial-generate ui-button"
               data-target="afterword"
               loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookEditorialCopyJobs.afterword.active || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'afterword'}}" class="book-editorial-generate-arrow">›</text>
+              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交…" : (bookEditorialCopyJobs.afterword.active ? "任务进行中" : "请小余重写")}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'afterword' && !bookEditorialCopyJobs.afterword.active}}" class="book-editorial-generate-arrow">›</text>
             </button>
+          </view>
+          <view wx:if="{{bookEditorialCopyJobs.afterword.visible}}" class="book-editorial-job-status {{bookEditorialCopyJobs.afterword.status}}">
+            <view class="book-editorial-job-dot" aria-hidden="true"></view>
+            <text>{{bookEditorialCopyJobs.afterword.statusText}}</text>
+            <text wx:if="{{bookEditorialCopyJobs.afterword.errorText}}" class="book-editorial-job-error">{{bookEditorialCopyJobs.afterword.errorText}}</text>
           </view>
           <textarea
             class="book-metadata-textarea book-editorial-textarea"
@@ -246,11 +241,16 @@
               class="book-editorial-generate ui-button"
               data-target="back_cover_quote"
               loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookEditorialCopyJobs.back_cover_quote.active || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交…" : "请小余重写"}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'back_cover_quote'}}" class="book-editorial-generate-arrow">›</text>
+              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交…" : (bookEditorialCopyJobs.back_cover_quote.active ? "任务进行中" : "请小余重写")}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'back_cover_quote' && !bookEditorialCopyJobs.back_cover_quote.active}}" class="book-editorial-generate-arrow">›</text>
             </button>
+          </view>
+          <view wx:if="{{bookEditorialCopyJobs.back_cover_quote.visible}}" class="book-editorial-job-status {{bookEditorialCopyJobs.back_cover_quote.status}}">
+            <view class="book-editorial-job-dot" aria-hidden="true"></view>
+            <text>{{bookEditorialCopyJobs.back_cover_quote.statusText}}</text>
+            <text wx:if="{{bookEditorialCopyJobs.back_cover_quote.errorText}}" class="book-editorial-job-error">{{bookEditorialCopyJobs.back_cover_quote.errorText}}</text>
           </view>
           <textarea
             class="book-metadata-textarea book-editorial-textarea compact"

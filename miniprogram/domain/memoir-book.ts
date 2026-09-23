@@ -311,6 +311,21 @@ export interface MemoirBookOutputEditorialCopyRegenerateRequest {
   feedback?: string | null;
 }
 
+export type MemoirBookEditorialCopyJobTarget = "preface" | "afterword" | "back_cover_quote";
+export type MemoirBookEditorialCopyJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface MemoirBookEditorialCopyJob {
+  target: MemoirBookEditorialCopyJobTarget;
+  job_id: string;
+  status: MemoirBookEditorialCopyJobStatus;
+  error_message: string;
+  updated_at: string;
+}
+
+export interface MemoirBookEditorialCopyJobsResponse {
+  items: MemoirBookEditorialCopyJob[];
+}
+
 export interface MemoirBookTitleSuggestionRequest {
   ai_model?: string | null;
   count?: number;

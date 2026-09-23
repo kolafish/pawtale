@@ -730,6 +730,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },
+    { call: () => api.getMemoirBookEditorialCopyJobs("project/1"), method: "GET", url: `${base}/book-output/editorial-copy/regenerate/jobs` },
   ];
 
   for (const apiCase of cases) {
@@ -765,6 +766,10 @@ test("book output export download encodes route and session cookie", async () =>
 
   const path = await downloadMemoirBookOutputExport("project/1", "pdf", "version/1");
   await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false);
+  await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false, {
+    template: "custom",
+    custom_layout: { font_scale: "large", line_spacing: "relaxed", page_margin: "wide" },
+  });
 
   const baseExportUrl = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export";
   assert.equal(path, "/tmp/book.pdf");
@@ -777,6 +782,10 @@ test("book output export download encodes route and session cookie", async () =>
   assert.equal(
     downloads[1].url,
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&version_id=version%2F1`,
+  );
+  assert.equal(
+    downloads[2].url,
+    `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&preview_template=custom&preview_font_scale=large&preview_line_spacing=relaxed&preview_page_margin=wide&version_id=version%2F1`,
   );
   delete global.wx;
 });

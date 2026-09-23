@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
     MemoirOutputStatus,
 )
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
@@ -410,6 +411,20 @@ MemoirBookEditorialCopyTarget = Literal[
     "chapter_intros",
     "pull_quotes",
 ]
+
+MemoirBookLevelEditorialCopyTarget = Literal["preface", "afterword", "back_cover_quote"]
+
+
+class MemoirBookOutputEditorialCopyGenerationJobResponse(BaseModel):
+    target: MemoirBookLevelEditorialCopyTarget
+    job_id: str
+    status: MemoirEditingJobStatus
+    error_message: str
+    updated_at: datetime
+
+
+class MemoirBookOutputEditorialCopyGenerationJobListResponse(BaseModel):
+    items: list[MemoirBookOutputEditorialCopyGenerationJobResponse]
 
 
 class MemoirBookOutputEditorialCopyRegenerateRequest(BaseModel):

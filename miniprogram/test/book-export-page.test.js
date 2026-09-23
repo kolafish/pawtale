@@ -57,6 +57,17 @@ function sampleBookOutput() {
   };
 }
 
+function sampleEditorialJob(target, status = "pending", patch = {}) {
+  return {
+    target,
+    job_id: `job-${target}`,
+    status,
+    error_message: "",
+    updated_at: "2026-06-17T00:01:00.000Z",
+    ...patch,
+  };
+}
+
 function loadBookExportPage(voiceApiExports = {}) {
   mockMemoirApiModules({
     getMemoirBookPlan: async () => samplePlan(),
@@ -73,7 +84,7 @@ function loadBookExportPage(voiceApiExports = {}) {
       summary_text: "后记已提交后台重生成。",
       metadata_json: { target_label: "后记", targets: ["afterword"] },
     }),
-    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 20 }),
+    getMemoirBookEditorialCopyJobs: async () => ({ items: [] }),
     ...voiceApiExports,
   });
   return loadPageModule("../pages/book-export/index.ts");
@@ -211,13 +222,6 @@ test("book export page keeps a production-sized book within the page-data budget
 });
 
 test("book export opens book settings when linked from whole-book review", async () => {
-  const completedEvent = sampleAutomationEvent({
-    event_type: "book_editorial_copy_generated",
-    status: "completed",
-    chapter_id: null,
-    summary_text: "前言已重生成，可以预览或导出。",
-    metadata_json: { target_label: "前言", targets: ["preface"] },
-  });
   let outputLoads = 0;
   const { page } = loadBookExportPage({
     getMemoirBookPlan: async () => samplePlan(),
@@ -225,11 +229,6 @@ test("book export opens book settings when linked from whole-book review", async
       outputLoads += 1;
       return sampleBookOutput();
     },
-    listMemoirAutomationEvents: async () => ({
-      items: [completedEvent],
-      total: 1,
-      limit: 20,
-    }),
   });
   const context = pageContext(page);
 
@@ -240,19 +239,12 @@ test("book export opens book settings when linked from whole-book review", async
   });
 
   assert.equal(context.data.activeSection, "title");
-  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
   assert.equal(outputLoads, 1);
 });
 
-test("book export refreshes when an initial completed event is newer than the loaded output", async () => {
+test("book export refreshes when a completed editorial job is newer than the loaded output", async () => {
   const output = sampleBookOutput();
   output.updated_at = "2026-06-17T00:00:00.000Z";
-  const completedEvent = sampleAutomationEvent({
-    event_type: "book_editorial_copy_generated",
-    status: "completed",
-    chapter_id: null,
-    updated_at: "2026-06-17T00:01:00.000Z",
-  });
   let outputLoads = 0;
   const { page } = loadBookExportPage({
     getMemoirBookPlan: async () => samplePlan(),
@@ -260,20 +252,18 @@ test("book export refreshes when an initial completed event is newer than the lo
       outputLoads += 1;
       return output;
     },
-    listMemoirAutomationEvents: async () => ({
-      items: [completedEvent],
-      total: 1,
-      limit: 20,
+    getMemoirBookEditorialCopyJobs: async () => ({
+      items: [sampleEditorialJob("preface", "succeeded")],
     }),
   });
   const context = pageContext(page);
 
-  await page.onLoad.call(context, {
-    projectId: "project-1",
-    settings: "book",
-  });
+  await page.onLoad.call(context, { projectId: "project-1" });
+  context.setData({ activeSection: "editorial" });
+  await page.refreshBookEditorialCopyProgress.call(context);
 
   assert.equal(outputLoads, 2);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "已完成");
 });
 
 test("book export page counts only chapters included in the final book", () => {
@@ -484,11 +474,11 @@ test("book export page suggests titles and queues book-level editorial copy", as
     projectId: "project/1",
     payload: { targets: ["afterword"] },
   });
-  assert.equal(toasts[0].title, "已开始后台生成");
+  assert.equal(toasts[0].title, "已加入后台任务");
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
-  assert.equal(context.data.bookEditorialCopyEventItem.titleText, "文案生成中");
-  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "处理中");
-  assert.equal(context.data.bookEditorialCopyEventItem.summaryText, "后记已提交后台重生成。");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.statusText, "排队中");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.active, true);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.visible, false);
   page.openBookHome.call(context);
   assert.deepEqual(navigations, ["/pages/book/index"]);
   const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
@@ -540,22 +530,45 @@ test("book export page submits only one editorial copy task at a time", async ()
   page.clearBookEditorialCopyPoll.call(context);
 });
 
-test("book export page refreshes rewritten copy when the background task completes", async () => {
+test("book export keeps separate queued tasks for different editorial fields", async () => {
+  const requests = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookOutputEditorialCopyGeneration: async (_projectId, payload) => {
+      const target = payload.targets[0];
+      requests.push(target);
+      return sampleAutomationEvent({
+        event_type: "book_editorial_copy_generated",
+        editing_job_id: `job-${target}`,
+      });
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  for (const target of ["preface", "afterword"]) {
+    await page.regenerateBookEditorialCopy.call(context, {
+      currentTarget: { dataset: { target } },
+    });
+  }
+  await page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "preface" } },
+  });
+
+  assert.deepEqual(requests, ["preface", "afterword"]);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "排队中");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.statusText, "排队中");
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
+  page.clearBookEditorialCopyPoll.call(context);
+});
+
+test("book export tracks all editorial jobs through queue, execution, completion, and failure", async () => {
   const updatedOutput = sampleBookOutput();
   updatedOutput.latest_version.manuscript.back_matter.afterword.content = "新的后记。";
-  const pendingEvent = sampleAutomationEvent({
-    id: "event-1",
-    event_type: "book_editorial_copy_generated",
-    chapter_id: null,
-    summary_text: "后记已提交后台重生成。",
-    metadata_json: { target_label: "后记", targets: ["afterword"] },
-  });
-  const completedEvent = {
-    ...pendingEvent,
-    status: "completed",
-    summary_text: "后记已重生成，可以预览或导出。",
-    updated_at: "2026-06-17T00:01:00.000Z",
-  };
+  const preface = sampleEditorialJob("preface", "pending");
+  const afterword = sampleEditorialJob("afterword", "running");
+  const backCover = sampleEditorialJob("back_cover_quote", "succeeded");
+  let jobs = [preface, afterword, backCover];
   const toasts = [];
   global.wx = {
     showToast(options) {
@@ -563,22 +576,86 @@ test("book export page refreshes rewritten copy when the background task complet
     },
   };
   const { page } = loadBookExportPage({
-    listMemoirAutomationEvents: async () => ({
-      items: [completedEvent],
-      total: 1,
-      limit: 20,
-    }),
+    getMemoirBookEditorialCopyJobs: async () => ({ items: jobs }),
     getMemoirBookOutput: async () => updatedOutput,
   });
-  const context = pageContext(page, { projectId: "project/1" });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
-  page.applyBookEditorialCopyEvent.call(context, pendingEvent);
+  page.applyBookEditorialCopyJobs.call(context, jobs);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "排队中");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.statusText, "执行中");
+  assert.equal(context.data.bookEditorialCopyJobs.back_cover_quote.statusText, "已完成");
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
 
+  jobs = [
+    sampleEditorialJob("preface", "running"),
+    sampleEditorialJob("afterword", "succeeded"),
+    backCover,
+  ];
   await page.refreshBookEditorialCopyProgress.call(context);
-
-  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "执行中");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.statusText, "已完成");
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
   assert.equal(context.data.bookAfterwordInput, "新的后记。");
   assert.equal(toasts[0].title, "后记已更新");
+
+  jobs = [
+    sampleEditorialJob("preface", "failed", { error_message: "服务暂时不可用" }),
+    jobs[1],
+    backCover,
+  ];
+  await page.refreshBookEditorialCopyProgress.call(context);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "失败，可重试");
+  assert.equal(context.data.bookEditorialCopyJobs.preface.errorText, "服务暂时不可用");
+  assert.equal(context.bookEditorialCopyPoller.pending, false);
+  assert.equal(toasts[1].title, "前言重写失败");
+  page.clearBookEditorialCopyPoll.call(context);
+});
+
+test("book export resumes editorial job updates after returning to the page", async () => {
+  let refreshes = 0;
+  const running = sampleEditorialJob("preface", "running");
+  const { page } = loadBookExportPage({
+    getMemoirBookEditorialCopyJobs: async () => {
+      refreshes += 1;
+      return { items: [running] };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.applyBookEditorialCopyJobs.call(context, [running]);
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
+
+  page.onHide.call(context);
+  assert.equal(context.bookEditorialCopyPoller.pending, false);
+  page.onShow.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(refreshes, 1);
+  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "执行中");
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
+  page.clearBookEditorialCopyPoll.call(context);
+});
+
+test("book export marks job status as stale when refresh fails and retries", async () => {
+  const running = sampleEditorialJob("afterword", "running");
+  let unavailable = true;
+  const { page } = loadBookExportPage({
+    getMemoirBookEditorialCopyJobs: async () => {
+      if (unavailable) throw new Error("offline");
+      return { items: [running] };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
+
+  await page.refreshBookEditorialCopyProgress.call(context);
+  assert.equal(context.data.bookEditorialCopyStatusError, "任务进度暂时无法更新，请稍后再试");
+  assert.equal(context.bookEditorialCopyPoller.pending, true);
+
+  unavailable = false;
+  await page.refreshBookEditorialCopyProgress.call(context);
+  assert.equal(context.data.bookEditorialCopyStatusError, "");
+  assert.equal(context.data.bookEditorialCopyJobs.afterword.statusText, "执行中");
   page.clearBookEditorialCopyPoll.call(context);
 });
 
