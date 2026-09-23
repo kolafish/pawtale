@@ -67,7 +67,7 @@ async def story(client, test_db):
     return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
 
 
-async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下"):
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False):
     fake = FakeAI({"operations": operations, "questions": questions or [], "reply": "请看看这些修改。"})
     requested = []
 
@@ -76,7 +76,7 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
         return fake
 
     monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", factory)
-    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash"})
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split})
     assert requested == ["deepseek-v4-flash"]
     return response, fake
 
@@ -220,6 +220,7 @@ async def test_split_chapter_preview_moves_only_confirmed_whole_utterances(
     response, fake = await preview(
         client, monkeypatch, story, [operation],
         instruction="把第三章里辞职后的运动和做饭放到新章节。",
+        supports_chapter_split=True,
     )
     assert response.status_code == 200, response.text
     data = response.json()
@@ -255,7 +256,7 @@ async def test_split_chapter_rejects_wrong_or_complete_source_selection(
         response, _ = await preview(client, monkeypatch, story, [{
             "action": "split_chapter", "target_ref": chapter,
             "new_title": "日常生活", "utterance_ids": selected,
-        }])
+        }], supports_chapter_split=True)
         assert response.status_code == 422
     uncertain, _ = await preview(client, monkeypatch, story, [{
         "action": "split_chapter", "target_ref": chapter,
@@ -263,10 +264,21 @@ async def test_split_chapter_rejects_wrong_or_complete_source_selection(
     }], questions=[{
         "target_refs": [chapter],
         "question": "第三章里，您具体要移走哪几条讲述？",
-    }])
+    }], supports_chapter_split=True)
     assert uncertain.status_code == 200
     assert uncertain.json()["operations"] == []
     assert uncertain.json()["questions"] == ["第三章里，您具体要移走哪几条讲述？"]
+
+
+async def test_old_client_cannot_receive_unexecutable_chapter_split(client, monkeypatch, story):
+    response, fake = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": story["chapters"][2],
+        "new_title": "辞职后的日常", "utterance_ids": [story["materials"][2]],
+    }], instruction="把第三章的日常放进新章节")
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    assert "当前小程序版本" in response.json()["reply"]
+    assert "不能执行 split_chapter" in fake.system
 
 
 async def test_selected_deletion_combines_material_and_structure_atomically(client, test_db, monkeypatch, story):
