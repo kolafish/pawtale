@@ -1085,7 +1085,7 @@ export function buildChapterViews(
         pendingCompletionSourceCount: assignedCompletionCount,
         pendingNewSourceCount: assignedNewCount,
         removedSourceCount: assignedRemovedCount,
-        draftAvailable: Boolean(draft?.latest_version),
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
         draftCharCount,
         draftChanged: false,
         chapterGuidanceText: chapterGuidanceText(
