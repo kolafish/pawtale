@@ -217,6 +217,8 @@ export interface BookHomeData {
   progressText: string;
   titleBusyTarget: string;
   bookCharCount: number;
+  bookIncludedChapterCount: number;
+  bookPartialNotice: string;
   bookPreviewTitle: string;
   bookStaleNotice: string;
   ttsBusyTarget: string;
@@ -843,15 +845,23 @@ export function bookHomeOutputData(
   BookHomeData,
   | "bookContentAvailable"
   | "bookCharCount"
+  | "bookIncludedChapterCount"
+  | "bookPartialNotice"
   | "bookPreviewTitle"
   | "bookStaleNotice"
 > {
   const content = latestBookContent(output);
   const emptyBookContent = `${trimText(output?.title || "")}\n\n目录`;
   const available = Boolean(content && trimText(content) !== emptyBookContent);
+  const includedChapterCount = available ? bookOutputTocItems(output).length : 0;
+  const totalChapterCount = progress?.total_chapter_count || 0;
   return {
     bookContentAvailable: available,
     bookCharCount: available ? trimText(content).length : 0,
+    bookIncludedChapterCount: includedChapterCount,
+    bookPartialNotice: available && !output?.is_stale && totalChapterCount > includedChapterCount
+      ? `已有 ${includedChapterCount}/${totalChapterCount} 章可读；其余章节尚未收录。你可以先阅读或导出当前书稿。`
+      : "",
     bookPreviewTitle: bookOutputPreviewTitle(output),
     bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
@@ -1176,6 +1186,8 @@ export function guestBookData(): Partial<BookHomeData> {
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
+    bookIncludedChapterCount: 0,
+    bookPartialNotice: "",
     bookPreviewTitle: "",
     bookStaleNotice: "",
     ttsBusyTarget: "",

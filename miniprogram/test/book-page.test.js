@@ -638,6 +638,16 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal("bookOutput" in data, false);
   assert.equal("bookContent" in data, false);
 
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(4, "当前可读的书稿", false, [], [], sampleBookManuscript("外婆回忆录", "classic_plain", { chapterCount: 1 })),
+    { status: "needs_input", total_chapter_count: 2 },
+  );
+  assert.equal(context.data.bookContentAvailable, true);
+  assert.equal(context.data.bookIncludedChapterCount, 1);
+  assert.match(context.data.bookPartialNotice, /1\/2 章可读.*当前书稿/);
+  assert.equal(context.data.bookStaleNotice, "");
+
   page.applyBookOutput.call(context, sampleBookOutput(4, "外婆回忆录\n\n目录", true, ["外婆家的童年"]));
   assert.equal(context.data.bookContentAvailable, false);
   assert.equal(context.data.bookCharCount, 0);
