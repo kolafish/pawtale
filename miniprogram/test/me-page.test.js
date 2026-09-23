@@ -21,6 +21,7 @@ function loadMePage({
   voiceAuthorizationExports = {},
   profileExports = {},
   cacheExports = {},
+  billingExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
@@ -115,6 +116,14 @@ function loadMePage({
     clearCurrentUserMemoirSnapshots: () => {},
     ...cacheExports,
   });
+  mockModule("../services/billing.ts", {
+    getAICreditSummary: async () => ({
+      total_credit_rmb: 10,
+      used_rmb: 0,
+      remaining_rmb: 10,
+    }),
+    ...billingExports,
+  });
 
   return loadPageModule("../pages/me/index.ts");
 }
@@ -128,6 +137,25 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
+
+test("me shows AI credit usage percentage to one decimal place", async () => {
+  const { page } = loadMePage({
+    billingExports: {
+      getAICreditSummary: async () => ({
+        total_credit_rmb: 10,
+        used_rmb: 0.03,
+        remaining_rmb: 9.97,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadAICreditSummary.call(context);
+
+  assert.equal(context.data.creditProgressPercent, "0.3");
+  assert.equal(context.data.creditUsedText, "0.03");
+  assert.equal(context.data.creditRemainingText, "9.97");
+});
 
 test("me shows the single guest login entry when the session is missing", async () => {
   const { ApiError } = require("../services/request.ts");
