@@ -427,6 +427,53 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     assert preserved.content == "用户亲自整理的全书。"
 
 
+async def test_editorial_review_questions_do_not_hide_readable_book_or_export(client, test_db):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=4)
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT,
+        )
+    for index, (issue_type, related_chapters) in enumerate((
+        ("clarity", chapters[:1]),
+        ("relationship", chapters[1:2]),
+        ("sequence", chapters[2:3]),
+        ("structure", chapters[2:]),
+    )):
+        test_db.add(MemoirCompletionIssue(
+            project_id=project_id, scope="book", issue_type=issue_type,
+            channel="manual_review", resolution="user_decision",
+            question=f"这部分需要调整吗？{index}", priority="medium",
+            related_chapter_ids_json=[chapter.id for chapter in related_chapters],
+            fingerprint=f"{index + 1:064x}", input_signature="review",
+        ))
+    await test_db.commit()
+
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    assert assembled.omitted_chapter_ids == []
+    assert [item["chapter_id"] for item in assembled.chapter_snapshot_json] == [
+        chapter.id for chapter in chapters
+    ]
+    manual = await assemble_book_output(test_db, project_id=project_id)
+    assert manual.output_version_id == assembled.output_version_id
+
+    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert output.status_code == 200
+    assert output.json()["is_stale"] is False
+    assert len(output.json()["latest_version"]["manuscript"]["chapters"]) == 4
+
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt"
+    )
+    assert exported.status_code == 200
+    assert "这是已经存在的完整章节正文。" in exported.text
+
+
 async def test_automatic_book_snapshot_keeps_legacy_flat_chapter_while_upgrade_needs_review(
     client,
     test_db,
