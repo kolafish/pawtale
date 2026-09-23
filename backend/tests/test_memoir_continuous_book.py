@@ -41,7 +41,7 @@ async def _ready_book(client, db, monkeypatch):
     return project_id, chapter_id, section_id, fake, parent
 
 
-async def _add_narration(client, db, project_id, section_id):
+async def _add_narration(client, db, project_id, section_id, fake=None):
     added = await create_test_voice_transcript(
         client, db, "后来我又想起了爬山路上的一件小事。", project_id=project_id,
     )
@@ -49,6 +49,10 @@ async def _add_narration(client, db, project_id, section_id):
         db, project_id=project_id, section_id=section_id, utterance_id=added["utterance_id"],
         assigned_by=MemoirSectionMaterialAssignedBy.USER, assignment_reason="user_supplement",
     )
+    if fake is not None:
+        # The fake controls citation count, while the real prompt contains
+        # earlier unused material as well as this new narration.
+        fake.draft_material_ids = ["include-all"] * 100
     await automatic_book_draft.schedule_book_draft(db, project_id=project_id)
     await db.commit()
 
@@ -60,9 +64,9 @@ async def _snapshot(client):
 
 
 async def test_supplement_keeps_previous_book_during_generation_and_failure(client, test_db, monkeypatch):
-    project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
     old = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     data = await _snapshot(client)
     assert data["book_readable"] and data["book_chapter_count"] == 1
@@ -124,7 +128,7 @@ async def test_book_design_changes_allow_future_automatic_prose(client, test_db,
         return json.dumps(value, ensure_ascii=False)
 
     monkeypatch.setattr(fake, "_call_llm", new_prose)
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     assert await run_test_editing_job(test_db, parent.result_json["chapters"][chapter_id]["job_id"])
     await run_test_editing_job(test_db, parent_id)
@@ -140,11 +144,11 @@ async def test_book_design_changes_allow_future_automatic_prose(client, test_db,
 
 @pytest.mark.parametrize("change", ["accept", "source", "manual_edit"])
 async def test_candidate_is_actionable_on_home_and_disappears_when_resolved_or_obsolete(client, test_db, monkeypatch, change):
-    project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
     parent_id = parent.id
     latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter_id)
     latest.created_by = "user"
-    await _add_narration(client, test_db, project_id, section_id)
+    await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent.id)
     child_id = parent.result_json["chapters"][chapter_id]["job_id"]
     assert await run_test_editing_job(test_db, child_id)
@@ -158,7 +162,7 @@ async def test_candidate_is_actionable_on_home_and_disappears_when_resolved_or_o
         response = await client.post(f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{child_id}/candidate/accept")
         assert response.status_code == 200, response.text
     elif change == "source":
-        await _add_narration(client, test_db, project_id, section_id)
+        await _add_narration(client, test_db, project_id, section_id, fake)
     else:
         await test_db.refresh(latest)
         values = {key: copy.deepcopy(getattr(latest, key)) for key in (

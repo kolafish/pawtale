@@ -129,7 +129,10 @@ async def prepare_chapter(
             )
             .limit(1)
         )
-        if not chapter_generation.chapter_draft_is_current(context, latest):
+        if (
+            not chapter_generation.chapter_draft_is_current(context, latest)
+            or not chapter_generation.chapter_draft_render_policy_current(context, latest)
+        ):
             await chapter_generation.generate_and_save_chapter_draft(
                 db,
                 project_id=project_id,
@@ -208,6 +211,7 @@ async def rewrite_chapter(
         editorial_guidance=editorial_guidance,
         checkpoint=checkpoint,
         progress_callback=progress_callback,
+        force_refresh=True,
     )
     if progress_callback is not None:
         await progress_callback(

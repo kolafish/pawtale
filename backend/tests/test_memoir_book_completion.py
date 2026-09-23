@@ -1444,7 +1444,7 @@ async def test_chapter_review_filters_section_findings_before_rewrite(
     assert any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请通读回忆录章节" in prompt)
 
 
-async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
+async def test_explicit_rewrite_refreshes_all_sections_once(
     client,
     test_db,
     monkeypatch,
@@ -1508,10 +1508,10 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     assert len(body["sections"]) == 4
     assert len(body["draft_sections"]) == 4
     assert [item["section_id"] for item in body["draft_sections"]] == [item["id"] for item in body["sections"]]
-    assert len(fake.prompts) == 3
+    assert len(fake.prompts) == 4
     assert all("请把下面的原始讲述整理为回忆录章节" in prompt for prompt in fake.prompts)
     assert all(prompt.count("material_id: ") == 1 for prompt in fake.prompts)
-    assert body["draft_sections"][0]["content"] == "这是已经存在的完整章节正文。"
+    assert body["draft_sections"][0]["content"] != "这是已经存在的完整章节正文。"
     assert requested_models == [DEFAULT_AI_TEXT_MODEL]
 
 
@@ -1670,7 +1670,7 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     ]
 
 
-async def test_book_overview_counts_all_unfinished_chapter_states(
+async def test_book_overview_counts_ready_drafts_as_complete(
     client,
     test_db,
     monkeypatch,
@@ -1705,8 +1705,9 @@ async def test_book_overview_counts_all_unfinished_chapter_states(
         project_id=project_id,
     )
 
-    assert overview.headline == "还有 3 章未完成"
-    assert overview.detail == ("1 章待检查，1 章待确认，1 章待通读。每章只显示当前最重要的一步。")
+    assert overview.completed_chapters == 1
+    assert overview.headline == "还有 2 章未完成"
+    assert overview.detail == "1 章待检查，1 章待确认。每章只显示当前最重要的一步。"
 
 
 async def test_book_completion_uses_background_chapter_preparation(

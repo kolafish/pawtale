@@ -258,8 +258,9 @@ async def chapter_summary(
         or (
             draft_current
             and version is not None
-            and version.prompt_snapshot
-            == chapter_generation.CHAPTER_GENERATION_ENGINE
+            and version.prompt_snapshot.startswith(
+                chapter_generation.CHAPTER_GENERATION_ENGINE
+            )
         )
     )
     if not review_ready:
@@ -348,12 +349,12 @@ async def chapter_summary(
             sort_order=chapter.sort_order,
             state="draft_ready",
             next_action=MemoirChapterCompletionNextAction(
-                kind="review_draft",
-                title="正文已经整理好",
-                detail="请通读、修改并确认本章。",
-                action_text="通读并确认",
+                kind="complete",
+                title="正文已更新",
+                detail="可以随时阅读或修改。",
+                action_text="查看正文",
             ),
-            headline="正文可以通读",
+            headline="正文已更新",
             detail=f"现有素材已经整理成完整章节。{optional_note}",
         )
     return MemoirChapterCompletionSummary(
@@ -588,12 +589,11 @@ async def book_overview(
         )
         for chapter in chapters
     ]
-    completed = sum(item.state == "confirmed" for item in items)
+    completed = sum(item.state in {"confirmed", "draft_ready"} for item in items)
     needs_input = sum(item.state == "needs_input" for item in items)
     needs_check = sum(
         item.state in {"not_started", "failed"} for item in items
     )
-    ready_to_review = sum(item.state == "draft_ready" for item in items)
     unfinished = len(items) - completed
     if unfinished:
         progress = []
@@ -601,12 +601,10 @@ async def book_overview(
             progress.append(f"{needs_check} 章待检查")
         if needs_input:
             progress.append(f"{needs_input} 章待确认")
-        if ready_to_review:
-            progress.append(f"{ready_to_review} 章待通读")
         headline = f"还有 {unfinished} 章未完成"
         detail = "，".join(progress) + "。每章只显示当前最重要的一步。"
     else:
-        headline = "全书正文已经确认"
+        headline = "全书正文已整理完成"
         detail = "需要时仍可按当前素材重新检查。"
     return MemoirBookCompletionOverviewResponse(
         project_id=project_id,

@@ -1058,7 +1058,7 @@ export function buildChapterViews(
         sectionCount,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
-        draftAvailable: Boolean(draft?.latest_version),
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
       };
       return {
         id: chapter.id,
@@ -1095,7 +1095,7 @@ export function buildChapterViews(
           assignedRemovedCount,
         ),
         chapterNeedsAction: Boolean(
-          assignedPendingCount || assignedRemovedCount || !draft?.latest_version,
+          assignedPendingCount || assignedRemovedCount || !draft?.latest_version?.content?.trim(),
         ),
         draftVersionText: draftVersionText(draft),
         draftActionText: draftActionText(

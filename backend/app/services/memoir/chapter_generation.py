@@ -697,7 +697,9 @@ def chapter_draft_render_policy_current(
                     break
         if matched_levels:
             return all(level == context.polish_level for level in matched_levels)
-    return False
+    # Older imported or manually assembled drafts may not record a render
+    # policy. Unknown provenance alone is not evidence to rewrite every story.
+    return True
 
 
 def chapter_draft_sources_still_included(

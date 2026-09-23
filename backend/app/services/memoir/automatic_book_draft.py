@@ -134,7 +134,10 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         if chapter_generation.chapter_draft_sources_still_included(context, latest):
             readable.add(chapter_id)
             state.draft_version_id = latest.id
-        if chapter_generation.chapter_draft_is_current(context, latest):
+        if (
+            chapter_generation.chapter_draft_is_current(context, latest)
+            and chapter_generation.chapter_draft_render_policy_current(context, latest)
+        ):
             state.status, state.error_message = "ready", ""
             state.draft_version_id = latest.id
             continue
@@ -159,6 +162,9 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             ("needs_review" if child.get("outcome") == "needs_review" else "needs_input")
             if child["status"] == "succeeded" else child["status"]
         )
+        if child.get("outcome") == "stale":
+            # The next poll retries against the latest version and material.
+            state.status = "pending"
         state.error_message = str(child.get("error_message") or "")
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
