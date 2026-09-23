@@ -195,6 +195,80 @@ async def test_regenerate_chapter_sections_rejects_stale_or_mixed_chapter_edits(
     assert job is None
 
 
+async def test_split_chapter_preview_moves_only_confirmed_whole_utterances(
+    client, test_db, monkeypatch, story,
+):
+    source_chapter = story["chapters"][2]
+    original_material = story["materials"][2]
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    moved = MemoirVoiceUtterance(
+        voice_session_id=session.id,
+        transcript_raw="辞职以后，我每天下午去运动，晚上学着做饭。",
+    )
+    test_db.add(moved)
+    await test_db.flush()
+    test_db.add(MemoirSectionMaterial(
+        project_id=story["pid"], section_id=story["sections"][2], utterance_id=moved.id,
+        sort_order=1,
+    ))
+    await test_db.commit()
+
+    operation = {
+        "action": "split_chapter", "target_ref": source_chapter,
+        "new_title": "辞职后的日常", "utterance_ids": [moved.id],
+    }
+    response, fake = await preview(
+        client, monkeypatch, story, [operation],
+        instruction="把第三章里辞职后的运动和做饭放到新章节。",
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "split_chapter" in fake.system
+    assert next(chapter for chapter in fake.inputs[0]["book_data"]["chapters"] if chapter["ref"] == source_chapter)["number"] == 3
+    assert next(material for material in fake.inputs[0]["book_data"]["materials"] if material["ref"] == moved.id)["created_at"]
+    assert "第3章" in data["operations"][0]["label"]
+    assert "辞职后的日常" in data["operations"][0]["label"]
+    assert "每天下午去运动" in data["operations"][0]["detail"]
+    assert data["operations"][0]["utterance_ids"] == [moved.id]
+
+    result = await apply(client, story, data, operations=[operation])
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    new_chapter = next(chapter for chapter in after["chapters"] if chapter["title"] == "辞职后的日常")
+    assert new_chapter["number"] == 4
+    assert moved.id in {
+        material["ref"] for material in after["materials"]
+        if any(section["ref"] == material["section_ref"] and section["chapter_ref"] == new_chapter["ref"] for section in after["sections"])
+    }
+    assert original_material in {
+        material["ref"] for material in after["materials"]
+        if any(section["ref"] == material["section_ref"] and section["chapter_ref"] == source_chapter for section in after["sections"])
+    }
+    assert (await apply(client, story, data, operations=[operation])).status_code == 409
+
+
+async def test_split_chapter_rejects_wrong_or_complete_source_selection(
+    client, monkeypatch, story,
+):
+    chapter = story["chapters"][2]
+    for selected in ([story["materials"][1]], [story["materials"][2]]):
+        response, _ = await preview(client, monkeypatch, story, [{
+            "action": "split_chapter", "target_ref": chapter,
+            "new_title": "日常生活", "utterance_ids": selected,
+        }])
+        assert response.status_code == 422
+    uncertain, _ = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": chapter,
+        "new_title": "日常生活", "utterance_ids": [story["materials"][2]],
+    }], questions=[{
+        "target_refs": [chapter],
+        "question": "第三章里，您具体要移走哪几条讲述？",
+    }])
+    assert uncertain.status_code == 200
+    assert uncertain.json()["operations"] == []
+    assert uncertain.json()["questions"] == ["第三章里，您具体要移走哪几条讲述？"]
+
+
 async def test_selected_deletion_combines_material_and_structure_atomically(client, test_db, monkeypatch, story):
     ops = [
         {"action": "delete_chapter", "target_ref": story["chapters"][0]},
@@ -385,7 +459,7 @@ async def test_wrong_entity_kind_is_rejected(client, monkeypatch, story, action,
     assert response.status_code == 422
 
 
-async def test_foreign_project_and_uncertain_mutation_are_rejected(client, test_db, monkeypatch, story):
+async def test_foreign_project_and_uncertain_mutation_are_not_applied(client, test_db, monkeypatch, story):
     foreign = Project(title="别人的回忆", type="memoir")
     test_db.add(foreign)
     await test_db.commit()
@@ -394,7 +468,18 @@ async def test_foreign_project_and_uncertain_mutation_are_rejected(client, test_
     response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": "foreign-material"}])
     assert response.status_code == 422
     response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": story["materials"][1]}], questions=[{"target_refs": [story["materials"][1]], "question": "是否整条删除？"}])
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    assert response.json()["questions"] == ["是否整条删除？"]
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][1]) is not None
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": story["materials"][1]}], questions=[{"target_refs": [], "question": "请确定要删除哪一条讲述？"}])
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    assert response.json()["questions"] == ["请确定要删除哪一条讲述？"]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": story["materials"][1]}], questions=[{"target_refs": [story["chapters"][1]], "question": "童年回忆这一章，具体要删除哪条讲述？"}])
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    assert response.json()["questions"] == ["童年回忆这一章，具体要删除哪条讲述？"]
 
 
 async def test_no_edit_and_invalid_provider_array_do_not_write(client, test_db, monkeypatch, story):
@@ -429,6 +514,8 @@ async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, t
     {"action": "rename_chapter", "target_ref": "c", "new_title": "  "},
     {"action": "delete_chapter", "target_ref": "c", "new_title": "新名"},
     {"action": "regenerate_chapter_sections", "target_ref": "c", "new_title": "新小节"},
+    {"action": "split_chapter", "target_ref": "c", "new_title": "新章节"},
+    {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "utterance_ids": ["u", "u"]},
     {"action": "execute_sql", "target_ref": "c"},
 ])
 def test_operation_contract_rejects_unexecutable_actions(data):
