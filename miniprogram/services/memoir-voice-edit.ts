@@ -5,6 +5,7 @@ export interface VoiceEditOperation {
   target_ref: string;
   new_title: string | null;
   utterance_ids?: string[];
+  section_ids?: string[];
 }
 
 export interface VoiceEditItem extends VoiceEditOperation {

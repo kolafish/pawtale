@@ -1,16 +1,28 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="edit-intro">
     <text class="edit-book">{{projectTitle || '当前回忆录'}}</text>
-    <text class="edit-title">说说你想怎么改</text>
-    <text class="edit-hint">进入页面后直接说，停顿后会自动理解；确认前不会修改。</text>
+    <text class="edit-title">{{splitConfirmation ? '确认这次调整' : '说说你想怎么改'}}</text>
+    <text class="edit-hint">{{splitConfirmation ? '请核对要移走的内容和新章节名，确认前不会修改。' : '进入页面后直接说，停顿后会自动理解；确认前不会修改。'}}</text>
   </view>
-  <voice-text-editor value="{{instruction}}" gateway-url="{{gatewayUrl}}" maxlength="2000"
-    placeholder="比如：给童年回忆重新整理小节，或把早晨日常这一章删掉。"
-    submit-text="发送" busy-text="正在理解…" busy="{{loading}}" disabled="{{applying || !projectId}}"
-    automatic-voice-command="{{true}}"
-    bind:change="changeInstruction" bind:submit="submitInstruction" />
+  <view hidden="{{splitConfirmation !== null}}">
+    <voice-text-editor value="{{instruction}}" gateway-url="{{gatewayUrl}}" maxlength="2000"
+      placeholder="比如：给童年回忆重新整理小节，或把早晨日常这一章删掉。"
+      submit-text="发送" busy-text="正在理解…" busy="{{loading}}" disabled="{{applying || !projectId || splitConfirmation !== null}}"
+      automatic-voice-command="{{true}}"
+      bind:change="changeInstruction" bind:submit="submitInstruction" />
+  </view>
   <view wx:if="{{error}}" class="ui-error-banner" aria-live="polite">{{error}}</view>
-  <view wx:if="{{preview}}" class="edit-result ui-card" aria-live="polite">
+  <view wx:if="{{splitConfirmation}}" class="edit-result edit-split-confirmation ui-card" aria-live="polite">
+    <text class="edit-split-summary">{{splitConfirmation.label}}</text>
+    <text wx:if="{{splitConfirmation.detail}}" class="edit-detail">{{splitConfirmation.detail}}</text>
+    <view class="edit-split-title-block">
+      <text class="edit-split-caption">建议的新章节名</text>
+      <text class="edit-split-title">{{splitConfirmation.new_title}}</text>
+    </view>
+    <button class="edit-apply ui-button ui-block-action" bindtap="apply" disabled="{{applying}}" loading="{{applying}}">确认移到新章节</button>
+    <button class="edit-restart ui-button" bindtap="restartInstruction" disabled="{{applying}}">修改要求</button>
+  </view>
+  <view wx:elif="{{preview}}" class="edit-result ui-card" aria-live="polite">
     <text class="edit-reply">{{preview.reply}}</text>
     <view wx:for="{{preview.questions}}" wx:key="*this" class="edit-question">{{item}}</view>
     <text wx:if="{{preview.questions.length}}" class="edit-hint">请回答上面的问题：点「语音输入」再说，或在上方文字末尾补充后点「发送」。之前的要求会一起保留。</text>

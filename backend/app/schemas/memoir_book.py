@@ -145,6 +145,7 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     title: str | None = None
     include_in_book: bool | None = None
     utterance_ids: list[str] = Field(default_factory=list)
+    section_ids: list[str] = Field(default_factory=list, max_length=30)
 
     @field_validator("chapter_id", "target_chapter_id", "relative_chapter_id")
     @classmethod
@@ -170,6 +171,14 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     @classmethod
     def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(item.strip() for item in value if item.strip()))
+
+    @field_validator("section_ids")
+    @classmethod
+    def _valid_section_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise ValueError("小节不能重复或为空")
+        return cleaned
 
 
 class MemoirBookChapterTitleUpdateRequest(BaseModel):
