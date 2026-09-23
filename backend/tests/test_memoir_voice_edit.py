@@ -476,6 +476,10 @@ async def test_foreign_project_and_uncertain_mutation_are_not_applied(client, te
     assert response.status_code == 200
     assert response.json()["operations"] == []
     assert response.json()["questions"] == ["请确定要删除哪一条讲述？"]
+    response, _ = await preview(client, monkeypatch, story, [{"action": "delete_material", "target_ref": story["materials"][1]}], questions=[{"target_refs": [story["chapters"][1]], "question": "童年回忆这一章，具体要删除哪条讲述？"}])
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    assert response.json()["questions"] == ["童年回忆这一章，具体要删除哪条讲述？"]
 
 
 async def test_no_edit_and_invalid_provider_array_do_not_write(client, test_db, monkeypatch, story):

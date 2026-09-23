@@ -104,6 +104,13 @@ def _question_touches_operation(story: dict, op: VoiceEditOperation, refs: set[s
         }
         affected.update(section_ids)
         affected.update(m["material_ref"] for m in story["memberships"] if m["section_ref"] in section_ids)
+    if kind in {"section", "material"}:
+        section_ref = op.target_ref if kind == "section" else next(
+            (m["section_ref"] for m in story["materials"] if m["ref"] == op.target_ref), None
+        )
+        if section_ref:
+            affected.add(section_ref)
+            affected.update(s["chapter_ref"] for s in story["sections"] if s["ref"] == section_ref)
     return bool(affected & refs)
 
 
