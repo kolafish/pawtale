@@ -293,6 +293,8 @@ export interface MemoirBookOutputUpdateRequest {
   afterword?: string | null;
   back_cover_quote?: string | null;
   cover_style?: MemoirBookCoverStyle | null;
+  manuscript_template?: MemoirBookManuscriptTemplate;
+  custom_layout?: MemoirBookCustomLayout;
 }
 
 export type MemoirBookEditorialCopyTarget =
@@ -346,7 +348,18 @@ export interface MemoirBookOutputTableOfContentsItem {
   sections: MemoirBookOutputSectionTableOfContentsItem[];
 }
 
-export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive";
+export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive" | "custom";
+
+export interface MemoirBookCustomLayout {
+  font_scale: "standard" | "large";
+  line_spacing: "compact" | "standard" | "relaxed";
+  page_margin: "narrow" | "standard" | "wide";
+}
+
+export interface MemoirBookLayoutPreview {
+  template: MemoirBookManuscriptTemplate;
+  custom_layout?: MemoirBookCustomLayout;
+}
 
 export interface MemoirBookManuscriptProfile {
   template: MemoirBookManuscriptTemplate;
@@ -424,6 +437,7 @@ export interface MemoirBookManuscriptRenderSettings {
   page_size: "a5";
   layout: "reading" | "print";
   font_scale: "standard" | "large";
+  custom_layout?: MemoirBookCustomLayout;
   show_headers: boolean;
   show_source_appendix: boolean;
   photo_mode: "none" | "chapter" | "appendix";

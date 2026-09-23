@@ -556,7 +556,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     manuscript = data["latest_version"]["manuscript"]
-    assert manuscript["schema_version"] == 2
+    assert manuscript["schema_version"] == 3
     assert manuscript["profile"]["template"] == "classic_family"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
@@ -672,6 +672,127 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     project = await test_db.get(Project, project_id)
     assert project is not None
     assert project.title == "外婆慢慢说"
+
+
+async def test_book_manuscript_design_saves_and_preview_does_not_change_selection(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    selected = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={
+            "manuscript_template": "custom",
+            "custom_layout": {
+                "font_scale": "large",
+                "line_spacing": "relaxed",
+                "page_margin": "wide",
+            },
+        },
+    )
+    assert selected.status_code == 200
+    version = selected.json()["latest_version"]
+    assert version["manuscript"]["schema_version"] == 3
+    assert version["manuscript"]["profile"]["template"] == "custom"
+    assert version["manuscript"]["render_settings"]["custom_layout"] == {
+        "font_scale": "large",
+        "line_spacing": "relaxed",
+        "page_margin": "wide",
+    }
+
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_template=photo_memory"
+    )
+    custom_preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_template=custom&preview_font_scale=standard"
+        "&preview_line_spacing=compact&preview_page_margin=narrow"
+    )
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+
+    assert preview.status_code == 200
+    assert custom_preview.status_code == 200
+    assert preview.content.startswith(b"%PDF-")
+    assert custom_preview.content.startswith(b"%PDF-")
+    assert current.status_code == 200
+    assert current.json()["latest_version"]["id"] == version["id"]
+    assert current.json()["latest_version"]["manuscript"]["profile"]["template"] == "custom"
+    assert current.json()["latest_version"]["manuscript"]["render_settings"]["custom_layout"] == (
+        version["manuscript"]["render_settings"]["custom_layout"]
+    )
+
+
+async def test_book_manuscript_design_rejects_unsupported_values(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "unknown"},
+    )
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?preview_template=custom&preview_page_margin=extreme"
+    )
+
+    assert update.status_code == 422
+    assert preview.status_code == 422
+
+
+async def test_book_manuscript_design_survives_new_book_assembly(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    selected = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={
+            "manuscript_template": "custom",
+            "custom_layout": {
+                "font_scale": "large",
+                "line_spacing": "compact",
+                "page_margin": "narrow",
+            },
+        },
+    )
+    assert selected.status_code == 200
+
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft)
+        .where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
+        .options(selectinload(MemoirBookChapterDraft.versions))
+    )
+    assert draft is not None
+    previous_draft_version = draft.versions[-1]
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapters[0].id,
+            version=previous_draft_version.version + 1,
+            content=previous_draft_version.content,
+            section_snapshot_json=previous_draft_version.section_snapshot_json,
+            material_snapshot_json=previous_draft_version.material_snapshot_json,
+            used_material_ids_json=previous_draft_version.used_material_ids_json,
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert current.status_code == 200
+    assert current.json()["latest_version"]["id"] == assembled.json()["output_version_id"]
+    manuscript = current.json()["latest_version"]["manuscript"]
+    assert manuscript["profile"]["template"] == "custom"
+    assert manuscript["render_settings"]["custom_layout"] == {
+        "font_scale": "large",
+        "line_spacing": "compact",
+        "page_margin": "narrow",
+    }
 
 
 async def test_project_title_update_replaces_existing_book_output_title(client, test_db):

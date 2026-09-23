@@ -30,6 +30,7 @@ from app.services.memoir import (
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     manuscript_from_snapshot,
+    stored_manuscript_design,
     stored_cover_style,
 )
 from app.services.memoir.book_output_snapshots import (
@@ -174,6 +175,9 @@ async def assemble_book_output(
         db,
         project_id=project_id,
     )
+    template, custom_layout = stored_manuscript_design(
+        previous_version.manuscript_json if previous_version else None
+    )
     manuscript = manuscript_from_snapshot(
         title=title,
         content=content,
@@ -183,6 +187,8 @@ async def assemble_book_output(
             if previous_version
             else "classic_plain"
         ),
+        template=template,
+        custom_layout=custom_layout,
         metadata=effective_book_metadata(
             project=project,
             stored=previous_version.manuscript_json if previous_version else None,

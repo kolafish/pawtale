@@ -97,6 +97,16 @@ test("book export overview binds reading, narration, and focused settings withou
   assert.doesNotMatch(template, /bookPreviewTocItems|bookManuscriptStructureItems|bookManuscriptChapterItems/);
 });
 
+test("book layout section exposes preview, selection, and custom controls", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
+  assert.match(template, /data-section="layout" bindtap="openSection"/);
+  assert.match(template, /data-template="\{\{option.value\}\}" bindtap="previewBookLayout"/);
+  assert.match(template, /data-template="\{\{option.value\}\}" bindtap="selectBookLayout"/);
+  assert.match(template, /data-key="font_scale" bindchange="changeBookCustomLayout"/);
+  assert.match(template, /data-key="line_spacing" bindchange="changeBookCustomLayout"/);
+  assert.match(template, /data-key="page_margin" bindchange="changeBookCustomLayout"/);
+});
+
 test("book export page loads plan and output from query project", async () => {
   const calls = [];
   const { page } = loadBookExportPage({
@@ -651,6 +661,107 @@ test("book export page downloads reading PDF with the standard layout", async ()
   assert.equal(exportCalls[0].showSourceAppendix, false);
   assert.equal(opened[0].filePath, "/tmp/reading.pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
+});
+
+test("book layout preview opens the chosen PDF without saving, then selection updates the book", async () => {
+  const output = sampleBookOutput();
+  const downloads = [];
+  const updates = [];
+  const opened = [];
+  global.wx = {
+    openDocument(options) {
+      opened.push(options.filePath);
+      options.success();
+    },
+    showToast() {},
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (...args) => {
+      downloads.push(args);
+      return "/tmp/book-layout-preview.pdf";
+    },
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      updates.push(payload);
+      output.latest_version.manuscript.profile.template = payload.manuscript_template;
+      return output;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+
+  await page.previewBookLayout.call(context, {
+    currentTarget: { dataset: { template: "photo_memory" } },
+  });
+  assert.deepEqual(downloads[0], [
+    "project/1", "pdf", "book-output-version-2", "standard", false,
+    { template: "photo_memory", custom_layout: undefined },
+  ]);
+  assert.deepEqual(opened, ["/tmp/book-layout-preview.pdf"]);
+  assert.deepEqual(updates, []);
+  assert.equal(context.data.bookManuscriptTemplateLabel, "素雅书籍版");
+
+  await page.selectBookLayout.call(context, {
+    currentTarget: { dataset: { template: "photo_memory" } },
+  });
+  assert.deepEqual(updates, [{ manuscript_template: "photo_memory" }]);
+  assert.equal(context.data.bookManuscriptTemplateLabel, "家庭纪念版");
+  assert.equal(context.data.bookLayoutTemplate, "photo_memory");
+});
+
+test("custom book layout previews pending changes and saves all three controls", async () => {
+  const output = sampleBookOutput();
+  const updates = [];
+  const downloads = [];
+  global.wx = {
+    openDocument(options) { options.success(); },
+    showToast() {},
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (...args) => {
+      downloads.push(args);
+      return "/tmp/custom-preview.pdf";
+    },
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      updates.push(payload);
+      output.latest_version.manuscript.profile.template = payload.manuscript_template;
+      output.latest_version.manuscript.render_settings.custom_layout = payload.custom_layout;
+      return output;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+  page.changeBookCustomLayout.call(context, {
+    currentTarget: { dataset: { key: "font_scale" } }, detail: { value: "1" },
+  });
+  page.changeBookCustomLayout.call(context, {
+    currentTarget: { dataset: { key: "line_spacing" } }, detail: { value: "2" },
+  });
+  page.changeBookCustomLayout.call(context, {
+    currentTarget: { dataset: { key: "page_margin" } }, detail: { value: "0" },
+  });
+  assert.equal(context.data.bookLayoutCustomChanged, true);
+  assert.deepEqual(context.data.bookCustomLayout, {
+    font_scale: "large", line_spacing: "relaxed", page_margin: "narrow",
+  });
+
+  await page.previewBookLayout.call(context, {
+    currentTarget: { dataset: { template: "custom" } },
+  });
+  assert.deepEqual(downloads[0][5], {
+    template: "custom",
+    custom_layout: { font_scale: "large", line_spacing: "relaxed", page_margin: "narrow" },
+  });
+  assert.deepEqual(updates, []);
+
+  await page.selectBookLayout.call(context, {
+    currentTarget: { dataset: { template: "custom" } },
+  });
+  assert.deepEqual(updates[0], {
+    manuscript_template: "custom",
+    custom_layout: { font_scale: "large", line_spacing: "relaxed", page_margin: "narrow" },
+  });
+  assert.equal(context.data.bookLayoutCustomChanged, false);
+  assert.equal(context.data.bookManuscriptTemplateLabel, "自定义版式");
 });
 
 test("book export delivers TXT through WeChat file sharing", async () => {

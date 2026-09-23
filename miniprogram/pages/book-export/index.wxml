@@ -267,8 +267,42 @@
 
         <view wx:if="{{activeSection === 'layout'}}" class="detail-card ui-card">
           <text class="section-title">版式与内容</text>
-          <text class="section-description">这本书的当前版式和内容。</text>
-          <view class="detail-info-row"><text>书稿版式</text><text>{{bookManuscriptTemplateLabel}}</text></view>
+          <text class="section-description">选择书稿版式，应用到阅读版和打印版 PDF。卡片是版式示意，点预览查看实际效果；预览不会保存选择。</text>
+          <view class="layout-current"><text>当前使用</text><text>{{bookManuscriptTemplateLabel}}</text></view>
+          <view class="layout-option-list">
+            <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{bookLayoutTemplate === option.value ? 'is-selected' : ''}}">
+              <view class="layout-option-main">
+                <view class="layout-sample {{option.previewClass}} {{option.value === 'custom' ? 'font-' + bookCustomLayout.font_scale + ' space-' + bookCustomLayout.line_spacing + ' margin-' + bookCustomLayout.page_margin : ''}}" aria-hidden="true">
+                  <text class="layout-sample-kicker">第一章</text>
+                  <text class="layout-sample-title">{{bookLayoutSampleTitle}}</text>
+                  <text class="layout-sample-rule"></text>
+                  <text class="layout-sample-body">{{bookLayoutSampleExcerpt}}</text>
+                </view>
+                <view class="layout-option-copy">
+                  <text class="layout-option-title">{{option.label}}</text>
+                  <text class="layout-option-description">{{option.description}}</text>
+                  <text wx:if="{{bookLayoutTemplate === option.value}}" class="layout-selected-label">当前版式</text>
+                </view>
+              </view>
+              <view wx:if="{{option.value === 'custom'}}" class="layout-custom-controls">
+                <picker mode="selector" range="{{bookLayoutFontScaleOptions}}" range-key="label" value="{{bookLayoutFontScaleIndex}}" data-key="font_scale" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
+                  <view class="layout-custom-row"><text>正文字号</text><text>{{bookLayoutFontScaleOptions[bookLayoutFontScaleIndex].label}} ›</text></view>
+                </picker>
+                <picker mode="selector" range="{{bookLayoutLineSpacingOptions}}" range-key="label" value="{{bookLayoutLineSpacingIndex}}" data-key="line_spacing" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
+                  <view class="layout-custom-row"><text>行距</text><text>{{bookLayoutLineSpacingOptions[bookLayoutLineSpacingIndex].label}} ›</text></view>
+                </picker>
+                <picker mode="selector" range="{{bookLayoutPageMarginOptions}}" range-key="label" value="{{bookLayoutPageMarginIndex}}" data-key="page_margin" bindchange="changeBookCustomLayout" disabled="{{!!bookLayoutBusyTarget}}">
+                  <view class="layout-custom-row"><text>页边距</text><text>{{bookLayoutPageMarginOptions[bookLayoutPageMarginIndex].label}} ›</text></view>
+                </picker>
+                <text wx:if="{{bookLayoutTemplate === 'custom' && bookLayoutCustomChanged}}" class="layout-custom-hint">调整尚未保存，预览满意后点保存调整。</text>
+              </view>
+              <view class="layout-option-actions">
+                <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}" disabled="{{!!bookLayoutBusyTarget || !!bookExportBusyTarget}}">预览 PDF</button>
+                <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{!!bookLayoutBusyTarget || !!bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === option.value && (option.value !== 'custom' || !bookLayoutCustomChanged))}}">{{bookLayoutTemplate === option.value ? (option.value === 'custom' && bookLayoutCustomChanged ? '保存调整' : '已使用') : '使用此版式'}}</button>
+              </view>
+            </view>
+          </view>
+          <text class="layout-content-title">书稿内容</text>
           <view class="detail-info-row"><text>章节</text><text>{{totalChapterCount}}章</text></view>
           <view class="detail-info-row"><text>前言</text><text>{{bookPrefaceInput ? '已填写' : '未填写'}}</text></view>
           <view class="detail-info-row"><text>后记</text><text>{{bookAfterwordInput ? '已填写' : '未填写'}}</text></view>

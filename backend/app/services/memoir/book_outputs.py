@@ -28,6 +28,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
+    MemoirBookManuscriptTemplate,
     MemoirBookOutputVersionResponse,
     MemoirBookOutputVersionSummaryResponse,
     MemoirBookTitleSuggestionRequest,
@@ -498,6 +499,8 @@ async def update_book_output(
         snapshot=snapshot,
         cover_style_value=cover_style,
         metadata_patch=metadata_patch,
+        manuscript_template=req.manuscript_template,
+        custom_layout=req.custom_layout,
     )
     version_changed = content != latest.content or manuscript_json != latest.manuscript_json
     title_changed = output.title != title
@@ -726,6 +729,8 @@ async def export_book_output_file(
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
     version_id: str | None = None,
     show_source_appendix: bool | None = None,
+    preview_template: MemoirBookManuscriptTemplate | None = None,
+    preview_custom_layout_patch: dict[str, str] | None = None,
     allow_admin: bool = False,
     timeout_seconds: float | None = None,
 ) -> ExportFile:
@@ -744,6 +749,16 @@ async def export_book_output_file(
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
     )
+    if manuscript and (preview_template is not None or preview_custom_layout_patch):
+        manuscript = manuscript.model_copy(deep=True)
+        if preview_template is not None:
+            manuscript.profile.template = preview_template
+        elif preview_custom_layout_patch:
+            manuscript.profile.template = "custom"
+        if preview_custom_layout_patch:
+            manuscript.render_settings.custom_layout = manuscript.render_settings.custom_layout.model_copy(
+                update=preview_custom_layout_patch
+            )
     deadline_seconds = max(
         0.01,
         timeout_seconds

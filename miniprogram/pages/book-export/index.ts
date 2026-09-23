@@ -1,4 +1,6 @@
 import type {
+  MemoirBookCustomLayout,
+  MemoirBookManuscriptTemplate,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -65,6 +67,7 @@ interface BookExportDataset {
   target?: string;
   title?: string;
   section?: string;
+  template?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<BookExportDataset>;
@@ -94,6 +97,70 @@ type WxWithDocument = WechatMiniprogram.Wx & {
   openDocument?: (options: OpenDocumentOptions) => void;
 };
 
+interface BookLayoutOption {
+  value: MemoirBookManuscriptTemplate;
+  label: string;
+  description: string;
+  previewClass: string;
+}
+
+const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = [
+  { value: "classic_family", label: "素雅书籍版", description: "留白舒展，适合安静地读故事", previewClass: "classic" },
+  { value: "photo_memory", label: "家庭纪念版", description: "更大的章首页，留出回忆的呼吸感", previewClass: "memory" },
+  { value: "oral_archive", label: "口述档案版", description: "紧凑清楚，方便对照和保存", previewClass: "archive" },
+  { value: "custom", label: "自定义版式", description: "按自己的阅读习惯调整正文", previewClass: "custom" },
+];
+
+const BOOK_LAYOUT_TEMPLATES = BOOK_LAYOUT_OPTIONS.map((option) => option.value);
+const CUSTOM_FONT_SCALE_OPTIONS: { value: MemoirBookCustomLayout["font_scale"]; label: string }[] = [
+  { value: "standard", label: "标准" },
+  { value: "large", label: "大字" },
+];
+const CUSTOM_LINE_SPACING_OPTIONS: { value: MemoirBookCustomLayout["line_spacing"]; label: string }[] = [
+  { value: "compact", label: "紧凑" },
+  { value: "standard", label: "标准" },
+  { value: "relaxed", label: "舒展" },
+];
+const CUSTOM_PAGE_MARGIN_OPTIONS: { value: MemoirBookCustomLayout["page_margin"]; label: string }[] = [
+  { value: "narrow", label: "窄" },
+  { value: "standard", label: "标准" },
+  { value: "wide", label: "宽" },
+];
+const DEFAULT_CUSTOM_LAYOUT: MemoirBookCustomLayout = {
+  font_scale: "standard",
+  line_spacing: "standard",
+  page_margin: "standard",
+};
+
+function customLayoutFromOutput(output: MemoirBookOutput | null): MemoirBookCustomLayout {
+  const settings = output?.latest_version?.manuscript?.render_settings?.custom_layout;
+  return {
+    font_scale: settings?.font_scale === "large" ? "large" : "standard",
+    line_spacing: CUSTOM_LINE_SPACING_OPTIONS.find((option) => option.value === settings?.line_spacing)?.value || "standard",
+    page_margin: CUSTOM_PAGE_MARGIN_OPTIONS.find((option) => option.value === settings?.page_margin)?.value || "standard",
+  };
+}
+
+function customLayoutIndex<T extends string>(options: { value: T }[], value: T): number {
+  return Math.max(0, options.findIndex((option) => option.value === value));
+}
+
+async function openBookPdf(filePath: string): Promise<void> {
+  const wxWithDocument = wx as WxWithDocument;
+  if (typeof wxWithDocument.openDocument !== "function") {
+    throw new Error("当前微信版本暂不支持预览 PDF");
+  }
+  await new Promise<void>((resolve, reject) => {
+    wxWithDocument.openDocument?.({
+      filePath,
+      fileType: "pdf",
+      showMenu: true,
+      success: () => resolve(),
+      fail: (error) => reject(new Error(error.errMsg || "PDF 打开失败")),
+    });
+  });
+}
+
 type BookExportData = BookOutputData & {
   loading: boolean;
   loadError: string;
@@ -112,6 +179,19 @@ type BookExportData = BookOutputData & {
   bookEditorialCopyEventItem: BookAutomationEventView | null;
   bookOutputAvailable: boolean;
   activeSection: BookExportSection;
+  bookLayoutOptions: BookLayoutOption[];
+  bookLayoutTemplate: MemoirBookManuscriptTemplate;
+  bookCustomLayout: MemoirBookCustomLayout;
+  bookLayoutFontScaleOptions: typeof CUSTOM_FONT_SCALE_OPTIONS;
+  bookLayoutLineSpacingOptions: typeof CUSTOM_LINE_SPACING_OPTIONS;
+  bookLayoutPageMarginOptions: typeof CUSTOM_PAGE_MARGIN_OPTIONS;
+  bookLayoutFontScaleIndex: number;
+  bookLayoutLineSpacingIndex: number;
+  bookLayoutPageMarginIndex: number;
+  bookLayoutCustomChanged: boolean;
+  bookLayoutBusyTarget: string;
+  bookLayoutSampleTitle: string;
+  bookLayoutSampleExcerpt: string;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
@@ -167,6 +247,19 @@ definePage<BookExportData>()({
     exportNotice: exportNotice("preview"),
     bookEditorialCopyEventItem: null,
     activeSection: "",
+    bookLayoutOptions: BOOK_LAYOUT_OPTIONS,
+    bookLayoutTemplate: "classic_family",
+    bookCustomLayout: DEFAULT_CUSTOM_LAYOUT,
+    bookLayoutFontScaleOptions: CUSTOM_FONT_SCALE_OPTIONS,
+    bookLayoutLineSpacingOptions: CUSTOM_LINE_SPACING_OPTIONS,
+    bookLayoutPageMarginOptions: CUSTOM_PAGE_MARGIN_OPTIONS,
+    bookLayoutFontScaleIndex: 0,
+    bookLayoutLineSpacingIndex: 1,
+    bookLayoutPageMarginIndex: 1,
+    bookLayoutCustomChanged: false,
+    bookLayoutBusyTarget: "",
+    bookLayoutSampleTitle: "那些年的故事",
+    bookLayoutSampleExcerpt: "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
     ...bookOutputData(null),
   },
 
@@ -304,6 +397,8 @@ definePage<BookExportData>()({
       .filter((chapter) => chapter.include_in_book !== false)
       .length;
     const outputData = bookOutputData(output, this.bookOutputVersion);
+    const bookLayoutTemplate = output?.latest_version?.manuscript?.profile.template || "classic_family";
+    const bookCustomLayout = customLayoutFromOutput(output);
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultTitle(plan, output);
     }
@@ -314,6 +409,14 @@ definePage<BookExportData>()({
         : (outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length),
       bookOutputAvailable: Boolean(output?.latest_version),
       ...outputData,
+      bookLayoutTemplate,
+      bookCustomLayout,
+      bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, bookCustomLayout.font_scale),
+      bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, bookCustomLayout.line_spacing),
+      bookLayoutPageMarginIndex: customLayoutIndex(CUSTOM_PAGE_MARGIN_OPTIONS, bookCustomLayout.page_margin),
+      bookLayoutCustomChanged: false,
+      bookLayoutSampleTitle: outputData.bookPreviewChapters[0]?.title || "那些年的故事",
+      bookLayoutSampleExcerpt: outputData.bookPreviewChapters[0]?.excerpt || "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
       bookExportBusyTarget: "",
     });
   },
@@ -654,6 +757,96 @@ definePage<BookExportData>()({
     this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
   },
 
+  changeBookCustomLayout(event: PickerEvent) {
+    const key = datasetString(event, "key");
+    const index = pickerIndex(event);
+    const next = { ...this.data.bookCustomLayout };
+    if (key === "font_scale") {
+      const option = CUSTOM_FONT_SCALE_OPTIONS[index];
+      if (!option) return;
+      next.font_scale = option.value;
+    } else if (key === "line_spacing") {
+      const option = CUSTOM_LINE_SPACING_OPTIONS[index];
+      if (!option) return;
+      next.line_spacing = option.value;
+    } else if (key === "page_margin") {
+      const option = CUSTOM_PAGE_MARGIN_OPTIONS[index];
+      if (!option) return;
+      next.page_margin = option.value;
+    } else {
+      return;
+    }
+    const stored = customLayoutFromOutput(this.bookOutput);
+    this.setData({
+      bookCustomLayout: next,
+      bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, next.font_scale),
+      bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, next.line_spacing),
+      bookLayoutPageMarginIndex: customLayoutIndex(CUSTOM_PAGE_MARGIN_OPTIONS, next.page_margin),
+      bookLayoutCustomChanged: next.font_scale !== stored.font_scale
+        || next.line_spacing !== stored.line_spacing
+        || next.page_margin !== stored.page_margin,
+      error: "",
+    });
+  },
+
+  async previewBookLayout(event: DatasetEvent) {
+    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "classic_family");
+    if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget) return;
+    if (!this.bookOutput?.latest_version) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    if (this.bookOutput.is_stale) {
+      this.setData({ error: "章节内容已更新，请先更新书稿再预览版式" });
+      return;
+    }
+    this.setData({ bookLayoutBusyTarget: `preview:${template}`, error: "" });
+    try {
+      const filePath = await downloadMemoirBookOutputExport(
+        this.data.projectId,
+        "pdf",
+        this.bookOutput.latest_version.id,
+        "standard",
+        this.data.bookExportShowSourceAppendix,
+        { template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined },
+      );
+      await openBookPdf(filePath);
+    } catch (error) {
+      if (routeAuthError(error, "login")) return;
+      this.setData({ error: error instanceof Error ? error.message : "版式预览失败" });
+    } finally {
+      this.setData({ bookLayoutBusyTarget: "" });
+    }
+  },
+
+  async selectBookLayout(event: DatasetEvent) {
+    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "classic_family");
+    if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget || this.data.bookTitleSaving) return;
+    if (!this.bookOutput?.latest_version) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({ error: "请切回最新版后再修改版式" });
+      return;
+    }
+    if (template === this.data.bookLayoutTemplate && (template !== "custom" || !this.data.bookLayoutCustomChanged)) return;
+    this.setData({ bookLayoutBusyTarget: `save:${template}`, error: "" });
+    try {
+      const output = await updateMemoirBookOutput(this.data.projectId, {
+        manuscript_template: template,
+        ...(template === "custom" ? { custom_layout: this.data.bookCustomLayout } : {}),
+      });
+      this.applyBookExportData(this.bookPlan, output);
+      wx.showToast({ title: "书稿版式已保存", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) return;
+      this.setData({ error: error instanceof Error ? error.message : "保存书稿版式失败" });
+    } finally {
+      this.setData({ bookLayoutBusyTarget: "" });
+    }
+  },
+
   openBookReader() {
     if (!this.data.projectId || !this.data.bookContent) {
       return;
@@ -739,18 +932,7 @@ definePage<BookExportData>()({
         format === "pdf" ? this.data.bookExportShowSourceAppendix : true,
       );
       if (format === "pdf") {
-        const wxWithDocument = wx as WxWithDocument;
-        if (typeof wxWithDocument.openDocument === "function") {
-          await new Promise<void>((resolve, reject) => {
-            wxWithDocument.openDocument?.({
-              filePath,
-              fileType: "pdf",
-              showMenu: true,
-              success: () => resolve(),
-              fail: (error) => reject(new Error(error.errMsg || "PDF 打开失败")),
-            });
-          });
-        }
+        await openBookPdf(filePath);
       } else {
         const title = trimText(this.data.bookManuscriptTitle || this.data.bookPreviewTitle || this.data.planTitle)
           .replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "回忆录";
