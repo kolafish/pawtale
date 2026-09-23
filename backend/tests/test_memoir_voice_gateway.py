@@ -803,6 +803,12 @@ async def test_mobile_voice_gateway_rejects_missing_voice_consent(monkeypatch):
         return False
 
     monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", authenticate)
+
+    async def credit_available(_user_id):
+        return None
+
+    monkeypatch.setattr(voice_gateway_router, "assert_ai_credit_available", credit_available)
+
     monkeypatch.setattr(
         voice_gateway_router.memoir_voice_authorization,
         "has_current_voice_authorization_consent",
@@ -898,8 +904,15 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     websocket = FakeWebSocket()
     db = object()
     monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+
+    async def credit_available(_user_id):
+        return None
+
+    monkeypatch.setattr(voice_gateway_router, "assert_ai_credit_available", credit_available)
+
     async def authorized(_db: Any, _user_id: str) -> bool:
         return True
+
     monkeypatch.setattr(
         voice_gateway_router.memoir_voice_authorization,
         "has_current_voice_authorization_consent",

@@ -1,6 +1,7 @@
 import asyncio
 from datetime import timedelta
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -62,7 +63,11 @@ class TestAuthAPI:
             json={"email": "socket@example.com", "password": "password123"},
         )).status_code == 201
         token = anonymous_client.cookies[SESSION_COOKIE_NAME]
-        socket = type("Socket", (), {"cookies": {SESSION_COOKIE_NAME: token}})()
+        socket = SimpleNamespace(
+            cookies={SESSION_COOKIE_NAME: token},
+            url=SimpleNamespace(path="/api/auth/test-websocket"),
+            path_params={},
+        )
         independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
         async with independent_sessions() as db:
             assert await authenticate_websocket(socket, db) is not None

@@ -24,7 +24,9 @@ from app.auth import SESSION_COOKIE_NAME, hash_password, session_token_hash  # n
 from app.clock import utcnow_naive  # noqa: E402
 from app.database import (  # noqa: E402
     Base,
+    async_session_maker,
     create_database_engine,
+    engine as app_engine,
     get_db,
     register_models,
     settings,
@@ -94,17 +96,21 @@ async def verified_postgres_schema(postgres_schema):
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_engine(verified_postgres_schema):
-    """Share a loop-safe engine while keeping each test's data isolated by transaction."""
+    """Share a loop-safe engine across API requests and background sessions."""
     # NullPool avoids reusing asyncpg connections across pytest-asyncio's per-test loops.
     engine = create_async_engine(
         POSTGRES_DATABASE_URL,
         poolclass=NullPool,
         pool_pre_ping=True,
     )
-    await _truncate_postgres_tables(engine)
+    # Services that open their own sessions must use the same test database and
+    # cannot reuse pooled asyncpg connections from a previous test event loop.
+    async_session_maker.configure(bind=engine)
     try:
+        await _truncate_postgres_tables(engine)
         yield engine
     finally:
+        async_session_maker.configure(bind=app_engine)
         await engine.dispose()
 
 
@@ -116,35 +122,18 @@ async def _truncate_postgres_tables(engine) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_db(request, test_engine):
-    """Run ordinary tests in a rollback-only transaction; isolate worker tests with truncation."""
-    if (
-        request.node.get_closest_marker("db_independent") is not None
-        or request.node.get_closest_marker("db_transaction_boundary") is not None
-    ):
-        async_session = async_sessionmaker(
-            test_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-        async with async_session() as session:
-            yield session
-        await _truncate_postgres_tables(test_engine)
-        return
-
-    connection = await test_engine.connect()
-    transaction = await connection.begin()
-    session = AsyncSession(
-        bind=connection,
+async def test_db(test_engine):
+    """Give each test real commit boundaries, then clear its database rows."""
+    async_session = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
         expire_on_commit=False,
-        join_transaction_mode="create_savepoint",
     )
     try:
-        yield session
+        async with async_session() as session:
+            yield session
     finally:
-        await session.close()
-        await transaction.rollback()
-        await connection.close()
+        await _truncate_postgres_tables(test_engine)
 
 
 @pytest_asyncio.fixture
@@ -155,12 +144,13 @@ async def anonymous_client(test_db, tmp_path):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-    app.dependency_overrides.clear()
+    try:
+        with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                yield ac
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture(scope="session")
