@@ -963,7 +963,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         ),
     )
 
-    async def fail_background_generation(_selected_text, _style_id):
+    async def fail_background_generation(_selected_text, _style_id, *, usage_context=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -1586,7 +1586,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_dir = tmp_path / "backgrounds"
     image_dir.mkdir()
 
-    async def fake_background(selected_text, style_id):
+    async def fake_background(selected_text, style_id, *, usage_context=None):
         image_calls.append((selected_text, style_id))
         image_path = image_dir / f"scene-{len(image_calls)}.png"
         image_path.write_bytes(b"fake image")

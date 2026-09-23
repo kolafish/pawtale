@@ -60,7 +60,7 @@ async def test_transcribe_voice_search_audio_maps_provider_error():
 async def test_transcribe_mobile_memoir_search_query_route(client, monkeypatch):
     calls: list[bytes] = []
 
-    async def fake_transcribe(audio: bytes, *, asr_client_factory):
+    async def fake_transcribe(audio: bytes, *, asr_client_factory, mime_type: str):
         calls.append(audio)
         return "外婆家的院子"
 
