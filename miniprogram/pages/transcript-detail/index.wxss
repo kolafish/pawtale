@@ -153,8 +153,7 @@
   background: var(--ui-surface);
 }
 
-.raw-title-line,
-.audio-row-copy {
+.raw-title-line {
   display: flex;
   align-items: baseline;
   min-width: 0;
@@ -476,9 +475,9 @@
   padding-bottom: 18rpx;
 }
 
-.audio-row {
+.audio-card .audio-row {
   width: 100%;
-  min-height: 88rpx;
+  min-height: 96rpx;
   margin: 0;
   padding: 0;
   border: 0;
@@ -486,25 +485,50 @@
   background: transparent;
   display: flex;
   align-items: center;
-  gap: 14rpx;
+  justify-content: flex-start;
+  gap: 18rpx;
   text-align: left;
   transition-property: transform, opacity, background-color;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
 
+.audio-row-symbol {
+  width: 68rpx;
+  height: 68rpx;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ui-accent-surface-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .audio-row-icon {
   width: 40rpx;
   height: 40rpx;
-  flex: 0 0 auto;
 }
 
 .audio-row-copy {
-  flex: 1 1 auto;
+  min-width: 0;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.audio-row-copy .section-title {
+  white-space: nowrap;
+}
+
+.audio-row-duration {
+  margin-top: 4rpx;
+  white-space: nowrap;
 }
 
 .audio-row-action {
   flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 700;

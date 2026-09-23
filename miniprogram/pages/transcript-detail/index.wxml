@@ -290,10 +290,12 @@
         disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
         aria-label="{{playingAudioKind === 'answer' ? '停止播放原始音频' : '播放原始音频'}}"
       >
-        <image class="audio-row-icon" src="/assets/chapter-workspace/speaker.svg" mode="aspectFit" aria-hidden="true" />
+        <view class="audio-row-symbol">
+          <image class="audio-row-icon" src="/assets/chapter-workspace/speaker.svg" mode="aspectFit" aria-hidden="true" />
+        </view>
         <view class="audio-row-copy">
           <text class="section-title">原始音频</text>
-          <text class="audio-row-duration">· {{item.audioText}}</text>
+          <text class="audio-row-duration">{{item.audioText}}</text>
         </view>
         <text class="audio-row-action">{{playingAudioKind === "answer" ? "停止" : "播放"}} ›</text>
       </button>
