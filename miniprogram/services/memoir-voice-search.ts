@@ -34,6 +34,13 @@ interface RecordMemoirVoiceSearchQueryOptions {
   noVoiceTranscriptMessage?: string;
   stopMode?: VoiceInputStopMode;
   maxDurationMs?: number;
+  isCancelled?: () => boolean;
+}
+
+function assertNotCancelled(options: RecordMemoirVoiceSearchQueryOptions): void {
+  if (options.isCancelled?.()) {
+    throw new Error("语音搜索已取消");
+  }
 }
 
 let pendingRecording: VoiceSearchRecorderPending | null = null;
@@ -168,12 +175,23 @@ export function stopMemoirVoiceSearchRecording(): void {
   sharedRecorderResource.stop(VOICE_INPUT_RECORDER_OWNER_ID);
 }
 
+export function cancelMemoirVoiceSearchRecording(): void {
+  const pending = pendingRecording;
+  if (!pending) {
+    return;
+  }
+  pendingRecording = null;
+  pending.reject(new Error("语音搜索已取消"));
+  sharedRecorderResource.stop(VOICE_INPUT_RECORDER_OWNER_ID);
+}
+
 export async function recordMemoirVoiceSearchQuery(
   options: RecordMemoirVoiceSearchQueryOptions = {},
 ): Promise<string> {
   if (!(await ensureVoiceRecordingAuthorization())) {
     throw new Error("请先同意语音授权");
   }
+  assertNotCancelled(options);
   let noVoiceAutoStopped = false;
   const audio = await recordVoiceSearchAudio({
     stopMode: options.stopMode,
@@ -183,9 +201,12 @@ export async function recordMemoirVoiceSearchQuery(
       options.onNoVoiceAutoStop?.();
     },
   });
+  assertNotCancelled(options);
   options.onRecordingEnd?.();
   const audioBase64 = await readFileAsBase64(audio.tempFilePath);
+  assertNotCancelled(options);
   const response = await transcribeMemoirVoiceSearchAudio(audioBase64, "audio/pcm");
+  assertNotCancelled(options);
   const transcript = response.transcript.trim();
   if (!transcript) {
     const wasNoVoice = noVoiceAutoStopped || Boolean(audio.noVoiceAutoStopped);
