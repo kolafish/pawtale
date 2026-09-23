@@ -103,7 +103,7 @@
       class="swipe-delete"
       data-id="{{item.id}}"
       catchtap="deleteTranscript"
-      disabled="{{deletingId !== ''}}"
+      disabled="{{deletingId !== '' || openSwipeId !== item.id}}"
       aria-hidden="{{openSwipeId !== item.id}}"
       aria-label="删除{{item.summaryTitleText}}"
     ><text>删除</text></button>

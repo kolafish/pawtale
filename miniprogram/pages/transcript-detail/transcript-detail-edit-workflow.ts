@@ -18,7 +18,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { promptRequiredText } from "../../services/text-prompt";
-import { confirmDeleteTranscript } from "../../services/transcript-view-model";
+import { confirmDeleteTranscript } from "../../services/transcript-delete-confirmation";
 import {
   changedItem,
   confirmConvertQuestionToAnswer,

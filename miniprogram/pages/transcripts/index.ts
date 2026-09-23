@@ -29,12 +29,12 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
-  confirmDeleteTranscript,
   transcriptCreatedAtText,
   transcriptDurationText,
   transcriptTitleText,
   type TranscriptTextSegment,
 } from "../../services/transcript-view-model";
+import { confirmDeleteTranscript } from "../../services/transcript-delete-confirmation";
 import {
   datasetString,
   pageUrl,
@@ -474,7 +474,6 @@ definePage<TranscriptsData>()({
   },
 
   async onShow() {
-    this.setData({ openSwipeId: "" });
     this.voiceSearchVisible = true;
     this.setData({ pageClass: accessibilityPageClass("transcripts-page") });
     await this.loadTranscripts(true);
