@@ -548,6 +548,11 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
+    if not snapshot:
+        raise HTTPException(
+            status_code=409,
+            detail="当前整本书没有可用章节。请在书稿页处理待确认事项，等后台更新书稿后再重写。",
+        )
     manuscript = _editable_manuscript(
         title=project.title,
         content=latest.content,

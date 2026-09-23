@@ -7,7 +7,7 @@ import type {
   MemoirImageAssetListResponse,
 } from "../../domain/memoir-book";
 import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
-import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
+import type { MemoirBookSnapshot, MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -431,7 +431,7 @@ definePage<BookPageData>()({
       projectTitle,
     });
     this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});
-    this.applyBookOutput(snapshot.output || null);
+    this.applyBookOutput(snapshot.output || null, snapshot.progress || null);
     this.applyAutomationEvents(snapshot.automation_events.items || []);
     this.applyImageAssetSummary(snapshot.image_assets);
   },
@@ -492,9 +492,9 @@ definePage<BookPageData>()({
     });
   },
 
-  applyBookOutput(output: MemoirBookOutput | null) {
+  applyBookOutput(output: MemoirBookOutput | null, progress: MemoirDraftProgress | null = null) {
     this.bookOutput = output;
-    this.setData(bookHomeOutputData(output));
+    this.setData(bookHomeOutputData(output, progress));
   },
 
   openImageAssetsPage() {

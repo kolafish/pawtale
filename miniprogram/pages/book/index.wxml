@@ -38,7 +38,7 @@
         <text class="status-pill">{{stageText}}</text>
       </view>
       <text class="status-meta">
-        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContentAvailable ? "已生成书稿" : progressText}}
+        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookStaleNotice ? "整本书待更新" : (bookContentAvailable ? "已生成书稿" : progressText)}}
       </text>
       <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
       <image
@@ -49,7 +49,7 @@
       />
     </view>
     <view class="progress-actions">
-      <button wx:if="{{bookContentAvailable}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
+      <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
         <text>阅读全书</text><text class="progress-action-mark">›</text>
       </button>
       <button class="ghost-button small progress-action" bindtap="openBookCompletion">

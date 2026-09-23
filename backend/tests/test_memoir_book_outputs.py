@@ -1025,6 +1025,31 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     assert "chapter_summary: 这一章写外婆家的院子和童年生活。" in fake_ai.calls[0]["user_prompt"]
 
 
+async def test_editorial_copy_explains_empty_book_after_chapters_are_withheld(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    previous = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    test_db.add(MemoirBookOutputVersion(
+        output_id=previous.output_id,
+        project_id=project_id,
+        plan_id=plan.id,
+        version=previous.version + 1,
+        content="我的回忆录",
+        chapter_snapshot_json=[],
+        manuscript_json={},
+        created_by=MemoirCreatedBy.SYSTEM.value,
+    ))
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/editorial-copy/regenerate",
+        json={"targets": ["preface"]},
+    )
+    assert response.status_code == 409
+    assert "待确认事项" in response.json()["detail"]
+    assert "后台更新书稿后再重写" in response.json()["detail"]
+
+
 async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_background(
     client,
     test_db,

@@ -142,6 +142,7 @@ async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_d
     assert book["plan"] is None
     assert book["drafts_by_chapter_id"] == {}
     assert book["output"] is None
+    assert book["progress"]["project_id"] == project_id
     assert book["automation_events"]["items"] == []
     assert book["image_assets"]["items"] == []
     assert book["share_video_counts"] == [
