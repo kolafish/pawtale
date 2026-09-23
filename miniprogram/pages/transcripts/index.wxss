@@ -217,7 +217,7 @@
 .swipe-delete {
   position: absolute;
   top: 0;
-  left: 0;
+  right: 0;
   bottom: 0;
   box-sizing: border-box;
   width: 144rpx;
@@ -253,7 +253,7 @@
 }
 
 .transcript-swipe-row.is-swiped .transcript-card {
-  transform: translateX(144rpx);
+  transform: translateX(-144rpx);
 }
 
 .transcript-card-hover {
