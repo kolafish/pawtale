@@ -343,7 +343,7 @@ test("book completion returns to the book hub for generation and chapter managem
   assert.deepEqual(navigations, ["/pages/book/index"]);
 });
 
-test("book completion submits answers and editorial actions as one revision", async () => {
+test("book completion submits an unrelated revision while another chapter awaits a decision", async () => {
   const requests = [];
   const navigations = [];
   const review = bookReview({
@@ -410,10 +410,7 @@ test("book completion submits answers and editorial actions as one revision", as
   page.toggleEditorialAction.call(context, {
     currentTarget: { dataset: { actionId: "action/1" } },
   });
-  context.data.requiredBookIssues = [{ id: "issue-1" }];
-  await page.generateBookRevision.call(context);
-  assert.deepEqual(requests, []);
-  context.data.requiredBookIssues = [];
+  context.data.requiredBookIssues = [{ id: "issue-1", related_chapter_ids: ["chapter-3"] }];
   await page.generateBookRevision.call(context);
   page.openBookRevision.call(context);
 

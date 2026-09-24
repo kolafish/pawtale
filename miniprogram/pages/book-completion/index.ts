@@ -901,7 +901,6 @@ definePage<BookCompletionData>()({
       (!this.data.includeBookReviewAnswers && !actionIds.length)
       || this.data.generatingRevision
       || this.data.revisionCancelling
-      || this.data.requiredBookIssues.length > 0
     ) {
       return;
     }

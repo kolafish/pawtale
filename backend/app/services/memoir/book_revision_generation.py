@@ -15,11 +15,15 @@ from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookRevisionProposalPhase,
     MemoirBookRevisionProposalStatus,
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueScope,
+    MemoirCompletionIssueStatus,
 )
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookReview,
+    MemoirCompletionIssue,
 )
 from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.ai_calls import generate_structured_with_client
@@ -38,6 +42,7 @@ from app.services.memoir import (
     book_review_answer_state,
     book_revision_proposals,
     book_reviews,
+    completion_issues,
 )
 from app.services.memoir.book_output_snapshots import sectioned_chapter_content
 from app.services.memoir.book_output_manuscript import (
@@ -134,6 +139,38 @@ def _text(value: object) -> str:
 
 def _snapshots(value: object) -> list[dict[str, object]]:
     return [deepcopy(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+async def selected_revision_has_pending_decision(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    review_input_signature: str,
+    chapter_ids: set[str],
+) -> bool:
+    """A pending decision limits only edits that involve its chapter."""
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+    ))).all()
+    for issue in issues:
+        if (
+            issue.issue_type not in completion_issues.BLOCKING_BOOK_ISSUE_TYPES
+            and (
+                issue.scope != MemoirCompletionIssueScope.BOOK.value
+                or issue.input_signature != review_input_signature
+            )
+        ):
+            continue
+        related_ids = (
+            {issue.chapter_id}
+            if issue.chapter_id
+            else set(issue.related_chapter_ids_json or [])
+        )
+        if not related_ids or related_ids.intersection(chapter_ids):
+            return True
+    return False
 
 
 def _sections(snapshot: dict[str, object]) -> list[dict[str, object]]:
@@ -960,8 +997,6 @@ async def generate_book_revision_proposal(
         if action_ids
         else []
     )
-    if answer_context.unresolved_count:
-        raise BookRevisionError("请先处理完所有需要确认的问题")
     if include_answers and not answer_context.answers:
         raise BookRevisionError("当前没有可以应用到书稿的回答")
     if include_answers and answer_context.answers_signature != expected_answers_signature:
@@ -976,6 +1011,20 @@ async def generate_book_revision_proposal(
         raise BookRevisionError("成书信息建议已经过期，请重新检查全书")
     if book_editorial_actions.actions_signature(actions) != expected_actions_signature:
         raise BookRevisionError("所选编辑建议已经变化，请重新选择")
+    related_ids = (
+        (answer_context.related_chapter_ids if include_answers else set())
+        | {
+            str(chapter_id)
+            for action in actions
+            for chapter_id in action.get("chapter_ids", [])
+        }
+    )
+    if await selected_revision_has_pending_decision(
+        db, project_id=project_id,
+        review_input_signature=review.input_signature,
+        chapter_ids=set(related_ids),
+    ):
+        raise BookRevisionError("请先处理所选章节需要确认的问题")
 
     if progress_callback is not None:
         await progress_callback({"stage": "assembling"})
@@ -986,14 +1035,6 @@ async def generate_book_revision_proposal(
     )
     original_snapshots = _snapshots(baseline.chapter_snapshot_json)
     book_information = _book_information(output, baseline)
-    related_ids = (
-        (answer_context.related_chapter_ids if include_answers else set())
-        | {
-            str(chapter_id)
-            for action in actions
-            for chapter_id in action.get("chapter_ids", [])
-        }
-    )
     chapter_refs, section_refs = _reference_maps(
         original_snapshots,
         related_ids,
@@ -1056,6 +1097,12 @@ async def generate_book_revision_proposal(
         )
     ):
         raise BookRevisionError("生成期间编辑建议或问题回答已经变化，请重试")
+    if await selected_revision_has_pending_decision(
+        db, project_id=project_id,
+        review_input_signature=current_review.input_signature,
+        chapter_ids=set(related_ids),
+    ):
+        raise BookRevisionError("所选章节出现需要确认的问题，请处理后重试")
     proposal = await book_revision_proposals.create_ready_proposal(
         db,
         review=current_review,

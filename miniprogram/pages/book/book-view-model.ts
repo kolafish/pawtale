@@ -219,7 +219,6 @@ export interface BookHomeData {
   titleBusyTarget: string;
   bookCharCount: number;
   bookIncludedChapterCount: number;
-  bookPartialNotice: string;
   bookPreviewTitle: string;
   bookStaleNotice: string;
   ttsBusyTarget: string;
@@ -842,13 +841,11 @@ export type BookOutputData = ReturnType<typeof bookOutputData>;
 export function bookHomeOutputData(
   output: MemoirBookOutput | null,
   progress: MemoirDraftProgress | null = null,
-  chapters: BookChapterView[] = [],
 ): Pick<
   BookHomeData,
   | "bookContentAvailable"
   | "bookCharCount"
   | "bookIncludedChapterCount"
-  | "bookPartialNotice"
   | "bookPreviewTitle"
   | "bookStaleNotice"
 > {
@@ -857,23 +854,10 @@ export function bookHomeOutputData(
   const available = Boolean(content && trimText(content) !== emptyBookContent);
   const includedIds = new Set(available ? bookOutputTocItems(output).map((item) => item.chapterId) : []);
   const includedChapterCount = includedIds.size;
-  const plannedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
-  const totalChapterCount = chapters.length ? plannedChapters.length : progress?.total_chapter_count || 0;
-  const omittedNames = chapters.flatMap((chapter, index) => (
-    chapter.include_in_book !== false && !includedIds.has(chapter.id)
-      ? [`第${index + 1}章「${trimText(chapter.editingTitle || chapter.title) || "未命名章节"}」`]
-      : []
-  ));
-  const omittedSubject = omittedNames.length
-    ? `${omittedNames.slice(0, 2).join("、")}${omittedNames.length > 2 ? "等章节" : ""}`
-    : "其余章节";
   return {
     bookContentAvailable: available,
     bookCharCount: available ? trimText(content).length : 0,
     bookIncludedChapterCount: includedChapterCount,
-    bookPartialNotice: available && !output?.is_stale && totalChapterCount > includedChapterCount
-      ? `${omittedSubject}尚未收入当前书稿。${bookOmissionFollowUp(progress, plannedChapters.filter((chapter) => !includedIds.has(chapter.id)))}`
-      : "",
     bookPreviewTitle: bookOutputPreviewTitle(output),
     bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
@@ -910,7 +894,7 @@ export function bookChapterInclusionData(
     ...chapter,
     bookInclusionNotice: available && chapter.include_in_book !== false
       && chapter.draftAvailable && !includedIds.has(chapter.id)
-      ? `本章正文可阅读，但尚未收入当前书稿。${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
+      ? `${progress?.status === "needs_input" ? "本章待确认，暂未收入当前书稿。" : "本章暂未收入当前书稿。"}${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
       : "",
   }));
 }
@@ -1236,7 +1220,6 @@ export function guestBookData(): Partial<BookHomeData> {
     bookContentAvailable: false,
     bookCharCount: 0,
     bookIncludedChapterCount: 0,
-    bookPartialNotice: "",
     bookPreviewTitle: "",
     bookStaleNotice: "",
     ttsBusyTarget: "",

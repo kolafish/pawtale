@@ -114,6 +114,7 @@ class _BookReviewIssueOutput(BaseModel):
     reason: str = ""
     priority: str = ""
     chapter_ids: list[str] = Field(default_factory=list)
+    evidence_quote: str = ""
     resolution: Literal[
         "new_material",
         "editorial_change",
@@ -349,12 +350,6 @@ async def load_book_review_context(
                     "id": chapter.chapter_id,
                     "title": chapter.title,
                     "sort_order": chapter.sort_order,
-                    "digest_id": chapter.digest_id,
-                    "digest_signature": chapter.digest_signature,
-                    "digest_hash": semantic_json_signature(chapter.digest),
-                    "draft_version_id": (
-                        chapter.draft_version_id
-                    ),
                     "draft_hash": chapter.draft_hash,
                 }
                 for chapter in chapters
@@ -389,9 +384,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         (
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
-            f"摘要: {chapter.digest.get('summary', '')}\n"
-            f"重点: {chapter.digest.get('focus', '')}\n"
-            f"当前正文（以此为准，摘要仅辅助理解）:\n{chapter.draft_content}"
+            f"当前正文:\n{chapter.draft_content}"
         )
         for chapter in context.chapters
     )
@@ -424,6 +417,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
       "chapter_ids": ["相关 chapter_id"],
+      "evidence_quote": "隐私或事实冲突事项所依据的章节正文短原句；其他事项留空",
       "resolution": "new_material|editorial_change|user_decision"
     }}
   ]
@@ -442,6 +436,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建正文和来源中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
+- 隐私或事实冲突事项的 evidence_quote 必须逐字摘自相关章节当前正文，选能指认这件事的最短完整片段；找不到可核对原文时留空，不要编造。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
     return checked_review_prompt(prompt, subject="全书")
@@ -525,8 +520,28 @@ def normalize_book_review(
             "material_ids": [],
             "resolution": resolution,
         }
-        issue["fingerprint"] = completion_issues.stable_book_issue_fingerprint(issue)
+        if issue_type in {"privacy", "conflict"}:
+            evidence_quote = _compact(candidate.get("evidence_quote"), limit=160)
+            if len("".join(evidence_quote.split())) >= 7 and any(
+                evidence_quote in chapter.draft_content
+                for chapter in context.chapters
+                if chapter.chapter_id in chapter_ids
+            ):
+                issue["evidence_quote"] = evidence_quote
         issues.append(issue)
+    anchor_counts: dict[tuple[str, tuple[str, ...], str], int] = {}
+    for issue in issues:
+        quote = issue.get("evidence_quote")
+        if isinstance(quote, str) and quote:
+            key = (issue["issue_type"], tuple(sorted(issue["chapter_ids"])), quote)
+            anchor_counts[key] = anchor_counts.get(key, 0) + 1
+    for issue in issues:
+        quote = issue.get("evidence_quote")
+        if isinstance(quote, str) and quote:
+            key = (issue["issue_type"], tuple(sorted(issue["chapter_ids"])), quote)
+            if anchor_counts[key] > 1:
+                issue.pop("evidence_quote", None)
+        issue["fingerprint"] = completion_issues.stable_book_issue_fingerprint(issue)
     model_guidance = _user_visible_string_list(
         payload.get("structure_guidance"),
         context=context,

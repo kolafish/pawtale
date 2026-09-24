@@ -112,13 +112,16 @@
   background: var(--ui-success-surface);
   color: var(--ui-success-text);
 }
+.status-pill.is-pending {
+  background: var(--ui-warning-surface);
+  color: var(--ui-warning-text);
+}
 .source-count {
   background: var(--ui-accent-surface);
   color: var(--ui-accent-strong);
   font-variant-numeric: tabular-nums;
 }
-.status-meta,
-.progress-note {
+.status-meta {
   position: relative;
   z-index: 1;
   display: block;
@@ -131,12 +134,6 @@
   font-size: var(--ui-font-meta);
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-}
-.progress-note {
-  margin-top: 10rpx;
-  color: var(--ui-accent-strong);
-  font-size: var(--ui-font-body);
-  line-height: var(--ui-line-body);
 }
 .progress-actions {
   padding: 0 20rpx;
@@ -739,6 +736,24 @@
   flex: 1 1 auto;
   overflow-wrap: anywhere;
 }
+.chapter-inclusion-link {
+  align-self: flex-start;
+  min-height: 80rpx;
+  margin: -8rpx 0 0;
+  padding: 0 18rpx;
+  border: 0;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-body);
+  font-weight: 600;
+  line-height: 80rpx;
+}
+.chapter-inclusion-link::after {
+  border: 0;
+}
+.chapter-inclusion-link text {
+  margin-left: 8rpx;
+}
 .chapter-summary-error,
 .chapter-audio-status {
   display: block;
@@ -1177,7 +1192,6 @@
   line-height: 1.4;
 }
 .book-page.large-text .status-meta,
-.book-page.large-text .progress-note,
 .book-page.large-text .automation-meta,
 .book-page.large-text .chapter-summary-meta,
 .book-page.large-text .image-assets-entry-meta,
