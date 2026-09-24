@@ -22,18 +22,76 @@
     <text class="empty-copy">这条讲述记录可能已删除，或不属于当前账号。</text>
   </view>
 
-  <view wx:elif="{{item.canRecoverTranscription}}" class="empty-panel">
+  <view wx:elif="{{viewMode === 'create' && item.canRecoverTranscription}}" class="empty-panel">
     <text class="empty-title">转写完成后再制作</text>
     <text class="empty-copy">原始音频已经保存，文字恢复完成后才能选择片段制作图片或视频。</text>
   </view>
 
   <block wx:else>
-    <view class="hero-panel">
+    <block wx:if="{{viewMode === 'video'}}">
+      <view class="hero-panel">
+        <text class="record-title">{{shareVideoJob ? (shareVideoJob.title || item.titleText) : "分享视频"}}</text>
+        <text class="record-meta">来自“{{item.titleText}}”的口述回忆</text>
+      </view>
+
+      <view class="section-card share-video-card share-video-result-card">
+        <view wx:if="{{loading && !shareVideoJob}}" class="share-video-state">正在打开视频</view>
+        <view wx:if="{{shareVideoError && (!shareVideoJob || shareVideoJob.status !== 'failed')}}" class="share-video-error">{{shareVideoError}}</view>
+
+        <block wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}">
+          <text class="share-video-result-label">视频已生成</text>
+          <video
+            wx:if="{{shareVideoPreviewPath}}"
+            class="share-video-preview"
+            src="{{shareVideoPreviewPath}}"
+            controls
+            show-center-play-btn
+            enable-progress-gesture
+            object-fit="contain"
+          />
+          <ai-task-progress
+            wx:elif="{{shareVideoDownloadingPreview}}"
+            class="share-video-task-progress"
+            title="正在准备视频预览"
+            mode="indeterminate"
+          />
+          <button wx:elif="{{shareVideoError}}" class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重试预览</button>
+          <view class="actions-row share-video-actions share-video-result-actions">
+            <button
+              class="primary-button"
+              bindtap="shareGeneratedVideo"
+              loading="{{shareVideoSharing}}"
+              disabled="{{shareVideoDownloadingPreview || shareVideoSharing}}"
+            >{{shareVideoSharing ? "分享中" : "分享给微信"}}</button>
+            <button class="ghost-button" bindtap="remakeShareVideo" disabled="{{shareVideoSharing}}">重新制作</button>
+          </view>
+        </block>
+
+        <block wx:elif="{{shareVideoJob && (shareVideoJob.status === 'pending' || shareVideoJob.status === 'running')}}">
+          <ai-task-progress
+            wx:if="{{shareVideoPolling}}"
+            class="share-video-task-progress"
+            title="{{shareVideoStatusText || '正在生成视频'}}"
+            detail="完成后可以先预览，再决定是否分享"
+            mode="indeterminate"
+          />
+          <button wx:else class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重新查看进度</button>
+        </block>
+
+        <view wx:elif="{{shareVideoJob && shareVideoJob.status === 'failed'}}" class="share-video-result-failed">
+          <text class="share-video-job-title">{{shareVideoStatusText || '视频生成失败'}}</text>
+          <button class="primary-button" bindtap="remakeShareVideo">重新制作</button>
+        </view>
+        <view wx:elif="{{!loading}}" class="share-video-state">暂时无法查看这段视频</view>
+      </view>
+    </block>
+
+    <view wx:if="{{viewMode === 'create'}}" class="hero-panel">
       <text class="record-title">做成图片或视频</text>
       <text class="record-meta">从“{{item.titleText}}”的成书文字中选择片段，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
     </view>
 
-    <view class="section-card share-video-card">
+    <view wx:if="{{viewMode === 'create'}}" class="section-card share-video-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">选择文字片段</text>
@@ -189,15 +247,6 @@
           >
             {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
           </button>
-          <button
-            wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}"
-            class="ghost-button"
-            bindtap="shareGeneratedVideo"
-            loading="{{shareVideoSharing}}"
-            disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
-          >
-            {{shareVideoSharing ? "分享中" : "分享给微信"}}
-          </button>
         </view>
 
         <ai-task-progress
@@ -222,24 +271,11 @@
         </view>
 
         <ai-task-progress
-          wx:if="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+          wx:if="{{shareVideoCreating}}"
           class="share-video-task-progress"
           title="{{shareVideoStatusText || '正在生成视频'}}"
           detail="{{shareVideoSelectedMetaText}}"
           mode="indeterminate"
-        />
-        <view wx:elif="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
-          <text class="share-video-job-title">{{shareVideoStatusText}}</text>
-          <text wx:if="{{shareVideoSelectedMetaText}}" class="share-video-job-meta">{{shareVideoSelectedMetaText}}</text>
-        </view>
-        <video
-          wx:if="{{shareVideoPreviewPath}}"
-          class="share-video-preview"
-          src="{{shareVideoPreviewPath}}"
-          controls
-          show-center-play-btn
-          enable-progress-gesture
-          object-fit="contain"
         />
       </block>
     </view>

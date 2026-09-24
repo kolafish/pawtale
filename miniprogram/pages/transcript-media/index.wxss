@@ -341,6 +341,29 @@
   box-shadow: var(--ui-card-shadow);
 }
 
+.share-video-result-card .share-video-preview,
+.share-video-result-card .share-video-task-progress {
+  margin-top: 0;
+}
+
+.share-video-result-label {
+  display: block;
+  margin-bottom: 14rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-meta);
+  font-weight: 700;
+}
+
+.share-video-result-actions {
+  margin-top: 22rpx;
+}
+
+.share-video-result-failed .primary-button,
+.share-video-retry {
+  width: 100%;
+  margin-top: 18rpx;
+}
+
 .detail-page.large-text .share-video-state,
 .detail-page.large-text .share-video-error,
 .detail-page.large-text .share-video-background-label,
@@ -362,6 +385,7 @@
 .detail-page.large-text .share-video-background-current,
 .detail-page.large-text .share-video-background-desc,
 .detail-page.large-text .share-video-background-help,
+.detail-page.large-text .share-video-result-label,
 .detail-page.large-text .share-video-job-meta {
   font-size: var(--ui-font-large-meta);
   line-height: 1.5;
