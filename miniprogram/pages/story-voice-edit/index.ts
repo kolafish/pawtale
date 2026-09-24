@@ -99,10 +99,10 @@ definePage<EditData>()({
     try {
       const result = await applyVoiceEdit(this.data.projectId, this.data.preview.signature, operations);
       if (sequence !== this.requestSequence) return;
-      const regeneration = operations.find(item => item.action === "regenerate_chapter_sections");
+      const regeneration = operations.find(item => item.action === "regenerate_chapter_sections" || item.action === "consolidate_chapter_sections");
       this.setData({
         message: regeneration
-          ? `${operations.length > 1 ? "修改已保存，" : ""}已开始重新整理小节。`
+          ? `${operations.length > 1 ? "修改已保存，" : ""}已开始${regeneration.action === "consolidate_chapter_sections" ? "合并" : "重新整理"}小节。`
           : result.message,
         progressChapterId: regeneration?.target_ref || "",
         preview: null, splitConfirmation: null, items: [], selectedCount: 0, instruction: "",

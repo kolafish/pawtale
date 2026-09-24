@@ -157,6 +157,35 @@ async def test_regenerate_chapter_sections_preview_queues_existing_workflow(
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
 
 
+async def test_reduce_sections_voice_edit_sets_a_smaller_job_limit(
+    client, test_db, monkeypatch, story,
+):
+    operation = {
+        "action": "consolidate_chapter_sections",
+        "target_ref": story["chapters"][1],
+    }
+    response, fake = await preview(
+        client, monkeypatch, story, [operation],
+        instruction="第二章的小节太多，合并得更少一些",
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["operations"][0]
+    assert "2 个减少到最多 1 个" in item["label"]
+    assert "必须使用 consolidate_chapter_sections" in fake.system
+
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == story["pid"],
+        MemoirEditingJob.chapter_id == story["chapters"][1],
+        MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    ))
+    assert job is not None
+    assert job.payload_json["request"]["max_sections"] == 1
+    assert await test_db.get(MemoirSection, story["sections"][1]) is not None
+    assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+
+
 async def test_regenerate_chapter_sections_rejects_stale_or_mixed_chapter_edits(
     client,
     test_db,

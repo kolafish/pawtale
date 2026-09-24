@@ -129,6 +129,7 @@ class MemoirSectionVersionReference(BaseModel):
 class MemoirSectionRegenerateRequest(BaseModel):
     expected_sections: list[MemoirSectionVersionReference] = Field(min_length=1)
     ai_model: str | None = Field(default=None, max_length=120)
+    max_sections: int | None = Field(default=None, ge=1, le=30)
 
     @field_validator("expected_sections")
     @classmethod

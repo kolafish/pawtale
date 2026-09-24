@@ -723,6 +723,29 @@ async def test_section_regeneration_job_can_be_cancelled_before_run(
     assert cancelled.json()["can_cancel"] is False
 
 
+async def test_running_regrouping_cannot_be_reported_as_a_new_consolidation(
+    client, test_db,
+):
+    project_id, chapters, _created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    url = f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/section-regeneration-jobs"
+    payload = {"expected_sections": [{
+        "id": data["sections"][0]["id"], "version": data["sections"][0]["version"],
+    }]}
+    queued = await client.post(url, json=payload)
+    assert queued.status_code == 202, queued.text
+    job = await test_db.get(MemoirEditingJob, queued.json()["job_id"])
+    assert job is not None
+    job.status = "running"
+    await test_db.commit()
+
+    response = await client.post(url, json={**payload, "max_sections": 1})
+    assert response.status_code == 409, response.text
+    assert "已有另一项小节整理任务" in response.json()["detail"]
+    await test_db.refresh(job)
+    assert job.payload_json["request"]["max_sections"] is None
+
+
 async def test_regenerate_chapter_sections_replays_current_material_organizer(
     client,
     test_db,
@@ -829,6 +852,78 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     ]
     assert [section["title"] for section in untouched] == ["工作这些年"]
     assert "工作这些年" not in fake.prompts[0]
+
+
+async def test_section_consolidation_keeps_original_structure_when_ai_adds_sections(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, _created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    test_db.add(other)
+    await test_db.commit()
+    fake = FakeStoryGrowthAI({"sections": [
+        {"title": "第一组", "section_type": "event"},
+        {"title": "第二组", "section_type": "event"},
+    ]})
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+        ], "max_sections": 1},
+    )
+    assert response.status_code == 409, response.text
+    assert "原小节保持不变" in response.json()["detail"]
+    assert await test_db.get(MemoirSection, original["id"]) is not None
+    assert await test_db.get(MemoirSection, other.id) is not None
+    assert fake.calls == 1
+
+
+async def test_section_consolidation_merges_existing_groups_within_the_limit(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    test_db.add(other)
+    await test_db.flush()
+    moved = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
+    ))
+    assert moved is not None
+    moved.section_id = other.id
+    await test_db.commit()
+    fake = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+        ], "max_sections": 1},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["section_count"] == 1
+    sections = (await client.get(f"/api/memoir/projects/{project_id}/sections")).json()["sections"]
+    current = [section for section in sections if section["chapter_id"] == chapter_id]
+    assert len(current) == 1
+    assert {material["utterance_id"] for material in current[0]["materials"]} == {
+        created[0]["utterance_id"], created[1]["utterance_id"],
+    }
+    assert "最多 1 个" in fake.prompts[0]
+    assert "同一原小节" in fake.prompts[1]
 
 
 async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choice(
