@@ -765,17 +765,25 @@ test("book page identifies a drafted chapter missing from the current book", () 
     "chapter-1": sampleDraft(1, "draft"),
     "chapter-2": secondDraft,
   });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(4, "当前可读的书稿", false, [], [], sampleBookManuscript("外婆回忆录", "classic_plain", { chapterCount: 1 })),
-    { status: "needs_input", total_chapter_count: 2 },
-  );
+  const partialOutput = sampleBookOutput(4, "当前可读的书稿", false, [], [], sampleBookManuscript("外婆回忆录", "classic_plain", { chapterCount: 1 }));
+  const needsInput = { status: "needs_input", total_chapter_count: 2 };
+  page.applyBookOutput.call(context, partialOutput, needsInput);
 
   assert.equal(context.data.readyDraftCount, 2);
   assert.equal(context.data.bookIncludedChapterCount, 1);
   assert.match(context.data.bookPartialNotice, /第2章「第一次离家」.*待确认事项/);
   assert.equal(context.data.chapters[0].bookInclusionNotice, "");
   assert.match(context.data.chapters[1].bookInclusionNotice, /正文可阅读.*尚未收入当前书稿.*待确认事项/);
+
+  const planWithNewSource = samplePlan("confirmed");
+  planWithNewSource.chapters[1].pending_source_count = 1;
+  planWithNewSource.chapters[1].pending_new_source_count = 1;
+  page.applyPlan.call(context, planWithNewSource, {
+    "chapter-1": sampleDraft(1, "draft"),
+    "chapter-2": secondDraft,
+  });
+  page.applyBookOutput.call(context, partialOutput, needsInput);
+  assert.match(context.data.chapters[1].bookInclusionNotice, /新增讲述尚未写入正文/);
 
   page.applyBookOutput.call(context, sampleBookOutput(5, "全书正文", false, [], [], sampleBookManuscript()));
   assert.equal(context.data.bookPartialNotice, "");

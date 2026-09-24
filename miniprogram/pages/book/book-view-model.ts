@@ -910,7 +910,7 @@ export function bookChapterInclusionData(
     ...chapter,
     bookInclusionNotice: available && chapter.include_in_book !== false
       && chapter.draftAvailable && !includedIds.has(chapter.id)
-      ? `本章正文可阅读，但尚未收入当前书稿。${bookOmissionFollowUp(progress, [chapter])}`
+      ? `本章正文可阅读，但尚未收入当前书稿。${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
       : "",
   }));
 }
