@@ -517,7 +517,7 @@ def _bookend_filters(
         f"eof_action=repeat:enable='lt(t,{intro_end})'[withintro]",
         f"[withintro][{outro_input_index}:v]overlay=0:0:format=auto:"
         f"eof_action=repeat:enable='gte(t,{outro_start})',format=yuv420p[vout]",
-        f"[{audio_input_index}:a]adelay={round(intro_seconds * 1000)}:all=1,"
+        f"[{audio_input_index}:a]adelay={round(intro_seconds * 1000)},"
         f"apad=whole_dur={total_seconds:.3f},atrim=duration={total_seconds:.3f},"
         "asetpts=PTS-STARTPTS[aout]",
     ]
@@ -647,6 +647,8 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             f"{request.start_ms / 1000:.3f}",
             "-t",
             f"{duration_seconds:.3f}",
+            "-ac",
+            "1",
             "-c:a",
             "pcm_s16le",
             str(clip_audio_path),
