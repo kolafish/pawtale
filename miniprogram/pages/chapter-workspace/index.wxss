@@ -646,7 +646,10 @@
   line-height: 38rpx;
 }
 
-.chapter-preparation-status {
+.chapter-preparation-status,
+.section-regeneration-status {
+  position: relative;
+  z-index: 1;
   margin-top: 22rpx;
   padding: 20rpx 22rpx;
   border-radius: var(--ui-radius-inner);
@@ -716,10 +719,6 @@
   font-size: var(--ui-font-body);
   line-height: var(--ui-line-body);
   text-wrap: pretty;
-}
-
-.section-regeneration-status {
-  padding: 20rpx 0;
 }
 
 .structure-actions {
