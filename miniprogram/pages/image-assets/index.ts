@@ -240,7 +240,7 @@ function videoViews(
   return videos.map((video, index) => ({
     id: video.id,
     utteranceId: video.utteranceId,
-    title: `分享视频 ${index + 1}`,
+    title: video.title?.trim() || `分享视频 ${index + 1}`,
     detail: shortText(materialText.get(video.utteranceId) || "") || "点按播放视频",
     isCurrent: video.isCurrent,
   }));

@@ -4,9 +4,12 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+import re
+import unicodedata
 from uuid import uuid4
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -28,6 +31,11 @@ from app.schemas.memoir_voice import (
     MemoirShareVideoOutputResponse,
     MemoirShareVideoCountResponse,
 )
+from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_usage_records import AIUsageContext, reset_ai_usage_context, set_ai_usage_context
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
 from app.services.memoir.audio_files import audio_file_path
@@ -60,7 +68,6 @@ from app.services.memoir.share_video_alignment import (
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_transcripts import _load_owned_utterance
-from app.services.ai_usage_records import AIUsageContext
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
@@ -68,6 +75,11 @@ SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v1"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
+_TITLE_MAX_CHARS = 18
+_TITLE_FALLBACK = "回忆片段"
+_TITLE_UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+_TITLE_SENSITIVE_NUMBER = re.compile(r"(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)")
+_TITLE_CLAUSE_BREAK = re.compile(r"[。！？!?；;，,：:\n]")
 logger = logging.getLogger(__name__)
 
 _ACTIVE_SHARE_VIDEO_STATUSES = frozenset(
@@ -80,6 +92,71 @@ _ACTIVE_SHARE_VIDEO_STATUSES = frozenset(
 
 class ShareVideoLeaseLostError(RuntimeError):
     pass
+
+
+class _ShareVideoTitleChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=24)
+
+
+def _clean_share_video_title(value: str) -> str:
+    compact = " ".join(value.split())
+    safe = "".join(
+        char
+        for char in _TITLE_UNSAFE_CHARS.sub("", compact)
+        if not unicodedata.category(char).startswith("C")
+    )
+    return safe[:_TITLE_MAX_CHARS].strip(" .，。！？!?；;：:、‘’“”《》\"'")
+
+
+def _title_contains_sensitive_number(value: str) -> bool:
+    return _TITLE_SENSITIVE_NUMBER.search(re.sub(r"[\s-]", "", value)) is not None
+
+
+def fallback_share_video_title(selected_text: str) -> str:
+    first_clause = _TITLE_CLAUSE_BREAK.split(selected_text.strip(), maxsplit=1)[0]
+    source = first_clause or selected_text
+    if _title_contains_sensitive_number(source):
+        return _TITLE_FALLBACK
+    return _clean_share_video_title(source) or _TITLE_FALLBACK
+
+
+def share_video_title(metadata: ShareVideoJobMetadata, selected_text: str) -> str:
+    saved_title = _clean_share_video_title(metadata.title)
+    if saved_title and not _title_contains_sensitive_number(metadata.title):
+        return saved_title
+    return fallback_share_video_title(selected_text)
+
+
+def share_video_download_filename(title: str) -> str:
+    safe_title = _clean_share_video_title(title)
+    if _title_contains_sensitive_number(title):
+        safe_title = ""
+    return f"{safe_title or _TITLE_FALLBACK}.mp4"
+
+
+async def _suggest_share_video_title(selected_text: str, *, ai_model: str | None) -> str | None:
+    policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
+    generated = await generate_structured_with_client(
+        get_ai_service(ai_model),
+        "你为家庭回忆录的分享视频拟短标题。只根据提供的实际视频片段起名，忠实于原话，突出具体的人、事或场景。"
+        "不要杜撰原文没有的事实，不要写营销文案，不要暴露电话号码或身份证号码。"
+        '只返回 JSON 对象，且只能包含 title 字段，格式为 {"title":"..."}；不要 Markdown 或解释。'
+        "标题用自然简洁的中文，建议 6 到 12 个字，最多 18 个字。",
+        selected_text,
+        output_model=_ShareVideoTitleChoice,
+        requested_model=ai_model,
+        temperature=0.2,
+        max_tokens=min(policy.max_tokens, 256),
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
+    )
+    proposed = generated.value.title
+    if _title_contains_sensitive_number(proposed):
+        return None
+    cleaned = _clean_share_video_title(proposed)
+    return cleaned if len(cleaned) >= 2 else None
 
 
 def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
@@ -240,6 +317,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         utterance_id=job.utterance_id,
         audio_file_id=job.audio_file_id,
         status=MemoirShareVideoJobStatus(job.status),
+        title=share_video_title(metadata, job.selected_text),
         selected_text=job.selected_text,
         start_char=job.start_char,
         end_char=job.end_char,
@@ -342,6 +420,7 @@ async def create_share_video_job(
 
     metadata = ShareVideoJobMetadata(
         pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
+        title=fallback_share_video_title(alignment.transcript_text[start_char:end_char]),
         alignment_strategy=alignment.strategy,
         alignment_confidence=alignment.confidence,
         char_timings=alignment.char_timings[start_char:end_char],
@@ -469,10 +548,14 @@ async def list_completed_share_video_counts(
         )
     ).all()
     job_ids_by_utterance: dict[str, list[str]] = {}
+    job_titles_by_utterance: dict[str, dict[str, str]] = {}
     current_job_ids_by_utterance: dict[str, list[str]] = {}
     current_text_by_utterance: dict[str, tuple[str, str] | None] = {}
     for job in jobs:
         job_ids_by_utterance.setdefault(job.utterance_id, []).append(job.id)
+        job_titles_by_utterance.setdefault(job.utterance_id, {})[job.id] = share_video_title(
+            ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text,
+        )
         if job.utterance_id not in current_text_by_utterance:
             current_text_by_utterance[job.utterance_id] = current_share_video_text_and_hash(job.utterance)
         current = current_text_by_utterance[job.utterance_id]
@@ -488,6 +571,7 @@ async def list_completed_share_video_counts(
             utterance_id=utterance_id,
             count=len(job_ids),
             job_ids=job_ids,
+            job_titles=job_titles_by_utterance[utterance_id],
             current_job_ids=current_job_ids_by_utterance.get(utterance_id, []),
         )
         for utterance_id, job_ids in job_ids_by_utterance.items()
@@ -500,7 +584,7 @@ async def load_completed_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
-) -> tuple[MemoirShareVideoOutput, Path]:
+) -> tuple[MemoirShareVideoOutput, Path, str]:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
     output = job.output
     if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or output is None:
@@ -508,7 +592,7 @@ async def load_completed_share_video_job(
     path = share_video_file_path(job, output)
     if not path.exists():
         raise HTTPException(status_code=404, detail="分享视频文件不存在")
-    return output, path
+    return output, path, share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text)
 
 
 def _claimable_share_video_job(now: datetime, max_attempts: int):
@@ -904,6 +988,28 @@ async def run_share_video_job_with_session(
             user_id=job.user_id,
             project_id=job.project_id,
         )
+
+        if not metadata.title_attempted:
+            metadata.title = share_video_title(metadata, job.selected_text)
+            context_token = set_ai_usage_context(
+                user_id=job.user_id,
+                project_id=job.project_id,
+                operation="memoir.share_video_title",
+                operation_id=usage_context.operation_id,
+            )
+            try:
+                suggested_title = await _suggest_share_video_title(
+                    job.selected_text, ai_model=metadata.ai_model,
+                )
+                if suggested_title:
+                    metadata.title = suggested_title
+            except Exception:
+                logger.exception("share video title generation failed job_id=%s", job.id)
+            finally:
+                reset_ai_usage_context(context_token)
+            metadata.title_attempted = True
+            _set_job_metadata(job, metadata)
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
         async def persist_background_progress(updated_metadata: ShareVideoJobMetadata) -> None:
             _set_job_metadata(job, updated_metadata)

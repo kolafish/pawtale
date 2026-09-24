@@ -182,6 +182,7 @@ function sampleShareVideoJob(overrides = {}) {
     utterance_id: "utterance-share",
     audio_file_id: "audio-utterance-share",
     status: "succeeded",
+    title: "爷爷继续工作的日子",
     selected_text: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
     start_char: 0,
     end_char: 23,
@@ -207,6 +208,13 @@ function sampleShareVideoJob(overrides = {}) {
     ...overrides,
   };
 }
+
+test("share video filename uses a safe, short job title", () => {
+  const { shareVideoFileName } = require("../pages/transcript-detail/transcript-detail-model.ts");
+  assert.equal(shareVideoFileName("  外婆/家的夏天:雨后?  "), "外婆家的夏天雨后.mp4");
+  assert.equal(shareVideoFileName("abcdefghijklmnopqrstuvwxyz"), "abcdefghijklmnopqrstuvwx.mp4");
+  assert.equal(shareVideoFileName(undefined), "回忆录片段.mp4");
+});
 
 function sampleMaterialImageJob(overrides = {}) {
   return {
@@ -1097,7 +1105,7 @@ test("transcript media page creates share video from selected corrected segments
   assert.deepEqual(downloads, ["job-1"]);
   assert.equal(shareCalls.length, 1);
   assert.equal(shareCalls[0].filePath, "/tmp/share-video.mp4");
-  assert.equal(shareCalls[0].fileName, "爷爷退休后仍帮公司做事.mp4");
+  assert.equal(shareCalls[0].fileName, "爷爷继续工作的日子.mp4");
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 

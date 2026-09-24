@@ -501,7 +501,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   async shareGeneratedVideo() {
     const item = this.data.item;
     const job = this.data.shareVideoJob;
-    const shared = await this.shareVideoController.share(shareVideoFileName(item));
+    const shared = await this.shareVideoController.share(shareVideoFileName(job?.title || job?.selected_text));
     if (shared && item && job) {
       trackAuditAction("transcript.detail_share_video_share", { job_id: job.id }, { projectId: item.project_id });
     }
