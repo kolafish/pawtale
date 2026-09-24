@@ -20,7 +20,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v2"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v3"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -70,7 +70,10 @@ _VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张横版 16:9
 
 {content}
 
-请理解原文所表达的场景、人物关系和整体氛围，并让画面的光线、色彩与情绪自然贴合原文。
+画面内容：
+- 从原文中选择一个具体、可见的回忆瞬间，不把不同时间或地点的事件拼贴在一起。
+- 优先呈现原文明确提到的时间、地点、人物关系、动作和关键物件，让这些细节成为画面主体；不要用泛泛的漂亮风景代替讲述的场景。
+- 原文没有说明的年代、地点、人物身份或生活细节不要猜测；缺少可见细节时，以克制的环境和光线衬托原文情绪。
 
 绘画风格：
 {drawing_instruction}

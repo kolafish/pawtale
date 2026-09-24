@@ -71,7 +71,7 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
-SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v1"
+SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v2"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
@@ -1037,6 +1037,7 @@ async def run_share_video_job_with_session(
             end_ms=job.end_ms,
             background_image_path=background_image_path,
             background_segments=background_segments,
+            title=share_video_title(metadata, job.selected_text),
         )
         try:
             await rendering.render_share_video_clip(render_request)
@@ -1058,6 +1059,7 @@ async def run_share_video_job_with_session(
                     end_ms=render_request.end_ms,
                     background_image_path=None,
                     background_segments=None,
+                    title=render_request.title,
                 )
             )
         size_bytes = _publish_completed_video(target_path)

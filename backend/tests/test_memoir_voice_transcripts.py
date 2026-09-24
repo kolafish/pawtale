@@ -638,13 +638,19 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     )
     assert "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720" in image_video_filter
     assert ":fontsdir='" in image_video_filter
-    branded_filter = share_video_rendering._single_background_filter_complex(
+    card_filter = share_video_rendering._single_background_filter_complex(
         tmp_path / "subtitles.ass",
         has_background_image=True,
+        body_seconds=12,
+        intro_seconds=1,
+        outro_seconds=1,
     )
-    assert "[0:v]scale=1280:720" in branded_filter
-    assert "[captioned][2:v]overlay=x=W-w-38:y=H-h-34" in branded_filter
-    assert branded_filter.endswith("[vout]")
+    assert "[0:v]scale=1280:720" in card_filter
+    assert "[padded][2:v]overlay=0:0" in card_filter
+    assert "[withintro][3:v]overlay=0:0" in card_filter
+    assert "[1:a]adelay=1000:all=1" in card_filter
+    assert "[vout]" in card_filter
+    assert card_filter.endswith("[aout]")
 
 
 def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
@@ -693,12 +699,17 @@ def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
         segments,
         tmp_path / "subtitles.ass",
         use_xfade=False,
+        body_seconds=24,
+        intro_seconds=1.5,
+        outro_seconds=1.7,
     )
 
     assert "xfade=" not in filter_argument
     assert "concat=n=2:v=1:a=0" in filter_argument
     assert "[concatbg]" in filter_argument
-    assert "[captioned][3:v]overlay=x=W-w-38:y=H-h-34" in filter_argument
+    assert "[padded][3:v]overlay=0:0" in filter_argument
+    assert "[withintro][4:v]overlay=0:0" in filter_argument
+    assert "[2:a]adelay=1500:all=1" in filter_argument
     assert "[vout]" in filter_argument
 
 
@@ -768,6 +779,20 @@ def test_share_video_background_prompts_cover_default_styles():
     )
     assert len(long_prompt.content) == share_video_backgrounds.SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS + 3
     assert long_prompt.content.endswith("...")
+
+
+def test_share_video_background_prompt_prioritizes_spoken_scene_details():
+    spoken_text = "小时候在老房子的院子里，爷爷摘了一朵栀子花送给我。"
+
+    prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
+
+    assert prompt.template_version == "memoir-share-video-background-v3"
+    assert spoken_text in prompt.prompt
+    assert "一个具体、可见的回忆瞬间" in prompt.prompt
+    assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
+    assert "不要用泛泛的漂亮风景代替讲述的场景" in prompt.prompt
+    assert "原文没有说明的年代、地点、人物身份或生活细节不要猜测" in prompt.prompt
+    assert "画面中部和右侧保留大面积" in prompt.prompt
 
 
 def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation():
@@ -1086,6 +1111,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
     assert "output" in response_schema["required"]
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
+    assert render_requests[0].title == expected_title
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
