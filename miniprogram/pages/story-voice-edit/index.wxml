@@ -37,9 +37,16 @@
     </checkbox-group>
     <button wx:if="{{items.length}}" class="edit-apply ui-button ui-block-action" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">执行所选修改（{{selectedCount}}）</button>
   </view>
-  <view wx:if="{{message}}" class="edit-result edit-message ui-card" aria-live="polite">
+  <view wx:if="{{message}}" class="edit-result edit-message {{sectionTasks.length ? 'has-section-tasks' : ''}} ui-card" aria-live="polite">
     <text>{{message}}</text>
-    <button wx:if="{{progressChapterId}}" class="edit-apply ui-button ui-block-action" bindtap="openChapterProgress">查看本章整理进度</button>
+  </view>
+  <view wx:if="{{sectionTasks.length}}" class="edit-task-list" aria-live="polite">
+    <view wx:for="{{sectionTasks}}" wx:key="chapterId" class="edit-task ui-card">
+      <text class="edit-task-label">{{item.label}}</text>
+      <text class="edit-task-status {{item.status === 'succeeded' ? 'is-succeeded' : (item.status === 'failed' || item.status === 'cancelled' ? 'is-failed' : '')}}">{{item.status === 'succeeded' ? '已完成' : item.status === 'failed' ? '未完成' : item.status === 'cancelled' ? '已取消' : item.status === 'idle' ? '状态未知' : item.status === 'checking' ? '正在核对' : '进行中'}}</text>
+      <text class="edit-task-detail">{{item.detail}}</text>
+      <button class="edit-task-open ui-button" data-chapter-id="{{item.chapterId}}" bindtap="openChapterProgress">查看本章</button>
+    </view>
   </view>
   <button class="edit-back ui-button" bindtap="backToStory">回到故事</button>
 </view>

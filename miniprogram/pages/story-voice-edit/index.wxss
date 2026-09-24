@@ -40,9 +40,20 @@
 }
 
 .edit-message { display: block; background: var(--ui-success-surface); color: var(--ui-success-text); box-shadow: none; font-size: var(--ui-font-body); line-height: 1.55; }
+.edit-message.has-section-tasks { background: var(--ui-surface-soft); color: var(--ui-text-primary); }
+.edit-task-list { margin-top: 16rpx; display: flex; flex-direction: column; gap: 16rpx; }
+.edit-task { padding: 24rpx 28rpx; }
+.edit-task-label, .edit-task-status, .edit-task-detail { display: block; }
+.edit-task-label { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.55; overflow-wrap: anywhere; }
+.edit-task-status { margin-top: 12rpx; color: var(--ui-section-title); font-size: var(--ui-font-body); font-weight: 700; }
+.edit-task-status.is-succeeded { color: var(--ui-success-text); }
+.edit-task-status.is-failed { color: var(--ui-accent-strong); }
+.edit-task-detail { margin-top: 6rpx; color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.edit-task-open { min-height: 88rpx; margin-top: 18rpx; border-radius: var(--ui-radius-control); background: var(--ui-surface-soft); color: var(--ui-section-title); font-size: var(--ui-font-body); font-weight: 700; }
 .edit-restart { min-height: 88rpx; margin-top: 10rpx; background: transparent; color: var(--ui-text-secondary); font-size: var(--ui-font-body); }
 .edit-back { min-height: 88rpx; margin-top: 22rpx; background: transparent; color: var(--ui-section-title); font-size: var(--ui-font-action); font-weight: 700; }
 .large-text .edit-title { font-size: 48rpx; }
 .large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: var(--ui-font-large-list-title); }
 .large-text .edit-operation-title, .large-text .edit-reply, .large-text .edit-question { font-size: 36rpx; }
 .large-text .edit-split-summary, .large-text .edit-split-title { font-size: 36rpx; }
+.large-text .edit-task-label, .large-text .edit-task-status, .large-text .edit-task-detail, .large-text .edit-task-open { font-size: var(--ui-font-large-list-title); }

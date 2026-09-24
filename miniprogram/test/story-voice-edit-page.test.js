@@ -14,10 +14,17 @@ const proposal = {
   ],
 };
 
-function setup({ preview, apply } = {}) {
-  const calls = { previews: [], applies: [], routes: [], back: 0 };
+function setup({ preview, apply, getJob } = {}) {
+  const calls = { previews: [], applies: [], jobs: [], invalidations: 0, routes: [], back: 0 };
   mockModule("../services/accessibility-settings.ts", { accessibilityPageClass: c => `${c} large-text` });
   mockModule("../services/memoir-api-client.ts", { ensureMemoirBackendSession: async () => {}, memoirProjectDictationUrl: id => `wss://test/projects/${id}/dictation` });
+  mockModule("../services/memoir-chapter-workspace-api.ts", {
+    getMemoirChapterSectionRegenerationJob: async (...args) => {
+      calls.jobs.push(args);
+      return getJob ? getJob(...args) : { chapter_id: args[1], status: "pending", section_count: 0, error_message: "" };
+    },
+  });
+  mockModule("../stores/memoir-read-cache.ts", { markCurrentUserMemoirSnapshotsStale: () => calls.invalidations++ });
   mockModule("../services/memoir-voice-edit.ts", {
     previewVoiceEdit: async (...args) => { calls.previews.push(args); return preview ? preview(...args) : proposal; },
     applyVoiceEdit: async (...args) => { calls.applies.push(args); return apply ? apply(...args) : { message: "修改已保存" }; },
@@ -84,8 +91,8 @@ test("chapter section regeneration is shown as a confirmable operation", async (
     target_ref: "c1",
     new_title: null,
   }]]]);
-  assert.equal(context.data.progressChapterId, "c1");
-  context.openChapterProgress();
+  assert.equal(context.data.sectionTasks[0].chapterId, "c1");
+  context.openChapterProgress({ currentTarget: { dataset: { chapterId: "c1" } } });
   assert.equal(calls.routes.length, 1);
   assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c1");
 });
@@ -103,9 +110,80 @@ test("section consolidation opens the affected chapter after confirmation", asyn
   await context.submitInstruction({ detail: { value: "第三章小节太多，合并少一些" } });
   await context.apply();
   assert.equal(calls.applies[0][2][0].action, "consolidate_chapter_sections");
-  assert.equal(context.data.progressChapterId, "c3");
-  context.openChapterProgress();
+  assert.equal(context.data.sectionTasks[0].chapterId, "c3");
+  context.openChapterProgress({ currentTarget: { dataset: { chapterId: "c3" } } });
   assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c3");
+});
+
+test("multiple chapter reductions show final counts and failures separately", async () => {
+  const jobs = {
+    c1: { status: "pending", section_count: 0, error_message: "" },
+    c2: { status: "running", section_count: 0, error_message: "" },
+    c3: { status: "pending", section_count: 0, error_message: "" },
+    c4: { status: "running", section_count: 0, error_message: "" },
+  };
+  const { context, calls } = setup({
+    preview: async () => ({
+      signature: "four-chapters", reply: "分别减少四章的小节。", questions: [],
+      operations: ["c1", "c2", "c3", "c4"].map((target_ref, index) => ({
+        action: "consolidate_chapter_sections", target_ref, new_title: null,
+        label: `第${index + 1}章减少小节`, detail: "原始讲述保留。",
+      })).concat({ action: "rename_chapter", target_ref: "c5", new_title: "尾声", label: "第五章改名", detail: "" }),
+    }),
+    getJob: async (_projectId, chapterId) => ({ chapter_id: chapterId, ...jobs[chapterId] }),
+  });
+  await context.submitInstruction({ detail: { value: "四章的小节都减少一些" } });
+  await context.apply();
+  await flushAsyncWork();
+  assert.equal(context.data.sectionTasks.length, 4);
+  assert.match(context.data.message, /任务已开始/);
+  assert.match(context.data.message, /其他修改已保存/);
+  assert.deepEqual(context.data.sectionTasks.map(task => task.status), ["pending", "running", "pending", "running"]);
+  const callsBeforeHide = calls.jobs.length;
+  context.onHide();
+  await context.refreshSectionTasks();
+  assert.equal(calls.jobs.length, callsBeforeHide);
+  context.onShow();
+  await flushAsyncWork();
+
+  jobs.c1 = { status: "succeeded", section_count: 8, error_message: "" };
+  jobs.c2 = { status: "failed", section_count: 0, error_message: "模型没有减少小节数" };
+  jobs.c3 = { status: "succeeded", section_count: 5, error_message: "" };
+  jobs.c4 = { status: "failed", section_count: 0, error_message: "保存失败" };
+  await context.refreshSectionTasks();
+  assert.deepEqual(context.data.sectionTasks.map(task => task.status), ["succeeded", "failed", "succeeded", "failed"]);
+  assert.match(context.data.sectionTasks[0].detail, /8 个小节/);
+  assert.match(context.data.sectionTasks[2].detail, /5 个小节/);
+  assert.match(context.data.sectionTasks[1].detail, /原有小节保持不变.*没有减少/);
+  assert.match(context.data.sectionTasks[3].detail, /原有小节保持不变.*保存失败/);
+  assert.doesNotMatch(context.data.sectionTasks[1].detail, /已整理为/);
+  assert.doesNotMatch(context.data.sectionTasks[3].detail, /已整理为/);
+  assert.equal(calls.invalidations, 2);
+  for (const chapterId of ["c1", "c2", "c3", "c4"]) {
+    context.openChapterProgress({ currentTarget: { dataset: { chapterId } } });
+  }
+  assert.deepEqual(calls.routes, ["c1", "c2", "c3", "c4"].map(chapterId => `/pages/chapter-workspace/index?projectId=p1&chapterId=${chapterId}`));
+  const callsAfterCompletion = calls.jobs.length;
+  context.onHide();
+  assert.equal(context.data.sectionTasks.length, 4);
+  await context.refreshSectionTasks();
+  assert.equal(calls.jobs.length, callsAfterCompletion);
+});
+
+test("a completed section job without a count never prints an undefined result", async () => {
+  const { context } = setup({
+    preview: async () => ({ signature: "sig", reply: "", questions: [], operations: [{
+      action: "consolidate_chapter_sections", target_ref: "c1", new_title: null,
+      label: "减少第一章的小节", detail: "",
+    }] }),
+    getJob: async () => ({ status: "succeeded", error_message: "" }),
+  });
+  await context.submitInstruction({ detail: { value: "减少第一章的小节" } });
+  await context.apply();
+  await flushAsyncWork();
+  assert.equal(context.data.sectionTasks[0].status, "succeeded");
+  assert.doesNotMatch(context.data.sectionTasks[0].detail, /undefined/);
+  assert.match(context.data.sectionTasks[0].detail, /查看最终小节数/);
 });
 
 test("chapter split keeps its selected utterances when the user confirms", async () => {

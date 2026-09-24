@@ -144,35 +144,6 @@ class PartiallyUnassignedReplayMaterialOrganizationAI(
         return index > 0
 
 
-class UnchangedSectionCountAI(ReplayMaterialOrganizationAI):
-    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
-        self.prompts.append(user_prompt)
-        if "这里只设计候选小节" in user_prompt:
-            return json.dumps({"sections": [
-                {"title": "第一组", "section_type": "event"},
-                {"title": "第二组", "section_type": "event"},
-            ]}, ensure_ascii=False)
-        raw_materials = re.search(
-            r"待归类讲述：\n(\[.*\])\n\n只返回 JSON",
-            user_prompt,
-            re.DOTALL,
-        )
-        assert raw_materials is not None
-        materials = json.loads(raw_materials.group(1))
-        return json.dumps({"assignments": [
-            {
-                "utterance_id": material["utterance_id"],
-                "action": "assign_existing",
-                "section_id": (
-                    "S1" if material["current_section"].startswith("1.") else "S2"
-                ),
-                "confidence": 0.86,
-                "reason": "保留原分组",
-            }
-            for material in materials
-        ]}, ensure_ascii=False)
-
-
 def test_section_regeneration_batches_by_material_text_budget():
     production_lengths = [
         8, 15, 20, 24, 32, 33, 47, 64, 70, 78, 80, 83, 101,
@@ -931,39 +902,65 @@ async def test_section_consolidation_lets_ai_choose_a_smaller_group_count(
         project_id=project_id, chapter_id=chapter_id,
         title="另一段回忆", sort_order=1,
     )
-    test_db.add(other)
+    untouched = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="独立的旧小节", sort_order=2,
+    )
+    test_db.add_all([other, untouched])
     await test_db.flush()
     moved = await test_db.scalar(select(MemoirSectionMaterial).where(
         MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
     ))
     assert moved is not None
     moved.section_id = other.id
+    moved.include_in_book = False
     await test_db.commit()
-    fake = ReplayMaterialOrganizationAI()
+    fake = FakeStoryGrowthAI({"groups": [{
+        "target_section_id": "S2",
+        "source_section_ids": ["S1"],
+        "title": "山桃花里的相识",
+    }]})
     monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
 
-    response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+    url = f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/section-regeneration-jobs"
+    queued = await client.post(
+        url,
         json={"expected_sections": [
             {"id": original["id"], "version": original["version"]},
             {"id": other.id, "version": other.version},
+            {"id": untouched.id, "version": untouched.version},
         ], "section_count_goal": "reduce"},
     )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"]) is True
+    finally:
+        clear_editing_job_handlers()
+    response = await client.get(f"{url}/current")
     assert response.status_code == 200, response.text
-    assert response.json()["section_count"] == 1
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["section_count"] == 2
     sections = (await client.get(f"/api/memoir/projects/{project_id}/sections")).json()["sections"]
     current = [section for section in sections if section["chapter_id"] == chapter_id]
-    assert len(current) == 1
+    assert [section["id"] for section in current] == [original["id"], untouched.id]
+    assert current[0]["title"] == "山桃花里的相识"
     assert {material["utterance_id"] for material in current[0]["materials"]} == {
         created[0]["utterance_id"], created[1]["utterance_id"],
     }
-    assert "当前有 2 个小节" in fake.prompts[0]
-    assert "自行判断合适的合并方式和数量" in fake.prompts[0]
-    assert "最多 1 个" not in fake.prompts[0]
-    assert "同一原小节" in fake.prompts[1]
+    moved_after = next(material for material in current[0]["materials"]
+                       if material["utterance_id"] == created[1]["utterance_id"])
+    assert moved_after["id"] == moved.id
+    assert moved_after["include_in_book"] is False
+    assert (moved_after["assigned_by"], moved_after["assignment_reason"]) == (
+        "ai", "ai_section_merge",
+    )
+    assert len(fake.prompts) == 1
+    assert original["id"] not in fake.prompts[0]
 
 
-async def test_section_consolidation_preserves_original_when_count_does_not_drop(
+async def test_section_consolidation_preserves_original_when_no_merge_group(
     client, test_db, monkeypatch,
 ):
     project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
@@ -981,7 +978,7 @@ async def test_section_consolidation_preserves_original_when_count_does_not_drop
     assert moved is not None
     moved.section_id = other.id
     await test_db.commit()
-    fake = UnchangedSectionCountAI()
+    fake = FakeStoryGrowthAI({"groups": []})
     monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
 
     response = await client.post(
@@ -992,10 +989,10 @@ async def test_section_consolidation_preserves_original_when_count_does_not_drop
         ], "section_count_goal": "reduce"},
     )
     assert response.status_code == 409, response.text
-    assert "AI 未减少小节数量" in response.json()["detail"]
+    assert "没有找到适合合并的现有小节" in response.json()["detail"]
     assert await test_db.get(MemoirSection, original["id"]) is not None
     assert await test_db.get(MemoirSection, other.id) is not None
-    assert len(fake.prompts) == 2
+    assert len(fake.prompts) == 1
 
 
 async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choice(
