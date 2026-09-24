@@ -573,6 +573,83 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
     assert current[0].input_signature == "later-review"
 
 
+async def test_declining_book_privacy_decision_keeps_manuscript_and_reincludes_chapter(
+    client, test_db,
+):
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    versions = []
+    for chapter in chapters:
+        _, version = await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT,
+        )
+        versions.append(version)
+    original_content = versions[0].content
+    candidate = {
+        "issue_type": "privacy",
+        "channel": "manual_review",
+        "question": "这段内容是否适合保留？",
+        "reason": "请由讲述者决定。",
+        "priority": "high",
+        "chapter_ids": [chapters[0].id],
+        "evidence_quote": original_content,
+        "resolution": "user_decision",
+    }
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+    issue = (await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="first-review",
+        candidates=[candidate],
+    ))[0]
+    await test_db.commit()
+
+    partial = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert partial.omitted_chapter_ids == [chapters[0].id]
+
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
+        json={"outcome": "declined", "note": "用户确认不处理，保留当前书稿表述。"},
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "closed"
+    assert closed.json()["outcome"] == "declined"
+
+    full = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert full.omitted_chapter_ids == []
+    assert [chapter["chapter_id"] for chapter in full.chapter_snapshot_json] == [
+        chapter.id for chapter in chapters
+    ]
+    assert full.chapter_snapshot_json[0]["content"] == original_content
+    assert (await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )).content == original_content
+
+    reworded = {**candidate, "question": "是否要修改这段表述？"}
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="second-review",
+        candidates=[reworded],
+    )
+    assert len(current) == 1
+    assert current[0].id == issue.id
+    assert current[0].status == "closed"
+    assert current[0].outcome == "declined"
+    assert current[0].outcome_note == "用户确认不处理，保留当前书稿表述。"
+
+    review = MemoirBookReview(
+        project_id=project_id,
+        engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="second-review",
+        status="ready",
+        review_json={},
+    )
+    answer_context = await book_review_answer_state.load_answer_context(
+        test_db, review=review,
+    )
+    assert answer_context.answers == ()
+    assert answer_context.unresolved_count == 0
+
+
 async def test_book_review_keeps_unresolved_privacy_issue_when_model_omits_it(
     client, test_db,
 ):

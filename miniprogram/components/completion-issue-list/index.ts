@@ -145,6 +145,42 @@ Component({
       await this.closeIssue(issueId, "confirmed", note);
     },
 
+    leaveBookIssueUnchanged(event: IssueEvent) {
+      const issue = this.issue(
+        this.properties.requiredIssues as MemoirCompletionIssue[],
+        event,
+      );
+      if (
+        !issue
+        || issue.scope !== "book"
+        || this.data.busyIssueId
+        || this.data.answeringIssueId
+        || this.properties.disabled
+      ) {
+        return;
+      }
+      const privacy = issue.issue_type === "privacy";
+      wx.showModal({
+        title: "不处理这项？",
+        content: privacy
+          ? "将结束本项待确认并保留当前表述，不做匿名化。更新书稿后，家人阅读、分享和导出可能包含这段文字。"
+          : "将结束本项待确认，保留当前书稿的相关表述，不作修改。",
+        confirmText: "不处理",
+        cancelText: "再想想",
+        success: ({ confirm }) => {
+          if (confirm && !this.data.answeringIssueId) {
+            void this.closeIssue(
+              issue.id,
+              "declined",
+              privacy
+                ? "用户确认不处理此项，保留当前书稿表述，不进行匿名化。"
+                : "用户确认不处理此项，保留当前书稿表述。",
+            );
+          }
+        },
+      });
+    },
+
     markHandled(event: IssueEvent) {
       const issue = this.issue(
         this.properties.optionalIssues as MemoirCompletionIssue[],
@@ -209,7 +245,7 @@ Component({
           });
         }
         this.triggerEvent("refresh");
-        wx.showToast({ title: "已处理", icon: "success" });
+        wx.showToast({ title: outcome === "declined" ? "已跳过" : "已处理", icon: "success" });
       } catch (error) {
         if (!routeAuthError(error, "login")) {
           wx.showToast({
