@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from sqlalchemy import select
 
 from app.clock import utcnow_naive
@@ -72,6 +74,27 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     assert repeated.status_code == 201
     assert repeated.json()["id"] == created_job.json()["id"]
     assert (await client.get(url)).json()["candidate"]["status"] == "accepted"
+
+
+async def test_model_can_decline_without_failing_candidate_job(client, test_db, monkeypatch):
+    created, job_id = await _stopped_story(client, test_db)
+
+    async def choose_with_model(client, system_prompt, user_prompt, *, output_model, **kwargs):
+        assert '{"candidate_id":1}' in system_prompt
+        assert '{"candidate_id":null}' in system_prompt
+        return SimpleNamespace(value=output_model.model_validate({"candidate_id": None}))
+
+    monkeypatch.setattr(share_video_candidates, "get_ai_service", lambda model: object())
+    monkeypatch.setattr(share_video_candidates, "generate_structured_with_client", choose_with_model)
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, job_id)
+
+    candidate = await test_db.scalar(select(MemoirShareVideoCandidate).where(
+        MemoirShareVideoCandidate.voice_session_id == created["session"]["id"],
+    ))
+    assert candidate is not None
+    assert candidate.status == "none"
+    assert candidate.reason_code == "model_declined"
 
 
 async def test_recommendation_is_hidden_after_transcript_edit(client, test_db, monkeypatch):
