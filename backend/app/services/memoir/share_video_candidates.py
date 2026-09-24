@@ -80,7 +80,7 @@ class CandidateWindow:
 class _CandidateChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    candidate_id: int | None = None
+    candidate_id: int | None
 
 
 def _trim_range(text: str, start: int, end: int) -> tuple[int, int]:
@@ -168,8 +168,10 @@ async def _choose_window(windows: list[CandidateWindow], *, ai_model: str | None
     generated = await generate_structured_with_client(
         get_ai_service(ai_model),
         "你在为家庭回忆录筛选一段讲述原声。只选一条独立看也能理解、具体生动、保留讲述者真实口吻、适合家人观看的片段。"
-        "若内容只是寒暄、采访提问、重复、语义不完整、缺少具体故事，或明显包含私密身份信息，就返回 null。"
-        "不要改写内容；只能返回候选编号。宁可不推荐，也不要凑数。",
+        "若内容只是寒暄、采访提问、重复、语义不完整、缺少具体故事，或明显包含私密身份信息，candidate_id 就填 null。"
+        "不要改写内容；candidate_id 只能填候选列表中的编号。宁可不推荐，也不要凑数。"
+        '只返回一个 JSON 对象，且只能包含 candidate_id 字段：推荐时如 {"candidate_id":1}，不推荐时为 {"candidate_id":null}。'
+        "不要返回裸编号、裸 null、Markdown 或解释。",
         prompt,
         output_model=_CandidateChoice,
         requested_model=ai_model,
