@@ -186,6 +186,13 @@ def _validate_expected_sections(
         raise SectionRegenerationConflict(status_code=409, detail="本章小节已经变化，请刷新后重试")
 
 
+def _current_included_section_count(chapter: MemoirBookPlanChapter) -> int:
+    return sum(
+        section.status == "active" and section.include_in_book
+        for section in chapter.sections
+    )
+
+
 def _ordered_materials(
     chapter: MemoirBookPlanChapter,
 ) -> list[tuple[MemoirSection, MemoirSectionMaterial]]:
@@ -267,6 +274,7 @@ def _build_section_structure_prompt(
     chapter_title: str,
     materials: list[_MaterialSnapshot],
     max_sections: int | None = None,
+    current_section_count: int | None = None,
 ) -> str:
     excerpt_limit = max(
         120,
@@ -280,7 +288,7 @@ def _build_section_structure_prompt(
             "source_index": index,
             "excerpt": _compact_excerpt(material.text, limit=excerpt_limit),
             **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
-               if max_sections is not None else {}),
+               if max_sections is not None or current_section_count is not None else {}),
         }
         for index, material in enumerate(materials, start=1)
     ]
@@ -289,7 +297,13 @@ def _build_section_structure_prompt(
         ensure_ascii=False,
     )
     outlines_json = json.dumps(material_outlines, ensure_ascii=False)
-    if max_sections is not None:
+    if current_section_count is not None:
+        task = (
+            f"任务：本章当前有 {current_section_count} 个小节。用户希望合并现有小节，让数量比现在更少。"
+            "请根据现有小节和讲述的内容关系，自行判断合适的合并方式和数量，不预设合并后的具体个数；"
+            "同一原小节的讲述必须留在同一个新小节，不要拆散。保留每条讲述，不虚构内容。\n"
+        )
+    elif max_sections is not None:
         task = (
             f"任务：合并本章现有小节，最终最多 {max_sections} 个（包含待归类组）；"
             "同一原小节的讲述必须留在同一个新小节，不要拆散。优先合并主题相近的小节，"
@@ -356,11 +370,13 @@ async def _plan_section_candidates(
     materials: list[_MaterialSnapshot],
     ai_client: AITextClient,
     max_sections: int | None = None,
+    current_section_count: int | None = None,
 ) -> list[MaterialOrganizationSectionCandidate]:
     prompt = _build_section_structure_prompt(
         chapter_title=chapter_title,
         materials=materials,
         max_sections=max_sections,
+        current_section_count=current_section_count,
     )
     if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
         raise HTTPException(
@@ -418,6 +434,7 @@ def _build_material_assignment_prompt(
     section_refs: ModelReferenceMap,
     material_refs: ModelReferenceMap,
     max_sections: int | None = None,
+    current_section_count: int | None = None,
 ) -> str:
     chapter = json.dumps(
         {"title": chapter_title},
@@ -440,14 +457,14 @@ def _build_material_assignment_prompt(
                 "utterance_id": material_refs.encode(material.utterance_id),
                 "text": material.text,
                 **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
-                   if max_sections is not None else {}),
+                   if max_sections is not None or current_section_count is not None else {}),
             }
             for material in materials
         ],
         ensure_ascii=False,
     )
     task = "任务：将下面多条讲述逐条归入当前章节的候选小节。"
-    if max_sections is not None:
+    if max_sections is not None or current_section_count is not None:
         task += "同一原小节的讲述必须归入同一个候选小节，不得拆散。"
     return (
         task + "确实无法可靠归类时才标记为 leave_unassigned；"
@@ -470,6 +487,7 @@ async def _assign_material_batch(
     materials: list[_MaterialSnapshot],
     ai_client: AITextClient,
     max_sections: int | None = None,
+    current_section_count: int | None = None,
 ) -> list[MaterialOrganizationDecision]:
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
     material_refs = ModelReferenceMap(
@@ -483,6 +501,7 @@ async def _assign_material_batch(
         section_refs=section_refs,
         material_refs=material_refs,
         max_sections=max_sections,
+        current_section_count=current_section_count,
     )
     if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
         raise HTTPException(
@@ -571,6 +590,7 @@ async def _plan_section_regeneration(
     ai_model: str | None,
     progress_callback: ProgressCallback | None = None,
     max_sections: int | None = None,
+    current_section_count: int | None = None,
 ) -> tuple[
     list[_PlannedSection],
     list[_PlannedAssignment],
@@ -592,6 +612,7 @@ async def _plan_section_regeneration(
         materials=materials,
         ai_client=client,
         max_sections=max_sections,
+        current_section_count=current_section_count,
     )
     planned_by_id = {
         candidate.id: _PlannedSection(candidate=candidate)
@@ -612,6 +633,7 @@ async def _plan_section_regeneration(
             materials=batch,
             ai_client=client,
             max_sections=max_sections,
+            current_section_count=current_section_count,
         )
         for material, decision in zip(batch, decisions, strict=True):
             assignment = _PlannedAssignment(
@@ -640,10 +662,13 @@ async def _plan_section_regeneration(
         for section in planned_by_id.values()
         if section.assignments
     ]
-    if max_sections is not None:
+    if max_sections is not None or current_section_count is not None:
         if any(assignment.material.include_in_book for assignment in pending_assignments):
             raise HTTPException(409, "AI 未能保留原有收录的讲述，原小节保持不变，请重试")
-        if len(planned_sections) + bool(pending_assignments) > max_sections:
+        resulting_count = len(planned_sections) + bool(pending_assignments)
+        if (max_sections is not None and resulting_count > max_sections) or (
+            current_section_count is not None and resulting_count >= current_section_count
+        ):
             raise HTTPException(409, "AI 未减少小节数量，原小节保持不变，请重试")
         destinations: dict[str, set[str]] = {}
         for section in planned_sections:
@@ -683,6 +708,12 @@ async def regenerate_chapter_sections(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
+    current_section_count = (
+        _current_included_section_count(chapter)
+        if req.section_count_goal == "reduce" else None
+    )
+    if current_section_count is not None and current_section_count < 2:
+        raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
     materials = _material_snapshots(chapter)
     if not materials:
         raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
@@ -702,6 +733,7 @@ async def regenerate_chapter_sections(
         ai_model=selected_ai_model,
         progress_callback=progress_callback,
         max_sections=req.max_sections,
+        current_section_count=current_section_count,
     )
     if not planned_sections:
         raise HTTPException(
@@ -907,6 +939,11 @@ async def enqueue_chapter_section_regeneration(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
+    if (
+        req.section_count_goal == "reduce"
+        and _current_included_section_count(chapter) < 2
+    ):
+        raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
     materials = _material_snapshots(chapter)
     requested_ai_model = select_project_ai_model(project, req.ai_model)
     job = await editing_jobs.enqueue_editing_job(
@@ -926,12 +963,16 @@ async def enqueue_chapter_section_regeneration(
                 ],
                 "ai_model": requested_ai_model,
                 "max_sections": req.max_sections,
+                "section_count_goal": req.section_count_goal,
             },
         },
     )
     if (
         job.status == MemoirEditingJobStatus.RUNNING.value
-        and (job.payload_json or {}).get("request", {}).get("max_sections") != req.max_sections
+        and (
+            (job.payload_json or {}).get("request", {}).get("max_sections") != req.max_sections
+            or (job.payload_json or {}).get("request", {}).get("section_count_goal") != req.section_count_goal
+        )
     ):
         raise HTTPException(409, "本章已有另一项小节整理任务在运行，请等它完成后再合并")
     if job.status == MemoirEditingJobStatus.PENDING.value:

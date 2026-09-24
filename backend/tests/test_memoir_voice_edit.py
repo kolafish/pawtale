@@ -157,7 +157,7 @@ async def test_regenerate_chapter_sections_preview_queues_existing_workflow(
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
 
 
-async def test_reduce_sections_voice_edit_sets_a_smaller_job_limit(
+async def test_reduce_sections_voice_edit_queues_natural_consolidation(
     client, test_db, monkeypatch, story,
 ):
     operation = {
@@ -170,7 +170,8 @@ async def test_reduce_sections_voice_edit_sets_a_smaller_job_limit(
     )
     assert response.status_code == 200, response.text
     item = response.json()["operations"][0]
-    assert "2 个减少到最多 1 个" in item["label"]
+    assert "目前 2 个，整理后更少" in item["label"]
+    assert "不预设合并后的数量" in item["detail"]
     assert "必须使用 consolidate_chapter_sections" in fake.system
 
     result = await apply(client, story, response.json())
@@ -181,7 +182,8 @@ async def test_reduce_sections_voice_edit_sets_a_smaller_job_limit(
         MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
     ))
     assert job is not None
-    assert job.payload_json["request"]["max_sections"] == 1
+    assert job.payload_json["request"]["section_count_goal"] == "reduce"
+    assert job.payload_json["request"]["max_sections"] is None
     assert await test_db.get(MemoirSection, story["sections"][1]) is not None
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
 
