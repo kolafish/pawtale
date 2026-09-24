@@ -54,6 +54,7 @@ from app.services.memoir.share_video_alignment import (
     MAX_SELECT_MS,
     MIN_SELECT_MS,
     build_share_video_alignment,
+    current_share_video_text_and_hash,
     share_video_char_range_ms,
 )
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
@@ -444,12 +445,9 @@ async def list_completed_share_video_counts(
     project_id: str,
     user_id: str,
 ) -> list[MemoirShareVideoCountResponse]:
-    rows = (
-        await db.execute(
-            select(
-                MemoirMaterialShareVideo.utterance_id,
-                MemoirMaterialShareVideo.id,
-            )
+    jobs = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo)
             .join(
                 MemoirShareVideoOutput,
                 MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id,
@@ -464,16 +462,33 @@ async def list_completed_share_video_counts(
                 MemoirMaterialShareVideo.created_at.desc(),
                 MemoirMaterialShareVideo.id,
             )
+            .options(
+                selectinload(MemoirMaterialShareVideo.utterance)
+                .selectinload(MemoirVoiceUtterance.audio_file)
+            )
         )
     ).all()
     job_ids_by_utterance: dict[str, list[str]] = {}
-    for utterance_id, job_id in rows:
-        job_ids_by_utterance.setdefault(utterance_id, []).append(job_id)
+    current_job_ids_by_utterance: dict[str, list[str]] = {}
+    current_text_by_utterance: dict[str, tuple[str, str] | None] = {}
+    for job in jobs:
+        job_ids_by_utterance.setdefault(job.utterance_id, []).append(job.id)
+        if job.utterance_id not in current_text_by_utterance:
+            current_text_by_utterance[job.utterance_id] = current_share_video_text_and_hash(job.utterance)
+        current = current_text_by_utterance[job.utterance_id]
+        if current is None or job.text_hash != current[1]:
+            continue
+        if job.audio_file_id != job.utterance.audio_file_id:
+            continue
+        if job.selected_text != current[0][job.start_char:job.end_char]:
+            continue
+        current_job_ids_by_utterance.setdefault(job.utterance_id, []).append(job.id)
     return [
         MemoirShareVideoCountResponse(
             utterance_id=utterance_id,
             count=len(job_ids),
             job_ids=job_ids,
+            current_job_ids=current_job_ids_by_utterance.get(utterance_id, []),
         )
         for utterance_id, job_ids in job_ids_by_utterance.items()
     ]

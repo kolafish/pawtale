@@ -185,6 +185,15 @@
   color: var(--ui-success-text);
 }
 
+.asset-status.outdated {
+  background: var(--ui-warning-surface);
+  color: var(--ui-warning-text);
+}
+
+.video-remake-button {
+  margin-top: 18rpx;
+}
+
 .asset-meta,
 .asset-placement,
 .asset-source {

@@ -29,6 +29,7 @@ import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
+  pageUrl,
   pickerIndex,
   queryParam,
   type PageDatasetEvent,
@@ -67,8 +68,10 @@ interface ImageAssetView extends MemoirImageAsset {
 
 interface VideoAssetView {
   id: string;
+  utteranceId: string;
   title: string;
   detail: string;
+  isCurrent: boolean;
 }
 
 type StoryMaterialScope = "" | "chapter" | "section" | "unassigned";
@@ -236,8 +239,10 @@ function videoViews(
 ): VideoAssetView[] {
   return videos.map((video, index) => ({
     id: video.id,
+    utteranceId: video.utteranceId,
     title: `分享视频 ${index + 1}`,
     detail: shortText(materialText.get(video.utteranceId) || "") || "点按播放视频",
+    isCurrent: video.isCurrent,
   }));
 }
 
@@ -561,6 +566,16 @@ definePage<ImageAssetsData>()({
 
   closeVideoPreview() {
     this.setData({ videoPreviewPath: "", videoPreviewTitle: "" });
+  },
+
+  remakeVideo(event: DatasetEvent) {
+    const video = this.data.videos.find((item) => item.id === datasetString(event, "id"));
+    if (!video?.utteranceId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/transcript-media/index", { id: video.utteranceId }),
+    });
   },
 
   onThumbnailError(event: DatasetEvent) {

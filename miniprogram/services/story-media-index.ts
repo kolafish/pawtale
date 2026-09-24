@@ -7,6 +7,7 @@ import type { MemoirShareVideoCount } from "../domain/memoir-snapshots";
 export interface StoryVideoAsset {
   id: string;
   utteranceId: string;
+  isCurrent: boolean;
 }
 
 export interface StoryMediaIndex {
@@ -91,6 +92,7 @@ export function buildStoryMediaIndex(
     const items = video.job_ids.map((id) => ({
       id,
       utteranceId: video.utterance_id,
+      isCurrent: video.current_job_ids?.includes(id) === true,
     }));
     const sectionId = sectionByUtteranceId.get(video.utterance_id);
     if (sectionId) {

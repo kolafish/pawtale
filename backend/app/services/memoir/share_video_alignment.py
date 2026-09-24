@@ -96,6 +96,13 @@ def _alignment_hash(utterance: MemoirVoiceUtterance, transcript_text: str, text_
     return _stable_json_hash(payload)
 
 
+def current_share_video_text_and_hash(utterance: MemoirVoiceUtterance) -> tuple[str, str] | None:
+    transcript_text, text_source = current_utterance_text_and_source(utterance)
+    if not transcript_text or not utterance.audio_file_id or not utterance.audio_file:
+        return None
+    return transcript_text, _alignment_hash(utterance, transcript_text, text_source)
+
+
 def _as_dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 

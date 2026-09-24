@@ -1163,6 +1163,48 @@ async def test_share_video_reuses_completed_file_but_regenerates_missing_file(
     assert regenerated.json()["status"] == "pending"
 
 
+async def test_share_video_snapshot_marks_old_transcript_and_alignment(
+    client, test_db, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "share-videos")
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"complete mp4")
+
+    monkeypatch.setattr(share_video_rendering, "render_share_video_clip", fake_render_share_video_clip)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": text.index("。") + 1,
+            "background_source": "classic",
+        },
+    )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
+
+    async def current_job_ids():
+        snapshot = (await client.get("/api/mobile/memoir/book-snapshot")).json()
+        return snapshot["share_video_counts"][0]["current_job_ids"]
+
+    assert await current_job_ids() == [job_id]
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    assert utterance is not None
+    original_edited_text = utterance.transcript_edited
+    utterance.transcript_edited = f"{text}我还记得那棵树。"
+    await test_db.commit()
+    assert await current_job_ids() == []
+
+    utterance.transcript_edited = original_edited_text
+    utterance.provider_payload_json = {"revised_alignment": True}
+    await test_db.commit()
+    assert await current_job_ids() == []
+
+
 async def test_share_video_worker_retries_and_removes_partial_output(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
