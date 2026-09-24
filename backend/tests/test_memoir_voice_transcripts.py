@@ -5,6 +5,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 from unittest.mock import AsyncMock
 
 import pytest
@@ -69,6 +70,14 @@ PNG_1X1 = base64.b64decode(
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_optional_video_title_ai(monkeypatch):
+    async def no_suggested_title(selected_text, *, ai_model):
+        return None
+
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", no_suggested_title)
+
+
 async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
     lease = await share_video_jobs.claim_share_video_job(
         test_db,
@@ -77,13 +86,16 @@ async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
         max_attempts=3,
     )
     assert lease is not None
-    return await share_video_jobs.run_share_video_job_with_session(
+    completed = await share_video_jobs.run_share_video_job_with_session(
         test_db,
         lease,
         lease_seconds=60,
         max_attempts=3,
         retry_seconds=1,
     )
+    # The test client reuses this session across requests; production requests use fresh sessions.
+    test_db.expire_all()
+    return completed
 
 
 class FakeAIClient(AITextServiceBase):
@@ -985,7 +997,10 @@ async def test_share_video_background_generation_caches_provider_result(tmp_path
     assert len(calls) == 1
 
 
-async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("suggested_title", ["外婆家的冬天", None])
+async def test_mobile_memoir_creates_and_downloads_share_video_job(
+    client, test_db, tmp_path, monkeypatch, suggested_title,
+):
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
         tmp_path / "share-videos",
@@ -1022,6 +1037,16 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     text = "我小时候住在外婆家。后来我去县城读书。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     end_char = text.index("。") + 1
+    fallback_title = "我小时候住在外婆家"
+    expected_title = suggested_title or fallback_title
+
+    async def suggest_title(selected_text, *, ai_model):
+        assert selected_text == text[:end_char]
+        if suggested_title is None:
+            raise RuntimeError("title provider unavailable")
+        return suggested_title
+
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", suggest_title)
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
@@ -1031,6 +1056,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert response.status_code == 201
     created_job = response.json()
     assert created_job["status"] == "pending"
+    assert created_job["title"] == fallback_title
     assert created_job["output"] is None
     job_id = created_job["id"]
     assert await _claim_and_run_share_video_job(test_db, job_id) is True
@@ -1039,6 +1065,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     detail = detail_response.json()
     assert detail is not None
     assert detail["status"] == "succeeded"
+    assert detail["title"] == expected_title
     assert detail["selected_text"] == "我小时候住在外婆家。"
     assert detail["duration_ms"] >= 3000
     assert detail["background_style"] == "ink_paper"
@@ -1065,12 +1092,37 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert stored_job is not None
     assert stored_job.output is not None
     assert stored_job.output.storage_path
+    project_id, user_id = stored_job.project_id, stored_job.user_id
+    counts = await share_video_jobs.list_completed_share_video_counts(
+        test_db,
+        project_id=project_id,
+        user_id=user_id,
+    )
+    assert counts[0].job_titles[job_id] == expected_title
 
     download_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
 
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
+    assert unquote(download_response.headers["content-disposition"]).endswith(f"{expected_title}.mp4")
     assert download_response.content == b"fake mp4"
+
+    if suggested_title is not None:
+        # Videos created before titles were stored still have a usable name.
+        stored_job.metadata_json = {
+            key: value for key, value in stored_job.metadata_json.items()
+            if key not in {"title", "title_attempted"}
+        }
+        await test_db.commit()
+        test_db.expire_all()
+        old_job = (await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")).json()
+        assert old_job["title"] == fallback_title
+        old_counts = await share_video_jobs.list_completed_share_video_counts(
+            test_db, project_id=project_id, user_id=user_id,
+        )
+        assert old_counts[0].job_titles[job_id] == fallback_title
+        old_download = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
+        assert unquote(old_download.headers["content-disposition"]).endswith(f"{fallback_title}.mp4")
 
     retry_response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",

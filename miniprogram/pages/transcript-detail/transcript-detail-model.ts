@@ -256,11 +256,12 @@ export function materialAssignmentPatch(
   };
 }
 
-export function shareVideoFileName(item: TranscriptDetailItemView | null): string {
-  const title = (item?.titleText || item?.summary_title || "回忆录片段")
-    .replace(/[\\/:*?"<>|]/g, "")
+export function shareVideoFileName(title: string | null | undefined): string {
+  const safeTitle = (title || "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
-  const shortTitle = Array.from(title).slice(0, 24).join("");
+  const shortTitle = Array.from(safeTitle).slice(0, 24).join("").trim();
   return `${shortTitle || "回忆录片段"}.mp4`;
 }
 

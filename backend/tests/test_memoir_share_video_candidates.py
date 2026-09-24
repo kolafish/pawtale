@@ -6,6 +6,7 @@ from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import AudioFile, MemoirEditingJob, MemoirShareVideoCandidate, MemoirVoiceUtterance
 from app.services.memoir import share_video_candidates
+from app.services.memoir.share_video_jobs import fallback_share_video_title
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_job
 
@@ -69,6 +70,7 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     created_job = await client.post(create_url, json={"background_source": "classic"})
     assert created_job.status_code == 201, created_job.text
     assert created_job.json()["selected_text"] == candidate["selected_text"]
+    assert created_job.json()["title"] == fallback_share_video_title(candidate["selected_text"])
     assert created_job.json()["status"] == "pending"
     repeated = await client.post(create_url, json={"background_source": "classic"})
     assert repeated.status_code == 201

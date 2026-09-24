@@ -19,6 +19,7 @@ export interface MemoirShareVideoCount {
   count: number;
   job_ids: string[];
   current_job_ids?: string[];
+  job_titles?: Record<string, string>;
 }
 
 export interface MemoirBookSnapshot {

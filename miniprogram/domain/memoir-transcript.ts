@@ -185,6 +185,7 @@ export interface MemoirShareVideoJob {
   utterance_id: string;
   audio_file_id: string;
   status: MemoirShareVideoJobStatus;
+  title: string;
   selected_text: string;
   start_char: number;
   end_char: number;

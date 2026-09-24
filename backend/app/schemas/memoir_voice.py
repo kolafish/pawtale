@@ -543,6 +543,7 @@ class MemoirShareVideoCountResponse(BaseModel):
     utterance_id: str
     count: int = Field(ge=1)
     job_ids: list[str] = Field(min_length=1)
+    job_titles: dict[str, str] = Field(default_factory=dict)
     current_job_ids: list[str] = Field(default_factory=list)
 
 
@@ -552,6 +553,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
     status: MemoirShareVideoJobStatus
+    title: str
     selected_text: str
     start_char: int
     end_char: int

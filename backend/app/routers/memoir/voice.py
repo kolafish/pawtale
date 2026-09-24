@@ -685,7 +685,7 @@ async def download_mobile_memoir_share_video_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    output, path = await memoir_share_video_jobs.load_completed_share_video_job(
+    output, path, title = await memoir_share_video_jobs.load_completed_share_video_job(
         db,
         job_id,
         current_user.id,
@@ -694,7 +694,7 @@ async def download_mobile_memoir_share_video_job(
     return FileResponse(
         path,
         media_type=output.mime_type,
-        filename=f"memoir-share-{output.job_id}.mp4",
+        filename=memoir_share_video_jobs.share_video_download_filename(title),
     )
 
 
