@@ -90,6 +90,24 @@ test("chapter section regeneration is shown as a confirmable operation", async (
   assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c1");
 });
 
+test("section consolidation opens the affected chapter after confirmation", async () => {
+  const { context, calls } = setup({
+    preview: async () => ({
+      signature: "reduce-sig", reply: "可以减少小节。", questions: [],
+      operations: [{
+        action: "consolidate_chapter_sections", target_ref: "c3", new_title: null,
+        label: "第三章的小节由 11 个减少到最多 8 个", detail: "保留原始讲述。",
+      }],
+    }),
+  });
+  await context.submitInstruction({ detail: { value: "第三章小节太多，合并少一些" } });
+  await context.apply();
+  assert.equal(calls.applies[0][2][0].action, "consolidate_chapter_sections");
+  assert.equal(context.data.progressChapterId, "c3");
+  context.openChapterProgress();
+  assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c3");
+});
+
 test("chapter split keeps its selected utterances when the user confirms", async () => {
   const split = {
     signature: "split-sig", reply: "请确认要拆出的讲述。", questions: [],

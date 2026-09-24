@@ -12,6 +12,7 @@ class VoiceEditOperation(BaseModel):
         "rename_chapter",
         "rename_section",
         "regenerate_chapter_sections",
+        "consolidate_chapter_sections",
         "split_chapter",
     ]
     target_ref: str = Field(min_length=1, max_length=80)
