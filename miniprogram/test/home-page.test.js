@@ -48,6 +48,7 @@ function loadHomePage({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
+    getMemoirShareVideoCandidate: async () => ({ candidate: null }),
     getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
       const latest = identity.active_project_id
@@ -182,6 +183,52 @@ test("home exposes mini program share entry points", () => {
     title: "老余口述，把家里的故事慢慢讲下来",
     query: "from=share_home",
   });
+});
+
+test("home recommendation starts a video job and opens its preview without sharing", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", voice_session_id: "session-1",
+    utterance_id: "utterance-1", selected_text: "父亲把围巾围在我脖子上。",
+    duration_ms: 30000, status: "ready", video_job_id: null,
+  };
+  const created = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    createMemoirShareVideoCandidateJob: async (...args) => {
+      created.push(args);
+      return { id: "video-1", utterance_id: "utterance-1", status: "pending" };
+    },
+    dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidate.id, "candidate-1");
+  assert.equal(context.data.shareCandidateDurationText, "30 秒");
+  await context.createShareCandidateVideo();
+  assert.deepEqual(created, [["p1", "candidate-1"]]);
+  assert.equal(context.data.shareCandidate.status, "accepted");
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=video-1"]);
+
+  context.openShareCandidateVideo();
+  assert.equal(navigations.length, 2);
+  await context.dismissShareCandidate();
+  assert.equal(context.data.shareCandidate, null);
+});
+
+test("home ignores a recommendation returned after the project changes", async () => {
+  const pending = deferred();
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: () => pending.promise,
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  const loading = context.refreshShareCandidate("p1");
+  context.setData({ projectId: "p2" });
+  pending.resolve({ candidate: { id: "old-candidate", status: "ready" } });
+  await loading;
+  assert.equal(context.data.shareCandidate, null);
 });
 
 test("home combines new-story and resume actions without mixing their routes", () => {

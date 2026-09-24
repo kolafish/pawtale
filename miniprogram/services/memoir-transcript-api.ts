@@ -1,6 +1,8 @@
 import type {
   MemoirMaterialImageGenerationJob,
   MemoirShareVideoCustomBackgroundAsset,
+  MemoirShareVideoCandidate,
+  MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
   MemoirMaterialOfflineASRState,
   MemoirTranscriptShareVideoContext,
@@ -14,6 +16,7 @@ import type {
 import type { MemoirTranscriptPolishLevel } from "../domain/memoir";
 import {
   memoirAIRequest,
+  memoirProjectPath,
   memoirRequest,
   queryString,
 } from "./memoir-api-client";
@@ -48,6 +51,14 @@ interface ShareVideoJobOptions {
 interface ShareVideoJobRequest {
   start_char: number;
   end_char: number;
+  ai_model: string | null;
+  background_source?: string;
+  background_style?: string;
+  background_mode?: string;
+  custom_background_asset_id?: string;
+}
+
+interface ShareVideoCandidateJobRequest {
   ai_model: string | null;
   background_source?: string;
   background_style?: string;
@@ -124,6 +135,42 @@ export function createMemoirTranscriptShareVideoJob(
     {
       start_char: startChar,
       end_char: endChar,
+      ai_model: null,
+      ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
+      ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
+      ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
+      ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+    },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirShareVideoCandidate(
+  projectId: string,
+): Promise<MemoirShareVideoCandidateResponse> {
+  return memoirRequest<MemoirShareVideoCandidateResponse>(
+    memoirProjectPath(projectId, "/share-video-candidate"),
+  );
+}
+
+export function dismissMemoirShareVideoCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<MemoirShareVideoCandidate> {
+  return memoirRequest<MemoirShareVideoCandidate>(
+    memoirProjectPath(projectId, `/share-video-candidates/${encodeURIComponent(candidateId)}/dismiss`),
+    { method: "POST" },
+  );
+}
+
+export function createMemoirShareVideoCandidateJob(
+  projectId: string,
+  candidateId: string,
+  options: ShareVideoJobOptions = {},
+): Promise<MemoirShareVideoJob> {
+  return memoirAIRequest<MemoirShareVideoJob, ShareVideoCandidateJobRequest>(
+    memoirProjectPath(projectId, `/share-video-candidates/${encodeURIComponent(candidateId)}/create-video`),
+    {
       ai_model: null,
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),

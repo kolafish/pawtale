@@ -55,7 +55,7 @@ interface TranscriptMediaWorkflowHost {
 
 export interface TranscriptMediaWorkflowMethods {
   resetShareVideoState(): void;
-  openShareVideoPanel(): Promise<void>;
+  openShareVideoPanel(preferredJobId?: string): Promise<void>;
   selectShareVideoSegment(event: ShareVideoSegmentEvent): void;
   clearShareVideoSelection(): void;
   selectShareVideoBackgroundSource(event: ShareVideoBackgroundEvent): void;
@@ -80,7 +80,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     this.setData(initialTranscriptShareVideoData());
   },
 
-  async openShareVideoPanel() {
+  async openShareVideoPanel(preferredJobId = "") {
     const item = this.data.item;
     if (!item || item.canRecoverTranscription) {
       return;
@@ -113,9 +113,15 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
         ...shareVideoSelectionPatch(context, -1, -1),
         ...shareVideoBackgroundPatch(context),
       });
-      if (context.latest_job_id) {
-        await this.shareVideoController.refresh(context.latest_job_id);
+      const videoJobId = preferredJobId || context.latest_job_id;
+      if (videoJobId) {
+        await this.shareVideoController.refresh(videoJobId);
         const job = this.data.shareVideoJob;
+        if (job && job.utterance_id !== item.id) {
+          this.shareVideoController.reset();
+          this.setData({ shareVideoError: "视频不属于这段讲述" });
+          return;
+        }
         if (job) {
           const firstSegmentIndex = context.segments.findIndex(
             (segment) => segment.end_char > job.start_char,
@@ -139,7 +145,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       if (context.latest_image_job_id) {
         await this.materialImageController.refresh(context.latest_image_job_id);
         const imageJob = this.data.materialImageJob;
-        if (imageJob && !context.latest_job_id) {
+        if (imageJob && !videoJobId) {
           const firstSegmentIndex = context.segments.findIndex(
             (segment) => segment.end_char > imageJob.start_char,
           );

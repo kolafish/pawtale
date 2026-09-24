@@ -149,6 +149,30 @@ export interface MemoirMaterialImageGenerationJob {
 }
 
 export type MemoirShareVideoJobStatus = "pending" | "running" | "succeeded" | "failed";
+export interface MemoirShareVideoCandidate {
+  id: string;
+  project_id: string;
+  voice_session_id: string;
+  utterance_id: string | null;
+  audio_file_id: string | null;
+  transcript_version_id: string | null;
+  text_hash: string | null;
+  selected_text: string;
+  start_char: number | null;
+  end_char: number | null;
+  start_ms: number | null;
+  end_ms: number | null;
+  duration_ms: number | null;
+  status: "ready" | "accepted" | "dismissed" | "stale" | "none";
+  video_job_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirShareVideoCandidateResponse {
+  candidate: MemoirShareVideoCandidate | null;
+}
+
 export interface MemoirShareVideoOutput {
   mime_type: string;
   size_bytes: number;

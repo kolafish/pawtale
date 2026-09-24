@@ -45,6 +45,7 @@ definePage<TranscriptMediaData>()({
     getJob: getMemoirMaterialImageGenerationJob,
   })),
   loadToken: 0,
+  preferredShareVideoJobId: "",
   shareVideoBackgroundUploadToken: 0,
 
   data: {
@@ -62,6 +63,7 @@ definePage<TranscriptMediaData>()({
     this.shareVideoController.setStateListener((patch) => this.setData(patch));
     this.materialImageController.setStateListener((patch) => this.setData(patch));
     this.resetShareVideoState();
+    this.preferredShareVideoJobId = queryParam(options, "jobId");
     this.setData({ utteranceId: queryParam(options, "id") });
     await this.loadTranscript();
   },
@@ -83,7 +85,7 @@ definePage<TranscriptMediaData>()({
         needsLogin: false,
         item: toViewItem(transcript),
       });
-      await this.openShareVideoPanel();
+      await this.openShareVideoPanel(this.preferredShareVideoJobId);
     } catch (error) {
       if (requestToken !== this.loadToken) {
         return;
