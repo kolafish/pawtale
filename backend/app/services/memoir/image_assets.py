@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.application_errors import ResourceNotFoundError
 from app.config import DATA_DIR
 from app.domain.memoir.types import (
     MemoirBookImagePlacementType,
@@ -23,6 +24,7 @@ from app.domain.memoir.types import (
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
     MemoirSectionStatus,
+    MemoirShareVideoJobStatus,
 )
 from app.models.memoir import (
     MemoirBookImagePlacement,
@@ -33,6 +35,7 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
 )
+from app.models.projects import Project
 from app.schemas.memoir_images import (
     MemoirBookImagePlacementCreateRequest,
     MemoirBookImagePlacementResponse,
@@ -316,6 +319,158 @@ async def _load_asset(
     return asset
 
 
+async def _lock_manual_image_selection(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> Project:
+    await load_memoir_project(db, project_id, user_id)
+    project = await db.scalar(
+        select(Project)
+        .where(Project.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        raise ResourceNotFoundError("项目不存在")
+    return project
+
+
+async def _begin_manual_image_selection(
+    db: AsyncSession,
+    *,
+    project: Project,
+    keep: MemoirBookImagePlacement | None = None,
+) -> None:
+    if project.memoir_book_image_selection_manual:
+        return
+    placements = (
+        await db.scalars(
+            select(MemoirBookImagePlacement).where(
+                MemoirBookImagePlacement.project_id == project.id,
+                MemoirBookImagePlacement.enabled.is_(True),
+            )
+        )
+    ).all()
+    for placement in placements:
+        if placement is not keep:
+            placement.enabled = False
+    project.memoir_book_image_selection_manual = True
+
+
+async def auto_place_share_video_backgrounds(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: set[str],
+) -> bool:
+    """Keep one video illustration per included chapter until the user arranges images."""
+    if not chapter_ids:
+        return False
+    project = await db.scalar(
+        select(Project)
+        .where(Project.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None or project.memoir_book_image_selection_manual:
+        return False
+
+    assets = (
+        await db.scalars(
+            select(MemoirImageAsset)
+            .join(
+                MemoirMaterialShareVideo,
+                MemoirImageAsset.share_video_job_id == MemoirMaterialShareVideo.id,
+            )
+            .where(
+                MemoirImageAsset.project_id == project_id,
+                MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
+                MemoirImageAsset.source_type == MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+                MemoirImageAsset.source_utterance_id.is_not(None),
+                MemoirMaterialShareVideo.project_id == project_id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+            )
+            .order_by(MemoirImageAsset.created_at, MemoirImageAsset.id)
+        )
+    ).all()
+    source_locations = await _source_material_locations(
+        db,
+        project_id=project_id,
+        utterance_ids={asset.source_utterance_id for asset in assets if asset.source_utterance_id},
+    )
+    candidates: dict[str, list[MemoirImageAsset]] = {}
+    for asset in assets:
+        metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
+        location = source_locations.get(asset.source_utterance_id or "")
+        if (
+            not location
+            or location[1] not in chapter_ids
+            or asset.provider == "user_upload"
+            or metadata.get("share_video_background_source") == "custom_upload"
+        ):
+            continue
+        try:
+            _file_path(asset.storage_path)
+        except HTTPException:
+            continue
+        candidates.setdefault(location[1], []).append(asset)
+
+    placements = (
+        await db.scalars(
+            select(MemoirBookImagePlacement)
+            .where(MemoirBookImagePlacement.project_id == project_id)
+            .order_by(MemoirBookImagePlacement.created_at, MemoirBookImagePlacement.id)
+        )
+    ).all()
+    candidate_chapter_by_asset = {
+        asset.id: chapter_id
+        for chapter_id, chapter_assets in candidates.items()
+        for asset in chapter_assets
+    }
+    selected: dict[str, MemoirBookImagePlacement] = {}
+    changed = False
+    for placement in placements:
+        if not placement.enabled:
+            continue
+        chapter_id = candidate_chapter_by_asset.get(placement.image_asset_id)
+        if chapter_id and chapter_id not in selected:
+            selected[chapter_id] = placement
+            if placement.placement_type != MemoirBookImagePlacementType.CHAPTER_INLINE.value:
+                placement.placement_type = MemoirBookImagePlacementType.CHAPTER_INLINE.value
+                changed = True
+            if placement.chapter_id != chapter_id:
+                placement.chapter_id = chapter_id
+                changed = True
+        else:
+            placement.enabled = False
+            changed = True
+
+    by_asset = {placement.image_asset_id: placement for placement in placements}
+    for chapter_id, chapter_assets in candidates.items():
+        if chapter_id in selected:
+            continue
+        asset = chapter_assets[0]
+        placement = by_asset.get(asset.id)
+        if placement is None:
+            placement = MemoirBookImagePlacement(
+                project_id=project_id,
+                image_asset_id=asset.id,
+                placement_type=MemoirBookImagePlacementType.CHAPTER_INLINE.value,
+                chapter_id=chapter_id,
+            )
+            db.add(placement)
+        else:
+            placement.placement_type = MemoirBookImagePlacementType.CHAPTER_INLINE.value
+            placement.chapter_id = chapter_id
+            placement.enabled = True
+        changed = True
+    if changed:
+        await db.flush()
+    return changed
+
+
 async def list_image_assets(
     db: AsyncSession,
     *,
@@ -396,7 +551,12 @@ async def delete_image_asset(
     project_id: str,
     asset_id: str,
 ) -> None:
+    project = await _lock_manual_image_selection(
+        db, user_id=user_id, project_id=project_id,
+    )
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    if any(placement.enabled for placement in asset.placements):
+        await _begin_manual_image_selection(db, project=project)
     asset.status = MemoirImageAssetStatus.DELETED.value
     for placement in asset.placements:
         placement.enabled = False
@@ -413,6 +573,9 @@ async def create_image_placement(
     asset_id: str,
     req: MemoirBookImagePlacementCreateRequest,
 ) -> MemoirImageAssetResponse:
+    project = await _lock_manual_image_selection(
+        db, user_id=user_id, project_id=project_id,
+    )
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
     if asset.status != MemoirImageAssetStatus.READY.value:
         raise HTTPException(status_code=400, detail="图片还不可入书")
@@ -520,6 +683,7 @@ async def create_image_placement(
             sort_order=next_sort_order,
         )
         asset.placements.append(placement)
+    await _begin_manual_image_selection(db, project=project, keep=placement)
     placement.caption_override = req.caption_override or placement.caption_override
     placement.display_size = req.display_size
     placement.enabled = True
@@ -547,11 +711,19 @@ async def update_image_placement(
     placement_id: str,
     req: MemoirBookImagePlacementUpdateRequest,
 ) -> MemoirImageAssetResponse:
+    project = await _lock_manual_image_selection(
+        db, user_id=user_id, project_id=project_id,
+    )
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
     placement = next((item for item in asset.placements if item.id == placement_id), None)
     if not placement:
         raise HTTPException(status_code=404, detail="插图位置不存在")
     fields_set = getattr(req, "model_fields_set", set())
+    await _begin_manual_image_selection(
+        db,
+        project=project,
+        keep=placement if req.enabled is not False and placement.enabled else None,
+    )
     if "caption_override" in fields_set and req.caption_override is not None:
         placement.caption_override = req.caption_override
     if "display_size" in fields_set and req.display_size is not None:

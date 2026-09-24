@@ -44,7 +44,11 @@ from app.services.memoir.book_output_snapshots import (
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.image_assets import manuscript_image_snapshots
+from app.services.memoir.image_assets import (
+    auto_place_share_video_backgrounds,
+    manuscript_image_snapshots,
+    sync_latest_book_output_image_snapshots,
+)
 
 
 def _manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str, object]]:
@@ -241,6 +245,11 @@ async def assemble_book_output(
                 source_refs=source_refs_by_chapter.get(chapter.id),
             )
         )
+    auto_images_changed = await auto_place_share_video_backgrounds(
+        db,
+        project_id=project_id,
+        chapter_ids={chapter.id for chapter, _ in chapter_versions},
+    )
     output = await db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
         .with_for_update().execution_options(populate_existing=True)
@@ -305,6 +314,12 @@ async def assemble_book_output(
                 or (automatic and protected and not _only_local_copy_is_protected(output, versions))
             )
         ):
+            if auto_images_changed:
+                await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+                previous_version = await book_output_versions.load_latest_book_output_version(
+                    db, output_id=output.id,
+                )
+                assert previous_version is not None
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -323,6 +338,12 @@ async def assemble_book_output(
             and previous_version.content == content
             and previous_version.chapter_snapshot_json == chapter_snapshots
         ):
+            if auto_images_changed:
+                await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+                previous_version = await book_output_versions.load_latest_book_output_version(
+                    db, output_id=output.id,
+                )
+                assert previous_version is not None
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,

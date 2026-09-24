@@ -1,5 +1,6 @@
 from io import BytesIO
 
+import pytest
 from PIL import Image
 from sqlalchemy import select
 
@@ -7,11 +8,13 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
     MemoirImageAssetSourceType,
+    MemoirImageAssetStatus,
     MemoirOutputStatus,
     MemoirShareVideoJobStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
+    MemoirBookImagePlacement,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirEditingJob,
@@ -26,6 +29,7 @@ from app.services.memoir.image_assets import (
     RegisteredShareVideoBackground,
     register_share_video_background_asset,
 )
+from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 from app.services.memoir.share_video_backgrounds import (
     VolcArkGeneratedImage,
@@ -321,6 +325,222 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
     )
     await test_db.commit()
     return user, project_id, chapters[0].id, asset.id
+
+
+async def _register_another_video_image(test_db, tmp_path, *, asset_id: str, scene_index: int) -> str:
+    source = await test_db.get(MemoirImageAsset, asset_id)
+    assert source is not None and source.share_video_job_id is not None
+    job = await test_db.get(MemoirMaterialShareVideo, source.share_video_job_id)
+    assert job is not None
+    storage_path = f"memoir/share-video-backgrounds/old_album/fake/asset-{scene_index}.png"
+    image_path = tmp_path / storage_path
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (1280, 720), (232, 218, 196)).save(image_path)
+    asset = await register_share_video_background_asset(
+        test_db,
+        job=job,
+        background=ShareVideoBackgroundAsset(
+            path=image_path,
+            storage_path=storage_path,
+            style_id="old_album",
+            prompt_hash=f"prompt-hash-{scene_index}",
+            prompt_template_version="memoir-share-video-background-v1",
+            provider="fake",
+            model="fake-image",
+            cache_hit=False,
+        ),
+        context=RegisteredShareVideoBackground(
+            source_quote="小时候院子里有一棵葡萄树。",
+            scene_index=scene_index,
+            scene_title=f"院子里的葡萄树 {scene_index}",
+            evidence_quote="小时候院子里有一棵葡萄树。",
+        ),
+    )
+    await test_db.commit()
+    return asset.id
+
+
+async def test_automatic_book_selects_one_video_image_and_updates_unchanged_manuscript(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    _, project_id, chapter_id, first_asset_id = await _seed_image_asset(
+        client, test_db, tmp_path, monkeypatch,
+    )
+    first_asset = await test_db.get(MemoirImageAsset, first_asset_id)
+    assert first_asset is not None and first_asset.share_video_job_id is not None
+    job = await test_db.get(MemoirMaterialShareVideo, first_asset.share_video_job_id)
+    assert job is not None
+    job.status = MemoirShareVideoJobStatus.PENDING.value
+    await test_db.commit()
+
+    baseline = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    baseline_version = await test_db.get(MemoirBookOutputVersion, baseline.output_version_id)
+    assert baseline_version is not None
+    assert baseline_version.manuscript_json["chapters"][0]["illustrations"] == []
+
+    job.status = MemoirShareVideoJobStatus.SUCCEEDED.value
+    await test_db.commit()
+    second_asset_id = await _register_another_video_image(
+        test_db, tmp_path, asset_id=first_asset_id, scene_index=1,
+    )
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    version = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    assert version is not None
+    assert assembled.output_version_id != baseline.output_version_id
+    assert version.content == baseline_version.content
+    assert version.chapter_snapshot_json == baseline_version.chapter_snapshot_json
+    assert version.manuscript_json["chapters"][0]["chapter_id"] == chapter_id
+    illustrations = version.manuscript_json["chapters"][0]["illustrations"]
+    assert len(illustrations) == 1
+    assert illustrations[0]["image_asset_id"] in {first_asset_id, second_asset_id}
+    assert illustrations[0]["section_id"] == version.manuscript_json["chapters"][0]["sections"][0]["section_id"]
+
+    repeated = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert repeated.output_version_id == assembled.output_version_id
+    placements = (await test_db.scalars(select(MemoirBookImagePlacement).where(
+        MemoirBookImagePlacement.project_id == project_id,
+        MemoirBookImagePlacement.enabled.is_(True),
+    ))).all()
+    assert len(placements) == 1
+
+
+async def test_automatic_book_adds_video_image_without_rewriting_protected_book(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    _, project_id, _, asset_id = await _seed_image_asset(
+        client, test_db, tmp_path, monkeypatch,
+    )
+    original = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(
+            MemoirBookOutputVersion.project_id == project_id,
+        )
+    )
+    assert original is not None
+    original.created_by = MemoirCreatedBy.USER.value
+    await test_db.commit()
+
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    version = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    assert version is not None
+    assert assembled.preserved_manual is True
+    assert version.id != original.id
+    assert version.content == original.content
+    assert version.chapter_snapshot_json == original.chapter_snapshot_json
+    assert [item["image_asset_id"] for item in version.manuscript_json["chapters"][0]["illustrations"]] == [asset_id]
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "delete"])
+async def test_manual_image_placement_stops_later_automatic_selection(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    _, project_id, _, first_asset_id = await _seed_image_asset(
+        client, test_db, tmp_path, monkeypatch,
+    )
+    first = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    first_version = await test_db.get(MemoirBookOutputVersion, first.output_version_id)
+    assert first_version is not None
+    assert [item["image_asset_id"] for item in first_version.manuscript_json["chapters"][0]["illustrations"]] == [first_asset_id]
+    auto_placement = await test_db.scalar(select(MemoirBookImagePlacement).where(
+        MemoirBookImagePlacement.project_id == project_id,
+        MemoirBookImagePlacement.image_asset_id == first_asset_id,
+        MemoirBookImagePlacement.enabled.is_(True),
+    ))
+    assert auto_placement is not None
+    second_asset_id = await _register_another_video_image(
+        test_db, tmp_path, asset_id=first_asset_id, scene_index=2,
+    )
+
+    if operation == "create":
+        response = await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/image-assets/{second_asset_id}/placements",
+            json={"placement_type": "chapter_inline", "display_size": "full_width"},
+        )
+        expected_asset_ids = [second_asset_id]
+    elif operation == "update":
+        response = await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}/image-assets/{first_asset_id}/placements/{auto_placement.id}",
+            json={"enabled": False},
+        )
+        expected_asset_ids = []
+    else:
+        response = await client.delete(
+            f"/api/mobile/memoir/projects/{project_id}/image-assets/{first_asset_id}/placements/{auto_placement.id}",
+        )
+        expected_asset_ids = []
+    assert response.status_code in {200, 201}
+
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    version = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    assert version is not None
+    assert [item["image_asset_id"] for item in version.manuscript_json["chapters"][0]["illustrations"]] == expected_asset_ids
+    enabled = (await test_db.scalars(select(MemoirBookImagePlacement.image_asset_id).where(
+        MemoirBookImagePlacement.project_id == project_id,
+        MemoirBookImagePlacement.enabled.is_(True),
+    ))).all()
+    assert enabled == expected_asset_ids
+
+
+async def test_automatic_book_skips_failed_video_and_custom_uploaded_background(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    user, project_id, _, asset_id = await _seed_image_asset(
+        client, test_db, tmp_path, monkeypatch,
+    )
+    source = await test_db.get(MemoirImageAsset, asset_id)
+    assert source is not None and source.share_video_job_id is not None
+    job = await test_db.get(MemoirMaterialShareVideo, source.share_video_job_id)
+    assert job is not None
+    job.status = MemoirShareVideoJobStatus.FAILED.value
+    await test_db.commit()
+
+    failed_video = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    failed_version = await test_db.get(MemoirBookOutputVersion, failed_video.output_version_id)
+    assert failed_version is not None
+    assert failed_version.manuscript_json["chapters"][0]["illustrations"] == []
+
+    source.status = MemoirImageAssetStatus.DELETED.value
+    job.status = MemoirShareVideoJobStatus.SUCCEEDED.value
+    test_db.add(MemoirImageAsset(
+        project_id=project_id,
+        user_id=user["id"],
+        status="ready",
+        source_type=MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+        source_signature="test-custom-upload-background",
+        storage_path=source.storage_path,
+        provider="user_upload",
+        source_utterance_id=source.source_utterance_id,
+        share_video_job_id=job.id,
+        metadata_json={"share_video_background_source": "custom_upload"},
+    ))
+    await test_db.commit()
+
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    version = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    assert version is not None
+    assert version.manuscript_json["chapters"][0]["illustrations"] == []
+    assert (await test_db.scalars(select(MemoirBookImagePlacement).where(
+        MemoirBookImagePlacement.project_id == project_id,
+    ))).all() == []
 
 
 async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscript(
