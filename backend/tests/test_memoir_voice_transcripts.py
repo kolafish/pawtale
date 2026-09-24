@@ -41,6 +41,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
+from app.services.memoir import share_video_alignment
 from app.services.memoir import share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs
 from app.services.memoir import share_video_rendering
@@ -417,7 +418,17 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
 
 
-async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_text(client, test_db):
+async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_text(
+    client, test_db, monkeypatch
+):
+    monkeypatch.setattr(
+        share_video_alignment,
+        "get_settings",
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
+    )
     raw_text = "是我们心不平的吧。我就带你回去。"
     edited_text = "说我们的心不平的嘛。我就带你回去。"
     created = await create_test_voice_transcript(client, test_db, text=raw_text)
@@ -479,6 +490,7 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert data["duration_ms"] == 12000
     assert data["alignment_strategy"] == "provider_words"
     assert data["alignment_confidence"] >= 0.7
+    assert data["ai_background_enabled"] is True
     assert data["default_background_source"] == "ai"
     assert [source["value"] for source in data["background_sources"]] == ["ai", "custom", "classic"]
     assert data["default_background_mode"] == "auto"
@@ -498,6 +510,41 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment is not None
     assert alignment.text_hash == data["text_hash"]
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
+
+
+@pytest.mark.parametrize(
+    ("enabled", "api_key"),
+    [(False, "test-key"), (True, "")],
+)
+async def test_share_video_context_hides_unavailable_ai_and_creation_rejects_it(
+    client, test_db, monkeypatch, enabled, api_key
+):
+    settings = SimpleNamespace(
+        memoir_share_video_ai_background_enabled=enabled,
+        volc_ark_api_key=api_key,
+    )
+    monkeypatch.setattr(share_video_alignment, "get_settings", lambda: settings)
+    monkeypatch.setattr(share_video_jobs, "get_settings", lambda: settings)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video"
+
+    context = (await client.get(f"{url}/context")).json()
+    assert context["ai_background_enabled"] is False
+    assert context["default_background_source"] == "classic"
+    assert [source["value"] for source in context["background_sources"]] == ["custom", "classic"]
+
+    rejected = await client.post(
+        f"{url}/jobs",
+        json={"start_char": 0, "end_char": end_char, "background_source": "ai"},
+    )
+    assert rejected.status_code == 400
+    created_job = await client.post(
+        f"{url}/jobs", json={"start_char": 0, "end_char": end_char}
+    )
+    assert created_job.status_code == 201
+    assert created_job.json()["background_source"] == "classic"
 
 
 async def test_share_video_context_returns_latest_job_only_for_current_text(client, test_db):
@@ -1024,6 +1071,138 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
     assert download_response.content == b"fake mp4"
+
+    retry_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": end_char, "background_style": "ink_paper"},
+    )
+    assert retry_response.status_code == 201
+    assert retry_response.json()["id"] != job_id
+
+
+async def test_share_video_dedupes_running_job_after_background_progress(
+    client, test_db, monkeypatch
+):
+    monkeypatch.setattr(
+        share_video_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
+    )
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    request = {
+        "start_char": 0,
+        "end_char": end_char,
+        "background_source": "ai",
+    }
+    first = await client.post(url, json=request)
+    assert first.status_code == 201
+    job_id = first.json()["id"]
+    assert first.json()["background_status"] == "pending"
+    assert await share_video_jobs.claim_share_video_job(
+        test_db, job_id, lease_seconds=60, max_attempts=3
+    ) is not None
+    job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    assert job is not None
+    job.metadata_json = {
+        **job.metadata_json,
+        "background_status": "planning",
+        "background_effective_mode": "smart_multi",
+    }
+    await test_db.commit()
+
+    duplicate = await client.post(url, json=request)
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == job_id
+    assert duplicate.json()["status"] == "running"
+
+    different_style = await client.post(url, json={**request, "background_style": "ink_paper"})
+    assert different_style.status_code == 201
+    assert different_style.json()["id"] != job_id
+
+
+async def test_share_video_reuses_completed_file_but_regenerates_missing_file(
+    client, test_db, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "share-videos")
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"complete mp4")
+
+    monkeypatch.setattr(share_video_rendering, "render_share_video_clip", fake_render_share_video_clip)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    request = {
+        "start_char": 0,
+        "end_char": text.index("。") + 1,
+        "background_source": "classic",
+    }
+    first = await client.post(url, json=request)
+    assert first.status_code == 201
+    job_id = first.json()["id"]
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
+
+    reused = await client.post(url, json=request)
+    assert reused.status_code == 201
+    assert reused.json()["id"] == job_id
+    assert reused.json()["status"] == "succeeded"
+
+    job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    assert job is not None
+    share_video_jobs.share_video_file_path(job).unlink()
+    regenerated = await client.post(url, json=request)
+    assert regenerated.status_code == 201
+    assert regenerated.json()["id"] != job_id
+    assert regenerated.json()["status"] == "pending"
+
+
+async def test_share_video_snapshot_marks_old_transcript_and_alignment(
+    client, test_db, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "share-videos")
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"complete mp4")
+
+    monkeypatch.setattr(share_video_rendering, "render_share_video_clip", fake_render_share_video_clip)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": text.index("。") + 1,
+            "background_source": "classic",
+        },
+    )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
+
+    async def current_job_ids():
+        snapshot = (await client.get("/api/mobile/memoir/book-snapshot")).json()
+        return snapshot["share_video_counts"][0]["current_job_ids"]
+
+    assert await current_job_ids() == [job_id]
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    assert utterance is not None
+    original_edited_text = utterance.transcript_edited
+    utterance.transcript_edited = f"{text}我还记得那棵树。"
+    await test_db.commit()
+    assert await current_job_ids() == []
+
+    utterance.transcript_edited = original_edited_text
+    utterance.provider_payload_json = {"revised_alignment": True}
+    await test_db.commit()
+    assert await current_job_ids() == []
 
 
 async def test_share_video_worker_retries_and_removes_partial_output(client, test_db, tmp_path, monkeypatch):

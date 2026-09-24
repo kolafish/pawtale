@@ -18,6 +18,7 @@ export interface MemoirShareVideoCount {
   utterance_id: string;
   count: number;
   job_ids: string[];
+  current_job_ids?: string[];
 }
 
 export interface MemoirBookSnapshot {

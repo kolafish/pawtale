@@ -123,6 +123,7 @@ test("image assets page reuses its cards for one story section and its videos", 
         utterance_id: "utterance-1",
         count: 2,
         job_ids: ["video-2", "video-1"],
+        current_job_ids: ["video-2"],
       }],
     }),
     getMemoirShareVideoJob: async (id) => {
@@ -136,6 +137,7 @@ test("image assets page reuses its cards for one story section and its videos", 
   });
   global.wx = {
     setNavigationBarTitle({ title }) { navigationTitles.push(title); },
+    navigateTo({ url }) { navigationTitles.push(url); },
   };
   const context = pageContext(page);
 
@@ -151,7 +153,11 @@ test("image assets page reuses its cards for one story section and its videos", 
   assert.equal(context.data.isStoryMaterialView, true);
   assert.deepEqual(context.data.items.map((item) => item.id), ["asset-section"]);
   assert.deepEqual(context.data.videos.map((item) => item.id), ["video-2", "video-1"]);
+  assert.deepEqual(context.data.videos.map((item) => item.isCurrent), [true, false]);
   assert.deepEqual(navigationTitles, ["外婆家的夏天"]);
+
+  page.remakeVideo.call(context, { currentTarget: { dataset: { id: "video-1" } } });
+  assert.equal(navigationTitles[1], "/pages/transcript-media/index?id=utterance-1");
 
   await page.previewVideo.call(context, {
     currentTarget: { dataset: { id: "video-2" } },

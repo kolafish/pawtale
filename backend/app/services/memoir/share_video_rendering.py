@@ -377,22 +377,34 @@ def _quote_karaoke_text(
     text: str,
     lines: list[tuple[int, int]],
     char_timings: list[dict[str, int]],
+    event_start_ms: int,
 ) -> str:
     pieces: list[str] = [r"{\an5\pos(640,356)\q2\fad(180,180)}"]
+    elapsed_cs = 0
     for line_index, (line_start, line_end) in enumerate(lines):
         if line_index:
             pieces.append(r"\N")
         for phrase_start, phrase_end in _karaoke_phrase_ranges(text, line_start, line_end):
-            phrase_duration = (
-                int(char_timings[phrase_end - 1]["end_ms"])
-                - int(char_timings[phrase_start]["start_ms"])
+            phrase_start_cs = max(
+                0,
+                round((int(char_timings[phrase_start]["start_ms"]) - event_start_ms) / 10),
             )
+            if phrase_start_cs > elapsed_cs:
+                # An empty karaoke syllable advances the ASS clock during silence.
+                pieces.append(r"{\k" + str(phrase_start_cs - elapsed_cs) + "}")
+                elapsed_cs = phrase_start_cs
+            phrase_end_cs = max(
+                phrase_start_cs + 1,
+                round((int(char_timings[phrase_end - 1]["end_ms"]) - event_start_ms) / 10),
+            )
+            phrase_duration_cs = max(1, phrase_end_cs - elapsed_cs)
             pieces.append(
                 r"{\kf"
-                + str(max(1, round(phrase_duration / 10)))
+                + str(phrase_duration_cs)
                 + "}"
                 + _ass_text(text[phrase_start:phrase_end])
             )
+            elapsed_cs += phrase_duration_cs
     return "".join(pieces)
 
 
@@ -427,7 +439,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end_ms = max(start_ms + 1, int(char_timings[end - 1]["end_ms"]) - request.start_ms)
         events.append(
             f"Dialogue: 1,{_ass_time(start_ms)},{_ass_time(end_ms)},Quote,,0,0,0,,"
-            f"{_quote_karaoke_text(request.selected_text, lines, char_timings)}\n"
+            f"{_quote_karaoke_text(request.selected_text, lines, char_timings, request.start_ms + start_ms)}\n"
         )
     return "".join(events)
 

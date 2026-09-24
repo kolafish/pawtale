@@ -5,8 +5,26 @@ const test = require("node:test");
 const { ApiError } = require("../services/request.ts");
 const {
   initialTranscriptShareVideoTaskState,
+  shareVideoBackgroundPatch,
   TranscriptShareVideoController,
 } = require("../services/transcript-share-video.ts");
+
+test("video background selection falls back when a saved AI preference is unavailable", () => {
+  const patch = shareVideoBackgroundPatch({
+    default_background_source: "classic",
+    default_background_style: "watercolor",
+    default_background_mode: "auto",
+    background_sources: [{ value: "classic", label: "经典背景" }],
+    background_styles: [{ value: "watercolor", label: "水彩" }],
+    background_modes: [{ value: "auto", label: "自动" }],
+  }, {
+    backgroundSource: "ai",
+    backgroundStyle: "watercolor",
+    backgroundMode: "auto",
+  });
+  assert.equal(patch.shareVideoBackgroundSource, "classic");
+  assert.equal(patch.shareVideoBackgroundUsesAi, false);
+});
 
 function shareVideoJob(overrides = {}) {
   return {

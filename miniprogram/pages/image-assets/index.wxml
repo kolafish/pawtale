@@ -200,7 +200,7 @@
       class="asset-card ui-pressable"
       data-id="{{item.id}}"
       aria-role="button"
-      aria-label="播放{{item.title}}"
+      aria-label="播放{{item.isCurrent ? '' : '旧版'}}{{item.title}}"
       bindtap="previewVideo"
     >
       <view class="asset-main">
@@ -213,13 +213,15 @@
         <view class="asset-copy">
           <view class="asset-title-row">
             <text class="asset-title">{{item.title}}</text>
-            <text class="asset-status included">已生成</text>
+            <text class="asset-status {{item.isCurrent ? 'included' : 'outdated'}}">{{item.isCurrent ? '可预览' : '旧版视频'}}</text>
           </view>
           <text class="asset-meta">分享视频</text>
           <text class="asset-source">{{item.detail}}</text>
+          <text wx:if="{{!item.isCurrent}}" class="asset-placement">讲述内容已变化，重新制作后再分享</text>
           <text class="asset-placement">{{previewingVideoId === item.id ? "加载中" : "播放视频 ›"}}</text>
         </view>
       </view>
+      <button wx:if="{{!item.isCurrent}}" class="action-button primary-action video-remake-button" data-id="{{item.id}}" catchtap="remakeVideo">重新制作</button>
     </view>
   </view>
 

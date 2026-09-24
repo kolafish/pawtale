@@ -68,8 +68,12 @@ _PROCESSING_JSON = {
 }
 
 
-def share_video_background_source_options() -> list[dict[str, str]]:
-    return [dict(option) for option in _BACKGROUND_SOURCE_OPTIONS]
+def share_video_background_source_options(*, include_ai: bool = True) -> list[dict[str, str]]:
+    return [
+        dict(option)
+        for option in _BACKGROUND_SOURCE_OPTIONS
+        if include_ai or option["value"] != SHARE_VIDEO_BACKGROUND_SOURCE_AI
+    ]
 
 
 def normalize_share_video_background_source(value: str | None) -> str:
