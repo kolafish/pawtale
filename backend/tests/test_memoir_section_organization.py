@@ -144,6 +144,35 @@ class PartiallyUnassignedReplayMaterialOrganizationAI(
         return index > 0
 
 
+class UnchangedSectionCountAI(ReplayMaterialOrganizationAI):
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.prompts.append(user_prompt)
+        if "这里只设计候选小节" in user_prompt:
+            return json.dumps({"sections": [
+                {"title": "第一组", "section_type": "event"},
+                {"title": "第二组", "section_type": "event"},
+            ]}, ensure_ascii=False)
+        raw_materials = re.search(
+            r"待归类讲述：\n(\[.*\])\n\n只返回 JSON",
+            user_prompt,
+            re.DOTALL,
+        )
+        assert raw_materials is not None
+        materials = json.loads(raw_materials.group(1))
+        return json.dumps({"assignments": [
+            {
+                "utterance_id": material["utterance_id"],
+                "action": "assign_existing",
+                "section_id": (
+                    "S1" if material["current_section"].startswith("1.") else "S2"
+                ),
+                "confidence": 0.86,
+                "reason": "保留原分组",
+            }
+            for material in materials
+        ]}, ensure_ascii=False)
+
+
 def test_section_regeneration_batches_by_material_text_budget():
     production_lengths = [
         8, 15, 20, 24, 32, 33, 47, 64, 70, 78, 80, 83, 101,
@@ -732,6 +761,11 @@ async def test_running_regrouping_cannot_be_reported_as_a_new_consolidation(
     payload = {"expected_sections": [{
         "id": data["sections"][0]["id"], "version": data["sections"][0]["version"],
     }]}
+    other = MemoirSection(project_id=project_id, chapter_id=chapter_id,
+                          title="另一段回忆", sort_order=1)
+    test_db.add(other)
+    await test_db.commit()
+    payload["expected_sections"].append({"id": other.id, "version": other.version})
     queued = await client.post(url, json=payload)
     assert queued.status_code == 202, queued.text
     job = await test_db.get(MemoirEditingJob, queued.json()["job_id"])
@@ -739,11 +773,12 @@ async def test_running_regrouping_cannot_be_reported_as_a_new_consolidation(
     job.status = "running"
     await test_db.commit()
 
-    response = await client.post(url, json={**payload, "max_sections": 1})
+    response = await client.post(url, json={**payload, "section_count_goal": "reduce"})
     assert response.status_code == 409, response.text
     assert "已有另一项小节整理任务" in response.json()["detail"]
     await test_db.refresh(job)
     assert job.payload_json["request"]["max_sections"] is None
+    assert job.payload_json["request"].get("section_count_goal") is None
 
 
 async def test_regenerate_chapter_sections_replays_current_material_organizer(
@@ -886,7 +921,7 @@ async def test_section_consolidation_keeps_original_structure_when_ai_adds_secti
     assert fake.calls == 1
 
 
-async def test_section_consolidation_merges_existing_groups_within_the_limit(
+async def test_section_consolidation_lets_ai_choose_a_smaller_group_count(
     client, test_db, monkeypatch,
 ):
     project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
@@ -912,7 +947,7 @@ async def test_section_consolidation_merges_existing_groups_within_the_limit(
         json={"expected_sections": [
             {"id": original["id"], "version": original["version"]},
             {"id": other.id, "version": other.version},
-        ], "max_sections": 1},
+        ], "section_count_goal": "reduce"},
     )
     assert response.status_code == 200, response.text
     assert response.json()["section_count"] == 1
@@ -922,8 +957,45 @@ async def test_section_consolidation_merges_existing_groups_within_the_limit(
     assert {material["utterance_id"] for material in current[0]["materials"]} == {
         created[0]["utterance_id"], created[1]["utterance_id"],
     }
-    assert "最多 1 个" in fake.prompts[0]
+    assert "当前有 2 个小节" in fake.prompts[0]
+    assert "自行判断合适的合并方式和数量" in fake.prompts[0]
+    assert "最多 1 个" not in fake.prompts[0]
     assert "同一原小节" in fake.prompts[1]
+
+
+async def test_section_consolidation_preserves_original_when_count_does_not_drop(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    test_db.add(other)
+    await test_db.flush()
+    moved = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
+    ))
+    assert moved is not None
+    moved.section_id = other.id
+    await test_db.commit()
+    fake = UnchangedSectionCountAI()
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+        ], "section_count_goal": "reduce"},
+    )
+    assert response.status_code == 409, response.text
+    assert "AI 未减少小节数量" in response.json()["detail"]
+    assert await test_db.get(MemoirSection, original["id"]) is not None
+    assert await test_db.get(MemoirSection, other.id) is not None
+    assert len(fake.prompts) == 2
 
 
 async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choice(

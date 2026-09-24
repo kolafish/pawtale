@@ -93,7 +93,7 @@ def _chapter_source_ids(story: dict, chapter_ref: str) -> set[str]:
     }
 
 
-def _consolidation_section_limit(story: dict, chapter_ref: str) -> int:
+def _consolidation_section_count(story: dict, chapter_ref: str) -> int:
     count = sum(
         section["chapter_ref"] == chapter_ref
         and section["status"] == "active"
@@ -102,7 +102,7 @@ def _consolidation_section_limit(story: dict, chapter_ref: str) -> int:
     )
     if count < 2:
         raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
-    return min(count - 1, (2 * count + 2) // 3, 30)
+    return count
 
 
 def _section_split_source_ids(story: dict, op: VoiceEditOperation) -> set[str]:
@@ -225,7 +225,7 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
             if op.action == "split_chapter":
                 continue
             if op.action == "consolidate_chapter_sections":
-                _consolidation_section_limit(story, op.target_ref)
+                _consolidation_section_count(story, op.target_ref)
             section_ids = {section["ref"] for section in story["sections"] if section["chapter_ref"] == op.target_ref}
             if not any(material.get("section_ref") in section_ids for material in story["materials"]):
                 raise HTTPException(422, "本章没有可用于重新整理小节的讲述")
@@ -287,11 +287,11 @@ def _item(story: dict, op: VoiceEditOperation) -> VoiceEditItem:
         section_ids = {section["ref"] for section in story["sections"] if section["chapter_ref"] == op.target_ref}
         material_count = sum(material.get("section_ref") in section_ids for material in story["materials"])
         if op.action == "consolidate_chapter_sections":
-            current_count = sum(section["chapter_ref"] == op.target_ref and section["status"] == "active" and section["included"] for section in story["sections"])
+            current_count = _consolidation_section_count(story, op.target_ref)
             return VoiceEditItem(
                 **op.model_dump(),
-                label=f"合并第{row['number']}章「{name}」的小节：{current_count} 个减少到最多 {_consolidation_section_limit(story, op.target_ref)} 个",
-                detail="AI 会合并现有小节，保留每条原始讲述和现有正文版本。只有新小节确实更少时才会保存。",
+                label=f"合并第{row['number']}章「{name}」的小节：目前 {current_count} 个，整理后更少",
+                detail="AI 会根据现有小节和讲述判断怎样合并，不预设合并后的数量；原始讲述和现有正文版本会保留。只有新小节确实更少时才会保存。",
             )
         return VoiceEditItem(
             **op.model_dump(),
@@ -411,9 +411,8 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
                     req=MemoirSectionRegenerateRequest(expected_sections=[
                         MemoirSectionVersionReference(id=section["ref"], version=section["version"])
                         for section in story["sections"] if section["chapter_ref"] == op.target_ref
-                    ], max_sections=(
-                        _consolidation_section_limit(story, op.target_ref)
-                        if op.action == "consolidate_chapter_sections" else None
+                    ], section_count_goal=(
+                        "reduce" if op.action == "consolidate_chapter_sections" else None
                     )), commit=False,
                 )
             elif op.action == "rename_section":
