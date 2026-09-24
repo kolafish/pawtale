@@ -741,7 +741,7 @@ test("book page stores only the full-book summary needed by the home view", () =
   );
   assert.equal(context.data.bookContentAvailable, true);
   assert.equal(context.data.bookIncludedChapterCount, 1);
-  assert.match(context.data.bookPartialNotice, /1\/2 章可读.*当前书稿/);
+  assert.match(context.data.bookPartialNotice, /其余章节尚未收入当前书稿/);
   assert.equal(context.data.bookStaleNotice, "");
 
   page.applyBookOutput.call(context, sampleBookOutput(4, "外婆回忆录\n\n目录", true, ["外婆家的童年"]));
@@ -753,6 +753,33 @@ test("book page stores only the full-book summary needed by the home view", () =
   page.applyPlan.call(context, samplePlan("draft"));
   assert.equal(context.bookOutput, null);
   assert.equal(context.data.bookContentAvailable, false);
+});
+
+test("book page identifies a drafted chapter missing from the current book", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const secondDraft = sampleDraft(1, "draft");
+  secondDraft.chapter_id = "chapter-2";
+  secondDraft.latest_version.chapter_id = "chapter-2";
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "draft"),
+    "chapter-2": secondDraft,
+  });
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(4, "当前可读的书稿", false, [], [], sampleBookManuscript("外婆回忆录", "classic_plain", { chapterCount: 1 })),
+    { status: "needs_input", total_chapter_count: 2 },
+  );
+
+  assert.equal(context.data.readyDraftCount, 2);
+  assert.equal(context.data.bookIncludedChapterCount, 1);
+  assert.match(context.data.bookPartialNotice, /第2章「第一次离家」.*待确认事项/);
+  assert.equal(context.data.chapters[0].bookInclusionNotice, "");
+  assert.match(context.data.chapters[1].bookInclusionNotice, /正文可阅读.*尚未收入当前书稿.*待确认事项/);
+
+  page.applyBookOutput.call(context, sampleBookOutput(5, "全书正文", false, [], [], sampleBookManuscript()));
+  assert.equal(context.data.bookPartialNotice, "");
+  assert.equal(context.data.chapters[1].bookInclusionNotice, "");
 });
 
 test("book page stays available when login is required", async () => {
