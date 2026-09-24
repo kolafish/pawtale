@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 import uuid
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -42,6 +43,12 @@ class Project(Base):
         Integer,
         default=0,
         server_default="0",
+        nullable=False,
+    )
+    memoir_book_image_selection_manual: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
