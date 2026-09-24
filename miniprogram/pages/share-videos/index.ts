@@ -99,7 +99,7 @@ definePage<ShareVideosData>()({
         needsLogin: false,
         items,
         total: response.total,
-        hasMore: items.length < response.total,
+        hasMore: response.items.length > 0 && items.length < response.total,
       });
     } catch (error) {
       if (requestToken !== this.requestToken) return;

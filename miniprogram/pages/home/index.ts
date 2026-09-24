@@ -477,16 +477,18 @@ definePage<HomeData>()({
       if (requestSequence !== this.shareCandidateRequestSequence
         || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
       const candidate = response.candidate;
+      const existingJob = candidate?.video_job_id === this.data.shareCandidateJob?.id
+        ? this.data.shareCandidateJob : null;
       this.setData({
         shareCandidate: candidate,
         shareCandidateDurationText: candidate?.duration_ms
           ? formatTranscriptDurationSeconds(candidate.duration_ms / 1000)
           : "",
         shareCandidateError: "",
-        shareCandidateJob: candidate?.video_job_id === this.data.shareCandidateJob?.id
-          ? this.data.shareCandidateJob : null,
+        shareCandidateJob: existingJob,
       });
-      if (candidate?.status === "accepted" && candidate.video_job_id) {
+      if (candidate?.status === "accepted" && candidate.video_job_id
+        && (!existingJob || existingJob.status === "pending" || existingJob.status === "running")) {
         try {
           const job = await getMemoirShareVideoJob(candidate.video_job_id);
           if (requestSequence === this.shareCandidateRequestSequence
