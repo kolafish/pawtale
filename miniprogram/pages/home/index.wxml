@@ -105,44 +105,61 @@
         </view>
 
         <view
-          wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted') && !voiceEntry}}"
+          wx:if="{{!voiceEntry && ((shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')) || recentShareVideo)}}"
           class="home-share-candidate"
-          aria-label="讲述分享视频建议"
+          aria-label="我的分享视频"
         >
-          <view class="home-share-candidate-head">
-            <view class="home-share-candidate-heading">
-              <text class="home-share-candidate-kicker">从最近的讲述里</text>
-              <text class="home-share-candidate-title">{{shareCandidate.status === 'accepted' ? '这段的分享视频' : '这段可以做成分享视频'}}</text>
+          <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
+            <view class="home-share-candidate-head">
+              <view class="home-share-candidate-heading">
+                <text class="home-share-candidate-kicker">{{shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '刚刚生成' : '从最近的讲述里'}}</text>
+                <text class="home-share-candidate-title">{{shareCandidate.status === 'ready' ? '这段可以做成分享视频' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '《' + shareCandidateJob.title + '》' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '视频制作未完成' : '分享视频制作中'))}}</text>
+              </view>
+              <text wx:if="{{shareCandidateDurationText}}" class="home-share-candidate-duration ui-tabular">约 {{shareCandidateDurationText}}</text>
             </view>
-            <text wx:if="{{shareCandidateDurationText}}" class="home-share-candidate-duration ui-tabular">约 {{shareCandidateDurationText}}</text>
-          </view>
-          <text class="home-share-candidate-quote">“{{shareCandidate.selected_text}}”</text>
-          <text class="home-share-candidate-hint">{{shareCandidate.status === 'accepted' ? '去查看进度，完成后先预览，再决定是否分享。' : '保留讲述原声，配上画面和字幕。视频做完后由您决定是否分享。'}}</text>
-          <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>
-          <view class="home-share-candidate-actions">
-            <button
-              wx:if="{{shareCandidate.status === 'ready'}}"
-              class="home-share-candidate-primary ui-button"
-              bindtap="createShareCandidateVideo"
-              loading="{{shareCandidateCreating}}"
-              disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
-              hover-class="home-share-candidate-primary-hover"
-            >{{shareCandidateCreating ? "正在开始制作" : "做成视频"}}</button>
-            <button
-              wx:elif="{{shareCandidate.video_job_id}}"
-              class="home-share-candidate-primary ui-button"
-              bindtap="openShareCandidateVideo"
-              disabled="{{shareCandidateDismissing}}"
-              hover-class="home-share-candidate-primary-hover"
-            >查看视频</button>
-            <button
-              class="home-share-candidate-secondary ui-button"
-              bindtap="dismissShareCandidate"
-              loading="{{shareCandidateDismissing}}"
-              disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
-              hover-class="ui-subtle-action-hover"
-            >暂不分享</button>
-          </view>
+            <text class="home-share-candidate-quote">“{{shareCandidate.selected_text}}”</text>
+            <text class="home-share-candidate-hint">{{shareCandidate.status === 'ready' ? '保留讲述原声，配上画面和字幕。视频做完后由您决定是否分享。' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '视频已做好，可以先预览，再决定什么时候分享。' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '点开查看原因，也可以重新制作。' : '正在把原声、画面和字幕做成视频。'))}}</text>
+            <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>
+            <view class="home-share-candidate-actions">
+              <button
+                wx:if="{{shareCandidate.status === 'ready'}}"
+                class="home-share-candidate-primary ui-button"
+                bindtap="createShareCandidateVideo"
+                loading="{{shareCandidateCreating}}"
+                disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
+                hover-class="home-share-candidate-primary-hover"
+              >{{shareCandidateCreating ? "正在开始制作" : "做成视频"}}</button>
+              <button
+                wx:elif="{{shareCandidate.video_job_id}}"
+                class="home-share-candidate-primary ui-button"
+                bindtap="openShareCandidateVideo"
+                disabled="{{shareCandidateDismissing}}"
+                hover-class="home-share-candidate-primary-hover"
+              >{{shareCandidateJob && shareCandidateJob.status === 'failed' ? '查看详情' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '查看视频' : '查看进度')}}</button>
+              <button
+                class="home-share-candidate-secondary ui-button"
+                bindtap="dismissShareCandidate"
+                loading="{{shareCandidateDismissing}}"
+                disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
+                hover-class="ui-subtle-action-hover"
+              >{{shareCandidate.status === 'ready' ? '先不做' : '稍后看看'}}</button>
+            </view>
+          </block>
+          <block wx:else>
+            <view class="home-share-candidate-head">
+              <view class="home-share-candidate-heading">
+                <text class="home-share-candidate-kicker">我的分享视频</text>
+                <text class="home-share-candidate-title">《{{recentShareVideo.title}}》</text>
+              </view>
+              <text class="home-share-candidate-duration ui-tabular">{{shareVideoTotal}} 段</text>
+            </view>
+            <text class="home-share-candidate-quote">“{{recentShareVideo.selected_text}}”</text>
+            <text class="home-share-candidate-hint">最近生成的分享视频，可以随时回来预览和分享。</text>
+            <view class="home-share-candidate-actions">
+              <button class="home-share-candidate-primary ui-button" bindtap="openRecentShareVideo" hover-class="home-share-candidate-primary-hover">查看视频</button>
+            </view>
+          </block>
+          <button wx:if="{{shareVideoTotal}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">查看全部分享视频（{{shareVideoTotal}}） ›</button>
         </view>
 
         <view id="home-voice-authorization" wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">

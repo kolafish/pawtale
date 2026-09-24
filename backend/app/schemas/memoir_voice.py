@@ -547,6 +547,23 @@ class MemoirShareVideoCountResponse(BaseModel):
     current_job_ids: list[str] = Field(default_factory=list)
 
 
+class MemoirShareVideoListItemResponse(BaseModel):
+    id: str
+    utterance_id: str
+    title: str
+    selected_text: str
+    duration_ms: int
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class MemoirShareVideoJobListResponse(BaseModel):
+    items: list[MemoirShareVideoListItemResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+
+
 class MemoirShareVideoJobResponse(BaseModel):
     id: str
     project_id: str

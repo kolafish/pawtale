@@ -376,6 +376,18 @@
   box-shadow: var(--ui-control-shadow);
 }
 
+.home-share-all {
+  display: block;
+  min-height: 40px;
+  margin: 12rpx 0 0;
+  padding: 10rpx 0 0;
+  color: var(--ui-accent-strong);
+  background: transparent;
+  font-size: var(--ui-font-meta);
+  font-weight: 700;
+  text-align: left;
+}
+
 .voice-auth-panel {
   padding: 22rpx 24rpx;
 }

@@ -210,6 +210,23 @@ export interface MemoirShareVideoJob {
   completed_at?: string | null;
 }
 
+export interface MemoirShareVideoListItem {
+  id: string;
+  utterance_id: string;
+  title: string;
+  selected_text: string;
+  duration_ms: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface MemoirShareVideoListResponse {
+  items: MemoirShareVideoListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface MemoirShareVideoCustomBackgroundAsset {
   id: string;
   project_id: string;

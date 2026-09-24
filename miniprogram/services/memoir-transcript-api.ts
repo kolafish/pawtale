@@ -4,6 +4,7 @@ import type {
   MemoirShareVideoCandidate,
   MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
+  MemoirShareVideoListResponse,
   MemoirMaterialOfflineASRState,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
@@ -150,6 +151,18 @@ export function getMemoirShareVideoCandidate(
 ): Promise<MemoirShareVideoCandidateResponse> {
   return memoirRequest<MemoirShareVideoCandidateResponse>(
     memoirProjectPath(projectId, "/share-video-candidate"),
+  );
+}
+
+export function listMemoirShareVideos(
+  projectId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<MemoirShareVideoListResponse> {
+  return memoirRequest<MemoirShareVideoListResponse>(
+    `${memoirProjectPath(projectId, "/share-video/jobs")}${queryString({
+      limit: options.limit,
+      offset: options.offset,
+    })}`,
   );
 }
 
