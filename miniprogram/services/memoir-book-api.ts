@@ -48,6 +48,13 @@ export function createMemoirBookShare(projectId: string): Promise<MemoirBookShar
   });
 }
 
+export function updateMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "PUT",
+    invalidatesSnapshots: false,
+  });
+}
+
 export async function revokeMemoirBookShare(projectId: string): Promise<void> {
   await memoirRequest<unknown>(memoirProjectPath(projectId, "/book-output/share"), {
     method: "DELETE",

@@ -687,6 +687,8 @@ class MemoirBookShareStatusResponse(BaseModel):
     active: bool
     expires_at: datetime | None = None
     token: str | None = None
+    stale: bool = False
+    current: bool = False
 
 
 class MemoirBookShareCreateResponse(BaseModel):

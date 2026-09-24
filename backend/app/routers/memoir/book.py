@@ -79,6 +79,17 @@ async def create_mobile_memoir_book_share(
     return await memoir_book_shares.create_share(db, user_id=current_user.id, project_id=project_id)
 
 
+@router.put("/projects/{project_id}/book-output/share", response_model=MemoirBookShareCreateResponse)
+async def update_mobile_memoir_book_share(
+    project_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.update_share(db, user_id=current_user.id, project_id=project_id)
+
+
 @router.delete("/projects/{project_id}/book-output/share", status_code=204)
 async def revoke_mobile_memoir_book_share(
     project_id: str,
