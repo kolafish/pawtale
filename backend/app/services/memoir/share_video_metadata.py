@@ -66,6 +66,7 @@ class ShareVideoSceneAssetMetadata(ShareVideoPlannedSceneMetadata):
 
 
 class ShareVideoJobMetadata(_ShareVideoMetadataModel):
+    pipeline_version: str = ""
     alignment_strategy: str = ""
     alignment_confidence: float | None = None
     char_timings: list[ShareVideoCharTiming] = Field(default_factory=list)

@@ -44,6 +44,7 @@ from app.services.memoir.share_video_backgrounds import (
     normalize_share_video_background_style,
 )
 from app.services.memoir.share_video_custom_backgrounds import (
+    SHARE_VIDEO_BACKGROUND_SOURCE_AI,
     SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
     load_custom_share_video_background_asset,
@@ -62,6 +63,7 @@ from app.services.ai_usage_records import AIUsageContext
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
+SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v1"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
@@ -85,13 +87,30 @@ def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str
         metadata.background_source,
         metadata.background_style,
         metadata.background_mode,
-        metadata.background_effective_mode,
         metadata.custom_background_asset_id or "",
-        metadata.background_status,
     )
 
 
-async def _find_active_duplicate_share_video_job(
+def _completed_share_video_is_reusable(
+    job: MemoirMaterialShareVideo,
+    metadata: ShareVideoJobMetadata,
+) -> bool:
+    output = job.output
+    if output is None or metadata.pipeline_version != SHARE_VIDEO_PIPELINE_VERSION:
+        return False
+    if metadata.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and metadata.background_status not in {
+        "ready",
+        "partial",
+    }:
+        return False
+    try:
+        path = share_video_file_path(job, output)
+        return path.is_file() and path.stat().st_size == output.size_bytes
+    except OSError:
+        return False
+
+
+async def _find_duplicate_or_reusable_share_video_job(
     db: AsyncSession,
     *,
     project_id: str,
@@ -118,16 +137,21 @@ async def _find_active_duplicate_share_video_job(
                 MemoirMaterialShareVideo.end_char == end_char,
                 MemoirMaterialShareVideo.start_ms == start_ms,
                 MemoirMaterialShareVideo.end_ms == end_ms,
-                MemoirMaterialShareVideo.status.in_(_ACTIVE_SHARE_VIDEO_STATUSES),
+                MemoirMaterialShareVideo.status.in_(
+                    (*_ACTIVE_SHARE_VIDEO_STATUSES, MemoirShareVideoJobStatus.SUCCEEDED.value)
+                ),
             )
             .order_by(MemoirMaterialShareVideo.created_at.desc())
         )
     ).all()
     request_signature = _share_video_options_signature(metadata)
     for candidate in candidates:
-        if _share_video_options_signature(
-            ShareVideoJobMetadata.from_json(candidate.metadata_json)
-        ) == request_signature:
+        candidate_metadata = ShareVideoJobMetadata.from_json(candidate.metadata_json)
+        if _share_video_options_signature(candidate_metadata) != request_signature:
+            continue
+        if candidate.status in _ACTIVE_SHARE_VIDEO_STATUSES or _completed_share_video_is_reusable(
+            candidate, candidate_metadata
+        ):
             return candidate
     return None
 
@@ -257,6 +281,11 @@ async def create_share_video_job(
     allow_admin: bool = False,
 ) -> MemoirShareVideoJobResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
+    settings = get_settings()
+    ai_background_enabled = bool(
+        settings.memoir_share_video_ai_background_enabled
+        and settings.volc_ark_api_key.strip()
+    )
     selected_ai_model = select_project_ai_model(
         utterance.voice_session.project,
         req.ai_model,
@@ -265,9 +294,14 @@ async def create_share_video_job(
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
     try:
-        background_source = normalize_share_video_background_source(req.background_source)
+        background_source = normalize_share_video_background_source(
+            req.background_source
+            or (SHARE_VIDEO_BACKGROUND_SOURCE_AI if ai_background_enabled else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and not ai_background_enabled:
+        raise HTTPException(status_code=400, detail="AI 背景图当前不可用，请选择其他背景")
     try:
         background_style = normalize_share_video_background_style(req.background_style)
     except ValueError as exc:
@@ -306,6 +340,7 @@ async def create_share_video_job(
     )
 
     metadata = ShareVideoJobMetadata(
+        pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
         alignment_strategy=alignment.strategy,
         alignment_confidence=alignment.confidence,
         char_timings=alignment.char_timings[start_char:end_char],
@@ -318,7 +353,7 @@ async def create_share_video_job(
         background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
         background_status=background_orchestration.initial_background_status(
             background_source,
-            ai_background_enabled=get_settings().memoir_share_video_ai_background_enabled,
+            ai_background_enabled=ai_background_enabled,
         ),
     )
 
@@ -329,7 +364,7 @@ async def create_share_video_job(
         .where(MemoirVoiceUtterance.id == utterance.id)
         .with_for_update()
     )
-    duplicate = await _find_active_duplicate_share_video_job(
+    duplicate = await _find_duplicate_or_reusable_share_video_job(
         db,
         project_id=utterance.voice_session.project_id,
         user_id=user_id,

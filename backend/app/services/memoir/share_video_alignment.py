@@ -37,7 +37,8 @@ from app.services.memoir.share_video_backgrounds import (
     share_video_background_style_options,
 )
 from app.services.memoir.share_video_custom_backgrounds import (
-    DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
+    SHARE_VIDEO_BACKGROUND_SOURCE_AI,
+    SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     share_video_background_source_options,
 )
 from app.services.memoir.transcript_projection import (
@@ -417,6 +418,10 @@ def _response(
     result: AlignmentBuildResult,
 ) -> MemoirTranscriptShareVideoContextResponse:
     settings = get_settings()
+    ai_background_enabled = bool(
+        settings.memoir_share_video_ai_background_enabled
+        and settings.volc_ark_api_key.strip()
+    )
     return MemoirTranscriptShareVideoContextResponse(
         utterance_id=utterance.id,
         audio_file_id=utterance.audio_file_id or "",
@@ -428,11 +433,15 @@ def _response(
         alignment_confidence=result.confidence,
         min_select_ms=MIN_SELECT_MS,
         max_select_ms=MAX_SELECT_MS,
-        ai_background_enabled=bool(settings.memoir_share_video_ai_background_enabled),
-        default_background_source=DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
+        ai_background_enabled=ai_background_enabled,
+        default_background_source=(
+            SHARE_VIDEO_BACKGROUND_SOURCE_AI
+            if ai_background_enabled
+            else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
+        ),
         default_background_style=DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
         default_background_mode=DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
-        background_sources=share_video_background_source_options(),
+        background_sources=share_video_background_source_options(include_ai=ai_background_enabled),
         background_styles=share_video_background_style_options(),
         background_modes=share_video_background_mode_options(),
         segments=[
