@@ -401,6 +401,11 @@ export class TranscriptShareVideoController {
     this.replaceState(initialTranscriptShareVideoTaskState());
   }
 
+  async showJob(job: MemoirShareVideoJob): Promise<void> {
+    this.reset();
+    await this.applyJob(job, this.token);
+  }
+
   clearResult(): void {
     this.invalidateOperations();
     this.fileCache = {};

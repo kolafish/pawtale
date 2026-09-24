@@ -1081,6 +1081,7 @@ test("transcript media page creates share video from selected corrected segments
   ]);
   assert.equal(context.data.shareVideoJob.status, "pending");
   assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.viewMode, "video");
   assert.deepEqual(downloads, []);
 
   context.shareVideoController.cancel();
@@ -1184,49 +1185,82 @@ test("transcript media page creates a standalone image and opens it in the toolb
   ]);
 });
 
-test("transcript media page restores the latest matching share video job after reload", async () => {
-  const contextCalls = [];
-  const pollCalls = [];
-  const restoredJob = sampleShareVideoJob({
+test("transcript media page keeps creation tools for completed or failed history", async () => {
+  for (const status of ["succeeded", "failed"]) {
+    const contextCalls = [];
+    const jobCalls = [];
+    const downloads = [];
+    const { page } = loadTranscriptMediaPage({
+      voiceApiExports: {
+        getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+        getMemoirTranscriptShareVideoContext: async (id) => {
+          contextCalls.push(id);
+          return sampleShareVideoContext(id, { latest_job_id: "earlier-video" });
+        },
+        getMemoirShareVideoJob: async (jobId) => {
+          jobCalls.push(jobId);
+          return sampleShareVideoJob({ id: jobId, utterance_id: "utterance-resume", status });
+        },
+        downloadMemoirShareVideoJob: async (job) => {
+          downloads.push(job.id);
+          return "/tmp/earlier-video.mp4";
+        },
+      },
+    });
+    const context = pageContext(page);
+
+    await page.onLoad.call(context, { id: "utterance-resume" });
+
+    assert.deepEqual(contextCalls, ["utterance-resume"]);
+    assert.deepEqual(jobCalls, ["earlier-video"]);
+    assert.deepEqual(downloads, []);
+    assert.equal(context.data.viewMode, "create");
+    assert.equal(context.data.shareVideoJob, null);
+    assert.equal(context.data.shareVideoSegments.length, 2);
+  }
+});
+
+test("transcript media page resumes an unfinished manual video without a job id", async () => {
+  const jobCalls = [];
+  const imageJobCalls = [];
+  const runningJob = sampleShareVideoJob({
     utterance_id: "utterance-resume",
     audio_file_id: "audio-utterance-resume",
-    status: "pending",
+    status: "running",
     output: null,
     completed_at: null,
   });
-  const { page } = loadTranscriptMediaPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-      getMemoirTranscriptShareVideoContext: async (id) => {
-        contextCalls.push(id);
-        return sampleShareVideoContext(id, { latest_job_id: restoredJob.id });
-      },
-      getMemoirShareVideoJob: async (jobId) => {
-        pollCalls.push(jobId);
-        return restoredJob;
-      },
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, {
+      latest_job_id: runningJob.id,
+      latest_image_job_id: "image-job-1",
+    }),
+    getMemoirShareVideoJob: async (jobId) => {
+      jobCalls.push(jobId);
+      return runningJob;
     },
-  });
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob();
+    },
+  } });
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-resume" });
 
-  assert.deepEqual(contextCalls, ["utterance-resume"]);
-  assert.deepEqual(pollCalls, ["job-1"]);
-  assert.equal(context.data.shareVideoJob.id, "job-1");
-  assert.equal(context.data.shareVideoJob.status, "pending");
+  assert.deepEqual(jobCalls, [runningJob.id]);
+  assert.deepEqual(imageJobCalls, []);
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob.id, runningJob.id);
   assert.equal(context.data.shareVideoPolling, true);
-  assert.equal(context.data.shareVideoSelectedStartIndex, 0);
-  assert.equal(context.data.shareVideoSelectedEndIndex, 1);
-  assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
-  assert.equal(context.data.shareVideoStatusText, "视频任务已创建，等待生成");
-
   context.shareVideoController.cancel();
-  assert.equal(context.data.shareVideoPolling, false);
 });
 
 test("transcript media page opens the video job chosen from the home recommendation", async () => {
   const pollCalls = [];
+  const contextCalls = [];
+  const imageJobCalls = [];
   const restoredJob = sampleShareVideoJob({
     id: "candidate-video",
     utterance_id: "utterance-candidate",
@@ -1237,7 +1271,14 @@ test("transcript media page opens the video job chosen from the home recommendat
   });
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { latest_job_id: "other-video" }),
+    getMemoirTranscriptShareVideoContext: async (id) => {
+      contextCalls.push(id);
+      return sampleShareVideoContext(id, { latest_image_job_id: "image-job-1" });
+    },
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob();
+    },
     getMemoirShareVideoJob: async (jobId) => {
       pollCalls.push(jobId);
       return restoredJob;
@@ -1248,9 +1289,91 @@ test("transcript media page opens the video job chosen from the home recommendat
   await page.onLoad.call(context, { id: "utterance-candidate", jobId: "candidate-video" });
 
   assert.deepEqual(pollCalls, ["candidate-video"]);
+  assert.deepEqual(contextCalls, []);
+  assert.deepEqual(imageJobCalls, []);
+  assert.equal(context.data.viewMode, "video");
   assert.equal(context.data.shareVideoJob.id, "candidate-video");
   assert.equal(context.data.shareVideoPolling, true);
   context.shareVideoController.cancel();
+});
+
+test("transcript media page reopens a completed video and loads creation tools only on remake", async () => {
+  const contextCalls = [];
+  const imageJobCalls = [];
+  const downloads = [];
+  const jobCalls = [];
+  const job = sampleShareVideoJob({ utterance_id: "utterance-result" });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => {
+      contextCalls.push(id);
+      return sampleShareVideoContext(id, {
+        latest_job_id: "another-running-video",
+        latest_image_job_id: "image-job-1",
+      });
+    },
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob({ utterance_id: "utterance-result" });
+    },
+    getMemoirShareVideoJob: async (jobId) => {
+      jobCalls.push(jobId);
+      return job;
+    },
+    downloadMemoirShareVideoJob: async (video) => {
+      downloads.push(video.id);
+      return "/tmp/completed-video.mp4";
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-result", jobId: job.id });
+
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob.title, "爷爷继续工作的日子");
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/completed-video.mp4");
+  assert.deepEqual(downloads, [job.id]);
+  assert.deepEqual(contextCalls, []);
+  assert.deepEqual(imageJobCalls, []);
+
+  const shareCalls = [];
+  global.wx = {
+    shareFileMessage(options) {
+      shareCalls.push(options.fileName);
+      options.success({ errMsg: "shareFileMessage:ok" });
+    },
+  };
+  await page.shareGeneratedVideo.call(context);
+  assert.deepEqual(shareCalls, ["爷爷继续工作的日子.mp4"]);
+
+  await page.remakeShareVideo.call(context);
+
+  assert.equal(context.data.viewMode, "create");
+  assert.equal(context.data.shareVideoJob, null);
+  assert.deepEqual(contextCalls, ["utterance-result"]);
+  assert.deepEqual(imageJobCalls, ["image-job-1"]);
+  assert.deepEqual(jobCalls, [job.id]);
+  assert.equal(context.data.shareVideoSegments.length, 2);
+});
+
+test("transcript media page rejects a video from a different utterance before preview", async () => {
+  const downloads = [];
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "other-utterance" }),
+    downloadMemoirShareVideoJob: async (job) => {
+      downloads.push(job.id);
+      return "/tmp/other-video.mp4";
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob, null);
+  assert.equal(context.data.error, "视频不属于这段讲述");
+  assert.deepEqual(downloads, []);
 });
 
 test("transcript media page restores the latest standalone image job and selection", async () => {

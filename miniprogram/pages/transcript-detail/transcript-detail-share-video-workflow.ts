@@ -1,7 +1,9 @@
 import type { MemoirShareVideoCustomBackgroundAsset } from "../../domain/memoir-transcript";
 import { trackAuditAction } from "../../services/audit-tracker";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
   downloadMemoirShareVideoCustomBackgroundPreview,
+  getMemoirShareVideoJob,
   getMemoirTranscriptShareVideoContext,
   uploadMemoirShareVideoCustomBackground,
 } from "../../services/memoir-transcript-api";
@@ -37,6 +39,7 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
 
 export interface TranscriptMediaData
   extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
+  viewMode: "create" | "video";
   pageClass: string;
   loading: boolean;
   needsLogin: boolean;
@@ -55,7 +58,8 @@ interface TranscriptMediaWorkflowHost {
 
 export interface TranscriptMediaWorkflowMethods {
   resetShareVideoState(): void;
-  openShareVideoPanel(preferredJobId?: string): Promise<void>;
+  openShareVideoPanel(resumeRunningJob?: boolean): Promise<void>;
+  remakeShareVideo(): Promise<void>;
   selectShareVideoSegment(event: ShareVideoSegmentEvent): void;
   clearShareVideoSelection(): void;
   selectShareVideoBackgroundSource(event: ShareVideoBackgroundEvent): void;
@@ -80,24 +84,9 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     this.setData(initialTranscriptShareVideoData());
   },
 
-  async openShareVideoPanel(preferredJobId = "") {
+  async openShareVideoPanel(resumeRunningJob = true) {
     const item = this.data.item;
     if (!item || item.canRecoverTranscription) {
-      return;
-    }
-    if (this.data.shareVideoContext?.utterance_id === item.id) {
-      this.setData({
-        shareVideoError: "",
-        ...shareVideoBackgroundPatch(this.data.shareVideoContext),
-      });
-      const job = this.data.shareVideoJob;
-      if (job && (job.status === "pending" || job.status === "running")) {
-        await this.shareVideoController.refresh(job.id);
-      }
-      const imageJob = this.data.materialImageJob;
-      if (imageJob && (imageJob.status === "pending" || imageJob.status === "running")) {
-        await this.materialImageController.refresh(imageJob.job_id);
-      }
       return;
     }
     this.shareVideoController.reset();
@@ -113,39 +102,30 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
         ...shareVideoSelectionPatch(context, -1, -1),
         ...shareVideoBackgroundPatch(context),
       });
-      const videoJobId = preferredJobId || context.latest_job_id;
-      if (videoJobId) {
-        await this.shareVideoController.refresh(videoJobId);
-        const job = this.data.shareVideoJob;
-        if (job && job.utterance_id !== item.id) {
-          this.shareVideoController.reset();
-          this.setData({ shareVideoError: "视频不属于这段讲述" });
-          return;
-        }
-        if (job) {
-          const firstSegmentIndex = context.segments.findIndex(
-            (segment) => segment.end_char > job.start_char,
-          );
-          let lastSegmentIndex = -1;
-          for (let index = context.segments.length - 1; index >= 0; index -= 1) {
-            if (context.segments[index].start_char < job.end_char) {
-              lastSegmentIndex = index;
-              break;
-            }
+      trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
+      if (resumeRunningJob && context.latest_job_id) {
+        try {
+          const job = await getMemoirShareVideoJob(context.latest_job_id);
+          if (
+            job.utterance_id === item.id &&
+            job.project_id === item.project_id &&
+            (job.status === "pending" || job.status === "running")
+          ) {
+            await this.shareVideoController.showJob(job);
+            this.setData({ viewMode: "video" });
+            setPageNavigationTitle("分享视频");
+            return;
           }
-          const statusText = this.data.shareVideoStatusText;
-          const statusClass = this.data.shareVideoStatusClass;
+        } catch (error) {
           this.setData({
-            ...shareVideoSelectionPatch(context, firstSegmentIndex, lastSegmentIndex),
-            shareVideoStatusText: statusText,
-            shareVideoStatusClass: statusClass,
+            shareVideoError: error instanceof Error ? error.message : "上次视频状态读取失败",
           });
         }
       }
       if (context.latest_image_job_id) {
         await this.materialImageController.refresh(context.latest_image_job_id);
         const imageJob = this.data.materialImageJob;
-        if (imageJob && !videoJobId) {
+        if (imageJob) {
           const firstSegmentIndex = context.segments.findIndex(
             (segment) => segment.end_char > imageJob.start_char,
           );
@@ -165,7 +145,6 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
           });
         }
       }
-      trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
     } catch (error) {
       this.setData({
         shareVideoError: error instanceof Error ? error.message : "分享视频素材加载失败",
@@ -174,6 +153,15 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     } finally {
       this.setData({ shareVideoLoadingContext: false });
     }
+  },
+
+  async remakeShareVideo() {
+    if (this.data.shareVideoCreating || this.data.shareVideoSharing) {
+      return;
+    }
+    this.setData({ viewMode: "create" });
+    setPageNavigationTitle("做成图片或视频");
+    await this.openShareVideoPanel(false);
   },
 
   selectShareVideoSegment(event: ShareVideoSegmentEvent) {
@@ -490,6 +478,8 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       },
     });
     if (job) {
+      this.setData({ viewMode: "video" });
+      setPageNavigationTitle("分享视频");
       trackAuditAction(
         "transcript.detail_share_video_create",
         { background_source: this.data.shareVideoBackgroundSource, duration_ms: job.duration_ms },

@@ -17,6 +17,7 @@ import {
   type PageQuery,
 } from "../../services/page-input";
 import { shareLocalFileMessage } from "../../services/share";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
   initialTranscriptMaterialImageTaskState,
   TranscriptMaterialImageController,
@@ -45,7 +46,7 @@ definePage<TranscriptMediaData>()({
     getJob: getMemoirMaterialImageGenerationJob,
   })),
   loadToken: 0,
-  preferredShareVideoJobId: "",
+  requestedShareVideoJobId: "",
   shareVideoBackgroundUploadToken: 0,
 
   data: {
@@ -53,6 +54,7 @@ definePage<TranscriptMediaData>()({
     loading: false,
     needsLogin: false,
     error: "",
+    viewMode: "create",
     utteranceId: "",
     item: null,
     ...initialTranscriptShareVideoData(),
@@ -63,8 +65,12 @@ definePage<TranscriptMediaData>()({
     this.shareVideoController.setStateListener((patch) => this.setData(patch));
     this.materialImageController.setStateListener((patch) => this.setData(patch));
     this.resetShareVideoState();
-    this.preferredShareVideoJobId = queryParam(options, "jobId");
-    this.setData({ utteranceId: queryParam(options, "id") });
+    this.requestedShareVideoJobId = queryParam(options, "jobId");
+    this.setData({
+      utteranceId: queryParam(options, "id"),
+      viewMode: this.requestedShareVideoJobId ? "video" : "create",
+    });
+    setPageNavigationTitle(this.requestedShareVideoJobId ? "分享视频" : "做成图片或视频");
     await this.loadTranscript();
   },
 
@@ -81,11 +87,20 @@ definePage<TranscriptMediaData>()({
       if (requestToken !== this.loadToken) {
         return;
       }
-      this.setData({
-        needsLogin: false,
-        item: toViewItem(transcript),
-      });
-      await this.openShareVideoPanel(this.preferredShareVideoJobId);
+      const item = toViewItem(transcript);
+      this.setData({ needsLogin: false, item });
+      if (this.requestedShareVideoJobId) {
+        const job = await getMemoirShareVideoJob(this.requestedShareVideoJobId);
+        if (requestToken !== this.loadToken) {
+          return;
+        }
+        if (job.utterance_id !== item.id || job.project_id !== item.project_id) {
+          throw new Error("视频不属于这段讲述");
+        }
+        await this.shareVideoController.showJob(job);
+      } else {
+        await this.openShareVideoPanel();
+      }
     } catch (error) {
       if (requestToken !== this.loadToken) {
         return;
@@ -103,6 +118,13 @@ definePage<TranscriptMediaData>()({
   },
 
   ...transcriptMediaWorkflowMethods,
+
+  async refreshShareVideoJob() {
+    const job = this.data.shareVideoJob;
+    if (job && job.utterance_id === this.data.utteranceId) {
+      await this.shareVideoController.refresh(job.id);
+    }
+  },
 
   openLogin() {
     navigateToLogin();
