@@ -648,7 +648,7 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     assert "[0:v]scale=1280:720" in card_filter
     assert "[padded][2:v]overlay=0:0" in card_filter
     assert "[withintro][3:v]overlay=0:0" in card_filter
-    assert "[1:a]adelay=1000:all=1" in card_filter
+    assert "[1:a]adelay=1000," in card_filter
     assert "[vout]" in card_filter
     assert card_filter.endswith("[aout]")
 
@@ -709,7 +709,7 @@ def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
     assert "[concatbg]" in filter_argument
     assert "[padded][3:v]overlay=0:0" in filter_argument
     assert "[withintro][4:v]overlay=0:0" in filter_argument
-    assert "[2:a]adelay=1500:all=1" in filter_argument
+    assert "[2:a]adelay=1500," in filter_argument
     assert "[vout]" in filter_argument
 
 
