@@ -206,7 +206,6 @@ definePage<BookPageData>()({
     bookContentAvailable: false,
     bookCharCount: 0,
     bookIncludedChapterCount: 0,
-    bookPartialNotice: "",
     bookPreviewTitle: "",
     bookStaleNotice: "",
     ttsBusyTarget: "",
@@ -557,7 +556,7 @@ definePage<BookPageData>()({
   applyBookOutput(output: MemoirBookOutput | null, progress: MemoirDraftProgress | null = null) {
     const previousVersionId = this.bookOutput?.latest_version?.id;
     const previousStale = Boolean(this.data.bookStaleNotice);
-    const bookData = bookHomeOutputData(output, progress, this.data.chapters);
+    const bookData = bookHomeOutputData(output, progress);
     const shareStateChanged = previousVersionId !== output?.latest_version?.id
       || previousStale !== Boolean(bookData.bookStaleNotice);
     this.bookOutput = output;

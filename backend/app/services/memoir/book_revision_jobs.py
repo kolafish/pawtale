@@ -211,8 +211,6 @@ async def enqueue_book_revision_job(
             db,
             review=review,
         )
-        if context.unresolved_count:
-            raise ValueError("请先处理完所有需要确认的问题")
         _, _, already_applied = await _answer_state(db, project_id=project_id)
         if include_answers and not context.answers:
             raise ValueError("当前没有可以应用到书稿的回答")
@@ -229,6 +227,20 @@ async def enqueue_book_revision_job(
         )
         if not include_answers and not actions:
             raise ValueError("请至少选择回答或一条编辑建议")
+        related_ids = (
+            (context.related_chapter_ids if include_answers else set())
+            | {
+                str(chapter_id)
+                for action in actions
+                for chapter_id in action.get("chapter_ids", [])
+            }
+        )
+        if await book_revision_generation.selected_revision_has_pending_decision(
+            db, project_id=project_id,
+            review_input_signature=review.input_signature,
+            chapter_ids=set(related_ids),
+        ):
+            raise ValueError("请先处理所选章节需要确认的问题")
         payload.update(
             include_answers=include_answers,
             answers_signature=(context.answers_signature if include_answers else ""),

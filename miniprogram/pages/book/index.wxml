@@ -35,15 +35,13 @@
     <view class="progress-main">
       <view class="progress-title-row">
         <text class="status-title">{{bookPreviewTitle || planTitle || "书稿"}}</text>
-        <text class="status-pill">{{stageText}}</text>
+        <text class="status-pill {{bookStaleNotice ? 'is-pending' : ''}}">{{bookStaleNotice ? "待更新" : stageText}}</text>
       </view>
       <text class="status-meta">
         <text wx:if="{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount}}">当前书稿收录 {{bookIncludedChapterCount}}/{{totalChapterCount}} 章</text>
         <text wx:else>{{totalChapterCount}} 章</text>
-        · {{bookCharCount || 0}} 字 · {{bookStaleNotice ? "整本书待更新" : (bookContentAvailable ? "已生成书稿" : progressText)}}
+        · {{bookCharCount || 0}} 字
       </text>
-      <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
-      <text wx:if="{{bookPartialNotice}}" class="progress-note">{{bookPartialNotice}}</text>
       <image
         class="book-header-illustration"
         src="/assets/memoir-book-header.png"
@@ -53,7 +51,7 @@
     </view>
     <view class="progress-actions">
       <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
-        <text>{{bookPartialNotice ? "阅读当前书稿" : "阅读全书"}}</text><text class="progress-action-mark">›</text>
+        <text>{{bookIncludedChapterCount < totalChapterCount ? "阅读当前书稿" : "阅读全书"}}</text><text class="progress-action-mark">›</text>
       </button>
       <button class="ghost-button small progress-action" bindtap="openBookCompletion">
         <text>查看待确认事项</text><text class="progress-action-mark">›</text>
@@ -472,6 +470,7 @@
             <text class="chapter-summary-guidance-label">{{item.bookInclusionNotice ? '未入书' : (item.chapterNeedsAction ? (item.draftAvailable ? '待更新' : '整理中') : '已更新')}}</text>
             <text class="chapter-summary-guidance-text">{{item.bookInclusionNotice || item.chapterGuidanceText}}</text>
           </view>
+          <button wx:if="{{item.bookInclusionNotice}}" class="chapter-inclusion-link" bindtap="openBookCompletion">查看收录进度 <text aria-hidden="true">›</text></button>
           <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
           <text
             wx:if="{{ttsBusyTarget === item.ttsTarget || playingTarget === item.ttsTarget}}"

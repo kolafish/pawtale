@@ -202,7 +202,7 @@ async def assemble_book_output(
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("请先确认章节规划")
     chapters = included_book_chapters(plan)
-    chapter_versions = readable_chapter_versions(plan, allow_partial=automatic)
+    chapter_versions = readable_chapter_versions(plan, allow_partial=True)
     if eligible_chapter_ids is not None:
         chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id in eligible_chapter_ids]
     current_review = await book_reviews.get_current_book_review(
@@ -218,12 +218,12 @@ async def assemble_book_output(
         issue for issue in decisions
         if issue.issue_type in completion_issues.BLOCKING_BOOK_ISSUE_TYPES
     ]
-    if blocking_decisions and not automatic:
-        raise ValueError("book output requires resolving book review decisions")
     blocked_chapter_ids = completion_issues.blocking_book_chapter_ids(
         blocking_decisions, (chapter.id for chapter in chapters),
     )
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
+    if not chapter_versions and not automatic:
+        raise ValueError("还没有可收录的章节正文，请先处理相关章节的待确认事项")
     omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]
     answer_context = await book_review_answer_state.load_answer_context(db, review=current_review) if current_review else None
 
@@ -285,6 +285,9 @@ async def assemble_book_output(
             for item in (previous_version.chapter_snapshot_json if previous_version else [])
             if isinstance(item, dict) and isinstance(item.get("chapter_id"), str)
         }
+        previous_contains_blocked_chapter = bool(
+            blocked_chapter_ids.intersection(previous_snapshots)
+        )
         next_snapshots = {
             item["chapter_id"]: item for item in chapter_snapshots
         }
@@ -295,9 +298,12 @@ async def assemble_book_output(
             for chapter_id in manual_copy_fields
         )
         if (
-            preserves_applied_answers
-            or (automatic and changed_manual_copy)
-            or (automatic and protected and not _only_local_copy_is_protected(output, versions))
+            not previous_contains_blocked_chapter
+            and (
+                preserves_applied_answers
+                or (automatic and changed_manual_copy)
+                or (automatic and protected and not _only_local_copy_is_protected(output, versions))
+            )
         ):
             return MemoirBookAssemblyResponse(
                 project_id=project_id,

@@ -407,7 +407,7 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     from app.models.memoir import MemoirBookOutputVersion
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
     from tests.test_memoir_book_completion import _book, _create_current_draft
-    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=3)
     for chapter in chapters:
         await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
                                     status=MemoirBookChapterDraftStatus.DRAFT)
@@ -417,7 +417,12 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     await test_db.commit()
     partial = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert partial.omitted_chapter_ids == [chapters[0].id]
-    assert [item["chapter_id"] for item in partial.chapter_snapshot_json] == [chapters[1].id]
+    assert [item["chapter_id"] for item in partial.chapter_snapshot_json] == [
+        chapters[1].id, chapters[2].id,
+    ]
+    manual = await assemble_book_output(test_db, project_id=project_id)
+    assert manual.output_version_id == partial.output_version_id
+    assert manual.omitted_chapter_ids == [chapters[0].id]
     version = await test_db.get(MemoirBookOutputVersion, partial.output_version_id)
     version.content, version.created_by = "用户亲自整理的全书。", "user"
     await test_db.commit()
@@ -425,6 +430,16 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     assert preserved.preserved_manual
     assert preserved.output_version_id == partial.output_version_id
     assert preserved.content == "用户亲自整理的全书。"
+    test_db.add(MemoirCompletionIssue(
+        project_id=project_id, chapter_id=chapters[1].id, scope="chapter",
+        issue_type="privacy", channel="manual_review", question="是否保留新发现的私人经历？",
+        priority="high", fingerprint="c" * 64, input_signature="review-2",
+    ))
+    await test_db.commit()
+    updated = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert updated.output_version_id != partial.output_version_id
+    assert updated.omitted_chapter_ids == [chapters[0].id, chapters[1].id]
+    assert [item["chapter_id"] for item in updated.chapter_snapshot_json] == [chapters[2].id]
 
 
 async def test_editorial_review_questions_do_not_hide_readable_book_or_export(client, test_db):

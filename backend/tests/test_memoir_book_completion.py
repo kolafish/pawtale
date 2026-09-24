@@ -439,6 +439,190 @@ def test_book_review_fingerprints_follow_questions_when_order_changes():
     assert fingerprints(candidates) == fingerprints(list(reversed(candidates)))
 
 
+def test_book_review_anchors_only_verified_distinct_quoted_facts():
+    quote = "某位知名企业家曾经是我的经理"
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={"title": "故事"},
+        chapters=tuple(
+            BookReviewChapter(
+                chapter_id=f"chapter-{index}",
+                title=f"第{index}章",
+                sort_order=index,
+                digest_id=f"digest-{index}",
+                digest_signature=f"signature-{index}",
+                digest={},
+                draft_version_id=f"version-{index}",
+                draft_hash=f"hash-{index}",
+                material_ids=frozenset(),
+                draft_content=content,
+            )
+            for index, content in (
+                (1, f"那时候，{quote}。"),
+                (2, "这一章只写散步。"),
+            )
+        ),
+        input_signature="book-signature",
+    )
+    def candidate(question, chapter_id, issue_type="privacy"):
+        return {
+            "issue_type": issue_type,
+            "question": question,
+            "reason": "这需要用户决定。",
+            "priority": "high",
+            "chapter_ids": [chapter_id],
+            "evidence_quote": quote,
+            "resolution": "user_decision",
+        }
+    short_quote = candidate("经理一词需要确认吗？", "C1")
+    short_quote["evidence_quote"] = "经理"
+
+    review = normalize_book_review(
+        {
+            "summary": "有待确认内容。",
+            "candidate_issues": [
+                candidate("是否匿名？", "C1"),
+                candidate("是否匿名？", "C2"),
+                candidate("这段关系准确吗？", "C1", "conflict"),
+                candidate("这段邀请准确吗？", "C1", "conflict"),
+                short_quote,
+            ],
+        },
+        context=context,
+    )
+    issues = review["candidate_issues"]
+    assert issues[0]["evidence_quote"] == quote
+    assert "evidence_quote" not in issues[1]
+    assert "evidence_quote" not in issues[2]
+    assert "evidence_quote" not in issues[3]
+    assert "evidence_quote" not in issues[4]
+    assert issues[2]["fingerprint"] != issues[3]["fingerprint"]
+
+
+async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
+    client, test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    chapter_id = "chapter-1"
+    old = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="书中‘某位知名企业家’曾是你的经理，这段是否适合保留？",
+        reason="请决定如何表述。",
+        priority="high",
+        fingerprint="a" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="old-review",
+    )
+    test_db.add(old)
+    test_db.add(MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="‘某位知名企业家’这段职场关系要保留吗？",
+        reason="旧轮次的问题。",
+        priority="high",
+        fingerprint="c" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="earlier-review",
+        status="closed",
+        outcome="superseded",
+    ))
+    await test_db.flush()
+    old_id = old.id
+    candidate = {
+        "issue_type": "privacy",
+        "channel": "manual_review",
+        "question": "与这位经理的关系是否需要匿名？",
+        "reason": "可识别关系需要由用户决定。",
+        "priority": "high",
+        "chapter_ids": [chapter_id],
+        "evidence_quote": "某位知名企业家曾经是我的经理",
+        "resolution": "user_decision",
+    }
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    first = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="new-review",
+        candidates=[candidate],
+    )
+    assert len(first) == 1
+    assert first[0].id == old_id
+    assert first[0].status == "open"
+    assert first[0].input_signature == "new-review"
+
+    first[0].status = "closed"
+    first[0].outcome = "confirmed"
+    first[0].outcome_note = "使用化名。"
+    await test_db.flush()
+    reworded = {**candidate, "question": "这段职场关系是否可以公开？"}
+    reworded["fingerprint"] = completion_issues.stable_book_issue_fingerprint(reworded)
+    assert reworded["fingerprint"] == candidate["fingerprint"]
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="later-review",
+        candidates=[reworded],
+    )
+    assert len(current) == 1
+    assert current[0].id == old_id
+    assert current[0].status == "closed"
+    assert current[0].outcome_note == "使用化名。"
+    assert current[0].input_signature == "later-review"
+
+
+async def test_book_review_keeps_unresolved_privacy_issue_when_model_omits_it(
+    client, test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    draft = MemoirBookChapterDraft(
+        project_id=project_id, chapter_id=chapter_id, status="confirmed",
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=draft.id, project_id=project_id, chapter_id=chapter_id,
+        version=1, content="书中写到‘某位知名企业家’曾是我的经理。",
+    ))
+    old = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="书中‘某位知名企业家’曾是你的经理，这段是否适合保留？",
+        reason="请决定如何表述。",
+        priority="high",
+        fingerprint="b" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="old-review",
+    )
+    test_db.add(old)
+    await test_db.flush()
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="new-review",
+        candidates=[],
+    )
+    assert [issue.id for issue in current] == [old.id]
+    assert old.status == "open"
+    assert old.input_signature == "new-review"
+
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=draft.id, project_id=project_id, chapter_id=chapter_id,
+        version=2, content="书中只写一位同事曾是我的经理。",
+    ))
+    await test_db.flush()
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="later-review",
+        candidates=[],
+    )
+    assert current == []
+    assert old.status == "closed"
+    assert old.outcome == "superseded"
+
+
 def test_book_review_does_not_invent_material_provenance():
     context = BookReviewContext(
         project_id="project-1",
@@ -1950,7 +2134,7 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
 
 
-async def test_book_review_uses_chapter_digests_and_creates_book_issue(
+async def test_book_review_uses_chapter_text_and_creates_book_issue(
     client,
     test_db,
     monkeypatch,
@@ -2005,11 +2189,11 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert issue.related_chapter_ids_json == [chapter.id for chapter in chapters]
     current = await _completion_field(client, project_id, "book_review")
     assert current["id"] == review["id"]
-    blocked = await client.post(
+    still_readable = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble",
     )
-    assert blocked.status_code == 409
-    assert "全书检查中需要确认的问题" in blocked.json()["detail"]
+    assert still_readable.status_code == 200
+    assert len(still_readable.json()["chapter_snapshot_json"]) == 2
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
         json={"outcome": "confirmed"},
@@ -2023,6 +2207,21 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         await test_db.scalar(select(MemoirBookReview.id).where(MemoirBookReview.project_id == project_id))
         == review["id"]
     )
+    first_version = await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )
+    assert first_version is not None
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=first_version.draft_id,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        version=first_version.version + 1,
+        content=first_version.content,
+    ))
+    await test_db.flush()
+    assert (await book_reviews.load_book_review_context(
+        test_db, project_id=project_id,
+    )).input_signature == review["input_signature"]
 
 
 async def test_book_review_job_persists_across_requests_and_runs_in_worker(
@@ -2145,6 +2344,62 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert cancelled.json()["can_retry"] is True
 
 
+async def test_unrelated_book_revision_can_proceed_while_privacy_chapter_is_omitted(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=3)
+    fake = LayeredBookAI(book_actions=True)
+    _install_ai(monkeypatch, fake)
+    assert (await client.post(f"/api/memoir/projects/{project_id}/sections/bootstrap")).status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+    generated = await _run_book_review(client, test_db, project_id=project_id)
+    assert generated.status_code == 200, generated.text
+    review = await test_db.get(MemoirBookReview, generated.json()["id"])
+    assert review is not None
+    test_db.add(MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="第三章这段可识别的经历是否适合入书？",
+        priority="high",
+        fingerprint="f" * 64,
+        input_signature=review.input_signature,
+        related_chapter_ids_json=[chapters[2].id],
+    ))
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200, assembled.text
+    assert assembled.json()["omitted_chapter_ids"] == [chapters[2].id]
+    assert [item["chapter_id"] for item in assembled.json()["chapter_snapshot_json"]] == [
+        chapter.id for chapter in chapters[:2]
+    ]
+
+    action = generated.json()["review"]["editorial_actions"][0]
+    assert action["chapter_ids"] == [chapter.id for chapter in chapters[:2]]
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={"include_answers": False, "action_ids": [action["id"]]},
+    )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    completed = await _completion_field(client, project_id, "revision_job")
+    assert completed["status"] == "succeeded"
+    assert completed["proposal_status"] == "ready"
+
+
 async def test_book_review_selection_plan_feedback_draft_and_apply(
     client,
     test_db,
@@ -2191,7 +2446,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         },
     )
     assert blocked_revision.status_code == 409
-    assert "先处理完所有需要确认的问题" in blocked_revision.json()["detail"]
+    assert "先处理所选章节需要确认的问题" in blocked_revision.json()["detail"]
     blocked_state = await _completion_field(
         client,
         project_id,
