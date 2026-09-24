@@ -26,14 +26,14 @@
     </button>
   </view>
 
-  <view class="topic-panel">
+  <view wx:if="{{!recording || sessionGoal !== 'book_completion'}}" class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>
     <text class="topic-kicker">正在聊</text>
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
 
   <view
-    wx:if="{{!embedded && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
+    wx:if="{{!embedded && !(sessionGoal === 'book_completion' && recording) && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
     class="story-growth-bubble {{progressNoticeTitle ? 'ready' : storyGrowthNoticeState}}"
     aria-live="polite"
   >
@@ -113,14 +113,14 @@
   </view>
 
   <view wx:if="{{showCompletionIssuePanel}}" class="{{completionIssuePanelClass}}">
-    <view class="completion-issue-head">
+    <view wx:if="{{!recording}}" class="completion-issue-head">
       <text class="completion-issue-label">本次只补这一点</text>
       <text class="completion-issue-status">{{completionIssueStatusText}}</text>
     </view>
     <text class="completion-issue-question">{{completionIssueQuestionText}}</text>
     <text wx:if="{{completionIssueError}}" class="completion-issue-error">{{completionIssueError}}</text>
     <text wx:if="{{completionIssueActionText}}" class="completion-issue-action-state">{{completionIssueActionText}}</text>
-    <view wx:if="{{showCompletionIssueActions}}" class="completion-issue-actions">
+    <view wx:if="{{showCompletionIssueActions && !recording}}" class="completion-issue-actions">
       <button
         class="completion-issue-defer ui-button ui-pressable {{completionIssueControlsDisabled ? 'is-disabled' : ''}}"
         disabled="{{completionIssueControlsDisabled}}"
