@@ -15,14 +15,14 @@ const proposal = {
 };
 
 function setup({ preview, apply } = {}) {
-  const calls = { previews: [], applies: [], back: 0 };
+  const calls = { previews: [], applies: [], routes: [], back: 0 };
   mockModule("../services/accessibility-settings.ts", { accessibilityPageClass: c => `${c} large-text` });
   mockModule("../services/memoir-api-client.ts", { ensureMemoirBackendSession: async () => {}, memoirProjectDictationUrl: id => `wss://test/projects/${id}/dictation` });
   mockModule("../services/memoir-voice-edit.ts", {
     previewVoiceEdit: async (...args) => { calls.previews.push(args); return preview ? preview(...args) : proposal; },
     applyVoiceEdit: async (...args) => { calls.applies.push(args); return apply ? apply(...args) : { message: "修改已保存" }; },
   });
-  global.wx = { navigateBack: () => calls.back++ };
+  global.wx = { navigateBack: () => calls.back++, navigateTo: ({ url }) => calls.routes.push(url) };
   const context = pageContext(loadPageModule("../pages/story-voice-edit/index.ts").page);
   context.onLoad({ projectId: "p1", projectTitle: encodeURIComponent("我的回忆录") });
   return { context, calls };
@@ -84,7 +84,10 @@ test("chapter section regeneration is shown as a confirmable operation", async (
     target_ref: "c1",
     new_title: null,
   }]]]);
-  assert.equal(context.data.message, "已开始重新整理小节，可在章节工作台查看进度。");
+  assert.equal(context.data.progressChapterId, "c1");
+  context.openChapterProgress();
+  assert.equal(calls.routes.length, 1);
+  assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c1");
 });
 
 test("chapter split keeps its selected utterances when the user confirms", async () => {

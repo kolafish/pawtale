@@ -1,6 +1,6 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
-import { queryParam, type PageQuery } from "../../services/page-input";
+import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
 import { ensureMemoirBackendSession, memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import { applyVoiceEdit, previewVoiceEdit, type VoiceEditItem, type VoiceEditPreview } from "../../services/memoir-voice-edit";
 
@@ -14,6 +14,7 @@ interface EditData {
   applying: boolean;
   error: string;
   message: string;
+  progressChapterId: string;
   preview: VoiceEditPreview | null;
   splitConfirmation: VoiceEditItem | null;
   items: Array<VoiceEditItem & { selected: boolean }>;
@@ -24,7 +25,7 @@ definePage<EditData>()({
   data: {
     pageClass: accessibilityPageClass("voice-edit-page ui-page-shell ui-accessible-page"),
     projectId: "", projectTitle: "", gatewayUrl: "", instruction: "",
-    loading: false, applying: false, error: "", message: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0,
+    loading: false, applying: false, error: "", message: "", progressChapterId: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0,
   },
   requestSequence: 0,
 
@@ -49,14 +50,14 @@ definePage<EditData>()({
     if (this.data.loading || this.data.applying) return;
     const clarification = this.data.preview?.questions.length && !this.data.items.length
       ? this.data.preview : null;
-    this.setData({ instruction: event.detail.value, preview: clarification, splitConfirmation: null, items: [], selectedCount: 0, message: "", error: "" });
+    this.setData({ instruction: event.detail.value, preview: clarification, splitConfirmation: null, items: [], selectedCount: 0, message: "", progressChapterId: "", error: "" });
   },
 
   async submitInstruction(event?: { detail?: { value?: string } }) {
     const instruction = String(event?.detail?.value ?? this.data.instruction).trim();
     if (!instruction || !this.data.projectId || this.data.loading || this.data.applying) return;
     const sequence = ++this.requestSequence;
-    this.setData({ instruction, loading: true, error: "", message: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
+    this.setData({ instruction, loading: true, error: "", message: "", progressChapterId: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
     try {
       await ensureMemoirBackendSession();
       if (sequence !== this.requestSequence) return;
@@ -83,7 +84,7 @@ definePage<EditData>()({
   restartInstruction() {
     if (this.data.loading || this.data.applying) return;
     this.requestSequence++;
-    this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, message: "", error: "" });
+    this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, message: "", progressChapterId: "", error: "" });
   },
 
   async apply() {
@@ -98,14 +99,29 @@ definePage<EditData>()({
     try {
       const result = await applyVoiceEdit(this.data.projectId, this.data.preview.signature, operations);
       if (sequence !== this.requestSequence) return;
-      this.setData({ message: result.message, preview: null, splitConfirmation: null, items: [], selectedCount: 0, instruction: "" });
+      const regeneration = operations.find(item => item.action === "regenerate_chapter_sections");
+      this.setData({
+        message: regeneration
+          ? `${operations.length > 1 ? "修改已保存，" : ""}已开始重新整理小节。`
+          : result.message,
+        progressChapterId: regeneration?.target_ref || "",
+        preview: null, splitConfirmation: null, items: [], selectedCount: 0, instruction: "",
+      });
     } catch (error) {
       if (sequence !== this.requestSequence) return;
       // A lost response may follow a successful commit. Do not replay the old batch.
-      this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, error: `${error instanceof Error ? error.message : "未收到修改结果"}。请先回到故事查看当前内容，再提出修改。` });
+      this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, progressChapterId: "", error: `${error instanceof Error ? error.message : "未收到修改结果"}。请先回到故事查看当前内容，再提出修改。` });
     } finally {
       if (sequence === this.requestSequence) this.setData({ applying: false });
     }
+  },
+
+  openChapterProgress() {
+    if (!this.data.projectId || !this.data.progressChapterId) return;
+    wx.navigateTo({ url: pageUrl("/pages/chapter-workspace/index", {
+      projectId: this.data.projectId,
+      chapterId: this.data.progressChapterId,
+    }) });
   },
 
   backToStory() { wx.navigateBack({ delta: 1 }); },

@@ -21,6 +21,17 @@
           bindcancel="cancelChapterPreparation"
         />
       </view>
+      <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
+        <ai-task-progress
+          title="{{sectionRegenerationTitle}}"
+          detail="{{sectionRegenerationDetail}}"
+          mode="{{sectionRegenerationProgressMode}}"
+          progress="{{sectionRegenerationProgress}}"
+          can-cancel="{{sectionRegenerationJob.can_cancel}}"
+          cancel-text="取消整理"
+          bindcancel="cancelSectionRegeneration"
+        />
+      </view>
       <view
         wx:if="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
         class="chapter-read-primary chapter-next-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
@@ -423,17 +434,6 @@
       </view>
 
       <view wx:if="{{sectionViews.length}}" class="structure-actions">
-        <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
-          <ai-task-progress
-            title="{{sectionRegenerationTitle}}"
-            detail="{{sectionRegenerationDetail}}"
-            mode="{{sectionRegenerationProgressMode}}"
-            progress="{{sectionRegenerationProgress}}"
-            can-cancel="{{sectionRegenerationJob.can_cancel}}"
-            cancel-text="取消整理"
-            bindcancel="cancelSectionRegeneration"
-          />
-        </view>
         <view
           class="structure-regenerate-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
