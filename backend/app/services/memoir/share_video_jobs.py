@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -27,7 +27,9 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoJobListResponse,
     MemoirShareVideoJobResponse,
+    MemoirShareVideoListItemResponse,
     MemoirShareVideoOutputResponse,
     MemoirShareVideoCountResponse,
 )
@@ -66,6 +68,7 @@ from app.services.memoir.share_video_alignment import (
     share_video_char_range_ms,
 )
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
+from app.services.memoir.access import load_memoir_project
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_transcripts import _load_owned_utterance
 
@@ -516,6 +519,62 @@ async def get_share_video_job(
 ) -> MemoirShareVideoJobResponse:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
     return _job_response(job)
+
+
+async def list_completed_share_video_jobs(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_id: str,
+    limit: int,
+    offset: int,
+    allow_admin: bool = False,
+) -> MemoirShareVideoJobListResponse:
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    filters = (
+        MemoirMaterialShareVideo.project_id == project_id,
+        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+    )
+    completed_jobs = (
+        select(MemoirMaterialShareVideo)
+        .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
+        .where(*filters)
+    )
+    total = await db.scalar(
+        select(func.count(MemoirMaterialShareVideo.id))
+        .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
+        .where(*filters)
+    )
+    jobs = (
+        await db.scalars(
+            completed_jobs.order_by(
+                func.coalesce(
+                    MemoirMaterialShareVideo.completed_at,
+                    MemoirMaterialShareVideo.created_at,
+                ).desc(),
+                MemoirMaterialShareVideo.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+    return MemoirShareVideoJobListResponse(
+        items=[
+            MemoirShareVideoListItemResponse(
+                id=job.id,
+                utterance_id=job.utterance_id,
+                title=share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text),
+                selected_text=job.selected_text,
+                duration_ms=max(0, job.end_ms - job.start_ms),
+                created_at=job.created_at,
+                completed_at=job.completed_at,
+            )
+            for job in jobs
+        ],
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
 
 
 async def list_completed_share_video_counts(

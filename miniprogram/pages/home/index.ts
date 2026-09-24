@@ -8,7 +8,12 @@ import type {
   MemoirInterviewType,
   MemoirSessionGoal,
 } from "../../domain/memoir-voice-session";
-import type { MemoirShareVideoCandidate, MemoirVoiceTranscriptItem } from "../../domain/memoir-transcript";
+import type {
+  MemoirShareVideoCandidate,
+  MemoirShareVideoJob,
+  MemoirShareVideoListItem,
+  MemoirVoiceTranscriptItem,
+} from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -22,6 +27,8 @@ import {
   createMemoirShareVideoCandidateJob,
   dismissMemoirShareVideoCandidate,
   getMemoirShareVideoCandidate,
+  getMemoirShareVideoJob,
+  listMemoirShareVideos,
 } from "../../services/memoir-transcript-api";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { ApiError } from "../../services/request";
@@ -107,6 +114,9 @@ interface HomeData extends HomeStoryData {
   shareCandidateCreating: boolean;
   shareCandidateDismissing: boolean;
   shareCandidateError: string;
+  shareCandidateJob: MemoirShareVideoJob | null;
+  recentShareVideo: MemoirShareVideoListItem | null;
+  shareVideoTotal: number;
 }
 
 interface CheckboxChangeEvent {
@@ -236,6 +246,9 @@ function applyHomeSnapshotData(
       shareCandidateCreating: false,
       shareCandidateDismissing: false,
       shareCandidateError: "",
+      shareCandidateJob: null,
+      recentShareVideo: null,
+      shareVideoTotal: 0,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -250,6 +263,7 @@ function applyHomeSnapshotData(
 definePage<HomeData>()({
   homeLoadSequence: 0,
   shareCandidateRequestSequence: 0,
+  shareVideosRequestSequence: 0,
   homeVisible: false,
   homeLaunchScope: "",
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
@@ -294,6 +308,9 @@ definePage<HomeData>()({
     shareCandidateCreating: false,
     shareCandidateDismissing: false,
     shareCandidateError: "",
+    shareCandidateJob: null,
+    recentShareVideo: null,
+    shareVideoTotal: 0,
     ...emptyHomeStoryData(),
   },
 
@@ -318,6 +335,7 @@ definePage<HomeData>()({
     this.homeVisible = false;
     this.homeLoadSequence += 1;
     this.shareCandidateRequestSequence += 1;
+    this.shareVideosRequestSequence += 1;
     this.homeRefreshTimer.cancel();
     this.growthAnimationTimer.cancel();
     this.setData({ story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
@@ -399,6 +417,7 @@ definePage<HomeData>()({
         if (validTarget) this.openStoryProgress();
       });
       void this.refreshShareCandidate(this.data.projectId);
+      void this.refreshShareVideos(this.data.projectId);
       if (freshEvents.size) this.growthAnimationTimer.schedule(() => this.clearGrowthAnimation());
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
@@ -428,6 +447,9 @@ definePage<HomeData>()({
           shareCandidate: null,
           shareCandidateDurationText: "",
           shareCandidateError: "",
+          shareCandidateJob: null,
+          recentShareVideo: null,
+          shareVideoTotal: 0,
         });
         return;
       }
@@ -461,10 +483,44 @@ definePage<HomeData>()({
           ? formatTranscriptDurationSeconds(candidate.duration_ms / 1000)
           : "",
         shareCandidateError: "",
+        shareCandidateJob: candidate?.video_job_id === this.data.shareCandidateJob?.id
+          ? this.data.shareCandidateJob : null,
       });
+      if (candidate?.status === "accepted" && candidate.video_job_id) {
+        try {
+          const job = await getMemoirShareVideoJob(candidate.video_job_id);
+          if (requestSequence === this.shareCandidateRequestSequence
+            && this.homeVisible && this.data.projectId === projectId
+            && this.data.shareCandidate?.id === candidate.id) {
+            this.setData({ shareCandidateJob: job });
+          }
+        } catch (error) {
+          if (requestSequence === this.shareCandidateRequestSequence) {
+            console.warn("share video job refresh failed", error);
+          }
+        }
+      }
     } catch (error) {
       if (requestSequence === this.shareCandidateRequestSequence) {
         console.warn("share video suggestion refresh failed", error);
+      }
+    }
+  },
+
+  async refreshShareVideos(projectId: string) {
+    const requestSequence = ++this.shareVideosRequestSequence;
+    if (!this.homeVisible || !projectId || this.data.needsLogin || this.data.voiceEntry) return;
+    try {
+      const response = await listMemoirShareVideos(projectId, { limit: 1, offset: 0 });
+      if (requestSequence !== this.shareVideosRequestSequence
+        || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
+      this.setData({
+        recentShareVideo: response.items[0] || null,
+        shareVideoTotal: response.total,
+      });
+    } catch (error) {
+      if (requestSequence === this.shareVideosRequestSequence) {
+        console.warn("share video library refresh failed", error);
       }
     }
   },
@@ -481,7 +537,10 @@ definePage<HomeData>()({
       if (!this.homeVisible || this.data.projectId !== projectId
         || this.data.shareCandidate?.id !== candidate.id) return;
       this.shareCandidateRequestSequence += 1;
-      this.setData({ shareCandidate: { ...candidate, status: "accepted", video_job_id: job.id } });
+      this.setData({
+        shareCandidate: { ...candidate, status: "accepted", video_job_id: job.id },
+        shareCandidateJob: job,
+      });
       trackAuditAction("home.share_video_candidate_accept", {}, { projectId, voiceSessionId: candidate.voice_session_id });
       wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", { id: job.utterance_id, jobId: job.id }) });
     } catch (error) {
@@ -509,6 +568,21 @@ definePage<HomeData>()({
     }) });
   },
 
+  openRecentShareVideo() {
+    const video = this.data.recentShareVideo;
+    if (!video || this.data.voiceEntry) return;
+    wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
+      id: video.utterance_id,
+      jobId: video.id,
+    }) });
+  },
+
+  openShareVideoLibrary() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.voiceEntry) return;
+    wx.navigateTo({ url: pageUrl("/pages/share-videos/index", { projectId }) });
+  },
+
   async dismissShareCandidate() {
     const candidate = this.data.shareCandidate;
     const projectId = this.data.projectId;
@@ -519,7 +593,8 @@ definePage<HomeData>()({
       await dismissMemoirShareVideoCandidate(projectId, candidate.id);
       if (this.homeVisible && this.data.projectId === projectId && this.data.shareCandidate?.id === candidate.id) {
         this.shareCandidateRequestSequence += 1;
-        this.setData({ shareCandidate: null, shareCandidateDurationText: "" });
+        this.setData({ shareCandidate: null, shareCandidateDurationText: "", shareCandidateJob: null });
+        void this.refreshShareVideos(projectId);
       }
     } catch (error) {
       if (this.homeVisible && this.data.projectId === projectId) {

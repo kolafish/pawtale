@@ -49,6 +49,7 @@ from app.schemas.memoir_voice import (
     MemoirTranscriptShareVideoContextResponse,
     MemoirShareVideoCustomBackgroundAssetResponse,
     MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoJobListResponse,
     MemoirShareVideoJobResponse,
     MemoirShareVideoCandidateCreateVideoRequest,
     MemoirShareVideoCandidateLatestResponse,
@@ -675,6 +676,27 @@ async def get_mobile_memoir_share_video_job(
         db,
         job_id,
         current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.get(
+    "/projects/{project_id}/share-video/jobs",
+    response_model=MemoirShareVideoJobListResponse,
+)
+async def list_mobile_memoir_share_video_jobs(
+    project_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_jobs.list_completed_share_video_jobs(
+        db,
+        project_id=project_id,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
         allow_admin=is_admin_user(current_user),
     )
 

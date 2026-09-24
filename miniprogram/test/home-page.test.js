@@ -49,6 +49,7 @@ function loadHomePage({
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
     getMemoirShareVideoCandidate: async () => ({ candidate: null }),
+    listMemoirShareVideos: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
     getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
       const latest = identity.active_project_id
@@ -216,6 +217,38 @@ test("home recommendation starts a video job and opens its preview without shari
   assert.equal(navigations.length, 2);
   await context.dismissShareCandidate();
   assert.equal(context.data.shareCandidate, null);
+});
+
+test("home shows one latest video and opens the exact result or the full library", async () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const latest = {
+    id: "video-2", utterance_id: "utterance-2", title: "外婆家的夏天",
+    selected_text: "每年夏天，我都会去外婆家。", duration_ms: 28000,
+    created_at: "2026-09-24T08:00:00", completed_at: "2026-09-24T08:01:00",
+  };
+  const calls = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async (...args) => {
+      calls.push(args);
+      return { items: [latest], total: 5, limit: 1, offset: 0 };
+    },
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareVideos("p1");
+  assert.deepEqual(calls, [["p1", { limit: 1, offset: 0 }]]);
+  assert.equal(context.data.recentShareVideo.id, "video-2");
+  assert.equal(context.data.shareVideoTotal, 5);
+  context.openRecentShareVideo();
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, [
+    "/pages/transcript-media/index?id=utterance-2&jobId=video-2",
+    "/pages/share-videos/index?projectId=p1",
+  ]);
+  assert.match(pageWxml, /bindtap="openRecentShareVideo"/);
+  assert.match(pageWxml, /bindtap="openShareVideoLibrary"/);
 });
 
 test("home ignores a recommendation returned after the project changes", async () => {
