@@ -217,6 +217,9 @@ async def run_transcript_correction_job(
     await db.flush()
 
     utterance.transcript_edited = cleaned.content
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     if message:
         message.content_text = cleaned.content
         message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -256,6 +259,14 @@ async def run_transcript_correction_job(
             source="transcript_correction_succeeded",
             ai_model=ai_model,
         )
+    from app.services.memoir.share_video_candidate_scheduling import schedule_share_video_candidate_evaluation
+
+    await db.flush()
+    await schedule_share_video_candidate_evaluation(
+        db,
+        project_id=job.project_id,
+        voice_session_id=utterance.voice_session_id,
+    )
     return EditingJobResult(
         result_json={
             "utterance_id": utterance.id,

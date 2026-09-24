@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirSessionGoal,
     MemoirShareVideoJobStatus,
+    MemoirShareVideoCandidateStatus,
     MemoirTranscriptPolishLevel,
     MemoirVoiceSessionStatus,
 )
@@ -496,6 +497,40 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
         if self.background_source == "custom" and not self.custom_background_asset_id:
             raise ValueError("请选择自定义背景图")
         return self
+
+
+class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ai_model: str | None = Field(default=None, max_length=120)
+    background_source: str | None = Field(default=None, max_length=40)
+    background_style: str | None = Field(default=None, max_length=40)
+    background_mode: str | None = Field(default=None, max_length=40)
+    custom_background_asset_id: str | None = Field(default=None, max_length=36)
+
+
+class MemoirShareVideoCandidateResponse(BaseModel):
+    id: str
+    project_id: str
+    voice_session_id: str
+    utterance_id: str | None
+    audio_file_id: str | None
+    transcript_version_id: str | None
+    text_hash: str | None
+    selected_text: str
+    start_char: int | None
+    end_char: int | None
+    start_ms: int | None
+    end_ms: int | None
+    duration_ms: int | None
+    status: MemoirShareVideoCandidateStatus
+    video_job_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirShareVideoCandidateLatestResponse(BaseModel):
+    candidate: MemoirShareVideoCandidateResponse | None
 
 
 class MemoirShareVideoOutputResponse(BaseModel):

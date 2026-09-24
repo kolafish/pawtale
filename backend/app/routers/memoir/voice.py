@@ -50,6 +50,9 @@ from app.schemas.memoir_voice import (
     MemoirShareVideoCustomBackgroundAssetResponse,
     MemoirShareVideoJobCreateRequest,
     MemoirShareVideoJobResponse,
+    MemoirShareVideoCandidateCreateVideoRequest,
+    MemoirShareVideoCandidateLatestResponse,
+    MemoirShareVideoCandidateResponse,
     MemoirVoiceTranscriptUpdateRequest,
     MemoirVoiceTranscriptVoiceEditPreviewRequest,
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
@@ -69,6 +72,7 @@ from app.services.memoir import voice_tts_persistence as memoir_voice_tts
 from app.services.memoir import share_video_alignment as memoir_share_video_alignment
 from app.services.memoir import share_video_custom_backgrounds as memoir_share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs as memoir_share_video_jobs
+from app.services.memoir import share_video_candidates as memoir_share_video_candidates
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import material_offline_asr_jobs as memoir_material_offline_asr_jobs
 from app.services.memoir import material_image_generation as memoir_material_image_generation
@@ -612,6 +616,53 @@ async def create_mobile_memoir_voice_transcript_share_video_job(
         allow_admin=is_admin_user(current_user),
     )
     return job
+
+
+@router.get(
+    "/projects/{project_id}/share-video-candidate",
+    response_model=MemoirShareVideoCandidateLatestResponse,
+)
+async def get_mobile_memoir_share_video_candidate(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    candidate = await memoir_share_video_candidates.get_latest_share_video_candidate(
+        db, user_id=current_user.id, project_id=project_id,
+    )
+    return MemoirShareVideoCandidateLatestResponse(candidate=candidate)
+
+
+@router.post(
+    "/projects/{project_id}/share-video-candidates/{candidate_id}/dismiss",
+    response_model=MemoirShareVideoCandidateResponse,
+)
+async def dismiss_mobile_memoir_share_video_candidate(
+    project_id: str,
+    candidate_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_candidates.dismiss_share_video_candidate(
+        db, user_id=current_user.id, project_id=project_id, candidate_id=candidate_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/share-video-candidates/{candidate_id}/create-video",
+    response_model=MemoirShareVideoJobResponse,
+    status_code=201,
+)
+async def create_mobile_memoir_share_video_candidate_job(
+    project_id: str,
+    candidate_id: str,
+    req: MemoirShareVideoCandidateCreateVideoRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_candidates.create_candidate_share_video(
+        db, user_id=current_user.id, project_id=project_id, candidate_id=candidate_id, req=req,
+    )
 
 
 @router.get("/share-video/jobs/{job_id}", response_model=MemoirShareVideoJobResponse)
