@@ -344,6 +344,13 @@ class MemoirShareVideoCandidate(Base):
             f"status IN ({_enum_values(MemoirShareVideoCandidateStatus)})",
             name="ck_memoir_share_video_candidates_status",
         ),
+        CheckConstraint(
+            "status NOT IN ('ready', 'accepted') OR ("
+            "text_hash IS NOT NULL AND "
+            "start_char IS NOT NULL AND end_char IS NOT NULL AND end_char > start_char AND "
+            "start_ms IS NOT NULL AND end_ms IS NOT NULL AND end_ms > start_ms AND length(selected_text) > 0)",
+            name="ck_memoir_share_video_candidates_ready_range",
+        ),
         Index(
             "ix_memoir_share_video_candidates_project_latest",
             "project_id", "created_at",
@@ -361,7 +368,9 @@ class MemoirShareVideoCandidate(Base):
     audio_file_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("audio_files.id", ondelete="SET NULL"), nullable=True,
     )
-    transcript_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_transcript_versions.id", ondelete="SET NULL"), nullable=True,
+    )
     text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     selected_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     start_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -371,6 +380,8 @@ class MemoirShareVideoCandidate(Base):
     status: Mapped[str] = mapped_column(
         String(20), default=MemoirShareVideoCandidateStatus.NONE.value, nullable=False,
     )
+    algorithm_version: Mapped[str] = mapped_column(String(32), default="v1", nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     video_job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_material_share_videos.id", ondelete="SET NULL"), nullable=True,
     )

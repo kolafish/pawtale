@@ -321,6 +321,9 @@ async def _apply_corrected_reprocess_text(
     await db.flush()
 
     utterance.transcript_edited = cleaned_content
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     if utterance.chat_message:
         utterance.chat_message.content_text = cleaned_content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value

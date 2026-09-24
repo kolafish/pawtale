@@ -13,6 +13,7 @@ from app.services.memoir import retrieval_source_index
 from app.services.memoir import section_regeneration
 from app.services.memoir import section_revision_jobs
 from app.services.memoir import voice_transcript_correction
+from app.services.memoir import share_video_candidates
 from app.services.memoir.editing_jobs import register_editing_job_handler
 from app.services.memoir.narrative import interview_policy_outcomes
 from app.services.memoir.narrative import interview_policy_runtime
@@ -24,6 +25,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.CORRECT_TRANSCRIPT,
         voice_transcript_correction.run_transcript_correction_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.EVALUATE_SHARE_VIDEO_CANDIDATE,
+        share_video_candidates.run_share_video_candidate_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE,

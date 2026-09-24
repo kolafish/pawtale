@@ -355,6 +355,9 @@ async def _apply_recovered_transcript(
     message.content_status = MemoirChatContentStatus.FINAL.value
     message.audio_file_id = utterance.audio_file_id
     message.transcript_version_id = transcript_version.id
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     message.metadata_json = {
         **(message.metadata_json or {}),
         "source": "transcript_recovery",
@@ -402,6 +405,14 @@ async def _apply_recovered_transcript(
             project_id=voice_session.project_id,
             utterance=utterance,
             source="transcript_recovery",
+        )
+        from app.services.memoir.share_video_candidate_scheduling import schedule_share_video_candidate_evaluation
+
+        await db.flush()
+        await schedule_share_video_candidate_evaluation(
+            db,
+            project_id=voice_session.project_id,
+            voice_session_id=voice_session.id,
         )
     await db.commit()
 

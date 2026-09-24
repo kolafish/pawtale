@@ -1042,6 +1042,9 @@ async def _apply_edited_text(
     db.add(version)
     await db.flush()
     utterance.transcript_edited = content
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     if utterance.chat_message:
         utterance.chat_message.content_text = content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -1281,12 +1284,15 @@ async def delete_voice_transcript(
     *,
     commit: bool = True,
 ) -> None:
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
     await _ensure_voice_transcript_can_be_deleted(
         db,
         utterance_id=utterance.id,
     )
     project_id = utterance.voice_session.project_id
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     message = utterance.chat_message
     delete_message = False
     clear_message = False

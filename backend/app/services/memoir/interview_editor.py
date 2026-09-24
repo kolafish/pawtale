@@ -654,6 +654,9 @@ async def update_interview_question_text(
         db.add(version)
         await db.flush()
         utterance.transcript_edited = req.text
+        from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+        await invalidate_share_video_candidate(db, utterance_id=utterance.id)
         message.transcript_version_id = version.id
         await prune_transcript_versions_for_utterance(
             db,
@@ -759,6 +762,9 @@ async def convert_interview_question_to_answer(
             db.add(version)
             await db.flush()
             utterance.transcript_edited = text_for_answer
+            from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+            await invalidate_share_video_candidate(db, utterance_id=utterance.id)
             message.transcript_version_id = version.id
             await prune_transcript_versions_for_utterance(
                 db,

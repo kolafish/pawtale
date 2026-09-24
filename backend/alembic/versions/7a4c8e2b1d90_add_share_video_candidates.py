@@ -33,7 +33,7 @@ def upgrade() -> None:
         sa.Column("voice_session_id", sa.String(36), sa.ForeignKey("memoir_voice_sessions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("utterance_id", sa.String(36), sa.ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"), nullable=True),
         sa.Column("audio_file_id", sa.String(36), sa.ForeignKey("audio_files.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("transcript_version_id", sa.String(36), nullable=True),
+        sa.Column("transcript_version_id", sa.String(36), sa.ForeignKey("memoir_transcript_versions.id", ondelete="SET NULL"), nullable=True),
         sa.Column("text_hash", sa.String(64), nullable=True),
         sa.Column("selected_text", sa.Text(), nullable=False),
         sa.Column("start_char", sa.Integer(), nullable=True),
@@ -41,6 +41,8 @@ def upgrade() -> None:
         sa.Column("start_ms", sa.Integer(), nullable=True),
         sa.Column("end_ms", sa.Integer(), nullable=True),
         sa.Column("status", sa.String(20), nullable=False),
+        sa.Column("algorithm_version", sa.String(32), nullable=False),
+        sa.Column("reason_code", sa.String(40), nullable=False),
         sa.Column("video_job_id", sa.String(36), sa.ForeignKey("memoir_material_share_videos.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
@@ -48,6 +50,13 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "status IN ('none', 'ready', 'accepted', 'dismissed', 'stale')",
             name="ck_memoir_share_video_candidates_status",
+        ),
+        sa.CheckConstraint(
+            "status NOT IN ('ready', 'accepted') OR ("
+            "text_hash IS NOT NULL AND "
+            "start_char IS NOT NULL AND end_char IS NOT NULL AND end_char > start_char AND "
+            "start_ms IS NOT NULL AND end_ms IS NOT NULL AND end_ms > start_ms AND length(selected_text) > 0)",
+            name="ck_memoir_share_video_candidates_ready_range",
         ),
     )
     op.create_index(
