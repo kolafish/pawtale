@@ -296,8 +296,6 @@ async def run_share_video_candidate_job(db: AsyncSession, job: MemoirEditingJob)
         selected = None
 
     if selected is not None:
-        session = await _load_session(db, job.project_id, session_id)
-        utterance = next((item for item in session.utterances if item.id == selected.utterance_id), None) if session else None
         probe = MemoirShareVideoCandidate(
             project_id=job.project_id,
             voice_session_id=session_id,
@@ -311,6 +309,7 @@ async def run_share_video_candidate_job(db: AsyncSession, job: MemoirEditingJob)
             start_ms=selected.start_ms,
             end_ms=selected.end_ms,
         )
+        utterance = await _load_current_utterance(db, probe, for_update=True)
         if not _candidate_current(probe, utterance):
             job.run_after = utcnow_naive() + timedelta(seconds=5)
             db.add(job)
@@ -375,11 +374,11 @@ async def _owned_candidate(
 
 
 async def _load_current_utterance(
-    db: AsyncSession, candidate: MemoirShareVideoCandidate,
+    db: AsyncSession, candidate: MemoirShareVideoCandidate, *, for_update: bool = False,
 ) -> MemoirVoiceUtterance | None:
     if not candidate.utterance_id:
         return None
-    return await db.scalar(
+    statement = (
         select(MemoirVoiceUtterance)
         .where(
             MemoirVoiceUtterance.id == candidate.utterance_id,
@@ -391,6 +390,9 @@ async def _load_current_utterance(
         )
         .execution_options(populate_existing=True)
     )
+    if for_update:
+        statement = statement.with_for_update(of=MemoirVoiceUtterance)
+    return await db.scalar(statement)
 
 
 async def get_latest_share_video_candidate(
@@ -442,7 +444,7 @@ async def create_candidate_share_video(
         MemoirShareVideoCandidateStatus.ACCEPTED.value,
     } or candidate.created_at < utcnow_naive() - CANDIDATE_AGE_LIMIT:
         raise HTTPException(status_code=409, detail="分享片段已失效")
-    utterance = await _load_current_utterance(db, candidate)
+    utterance = await _load_current_utterance(db, candidate, for_update=True)
     if not _candidate_current(candidate, utterance):
         candidate.status = MemoirShareVideoCandidateStatus.STALE.value
         await db.commit()
