@@ -218,6 +218,10 @@
   flex: 1;
 }
 
+.required-actions .action:first-child {
+  flex: 2;
+}
+
 .action.subtle {
   border-color: var(--ui-border);
   color: var(--ui-text-secondary);
