@@ -104,6 +104,47 @@
           </view>
         </view>
 
+        <view
+          wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted') && !voiceEntry}}"
+          class="home-share-candidate"
+          aria-label="讲述分享视频建议"
+        >
+          <view class="home-share-candidate-head">
+            <view class="home-share-candidate-heading">
+              <text class="home-share-candidate-kicker">从最近的讲述里</text>
+              <text class="home-share-candidate-title">{{shareCandidate.status === 'accepted' ? '这段的分享视频' : '这段可以做成分享视频'}}</text>
+            </view>
+            <text wx:if="{{shareCandidateDurationText}}" class="home-share-candidate-duration ui-tabular">约 {{shareCandidateDurationText}}</text>
+          </view>
+          <text class="home-share-candidate-quote">“{{shareCandidate.selected_text}}”</text>
+          <text class="home-share-candidate-hint">{{shareCandidate.status === 'accepted' ? '去查看进度，完成后先预览，再决定是否分享。' : '保留讲述原声，配上画面和字幕。视频做完后由您决定是否分享。'}}</text>
+          <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>
+          <view class="home-share-candidate-actions">
+            <button
+              wx:if="{{shareCandidate.status === 'ready'}}"
+              class="home-share-candidate-primary ui-button"
+              bindtap="createShareCandidateVideo"
+              loading="{{shareCandidateCreating}}"
+              disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
+              hover-class="home-share-candidate-primary-hover"
+            >{{shareCandidateCreating ? "正在开始制作" : "做成视频"}}</button>
+            <button
+              wx:elif="{{shareCandidate.video_job_id}}"
+              class="home-share-candidate-primary ui-button"
+              bindtap="openShareCandidateVideo"
+              disabled="{{shareCandidateDismissing}}"
+              hover-class="home-share-candidate-primary-hover"
+            >查看视频</button>
+            <button
+              class="home-share-candidate-secondary ui-button"
+              bindtap="dismissShareCandidate"
+              loading="{{shareCandidateDismissing}}"
+              disabled="{{shareCandidateCreating || shareCandidateDismissing}}"
+              hover-class="ui-subtle-action-hover"
+            >暂不分享</button>
+          </view>
+        </view>
+
         <view id="home-voice-authorization" wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
           <checkbox-group bindchange="changeVoiceAuthorization">
             <view class="voice-auth-row ui-consent-row">

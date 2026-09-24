@@ -1217,6 +1217,34 @@ test("transcript media page restores the latest matching share video job after r
   assert.equal(context.data.shareVideoPolling, false);
 });
 
+test("transcript media page opens the video job chosen from the home recommendation", async () => {
+  const pollCalls = [];
+  const restoredJob = sampleShareVideoJob({
+    id: "candidate-video",
+    utterance_id: "utterance-candidate",
+    audio_file_id: "audio-utterance-candidate",
+    status: "pending",
+    output: null,
+    completed_at: null,
+  });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { latest_job_id: "other-video" }),
+    getMemoirShareVideoJob: async (jobId) => {
+      pollCalls.push(jobId);
+      return restoredJob;
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-candidate", jobId: "candidate-video" });
+
+  assert.deepEqual(pollCalls, ["candidate-video"]);
+  assert.equal(context.data.shareVideoJob.id, "candidate-video");
+  assert.equal(context.data.shareVideoPolling, true);
+  context.shareVideoController.cancel();
+});
+
 test("transcript media page restores the latest standalone image job and selection", async () => {
   const pollCalls = [];
   const restoredJob = sampleMaterialImageJob({
