@@ -200,7 +200,7 @@ export function sectionRegenerationView(
   if (job.stage === "saving") {
     return {
       title: "正在保存新的故事结构",
-      detail: `全部回忆已归类，正在进行一致性检查${modelDetail}`,
+      detail: `正在检查并保存新的故事结构${modelDetail}`,
       progress: 0,
       progressMode: "indeterminate",
     };

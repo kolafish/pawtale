@@ -1318,6 +1318,79 @@ async def place_material(
     )
 
 
+async def apply_section_merge_groups(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    plan: MemoirBookPlan,
+    groups: list[tuple[str, MemoirSectionMergeRequest]],
+    assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
+    updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+) -> None:
+    """Apply validated groups under the caller's plan/chapter locks, without committing."""
+    all_ids = [
+        section_id
+        for target_id, req in groups
+        for section_id in (target_id, *req.source_section_ids)
+    ]
+    if any(target_id in req.source_section_ids for target_id, req in groups):
+        raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
+    if len(all_ids) != len(set(all_ids)):
+        raise HTTPException(status_code=400, detail="同一个小章节不能重复合并")
+    sections_by_id = {
+        section_id: await _load_section(db, project_id=project_id, section_id=section_id)
+        for section_id in all_ids
+    }
+    if any(section.chapter_id != chapter_id for section in sections_by_id.values()):
+        raise HTTPException(status_code=400, detail="只能合并同一章内的小章节")
+
+    for target_id, req in groups:
+        target = sections_by_id[target_id]
+        source_sections = [sections_by_id[section_id] for section_id in req.source_section_ids]
+        utterance_ids = [
+            material.utterance_id
+            for section in sorted(source_sections, key=lambda item: (item.sort_order, item.id))
+            for material in sorted(section.materials, key=lambda item: (item.sort_order, item.id))
+        ]
+        if utterance_ids:
+            await _move_materials(
+                db,
+                project_id=project_id,
+                target=target,
+                utterance_ids=utterance_ids,
+                assigned_by=assigned_by,
+                assignment_reason=(
+                    "ai_section_merge"
+                    if assigned_by == MemoirSectionMaterialAssignedBy.AI
+                    else "section_merge"
+                ),
+            )
+        if req.title is not None:
+            target.title = req.title
+            target.version += 1
+            target.updated_at = utcnow_naive()
+            db.add(target)
+        await db.execute(
+            delete(MemoirSection).where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.id.in_(req.source_section_ids),
+            )
+        )
+        await db.flush()
+
+    remaining = await _load_sections(db, project_id=project_id, chapter_id=chapter_id)
+    await _set_section_order(db, sections=remaining)
+    await mark_section_structure_changed(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter_ids={chapter_id},
+        operation="merge_sections",
+        updated_by=updated_by,
+    )
+
+
 async def merge_sections(
     db: AsyncSession,
     *,
@@ -1327,80 +1400,16 @@ async def merge_sections(
     req: MemoirSectionMergeRequest,
     allow_admin: bool = False,
 ) -> MemoirSectionCollectionResponse:
-    await load_memoir_project(
-        db,
-        project_id,
-        user_id,
-        allow_admin=allow_admin,
-    )
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await lock_plan_structure(db, project_id=project_id)
-    if target_section_id in req.source_section_ids:
-        raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
-    target = await _load_section(
-        db,
-        project_id=project_id,
-        section_id=target_section_id,
-    )
-    await lock_chapter_structure(
+    target = await _load_section(db, project_id=project_id, section_id=target_section_id)
+    await lock_chapter_structure(db, project_id=project_id, chapter_id=target.chapter_id)
+    await apply_section_merge_groups(
         db,
         project_id=project_id,
         chapter_id=target.chapter_id,
-    )
-    target = await _load_section(
-        db,
-        project_id=project_id,
-        section_id=target_section_id,
-    )
-    source_sections = [
-        await _load_section(db, project_id=project_id, section_id=section_id)
-        for section_id in req.source_section_ids
-    ]
-    if any(section.chapter_id != target.chapter_id for section in source_sections):
-        raise HTTPException(status_code=400, detail="只能合并同一章内的小章节")
-    utterance_ids = [
-        material.utterance_id
-        for section in sorted(
-            source_sections,
-            key=lambda item: (item.sort_order, item.id),
-        )
-        for material in sorted(
-            section.materials,
-            key=lambda item: (item.sort_order, item.id),
-        )
-    ]
-    if utterance_ids:
-        await _move_materials(
-            db,
-            project_id=project_id,
-            target=target,
-            utterance_ids=utterance_ids,
-            assigned_by=MemoirSectionMaterialAssignedBy.USER,
-            assignment_reason="section_merge",
-        )
-    if req.title is not None:
-        target.title = req.title
-        target.version += 1
-        target.updated_at = utcnow_naive()
-        db.add(target)
-    await db.execute(
-        delete(MemoirSection).where(
-            MemoirSection.project_id == project_id,
-            MemoirSection.id.in_(req.source_section_ids),
-        )
-    )
-    await db.flush()
-    remaining = await _load_sections(
-        db,
-        project_id=project_id,
-        chapter_id=target.chapter_id,
-    )
-    await _set_section_order(db, sections=remaining)
-    await mark_section_structure_changed(
-        db,
-        project_id=project_id,
         plan=plan,
-        chapter_ids={target.chapter_id},
-        operation="merge_sections",
+        groups=[(target_section_id, req)],
     )
     await db.commit()
     return await _collection_response(db, project_id=project_id)
