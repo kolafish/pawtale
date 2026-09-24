@@ -43,6 +43,13 @@ def test_subtitles_pack_at_most_two_short_sentences_per_page() -> None:
         "走吧。",
     ]
 
+    long_then_short = "小时候我和爷爷在院子里看月亮。后来搬家。"
+    separate_pages = _subtitle_ranges(long_then_short, max_chars=_QUOTE_PAGE_MAX_CHARS)
+    assert [long_then_short[start:end] for start, end in separate_pages] == [
+        "小时候我和爷爷在院子里看月亮。",
+        "后来搬家。",
+    ]
+
 
 def test_unpunctuated_subtitles_keep_every_character_in_two_line_pages() -> None:
     text = "我小时候经常去爷爷奶奶家玩记得爷爷很喜欢我每天都会摘一朵大栀子花带回来给我三年级的时候我转学进了城"

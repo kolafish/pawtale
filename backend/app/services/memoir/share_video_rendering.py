@@ -153,6 +153,8 @@ def _subtitle_ranges(text: str, *, max_chars: int = 24) -> list[tuple[int, int]]
         if page_start is not None and page_end is not None and (
             _visible_range_length(text, page_start, fragment_end) > max_chars
             or page_sentences + fragment_sentences > _QUOTE_PAGE_MAX_SENTENCES
+            or _visible_range_length(text, page_start, page_end) > _QUOTE_LINE_MAX_CHARS
+            or _visible_range_length(text, fragment_start, fragment_end) > _QUOTE_LINE_MAX_CHARS
             or page_is_split_sentence
             or is_split_sentence
         ):
