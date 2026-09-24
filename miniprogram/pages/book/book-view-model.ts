@@ -78,6 +78,7 @@ export interface BookChapterView extends Pick<
   draftVersionText: string;
   draftActionText: string;
   chapterGuidanceText: string;
+  bookInclusionNotice: string;
   chapterNeedsAction: boolean;
   draftBusy: boolean;
   draftError: string;
@@ -841,6 +842,7 @@ export type BookOutputData = ReturnType<typeof bookOutputData>;
 export function bookHomeOutputData(
   output: MemoirBookOutput | null,
   progress: MemoirDraftProgress | null = null,
+  chapters: BookChapterView[] = [],
 ): Pick<
   BookHomeData,
   | "bookContentAvailable"
@@ -853,18 +855,64 @@ export function bookHomeOutputData(
   const content = latestBookContent(output);
   const emptyBookContent = `${trimText(output?.title || "")}\n\n目录`;
   const available = Boolean(content && trimText(content) !== emptyBookContent);
-  const includedChapterCount = available ? bookOutputTocItems(output).length : 0;
-  const totalChapterCount = progress?.total_chapter_count || 0;
+  const includedIds = new Set(available ? bookOutputTocItems(output).map((item) => item.chapterId) : []);
+  const includedChapterCount = includedIds.size;
+  const plannedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
+  const totalChapterCount = chapters.length ? plannedChapters.length : progress?.total_chapter_count || 0;
+  const omittedNames = chapters.flatMap((chapter, index) => (
+    chapter.include_in_book !== false && !includedIds.has(chapter.id)
+      ? [`第${index + 1}章「${trimText(chapter.editingTitle || chapter.title) || "未命名章节"}」`]
+      : []
+  ));
+  const omittedSubject = omittedNames.length
+    ? `${omittedNames.slice(0, 2).join("、")}${omittedNames.length > 2 ? "等章节" : ""}`
+    : "其余章节";
   return {
     bookContentAvailable: available,
     bookCharCount: available ? trimText(content).length : 0,
     bookIncludedChapterCount: includedChapterCount,
     bookPartialNotice: available && !output?.is_stale && totalChapterCount > includedChapterCount
-      ? `已有 ${includedChapterCount}/${totalChapterCount} 章可读；其余章节尚未收录。你可以先阅读或导出当前书稿。`
+      ? `${omittedSubject}尚未收入当前书稿。${bookOmissionFollowUp(progress, plannedChapters.filter((chapter) => !includedIds.has(chapter.id)))}`
       : "",
     bookPreviewTitle: bookOutputPreviewTitle(output),
     bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
+}
+
+function bookOmissionFollowUp(
+  progress: MemoirDraftProgress | null,
+  omittedChapters: BookChapterView[],
+): string {
+  if (progress?.status === "needs_input") {
+    return "请查看待确认事项，处理后书稿会继续更新。";
+  }
+  if (progress?.status === "failed") {
+    return "后台整理遇到问题，请查看待确认事项并重试。";
+  }
+  if (progress?.status === "processing") {
+    return "后台正在整理，完成后请再查看。";
+  }
+  if (omittedChapters.some((chapter) => !chapter.draftAvailable)) {
+    return "请进入对应章节查看正文整理进度。";
+  }
+  return "如需将其收入书稿，请查看待确认事项。";
+}
+
+export function bookChapterInclusionData(
+  chapters: BookChapterView[],
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): BookChapterView[] {
+  const content = latestBookContent(output);
+  const available = Boolean(content && trimText(content) !== `${trimText(output?.title || "")}\n\n目录`);
+  const includedIds = new Set(available ? bookOutputTocItems(output).map((item) => item.chapterId) : []);
+  return chapters.map((chapter) => ({
+    ...chapter,
+    bookInclusionNotice: available && chapter.include_in_book !== false
+      && chapter.draftAvailable && !includedIds.has(chapter.id)
+      ? `本章正文可阅读，但尚未收入当前书稿。${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
+      : "",
+  }));
 }
 
 function chapterOption(chapter: Pick<BookChapterView, "id" | "title" | "editingTitle">, index: number): ChapterPickerOption {
@@ -1129,6 +1177,7 @@ export function buildChapterViews(
           assignedPendingCount,
           assignedRemovedCount,
         ),
+        bookInclusionNotice: "",
         draftBusy: false,
         draftError: "",
       };

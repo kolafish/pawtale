@@ -79,6 +79,7 @@ import {
   toggleBookSplitSourcePatch,
 } from "./book-page-plan-helpers";
 import {
+  bookChapterInclusionData,
   bookHomeOutputData,
   buildChapterViews,
   chapterCollectionData,
@@ -556,12 +557,13 @@ definePage<BookPageData>()({
   applyBookOutput(output: MemoirBookOutput | null, progress: MemoirDraftProgress | null = null) {
     const previousVersionId = this.bookOutput?.latest_version?.id;
     const previousStale = Boolean(this.data.bookStaleNotice);
-    const bookData = bookHomeOutputData(output, progress);
+    const bookData = bookHomeOutputData(output, progress, this.data.chapters);
     const shareStateChanged = previousVersionId !== output?.latest_version?.id
       || previousStale !== Boolean(bookData.bookStaleNotice);
     this.bookOutput = output;
     this.setData({
       ...bookData,
+      chapters: bookChapterInclusionData(this.data.chapters, output, progress),
       ...(shareStateChanged ? {
         bookShareReady: false,
         bookShareNeedsUpdate: false,
