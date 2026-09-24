@@ -33,7 +33,7 @@
   </view>
 
   <view
-    wx:if="{{!embedded && !recording && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
+    wx:if="{{!embedded && !(sessionGoal === 'book_completion' && recording) && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
     class="story-growth-bubble {{progressNoticeTitle ? 'ready' : storyGrowthNoticeState}}"
     aria-live="polite"
   >

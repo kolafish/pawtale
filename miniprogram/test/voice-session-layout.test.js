@@ -17,7 +17,7 @@ test("voice live transcript uses one measured scroll path", () => {
 
 test("book completion recording removes panels that crowd the transcript", () => {
   assert.match(template, /wx:if="\{\{!recording \|\| sessionGoal !== 'book_completion'\}\}" class="topic-panel"/);
-  assert.match(template, /wx:if="\{\{!embedded && !recording && \(progressNoticeTitle/);
+  assert.match(template, /wx:if="\{\{!embedded && !\(sessionGoal === 'book_completion' && recording\) && \(progressNoticeTitle/);
   assert.match(template, /wx:if="\{\{!recording\}\}" class="completion-issue-head"/);
   assert.match(template, /wx:if="\{\{showCompletionIssueActions && !recording\}\}"/);
   assert.match(template, /class="completion-issue-question"/);
