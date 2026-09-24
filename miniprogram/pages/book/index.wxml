@@ -70,11 +70,13 @@
       <view class="book-share-primary-action">
         <button wx:if="{{!bookShareStatusKnown}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
         <button wx:elif="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送给家人</button>
+        <button wx:elif="{{bookShareStale}}" class="primary-button small" disabled="{{true}}">书稿更新中</button>
+        <button wx:elif="{{bookShareNeedsUpdate}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="updateBookShare">更新家人阅读的书稿</button>
         <button wx:elif="{{!bookShareActive}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
         <button wx:else class="primary-button small" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
       </view>
       <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
-        <button class="book-share-manage-button" disabled="{{bookShareBusy}}" bindtap="regenerateBookShare">重新生成</button>
+        <button class="book-share-manage-button" disabled="{{bookShareBusy || bookShareStale}}" bindtap="regenerateBookShare">重新生成</button>
         <button class="book-share-manage-button is-danger" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
       </view>
     </view>

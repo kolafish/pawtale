@@ -16,6 +16,7 @@ from app.clock import utcnow_naive
 from app.config import get_settings
 from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare
+from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookOutputResponse,
     MemoirBookOutputVersionSummaryResponse,
@@ -23,8 +24,8 @@ from app.schemas.memoir_book import (
     MemoirBookShareStatusResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_outputs import _output_version_response
 from app.services.memoir.book_output_versions import book_output_version_title
+from app.services.memoir.book_outputs import _output_version_response, get_book_output
 
 
 SHARE_LIFETIME = timedelta(days=7)
@@ -50,25 +51,37 @@ async def _owned_output(db: AsyncSession, user_id: str, project_id: str) -> Memo
     return output
 
 
+async def _current_version(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> tuple[MemoirBookOutputVersion | None, bool]:
+    output = await get_book_output(db, user_id=user_id, project_id=project_id)
+    version_id = output.latest_version.id if output.latest_version else None
+    version = await db.get(MemoirBookOutputVersion, version_id) if version_id else None
+    return version, output.is_stale
+
+
 async def share_status(db: AsyncSession, *, user_id: str, project_id: str) -> MemoirBookShareStatusResponse:
     output = await _owned_output(db, user_id, project_id)
     share = await db.get(MemoirBookShare, output.id, populate_existing=True)
     active = share is not None and share.expires_at > utcnow_naive()
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id)
     return MemoirBookShareStatusResponse(
         active=active,
         expires_at=share.expires_at if active else None,
         token=_stable_token(share.output_id, share.token_hash) if active else None,
+        stale=stale,
+        current=bool(active and not stale and version and share.version_id == version.id),
     )
 
 
 async def create_share(db: AsyncSession, *, user_id: str, project_id: str) -> MemoirBookShareCreateResponse:
     output = await _owned_output(db, user_id, project_id)
-    version = await db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.output_id == output.id)
-        .order_by(MemoirBookOutputVersion.version.desc())
-        .limit(1)
-    )
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id)
+    if stale:
+        raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
     if version is None or not version.content.strip():
         raise HTTPException(status_code=409, detail="请先生成可阅读的书稿")
     token = secrets.token_urlsafe(32)
@@ -93,6 +106,24 @@ async def create_share(db: AsyncSession, *, user_id: str, project_id: str) -> Me
     ))
     await db.commit()
     return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash), expires_at=expires_at)
+
+
+async def update_share(db: AsyncSession, *, user_id: str, project_id: str) -> MemoirBookShareCreateResponse:
+    output = await _owned_output(db, user_id, project_id)
+    share = await db.get(MemoirBookShare, output.id, populate_existing=True)
+    if share is None or share.expires_at <= utcnow_naive():
+        raise HTTPException(status_code=409, detail="阅读链接已失效，请重新生成")
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id)
+    if stale:
+        raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
+    if version is None or not version.content.strip():
+        raise HTTPException(status_code=409, detail="请先生成可阅读的书稿")
+    share.version_id = version.id
+    await db.commit()
+    return MemoirBookShareCreateResponse(
+        token=_stable_token(share.output_id, share.token_hash),
+        expires_at=share.expires_at,
+    )
 
 
 async def revoke_share(db: AsyncSession, *, user_id: str, project_id: str) -> None:
@@ -121,6 +152,12 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     version = await db.get(MemoirBookOutputVersion, share.version_id)
     if output is None or version is None or version.output_id != output.id:
         raise invalid
+    owner_id = await db.scalar(select(Project.user_id).where(Project.id == output.project_id))
+    if owner_id is None:
+        raise invalid
+    current_version, stale = await _current_version(db, user_id=owner_id, project_id=output.project_id)
+    if stale or current_version is None or share.version_id != current_version.id:
+        raise HTTPException(status_code=409, detail="书稿正在更新，暂时无法阅读分享内容")
     reading_version = _output_version_response(version, fallback_title=output.title)
     manuscript = reading_version.manuscript
     if manuscript is not None:
