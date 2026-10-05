@@ -737,6 +737,11 @@ async def load_chapter_draft_generation_plan(
     )
 
 
+class ChapterGenerationNeedsMaterial(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=422, detail="章节没有可用于生成正文的素材")
+
+
 def chapter_generation_context(
     chapter: MemoirBookPlanChapter,
     *,
@@ -791,7 +796,7 @@ def chapter_generation_context(
                 )
             )
     if not materials:
-        raise HTTPException(status_code=422, detail="章节没有可用于生成正文的素材")
+        raise ChapterGenerationNeedsMaterial()
     signature = semantic_json_signature(
         {
             "chapter": {

@@ -23,10 +23,12 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir.book_manuscript_ai import GeneratedManuscriptCopy
 from app.services.memoir.book_manuscript_cleanup import (
+    brief_text,
     expanded_afterword,
     fallback_back_cover_quote,
     fallback_chapter_intro,
     fallback_preface,
+    first_sentence,
     formal_book_title as cleanup_formal_book_title,
     sanitize_manuscript_payload,
 )
@@ -176,19 +178,6 @@ def project_narrator_name(project: object) -> str:
     metadata = getattr(project, "metadata_json", None)
     profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY) if isinstance(metadata, dict) else None
     return limited_book_text(profile.get("narrator_name"), max_chars=80) if isinstance(profile, dict) else ""
-
-
-def _brief_text(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    return normalized if len(normalized) <= max_chars else normalized[:max_chars].rstrip("，。；、,. ") + "。"
-
-
-def _first_sentence(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    for index, char in enumerate(normalized):
-        if char in "。！？!?":
-            return _brief_text(normalized[: index + 1], max_chars=max_chars)
-    return _brief_text(normalized, max_chars=max_chars) if normalized else ""
 
 
 def _strip_title_wrappers(title: str) -> str:
@@ -348,10 +337,10 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
 
 def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
     for ref in source_refs:
-        quote = _brief_text(ref.quote, max_chars=80)
+        quote = brief_text(ref.quote, max_chars=80)
         if quote:
             return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
-    quote = _first_sentence(content, max_chars=80)
+    quote = first_sentence(content, max_chars=80)
     return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
 
 

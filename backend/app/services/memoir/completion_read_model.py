@@ -58,6 +58,7 @@ class _ChapterSummarySnapshot:
     draft: MemoirBookChapterDraft | None
     version: MemoirBookChapterDraftVersion | None
     context: chapter_generation.ChapterGenerationContext | None
+    needs_material: bool
     digest: MemoirChapterDigest | None
 
 
@@ -127,6 +128,26 @@ async def _latest_version(
     return draft, version
 
 
+def _needs_material_summary(
+    chapter: MemoirBookPlanChapter,
+) -> MemoirChapterCompletionSummary:
+    return MemoirChapterCompletionSummary(
+        chapter_id=chapter.id,
+        title=chapter.title,
+        sort_order=chapter.sort_order,
+        state="needs_input",
+        next_action=MemoirChapterCompletionNextAction(
+            kind="wait",
+            title="本章还需要讲述素材",
+            detail="请先补充相关讲述，再检查并整理本章。",
+            action_text="先补充讲述",
+            disabled=True,
+        ),
+        headline="本章还没有讲述素材",
+        detail="已有书稿会保留，本章补充讲述后再整理。",
+    )
+
+
 async def chapter_summary(
     db: AsyncSession,
     *,
@@ -170,6 +191,8 @@ async def chapter_summary(
             headline="正在检查并整理本章",
             detail="每个小节完成后都会保存进度。",
         )
+    if snapshot is not None and snapshot.needs_material:
+        return _needs_material_summary(chapter)
     section_exists = (
         snapshot.section_exists
         if snapshot is not None
@@ -222,7 +245,7 @@ async def chapter_summary(
         )
     )
     draft_current = False
-    if section_exists:
+    if section_exists or snapshot is None:
         try:
             context = (
                 snapshot.context
@@ -238,6 +261,8 @@ async def chapter_summary(
                     context,
                     version,
                 )
+        except chapter_generation.ChapterGenerationNeedsMaterial:
+            return _needs_material_summary(chapter)
         except HTTPException:
             draft_current = False
     digest = (
@@ -538,12 +563,15 @@ async def _chapter_summary_snapshots(
     for chapter in chapters:
         issues = issues_by_chapter.get(chapter.id, [])
         context = None
+        needs_material = False
         if chapter.id not in active_chapter_ids:
             try:
                 context = chapter_generation.chapter_generation_context(
                     chapter,
                     polish_level=polish_level,
                 )
+            except chapter_generation.ChapterGenerationNeedsMaterial:
+                needs_material = True
             except HTTPException:
                 pass
         snapshots[chapter.id] = _ChapterSummarySnapshot(
@@ -553,6 +581,7 @@ async def _chapter_summary_snapshots(
             draft=drafts.get(chapter.id),
             version=versions.get(chapter.id),
             context=context,
+            needs_material=needs_material,
             digest=current_digests.get(chapter.id),
         )
     return snapshots
@@ -590,7 +619,11 @@ async def book_overview(
         for chapter in chapters
     ]
     completed = sum(item.state in {"confirmed", "draft_ready"} for item in items)
-    needs_input = sum(item.state == "needs_input" for item in items)
+    needs_material = sum(
+        item.state == "needs_input" and item.next_action.kind == "wait"
+        for item in items
+    )
+    needs_input = sum(item.state == "needs_input" for item in items) - needs_material
     needs_check = sum(
         item.state in {"not_started", "failed"} for item in items
     )
@@ -601,6 +634,8 @@ async def book_overview(
             progress.append(f"{needs_check} 章待检查")
         if needs_input:
             progress.append(f"{needs_input} 章待确认")
+        if needs_material:
+            progress.append(f"{needs_material} 章待补充讲述")
         headline = f"还有 {unfinished} 章未完成"
         detail = "，".join(progress) + "。每章只显示当前最重要的一步。"
     else:

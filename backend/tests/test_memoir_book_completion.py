@@ -1187,6 +1187,80 @@ async def _create_current_draft(
     return draft, version
 
 
+@pytest.mark.parametrize("empty_sections_present", [True, False])
+async def test_completion_requires_material_before_checking_empty_chapters(
+    client, test_db, empty_sections_present,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    source = await create_test_voice_transcript(
+        client, test_db, "这是用于发布回归的虚构讲述。", project_id=project_id,
+    )
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["有讲述的章节", "尚未讲述的章节一", "尚未讲述的章节二"],
+        source_refs_by_chapter=[[memoir_source_ref(source)], [], []],
+    )
+    _, version = await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    version.prompt_snapshot = chapter_generation.CHAPTER_GENERATION_ENGINE
+    if not empty_sections_present:
+        for section in (await test_db.scalars(
+            select(MemoirSection).where(MemoirSection.chapter_id.in_([c.id for c in chapters[1:]]))
+        )).all():
+            await test_db.delete(section)
+    await test_db.commit()
+
+    overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert overview.status_code == 200
+    body = overview.json()
+    assert body["completed_chapters"] == 1
+    for item in body["chapters"][1:]:
+        assert item["state"] == "needs_input"
+        assert item["next_action"]["kind"] == "wait"
+        assert item["next_action"]["disabled"] is True
+        assert item["active_issue"] is None
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/workspace"
+    )
+    assert workspace.status_code == 200
+    assert workspace.json()["completion_summary"]["state"] == "needs_input"
+
+    old_batch = MemoirBookCompletionJob(
+        project_id=project_id,
+        status=MemoirBookCompletionJobStatus.FAILED.value,
+        target_chapters_json=[{"chapter_id": c.id, "title": c.title} for c in chapters[1:]],
+        chapter_job_ids_json={},
+        enqueue_errors_json={c.id: "章节没有可用于生成正文的素材" for c in chapters[1:]},
+    )
+    test_db.add(old_batch)
+    await test_db.commit()
+    retry = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={"retry_job_id": old_batch.id},
+    )
+    assert retry.status_code == 409
+    assert await test_db.scalar(select(func.count()).select_from(MemoirBookCompletionJob)) == 1
+    await test_db.refresh(old_batch)
+    assert old_batch.status == MemoirBookCompletionJobStatus.FAILED.value
+
+    # A real unchecked chapter still queues normally; the empty chapters do not.
+    version.prompt_snapshot = ""
+    await test_db.commit()
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs", json={},
+    )
+    assert queued.status_code == 202
+    assert queued.json()["failed_chapter_count"] == 0
+    assert [item["chapter_id"] for item in queued.json()["chapters"]] == [chapters[0].id]
+    assert queued.json()["chapters"][0]["job_id"]
+    assert await test_db.scalar(select(func.count()).select_from(MemoirSectionMaterial)) == 1
+
+
 async def test_existing_current_draft_still_requires_a_real_completion_check(
     client,
     test_db,
