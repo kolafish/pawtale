@@ -186,7 +186,7 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
-test("home recommendation starts a video job and opens its preview without sharing", async () => {
+test("home recommendation opens the editor immediately without creating or accepting a video", async () => {
   const candidate = {
     id: "candidate-1", project_id: "p1", voice_session_id: "session-1",
     utterance_id: "utterance-1", selected_text: "父亲把围巾围在我脖子上。",
@@ -198,7 +198,7 @@ test("home recommendation starts a video job and opens its preview without shari
     getMemoirShareVideoCandidate: async () => ({ candidate }),
     createMemoirShareVideoCandidateJob: async (...args) => {
       created.push(args);
-      return { id: "video-1", utterance_id: "utterance-1", status: "pending" };
+      return new Promise(() => {});
     },
     dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
   } });
@@ -208,18 +208,20 @@ test("home recommendation starts a video job and opens its preview without shari
   await context.refreshShareCandidate("p1");
   assert.equal(context.data.shareCandidate.id, "candidate-1");
   assert.equal(context.data.shareCandidateDurationText, "30 秒");
-  await context.createShareCandidateVideo();
-  assert.deepEqual(created, [["p1", "candidate-1", { videoStyle: "illustrated" }]]);
-  assert.equal(context.data.shareCandidate.status, "accepted");
-  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=video-1"]);
+  context.openShareCandidateEditor();
+  assert.deepEqual(created, []);
+  assert.equal(context.data.shareCandidate.status, "ready");
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
 
+  context.setData({ shareCandidate: { ...candidate, status: "accepted", video_job_id: "video-1" } });
   context.openShareCandidateVideo();
   assert.equal(navigations.length, 2);
+  assert.equal(navigations[1], "/pages/transcript-media/index?id=utterance-1&jobId=video-1");
   await context.dismissShareCandidate();
   assert.equal(context.data.shareCandidate, null);
 });
 
-test("home uploaded recommendation opens the existing creation page before creating a job", async () => {
+test("home editor entry keeps voice and dismiss guards", () => {
   const created = [];
   const navigations = [];
   const candidate = {
@@ -229,14 +231,16 @@ test("home uploaded recommendation opens the existing creation page before creat
   const { page } = loadHomePage({ voiceApiExports: {
     createMemoirShareVideoCandidateJob: async (...args) => { created.push(args); },
   } });
-  const context = pageContext(page, {
-    projectId: "p1", hasProject: true, shareVideoStyle: "uploaded", shareCandidate: candidate,
-  });
   global.wx = { navigateTo({ url }) { navigations.push(url); } };
-  await context.createShareCandidateVideo();
+  const context = pageContext(page, { projectId: "p1", hasProject: true, shareCandidate: candidate });
+  context.openShareCandidateEditor();
+  assert.equal(context.data.shareCandidate.status, "ready");
+  context.setData({ voiceEntry: { voiceSessionId: "session-1" } });
+  context.openShareCandidateEditor();
+  context.setData({ voiceEntry: null, shareCandidateDismissing: true });
+  context.openShareCandidateEditor();
   assert.deepEqual(created, []);
   assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
-  assert.equal(context.data.shareCandidate.status, "ready");
 });
 
 test("home shows one latest video and opens the exact result or the full library", async () => {
