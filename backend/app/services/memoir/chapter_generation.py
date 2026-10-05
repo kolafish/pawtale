@@ -66,8 +66,9 @@ CHAPTER_GENERATION_SYSTEM_PROMPT = (
 )
 CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
     "你是一位谨慎的中文回忆录编辑。"
-    "只使用允许的原始讲述和用户明确给出的事实更正修改当前小节，"
-    "不自行创造事实。"
+    "以当前小节正文为编辑基线，严格按用户已确认的修改思路局部修改，"
+    "未涉及的现有内容必须逐字保留。"
+    "新增或变更的事实只能依据允许的原始讲述和用户明确给出的事实更正，不自行创造事实。"
 )
 CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
 CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS = 40
@@ -919,7 +920,21 @@ def build_chapter_generation_prompt(
         for item in editorial_guidance[:8]
         if item.strip()
     ) or "（无额外编辑建议）"
-    polish_requirements = text_polish_requirements(context.polish_level)
+    polish_requirements = (
+        "本次仅按已确认修改思路局部编辑，不执行通用润色。"
+        if revision_instruction
+        else f"文字润色强度：{context.polish_level.value}\n{text_polish_requirements(context.polish_level)}"
+    )
+    writing_rules = "" if revision_instruction else (
+        "- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。\n"
+        "- 只能使用输入中的事实和感受，可以调整顺序、合并重复。\n"
+        "- 正文根据内容自然分段，段落之间用换行分隔。\n"
+    )
+    task = (
+        f"请按已确认修改思路局部修改回忆录章节“{context.chapter_title}”中的当前小节。"
+        if revision_instruction
+        else f"请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。"
+    )
     generation_scope = (
         "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项；"
         "不得复述其他小节的内容。\n"
@@ -940,14 +955,15 @@ def build_chapter_generation_prompt(
 {revision_instruction}
 
 修改规则：
-- 先理解用户要调整的对象、范围和表达效果，再输出修改后的标题和完整正文。
+- 以当前小节正文为编辑基线，只修改已确认思路明确涉及的对象和范围，再输出修改后的标题和完整正文。
 - 如果修改要求涉及标题中的错字或表达，必须同步修改标题；否则标题保持不变。
 - 同一个错字或名称同时出现在标题和正文时，两处必须同步修正。
-- 指令未涉及的事实和段落尽量保持不变。
-- 可以按要求调整措辞、语气、详略、顺序和段落结构。
-- 用户在指令中明确给出的事实更正可以采用；除此之外仍只能使用下方原始讲述中的事实。
+- 未涉及的文字、用户已写内容、段落及换行必须逐字保留，不删除、不改写。
+- 只有已确认思路明确要求时，才能在指定范围内调整措辞、语气、详略、顺序或段落结构；通用整理、编辑建议和润色要求不得扩大修改范围。
+- 下方原始讲述仅用于校对本次新增或变更事实的依据，不能因其中没有对应内容而删除当前正文中本次未涉及的说明。
+- 用户在指令中明确给出的事实更正可以采用；其他新增或变更事实必须有下方原始讲述支持。
 - 用户只要求“补充更多细节”却没有说出具体事实、且原始讲述也不支持时，不得自行虚构，应放入 missing_source_candidates。
-- 不要在正文里复述用户指令，也不要解释修改过程。
+- 不要把本次修改指令或修改过程的解释新增到正文。
 """
     elif current_section_content:
         reason = source_update_reason or "本小节的原始讲述发生了变化。"
@@ -958,7 +974,7 @@ def build_chapter_generation_prompt(
 本次局部更新原因：{reason}
 请在现有正文基础上融入下方素材或调整必要的衔接。保留仍受素材支持的事实、用户原有表达和无关段落；只改与本次变化有关的文字。若素材不支持原有表述，不要延续该表述。标题保持输入标题。
 """
-    return f"""请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。
+    return f"""{task}
 
 本章完整小节顺序：
 {outline}
@@ -966,7 +982,6 @@ def build_chapter_generation_prompt(
 编辑建议：
 {guidance}
 
-文字润色强度：{context.polish_level.value}
 {polish_requirements}
 
 前一小节衔接参考：
@@ -996,11 +1011,8 @@ def build_chapter_generation_prompt(
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
 - 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
-- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。
-- 只能使用输入中的事实和感受，可以调整顺序、合并重复。
-- 正文根据内容自然分段，段落之间用换行分隔。
-- 不要为了完整而虚构时间、地点、人物、因果或心理活动。
-- 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
+{writing_rules}- 不要为了完整而虚构时间、地点、人物、因果或心理活动。
+- 不在正文中{"新增" if revision_instruction else "出现"} section_id、material_id、编辑指令、“叙述者”等后台术语。
 """
 
 
