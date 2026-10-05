@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
+import math
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +14,8 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 from app.services.memoir.branding import BRAND_ATTRIBUTION, render_brand_lockup
+from app.services.memoir.share_video_story_plan import ShareVideoStoryPlan, validate_story_plan_source
+from app.services.memoir.share_video_styles import ShareVideoStyle
 
 
 _VIDEO_WIDTH = 1280
@@ -56,6 +60,8 @@ class ShareVideoRenderRequest:
     background_image_path: Path | None = None
     background_segments: list[ShareVideoBackgroundSegment] | None = None
     title: str = ""
+    video_style: ShareVideoStyle = "illustrated"
+    animation_plan: ShareVideoStoryPlan | None = None
 
 
 class ShareVideoGenerationError(RuntimeError):
@@ -94,28 +100,54 @@ def _ffmpeg_filter_available(ffmpeg: str, filter_name: str) -> bool:
     return any(marker in line for line in result.stdout.splitlines())
 
 
-async def _run_ffmpeg(args: list[str]) -> None:
+async def _stop_ffmpeg(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(process.wait(), timeout=3)
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        await process.wait()
+
+
+async def _run_ffmpeg(args: list[str], *, frames: Iterable[bytes] | None = None) -> None:
     process = await asyncio.create_subprocess_exec(
         *args,
+        stdin=asyncio.subprocess.PIPE if frames is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    readers = []
     try:
-        _stdout, stderr = await process.communicate()
-    except asyncio.CancelledError:
-        if process.returncode is None:
+        if frames is None:
+            _stdout, stderr = await process.communicate()
+        else:
+            # Drain encoder diagnostics while feeding frames so neither pipe
+            # can stall the worker. Yield between frames to preserve its lease.
+            readers = [asyncio.create_task(process.stdout.read()), asyncio.create_task(process.stderr.read())]
             try:
-                process.terminate()
-            except ProcessLookupError:
+                for frame in frames:
+                    process.stdin.write(frame)
+                    await process.stdin.drain()
+                    await asyncio.sleep(0)
+            except (BrokenPipeError, ConnectionResetError):
+                # A failed encoder's stderr below is the actionable error.
                 pass
-            try:
-                await asyncio.wait_for(process.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
-                await process.wait()
+            finally:
+                process.stdin.close()
+            await process.wait()
+            _stdout, stderr = await asyncio.gather(*readers)
+    except BaseException:
+        await _stop_ffmpeg(process)
+        if readers:
+            await asyncio.gather(*readers, return_exceptions=True)
         raise
     if process.returncode != 0:
         message = stderr.decode("utf-8", errors="ignore").strip().splitlines()[-1:]
@@ -363,8 +395,11 @@ def _quote_karaoke_text(
     lines: list[tuple[int, int]],
     char_timings: list[dict[str, int]],
     event_start_ms: int,
+    *,
+    story_animation: bool = False,
 ) -> str:
-    pieces: list[str] = [r"{\an5\pos(640,356)\q2\fad(180,180)}"]
+    position = r"{\an5\pos(640,600)\q2\fad(180,180)}" if story_animation else r"{\an5\pos(640,356)\q2\fad(180,180)}"
+    pieces: list[str] = [position]
     elapsed_cs = 0
     for line_index, (line_start, line_end) in enumerate(lines):
         if line_index:
@@ -398,6 +433,12 @@ def _subtitle_file_content(request: ShareVideoRenderRequest) -> str:
     char_timings = request.char_timings
     if len(char_timings) != len(request.selected_text):
         char_timings = _linear_timings(request.selected_text, duration_ms)
+    story_animation = request.video_style == "story_animation"
+    quote_size = 50 if story_animation else 62
+    quote_primary = "&H00D8E8EF" if story_animation else _ASS_TEA_GOLD_COLOR
+    quote_secondary = "&H00EDF3F7" if story_animation else _ASS_INK_COLOR
+    quote_outline = "&H00201B16" if story_animation else _ASS_INK_COLOR
+    outline_width = 2 if story_animation else 0
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1280
@@ -407,7 +448,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Quote,{_SHARE_VIDEO_FONT_NAME},62,{_ASS_TEA_GOLD_COLOR},{_ASS_INK_COLOR},{_ASS_INK_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,120,120,80,1
+Style: Quote,{_SHARE_VIDEO_FONT_NAME},{quote_size},{quote_primary},{quote_secondary},{quote_outline},&H00000000,0,0,0,0,100,100,0,0,1,{outline_width},0,5,120,120,80,1
 Style: Meta,{_SHARE_VIDEO_FONT_NAME},28,{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,8,80,80,80,1
 Style: Mark,{_SHARE_VIDEO_FONT_NAME},112,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 Style: Rule,{_SHARE_VIDEO_FONT_NAME},10,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
@@ -415,7 +456,14 @@ Style: Rule,{_SHARE_VIDEO_FONT_NAME},10,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_AS
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    events = [header, *_decorative_subtitle_events(duration_ms)]
+    if story_animation:
+        # Keep the spoken text below the performance rather than over faces.
+        events = [header,
+            f"Dialogue: 0,0:00:00.00,{_ass_time(duration_ms)},Meta,,0,0,0,,{{\\an7\\pos(44,32)\\c&H00494339&}}老余口述\n",
+            f"Dialogue: 0,0:00:00.00,{_ass_time(duration_ms)},Meta,,0,0,0,,{{\\an9\\pos(1236,32)\\c&H00494339&}}往事小剧场 · 情景示意\n",
+        ]
+    else:
+        events = [header, *_decorative_subtitle_events(duration_ms)]
     for start, end in _subtitle_ranges(request.selected_text, max_chars=_QUOTE_PAGE_MAX_CHARS):
         lines = _quote_line_ranges(request.selected_text, start, end)
         if not lines:
@@ -424,7 +472,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end_ms = max(start_ms + 1, int(char_timings[end - 1]["end_ms"]) - request.start_ms)
         events.append(
             f"Dialogue: 1,{_ass_time(start_ms)},{_ass_time(end_ms)},Quote,,0,0,0,,"
-            f"{_quote_karaoke_text(request.selected_text, lines, char_timings, request.start_ms + start_ms)}\n"
+            f"{_quote_karaoke_text(request.selected_text, lines, char_timings, request.start_ms + start_ms, story_animation=story_animation)}\n"
         )
     return "".join(events)
 
@@ -615,6 +663,10 @@ def _multi_background_filter_complex(
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
+    if request.video_style == "story_animation":
+        if request.animation_plan is None:
+            raise ShareVideoGenerationError("往事小剧场缺少场景规划")
+        validate_story_plan_source(request.animation_plan, request.selected_text, request.end_ms-request.start_ms)
     ffmpeg = _ffmpeg_executable()
     request.target_path.parent.mkdir(parents=True, exist_ok=True)
     duration_seconds = max(0.1, (request.end_ms - request.start_ms) / 1000)
@@ -653,6 +705,26 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             "pcm_s16le",
             str(clip_audio_path),
         ])
+
+        if request.video_style == "story_animation":
+            from app.services.memoir.share_video_story_animation import create_story_renderer
+
+            renderer = create_story_renderer(request.animation_plan, _VIDEO_WIDTH, _VIDEO_HEIGHT)
+            frame_count = max(1, math.ceil(duration_seconds * 30))
+            await _run_ffmpeg([
+                ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{_VIDEO_WIDTH}x{_VIDEO_HEIGHT}",
+                "-r", "30", "-i", "-", "-i", str(clip_audio_path), *card_input_args,
+                "-filter_complex", _single_background_filter_complex(
+                    subtitle_path, has_background_image=False, body_seconds=duration_seconds,
+                    intro_seconds=intro_seconds, outro_seconds=outro_seconds,
+                ),
+                "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", "veryfast",
+                "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                "-t", f"{total_seconds:.3f}", "-movflags", "+faststart", str(temp_video_path),
+            ], frames=(renderer(index/30).tobytes() for index in range(frame_count)))
+            temp_video_path.replace(request.target_path)
+            return
 
         background_segments = _valid_background_segments(request)
         if len(background_segments) > 1:

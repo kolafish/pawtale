@@ -459,6 +459,7 @@ async def create_candidate_share_video(
             start_char=candidate.start_char,
             end_char=candidate.end_char,
             ai_model=req.ai_model,
+            video_style=req.video_style,
             background_source=req.background_source,
             background_style=req.background_style,
             background_mode=req.background_mode,

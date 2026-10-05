@@ -117,6 +117,26 @@
         </view>
       </view>
     </view>
+    <view class="field">
+      <text class="field-label ui-section-heading">默认分享视频风格</text>
+      <text class="mode-desc">用于这本回忆录之后制作的分享视频，每次制作时也可以重新选择。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="默认分享视频风格">
+        <view
+          wx:for="{{shareVideoStyleOptions}}"
+          wx:key="value"
+          class="mode-option ui-pressable {{shareVideoStyle === item.value ? 'selected' : ''}}"
+          data-video-style="{{item.value}}"
+          bindtap="selectShareVideoStyle"
+          aria-role="radio"
+          aria-checked="{{shareVideoStyle === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
+        >
+          <text class="mode-title">{{item.label}}</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{shareVideoStyle === item.value}}" class="option-check" aria-hidden="true">✓</text>
+        </view>
+      </view>
+    </view>
   </view>
 
   <view class="actions">

@@ -146,32 +146,33 @@
 
         <view class="share-video-background">
           <view class="share-video-background-head">
-            <text class="voice-edit-label">视频背景</text>
-            <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
+            <text class="voice-edit-label">本次视频风格</text>
+            <text class="share-video-background-current">{{shareVideoStyleLabel}}</text>
           </view>
-          <view class="share-video-background-options" aria-role="radiogroup" aria-label="视频背景">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="本次视频风格">
             <view
-              wx:for="{{shareVideoBackgroundSourceOptions}}"
+              wx:for="{{shareVideoStyleOptions}}"
               wx:key="value"
-              class="share-video-background-option {{item.value === shareVideoBackgroundSource ? 'selected' : ''}}"
-              data-background-source="{{item.value}}"
-              bindtap="selectShareVideoBackgroundSource"
+              class="share-video-background-option {{item.value === shareVideoStyle ? 'selected' : ''}}"
+              data-video-style="{{item.value}}"
+              bindtap="selectShareVideoStyle"
               aria-role="radio"
-              aria-checked="{{item.value === shareVideoBackgroundSource}}"
+              aria-checked="{{item.value === shareVideoStyle}}"
               aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
             </view>
           </view>
+          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">插图生成暂不可用，请选择自选画面或往事小剧场。</text>
         </view>
 
-        <view class="share-video-background">
+        <view wx:if="{{shareVideoUsesIllustration}}" class="share-video-background">
           <view class="share-video-background-head">
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
-          <text class="share-video-background-help">直接图片使用完整构图；视频选择 AI 背景时，会另行为字幕保留留白。</text>
+          <text class="share-video-background-help">直接图片使用完整构图；回忆画卷会另行为字幕保留留白。</text>
           <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
@@ -243,7 +244,7 @@
             class="primary-button"
             bindtap="createShareVideo"
             loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-            disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
+            disabled="{{!shareVideoSelectedCanGenerate || shareVideoStyleUnavailable || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
           >
             {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
           </button>

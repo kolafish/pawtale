@@ -8,6 +8,12 @@ import {
 } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import type { MemoirTranscriptPolishLevel } from "../../domain/memoir";
+import {
+  MEMOIR_SHARE_VIDEO_STYLES,
+  normalizeMemoirShareVideoStyle,
+  type MemoirShareVideoStyle,
+  type MemoirShareVideoStyleOption,
+} from "../../domain/memoir-transcript";
 import type { MemoirNarratorGender, MemoirProjectInput } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -41,6 +47,7 @@ interface ProjectEditDataset {
   gender?: string;
   mode?: string;
   polish?: string;
+  videoStyle?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<ProjectEditDataset>;
@@ -65,9 +72,11 @@ interface ProjectEditData {
   narratorAgeText: string;
   defaultNarrationMode: DefaultNarrationMode;
   transcriptPolishLevel: MemoirTranscriptPolishLevel;
+  shareVideoStyle: MemoirShareVideoStyle;
   genderOptions: Array<Option<MemoirNarratorGender>>;
   narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
   transcriptPolishOptions: TranscriptPolishOption[];
+  shareVideoStyleOptions: MemoirShareVideoStyleOption[];
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
@@ -107,6 +116,7 @@ definePage<ProjectEditData>()({
     narratorAgeText: "",
     defaultNarrationMode: "free_narration",
     transcriptPolishLevel: "medium",
+    shareVideoStyle: "illustrated",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
@@ -114,6 +124,7 @@ definePage<ProjectEditData>()({
     ],
     narrationOptions: DEFAULT_NARRATION_MODE_OPTIONS,
     transcriptPolishOptions: TRANSCRIPT_POLISH_OPTIONS,
+    shareVideoStyleOptions: MEMOIR_SHARE_VIDEO_STYLES,
   },
 
   onShow() {
@@ -139,6 +150,7 @@ definePage<ProjectEditData>()({
       narratorAgeText: "",
       defaultNarrationMode: "free_narration",
       transcriptPolishLevel: "medium",
+      shareVideoStyle: "illustrated",
     });
     setPageNavigationTitle("新建回忆录");
   },
@@ -161,6 +173,7 @@ definePage<ProjectEditData>()({
         narratorAgeText: profile.narratorAge === null ? "" : String(profile.narratorAge),
         defaultNarrationMode: profile.defaultNarrationMode,
         transcriptPolishLevel: transcriptPolishLevel(project),
+        shareVideoStyle: normalizeMemoirShareVideoStyle(project.metadata_json?.share_video_style),
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
@@ -211,6 +224,18 @@ definePage<ProjectEditData>()({
     }
   },
 
+  selectShareVideoStyle(event: DatasetEvent) {
+    const style = datasetChoice(
+      event,
+      "videoStyle",
+      MEMOIR_SHARE_VIDEO_STYLES.map((option) => option.value),
+      this.data.shareVideoStyle,
+    );
+    if (style) {
+      this.setData({ shareVideoStyle: style, error: "" });
+    }
+  },
+
   async saveProject() {
     if (this.data.saving || this.data.loading) {
       return;
@@ -239,6 +264,7 @@ definePage<ProjectEditData>()({
       default_interview_type: narrationFields.interviewType,
       default_session_goal: narrationFields.sessionGoal,
       transcript_polish_level: this.data.transcriptPolishLevel,
+      share_video_style: this.data.shareVideoStyle,
     };
     try {
       let createdProject = this.pendingCreatedProject;

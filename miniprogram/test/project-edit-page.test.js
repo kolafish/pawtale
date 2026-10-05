@@ -44,6 +44,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
     title: "爷爷的回忆",
     metadata_json: {
       transcript_polish_level: "high",
+      share_video_style: "story_animation",
       memoir_profile: {
         narrator_name: "爷爷",
         narrator_gender: "male",
@@ -70,6 +71,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
   assert.equal(context.data.narratorName, "爷爷");
   assert.equal(context.data.defaultNarrationMode, "human_interview");
   assert.equal(context.data.transcriptPolishLevel, "high");
+  assert.equal(context.data.shareVideoStyle, "story_animation");
   assert.deepEqual(context.data.narrationOptions.map(option => option.value), [
     "free_narration",
     "guided_interview",
@@ -84,6 +86,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
 
   context.selectNarrationMode({ currentTarget: { dataset: { mode: "book_completion" } } });
   context.selectTranscriptPolishLevel({ currentTarget: { dataset: { polish: "medium" } } });
+  context.selectShareVideoStyle({ currentTarget: { dataset: { videoStyle: "uploaded" } } });
   await context.saveProject();
 
   assert.equal(updates.length, 1);
@@ -93,6 +96,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
   assert.equal(updates[0].payload.default_interview_type, "ai_interview");
   assert.equal(updates[0].payload.default_session_goal, "book_completion");
   assert.equal(updates[0].payload.transcript_polish_level, "medium");
+  assert.equal(updates[0].payload.share_video_style, "uploaded");
 });
 
 test("project creation retries activation without creating a duplicate", async () => {
@@ -100,6 +104,7 @@ test("project creation retries activation without creating a duplicate", async (
   let creates = 0;
   let activations = 0;
   const updates = [];
+  const createdInputs = [];
   global.wx = {
     navigateBack() {},
     setNavigationBarTitle() {},
@@ -107,8 +112,9 @@ test("project creation retries activation without creating a duplicate", async (
   };
   const { page } = loadProjectEditPage({
     project,
-    createMemoirProject: async () => {
+    createMemoirProject: async (input) => {
       creates += 1;
+      createdInputs.push(input);
       return project;
     },
     activateMemoirProject: async () => {
@@ -124,6 +130,7 @@ test("project creation retries activation without creating a duplicate", async (
 
   await context.saveProject();
   assert.equal(creates, 1);
+  assert.equal(createdInputs[0].share_video_style, "illustrated");
   assert.match(context.data.error, /已创建.*激活失败/);
 
   context.changeTitle({ detail: { value: "第二版" } });

@@ -209,7 +209,7 @@ test("home recommendation starts a video job and opens its preview without shari
   assert.equal(context.data.shareCandidate.id, "candidate-1");
   assert.equal(context.data.shareCandidateDurationText, "30 秒");
   await context.createShareCandidateVideo();
-  assert.deepEqual(created, [["p1", "candidate-1"]]);
+  assert.deepEqual(created, [["p1", "candidate-1", { videoStyle: "illustrated" }]]);
   assert.equal(context.data.shareCandidate.status, "accepted");
   assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=video-1"]);
 
@@ -217,6 +217,26 @@ test("home recommendation starts a video job and opens its preview without shari
   assert.equal(navigations.length, 2);
   await context.dismissShareCandidate();
   assert.equal(context.data.shareCandidate, null);
+});
+
+test("home uploaded recommendation opens the existing creation page before creating a job", async () => {
+  const created = [];
+  const navigations = [];
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "ready", start_char: 0, end_char: 13,
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirShareVideoCandidateJob: async (...args) => { created.push(args); },
+  } });
+  const context = pageContext(page, {
+    projectId: "p1", hasProject: true, shareVideoStyle: "uploaded", shareCandidate: candidate,
+  });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.createShareCandidateVideo();
+  assert.deepEqual(created, []);
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+  assert.equal(context.data.shareCandidate.status, "ready");
 });
 
 test("home shows one latest video and opens the exact result or the full library", async () => {

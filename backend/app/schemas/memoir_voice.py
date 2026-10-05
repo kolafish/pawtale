@@ -22,6 +22,7 @@ from app.schemas.memoir_automation import (
     MemoirAutomationEventVoicePlaybackRequest as MemoirAutomationEventVoicePlaybackRequest,
     MemoirAutomationEventVoicePlaybackResponse as MemoirAutomationEventVoicePlaybackResponse,
 )
+from app.services.memoir.share_video_styles import DEFAULT_SHARE_VIDEO_STYLE, ShareVideoStyle
 
 
 class MemoirVoiceSessionCreate(BaseModel):
@@ -442,6 +443,12 @@ class MemoirShareVideoBackgroundSourceResponse(BaseModel):
     description: str
 
 
+class MemoirShareVideoStyleResponse(BaseModel):
+    value: ShareVideoStyle
+    label: str
+    description: str
+
+
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
@@ -456,6 +463,8 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     min_select_ms: int = 3000
     max_select_ms: int = 90000
     ai_background_enabled: bool = False
+    default_video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
+    video_styles: list[MemoirShareVideoStyleResponse] = Field(default_factory=list)
     default_background_source: str = "ai"
     default_background_style: str = "watercolor"
     default_background_mode: str = "auto"
@@ -471,6 +480,7 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     start_char: int = Field(ge=0)
     end_char: int = Field(gt=0)
     ai_model: str | None = Field(default=None, max_length=120)
+    video_style: ShareVideoStyle | None = None
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
@@ -494,8 +504,6 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     def _valid_range(self) -> "MemoirShareVideoJobCreateRequest":
         if self.end_char <= self.start_char:
             raise ValueError("结束位置必须大于开始位置")
-        if self.background_source == "custom" and not self.custom_background_asset_id:
-            raise ValueError("请选择自定义背景图")
         return self
 
 
@@ -503,6 +511,7 @@ class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ai_model: str | None = Field(default=None, max_length=120)
+    video_style: ShareVideoStyle | None = None
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
@@ -577,6 +586,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     start_ms: int
     end_ms: int
     duration_ms: int
+    video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
     background_source: str = "ai"
     background_style: str = "watercolor"
     background_mode: str = "auto"

@@ -5,6 +5,7 @@ import type {
   MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
   MemoirShareVideoListResponse,
+  MemoirShareVideoStyle,
   MemoirMaterialOfflineASRState,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
@@ -43,6 +44,7 @@ interface VoiceTranscriptListOptions {
 }
 
 interface ShareVideoJobOptions {
+  videoStyle?: MemoirShareVideoStyle;
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
@@ -53,6 +55,7 @@ interface ShareVideoJobRequest {
   start_char: number;
   end_char: number;
   ai_model: string | null;
+  video_style?: MemoirShareVideoStyle;
   background_source?: string;
   background_style?: string;
   background_mode?: string;
@@ -61,6 +64,7 @@ interface ShareVideoJobRequest {
 
 interface ShareVideoCandidateJobRequest {
   ai_model: string | null;
+  video_style?: MemoirShareVideoStyle;
   background_source?: string;
   background_style?: string;
   background_mode?: string;
@@ -137,6 +141,7 @@ export function createMemoirTranscriptShareVideoJob(
       start_char: startChar,
       end_char: endChar,
       ai_model: null,
+      ...(options.videoStyle ? { video_style: options.videoStyle } : {}),
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
@@ -185,6 +190,7 @@ export function createMemoirShareVideoCandidateJob(
     memoirProjectPath(projectId, `/share-video-candidates/${encodeURIComponent(candidateId)}/create-video`),
     {
       ai_model: null,
+      ...(options.videoStyle ? { video_style: options.videoStyle } : {}),
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),

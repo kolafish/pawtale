@@ -12,8 +12,10 @@ import type {
   MemoirShareVideoCandidate,
   MemoirShareVideoJob,
   MemoirShareVideoListItem,
+  MemoirShareVideoStyle,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
+import { normalizeMemoirShareVideoStyle } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -115,6 +117,7 @@ interface HomeData extends HomeStoryData {
   shareCandidateDismissing: boolean;
   shareCandidateError: string;
   shareCandidateJob: MemoirShareVideoJob | null;
+  shareVideoStyle: MemoirShareVideoStyle;
   recentShareVideo: MemoirShareVideoListItem | null;
   shareVideoTotal: number;
 }
@@ -233,6 +236,7 @@ function applyHomeSnapshotData(
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
+    shareVideoStyle: normalizeMemoirShareVideoStyle(identity.active_project?.metadata_json?.share_video_style),
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     ...(changedProject ? {
@@ -309,6 +313,7 @@ definePage<HomeData>()({
     shareCandidateDismissing: false,
     shareCandidateError: "",
     shareCandidateJob: null,
+    shareVideoStyle: "illustrated",
     recentShareVideo: null,
     shareVideoTotal: 0,
     ...emptyHomeStoryData(),
@@ -532,10 +537,19 @@ definePage<HomeData>()({
     const projectId = this.data.projectId;
     if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
       || this.data.voiceEntry || this.data.shareCandidateCreating || this.data.shareCandidateDismissing) return;
+    if (this.data.shareVideoStyle === "uploaded") {
+      wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
+        id: candidate.utterance_id,
+        candidateId: candidate.id,
+      }) });
+      return;
+    }
     this.shareCandidateRequestSequence += 1;
     this.setData({ shareCandidateCreating: true, shareCandidateError: "" });
     try {
-      const job = await createMemoirShareVideoCandidateJob(projectId, candidate.id);
+      const job = await createMemoirShareVideoCandidateJob(projectId, candidate.id, {
+        videoStyle: this.data.shareVideoStyle,
+      });
       if (!this.homeVisible || this.data.projectId !== projectId
         || this.data.shareCandidate?.id !== candidate.id) return;
       this.shareCandidateRequestSequence += 1;

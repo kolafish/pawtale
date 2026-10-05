@@ -1,5 +1,4 @@
 export interface ShareVideoBackgroundSettings {
-  backgroundSource: string;
   backgroundStyle: string;
   backgroundMode: string;
 }
@@ -8,7 +7,6 @@ const STORAGE_KEY = "pawtale_share_video_background_settings";
 
 function emptyShareVideoBackgroundSettings(): ShareVideoBackgroundSettings {
   return {
-    backgroundSource: "",
     backgroundStyle: "",
     backgroundMode: "",
   };
@@ -24,7 +22,6 @@ function normalizeStoredSettings(value: unknown): ShareVideoBackgroundSettings {
   }
   const candidate = value as Partial<ShareVideoBackgroundSettings>;
   return {
-    backgroundSource: storedSelection(candidate.backgroundSource),
     backgroundStyle: storedSelection(candidate.backgroundStyle),
     backgroundMode: storedSelection(candidate.backgroundMode),
   };

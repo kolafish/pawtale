@@ -2,10 +2,12 @@ import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   createMemoirMaterialImageGenerationJob,
+  createMemoirShareVideoCandidateJob,
   createMemoirTranscriptShareVideoJob,
   downloadMemoirShareVideoJob,
   getMemoirMaterialImageGenerationJob,
   getMemoirShareVideoJob,
+  getMemoirShareVideoCandidate,
   getMemoirVoiceTranscript,
 } from "../../services/memoir-transcript-api";
 import {
@@ -24,6 +26,7 @@ import {
 } from "../../services/transcript-material-image";
 import {
   initialTranscriptShareVideoData,
+  shareVideoSelectionPatch,
   TranscriptShareVideoController,
 } from "../../services/transcript-share-video";
 import {
@@ -37,6 +40,7 @@ import {
 definePage<TranscriptMediaData>()({
   shareVideoController: pageRuntime(() => new TranscriptShareVideoController({
     createJob: createMemoirTranscriptShareVideoJob,
+    createCandidateJob: createMemoirShareVideoCandidateJob,
     getJob: getMemoirShareVideoJob,
     downloadJob: downloadMemoirShareVideoJob,
     shareFile: shareLocalFileMessage,
@@ -47,6 +51,7 @@ definePage<TranscriptMediaData>()({
   })),
   loadToken: 0,
   requestedShareVideoJobId: "",
+  requestedShareVideoCandidateId: "",
   shareVideoBackgroundUploadToken: 0,
 
   data: {
@@ -66,6 +71,7 @@ definePage<TranscriptMediaData>()({
     this.materialImageController.setStateListener((patch) => this.setData(patch));
     this.resetShareVideoState();
     this.requestedShareVideoJobId = queryParam(options, "jobId");
+    this.requestedShareVideoCandidateId = queryParam(options, "candidateId");
     this.setData({
       utteranceId: queryParam(options, "id"),
       viewMode: this.requestedShareVideoJobId ? "video" : "create",
@@ -99,7 +105,28 @@ definePage<TranscriptMediaData>()({
         }
         await this.shareVideoController.showJob(job);
       } else {
-        await this.openShareVideoPanel();
+        await this.openShareVideoPanel(!this.requestedShareVideoCandidateId, !this.requestedShareVideoCandidateId);
+        if (this.requestedShareVideoCandidateId) {
+          const { candidate } = await getMemoirShareVideoCandidate(item.project_id);
+          if (requestToken !== this.loadToken) {
+            return;
+          }
+          const context = this.data.shareVideoContext;
+          if (!context || !candidate || candidate.id !== this.requestedShareVideoCandidateId
+            || candidate.project_id !== item.project_id || candidate.utterance_id !== item.id
+            || candidate.status !== "ready" || candidate.text_hash !== context.text_hash) {
+            throw new Error("推荐片段已更新，请从这段讲述重新选择内容");
+          }
+          const startIndex = context.segments.findIndex((segment) => segment.start_char === candidate.start_char);
+          const endIndex = context.segments.findIndex((segment) => segment.end_char === candidate.end_char);
+          if (startIndex < 0 || endIndex < startIndex) {
+            throw new Error("推荐片段已更新，请从这段讲述重新选择内容");
+          }
+          this.setData({
+            shareVideoCandidate: candidate,
+            ...shareVideoSelectionPatch(context, startIndex, endIndex),
+          });
+        }
       }
     } catch (error) {
       if (requestToken !== this.loadToken) {
