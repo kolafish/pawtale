@@ -37,11 +37,7 @@
         <text class="status-title">{{bookPreviewTitle || planTitle || "书稿"}}</text>
         <text class="status-pill {{bookStaleNotice ? 'is-pending' : ''}}">{{bookStaleNotice ? "待更新" : stageText}}</text>
       </view>
-      <text class="status-meta">
-        <text wx:if="{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount}}">当前书稿收录 {{bookIncludedChapterCount}}/{{totalChapterCount}} 章</text>
-        <text wx:else>{{totalChapterCount}} 章</text>
-        · {{bookCharCount || 0}} 字
-      </text>
+      <text class="status-meta">{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount ? '当前书稿收录 ' + bookIncludedChapterCount + '/' + totalChapterCount : totalChapterCount}} 章 · {{bookCharCount || 0}} 字</text>
       <image
         class="book-header-illustration"
         src="/assets/memoir-book-header.png"
