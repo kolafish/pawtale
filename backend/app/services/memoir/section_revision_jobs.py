@@ -619,6 +619,9 @@ async def finalize_section_revision(
             resolved_ai_model=resolved_model,
         )
         patch = {"proposal_status": "applied", "result_version_id": version.id}
+        from app.services.memoir.automatic_book_draft import schedule_book_draft
+
+        await schedule_book_draft(db, project_id=project_id, source="section_revision")
     proposal.result_json = {**values, **patch}
     proposal.updated_at = utcnow_naive()
     db.add(proposal)

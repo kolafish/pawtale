@@ -37,6 +37,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.memoir import (
+    automatic_book_draft,
     book_completion_jobs,
     book_revision_generation,
     book_revision_proposals,
@@ -1850,12 +1851,22 @@ async def test_explicit_rewrite_refreshes_all_sections_once(
     assert requested_models == [DEFAULT_AI_TEXT_MODEL]
 
 
+@pytest.mark.parametrize("finalize_action", ["apply", "dismiss", "stale"])
 async def test_section_revision_waits_for_apply_and_preserves_other_content(
     client,
     test_db,
     monkeypatch,
+    finalize_action,
 ):
-    project_id, chapters, sources = await _book(client, test_db)
+    project_id = await ensure_mobile_memoir_project(client)
+    sources = [await create_test_voice_transcript(
+        client, test_db, "那年，我参加了学校比赛。", project_id=project_id,
+    )]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db, project_id=project_id,
+        chapter_titles=["学校里的比赛", "尚未讲述的章节一", "尚未讲述的章节二"],
+        source_refs_by_chapter=[[memoir_source_ref(sources[0])], [], []],
+    )
     chapter = chapters[0]
     added_source = await create_test_voice_transcript(
         client,
@@ -1889,6 +1900,27 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter.id,
+    )
+    version.prompt_snapshot = chapter_generation._render_policy_tag(context)
+    version.content = "\n\n".join(item["content"] for item in version.section_snapshot_json)
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, parent.id)
+    finally:
+        clear_editing_job_handlers()
+    await test_db.refresh(parent)
+    assert parent.status == MemoirEditingJobStatus.SUCCEEDED.value
+    original_output = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert original_output is not None
+    original_output_id, original_output_version = original_output.id, original_output.version
+    original_snapshot = original_output.chapter_snapshot_json[0]
+    assert original_snapshot["draft_version_id"] == version.id
+
     fake = LayeredBookAI(
         section_revision_title="赛后回想",
         section_revision_content="这是已经存在的完整章节正文。",
@@ -1974,7 +2006,29 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         )
     ) == 1
 
-    applied = await client.post(f"{base_path}/proposals/{proposal_id}/apply")
+    if finalize_action == "stale":
+        target_section.version += 1
+        await test_db.commit()
+        stale = await client.get(f"{base_path}/proposals/{proposal_id}")
+        assert stale.json()["status"] == "stale"
+        assert stale.json()["can_apply"] is False
+    action = "dismiss" if finalize_action == "dismiss" else "apply"
+    applied = await client.post(f"{base_path}/proposals/{proposal_id}/{action}")
+    if finalize_action != "apply":
+        assert applied.status_code == (200 if action == "dismiss" else 409), applied.text
+        if action == "dismiss":
+            assert applied.json()["status"] == "dismissed"
+        await test_db.refresh(parent)
+        assert parent.status == MemoirEditingJobStatus.SUCCEEDED.value
+        assert parent.result_json["output_version_id"] == original_output_id
+        assert await test_db.scalar(select(func.count(MemoirEditingJob.id)).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        )) == 1
+        assert await test_db.scalar(select(func.count(MemoirBookChapterDraftVersion.id)).where(
+            MemoirBookChapterDraftVersion.draft_id == version.draft_id,
+        )) == 1
+        return
     assert applied.status_code == 200, applied.text
     assert applied.json()["status"] == "applied"
     assert (await client.get(f"{base_path}/jobs/current")).json()["status"] == "idle"
@@ -2003,6 +2057,43 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         DEFAULT_AI_TEXT_MODEL,
         DEFAULT_AI_TEXT_MODEL,
     ]
+
+    await test_db.refresh(parent)
+    assert parent.status == MemoirEditingJobStatus.PENDING.value
+    assert parent.result_json["output_version_id"] == original_output_id
+    assert await test_db.scalar(select(func.count(MemoirEditingJob.id)).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+    )) == 1
+    latest_id, latest_content = latest.id, latest.content
+    assert latest.used_material_ids_json == version.used_material_ids_json
+    calls = len(fake.prompts)
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, parent.id)
+    finally:
+        clear_editing_job_handlers()
+    assert len(fake.prompts) == calls
+    await test_db.refresh(parent)
+    assert parent.result_json["chapters"][chapter.id]["draft_version_id"] == latest_id
+    assert all(parent.result_json["chapters"][empty.id]["status"] == "needs_material" for empty in chapters[1:])
+    refreshed_output = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert refreshed_output is not None
+    assert refreshed_output.version == original_output_version + 1
+    assert len(refreshed_output.chapter_snapshot_json) == 1
+    snapshot = refreshed_output.chapter_snapshot_json[0]
+    assert snapshot["draft_version_id"] == latest_id
+    assert snapshot["content"] == latest_content
+    assert snapshot["sections"][0] == original_snapshot["sections"][0]
+    assert snapshot["sections"][1]["title"] == "赛后回想"
+    assert snapshot["source_refs"] == original_snapshot["source_refs"]
+    assert await test_db.scalar(select(func.count(MemoirBookChapterDraftVersion.id)).where(
+        MemoirBookChapterDraftVersion.project_id == project_id,
+    )) == 2
+    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert output.status_code == 200, output.text
+    assert output.json()["is_stale"] is False
 
 
 async def test_book_overview_counts_ready_drafts_as_complete(
