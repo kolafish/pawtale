@@ -53,7 +53,7 @@ interface EditData {
   sectionTasks: SectionTask[];
   preview: VoiceEditPreview | null;
   splitConfirmation: VoiceEditItem | null;
-  items: Array<VoiceEditItem & { selected: boolean }>;
+  items: Array<VoiceEditItem & { selected: boolean; selectionKey: string }>;
   selectedCount: number;
 }
 
@@ -112,7 +112,7 @@ definePage<EditData>()({
       const splitConfirmation = preview.questions.length === 0 && preview.operations.length === 1
         && preview.operations[0].action === "split_chapter" && preview.operations[0].section_ids?.length
         ? preview.operations[0] : null;
-      this.setData({ preview, splitConfirmation, items: preview.operations.map(item => ({ ...item, selected: true })), selectedCount: preview.operations.length });
+      this.setData({ preview, splitConfirmation, items: preview.operations.map(item => ({ ...item, selected: true, selectionKey: `${item.action}:${item.target_ref}` })), selectedCount: preview.operations.length });
     } catch (error) {
       if (sequence === this.requestSequence) this.setData({ error: error instanceof Error ? error.message : "没有得到修改结果，请重试" });
     } finally {
@@ -123,7 +123,7 @@ definePage<EditData>()({
   selectOperations(event: { detail: { value: string[] } }) {
     if (this.data.applying) return;
     const selected = new Set(event.detail.value);
-    const items = this.data.items.map(item => ({ ...item, selected: selected.has(item.target_ref) }));
+    const items = this.data.items.map(item => ({ ...item, selected: selected.has(item.selectionKey) }));
     this.setData({ items, selectedCount: items.filter(item => item.selected).length });
   },
 

@@ -54,7 +54,7 @@ test("raw transcribed request reaches the model; selected existing operations ex
   assert.match(context.data.gatewayUrl, /p1\/dictation$/);
   assert.equal(context.data.items[0].detail, "保留 1 条讲述");
   assert.equal(context.data.preview.questions.length, 1);
-  context.selectOperations({ detail: { value: ["s1"] } });
+  context.selectOperations({ detail: { value: [context.data.items[1].selectionKey] } });
   await context.apply();
   assert.deepEqual(calls.applies, [["p1", "sig", [{ action: "rename_section", target_ref: "s1", new_title: "外婆家的时光" }]]]);
   assert.equal(context.data.preview, null);
@@ -95,6 +95,33 @@ test("chapter section regeneration is shown as a confirmable operation", async (
   context.openChapterProgress({ currentTarget: { dataset: { chapterId: "c1" } } });
   assert.equal(calls.routes.length, 1);
   assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c1");
+});
+
+test("rename and structure edits of the same chapter can be selected separately", async () => {
+  const operations = [
+    { action: "rename_chapter", target_ref: "c1", new_title: "八十年代的童年", label: "修改章名", detail: "" },
+    { action: "regenerate_chapter_sections", target_ref: "c1", new_title: null, label: "整理小节", detail: "" },
+  ];
+  for (const selected of [[0], [1], [0, 1]]) {
+    const { context, calls } = setup({ preview: async () => ({
+      signature: "chapter-review", reply: "请确认这些调整。", questions: [], operations,
+    }) });
+    await context.submitInstruction({ detail: { value: "整体审阅章节结构和名字" } });
+    assert.equal(calls.applies.length, 0);
+    assert.notEqual(context.data.items[0].selectionKey, context.data.items[1].selectionKey);
+    context.selectOperations({ detail: { value: selected.map(index => context.data.items[index].selectionKey) } });
+    assert.equal(context.data.selectedCount, selected.length);
+    await context.apply();
+    assert.deepEqual(calls.applies[0][2], selected.map(index => {
+      const { action, target_ref, new_title } = operations[index];
+      return { action, target_ref, new_title };
+    }));
+    assert.equal(context.data.sectionTasks.length, selected.includes(1) ? 1 : 0);
+    context.onUnload();
+  }
+  const template = fs.readFileSync(path.join(__dirname, "../pages/story-voice-edit/index.wxml"), "utf8");
+  assert.match(template, /wx:key="selectionKey"/);
+  assert.match(template, /value="\{\{item.selectionKey\}\}"/);
 });
 
 test("section consolidation opens the affected chapter after confirmation", async () => {
@@ -334,6 +361,7 @@ test("voice edit gives the model a generation deadline, uses mutation writes and
   assert.equal(calls[0][0], "ai");
   assert.equal(calls[0][2].supports_chapter_split, true);
   assert.equal(calls[0][2].supports_section_merge, true);
+  assert.equal(calls[0][2].supports_composed_chapter_edits, true);
   assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");

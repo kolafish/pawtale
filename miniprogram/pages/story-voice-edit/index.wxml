@@ -27,8 +27,8 @@
     <view wx:for="{{preview.questions}}" wx:key="*this" class="edit-question">{{item}}</view>
     <text wx:if="{{preview.questions.length}}" class="edit-hint">请回答上面的问题：点「语音输入」再说，或在上方文字末尾补充后点「发送」。之前的要求会一起保留。</text>
     <checkbox-group bindchange="selectOperations">
-      <label wx:for="{{items}}" wx:key="target_ref" class="edit-operation">
-        <checkbox value="{{item.target_ref}}" checked="{{item.selected}}" disabled="{{applying}}" color="#b65d49" />
+      <label wx:for="{{items}}" wx:key="selectionKey" class="edit-operation">
+        <checkbox value="{{item.selectionKey}}" checked="{{item.selected}}" disabled="{{applying}}" color="#b65d49" />
         <view class="edit-operation-copy">
           <text class="edit-operation-title">{{item.label}}</text>
           <text wx:if="{{item.detail}}" class="edit-detail">{{item.detail}}</text>
