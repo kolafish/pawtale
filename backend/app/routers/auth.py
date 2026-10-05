@@ -177,12 +177,12 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    _require_development_account_auth()
     email = normalize_email(req.email)
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if (
         not user
+        or (is_production_environment() and not is_admin_user(user))
         or not user.password_login_enabled
         or not verify_password(req.password, user.password_hash)
     ):
