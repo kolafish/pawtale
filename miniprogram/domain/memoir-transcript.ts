@@ -9,6 +9,27 @@ import type {
 export type MemoirVoiceTranscriptIncludedFilter = "all" | "included" | "not_included";
 export type MemoirMaterialOfflineASRStatus = "idle" | "pending" | "running" | "succeeded" | "failed";
 
+export type MemoirShareVideoStyle = "uploaded" | "illustrated" | "story_animation";
+
+export interface MemoirShareVideoStyleOption {
+  value: MemoirShareVideoStyle;
+  label: string;
+  description: string;
+}
+
+export const MEMOIR_SHARE_VIDEO_STYLES: MemoirShareVideoStyleOption[] = [
+  { value: "uploaded", label: "自选画面", description: "上传老照片或插图，配上讲述原声和字幕。" },
+  { value: "illustrated", label: "回忆画卷", description: "根据讲述生成插图，配原声和字幕展开回忆。" },
+  { value: "story_animation", label: "往事小剧场", description: "人物与场景动画配原声和字幕，让故事动起来。" },
+];
+
+export function normalizeMemoirShareVideoStyle(value: unknown, backgroundSource?: string): MemoirShareVideoStyle {
+  if (value === "uploaded" || value === "illustrated" || value === "story_animation") {
+    return value;
+  }
+  return backgroundSource === "custom" ? "uploaded" : "illustrated";
+}
+
 export interface MemoirMaterialOfflineASRState {
   status: MemoirMaterialOfflineASRStatus;
   job_id?: string | null;
@@ -114,6 +135,8 @@ export interface MemoirTranscriptShareVideoContext {
   alignment_confidence?: number | null;
   min_select_ms: number;
   max_select_ms: number;
+  default_video_style: MemoirShareVideoStyle;
+  video_styles: MemoirShareVideoStyleOption[];
   ai_background_enabled: boolean;
   default_background_source: string;
   default_background_style: string;
@@ -192,6 +215,7 @@ export interface MemoirShareVideoJob {
   start_ms: number;
   end_ms: number;
   duration_ms: number;
+  video_style: MemoirShareVideoStyle;
   background_source?: string;
   background_style?: string;
   background_mode?: string;

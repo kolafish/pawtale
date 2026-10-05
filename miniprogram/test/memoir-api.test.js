@@ -541,6 +541,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   };
   resetMemoirApiModules();
   const {
+    createMemoirShareVideoCandidateJob,
     createMemoirTranscriptShareVideoJob,
     downloadMemoirShareVideoJob,
     getMemoirShareVideoJob,
@@ -549,10 +550,15 @@ test("share video APIs encode routes and download preview with session cookie", 
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
   const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
+    videoStyle: "illustrated",
     backgroundStyle: "gouache",
     backgroundMode: "smart_multi",
   });
   const detail = await getMemoirShareVideoJob("job/1");
+  await createMemoirShareVideoCandidateJob("project/1", "candidate/1", {
+    videoStyle: "uploaded",
+    customBackgroundAssetId: "photo-1",
+  });
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
@@ -571,6 +577,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     start_char: 0,
     end_char: 13,
     ai_model: "deepseek-v4-pro",
+    video_style: "illustrated",
     background_style: "gouache",
     background_mode: "smart_multi",
   });
@@ -579,6 +586,11 @@ test("share video APIs encode routes and download preview with session cookie", 
     "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1",
   );
   assert.equal(apiRequests[2].method, "GET");
+  assert.equal(apiRequests[3].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/share-video-candidates/candidate%2F1/create-video");
+  assert.deepEqual(apiRequests[3].data, {
+    ai_model: "deepseek-v4-pro", video_style: "uploaded", custom_background_asset_id: "photo-1",
+  });
   assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
   assert.equal(context.background_modes[2].value, "smart_multi");
   assert.equal(created.status, "succeeded");

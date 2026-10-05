@@ -75,6 +75,10 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     repeated = await client.post(create_url, json={"background_source": "classic"})
     assert repeated.status_code == 201
     assert repeated.json()["id"] == created_job.json()["id"]
+    animated = await client.post(create_url, json={"video_style": "story_animation"})
+    assert animated.status_code == 201, animated.text
+    assert animated.json()["video_style"] == "story_animation"
+    assert animated.json()["id"] != created_job.json()["id"]
     assert (await client.get(url)).json()["candidate"]["status"] == "accepted"
 
 

@@ -69,7 +69,13 @@ from app.services.memoir.share_video_alignment import (
 )
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import project_share_video_style, select_project_ai_model
+from app.services.memoir.share_video_styles import SHARE_VIDEO_STYLE_STORY_ANIMATION
+from app.services.memoir.share_video_story_plan import (
+    SHARE_VIDEO_STORY_PLAN_VERSION,
+    plan_share_video_story,
+    validate_story_plan_source,
+)
 from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
@@ -163,7 +169,10 @@ async def _suggest_share_video_title(selected_text: str, *, ai_model: str | None
 
 
 def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
+    if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+        return (metadata.video_style, metadata.animation_version, metadata.ai_model or "")
     return (
+        metadata.video_style,
         metadata.ai_model or "",
         metadata.background_source,
         metadata.background_style,
@@ -179,7 +188,14 @@ def _completed_share_video_is_reusable(
     output = job.output
     if output is None or metadata.pipeline_version != SHARE_VIDEO_PIPELINE_VERSION:
         return False
-    if metadata.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and metadata.background_status not in {
+    if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+        if (
+            metadata.animation_version != SHARE_VIDEO_STORY_PLAN_VERSION
+            or metadata.animation_plan is None
+            or metadata.animation_plan.version != metadata.animation_version
+        ):
+            return False
+    elif metadata.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and metadata.background_status not in {
         "ready",
         "partial",
     }:
@@ -327,6 +343,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         start_ms=job.start_ms,
         end_ms=job.end_ms,
         duration_ms=max(0, job.end_ms - job.start_ms),
+        video_style=metadata.video_style,
         background_source=metadata.background_source,
         background_style=metadata.background_style,
         background_mode=metadata.background_mode,
@@ -372,24 +389,46 @@ async def create_share_video_job(
         utterance.voice_session.project,
         req.ai_model,
     )
+    project = utterance.voice_session.project
+    legacy_background_source = req.video_style is None and req.background_source is not None
+    legacy_default = (
+        req.video_style is None
+        and req.background_source is None
+        and "share_video_style" not in (project.metadata_json or {})
+    )
+    video_style = (
+        ("uploaded" if req.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else "illustrated")
+        if legacy_background_source
+        else req.video_style or project_share_video_style(project)
+    )
+    story_animation = video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION
     alignment = build_share_video_alignment(utterance)
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
-    try:
-        background_source = normalize_share_video_background_source(
-            req.background_source
-            or (SHARE_VIDEO_BACKGROUND_SOURCE_AI if ai_background_enabled else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC)
+    if legacy_background_source:
+        selected_background_source = req.background_source
+    elif legacy_default:
+        selected_background_source = (
+            SHARE_VIDEO_BACKGROUND_SOURCE_AI if ai_background_enabled else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
         )
+    elif story_animation:
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
+    elif video_style == "uploaded":
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM
+    else:
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_AI
+    try:
+        background_source = normalize_share_video_background_source(selected_background_source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and not ai_background_enabled:
-        raise HTTPException(status_code=400, detail="AI 背景图当前不可用，请选择其他背景")
+        raise HTTPException(status_code=400, detail="回忆画卷当前不可用，请选择自选画面或往事小剧场")
     try:
-        background_style = normalize_share_video_background_style(req.background_style)
+        background_style = normalize_share_video_background_style(None if story_animation else req.background_style)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        background_mode = normalize_share_video_background_mode(req.background_mode)
+        background_mode = normalize_share_video_background_mode(None if story_animation else req.background_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     duration_ms = end_ms - start_ms
@@ -412,7 +451,7 @@ async def create_share_video_job(
             allow_admin=allow_admin,
         )
         custom_background_asset_id = custom_asset.id
-    elif req.custom_background_asset_id:
+    elif req.custom_background_asset_id and not story_animation:
         raise HTTPException(status_code=400, detail="只有自定义背景图模式可以选择背景图片")
 
     effective_background_mode = (
@@ -428,13 +467,15 @@ async def create_share_video_job(
         alignment_confidence=alignment.confidence,
         char_timings=alignment.char_timings[start_char:end_char],
         ai_model=selected_ai_model,
+        video_style=video_style,
+        animation_version=SHARE_VIDEO_STORY_PLAN_VERSION if story_animation else "",
         background_source=background_source,
         background_style=background_style,
         background_mode=background_mode,
         background_effective_mode=effective_background_mode,
         custom_background_asset_id=custom_background_asset_id,
         background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
-        background_status=background_orchestration.initial_background_status(
+        background_status="disabled" if story_animation else background_orchestration.initial_background_status(
             background_source,
             ai_background_enabled=ai_background_enabled,
         ),
@@ -1074,17 +1115,40 @@ async def run_share_video_job_with_session(
             _set_job_metadata(job, updated_metadata)
             await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
-        prepared_background = await background_orchestration.prepare_share_video_background(
-            db,
-            job=job,
-            metadata=metadata,
-            persist_progress=persist_background_progress,
-            ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
-            volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
-            usage_context=usage_context,
-        )
-        background_image_path = prepared_background.image_path
-        background_segments = prepared_background.segments
+        background_image_path = None
+        background_segments = None
+        if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+            duration_ms = job.end_ms - job.start_ms
+            if metadata.animation_plan is None:
+                relative_timings = [
+                    {
+                        "start_ms": max(0, min(duration_ms, timing.start_ms - job.start_ms)),
+                        "end_ms": max(0, min(duration_ms, timing.end_ms - job.start_ms)),
+                    }
+                    for timing in metadata.char_timings
+                ]
+                metadata.animation_plan = await plan_share_video_story(
+                    job.selected_text,
+                    relative_timings,
+                    duration_ms,
+                    ai_model=metadata.ai_model,
+                    usage_context=usage_context,
+                )
+                _set_job_metadata(job, metadata)
+                await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
+            validate_story_plan_source(metadata.animation_plan, job.selected_text, duration_ms)
+        else:
+            prepared_background = await background_orchestration.prepare_share_video_background(
+                db,
+                job=job,
+                metadata=metadata,
+                persist_progress=persist_background_progress,
+                ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
+                volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
+                usage_context=usage_context,
+            )
+            background_image_path = prepared_background.image_path
+            background_segments = prepared_background.segments
         target_path = share_video_file_path(job)
         render_request = rendering.ShareVideoRenderRequest(
             source_audio_path=audio_file_path(job.audio_file),
@@ -1097,11 +1161,15 @@ async def run_share_video_job_with_session(
             background_image_path=background_image_path,
             background_segments=background_segments,
             title=share_video_title(metadata, job.selected_text),
+            video_style=metadata.video_style,
+            animation_plan=metadata.animation_plan,
         )
         try:
             await rendering.render_share_video_clip(render_request)
         except rendering.ShareVideoGenerationError as exc:
-            if background_image_path is None and not background_segments:
+            if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION or (
+                background_image_path is None and not background_segments
+            ):
                 raise
             metadata.background_status = "fallback"
             metadata.background_error_message = f"背景图渲染失败，已回退经典样式：{str(exc)[:400]}"

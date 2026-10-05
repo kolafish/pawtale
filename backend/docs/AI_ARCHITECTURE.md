@@ -72,7 +72,8 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 - `section_digests.py` / `chapter_digests.py` / `book_reviews.py`：分层派生审阅；
 - `chapter_generation.py` / `book_manuscript_ai.py`：章节和全书候选正文；
 - `transcript_cleanup_editor.py` / `dialect_profile.py`：转写校正；
-- `share_video_scene_planner.py`：分享视频场景规划。
+- `share_video_scene_planner.py`：AI 插图分享视频的原文句子分组；
+- `share_video_story_plan.py` / `share_video_story_animation.py`：往事小剧场使用项目所选文本模型规划有限场景，再由 Python 绘制人物和动作。分镜必须引用原文，保存文本签名与音频时长；不调用图片或视频生成模型。
 
 领域逻辑负责权限、输入签名、素材 allowlist、版本和用户决定；模型不能自行删除素材、覆盖隐私决定或把未讲述内容写成事实。
 

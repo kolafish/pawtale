@@ -8,6 +8,7 @@ from app.config import DEFAULT_AI_TEXT_MODEL
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.models.projects import Project
 from app.services.ai_access import restrict_requested_ai_model
+from app.services.memoir.share_video_styles import ShareVideoStyle, normalize_share_video_style
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
@@ -20,6 +21,7 @@ DISABLED_AI_MODEL_ALIASES = frozenset(
     }
 )
 TRANSCRIPT_POLISH_LEVEL_METADATA_KEY = "transcript_polish_level"
+SHARE_VIDEO_STYLE_METADATA_KEY = "share_video_style"
 TEXT_POLISH_REQUIREMENTS = {
     MemoirTranscriptPolishLevel.LOW: (
         "- 去掉口头填充词、说话磕绊、赘词和没有信息增量的重复\n"
@@ -116,3 +118,15 @@ async def load_project_transcript_polish_level(
     if requested_level is not None:
         return normalize_transcript_polish_level(requested_level)
     return project_transcript_polish_level(await db.get(Project, project_id))
+
+
+def project_share_video_style(project: Project | None) -> ShareVideoStyle:
+    metadata = project.metadata_json if project else {}
+    return normalize_share_video_style((metadata or {}).get(SHARE_VIDEO_STYLE_METADATA_KEY))
+
+
+def remember_project_share_video_style(project: Project, style: ShareVideoStyle) -> None:
+    project.metadata_json = {
+        **(project.metadata_json or {}),
+        SHARE_VIDEO_STYLE_METADATA_KEY: style,
+    }

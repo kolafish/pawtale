@@ -8,6 +8,7 @@ import type {
   MemoirInterviewType,
   MemoirSessionGoal,
 } from "../domain/memoir-voice-session";
+import type { MemoirShareVideoStyle } from "../domain/memoir-transcript";
 import {
   memoirProjectPath,
   memoirRequest,
@@ -26,6 +27,7 @@ export interface MemoirProjectInput {
   default_interview_type?: MemoirInterviewType;
   default_session_goal?: MemoirSessionGoal;
   transcript_polish_level?: MemoirTranscriptPolishLevel;
+  share_video_style?: MemoirShareVideoStyle;
 }
 
 export function listMemoirProjects(): Promise<MemoirProjectListResponse> {

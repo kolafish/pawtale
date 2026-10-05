@@ -6,24 +6,39 @@ const { ApiError } = require("../services/request.ts");
 const {
   initialTranscriptShareVideoTaskState,
   shareVideoBackgroundPatch,
+  shareVideoStylePatch,
   TranscriptShareVideoController,
 } = require("../services/transcript-share-video.ts");
 
-test("video background selection falls back when a saved AI preference is unavailable", () => {
-  const patch = shareVideoBackgroundPatch({
-    default_background_source: "classic",
+test("illustration subsettings preserve the selected video style", () => {
+  const context = {
     default_background_style: "watercolor",
     default_background_mode: "auto",
-    background_sources: [{ value: "classic", label: "经典背景" }],
     background_styles: [{ value: "watercolor", label: "水彩" }],
     background_modes: [{ value: "auto", label: "自动" }],
-  }, {
-    backgroundSource: "ai",
+  };
+  const patch = shareVideoBackgroundPatch(context, {
     backgroundStyle: "watercolor",
     backgroundMode: "auto",
   });
-  assert.equal(patch.shareVideoBackgroundSource, "classic");
-  assert.equal(patch.shareVideoBackgroundUsesAi, false);
+  for (const style of ["uploaded", "illustrated", "story_animation"]) {
+    const selected = shareVideoStylePatch(context, style);
+    const state = { ...selected, ...patch };
+    assert.equal(state.shareVideoStyle, selected.shareVideoStyle);
+    assert.equal(state.shareVideoBackgroundSource, selected.shareVideoBackgroundSource);
+    assert.equal(state.shareVideoBackgroundUsesAi, selected.shareVideoBackgroundUsesAi);
+    assert.equal(state.shareVideoBackgroundUsesCustom, selected.shareVideoBackgroundUsesCustom);
+    assert.equal(state.shareVideoBackgroundStyle, "watercolor");
+    assert.equal(state.shareVideoBackgroundMode, "auto");
+  }
+});
+
+test("video style selection uses the project default and keeps unavailable illustration explicit", () => {
+  assert.equal(shareVideoStylePatch({ default_video_style: "story_animation" }).shareVideoStyle, "story_animation");
+  const patch = shareVideoStylePatch({ default_video_style: "illustrated", ai_background_enabled: false });
+  assert.equal(patch.shareVideoStyle, "illustrated");
+  assert.equal(patch.shareVideoStyleUnavailable, true);
+  assert.equal(shareVideoStylePatch(null, "uploaded").shareVideoBackgroundUsesCustom, true);
 });
 
 function shareVideoJob(overrides = {}) {

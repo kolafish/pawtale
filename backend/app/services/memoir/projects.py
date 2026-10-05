@@ -24,6 +24,7 @@ from app.services.memoir import book_outputs
 from app.services.memoir.project_ai_preferences import (
     project_transcript_polish_level,
     remember_project_transcript_polish_level,
+    remember_project_share_video_style,
 )
 from app.services.projects.access import load_project
 
@@ -266,6 +267,8 @@ async def create_mobile_memoir_project(
         metadata_json=_profile_metadata(req, include_defaults=True),
     )
     remember_project_transcript_polish_level(project, req.transcript_polish_level)
+    if _field_was_set(req, "share_video_style"):
+        remember_project_share_video_style(project, req.share_video_style)
     db.add(project)
     await db.flush()
     await initialize_project_template(db, project)
@@ -297,6 +300,8 @@ async def update_mobile_memoir_project(
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
     if _field_was_set(req, "transcript_polish_level") and req.transcript_polish_level:
         remember_project_transcript_polish_level(project, req.transcript_polish_level)
+    if req.share_video_style is not None:
+        remember_project_share_video_style(project, req.share_video_style)
     if project_transcript_polish_level(project) != previous_polish_level:
         existing_draft = await db.scalar(
             select(MemoirBookChapterDraft.id)

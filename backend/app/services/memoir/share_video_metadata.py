@@ -10,6 +10,8 @@ from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
 )
 from app.services.memoir.share_video_custom_backgrounds import DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE
+from app.services.memoir.share_video_styles import DEFAULT_SHARE_VIDEO_STYLE, ShareVideoStyle
+from app.services.memoir.share_video_story_plan import ShareVideoStoryPlan
 
 
 BackgroundStatus = Literal[
@@ -73,6 +75,9 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     alignment_confidence: float | None = None
     char_timings: list[ShareVideoCharTiming] = Field(default_factory=list)
     ai_model: str | None = None
+    video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
+    animation_version: str = ""
+    animation_plan: ShareVideoStoryPlan | None = None
     background_source: str = DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE
     background_style: str = DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     background_mode: str = DEFAULT_SHARE_VIDEO_BACKGROUND_MODE
@@ -99,7 +104,10 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
 
     @classmethod
     def from_json(cls, value: object) -> "ShareVideoJobMetadata":
-        return cls.model_validate(value if isinstance(value, dict) else {})
+        data = dict(value) if isinstance(value, dict) else {}
+        if "video_style" not in data and data.get("background_source") == "custom":
+            data["video_style"] = "uploaded"
+        return cls.model_validate(data)
 
     def to_json(self) -> dict[str, object]:
         return self.model_dump(mode="json", exclude_none=True)
