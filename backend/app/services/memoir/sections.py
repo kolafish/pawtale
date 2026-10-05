@@ -1556,6 +1556,12 @@ async def sync_materials_to_chapters(
     assignment_reason: str,
 ) -> set[str]:
     """Apply a chapter plan to the single SectionMaterial ownership table."""
+    seen_utterances: set[str] = set()
+    for utterance_ids in utterance_ids_by_chapter.values():
+        chapter_utterances = set(utterance_ids)
+        if seen_utterances & chapter_utterances:
+            raise HTTPException(status_code=400, detail="同一条讲述记录不能重复归入多个章节")
+        seen_utterances.update(chapter_utterances)
     chapter_ids = set(utterance_ids_by_chapter)
     chapters = list(
         (

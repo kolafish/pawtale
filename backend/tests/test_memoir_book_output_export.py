@@ -1,6 +1,7 @@
 from hashlib import sha256
 from typing import get_args
 
+import pytest
 from PIL import Image
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
@@ -925,3 +926,103 @@ def test_body_text_indents_paragraphs_and_avoids_orphan_starts():
     )
     assert second_paragraph.x == layout.margin_x + layout.font_size * 2
     assert all(not command.text.startswith("第一段") for command in builder.pages[0].commands)
+
+
+@pytest.mark.parametrize("template", ["heritage_classic", "warm_journal", "modern_minimal"])
+def test_section_heading_keeps_body_start_on_the_same_page(template):
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template=template
+    )
+    builder = PDFBookBuilder(title="分页回归", layout=layout)
+    builder.new_page("测试章节", body_numbering=True)
+    builder.add_text("前一段正文")
+    builder.y = layout.margin_bottom + 100
+    heading = "童年院落里的微光与后来漫长岁月回忆"
+    body = "这一段讲述只用于分页测试，标题之后至少保留两行正文，阅读时不必翻页寻找开头。"
+
+    builder.add_section_heading(heading)
+    builder.add_body_text(body)
+
+    heading_page = next(
+        page for page in builder.pages if any(command.text.startswith("童年院落") for command in page.commands)
+    )
+    assert any(command.text.startswith("这一段讲述") for command in heading_page.commands)
+    assert len([command for command in heading_page.commands if command.font_size == layout.font_size]) >= 2
+    assert not any(command.text.startswith("童年院落") for command in builder.pages[0].commands)
+
+
+def test_pdf_heading_and_toc_do_not_leave_a_single_character_last_line():
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="warm_journal"
+    )
+    builder = PDFBookBuilder(title="换行回归", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    heading = "童年院落里的微光与后来漫长的岁月里"
+    builder.add_section_heading(heading)
+    heading_lines = [command.text for command in builder.current_page.commands]
+
+    assert len(heading_lines) == 2
+    assert "".join(heading_lines) == heading
+    assert len(heading_lines[-1]) > 1
+
+    builder.new_page("目录", show_footer=False)
+    label = f"1.1　{heading}"
+    builder.add_toc_row(label=label, page_text="", indent=18, font_size=14)
+    toc_lines = [command.text for command in builder.current_page.commands]
+
+    assert "".join(toc_lines) == label
+    assert len(toc_lines[-1]) > 1
+
+
+def test_pdf_text_and_toc_reserve_their_actual_line_height():
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    builder = PDFBookBuilder(title="行高回归", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.add_text("前文")
+    builder.y = layout.margin_bottom + layout.line_height + 1
+
+    builder.add_text("大行高标题", line_height=layout.line_height + 12)
+
+    assert all(command.text != "大行高标题" for command in builder.pages[0].commands)
+    builder.y = layout.margin_bottom + layout.line_height + 1
+    builder.add_toc_row(label="目录测试", page_text="2")
+    assert all(command.text != "目录测试" for command in builder.pages[1].commands)
+
+
+def test_print_chapters_keep_right_page_alignment_and_mirrored_body_margins():
+    paragraph = "这一段虚构讲述只用于测试章节分页和装订边距。"
+    content = "\n".join([paragraph] * 8)
+    manuscript = _sample_manuscript(content)
+    second_chapter = {
+        **manuscript["chapters"][0],
+        "chapter_id": "chapter-2",
+        "index": 2,
+        "title": "第二章的测试故事",
+        "content": paragraph,
+        "sections": [{**manuscript["chapters"][0]["sections"][0], "content": paragraph}],
+    }
+    manuscript["chapters"].append(second_chapter)
+    manuscript["table_of_contents"].append({"index": 2, "title": second_chapter["title"]})
+    manuscript["chapters"].append({**second_chapter, "chapter_id": "chapter-3", "index": 3})
+    manuscript["table_of_contents"].append({"index": 3, "title": second_chapter["title"]})
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="warm_journal"
+    )
+
+    pages = _build_manuscript_pdf_pages(
+        title="分页测试", content="", manuscript=manuscript, layout=layout
+    )
+
+    assert all((index + 1) % 2 == 1 for index, page in enumerate(pages) if page.anchor)
+    blank_pages = [page for page in pages if not page.commands and not page.images and not page.decorations]
+    assert blank_pages
+    assert all(not page.show_footer and not page.header_title and page.body_page_number is None for page in blank_pages)
+    for index, page in enumerate(pages):
+        body_start = next((command for command in page.commands if command.text.startswith("这一段虚构")), None)
+        if body_start is None:
+            continue
+        assert body_start.x == (
+            layout.margin_x
+            + (layout.inner_margin_delta if (index + 1) % 2 else -layout.inner_margin_delta)
+            + 2 * layout.font_size
+        )

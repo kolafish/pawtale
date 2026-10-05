@@ -72,6 +72,7 @@ function loadBookExportPage(voiceApiExports = {}) {
   mockMemoirApiModules({
     getMemoirBookPlan: async () => samplePlan(),
     getMemoirBookOutput: async () => sampleBookOutput(),
+    getMemoirDraftProgress: async () => ({ status: "ready", needs_user_material_count: 0 }),
     getMemoirBookOutputVersion: async () => sampleBookOutputVersion(1, "全书第一版正文"),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
@@ -272,15 +273,54 @@ test("book export refreshes when a completed editorial job is newer than the loa
   assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "已完成");
 });
 
-test("book export page counts only chapters included in the final book", () => {
+test("book export page counts the current output when included plan chapters have no draft", () => {
   const { page } = loadBookExportPage();
   const context = pageContext(page);
   const plan = baseSamplePlan("confirmed", { chapterCount: 2 });
-  plan.chapters[1].include_in_book = false;
 
   page.applyBookExportData.call(context, plan, sampleBookOutput());
 
   assert.equal(context.data.totalChapterCount, 1);
+  assert.equal(context.data.bookPreviewChapters.length, 1);
+});
+
+test("book export updates the chapter count with the selected historical output", async () => {
+  const historical = sampleBookOutputVersion(1, "历史书稿正文", undefined, baseSampleBookManuscript());
+  const { page } = loadBookExportPage({ getMemoirBookOutputVersion: async () => historical });
+  const context = pageContext(page, { projectId: "project-1" });
+  page.applyBookExportData.call(context, baseSamplePlan("confirmed", { chapterCount: 2 }), sampleBookOutput());
+  await page.changeBookOutputVersion.call(context, { detail: { value: "1" } });
+
+  assert.equal(context.data.bookContent, "历史书稿正文");
+  assert.equal(context.data.totalChapterCount, 2);
+  assert.equal(context.data.bookPreviewChapters.length, 2);
+});
+
+test("book export waits only for active draft processing and preserves failed or material-required guidance", async () => {
+  const output = { ...sampleBookOutput(), is_stale: true, stale_chapter_titles: ["童年"] };
+  for (const [status, needsMaterial, expected] of [
+    ["processing", 0, /正在整理新版全书/],
+    ["failed", 0, /遇到问题.*重试/],
+    ["needs_input", 1, /需要补充讲述.*首页.*回忆/],
+    ["needs_input", 0, /待确认事项.*尚未更新/],
+    ["idle", 0, /尚未更新.*当前步骤/],
+  ]) {
+    const calls = [];
+    const { page } = loadBookExportPage({
+      getMemoirBookOutput: async () => output,
+      getMemoirDraftProgress: async (projectId) => {
+        calls.push(projectId);
+        return { status, needs_user_material_count: needsMaterial };
+      },
+    });
+    const context = pageContext(page);
+    await page.onLoad.call(context, { projectId: "fixture-project" });
+
+    assert.deepEqual(calls, ["fixture-project"]);
+    assert.match(context.data.bookStaleNotice, expected);
+    if (status !== "processing") assert.doesNotMatch(context.data.bookStaleNotice, /正在|会在后台自动更新/);
+    assert.equal(context.data.bookContent, output.latest_version.content);
+  }
 });
 
 test("book export uses the finished book for chapter count when the plan is unavailable", () => {

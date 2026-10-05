@@ -342,6 +342,37 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   );
 });
 
+test("chapter workspace guides empty chapters to narration and retains authoritative failure or processing state", () => {
+  const { mod } = loadWorkspacePage();
+  const emptyWorkspace = workspace({
+    sections: [],
+    draft_id: null,
+    draft_version_id: null,
+    draft_content: "",
+    draft_sections: [],
+    completion_summary: summary({ state: "not_started" }),
+  });
+  const empty = mod.chapterWorkspaceViewPatch(emptyWorkspace);
+
+  assert.equal(empty.chapterHasReadableDraft, false);
+  assert.match(empty.readinessTitle, /需要讲述素材/);
+  assert.match(empty.readinessDetail, /继续讲述.*当前步骤/);
+  assert.doesNotMatch(empty.chapterStoryDetail, /正在|自动/);
+
+  for (const state of ["failed", "preparing"]) {
+    const authoritativeSummary = summary({
+      state,
+      headline: state === "failed" ? "上次检查没有完成" : "正在检查本章",
+      detail: state === "failed" ? "原始素材保留，请重新检查。" : "检查任务正在处理。",
+    });
+    const view = mod.chapterWorkspaceViewPatch({ ...emptyWorkspace, completion_summary: authoritativeSummary });
+    assert.equal(view.readinessTitle, authoritativeSummary.headline);
+    assert.equal(view.readinessDetail, authoritativeSummary.detail);
+    assert.equal(view.chapterStoryDetail, authoritativeSummary.detail);
+    assert.equal(view.nextAction.kind, authoritativeSummary.next_action.kind);
+  }
+});
+
 test("chapter workspace opens a focused section selected from the story tree", async () => {
   const base = workspace();
   const currentWorkspace = workspace({

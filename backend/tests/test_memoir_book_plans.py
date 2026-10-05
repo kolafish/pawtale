@@ -295,3 +295,24 @@ async def test_confirm_plan_rejects_foreign_material(client, test_db):
         },
     )
     assert response.status_code == 400
+
+
+async def test_confirm_plan_rejects_duplicate_material_without_replacing_current_plan(client, test_db):
+    source = await create_test_voice_transcript(client, test_db, "一段完整的童年经历。")
+    project_id = source["session"]["project_id"]
+    url = f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    saved = await client.put(url, json={"chapters": [
+        {"title": "童年", "source_refs": [memoir_source_ref(source)]},
+    ]})
+    assert saved.status_code == 200, saved.text
+    before = saved.json()
+
+    rejected = await client.put(url, json={"chapters": [
+        {"title": "童年", "source_refs": [memoir_source_ref(source)]},
+        {"title": "另一章", "source_refs": [memoir_source_ref(source)]},
+    ]})
+
+    assert rejected.status_code == 400
+    current = (await client.get(url)).json()
+    assert current["id"] == before["id"]
+    assert current["chapters"] == before["chapters"]

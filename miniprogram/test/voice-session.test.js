@@ -3449,6 +3449,46 @@ test("a closed voice client exits only after the persisted session reaches a ter
   }
 });
 
+test("finished audio-only pending utterances preserve saved audio without claiming narration growth", async () => {
+  for (const [raw, edited, narrationSaved] of [
+    ["", "", false],
+    [" \n", "\t", false],
+    ["", "校正后的讲述", true],
+    ["已识别的讲述", " ", true],
+  ]) {
+    const utterance = {
+      id: "pending-utterance",
+      audio_file_id: "original-audio",
+      transcript_raw: raw,
+      transcript_edited: edited,
+      provider_payload_json: { status: "pending" },
+    };
+    global.wx = {};
+    const page = loadVoiceChatPage();
+    const context = {
+      ...page,
+      data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      voiceStreaming: {
+        isBargeInMonitoring: () => false,
+        startBargeInMonitoring: () => false,
+        async stopBargeInMonitoring() {},
+        hasClient: () => false,
+      },
+      refreshVoiceSessionSnapshot: async () => ({ session: { status: "stopped" }, utterances: [utterance] }),
+      stopCompletionIssueRefresh() {},
+      cancelFollowUpTTS() {},
+    };
+
+    await context.finishSession();
+
+    assert.equal(context.events[0].detail.narrationSaved, narrationSaved);
+    assert.equal(context.events[0].detail.finished, true);
+    assert.equal(context.data.persistenceStateText, "已保存");
+    assert.equal(utterance.audio_file_id, "original-audio");
+  }
+});
+
 test("ASR failure during finish exits to saved records when server confirms failed", async () => {
   const toasts = [];
   global.wx = { showToast: options => toasts.push(options.title) };

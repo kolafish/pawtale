@@ -258,9 +258,12 @@ export function chapterGuidanceText(
   changeNotice: string,
   pendingCount = 0,
   removedCount = 0,
+  sourceCount = 0,
 ): string {
-  if (!draft?.latest_version) {
-    return "正文还没准备好，进入章节页查看整理进度。";
+  if (!draft?.latest_version?.content.trim()) {
+    return sourceCount
+      ? "本章还没有正文，进入章节页查看当前步骤。"
+      : "本章还没有讲述素材，请回到首页继续讲述与本章有关的回忆。";
   }
   if (pendingCount || removedCount) {
     return `${changeNotice}。相关内容待更新，当前正文仍可阅读。`;
@@ -294,9 +297,10 @@ export function draftActionText(
   draft: MemoirBookChapterDraft | null,
   pendingCount: number,
   removedCount = 0,
+  sourceCount = 0,
 ): string {
-  if (!draft?.latest_version) {
-    return "查看整理进度";
+  if (!draft?.latest_version?.content.trim()) {
+    return sourceCount ? "查看当前步骤" : "查看本章";
   }
   if (pendingCount || removedCount) {
     return "查看更新状态";
@@ -755,15 +759,17 @@ export function bookOutputStaleNotice(
   const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
   const subject = titles.length ? `「${titles.join("、")}」${suffix}` : "章节内容";
   if (progress?.status === "needs_input") {
-    return `${subject}已更新。请点「查看待确认事项」处理，全书会在处理后自动更新。`;
+    return progress.needs_user_material_count
+      ? `${subject}有变更，部分章节还需要补充讲述。请回到首页补充相关回忆。`
+      : `${subject}有变更。请点「查看待确认事项」处理，全书尚未更新。`;
   }
   if (progress?.status === "failed") {
-    return `${subject}已更新，后台整理遇到问题。请点「查看待确认事项」查看原因并重试。`;
+    return `${subject}有变更，后台整理遇到问题。请点「查看待确认事项」查看原因并重试。`;
   }
   if (progress?.status === "processing") {
-    return `${subject}已更新，后台正在整理新版全书。`;
+    return `${subject}有变更，后台正在整理新版全书。`;
   }
-  return `${subject}已更新，全书会在后台自动更新；如迟迟未完成，请点「查看待确认事项」。`;
+  return `${subject}有变更，全书尚未更新。请点「查看待确认事项」查看当前步骤。`;
 }
 
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
@@ -793,6 +799,7 @@ export interface BookReadingData {
 export function bookReadingData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
+  progress: MemoirDraftProgress | null = null,
 ): BookReadingData {
   const content = selectedBookContent(output, selectedVersion);
   const manuscript = selectedBookManuscript(output, selectedVersion);
@@ -809,16 +816,17 @@ export function bookReadingData(
     bookVersionText: selectedBookOutputVersionText(output, selectedVersion),
     bookViewingHistoricalVersion: viewingHistorical,
     bookVersionNotice: bookVersionNotice(output, viewingHistorical),
-    bookStaleNotice: bookOutputStaleNotice(output),
+    bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
 }
 
 export function bookOutputData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
+  progress: MemoirDraftProgress | null = null,
 ) {
   const versionState = bookVersionOptions(output, selectedVersion);
-  const readingData = bookReadingData(output, selectedVersion);
+  const readingData = bookReadingData(output, selectedVersion, progress);
   return {
     ...readingData,
     ...bookManuscriptDesignData(selectedBookManuscript(output, selectedVersion)),
@@ -868,7 +876,9 @@ function bookOmissionFollowUp(
   omittedChapters: BookChapterView[],
 ): string {
   if (progress?.status === "needs_input") {
-    return "请查看待确认事项，处理后书稿会继续更新。";
+    return progress.needs_user_material_count
+      ? "请回到首页补充与本章有关的讲述。"
+      : "请查看待确认事项，处理后书稿会继续更新。";
   }
   if (progress?.status === "failed") {
     return "后台整理遇到问题，请查看待确认事项并重试。";
@@ -877,7 +887,9 @@ function bookOmissionFollowUp(
     return "后台正在整理，完成后请再查看。";
   }
   if (omittedChapters.some((chapter) => !chapter.draftAvailable)) {
-    return "请进入对应章节查看正文整理进度。";
+    return omittedChapters.some((chapter) => !chapter.sourceCount)
+      ? "请回到首页继续讲述与本章有关的回忆。"
+      : "请进入对应章节查看当前步骤。";
   }
   return "如需将其收入书稿，请查看待确认事项。";
 }
@@ -893,7 +905,7 @@ export function bookChapterInclusionData(
   return chapters.map((chapter) => ({
     ...chapter,
     bookInclusionNotice: available && chapter.include_in_book !== false
-      && chapter.draftAvailable && !includedIds.has(chapter.id)
+      && !includedIds.has(chapter.id)
       ? `${progress?.status === "needs_input" ? "本章待确认，暂未收入当前书稿。" : "本章暂未收入当前书稿。"}${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
       : "",
   }));
@@ -1151,6 +1163,7 @@ export function buildChapterViews(
           changeNotice,
           assignedPendingCount,
           assignedRemovedCount,
+          chapter.source_refs.length,
         ),
         chapterNeedsAction: Boolean(
           assignedPendingCount || assignedRemovedCount || !draft?.latest_version?.content?.trim(),
@@ -1160,6 +1173,7 @@ export function buildChapterViews(
           draft,
           assignedPendingCount,
           assignedRemovedCount,
+          chapter.source_refs.length,
         ),
         bookInclusionNotice: "",
         draftBusy: false,

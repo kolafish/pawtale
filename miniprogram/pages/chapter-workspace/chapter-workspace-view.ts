@@ -433,29 +433,36 @@ export function chapterWorkspaceViewPatch(
     workspace.draft_version_id
     && workspace.draft_content.trim(),
   );
+  const needsMaterial = !chapterHasReadableDraft && !includedMaterialCount && !pendingAssignmentCount;
+  const emptyDraftTitle = summary.state === "failed" || summary.state === "preparing"
+    ? summary.headline
+    : needsMaterial ? "本章还需要讲述素材" : summary.headline;
+  const emptyDraftDetail = summary.state === "failed" || summary.state === "preparing"
+    ? summary.detail
+    : needsMaterial ? "请回到首页继续讲述与本章有关的回忆，补充后再查看本章当前步骤。" : summary.detail;
   return {
     nextAction,
     chapterHeroKicker: chapterHasReadableDraft
       ? "这一章已经整理成"
-      : "这一章正在慢慢长大",
+      : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
     chapterStoryCountText: narrativeSectionCount
       ? `${narrativeSectionCount} 个故事`
-      : "故事正在生长",
+      : "暂无故事",
     chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
       ? "本章有新变化，当前正文仍可阅读，相关内容待更新。"
       : summary.state === "draft_ready"
         ? "本章正文已整理好，可以随时阅读或修改。"
         : chapterHasReadableDraft
           ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
-          : "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+          : emptyDraftDetail,
     chapterHasReadableDraft,
     chapterEditingHint: pendingAssignmentCount
       ? `${pendingAssignmentCount} 段回忆待整理`
       : workspace.draft_needs_rewrite
         ? "有新回忆等待写进故事"
         : "",
-    readinessTitle: summary.headline,
-    readinessDetail: summary.detail,
+    readinessTitle: chapterHasReadableDraft ? summary.headline : emptyDraftTitle,
+    readinessDetail: chapterHasReadableDraft ? summary.detail : emptyDraftDetail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace, structureChanged),
     rewriteNoticeDetail: structureChanged
       ? (

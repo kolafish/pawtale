@@ -677,14 +677,14 @@ test("book page directs chapters without a draft to their existing workspace", (
   const [chapter] = mod.buildChapterViews(samplePlan("confirmed"));
 
   assert.equal(chapter.chapterNeedsAction, true);
-  assert.equal(chapter.chapterGuidanceText, "正文还没准备好，进入章节页查看整理进度。");
-  assert.equal(chapter.draftActionText, "查看整理进度");
+  assert.match(chapter.chapterGuidanceText, /没有正文.*章节页.*当前步骤/);
+  assert.match(chapter.draftActionText, /当前步骤/);
   assert.doesNotMatch(chapter.chapterSummaryMetaText, /未生成|待确认/);
 
   const planWithNewSource = samplePlan("confirmed");
   planWithNewSource.chapters[0].pending_source_count = 1;
   const [unpreparedChapter] = mod.buildChapterViews(planWithNewSource);
-  assert.equal(unpreparedChapter.draftActionText, "查看整理进度");
+  assert.match(unpreparedChapter.draftActionText, /当前步骤/);
 });
 
 test("book page excludes hidden chapters from full-book generation readiness", () => {
@@ -722,11 +722,11 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(data.bookContentAvailable, true);
   assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
-  assert.match(data.bookStaleNotice, /外婆家的童年.*第一次离家.*自动更新/);
+  assert.match(data.bookStaleNotice, /外婆家的童年.*第一次离家.*尚未更新/);
   assert.match(data.bookStaleNotice, /查看待确认事项/);
 
   page.applyBookOutput.call(context, output, { status: "needs_input" });
-  assert.match(context.data.bookStaleNotice, /处理后自动更新/);
+  assert.match(context.data.bookStaleNotice, /待确认事项.*尚未更新/);
   page.applyBookOutput.call(context, output, { status: "processing" });
   assert.match(context.data.bookStaleNotice, /正在整理新版全书/);
   assert.equal("bookPreviewChapters" in data, false);
@@ -785,6 +785,26 @@ test("book page identifies a drafted chapter missing from the current book", () 
 
   page.applyBookOutput.call(context, sampleBookOutput(5, "全书正文", false, [], [], sampleBookManuscript()));
   assert.equal(context.data.chapters[1].bookInclusionNotice, "");
+});
+
+test("book page exposes an empty omitted chapter and guides additional narration", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const plan = samplePlan("confirmed");
+  plan.chapters[1].source_refs = [];
+  page.applyPlan.call(context, plan, { "chapter-1": sampleDraft(1, "draft") });
+  const partialOutput = sampleBookOutput(4, "当前书稿", false, [], [], sampleBookManuscript("外婆回忆录", "classic_plain", { chapterCount: 1 }));
+
+  page.applyBookOutput.call(context, partialOutput, { status: "needs_input", needs_user_material_count: 1 });
+
+  assert.equal(context.data.chapters[1].draftAvailable, false);
+  assert.match(context.data.chapters[1].chapterGuidanceText, /没有讲述素材.*继续讲述/);
+  assert.match(context.data.chapters[1].draftActionText, /查看本章/);
+  assert.match(context.data.chapters[1].bookInclusionNotice, /未收入当前书稿.*首页.*讲述/);
+
+  page.applyBookOutput.call(context, partialOutput, { status: "failed" });
+  assert.match(context.data.chapters[1].bookInclusionNotice, /遇到问题.*重试/);
+  assert.equal(context.data.bookIncludedChapterCount, 1);
 });
 
 test("book page stays available when login is required", async () => {

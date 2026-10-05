@@ -112,6 +112,7 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment]) -> str:
 - 章节标题要短，像书稿目录，不要像 AI 总结标题。
 - 根据素材量和主题密度自主决定章节数量，不要为了凑数拆分，也不要为了减少章节强行合并。
 - source_indices 必须来自给定 source_index，且每章至少包含一个来源。
+- 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，只返回必要的少量章节。
 
@@ -156,6 +157,7 @@ def chapters_from_payload(
         )
 
     chapters: list[MemoirBookPlanChapterInput] = []
+    seen_utterances: set[str] = set()
     for item in raw_chapters:
         if not isinstance(item, dict):
             continue
@@ -164,7 +166,6 @@ def chapters_from_payload(
             continue
         quote = string_value(item, "evidence_quote")
         refs: list[MemoirBookChapterSourceRef] = []
-        seen_utterances: set[str] = set()
         for source_index in source_indices(item):
             source = source_by_index.get(source_index)
             if not source or source.utterance_id in seen_utterances:
