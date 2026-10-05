@@ -562,6 +562,7 @@ class MemoirShareVideoListItemResponse(BaseModel):
     title: str
     selected_text: str
     duration_ms: int
+    video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
     created_at: datetime
     completed_at: datetime | None
 
@@ -571,6 +572,10 @@ class MemoirShareVideoJobListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class MemoirShareVideoDeleteRequest(BaseModel):
+    confirm: Literal[True]
 
 
 class MemoirShareVideoJobResponse(BaseModel):

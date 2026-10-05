@@ -240,6 +240,7 @@ export interface MemoirShareVideoListItem {
   title: string;
   selected_text: string;
   duration_ms: number;
+  video_style: MemoirShareVideoStyle;
   created_at: string;
   completed_at: string | null;
 }

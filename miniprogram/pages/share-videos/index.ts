@@ -1,4 +1,5 @@
 import type { MemoirShareVideoListItem } from "../../domain/memoir-transcript";
+import { MEMOIR_SHARE_VIDEO_STYLES, normalizeMemoirShareVideoStyle } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { getMemoirIdentity } from "../../services/auth";
 import { definePage } from "../../services/page-definition";
@@ -17,6 +18,7 @@ import { formatTranscriptDurationSeconds } from "../../services/transcript-view-
 const PAGE_SIZE = 20;
 
 interface ShareVideoItemView extends MemoirShareVideoListItem {
+  styleLabel: string;
   durationText: string;
   completedAtText: string;
 }
@@ -37,6 +39,9 @@ type VideoEvent = PageDatasetEvent<{ id?: string; utteranceId?: string }>;
 function toViewItem(item: MemoirShareVideoListItem): ShareVideoItemView {
   return {
     ...item,
+    styleLabel: MEMOIR_SHARE_VIDEO_STYLES.find(
+      (style) => style.value === normalizeMemoirShareVideoStyle(item.video_style),
+    )!.label,
     durationText: formatTranscriptDurationSeconds(item.duration_ms / 1000),
     completedAtText: formatBeijingDateTimeShort(item.completed_at || item.created_at),
   };

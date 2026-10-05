@@ -274,6 +274,13 @@ export function getMemoirShareVideoJob(jobId: string): Promise<MemoirShareVideoJ
   );
 }
 
+export async function deleteMemoirShareVideoJob(jobId: string): Promise<void> {
+  await memoirRequest<unknown>(
+    `/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE", data: { confirm: true } },
+  );
+}
+
 export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
   if (/^https?:\/\//.test(downloadUrl)) {
     return downloadUrl;

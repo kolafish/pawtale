@@ -61,10 +61,12 @@
               class="primary-button"
               bindtap="shareGeneratedVideo"
               loading="{{shareVideoSharing}}"
-              disabled="{{shareVideoDownloadingPreview || shareVideoSharing}}"
+              disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}"
             >{{shareVideoSharing ? "分享中" : "分享给微信"}}</button>
-            <button class="ghost-button" bindtap="remakeShareVideo" disabled="{{shareVideoSharing}}">重新制作</button>
+            <button class="ghost-button" bindtap="remakeShareVideo" disabled="{{shareVideoSharing || shareVideoDeleting}}">重新制作</button>
           </view>
+          <text class="record-meta">重新制作时可以换一种风格，已有视频会保留。</text>
+          <button class="ghost-button share-video-retry" bindtap="deleteShareVideo" loading="{{shareVideoDeleting}}" disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}">删除这版视频</button>
         </block>
 
         <block wx:elif="{{shareVideoJob && (shareVideoJob.status === 'pending' || shareVideoJob.status === 'running')}}">
