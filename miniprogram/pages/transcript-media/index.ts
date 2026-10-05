@@ -5,6 +5,7 @@ import {
   createMemoirShareVideoCandidateJob,
   createMemoirTranscriptShareVideoJob,
   downloadMemoirShareVideoJob,
+  deleteMemoirShareVideoJob,
   getMemoirMaterialImageGenerationJob,
   getMemoirShareVideoJob,
   getMemoirShareVideoCandidate,
@@ -60,6 +61,7 @@ definePage<TranscriptMediaData>()({
     needsLogin: false,
     error: "",
     viewMode: "create",
+    shareVideoDeleting: false,
     utteranceId: "",
     item: null,
     ...initialTranscriptShareVideoData(),
@@ -146,7 +148,50 @@ definePage<TranscriptMediaData>()({
 
   ...transcriptMediaWorkflowMethods,
 
+  async deleteShareVideo() {
+    const job = this.data.shareVideoJob;
+    if (!job || job.status !== "succeeded" || this.data.shareVideoDeleting
+      || this.data.shareVideoSharing || this.data.shareVideoDownloadingPreview) {
+      return;
+    }
+    const requestToken = this.loadToken;
+    this.setData({ shareVideoDeleting: true });
+    try {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        wx.showModal({
+          title: "删除这版视频？",
+          content: `《${job.title}》删除后需要重新制作。其他版本、原始讲述和图片素材会保留。`,
+          confirmText: "删除视频",
+          confirmColor: "#b64545",
+          success: (result) => resolve(Boolean(result.confirm)),
+          fail: () => resolve(false),
+        });
+      });
+      if (!confirmed || requestToken !== this.loadToken || this.data.shareVideoJob?.id !== job.id) {
+        return;
+      }
+      await deleteMemoirShareVideoJob(job.id);
+      if (requestToken !== this.loadToken) {
+        return;
+      }
+      this.shareVideoController.reset();
+      wx.showToast({ title: "视频已删除", icon: "success" });
+      wx.navigateBack();
+    } catch (error) {
+      if (requestToken === this.loadToken) {
+        this.setData({ shareVideoError: error instanceof Error ? error.message : "删除视频失败" });
+      }
+    } finally {
+      if (requestToken === this.loadToken) {
+        this.setData({ shareVideoDeleting: false });
+      }
+    }
+  },
+
   async refreshShareVideoJob() {
+    if (this.data.shareVideoDeleting) {
+      return;
+    }
     const job = this.data.shareVideoJob;
     if (job && job.utterance_id === this.data.utteranceId) {
       await this.shareVideoController.refresh(job.id);
@@ -162,6 +207,7 @@ definePage<TranscriptMediaData>()({
   },
 
   onUnload() {
+    this.loadToken += 1;
     this.shareVideoBackgroundUploadToken += 1;
     this.shareVideoController.dispose();
     this.materialImageController.dispose();

@@ -49,6 +49,7 @@ from app.schemas.memoir_voice import (
     MemoirTranscriptShareVideoContextResponse,
     MemoirShareVideoCustomBackgroundAssetResponse,
     MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoDeleteRequest,
     MemoirShareVideoJobListResponse,
     MemoirShareVideoJobResponse,
     MemoirShareVideoCandidateCreateVideoRequest,
@@ -678,6 +679,19 @@ async def get_mobile_memoir_share_video_job(
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
+
+
+@router.delete("/share-video/jobs/{job_id}", status_code=204)
+async def delete_mobile_memoir_share_video_job(
+    job_id: str,
+    req: MemoirShareVideoDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await memoir_share_video_jobs.delete_share_video_job(
+        db, job_id, current_user.id, allow_admin=is_admin_user(current_user),
+    )
+    return Response(status_code=204)
 
 
 @router.get(

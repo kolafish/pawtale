@@ -38,7 +38,7 @@
         </view>
         <text class="video-library-quote">“{{item.selected_text}}”</text>
         <view class="video-library-card-foot">
-          <text class="video-library-date">{{item.completedAtText}}</text>
+          <text class="video-library-date">{{item.styleLabel}} · {{item.completedAtText}}</text>
           <button class="video-library-open ui-button" data-id="{{item.id}}" data-utterance-id="{{item.utterance_id}}" bindtap="openVideo">查看视频 ›</button>
         </view>
       </view>

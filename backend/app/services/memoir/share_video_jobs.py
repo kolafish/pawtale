@@ -20,6 +20,7 @@ from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import (
+    MemoirImageAsset,
     MemoirMaterialShareVideo,
     MemoirShareVideoOutput,
     MemoirVoiceUtterance,
@@ -562,6 +563,33 @@ async def get_share_video_job(
     return _job_response(job)
 
 
+async def delete_share_video_job(
+    db: AsyncSession,
+    job_id: str,
+    user_id: str,
+    *,
+    allow_admin: bool = False,
+) -> None:
+    job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or not job.output:
+        raise HTTPException(status_code=409, detail="只能删除已完成的视频")
+    video_path = share_video_file_path(job, job.output)
+    # Illustrations remain reusable in the image library after deleting a video.
+    await db.execute(
+        update(MemoirImageAsset)
+        .where(MemoirImageAsset.share_video_job_id == job.id)
+        .values(share_video_job_id=None)
+    )
+    await db.delete(job)
+    await db.commit()
+    # Never remove the file before the database deletion has succeeded.
+    try:
+        video_path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("failed to remove deleted share video file job_id=%s", job_id)
+    _remove_video_completion_marker(video_path)
+
+
 async def list_completed_share_video_jobs(
     db: AsyncSession,
     *,
@@ -607,6 +635,7 @@ async def list_completed_share_video_jobs(
                 title=share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text),
                 selected_text=job.selected_text,
                 duration_ms=max(0, job.end_ms - job.start_ms),
+                video_style=ShareVideoJobMetadata.from_json(job.metadata_json).video_style,
                 created_at=job.created_at,
                 completed_at=job.completed_at,
             )

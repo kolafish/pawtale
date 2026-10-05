@@ -544,6 +544,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     createMemoirShareVideoCandidateJob,
     createMemoirTranscriptShareVideoJob,
     downloadMemoirShareVideoJob,
+    deleteMemoirShareVideoJob,
     getMemoirShareVideoJob,
     getMemoirTranscriptShareVideoContext,
   } = require("../services/memoir-transcript-api.ts");
@@ -560,6 +561,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     customBackgroundAssetId: "photo-1",
   });
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
+  await deleteMemoirShareVideoJob("job/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
@@ -591,6 +593,10 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.deepEqual(apiRequests[3].data, {
     ai_model: "deepseek-v4-pro", video_style: "uploaded", custom_background_asset_id: "photo-1",
   });
+  assert.equal(apiRequests[4].url,
+    "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1");
+  assert.equal(apiRequests[4].method, "DELETE");
+  assert.deepEqual(apiRequests[4].data, { confirm: true });
   assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
   assert.equal(context.background_modes[2].value, "smart_multi");
   assert.equal(created.status, "succeeded");

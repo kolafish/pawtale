@@ -46,6 +46,7 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
 export interface TranscriptMediaData
   extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
   viewMode: "create" | "video";
+  shareVideoDeleting: boolean;
   pageClass: string;
   loading: boolean;
   needsLogin: boolean;
@@ -163,18 +164,38 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   },
 
   async remakeShareVideo() {
-    if (this.data.shareVideoCreating || this.data.shareVideoSharing) {
+    if (this.data.shareVideoCreating || this.data.shareVideoSharing || this.data.shareVideoDeleting) {
       return;
     }
     const previousJob = this.data.shareVideoJob;
     this.setData({ viewMode: "create" });
     setPageNavigationTitle("做成图片或视频");
-    await this.openShareVideoPanel(false);
-    if (this.data.shareVideoContext && previousJob) {
-      this.setData(shareVideoStylePatch(
-        this.data.shareVideoContext,
-        normalizeMemoirShareVideoStyle(previousJob.video_style, previousJob.background_source),
-      ));
+    await this.openShareVideoPanel(false, false);
+    const context = this.data.shareVideoContext;
+    if (context && previousJob) {
+      const firstIndex = context.segments.findIndex((segment) => segment.end_char > previousJob.start_char);
+      let lastIndex = -1;
+      for (let index = context.segments.length - 1; index >= 0; index -= 1) {
+        if (context.segments[index].start_char < previousJob.end_char) {
+          lastIndex = index;
+          break;
+        }
+      }
+      const selection = shareVideoSelectionPatch(context, firstIndex, lastIndex);
+      const sameText = selection.shareVideoSelectedText === previousJob.selected_text;
+      this.setData({
+        ...shareVideoBackgroundPatch(context, {
+          backgroundStyle: previousJob.background_style || "",
+          backgroundMode: previousJob.background_mode || "",
+        }),
+        ...shareVideoStylePatch(context,
+          normalizeMemoirShareVideoStyle(previousJob.video_style, previousJob.background_source)),
+        ...(sameText ? selection : {}),
+        shareVideoCustomBackgroundAssetId: previousJob.custom_background_asset_id || "",
+        shareVideoCustomBackgroundStatusText: previousJob.custom_background_asset_id
+          ? "沿用原视频的图片，也可以重新选择" : "",
+        shareVideoError: sameText ? "" : "讲述文字已更新，请重新选择片段。已有视频会继续保留。",
+      });
     }
   },
 
@@ -515,6 +536,9 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   },
 
   async shareGeneratedVideo() {
+    if (this.data.shareVideoDeleting) {
+      return;
+    }
     const item = this.data.item;
     const job = this.data.shareVideoJob;
     const shared = await this.shareVideoController.share(shareVideoFileName(job?.title || job?.selected_text));
