@@ -262,6 +262,44 @@ def test_original_boarding_phrase_cannot_be_staged_as_walking():
         planning._map_proposal(planning._ProposedPlan.model_validate(payload), OUTING, units, 27705, "test", "test")
 
 
+async def test_real_sightseeing_walk_is_offered_and_accepted_without_sitting_in_a_tower(monkeypatch):
+    # Reduced from the failed DeepSeek proposal: building “座” was offered as
+    # sitting, while “逛了逛 / 巷子里转了一圈” was rejected as walking.
+    text = "那里有一座鼓楼，我们也去逛了逛，还在当地的巷子里转了一圈。"
+
+    async def generate(client, system, prompt, *, output_model, **kwargs):
+        source = json.loads(prompt.rsplit("\n", 1)[-1])
+        actions = source["sentences"][0]["capabilities"]["actions"]
+        assert "walk" in actions and "sit" not in actions
+        base = dict(proposal()["shots"][0], actor_ids=["travellers"], active_actor_id="travellers",
+                    action="walk", gesture="relaxed", camera="track", start_phase=0, end_phase=1,
+                    evidence=[{"sentence_id": 0, "quote": text}])
+        value = {"actors": [{"id": "travellers", "figure": "group",
+                              "evidence": {"sentence_id": 0, "quote": text}}], "shots": [base]}
+        return SimpleNamespace(value=output_model.model_validate(value),
+                               response=SimpleNamespace(provider="test", response_model="test", resolved_model="test"))
+
+    monkeypatch.setattr(planning, "get_ai_service", lambda model: SimpleNamespace(provider_name="test", model_name="test"))
+    monkeypatch.setattr(planning, "generate_structured_with_client", generate)
+    plan = await planning.plan_share_video_story(text, [], 8000, ai_model="test")
+    planning.validate_story_plan_source(plan, text, 8000)
+    assert plan.shots[0].action == "walk"
+    assert create_story_renderer(plan, 1280, 720)(1).size == (1280, 720)
+
+
+@pytest.mark.parametrize("text,action,allowed", [
+    ("我们在街上逛了逛。", "walk", True),
+    ("我们在巷子里转了一圈。", "walk", True),
+    ("我们坐车转了一圈。", "walk", False),
+    ("我们没有逛街，只是坐车转了一圈。", "walk", False),
+    ("一座鼓楼坐落在街上。", "sit", False),
+    ("我们坐在鼓楼旁歇了歇。", "sit", True),
+])
+def test_sightseeing_and_building_phrases_preserve_action_boundaries(text, action, allowed):
+    unit = planning.share_video_sentence_units(text, [], 8000)[0]
+    assert (action in planning._sentence_capabilities(unit)["actions"]) is allowed
+
+
 @pytest.mark.parametrize("dimensions", [(1280, 720), (720, 1280)])
 def test_story_frames_are_reproducible_and_actions_and_camera_move(dimensions):
     plan = mapped()

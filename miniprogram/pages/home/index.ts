@@ -12,10 +12,8 @@ import type {
   MemoirShareVideoCandidate,
   MemoirShareVideoJob,
   MemoirShareVideoListItem,
-  MemoirShareVideoStyle,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
-import { normalizeMemoirShareVideoStyle } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -26,14 +24,12 @@ import {
 } from "../../services/memoir-voice-session-api";
 import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import {
-  createMemoirShareVideoCandidateJob,
   dismissMemoirShareVideoCandidate,
   getMemoirShareVideoCandidate,
   getMemoirShareVideoJob,
   listMemoirShareVideos,
 } from "../../services/memoir-transcript-api";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
-import { ApiError } from "../../services/request";
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
@@ -113,11 +109,9 @@ interface HomeData extends HomeStoryData {
   showContinueNarration: boolean;
   shareCandidate: MemoirShareVideoCandidate | null;
   shareCandidateDurationText: string;
-  shareCandidateCreating: boolean;
   shareCandidateDismissing: boolean;
   shareCandidateError: string;
   shareCandidateJob: MemoirShareVideoJob | null;
-  shareVideoStyle: MemoirShareVideoStyle;
   recentShareVideo: MemoirShareVideoListItem | null;
   shareVideoTotal: number;
 }
@@ -236,7 +230,6 @@ function applyHomeSnapshotData(
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
-    shareVideoStyle: normalizeMemoirShareVideoStyle(identity.active_project?.metadata_json?.share_video_style),
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     ...(changedProject ? {
@@ -247,7 +240,6 @@ function applyHomeSnapshotData(
       voiceAuthorizationSaving: false,
       shareCandidate: null,
       shareCandidateDurationText: "",
-      shareCandidateCreating: false,
       shareCandidateDismissing: false,
       shareCandidateError: "",
       shareCandidateJob: null,
@@ -309,11 +301,9 @@ definePage<HomeData>()({
     showContinueNarration: false,
     shareCandidate: null,
     shareCandidateDurationText: "",
-    shareCandidateCreating: false,
     shareCandidateDismissing: false,
     shareCandidateError: "",
     shareCandidateJob: null,
-    shareVideoStyle: "illustrated",
     recentShareVideo: null,
     shareVideoTotal: 0,
     ...emptyHomeStoryData(),
@@ -532,46 +522,18 @@ definePage<HomeData>()({
     }
   },
 
-  async createShareCandidateVideo() {
+  openShareCandidateEditor() {
     const candidate = this.data.shareCandidate;
-    const projectId = this.data.projectId;
     if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
-      || this.data.voiceEntry || this.data.shareCandidateCreating || this.data.shareCandidateDismissing) return;
-    if (this.data.shareVideoStyle === "uploaded") {
-      wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
-        id: candidate.utterance_id,
-        candidateId: candidate.id,
-      }) });
-      return;
-    }
-    this.shareCandidateRequestSequence += 1;
-    this.setData({ shareCandidateCreating: true, shareCandidateError: "" });
-    try {
-      const job = await createMemoirShareVideoCandidateJob(projectId, candidate.id, {
-        videoStyle: this.data.shareVideoStyle,
-      });
-      if (!this.homeVisible || this.data.projectId !== projectId
-        || this.data.shareCandidate?.id !== candidate.id) return;
-      this.shareCandidateRequestSequence += 1;
-      this.setData({
-        shareCandidate: { ...candidate, status: "accepted", video_job_id: job.id },
-        shareCandidateJob: job,
-      });
-      trackAuditAction("home.share_video_candidate_accept", {}, { projectId, voiceSessionId: candidate.voice_session_id });
-      wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", { id: job.utterance_id, jobId: job.id }) });
-    } catch (error) {
-      if (!this.homeVisible || this.data.projectId !== projectId) return;
-      if (isAuthError(error)) {
-        navigateToLogin();
-        return;
-      }
-      this.setData({ shareCandidateError: error instanceof Error ? error.message : "视频制作未开始，请再试一次" });
-      if (error instanceof ApiError && error.statusCode === 409) {
-        void this.refreshShareCandidate(projectId);
-      }
-    } finally {
-      if (this.data.projectId === projectId) this.setData({ shareCandidateCreating: false });
-    }
+      || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    this.setData({ shareCandidateError: "" });
+    wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
+      id: candidate.utterance_id,
+      candidateId: candidate.id,
+    }) });
+    trackAuditAction("home.share_video_candidate_edit", {}, {
+      projectId: this.data.projectId, voiceSessionId: candidate.voice_session_id,
+    });
   },
 
   openShareCandidateVideo() {
@@ -602,7 +564,7 @@ definePage<HomeData>()({
   async dismissShareCandidate() {
     const candidate = this.data.shareCandidate;
     const projectId = this.data.projectId;
-    if (!candidate || this.data.voiceEntry || this.data.shareCandidateCreating || this.data.shareCandidateDismissing) return;
+    if (!candidate || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
     this.shareCandidateRequestSequence += 1;
     this.setData({ shareCandidateDismissing: true, shareCandidateError: "" });
     try {

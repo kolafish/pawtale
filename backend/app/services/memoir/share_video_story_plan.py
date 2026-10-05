@@ -131,16 +131,17 @@ _FIGURE_WORDS = {
     "person": r"我|你|他|她|人|父|母|爸|妈|叔|姨|伯|姑|爷|奶|婆|公|老师|师傅|同学|同事|孩|娃",
 }
 _SETTING_WORDS = {
-    "street": r"街|路|步行|出门",
+    "street": r"街|巷|路|步行|出门",
     "vehicle": r"车|火车|公交|巴士|客运",
     "courtyard": r"院|门口|天井",
     "workshop": r"厂|车间|工地|作坊|工场",
 }
 _ACTION_WORDS = {
     # Bare “走” means leaving too: “搭车就走” is riding, not walking.
-    "walk": r"步行|徒步|散步|走路|走着|走在|走街串巷|走来走去|走动|迈步|迈开步|脚步|步子",
+    "walk": r"步行|徒步|散步|走路|走着|走在|走街串巷|走来走去|走动|迈步|迈开步|脚步|步子|逛街|逛了逛|巷子里转了?一圈",
     "gather": r"约|聚|一起|一块|大家|集合",
-    "sit": r"坐|座",
+    # “一座鼓楼” and “坐落” describe buildings, not seated people.
+    "sit": r"坐(?!落|标)|入座|落座",
     "ride": r"车|乘|搭",
     "look_outside": r"窗|看|望|车",
     "hold_object": r"拿|捧|抱|端|握|手|吃|饭|碗|石|晶",
