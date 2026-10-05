@@ -3,6 +3,7 @@ import json
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirEditingJobType
@@ -67,7 +68,7 @@ async def story(client, test_db):
     return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
 
 
-async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, reply="请看看这些修改。"):
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, supports_section_merge=True, reply="请看看这些修改。"):
     fake = FakeAI({"operations": operations, "questions": questions or [], "reply": reply})
     requested = []
 
@@ -76,7 +77,7 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
         return fake
 
     monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", factory)
-    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split})
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split, "supports_section_merge": supports_section_merge})
     assert requested == ["deepseek-v4-flash"]
     return response, fake
 
@@ -494,6 +495,140 @@ async def test_standalone_section_delete_preserves_material_and_other_sections(c
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
     assert await test_db.get(MemoirVoiceUtterance, story["materials"][1]) is not None
     assert await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == story["materials"][1])) is None
+
+
+@pytest.mark.parametrize("singleton", [False, True])
+async def test_voice_merge_moves_section_into_existing_chapter_and_preserves_other_groups(
+    client, test_db, monkeypatch, story, singleton,
+):
+    source = story["sections"][0 if singleton else 1]
+    source_chapter = story["chapters"][0 if singleton else 1]
+    target = story["sections"][2]
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    excluded = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw="暂不收录但仍属于这一小节的讲述。")
+    unrelated = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw="其他小节的讲述保持原位置。")
+    test_db.add_all([excluded, unrelated])
+    await test_db.flush()
+    test_db.add_all([
+        MemoirSectionMaterial(project_id=story["pid"], section_id=source, utterance_id=excluded.id, sort_order=1, include_in_book=False),
+        MemoirSectionMaterial(project_id=story["pid"], section_id=story["sections"][3], utterance_id=unrelated.id),
+    ])
+    plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == story["pid"]))
+    output = MemoirBookOutput(project_id=story["pid"], plan_id=plan.id, title="我的回忆录", status="accepted")
+    drafts = list((await test_db.scalars(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.project_id == story["pid"]))).all())
+    for draft in drafts:
+        draft.status = "confirmed"
+    test_db.add(output)
+    await test_db.commit()
+    before = await _story(test_db, story["pid"])
+    links_before = {m["ref"]: m for m in before["memberships"]}
+    op = {"action": "merge_sections", "target_ref": target, "section_ids": [source]}
+    response, fake = await preview(
+        client, monkeypatch, story, [op],
+        instruction="把这个章节里的小节挪到早晨日常章节，和那里的小节合并。",
+    )
+    assert response.status_code == 200, response.text
+    assert "必须使用 merge_sections" in fake.system
+    item = response.json()["operations"][0]
+    assert "合并到「早晨日常」中的「早晨日常」" in item["label"]
+    assert ("将移除" in item["detail"]) == singleton
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    assert len(after["chapters"]) == len(before["chapters"]) - int(singleton)
+    assert {s["ref"] for s in after["sections"]} == {s["ref"] for s in before["sections"]} - {source}
+    assert {m["ref"]: (m["raw"], m["text"]) for m in after["materials"]} == {
+        m["ref"]: (m["raw"], m["text"]) for m in before["materials"]
+    }
+    for membership in after["memberships"]:
+        old = links_before[membership["ref"]]
+        assert membership["section_ref"] == (target if old["section_ref"] == source else old["section_ref"])
+        assert membership["included"] == old["included"]
+        assert membership["version"] == old["version"]
+    assert (await test_db.get(MemoirBookPlanChapter, source_chapter) is None) == singleton
+    await test_db.refresh(output)
+    assert output.status == "draft"
+    for draft in drafts:
+        if draft.chapter_id in {source_chapter, story["chapters"][2]} and not (singleton and draft.chapter_id == source_chapter):
+            await test_db.refresh(draft)
+            assert draft.status == "draft"
+    assert (await apply(client, story, response.json())).status_code == 409
+
+
+async def test_voice_merge_keeps_source_chapter_with_hidden_section(client, test_db, monkeypatch, story):
+    source = story["sections"][0]
+    hidden = MemoirSection(project_id=story["pid"], chapter_id=story["chapters"][0], title="尚未收录的小节", include_in_book=False, sort_order=1)
+    test_db.add(hidden)
+    await test_db.commit()
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [source],
+    }])
+    assert "将移除" not in response.json()["operations"][0]["detail"]
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is not None
+    assert await test_db.get(MemoirSection, hidden.id) is not None
+
+
+@pytest.mark.parametrize("change", ["destination", "destination_deleted", "source", "new_sibling", "source_draft"])
+async def test_voice_merge_rejects_changed_source_or_destination(client, test_db, monkeypatch, story, change):
+    op = {"action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [story["sections"][0]]}
+    response, _ = await preview(client, monkeypatch, story, [op])
+    if change == "destination_deleted":
+        await test_db.delete(await test_db.get(MemoirSection, op["target_ref"]))
+    elif change == "new_sibling":
+        test_db.add(MemoirSection(project_id=story["pid"], chapter_id=story["chapters"][0], title="新补的小节", sort_order=1))
+    elif change == "source_draft":
+        draft = await test_db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == story["chapters"][0]))
+        test_db.add(MemoirBookChapterDraftVersion(draft_id=draft.id, project_id=story["pid"], chapter_id=draft.chapter_id, version=2, content="后来修改的章节正文。"))
+    else:
+        section = await test_db.get(MemoirSection, op["target_ref"] if change == "destination" else op["section_ids"][0])
+        section.title = "后来修改的标题"
+        section.version += 1
+    await test_db.commit()
+    before = await _story(test_db, story["pid"])
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409, result.text
+    assert await _story(test_db, story["pid"]) == before
+
+
+async def test_voice_merge_failure_rolls_back_material_move(client, test_db, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [story["sections"][0]],
+    }])
+    before = await _story(test_db, story["pid"])
+
+    async def fail(*args, **kwargs):
+        raise HTTPException(409, "模拟移除空章时发生冲突")
+
+    monkeypatch.setattr("app.services.memoir.voice_edit.apply_book_plan_structure_command", fail)
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409
+    assert await _story(test_db, story["pid"]) == before
+
+
+async def test_voice_merge_requires_current_sections_and_unambiguous_batch(client, test_db, monkeypatch, story):
+    op = {"action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [story["sections"][0]]}
+    response, _ = await preview(client, monkeypatch, story, [op, {
+        "action": "delete_chapter", "target_ref": story["chapters"][2],
+    }])
+    assert response.status_code == 422
+    hidden = await test_db.get(MemoirSection, story["sections"][0])
+    hidden.include_in_book = False
+    await test_db.commit()
+    response, _ = await preview(client, monkeypatch, story, [op])
+    assert response.status_code == 422
+    hidden.include_in_book = True
+    await test_db.commit()
+    uncertain, _ = await preview(client, monkeypatch, story, [op], questions=[{
+        "target_refs": [op["target_ref"]], "question": "要放入哪一个小节？",
+    }])
+    assert uncertain.status_code == 200
+    assert uncertain.json()["operations"] == []
+    legacy, _ = await preview(client, monkeypatch, story, [op], supports_section_merge=False)
+    assert legacy.status_code == 200
+    assert legacy.json()["operations"] == []
+    assert "更新小程序" in legacy.json()["reply"]
 
 
 async def test_background_draft_completion_does_not_block_section_delete(client, test_db, monkeypatch, story):

@@ -867,7 +867,11 @@ async def apply_book_plan_structure_command(
         if output is not None:
             invalidate_book_output(output)
             db.add(output)
-    elif mutation.changed_chapter_ids or mutation.deleted_chapters:
+    elif mutation.changed_chapter_ids or any(
+        refs_by_chapter.get(chapter.id) for chapter in mutation.deleted_chapters
+    ):
+        # Removing an empty chapter needs no material reassignment. Rebuilding
+        # every chapter's sources here would collapse unrelated section groups.
         await db.flush()
         await sync_materials_to_chapters(
             db,

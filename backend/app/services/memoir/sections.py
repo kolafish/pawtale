@@ -1342,8 +1342,11 @@ async def apply_section_merge_groups(
         section_id: await _load_section(db, project_id=project_id, section_id=section_id)
         for section_id in all_ids
     }
-    if any(section.chapter_id != chapter_id for section in sections_by_id.values()):
-        raise HTTPException(status_code=400, detail="只能合并同一章内的小章节")
+    if any(sections_by_id[target_id].chapter_id != chapter_id for target_id, _ in groups):
+        raise HTTPException(status_code=400, detail="目标小节不在目标章节中")
+    affected_chapter_ids = {section.chapter_id for section in sections_by_id.values()}
+    for affected_chapter_id in sorted(affected_chapter_ids):
+        await lock_chapter_structure(db, project_id=project_id, chapter_id=affected_chapter_id)
 
     for target_id, req in groups:
         target = sections_by_id[target_id]
@@ -1379,13 +1382,14 @@ async def apply_section_merge_groups(
         )
         await db.flush()
 
-    remaining = await _load_sections(db, project_id=project_id, chapter_id=chapter_id)
-    await _set_section_order(db, sections=remaining)
+    for affected_chapter_id in sorted(affected_chapter_ids):
+        remaining = await _load_sections(db, project_id=project_id, chapter_id=affected_chapter_id)
+        await _set_section_order(db, sections=remaining)
     await mark_section_structure_changed(
         db,
         project_id=project_id,
         plan=plan,
-        chapter_ids={chapter_id},
+        chapter_ids=affected_chapter_ids,
         operation="merge_sections",
         updated_by=updated_by,
     )
@@ -1399,11 +1403,11 @@ async def merge_sections(
     target_section_id: str,
     req: MemoirSectionMergeRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirSectionCollectionResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await lock_plan_structure(db, project_id=project_id)
     target = await _load_section(db, project_id=project_id, section_id=target_section_id)
-    await lock_chapter_structure(db, project_id=project_id, chapter_id=target.chapter_id)
     await apply_section_merge_groups(
         db,
         project_id=project_id,
@@ -1411,7 +1415,7 @@ async def merge_sections(
         plan=plan,
         groups=[(target_section_id, req)],
     )
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
 
 

@@ -14,6 +14,7 @@ class VoiceEditOperation(BaseModel):
         "regenerate_chapter_sections",
         "consolidate_chapter_sections",
         "split_chapter",
+        "merge_sections",
     ]
     target_ref: str = Field(min_length=1, max_length=80)
     new_title: str | None = Field(default=None, max_length=80)
@@ -35,8 +36,15 @@ class VoiceEditOperation(BaseModel):
             selected = self.section_ids or self.utterance_ids
             if len(set(selected)) != len(selected) or any(not item.strip() for item in selected):
                 raise ValueError("拆分章节不能选择重复或空白的对象")
+        elif self.action == "merge_sections":
+            if not self.section_ids or self.utterance_ids:
+                raise ValueError("合并小节必须选择来源小节，不能选择讲述记录")
+            if len(set(self.section_ids)) != len(self.section_ids) or any(not item.strip() for item in self.section_ids):
+                raise ValueError("合并小节不能选择重复或空白的对象")
+            if self.target_ref in self.section_ids:
+                raise ValueError("不能把小节合并到自身")
         elif self.utterance_ids or self.section_ids:
-            raise ValueError("只有拆分章节可以选择小节或讲述记录")
+            raise ValueError("只有拆分章节或合并小节可以选择小节或讲述记录")
         return self
 
 
@@ -57,6 +65,7 @@ class VoiceEditPreviewRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=2000)
     ai_model: str | None = None
     supports_chapter_split: bool = False
+    supports_section_merge: bool = False
 
 
 class VoiceEditItem(VoiceEditOperation):
