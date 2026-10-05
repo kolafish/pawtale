@@ -48,6 +48,7 @@ class MemoirBookSnapshotResponse(BaseModel):
     ] = Field(default_factory=dict)
     output: MemoirBookOutputResponse | None = None
     progress: MemoirDraftProgressResponse | None = None
+    blocking_issue_count: int = Field(default=0, ge=0)
     automation_events: MemoirAutomationEventListResponse
     image_assets: MemoirImageAssetListResponse
     share_video_counts: list[MemoirShareVideoCountResponse] = Field(default_factory=list)

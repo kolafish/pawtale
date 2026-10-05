@@ -218,6 +218,7 @@ export interface BookHomeData {
   progressText: string;
   titleBusyTarget: string;
   bookCharCount: number;
+  blockingIssueCount: number;
   bookIncludedChapterCount: number;
   bookPreviewTitle: string;
   bookStaleNotice: string;
@@ -1233,6 +1234,7 @@ export function guestBookData(): Partial<BookHomeData> {
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
+    blockingIssueCount: 0,
     bookIncludedChapterCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",

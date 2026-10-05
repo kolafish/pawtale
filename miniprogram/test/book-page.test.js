@@ -835,6 +835,7 @@ test("book page stays available when login is required", async () => {
 test("book page labels a cached snapshot after refresh fails and clears it on retry", async () => {
   const snapshot = {
     server_revision: 1,
+    blocking_issue_count: 3,
     identity: {
       active_project_id: "project/1",
       active_project: { title: "外婆回忆录" },
@@ -868,6 +869,7 @@ test("book page labels a cached snapshot after refresh fails and clears it on re
   }
 
   assert.equal(context.data.bookContentAvailable, true);
+  assert.equal(context.data.blockingIssueCount, 3);
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.showingCachedBook, true);
   assert.equal(context.data.error, "");
@@ -876,6 +878,29 @@ test("book page labels a cached snapshot after refresh fails and clears it on re
 
   assert.equal(fetchCount, 2);
   assert.equal(context.data.showingCachedBook, false);
+});
+
+test("book page refreshes mandatory confirmation counts without changing saved book content", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const snapshot = {
+    identity: { active_project_id: "project/1", active_project: { title: "外婆回忆录" } },
+    plan: samplePlan("confirmed"), drafts_by_chapter_id: { "chapter-1": sampleDraft() },
+    output: sampleBookOutput(4, "外婆回忆录\n\n目录"), blocking_issue_count: 3,
+    automation_events: { items: [] },
+    image_assets: { items: [], total: 0, ready_count: 0, included_count: 0, unused_count: 0 },
+  };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.blockingIssueCount, 3);
+  assert.equal(context.data.bookContentAvailable, false);
+  assert.equal(context.data.bookCharCount, 0);
+  assert.equal(context.bookOutput, snapshot.output);
+
+  page.applyBookSnapshot.call(context, { ...snapshot, blocking_issue_count: 0 });
+  assert.equal(context.data.blockingIssueCount, 0);
+  assert.equal(context.bookOutput, snapshot.output);
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  assert.match(template, /bindtap="openBookCompletion"[\s\S]*?blockingIssueCount/);
 });
 
 test("book page opens the transcript list as a secondary page", () => {

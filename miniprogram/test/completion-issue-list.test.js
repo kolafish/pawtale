@@ -51,6 +51,41 @@ function issueEvent() {
   return { currentTarget: { dataset: { issueId: "issue-1" } } };
 }
 
+test("book confirmations group assembly blockers ahead of optional manual adjustments", () => {
+  const component = loadIssueList();
+  const privacy = requiredIssue({ id: "privacy", issue_type: "privacy", blocks_book: true });
+  const conflict = requiredIssue({ id: "conflict", issue_type: "conflict", blocks_book: true });
+  const clarity = requiredIssue({ id: "clarity", issue_type: "clarity", blocks_book: false });
+  const excluded = requiredIssue({ id: "excluded", issue_type: "privacy", blocks_book: false });
+  const context = componentContext(component, {
+    requiredIssues: [clarity, privacy, excluded, conflict], bookConfirmationMode: true,
+    allowRequiredConfirmation: true, projectId: "project-1",
+  });
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.deepEqual(context.data.requiredIssueGroups.map((group) => [
+    group.id, group.issues.map((item) => item.id),
+  ]), [["blocking", ["privacy", "conflict"]], ["optional", ["clarity", "excluded"]]]);
+
+  context.beginRequiredAnswer({ currentTarget: { dataset: { issueId: "clarity" } } });
+  assert.equal(context.data.answeringIssueId, "clarity");
+  context.properties.requiredIssues = [clarity, excluded];
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.deepEqual(context.data.requiredIssueGroups.map((group) => group.id), ["optional"]);
+  assert.equal(context.data.answeringIssueId, "clarity");
+});
+
+test("chapter confirmations retain their existing grouping and answer flow", () => {
+  const component = loadIssueList();
+  const context = componentContext(component, { requiredIssues: [requiredIssue()] });
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.equal(context.data.requiredIssueGroups.length, 1);
+  assert.equal(context.data.requiredIssueGroups[0].id, "required");
+  assert.equal(context.data.requiredIssueGroups[0].issues[0].id, "issue-1");
+  const template = fs.readFileSync(path.join(__dirname, "../components/completion-issue-list/index.wxml"), "utf8");
+  assert.match(template, /wx:for="\{\{requiredIssueGroups\}\}"/);
+  assert.match(template, /wx:for="\{\{group.issues\}\}"/);
+});
+
 test("required book issue opens a real answer editor instead of a confirm modal", () => {
   let modalOpened = false;
   global.wx = {
