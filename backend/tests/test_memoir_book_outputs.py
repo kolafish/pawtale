@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -36,7 +37,12 @@ from app.services.memoir import book_outputs
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
-from app.services.memoir.book_output_manuscript import formal_book_title, manuscript_from_snapshot
+from app.services.memoir.book_output_manuscript import (
+    apply_editorial_copy,
+    formal_book_title,
+    manuscript_from_snapshot,
+    updated_manuscript_payload,
+)
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -333,6 +339,143 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
     assert cleaned["render_settings"]["back_cover_quote"] == "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
 
 
+@pytest.fixture
+def release_quote_snapshot():
+    # Fictional narration whose exported 81/46-character quotes ended mid-sentence.
+    narration = (
+        "这是发布测试用的虚构故事。我小时候住在四川成都，7岁那年，奶奶每天早晨带我去河边散步。"
+        "有一天突然下大雨，奶奶把她的蓝色雨衣披在我身上，自己淋湿了。"
+        "回到家以后，她给我煮了一碗热汤面。从那以后，我一直记得她照顾我的样子。"
+    )
+    return [{
+        "chapter_id": "release-chapter",
+        "chapter_title": "奶奶的蓝色雨衣",
+        "content": narration,
+        "source_refs": [{"utterance_id": "release-utterance", "transcript_version_id": "release-transcript", "quote": narration}],
+    }]
+
+
+def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
+
+    assert manuscript is not None
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.text == narration[:73]
+    assert quote.source == "original_quote"
+    assert quote.source_ref_ids == ["release-utterance"]
+    assert manuscript.chapters[0].source_refs[0].transcript_version_id == "release-transcript"
+    assert manuscript.render_settings.back_cover_quote == narration[:43]
+
+    payload = manuscript.model_dump(mode="json")
+    payload["render_settings"]["back_cover_quote"] = ""
+    regenerated = sanitize_manuscript_payload(title="发布手测", manuscript=payload)
+    assert regenerated["render_settings"]["back_cover_quote"] == narration[:43]
+
+
+def test_release_quote_skips_source_without_a_complete_sentence_in_budget(release_quote_snapshot):
+    chapter = release_quote_snapshot[0]
+    chapter["source_refs"][0]["quote"] = chapter["content"].replace("。", "，")
+    chapter["source_refs"].append({"utterance_id": "short-source", "quote": "奶奶把蓝色雨衣披在我身上。"})
+    manuscript = manuscript_from_snapshot(title="发布手测", content=chapter["content"], snapshot=release_quote_snapshot)
+
+    assert manuscript is not None
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.text == "奶奶把蓝色雨衣披在我身上。"
+    assert quote.source_ref_ids == ["short-source"]
+
+
+def test_release_quote_metadata_update_preserves_manual_text(release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    old_chapter_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover_quote = narration[:45].rstrip("，。；、,. ") + "。"
+    assert len(old_chapter_quote) == 81
+    assert len(old_back_cover_quote) == 46
+    manuscript = manuscript_from_snapshot(
+        title="发布手测", content=narration, snapshot=release_quote_snapshot,
+        metadata={"back_cover_quote": old_back_cover_quote},
+    )
+    assert manuscript is not None
+    manuscript.chapters[0].pull_quotes[0].text = old_chapter_quote
+    manuscript.chapters[0].pull_quotes[0].source = "manual"
+    updated = updated_manuscript_payload(
+        title="发布手测", stored=manuscript.model_dump(mode="json"), content=narration,
+        snapshot=release_quote_snapshot, cover_style_value=None, metadata_patch={"subtitle": "自定副标题"},
+    )
+
+    assert updated["chapters"][0]["pull_quotes"][0]["text"] == old_chapter_quote
+    assert updated["chapters"][0]["pull_quotes"][0]["source"] == "manual"
+    assert updated["render_settings"]["back_cover_quote"] == old_back_cover_quote
+
+
+async def test_release_quote_regeneration_keeps_complete_sentences_and_selected_targets(release_quote_snapshot, monkeypatch):
+    narration = release_quote_snapshot[0]["content"]
+    fake_ai = FakeEditorialAI()
+
+    async def provider_response(*args, **kwargs):
+        return json.dumps({
+            "chapter_intros": [{"chapter_id": "C1", "pull_quote": narration, "pull_quote_source_ref_id": "M1"}],
+            "back_cover_quote": narration,
+        }, ensure_ascii=False)
+
+    monkeypatch.setattr(fake_ai, "_call_llm", provider_response)
+    copy = await generate_manuscript_editorial_copy(
+        title="发布手测", snapshot=release_quote_snapshot, ai_model="fake-model", ai_client=fake_ai,
+        targets=["pull_quotes", "back_cover_quote"],
+    )
+    assert copy is not None
+    assert copy.chapter_intros[0].pull_quote == narration[:90]
+    assert copy.chapter_intros[0].pull_quote_source_ref_id == "release-utterance"
+    assert copy.back_cover_quote == narration[:43]
+
+    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
+    assert manuscript is not None
+    manuscript.chapters[0].pull_quotes[0].text = "手工保留的摘录"
+    manuscript.chapters[0].pull_quotes[0].source = "manual"
+    apply_editorial_copy(manuscript, copy, targets={"back_cover_quote"}, chapter_ids=set())
+    assert manuscript.render_settings.back_cover_quote == narration[:43]
+    assert manuscript.chapters[0].pull_quotes[0].text == "手工保留的摘录"
+    apply_editorial_copy(manuscript, copy, targets={"pull_quotes"}, chapter_ids={"release-chapter"})
+    assert manuscript.chapters[0].pull_quotes[0].text == narration[:90]
+    assert manuscript.chapters[0].pull_quotes[0].source_ref_ids == ["release-utterance"]
+
+
+@pytest.mark.parametrize("has_complete_sentence", [True, False])
+def test_release_quote_cleanup_repairs_only_proven_automatic_history(release_quote_snapshot, has_complete_sentence):
+    narration = release_quote_snapshot[0]["content"]
+    if not has_complete_sentence:
+        narration = narration.replace("。", "，")
+        release_quote_snapshot[0]["source_refs"][0]["quote"] = narration
+    old_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover = narration[:45].rstrip("，。；、,. ") + "。"
+    manuscript = manuscript_from_snapshot(
+        title="发布手测", content=narration, snapshot=release_quote_snapshot,
+        metadata={"back_cover_quote": old_back_cover},
+    )
+    assert manuscript is not None
+    stored = manuscript.model_dump(mode="json")
+    chapter = stored["chapters"][0]
+    chapter["source_refs"].append({"utterance_id": "literal-source", "quote": old_quote + "这句话本来就这样说。"})
+    chapter["pull_quotes"] = [
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "manual", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "editorial_generated", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["unknown-source"]},
+        {"text": old_quote + "自定说明", "source": "original_quote", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["literal-source"]},
+    ]
+
+    cleaned = sanitize_manuscript_payload(title="发布手测", manuscript=stored)
+
+    assert [quote["text"] for quote in cleaned["chapters"][0]["pull_quotes"]] == (
+        [narration[:73]] if has_complete_sentence else []
+    ) + [old_quote, old_quote, old_quote, old_quote + "自定说明", old_quote]
+    if has_complete_sentence:
+        assert cleaned["chapters"][0]["pull_quotes"][0]["source_ref_ids"] == ["release-utterance"]
+    assert cleaned["render_settings"]["back_cover_quote"] == old_back_cover
+    assert stored["chapters"][0]["pull_quotes"][0]["text"] == old_quote
+
+
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
     draft_statuses = None
     if not confirmed_chapters:
@@ -469,6 +612,45 @@ async def _seed_confirmed_book_output(test_db, *, project_id: str) -> MemoirBook
     test_db.add(version)
     await test_db.commit()
     return version
+
+
+async def test_release_quote_normal_assembly_repairs_reused_original_only(client, test_db, release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    old_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover = narration[:45].rstrip("，。；、,. ") + "。"
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id, chapter_id=chapters[0].id,
+        utterance_id="release-utterance", quote=narration,
+    )
+    await test_db.commit()
+    previous = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    payload = json.loads(json.dumps(previous.manuscript_json))
+    payload["chapters"][0]["pull_quotes"] = [
+        {"text": old_quote, "source": source, "source_ref_ids": ["release-utterance"]}
+        for source in ("original_quote", "manual", "editorial_generated")
+    ]
+    payload["render_settings"]["back_cover_quote"] = old_back_cover
+    previous.manuscript_json = payload
+    draft_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.chapter_id == chapters[0].id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert draft_version is not None
+    draft_version.content += "正常整理发布测试说明。"
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200
+    current = await test_db.get(MemoirBookOutputVersion, assembled.json()["output_version_id"])
+    assert current is not None and current.id != previous.id
+    quotes = current.manuscript_json["chapters"][0]["pull_quotes"]
+    assert [quote["text"] for quote in quotes] == [narration[:73], old_quote, old_quote]
+    assert [quote["source"] for quote in quotes] == ["original_quote", "manual", "editorial_generated"]
+    assert current.manuscript_json["render_settings"]["back_cover_quote"] == old_back_cover
+    assert previous.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == old_quote
 
 
 async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
@@ -1276,6 +1458,63 @@ async def test_mobile_memoir_book_output_exports_selected_version(client, test_d
     assert unchanged.status_code == 200
     assert unchanged.json()["content"] == first_version.content
     assert unchanged.json()["manuscript"] == first_version.manuscript_json
+
+
+async def test_partial_book_export_omits_empty_chapters_until_material_arrives(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["有讲述的章节", "尚未讲述的章节一", "尚未讲述的章节二"],
+        draft_contents=["这是用于发布回归的虚构正文。", None, None],
+    )
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="aa562d9f-393b-4272-b7f8-8f329bedc5a2",
+        quote="这是用于发布回归的虚构讲述。",
+    )
+    await test_db.commit()
+    loaded = await book_outputs.load_book_plan_drafts(test_db, project_id=project_id)
+    chapter = next(c for c in loaded.chapters if c.id == chapters[0].id)
+    refs = await plan_source_ref_dicts_by_chapter(test_db, loaded)
+    content, snapshot = book_outputs._compose_book_content(
+        title=plan.title, chapters=[(chapter, chapter.draft.versions[-1])],
+        source_refs_by_chapter=refs,
+    )
+    output = MemoirBookOutput(project_id=project_id, plan_id=plan.id, title=plan.title)
+    test_db.add(output)
+    await test_db.flush()
+    output_version = MemoirBookOutputVersion(
+        output_id=output.id, project_id=project_id, plan_id=plan.id,
+        version=1, content=content, chapter_snapshot_json=snapshot,
+    )
+    test_db.add(output_version)
+    chapters[1].title = "改名后的空章"
+    await test_db.commit()
+
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert current.status_code == 200
+    assert current.json()["is_stale"] is False
+    assert current.json()["stale_chapter_titles"] == []
+    assert current.json()["latest_version"]["content"] == content
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt"
+    )
+    assert exported.status_code == 200
+
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id,
+        chapter_id=chapters[1].id,
+        utterance_id="0e6a58f5-9c27-4db5-a87c-28c401a72f89",
+        quote="这是刚补进另一章的虚构讲述。",
+    )
+    await test_db.commit()
+    changed = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert changed.status_code == 200
+    assert changed.json()["is_stale"] is True
+    assert changed.json()["stale_chapter_titles"] == [chapters[1].title]
+    assert changed.json()["latest_version"]["id"] == output_version.id
 
 
 async def test_mobile_memoir_book_output_detects_stale_chapter_versions(client, test_db):

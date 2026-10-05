@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +27,7 @@ from app.services.memoir import (
     book_reviews,
     completion_issues,
 )
+from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     manuscript_from_snapshot,
@@ -403,7 +402,7 @@ async def assemble_book_output(
                 chapter.intro = str(old.get("intro") or "")
                 chapter.pull_quotes = [
                     MemoirBookManuscriptQuote.model_validate(value)
-                    for value in deepcopy(old.get("pull_quotes") or [])
+                    for value in repair_original_pull_quotes(old)
                     if isinstance(value, dict)
                 ]
     version = await book_output_versions.append_book_output_version(

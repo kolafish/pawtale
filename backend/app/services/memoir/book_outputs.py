@@ -306,6 +306,14 @@ def _current_book_snapshot(
                 )
             )
         ):
+            if (
+                (version is None or not version.content.strip())
+                and source_refs_by_chapter is not None
+                and not source_refs_by_chapter.get(chapter.id)
+            ):
+                # Empty planned chapters are omitted by partial book assembly.
+                # Once material arrives, the missing draft must block export.
+                continue
             unavailable_titles.append(chapter.title)
             continue
         snapshot.append(

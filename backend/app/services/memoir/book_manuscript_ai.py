@@ -20,6 +20,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.book_manuscript_cleanup import brief_text
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
@@ -422,8 +423,9 @@ def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str,
                     _string(raw_ref.get("representative_quote"))
                     or _string(raw_ref.get("quote"))
                 )
+                quote = brief_text(quote, max_chars=90)
                 if utterance_id and quote:
-                    candidates[utterance_id] = _compact_text(quote, 90)
+                    candidates[utterance_id] = quote
         result[chapter_id] = candidates
     return result
 
@@ -435,7 +437,7 @@ def _validated_original_quote(
     source_ref_id: object,
     quote_candidates: dict[str, dict[str, str]],
 ) -> tuple[str, str]:
-    quote = _clean_copy_text(value, max_chars=90).strip("“”\"'「」")
+    quote = _clean_copy_text(brief_text(_string(value), max_chars=90), max_chars=90).strip("“”\"'「」")
     candidate_by_source = quote_candidates.get(chapter_id, {})
     source_id = _string(source_ref_id)
     if source_id and source_id in candidate_by_source:
@@ -456,7 +458,7 @@ def _validated_original_quote(
 
 
 def _validated_back_cover_quote(value: object, quote_candidates: dict[str, dict[str, str]]) -> str:
-    quote = _clean_copy_text(value, max_chars=60).strip("“”\"'「」")
+    quote = _clean_copy_text(brief_text(_string(value), max_chars=60), max_chars=60).strip("“”\"'「」")
     if not quote:
         return ""
     for candidate_by_source in quote_candidates.values():

@@ -364,14 +364,16 @@ function chapterView(
   preparingChapterId: string,
   recheckingAll = false,
 ): ChapterView {
-  const stateText = {
-    not_started: "待检查",
-    preparing: "正在检查",
-    needs_input: "需要确认",
-    draft_ready: "正文可读",
-    confirmed: "正文可读",
-    failed: "检查未完成",
-  }[item.state];
+  const stateText = item.state === "needs_input" && item.next_action.kind === "wait"
+    ? "待补充讲述"
+    : {
+      not_started: "待检查",
+      preparing: "正在检查",
+      needs_input: "需要确认",
+      draft_ready: "正文可读",
+      confirmed: "正文可读",
+      failed: "检查未完成",
+    }[item.state];
   const busy = (
     recheckingAll
     || preparingChapterId === item.chapter_id
