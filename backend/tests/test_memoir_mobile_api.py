@@ -31,7 +31,7 @@ async def test_book_confirmation_counts_match_assembly_blockers(client, test_db)
             id=f"confirmation-{index}", project_id=project_id,
             question="是否保留这段经历？", priority="high",
             fingerprint=f"{index:064x}", input_signature="older-review",
-            **{"scope": "book", "channel": "manual_review", "issue_type": "privacy", **patch},
+            **{"scope": "book", "channel": "manual_review", "issue_type": "conflict", **patch},
         )
 
     rows = [
@@ -43,6 +43,8 @@ async def test_book_confirmation_counts_match_assembly_blockers(client, test_db)
         issue(6, status="closed", outcome="confirmed"),
         issue(7, scope="chapter", chapter_id=chapters[1].id),
         issue(8, issue_type="conflict", related_chapter_ids_json=[chapters[1].id]),
+        issue(9, issue_type="privacy", related_chapter_ids_json=[chapters[0].id]),
+        issue(10, issue_type="privacy", scope="chapter", chapter_id=chapters[0].id),
     ]
     test_db.add_all(rows)
     await test_db.commit()
@@ -58,6 +60,11 @@ async def test_book_confirmation_counts_match_assembly_blockers(client, test_db)
     assert overview["chapters"][0]["blocking_issue_count"] == 1
     assert {item["id"] for item in collection["issues"] if item["blocks_book"]} == {
         rows[0].id, rows[1].id, rows[2].id,
+    }
+    active = (await client.get(f"/api/memoir/projects/{project_id}/completion-issues")).json()
+    assert not any(item["issue_type"] == "privacy" for item in active["issues"])
+    assert {item["id"] for item in collection["issues"] if item["issue_type"] == "privacy"} == {
+        rows[8].id, rows[9].id,
     }
 
     closed = await client.post(

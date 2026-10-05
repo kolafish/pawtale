@@ -31,7 +31,7 @@ export function requiredIssueGroups(issues: MemoirCompletionIssue[], bookMode: b
         id: "blocking",
         title: "必须处理",
         className: "required",
-        detail: "涉及隐私或事实冲突，处理后相关章节才能收入全书。可以填写处理说明，也可以明确选择保留现状。",
+        detail: "涉及事实冲突，处理后相关章节才能收入全书。可以填写处理说明，也可以明确选择保留现状。",
         issues: issues.filter((issue) => issue.blocks_book),
       },
       {

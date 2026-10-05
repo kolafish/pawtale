@@ -10,6 +10,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
     MemoirCompletionIssueStatus,
+    MemoirCompletionIssueType,
 )
 from app.models.memoir import (
     MemoirBookOutput,
@@ -97,7 +98,8 @@ async def load_answer_context(
     unresolved_count = 0
     for issue in issues:
         if issue.status != MemoirCompletionIssueStatus.CLOSED.value:
-            unresolved_count += 1
+            if issue.issue_type != MemoirCompletionIssueType.PRIVACY.value:
+                unresolved_count += 1
             continue
         if (
             issue.outcome != MemoirCompletionIssueOutcome.CONFIRMED.value

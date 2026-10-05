@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from app.config import DEFAULT_AI_TEXT_MODEL
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_references import ModelReferenceMap
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
@@ -148,10 +149,10 @@ class LayeredBookAI(AITextServiceBase):
             elif self.chapter_manual_issue:
                 candidates = [
                     {
-                        "issue_type": "privacy",
+                        "issue_type": "conflict",
                         "channel": "manual_review",
-                        "question": "这一章是否愿意保留真实学校名称？",
-                        "reason": "这是用户需要决定的隐私边界。",
+                        "question": "这一章比赛年份的两种说法，哪一种准确？",
+                        "reason": "年份冲突需要讲述者确认。",
                         "priority": "high",
                         "section_ids": section_ids[:1],
                     }
@@ -415,6 +416,43 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
     assert "书名是否应" in review["structure_guidance"][0]
 
 
+@pytest.mark.parametrize("question", [
+    "先生和亲友的婚姻经历是否需要匿名？",
+    "完整联系方式是否适合写入书稿？",
+])
+def test_private_review_rejects_privacy_questions_at_every_level(question):
+    candidate = {
+        "issue_type": "privacy", "channel": "manual_review",
+        "resolution": "user_decision", "priority": "high",
+        "question": question, "reason": "模型按公开出版标准提出确认。",
+        "material_ids": ["M1"], "section_ids": ["S1"], "chapter_ids": ["C1"],
+    }
+    section = section_digests.normalize_section_digest_payload(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        material_references=ModelReferenceMap("M", ["material-1"]),
+    )
+    chapter = chapter_digests.normalize_chapter_digest(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        section_references=ModelReferenceMap("S", ["section-1"]),
+    )
+    context = BookReviewContext(
+        project_id="project-1", plan_id="plan-1", book_metadata={"title": "回忆"},
+        chapters=(BookReviewChapter(
+            chapter_id="chapter-1", title="亲友生活", sort_order=0,
+            digest_id="digest-1", digest_signature="digest-signature", digest={},
+            draft_version_id="version-1", draft_hash="draft-hash",
+            material_ids=frozenset(),
+        ),),
+        input_signature="private-review",
+    )
+    book = normalize_book_review(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        context=context,
+    )
+    assert section["candidate_issues"] == chapter["candidate_issues"] == book["candidate_issues"] == []
+    assert completion_issues.book_review_candidate_fingerprints([candidate]) == []
+
+
 def test_book_review_fingerprints_follow_questions_when_order_changes():
     common = {
         "issue_type": "clarity",
@@ -466,7 +504,7 @@ def test_book_review_anchors_only_verified_distinct_quoted_facts():
         ),
         input_signature="book-signature",
     )
-    def candidate(question, chapter_id, issue_type="privacy"):
+    def candidate(question, chapter_id, issue_type="conflict"):
         return {
             "issue_type": issue_type,
             "question": question,
@@ -485,8 +523,8 @@ def test_book_review_anchors_only_verified_distinct_quoted_facts():
             "candidate_issues": [
                 candidate("是否匿名？", "C1"),
                 candidate("是否匿名？", "C2"),
-                candidate("这段关系准确吗？", "C1", "conflict"),
-                candidate("这段邀请准确吗？", "C1", "conflict"),
+                candidate("这段关系准确吗？", "C1", "clarity"),
+                candidate("这段邀请准确吗？", "C1", "clarity"),
                 short_quote,
             ],
         },
@@ -501,7 +539,7 @@ def test_book_review_anchors_only_verified_distinct_quoted_facts():
     assert issues[2]["fingerprint"] != issues[3]["fingerprint"]
 
 
-async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
+async def test_book_review_reuses_quoted_conflict_issue_across_reworded_reviews(
     client, test_db,
 ):
     project_id = await ensure_mobile_memoir_project(client)
@@ -509,9 +547,9 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
     old = MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
-        issue_type="privacy",
+        issue_type="conflict",
         channel="manual_review",
-        question="书中‘某位知名企业家’曾是你的经理，这段是否适合保留？",
+        question="书中‘学校比赛安排在九月’与另一章十月的说法冲突，以哪一个为准？",
         reason="请决定如何表述。",
         priority="high",
         fingerprint="a" * 64,
@@ -522,9 +560,9 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
     test_db.add(MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
-        issue_type="privacy",
+        issue_type="conflict",
         channel="manual_review",
-        question="‘某位知名企业家’这段职场关系要保留吗？",
+        question="‘学校比赛安排在九月’这个日期准确吗？",
         reason="旧轮次的问题。",
         priority="high",
         fingerprint="c" * 64,
@@ -536,13 +574,13 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
     await test_db.flush()
     old_id = old.id
     candidate = {
-        "issue_type": "privacy",
+        "issue_type": "conflict",
         "channel": "manual_review",
-        "question": "与这位经理的关系是否需要匿名？",
-        "reason": "可识别关系需要由用户决定。",
+        "question": "学校比赛到底在九月还是十月？",
+        "reason": "时间冲突需要讲述者确认。",
         "priority": "high",
         "chapter_ids": [chapter_id],
-        "evidence_quote": "某位知名企业家曾经是我的经理",
+        "evidence_quote": "学校比赛安排在九月",
         "resolution": "user_decision",
     }
     candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
@@ -558,9 +596,9 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
 
     first[0].status = "closed"
     first[0].outcome = "confirmed"
-    first[0].outcome_note = "使用化名。"
+    first[0].outcome_note = "以九月为准。"
     await test_db.flush()
-    reworded = {**candidate, "question": "这段职场关系是否可以公开？"}
+    reworded = {**candidate, "question": "学校比赛的时间以哪一个说法为准？"}
     reworded["fingerprint"] = completion_issues.stable_book_issue_fingerprint(reworded)
     assert reworded["fingerprint"] == candidate["fingerprint"]
     current = await completion_issues.sync_book_review_issues(
@@ -570,11 +608,12 @@ async def test_book_review_reuses_quoted_privacy_issue_across_reworded_reviews(
     assert len(current) == 1
     assert current[0].id == old_id
     assert current[0].status == "closed"
-    assert current[0].outcome_note == "使用化名。"
+    assert current[0].outcome_note == "以九月为准。"
     assert current[0].input_signature == "later-review"
 
 
-async def test_declining_book_privacy_decision_keeps_manuscript_and_reincludes_chapter(
+@pytest.mark.ci_smoke
+async def test_legacy_privacy_does_not_block_private_book_or_repeat_decisions(
     client, test_db,
 ):
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
@@ -599,14 +638,44 @@ async def test_declining_book_privacy_decision_keeps_manuscript_and_reincludes_c
         "resolution": "user_decision",
     }
     candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
-    issue = (await completion_issues.sync_book_review_issues(
-        test_db, project_id=project_id, input_signature="first-review",
-        candidates=[candidate],
-    ))[0]
+    issue = MemoirCompletionIssue(
+        project_id=project_id, scope="book", issue_type="privacy",
+        channel="manual_review", question=candidate["question"],
+        reason=candidate["reason"], priority="high",
+        related_chapter_ids_json=candidate["chapter_ids"],
+        fingerprint=candidate["fingerprint"], input_signature="first-review",
+        resolution="user_decision",
+    )
+    test_db.add(issue)
     await test_db.commit()
 
-    partial = await assemble_book_output(test_db, project_id=project_id, automatic=True)
-    assert partial.omitted_chapter_ids == [chapters[0].id]
+    full = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert full.omitted_chapter_ids == []
+    assert full.chapter_snapshot_json[0]["content"] == original_content
+    await test_db.commit()
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt",
+    )
+    assert exported.status_code == 200
+    assert original_content in exported.text
+    shared = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/share")
+    assert shared.status_code == 200, shared.text
+    assert (await completion_issues.collection_response(
+        test_db, project_id=project_id,
+    )).issues == []
+    history = await completion_issues.collection_response(
+        test_db, project_id=project_id, include_closed=True,
+    )
+    assert history.issues[0].id == issue.id
+    assert history.issues[0].blocks_book is False
+    assert issue.status == "open"
+    pending_review = MemoirBookReview(
+        project_id=project_id, engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="first-review", status="ready", review_json={},
+    )
+    assert (await book_review_answer_state.load_answer_context(
+        test_db, review=pending_review,
+    )).unresolved_count == 0
 
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
@@ -631,11 +700,11 @@ async def test_declining_book_privacy_decision_keeps_manuscript_and_reincludes_c
         test_db, project_id=project_id, input_signature="second-review",
         candidates=[reworded],
     )
-    assert len(current) == 1
-    assert current[0].id == issue.id
-    assert current[0].status == "closed"
-    assert current[0].outcome == "declined"
-    assert current[0].outcome_note == "用户确认不处理，保留当前书稿表述。"
+    assert current == []
+    await test_db.refresh(issue)
+    assert issue.status == "closed"
+    assert issue.outcome == "declined"
+    assert issue.outcome_note == "用户确认不处理，保留当前书稿表述。"
 
     review = MemoirBookReview(
         project_id=project_id,
@@ -651,7 +720,7 @@ async def test_declining_book_privacy_decision_keeps_manuscript_and_reincludes_c
     assert answer_context.unresolved_count == 0
 
 
-async def test_book_review_keeps_unresolved_privacy_issue_when_model_omits_it(
+async def test_book_review_keeps_unresolved_conflict_issue_when_model_omits_it(
     client, test_db,
 ):
     project_id, chapters, _ = await _book(client, test_db)
@@ -668,7 +737,7 @@ async def test_book_review_keeps_unresolved_privacy_issue_when_model_omits_it(
     old = MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
-        issue_type="privacy",
+        issue_type="conflict",
         channel="manual_review",
         question="书中‘某位知名企业家’曾是你的经理，这段是否适合保留？",
         reason="请决定如何表述。",
@@ -747,9 +816,9 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
 ):
     project_id = await ensure_mobile_memoir_project(client)
     candidate = {
-        "issue_type": "privacy",
+        "issue_type": "conflict",
         "channel": "manual_review",
-        "question": "是否保留真实姓名？",
+        "question": "比赛的时间以哪一个说法为准？",
         "reason": "需要用户决定。",
         "priority": "high",
         "chapter_ids": ["chapter-1"],
@@ -760,7 +829,7 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
     issue = MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
-        issue_type="privacy",
+        issue_type="conflict",
         channel="manual_review",
         question=candidate["question"],
         reason=candidate["reason"],
@@ -770,7 +839,7 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
         input_signature="same-review-input",
         status="closed",
         outcome="confirmed",
-        outcome_note="保留化名。",
+        outcome_note="以九月为准。",
     )
     test_db.add(issue)
     await test_db.flush()
@@ -787,7 +856,7 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
     assert len(current) == 1
     assert current[0].id == issue_id
     assert current[0].fingerprint == candidate["fingerprint"]
-    assert current[0].outcome_note == "保留化名。"
+    assert current[0].outcome_note == "以九月为准。"
     assert current[0].related_chapter_ids_json == ["chapter-1"]
     assert current[0].related_material_ids_json == []
     assert current[0].resolution == "user_decision"
@@ -1703,7 +1772,7 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     summary = prepared.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
-    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+    assert summary["active_issue"]["question"] == "这一章比赛年份的两种说法，哪一种准确？"
     rewritten = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/jobs",
         json={"operation": "rewrite"},
@@ -2373,7 +2442,7 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     summary = prepared.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
-    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+    assert summary["active_issue"]["question"] == "这一章比赛年份的两种说法，哪一种准确？"
 
 
 async def test_book_review_uses_chapter_text_and_creates_book_issue(
@@ -2586,7 +2655,7 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert cancelled.json()["can_retry"] is True
 
 
-async def test_unrelated_book_revision_can_proceed_while_privacy_chapter_is_omitted(
+async def test_unrelated_book_revision_can_proceed_while_conflict_chapter_is_omitted(
     client,
     test_db,
     monkeypatch,
@@ -2607,7 +2676,7 @@ async def test_unrelated_book_revision_can_proceed_while_privacy_chapter_is_omit
     test_db.add(MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
-        issue_type="privacy",
+        issue_type="conflict",
         channel="manual_review",
         question="第三章这段可识别的经历是否适合入书？",
         priority="high",

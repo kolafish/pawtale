@@ -45,7 +45,7 @@ from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v3"
+CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v4"
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -408,7 +408,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
   "structure_guidance": ["确有必要时给出的可选编辑建议"],
   "candidate_issues": [
     {{
-      "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure|privacy|conflict",
+      "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure|conflict",
       "channel": "interview|manual_review",
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么不处理会明显影响理解",
@@ -419,12 +419,15 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 }}
 
 要求：
+- 这是供自己和亲友阅读的私人回忆录，不按出版或公开传播标准审查隐私。
+- 普通经历、婚姻家庭、个人感受、亲友姓名或称呼、爱好默认保留，不提出隐私追问或匿名化建议。
+- 私人书稿不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求，不自行改变收录范围。
 - 先判断整章是否自然成立，不按固定模板逐项找缺口。
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
 - 已有素材足够、只需编辑处理的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
-- manual_review 只用于必须由用户决定的隐私、事实冲突或取舍，未处理时会阻止章节确认。
+- manual_review 只用于必须由用户决定的事实冲突或取舍，未处理时会阻止章节确认。
 - question 和 reason 会直接展示给用户；引用小章节时使用标题。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
@@ -453,7 +456,6 @@ def normalize_chapter_digest(
         "meaning",
         "clarity",
         "structure",
-        "privacy",
         "conflict",
     }
     candidate_values = payload.get("candidate_issues")
@@ -471,6 +473,8 @@ def normalize_chapter_digest(
             limit=8,
         )
         issue_type = _compact(candidate.get("issue_type"), limit=24)
+        if issue_type == "privacy":
+            continue
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
         issue_type = issue_type if issue_type in allowed_types else "clarity"
@@ -480,7 +484,7 @@ def normalize_chapter_digest(
                 "channel": (
                     "manual_review"
                     if channel == "manual_review"
-                    and issue_type in {"privacy", "conflict", "structure"}
+                    and issue_type in {"conflict", "structure"}
                     else "interview"
                 ),
                 "question": question,

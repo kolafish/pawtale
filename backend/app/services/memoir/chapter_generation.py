@@ -19,6 +19,7 @@ from app.domain.memoir.types import (
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
+    MemoirCompletionIssueType,
     MemoirCreatedBy,
     MemoirSectionStatus,
     MemoirTranscriptPolishLevel,
@@ -1735,6 +1736,7 @@ async def generate_and_save_chapter_draft(
         MemoirCompletionIssue.project_id == project_id,
         MemoirCompletionIssue.chapter_id == chapter_id,
         MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value,
         MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
     ).limit(1)) if automatic else None
     if changed:
@@ -2094,6 +2096,7 @@ async def confirm_chapter_draft(
             MemoirCompletionIssue.chapter_id == chapter_id,
             MemoirCompletionIssue.channel
             == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+            MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value,
             MemoirCompletionIssue.status
             != MemoirCompletionIssueStatus.CLOSED.value,
         )
