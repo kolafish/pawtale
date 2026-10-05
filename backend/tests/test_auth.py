@@ -12,6 +12,7 @@ from app.auth import SESSION_COOKIE_NAME, session_token_hash
 from app.clock import utcnow_naive
 from app.database import get_db
 from app.main import app
+from app.models.projects import Project
 from app.models.users import AuthIdentity, AuthSession, User
 from app.routers.websocket_auth import authenticate_websocket
 from app.config import Settings
@@ -158,12 +159,10 @@ class TestAuthAPI:
 
     async def test_production_closes_email_account_routes(self, anonymous_client, monkeypatch):
         monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
-        for route, payload in (
-            ("/register", {"email": "author@example.com", "password": "password123"}),
-            ("/login", {"email": "author@example.com", "password": "password123"}),
-        ):
-            response = await anonymous_client.post(f"/api/auth{route}", json=payload)
-            assert response.status_code == 404
+        response = await anonymous_client.post(
+            "/api/auth/register", json={"email": "author@example.com", "password": "password123"},
+        )
+        assert response.status_code == 404
 
         monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: False)
 
@@ -179,6 +178,67 @@ class TestAuthAPI:
         ):
             response = await anonymous_client.post(f"/api/auth{route}", json=payload)
             assert response.status_code == 404
+
+    async def test_production_admin_password_login_restores_project_access(
+        self, anonymous_client, test_db, test_user_password_hash, monkeypatch,
+    ):
+        admin = User(
+            email="admin@example.com", password_hash=test_user_password_hash,
+            display_name="管理员", role="admin",
+        )
+        owner = User(
+            email="owner@example.com", password_hash=test_user_password_hash,
+            display_name="作者",
+        )
+        test_db.add_all([admin, owner])
+        await test_db.flush()
+        project = Project(user_id=owner.id, type="memoir", title="作者的回忆录")
+        test_db.add(project)
+        await test_db.commit()
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        monkeypatch.setattr("app.auth.is_production_environment", lambda _settings: True)
+        anonymous_client.base_url = "https://test"
+
+        login = await anonymous_client.post(
+            "/api/auth/login", json={"email": " ADMIN@example.com ", "password": "password123"},
+        )
+        assert login.status_code == 200
+        assert login.json()["user"]["role"] == "admin"
+        assert "Secure" in login.headers["set-cookie"]
+        assert "HttpOnly" in login.headers["set-cookie"]
+        me = await anonymous_client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["id"] == admin.id
+        listing = await anonymous_client.get("/api/projects")
+        assert listing.status_code == 200
+        assert [item["id"] for item in listing.json()] == [project.id]
+        assert (await anonymous_client.get(f"/api/projects/{project.id}")).status_code == 200
+
+    @pytest.mark.parametrize("role,password_enabled,password", [
+        ("user", True, "password123"),
+        ("admin", True, "wrong-password"),
+        ("admin", False, "password123"),
+        (None, True, "password123"),
+    ])
+    async def test_production_password_login_rejects_ineligible_credentials(
+        self, anonymous_client, test_db, test_user_password_hash, monkeypatch,
+        role, password_enabled, password,
+    ):
+        if role is not None:
+            test_db.add(User(
+                email="account@example.com", password_hash=test_user_password_hash,
+                display_name="账号", role=role, password_login_enabled=password_enabled,
+            ))
+            await test_db.commit()
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+
+        login = await anonymous_client.post(
+            "/api/auth/login", json={"email": "account@example.com", "password": password},
+        )
+        assert login.status_code == 401
+        assert login.json()["detail"] == "邮箱或密码不正确"
+        assert SESSION_COOKIE_NAME not in anonymous_client.cookies
+        assert (await anonymous_client.get("/api/auth/me")).status_code == 401
 
     async def test_project_routes_require_login(self, anonymous_client):
         response = await anonymous_client.get("/api/projects")
