@@ -38,7 +38,14 @@
         <view wx:if="{{loading && !shareVideoJob}}" class="share-video-state">正在打开视频</view>
         <view wx:if="{{shareVideoError && (!shareVideoJob || shareVideoJob.status !== 'failed')}}" class="share-video-error">{{shareVideoError}}</view>
 
-        <block wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}">
+        <ai-task-progress
+          wx:if="{{shareVideoCreating && !shareVideoJob}}"
+          class="share-video-task-progress"
+          title="{{shareVideoStatusText || '正在创建视频任务'}}"
+          detail="提交成功后会继续显示制作进度"
+          mode="indeterminate"
+        />
+        <block wx:elif="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}">
           <text class="share-video-result-label">视频已生成</text>
           <video
             wx:if="{{shareVideoPreviewPath}}"

@@ -221,6 +221,38 @@ test("home recommendation opens the editor immediately without creating or accep
   assert.equal(context.data.shareCandidate, null);
 });
 
+test("home replaces a cached failed recommendation job with the latest remake and refreshes it", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "accepted", video_job_id: "remade-video",
+  };
+  let status = "running";
+  const calls = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoJob: async (id) => {
+      calls.push(id);
+      return { id, status, title: "重制的往事" };
+    },
+  } });
+  const context = pageContext(page, {
+    projectId: "p1", hasProject: true,
+    shareCandidate: { ...candidate, video_job_id: "old-failed-video" },
+    shareCandidateJob: { id: "old-failed-video", status: "failed" },
+  });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.id, "remade-video");
+  assert.equal(context.data.shareCandidateJob.status, "running");
+  context.openShareCandidateVideo();
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=remade-video"]);
+  status = "succeeded";
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.status, "succeeded");
+  assert.deepEqual(calls, ["remade-video", "remade-video"]);
+});
+
 test("home editor entry keeps voice and dismiss guards", () => {
   const created = [];
   const navigations = [];

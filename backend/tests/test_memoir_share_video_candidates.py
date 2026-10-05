@@ -1,10 +1,14 @@
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import AudioFile, MemoirEditingJob, MemoirShareVideoCandidate, MemoirVoiceUtterance
+from app.models.memoir import (
+    AudioFile, MemoirEditingJob, MemoirMaterialShareVideo, MemoirShareVideoCandidate,
+    MemoirShareVideoOutput, MemoirVoiceUtterance,
+)
 from app.services.memoir import share_video_candidates
 from app.services.memoir.share_video_jobs import fallback_share_video_title
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
@@ -80,6 +84,68 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     assert animated.json()["video_style"] == "story_animation"
     assert animated.json()["id"] != created_job.json()["id"]
     assert (await client.get(url)).json()["candidate"]["status"] == "accepted"
+
+
+@pytest.mark.parametrize("accept_original", [True, False])
+async def test_recommendation_follows_latest_manual_video_for_its_source_range(
+    client, test_db, monkeypatch, accept_original,
+):
+    created, evaluation_id = await _stopped_story(client, test_db)
+
+    async def choose_first(windows, *, ai_model):
+        return 0
+
+    monkeypatch.setattr(share_video_candidates, "_choose_window", choose_first)
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, evaluation_id)
+    project_id = created["session"]["project_id"]
+    url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidate"
+    candidate = (await client.get(url)).json()["candidate"]
+    if accept_original:
+        original = await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/share-video-candidates/{candidate['id']}/create-video",
+            json={"background_source": "classic"},
+        )
+        old_job = await test_db.get(MemoirMaterialShareVideo, original.json()["id"])
+        old_job.status = "failed"
+        old_job.error_message = "source evidence rejected"
+        await test_db.commit()
+
+    create_url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    remade = await client.post(create_url, json={
+        "start_char": candidate["start_char"], "end_char": candidate["end_char"],
+        "video_style": "story_animation",
+    })
+    assert remade.status_code == 201, remade.text
+    new_id = remade.json()["id"]
+    current = (await client.get(url)).json()["candidate"]
+    assert current["status"] == "accepted"
+    assert current["video_job_id"] == new_id
+    job = await test_db.get(MemoirMaterialShareVideo, new_id)
+    for status in ("running", "succeeded"):
+        job.status = status
+        if status == "succeeded":
+            job.output = MemoirShareVideoOutput(
+                job_id=new_id, project_id=project_id,
+                storage_path=f"memoir/share-videos/{job.user_id}/{new_id}.mp4",
+                mime_type="video/mp4", size_bytes=1024,
+            )
+        await test_db.commit()
+        assert (await client.get(url)).json()["candidate"]["video_job_id"] == new_id
+        assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{new_id}")).json()["status"] == status
+
+    # A newer task for another range must not replace the recommendation's video.
+    first_sentence_end = STORY.index("。") + 1
+    assert first_sentence_end < candidate["end_char"]
+    different_range = await client.post(create_url, json={
+        "start_char": 0, "end_char": first_sentence_end, "video_style": "story_animation",
+    })
+    assert different_range.status_code == 201, different_range.text
+    assert different_range.json()["id"] != new_id
+    assert (await client.get(url)).json()["candidate"]["video_job_id"] == new_id
+    if accept_original:
+        await test_db.refresh(old_job)
+        assert old_job.status == "failed"
 
 
 async def test_model_can_decline_without_failing_candidate_job(client, test_db, monkeypatch):
