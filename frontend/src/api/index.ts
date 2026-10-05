@@ -24,14 +24,10 @@ import type {
   AuditDashboardFilters,
   AuditDashboardResponse,
   AuditUserDayResponse,
-  MemoirChapterSourceEditor,
   MemoirBookPlan,
-  MemoirBookPlanStructureCommand,
   MemoirBookChapterDraft,
-  MemoirBookEditorData,
   MemoirBookExportDownload,
   MemoirBookOutput,
-  MemoirBookOutputForm,
   MemoirBatchTranscriptCleanupConfirmResponse,
   MemoirBatchTranscriptCleanupPreviewResponse,
   MemoirDialectGlossaryEntry,
@@ -292,6 +288,17 @@ export const memoirMaterialEditorApi = {
       },
     },
   ).then(response => response.data),
+  listAll: async (projectId: string): Promise<MemoirMaterialItem[]> => {
+    const materials: MemoirMaterialItem[] = [];
+    let offset = 0;
+    while (true) {
+      const page = await memoirMaterialEditorApi.list(projectId, { limit: 200, offset });
+      materials.push(...page.items);
+      offset += page.items.length;
+      if (offset >= page.total) return materials;
+      if (page.items.length === 0) throw new Error('素材列表未完整返回，请重新加载。');
+    }
+  },
   get: (projectId: string, utteranceId: string) =>
     api.get<MemoirMaterialItem>(
       `/memoir/projects/${projectId}/materials/${encodeURIComponent(utteranceId)}`,
@@ -305,154 +312,34 @@ export const memoirMaterialEditorApi = {
     `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
 };
 
-// Memoir chapter source editor API
-export const memoirChapterSourceEditorApi = {
-  get: (projectId: string) =>
-    api.get<MemoirChapterSourceEditor>(
-      `/memoir/projects/${projectId}/chapter-source-editor`,
-    ).then(r => r.data),
-  assign: (
-    projectId: string,
-    assignments: Array<{ chapter_id: string; utterance_ids: string[] }>,
-    aiModel?: string,
-  ) =>
-    api.post<MemoirChapterSourceEditor>(
-      `/memoir/projects/${projectId}/chapter-source-editor/assignments`,
-      { assignments, ai_model: aiModel },
-    ).then(r => r.data),
-  move: (
-    projectId: string,
-    sourceChapterId: string,
-    targetChapterId: string,
-    utteranceId: string,
-    aiModel?: string,
-  ) =>
-    api.post<MemoirChapterSourceEditor>(
-      `/memoir/projects/${projectId}/chapter-source-editor/moves`,
-      {
-        source_chapter_id: sourceChapterId,
-        target_chapter_id: targetChapterId,
-        utterance_id: utteranceId,
-        ai_model: aiModel,
-      },
-    ).then(r => r.data),
-  remove: (
-    projectId: string,
-    chapterId: string,
-    utteranceIds: string[],
-    aiModel?: string,
-  ) =>
-    api.post<MemoirChapterSourceEditor>(
-      `/memoir/projects/${projectId}/chapter-source-editor/removals`,
-      { chapter_id: chapterId, utterance_ids: utteranceIds, ai_model: aiModel },
-    ).then(r => r.data),
-  audioPlaybackUrl: (audioFileId: string) =>
-    `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
-};
+// Current memoir book resources are shared with the miniprogram.
+function absentMemoirResource(error: unknown, detail: string): null {
+  if (axios.isAxiosError(error) && error.response?.status === 404 && error.response.data?.detail === detail) {
+    return null;
+  }
+  throw error;
+}
 
-export const memoirBookEditorApi = {
-  get: (projectId: string) =>
-    api.get<MemoirBookEditorData>(
-      `/memoir/projects/${projectId}/book-editor`,
-    ).then(r => r.data),
-  generatePlan: (projectId: string, aiModel?: string) =>
-    api.post<MemoirBookPlan>(
-      `/memoir/projects/${projectId}/book-editor/plan/generate`,
-      { ai_model: aiModel },
-    ).then(r => r.data),
-  confirmPlan: (
-    projectId: string,
-    plan: Pick<MemoirBookPlan, 'title' | 'chapters'>,
-  ) => api.put<MemoirBookPlan>(
-    `/memoir/projects/${projectId}/book-editor/plan`,
-    {
-      title: plan.title,
-      chapters: plan.chapters.map(chapter => ({
-        title: chapter.title,
-        include_in_book: chapter.include_in_book,
-        source_refs: chapter.source_refs,
-      })),
-    },
-  ).then(r => r.data),
-  applyStructureCommand: (projectId: string, command: MemoirBookPlanStructureCommand) =>
-    api.post<MemoirBookPlan>(
-      `/memoir/projects/${projectId}/book-editor/plan/structure-commands`,
-      command,
-    ).then(r => r.data),
-  updateChapterTitle: (projectId: string, chapterId: string, title: string) =>
-    api.patch<MemoirBookPlan>(
-      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/title`,
-      { title },
-    ).then(r => r.data),
-  generateChapterDraft: (
-    projectId: string,
-    chapterId: string,
-    options: { aiModel?: string; feedback?: string; forceRegenerate?: boolean } = {},
-  ) => api.post<MemoirBookChapterDraft>(
-    `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft/generate`,
-    {
-      ai_model: options.aiModel,
-      feedback: options.feedback,
-      force_regenerate: options.forceRegenerate ?? false,
-    },
-  ).then(r => r.data),
-  updateChapterDraft: (projectId: string, chapterId: string, content: string) =>
-    api.patch<MemoirBookChapterDraft>(
-      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft`,
-      { content },
-    ).then(r => r.data),
-  confirmChapterDraft: (projectId: string, chapterId: string) =>
-    api.post<MemoirBookChapterDraft>(
-      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft/confirm`,
-    ).then(r => r.data),
-  generateOutput: (
-    projectId: string,
-    options: Partial<MemoirBookOutputForm> & { aiModel?: string; forceRegenerate?: boolean } = {},
-  ) => {
-    const { aiModel, forceRegenerate, ...form } = options;
-    return api.post<MemoirBookOutput>(
-      `/memoir/projects/${projectId}/book-editor/output/generate`,
-      {
-        ...form,
-        ai_model: aiModel,
-        force_regenerate: forceRegenerate ?? false,
-      },
-    ).then(r => r.data);
-  },
-  updateOutput: (projectId: string, form: MemoirBookOutputForm) =>
-    api.patch<MemoirBookOutput>(
-      `/memoir/projects/${projectId}/book-editor/output`,
-      form,
-    ).then(r => r.data),
-  suggestOutputTitles: (projectId: string, aiModel?: string) =>
-    api.post<{ suggestions: string[]; provider?: string | null; model?: string | null }>(
-      `/memoir/projects/${projectId}/book-editor/output/title-suggestions`,
-      { ai_model: aiModel, count: 6 },
-    ).then(r => r.data),
-  regenerateOutputCopy: (projectId: string, aiModel?: string) =>
-    api.post<MemoirBookOutput>(
-      `/memoir/projects/${projectId}/book-editor/output/editorial-copy/regenerate`,
-      {
-        ai_model: aiModel,
-        targets: ['preface', 'afterword', 'back_cover_quote', 'chapter_intros', 'pull_quotes'],
-        chapter_ids: [],
-      },
-    ).then(r => r.data),
-  updateOutputChapterCopy: (
-    projectId: string,
-    chapterId: string,
-    copy: { intro: string; pull_quote: string },
-  ) => api.patch<MemoirBookOutput>(
-    `/memoir/projects/${projectId}/book-editor/output/chapters/${chapterId}/editorial-copy`,
-    copy,
-  ).then(r => r.data),
+export const memoirBookApi = {
+  getPlan: (projectId: string) =>
+    api.get<MemoirBookPlan>(
+      `/mobile/memoir/projects/${projectId}/book-plan`,
+    ).then(response => response.data).catch(error => absentMemoirResource(error, '章节规划不存在')),
+  getChapterDraft: (projectId: string, chapterId: string) =>
+    api.get<MemoirBookChapterDraft>(
+      `/mobile/memoir/projects/${projectId}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
+    ).then(response => response.data).catch(error => absentMemoirResource(error, '章节稿不存在')),
+  getOutput: (projectId: string) =>
+    api.get<MemoirBookOutput>(
+      `/mobile/memoir/projects/${projectId}/book-output`,
+    ).then(response => response.data).catch(error => absentMemoirResource(error, '全书稿不存在')),
   downloadOutput: async (
     projectId: string,
     format: 'pdf' | 'txt',
     layout: 'standard' | 'large_print' = 'standard',
   ): Promise<MemoirBookExportDownload> => {
     const response = await api.get<Blob>(
-      `/memoir/projects/${projectId}/book-editor/output/export`,
+      `/mobile/memoir/projects/${projectId}/book-output/export`,
       { params: { format, layout }, responseType: 'blob' },
     );
     const header = response.headers['content-disposition'];

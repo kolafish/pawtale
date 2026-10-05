@@ -33,6 +33,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
+from app.models.users import User
 from app.services.memoir import book_outputs
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
@@ -51,7 +52,9 @@ from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
     add_test_section_materials,
     create_test_book_plan_with_chapters,
+    create_test_voice_transcript,
     ensure_mobile_memoir_project,
+    memoir_source_ref,
     run_test_editing_job,
 )
 
@@ -660,6 +663,77 @@ async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.ci_smoke
+async def test_admin_reads_other_users_memoir_book_without_write_access(client, test_db):
+    narration = "我小时候常在外婆家的院子里晒太阳。"
+    material = await create_test_voice_transcript(client, test_db, narration)
+    project_id = material["session"]["project_id"]
+    plan, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        title="外婆的回忆录",
+        chapter_titles=["外婆家的童年"],
+        source_refs_by_chapter=[[memoir_source_ref(material)]],
+        draft_contents=[narration],
+    )
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}"
+    paths = {
+        "plan": f"{base}/book-plan",
+        "draft": f"{base}/book-plan/chapters/{chapters[0].id}/draft",
+        "output": f"{base}/book-output",
+        "version": f"{base}/book-output/versions/{version.id}",
+        "export": f"{base}/book-output/export?format=txt&version_id={version.id}",
+    }
+    owner_responses = {}
+    for key, path in paths.items():
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        owner_responses[key] = response
+
+    assert owner_responses["plan"].json()["id"] == plan.id
+    section = owner_responses["plan"].json()["chapters"][0]["sections"][0]
+    assert section["materials"][0]["utterance_id"] == material["utterance_id"]
+    draft_section = owner_responses["draft"].json()["latest_version"]["sections"][0]
+    assert draft_section["section_id"] == section["id"]
+    assert draft_section["content"] == narration
+    assert owner_responses["output"].json()["latest_version"]["id"] == version.id
+    assert owner_responses["version"].json()["id"] == version.id
+    assert narration in owner_responses["export"].text
+    assert "attachment" in owner_responses["export"].headers["content-disposition"]
+
+    registration = await client.post(
+        "/api/auth/register",
+        json={"email": "other-reader@example.com", "password": "password123"},
+    )
+    assert registration.status_code == 201
+    reader = await test_db.get(User, registration.json()["user"]["id"])
+    assert reader is not None and reader.role == "user"
+    for path in paths.values():
+        response = await client.get(path)
+        assert response.status_code == 404, response.text
+
+    reader.role = "admin"
+    await test_db.commit()
+    for key, path in paths.items():
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        assert response.content == owner_responses[key].content
+
+    for path, payload in (
+        (
+            f"{base}/book-plan",
+            {
+                "title": "管理员尝试修改",
+                "chapters": [{"id": chapters[0].id, "title": chapters[0].title}],
+            },
+        ),
+        (f"{base}/book-output", {"title": "管理员尝试修改"}),
+    ):
+        response = await client.patch(path, json=payload)
+        assert response.status_code == 404, response.text
 
 
 async def test_book_output_requires_structured_small_sections(test_db, client):

@@ -408,7 +408,26 @@ export interface MemoirBookChapterSourceRef {
   quote: string;
 }
 
-export interface MemoirChapterSourceEditorChapter {
+export interface MemoirChapterSection {
+  id: string;
+  title: string;
+  section_type: string;
+  sort_order: number;
+  status: string;
+  include_in_book: boolean;
+  requires_user_assignment: boolean;
+  version: number;
+  material_count: number;
+  included_material_count: number;
+  materials: Array<{
+    utterance_id: string;
+    sort_order: number;
+    text: string;
+    include_in_book: boolean;
+  }>;
+}
+
+export interface MemoirBookPlanChapter {
   id: string;
   plan_id: string;
   project_id: string;
@@ -416,47 +435,14 @@ export interface MemoirChapterSourceEditorChapter {
   sort_order: number;
   include_in_book: boolean;
   source_refs: MemoirBookChapterSourceRef[];
+  sections: MemoirChapterSection[];
   metadata_json: Record<string, unknown>;
   pending_source_count: number;
+  pending_completion_source_count: number;
+  pending_new_source_count: number;
   removed_source_count: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirChapterSourceEditorSource {
-  source_index: number;
-  voice_session_id: string;
-  message_id: string;
-  utterance_id: string;
-  transcript_version_id?: string | null;
-  audio_file_id?: string | null;
-  start_ms?: number | null;
-  end_ms?: number | null;
-  text: string;
-  created_at: string;
-  source_material_type: string;
-  source_route_action: string;
-  source_route_confidence?: number | null;
-  source_route_reason: string;
-  source_route_updated_at?: string | null;
-  is_included: boolean;
-  included_in_chapters: MemoirBookSourceIncludedChapter[];
-  current_chapter_id?: string | null;
-  current_chapter_title?: string | null;
-  current_chapter_sort_order?: number | null;
-}
-
-export interface MemoirChapterSourceEditor {
-  project_id: string;
-  plan_id?: string | null;
-  plan_title?: string | null;
-  plan_status?: MemoirBookPlanStatus | null;
-  total_source_count: number;
-  covered_source_count: number;
-  uncovered_source_count: number;
-  chapters: MemoirChapterSourceEditorChapter[];
-  sources: MemoirChapterSourceEditorSource[];
-  uncovered_sources: MemoirChapterSourceEditorSource[];
 }
 
 export interface MemoirBookPlan {
@@ -466,33 +452,10 @@ export interface MemoirBookPlan {
   status: MemoirBookPlanStatus;
   created_by: string;
   model?: string | null;
-  prompt_snapshot: string;
   metadata_json: Record<string, unknown>;
-  chapters: MemoirChapterSourceEditorChapter[];
+  chapters: MemoirBookPlanChapter[];
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirBookPlanStructureCommand {
-  type:
-    | 'create_chapter_from_source'
-    | 'delete_chapter'
-    | 'merge_chapters'
-    | 'move_chapter'
-    | 'rename_chapter'
-    | 'set_chapter_book_inclusion'
-    | 'split_chapter';
-  chapter_id?: string;
-  target_chapter_id?: string;
-  direction?: 'up' | 'down';
-  target_position?: 'first' | 'last';
-  target_index?: number;
-  relative_chapter_id?: string;
-  relative_position?: 'before' | 'after';
-  title?: string;
-  include_in_book?: boolean;
-  utterance_id?: string;
-  utterance_ids?: string[];
 }
 
 export type MemoirBookChapterDraftStatus = 'draft' | 'confirmed';
@@ -504,6 +467,15 @@ export interface MemoirBookChapterDraftVersion {
   chapter_id: string;
   version: number;
   content: string;
+  sections: Array<{
+    section_id: string;
+    title: string;
+    section_type: string;
+    section_version: number;
+    sort_order: number;
+    content: string;
+    used_material_ids: string[];
+  }>;
   created_by: string;
   model?: string | null;
   prompt_snapshot: string;
@@ -530,7 +502,10 @@ export type MemoirBookCoverStyle =
   | 'warm_gray'
   | 'dark_album'
   | 'moonlit_courtyard'
-  | 'navy_gilt';
+  | 'navy_gilt'
+  | 'heritage_classic'
+  | 'warm_journal'
+  | 'modern_minimal';
 
 export interface MemoirBookOutputTableOfContentsItem {
   chapter_id: string;
@@ -538,20 +513,6 @@ export interface MemoirBookOutputTableOfContentsItem {
   title: string;
   char_count: number;
   source_count: number;
-}
-
-export interface MemoirBookOutputStructuredChapter extends MemoirBookOutputTableOfContentsItem {
-  content: string;
-  draft_version_id?: string | null;
-  draft_version?: number | null;
-}
-
-export interface MemoirBookOutputStructuredContent {
-  title: string;
-  chapter_count: number;
-  char_count: number;
-  table_of_contents: MemoirBookOutputTableOfContentsItem[];
-  chapters: MemoirBookOutputStructuredChapter[];
 }
 
 export interface MemoirBookManuscriptSection {
@@ -598,17 +559,16 @@ export interface MemoirBookManuscript {
   };
 }
 
-export interface MemoirBookOutputVersion {
+export interface MemoirBookOutputVersionSummary {
   id: string;
-  output_id: string;
-  project_id: string;
-  plan_id: string;
   version: number;
-  content: string;
-  structured_content?: MemoirBookOutputStructuredContent | null;
-  manuscript?: MemoirBookManuscript | null;
   created_by: string;
   created_at: string;
+}
+
+export interface MemoirBookOutputVersion extends MemoirBookOutputVersionSummary {
+  content: string;
+  manuscript?: MemoirBookManuscript | null;
 }
 
 export interface MemoirBookOutput {
@@ -617,21 +577,12 @@ export interface MemoirBookOutput {
   plan_id: string;
   title: string;
   status: string;
-  metadata_json: Record<string, unknown>;
   is_stale: boolean;
   stale_chapter_titles: string[];
   latest_version?: MemoirBookOutputVersion | null;
-  versions: MemoirBookOutputVersion[];
+  versions: MemoirBookOutputVersionSummary[];
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirBookEditorData {
-  project_id: string;
-  plan?: MemoirBookPlan | null;
-  chapter_source_editor: MemoirChapterSourceEditor;
-  chapter_drafts: MemoirBookChapterDraft[];
-  output?: MemoirBookOutput | null;
 }
 
 export interface MemoirBookOutputForm {
@@ -819,6 +770,15 @@ export interface MemoirMaterialItem {
   end_ms?: number | null;
   is_included_in_book: boolean;
   included_chapters: MemoirMaterialIncludedChapter[];
+  section_assignment?: {
+    chapter_id: string;
+    chapter_title: string;
+    chapter_sort_order: number;
+    section_id: string;
+    section_title: string;
+    section_sort_order: number;
+    requires_user_assignment: boolean;
+  } | null;
   created_at: string;
   session_created_at: string;
   session_started_at?: string | null;

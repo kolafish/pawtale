@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.services.file_exports import content_disposition
@@ -120,6 +120,7 @@ async def get_mobile_memoir_book_plan(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -387,6 +388,7 @@ async def get_mobile_memoir_book_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -480,6 +482,7 @@ async def get_mobile_memoir_book_output(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -498,6 +501,7 @@ async def get_mobile_memoir_book_output_version(
         user_id=current_user.id,
         project_id=project_id,
         version_id=version_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -629,6 +633,7 @@ async def export_mobile_memoir_book_output(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        allow_admin=is_admin_user(current_user),
         export_format=export_format,
         layout=layout,
         version_id=version_id,

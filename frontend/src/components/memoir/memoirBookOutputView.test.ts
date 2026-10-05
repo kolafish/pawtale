@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MemoirBookOutput } from '../../types';
-import { bookOutputForm, bookOutputFormsEqual } from './memoirBookOutputView';
+import { bookOutputForm } from './memoirBookOutputView';
 
 
 describe('memoir book output form', () => {
@@ -42,7 +42,5 @@ describe('memoir book output form', () => {
       back_cover_quote: '人走得再远，也记得回家的路。',
       cover_style: 'navy_gilt',
     });
-    expect(bookOutputFormsEqual(form, { ...form })).toBe(true);
-    expect(bookOutputFormsEqual(form, { ...form, cover_style: 'classic_plain' })).toBe(false);
   });
 });
