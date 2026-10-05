@@ -40,7 +40,6 @@ _PRIORITY_ORDER = {
 
 
 BLOCKING_BOOK_ISSUE_TYPES = frozenset({
-    MemoirCompletionIssueType.PRIVACY.value,
     MemoirCompletionIssueType.CONFLICT.value,
 })
 
@@ -149,7 +148,7 @@ def stable_book_issue_fingerprint(candidate: dict) -> str:
         related_material_ids=[],
         related_scope_ids=candidate["chapter_ids"],
     )
-    # A privacy decision concerns a passage in the manuscript, not the wording
+    # A fact decision concerns a passage in the manuscript, not the wording
     # chosen by a later review of that passage. The quote is checked against
     # the cited chapter when a review is normalized.
     evidence = (
@@ -232,6 +231,8 @@ def book_review_candidate_fingerprints(
             MemoirCompletionIssuePriority(candidate.get("priority"))
             MemoirCompletionIssueChannel(candidate.get("channel"))
         except ValueError:
+            continue
+        if issue_type == MemoirCompletionIssueType.PRIVACY:
             continue
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
@@ -370,6 +371,8 @@ async def sync_chapter_digest_issues(
             priority = MemoirCompletionIssuePriority(candidate.get("priority"))
             channel = MemoirCompletionIssueChannel(candidate.get("channel"))
         except ValueError:
+            continue
+        if issue_type == MemoirCompletionIssueType.PRIVACY:
             continue
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
@@ -585,7 +588,7 @@ async def sync_book_review_issues(
                 issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
                 and issue.issue_type in BLOCKING_BOOK_ISSUE_TYPES
             ):
-                # Model omission alone does not settle a privacy decision.
+                # Model omission alone does not settle a fact conflict.
                 # Only the deterministic disappearance of its quoted source
                 # from the current chapter draft can retire it automatically.
                 if not await _cited_fact_removed(
@@ -618,6 +621,11 @@ async def list_issues(
         filters.append(
             MemoirCompletionIssue.status
             != MemoirCompletionIssueStatus.CLOSED.value
+        )
+        # Legacy privacy questions stay in history, outside the private book's
+        # active queue. Reading must not rewrite the user's recorded decision.
+        filters.append(
+            MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value
         )
     issues = list(
         (

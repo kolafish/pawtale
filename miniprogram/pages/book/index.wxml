@@ -52,7 +52,7 @@
       <button class="ghost-button small progress-action" bindtap="openBookCompletion">
         <text>查看待确认事项{{blockingIssueCount ? '（' + blockingIssueCount + ' 项必须处理）' : ''}}</text><text class="progress-action-mark">›</text>
       </button>
-      <text wx:if="{{blockingIssueCount}}" class="book-confirmation-notice">这些事项涉及隐私或事实冲突，处理后相关章节才能收入全书；已保存的章节正文仍可阅读。</text>
+      <text wx:if="{{blockingIssueCount}}" class="book-confirmation-notice">这些事项涉及事实冲突，处理后相关章节才能收入全书；已保存的章节正文仍可阅读。</text>
       <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" data-action="preview" bindtap="openBookExportPage">
         <text>导出与成书设置</text><text class="progress-action-mark">›</text>
       </button>

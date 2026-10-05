@@ -350,19 +350,31 @@ async def test_candidate_rejects_changed_source_and_interrupted_call_requires_re
 
 
 @pytest.mark.db_independent
-async def test_new_privacy_decision_during_generation_prevents_publication(client, test_db, monkeypatch):
+@pytest.mark.parametrize("issue_type", ["privacy", "conflict"])
+async def test_only_fact_conflict_during_generation_requires_confirmation(client, test_db, monkeypatch, issue_type):
     project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
     generate = fake._call_llm
 
-    async def add_privacy_decision(*args, **kwargs):
+    async def add_decision(*args, **kwargs):
         async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
             other.add(MemoirCompletionIssue(project_id=project_id, chapter_id=chapter_id, scope="chapter",
-                issue_type="privacy", channel="manual_review", question="是否保留这段私人经历？",
+                issue_type=issue_type, channel="manual_review", question="这段经历是否需要调整？",
                 priority="high", fingerprint="a" * 64, input_signature="review"))
             await other.commit()
         return await generate(*args, **kwargs)
 
-    monkeypatch.setattr(fake, "_call_llm", add_privacy_decision)
+    monkeypatch.setattr(fake, "_call_llm", add_decision)
+    if issue_type == "privacy":
+        _, version = await chapter_generation.generate_and_save_chapter_draft(
+            test_db, project_id=project_id, chapter_id=chapter_id,
+            editorial_guidance=[], ai_client=fake, automatic=True,
+        )
+        draft, confirmed_version = await chapter_generation.confirm_chapter_draft(
+            test_db, project_id=project_id, chapter_id=chapter_id,
+        )
+        assert draft.status == "confirmed"
+        assert confirmed_version.id == version.id
+        return
     with pytest.raises(chapter_generation.ChapterDraftCandidateReady):
         await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id,
             chapter_id=chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
@@ -412,7 +424,7 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
         await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
                                     status=MemoirBookChapterDraftStatus.DRAFT)
     test_db.add(MemoirCompletionIssue(project_id=project_id, chapter_id=chapters[0].id, scope="chapter",
-        issue_type="privacy", channel="manual_review", question="是否保留这段私人经历？",
+        issue_type="conflict", channel="manual_review", question="这段经历的时间冲突如何处理？",
         priority="high", fingerprint="b" * 64, input_signature="review"))
     await test_db.commit()
     partial = await assemble_book_output(test_db, project_id=project_id, automatic=True)
@@ -432,7 +444,7 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     assert preserved.content == "用户亲自整理的全书。"
     test_db.add(MemoirCompletionIssue(
         project_id=project_id, chapter_id=chapters[1].id, scope="chapter",
-        issue_type="privacy", channel="manual_review", question="是否保留新发现的私人经历？",
+        issue_type="conflict", channel="manual_review", question="新讲述的时间冲突如何处理？",
         priority="high", fingerprint="c" * 64, input_signature="review-2",
     ))
     await test_db.commit()
@@ -489,7 +501,7 @@ async def test_editorial_review_questions_do_not_hide_readable_book_or_export(cl
     assert "这是已经存在的完整章节正文。" in exported.text
 
 
-async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_decision(client, test_db):
+async def test_completed_books_requeue_and_offer_safe_chapters_before_conflict_decision(client, test_db):
     from app.domain.memoir.types import MemoirBookChapterDraftStatus
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
     from tests.test_memoir_book_completion import _book, _create_current_draft
@@ -510,8 +522,8 @@ async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_de
             fingerprint="1" * 64, input_signature="review",
         ),
         MemoirCompletionIssue(
-            project_id=project_id, scope="book", issue_type="privacy",
-            channel="manual_review", question="是否收录私人经历？", priority="high",
+            project_id=project_id, scope="book", issue_type="conflict",
+            channel="manual_review", question="这段经历的时间冲突如何处理？", priority="high",
             related_chapter_ids_json=[chapters[-1].id],
             fingerprint="2" * 64, input_signature="review",
         ),
@@ -551,11 +563,11 @@ async def test_completed_books_requeue_and_offer_safe_chapters_before_privacy_de
     ).chapter_snapshot_json] == [
         chapter.id for chapter in chapters[:-1]
     ]
-    privacy_issue = await test_db.scalar(select(MemoirCompletionIssue).where(
+    conflict_issue = await test_db.scalar(select(MemoirCompletionIssue).where(
         MemoirCompletionIssue.project_id == project_id,
-        MemoirCompletionIssue.issue_type == "privacy",
+        MemoirCompletionIssue.issue_type == "conflict",
     ))
-    assert privacy_issue.status == "open"
+    assert conflict_issue.status == "open"
     response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
     assert response.status_code == 200
     assert response.json()["is_stale"] is False
@@ -663,8 +675,8 @@ async def test_stale_book_review_decisions_still_omit_their_chapters(client, tes
     for chapter in chapters:
         await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
             status=MemoirBookChapterDraftStatus.DRAFT)
-    candidates = [{"issue_type": "privacy", "channel": "manual_review", "priority": "high",
-        "question": "是否保留私人经历？", "reason": "包含个人隐私", "chapter_ids": [chapters[0].id]}]
+    candidates = [{"issue_type": "conflict", "channel": "manual_review", "priority": "high",
+        "question": "这段经历的时间冲突如何处理？", "reason": "存在时间冲突", "chapter_ids": [chapters[0].id]}]
     test_db.add(MemoirBookReview(project_id=project_id, engine="old", input_signature="old-input",
         status="stale", review_json={"candidate_issues": candidates}))
     await completion_issues.sync_book_review_issues(test_db, project_id=project_id,

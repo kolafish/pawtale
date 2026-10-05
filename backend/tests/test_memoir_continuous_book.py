@@ -80,7 +80,7 @@ async def test_supplement_keeps_previous_book_during_generation_and_failure(clie
     assert (await _snapshot(client))["book_readable"]
 
 
-@pytest.mark.parametrize("exclusion", ["chapter", "section", "material", "privacy"])
+@pytest.mark.parametrize("exclusion", ["chapter", "section", "material", "conflict"])
 async def test_retaining_old_draft_never_reintroduces_excluded_sources(client, test_db, monkeypatch, exclusion):
     project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
     if exclusion == "chapter":
@@ -100,8 +100,8 @@ async def test_retaining_old_draft_never_reintroduces_excluded_sources(client, t
         material.include_in_book = False
     else:
         test_db.add(MemoirCompletionIssue(
-            project_id=project_id, chapter_id=chapter_id, scope="chapter", issue_type="privacy",
-            channel="manual_review", question="是否保留这段私人经历？", priority="high",
+            project_id=project_id, chapter_id=chapter_id, scope="chapter", issue_type="conflict",
+            channel="manual_review", question="这段经历的时间冲突如何处理？", priority="high",
             fingerprint="c" * 64, input_signature="review",
         ))
     await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)

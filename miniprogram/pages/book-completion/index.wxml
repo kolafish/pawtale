@@ -9,7 +9,7 @@
     <text class="page-title">{{headline}}</text>
     <text class="page-detail">{{detail}}</text>
     <text wx:if="{{progressText}}" class="progress-text">{{progressText}}</text>
-    <text wx:if="{{blockingIssueCount}}" class="confirmation-notice">有 {{blockingIssueCount}} 项必须处理：涉及隐私或事实冲突，处理后相关章节才能收入全书。其余建议可按需要处理。</text>
+    <text wx:if="{{blockingIssueCount}}" class="confirmation-notice">有 {{blockingIssueCount}} 项必须处理：涉及事实冲突，处理后相关章节才能收入全书。其余建议可按需要处理。</text>
   </view>
 
   <view wx:if="{{error}}" class="error-strip">{{error}}</view>

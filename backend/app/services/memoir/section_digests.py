@@ -46,7 +46,7 @@ from app.services.memoir.semantic_state import (
 from app.services.memoir.transcript_projection import current_material_text
 
 
-SECTION_DIGEST_ENGINE = "llm_section_digest_v2"
+SECTION_DIGEST_ENGINE = "llm_section_digest_v3"
 SECTION_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制、敏锐的中文回忆录编辑。"
     "你只根据给定小章节和原始讲述判断读者是否容易理解，不补写事实。"
@@ -272,6 +272,8 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 }}
 
 要求：
+- 这是私人回忆录，普通经历、婚姻家庭、个人感受、人物称呼和爱好默认保留，不提出隐私追问或匿名化建议。
+- 不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求。
 - 先理解这一段真正想表达什么，不要逐条检查时间、地点、人物、起因和结果。
 - 能通过编辑现有素材解决的问题写入 editorial_guidance，不要向用户提问。
 - 只提出会明显改善读者理解的问题；内容已经自然成立时 candidate_issues 可以为空。
@@ -318,6 +320,8 @@ def normalize_section_digest_payload(
             limit=8,
         )
         issue_type = _trim_text(item.get("issue_type"), limit=30)
+        if issue_type == "privacy":
+            continue
         priority = _trim_text(item.get("priority"), limit=20)
         issues.append(
             {
