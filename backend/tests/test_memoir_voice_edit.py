@@ -68,7 +68,7 @@ async def story(client, test_db):
     return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
 
 
-async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, supports_section_merge=True, reply="请看看这些修改。"):
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, supports_section_merge=True, supports_composed_chapter_edits=True, reply="请看看这些修改。"):
     fake = FakeAI({"operations": operations, "questions": questions or [], "reply": reply})
     requested = []
 
@@ -77,7 +77,7 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
         return fake
 
     monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", factory)
-    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split, "supports_section_merge": supports_section_merge})
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split, "supports_section_merge": supports_section_merge, "supports_composed_chapter_edits": supports_composed_chapter_edits})
     assert requested == ["deepseek-v4-flash"]
     return response, fake
 
@@ -187,6 +187,93 @@ async def test_reduce_sections_voice_edit_queues_natural_consolidation(
     assert job.payload_json["request"]["max_sections"] is None
     assert await test_db.get(MemoirSection, story["sections"][1]) is not None
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
+
+
+@pytest.mark.parametrize("action", ["regenerate_chapter_sections", "consolidate_chapter_sections"])
+@pytest.mark.parametrize("selected", ["both", "rename", "structure"])
+async def test_chapter_review_can_confirm_rename_and_structure_independently(
+    client, test_db, monkeypatch, story, action, selected,
+):
+    chapter_id = story["chapters"][1]
+    ops = [
+        {"action": action, "target_ref": chapter_id},
+        {"action": "rename_chapter", "target_ref": chapter_id, "new_title": "八十年代的童年"},
+    ]
+    before = await _story(test_db, story["pid"])
+    response, _ = await preview(client, monkeypatch, story, ops,
+        instruction="内容多了一些，请整体审阅所有章节、小节的组织结构和名字，看看可以怎么调整。")
+    assert response.status_code == 200, response.text
+    assert len(response.json()["operations"]) == 2
+    assert semantic_json_signature(await _story(test_db, story["pid"])) == semantic_json_signature(before)
+    chosen = [op for op in ops if selected == "both" or (op["action"] == "rename_chapter") == (selected == "rename")]
+    result = await apply(client, story, response.json(), operations=chosen)
+    assert result.status_code == 200, result.text
+    chapter = await test_db.get(MemoirBookPlanChapter, chapter_id)
+    assert chapter.title == ("童年回忆" if selected == "structure" else "八十年代的童年")
+    job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.chapter_id == chapter_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    ))
+    if selected == "rename":
+        assert job is None
+    else:
+        assert job is not None and job.status == "pending"
+        assert job.payload_json["request"]["section_count_goal"] == (
+            "reduce" if action == "consolidate_chapter_sections" else None
+        )
+    after = await _story(test_db, story["pid"])
+    assert after["sections"] == before["sections"]
+    assert after["memberships"] == before["memberships"]
+    assert after["materials"] == before["materials"]
+    if selected != "structure":
+        assert (await apply(client, story, response.json(), operations=chosen)).status_code == 409
+
+
+@pytest.mark.parametrize("failure", ["stale", "enqueue"])
+async def test_composed_chapter_edit_is_atomic(client, test_db, monkeypatch, story, failure):
+    chapter_id = story["chapters"][1]
+    ops = [
+        {"action": "rename_chapter", "target_ref": chapter_id, "new_title": "不应保存的改名"},
+        {"action": "regenerate_chapter_sections", "target_ref": chapter_id},
+    ]
+    response, _ = await preview(client, monkeypatch, story, ops)
+    assert response.status_code == 200, response.text
+    if failure == "stale":
+        section = await test_db.get(MemoirSection, story["sections"][3])
+        section.title = "确认前发生变化"
+        section.version += 1
+        await test_db.commit()
+    else:
+        async def reject_enqueue(*args, **kwargs):
+            chapter = await test_db.get(MemoirBookPlanChapter, chapter_id)
+            assert chapter.title == "不应保存的改名"
+            raise HTTPException(409, "本章已有另一项小节整理任务在运行")
+        monkeypatch.setattr("app.services.memoir.voice_edit.enqueue_chapter_section_regeneration", reject_enqueue)
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409, result.text
+    assert (await test_db.get(MemoirBookPlanChapter, chapter_id)).title == "童年回忆"
+    assert await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.chapter_id == chapter_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    )) is None
+
+
+async def test_composed_chapter_edits_require_client_support_and_reject_conflicts(
+    client, test_db, monkeypatch, story,
+):
+    chapter_id = story["chapters"][1]
+    rename = {"action": "rename_chapter", "target_ref": chapter_id, "new_title": "八十年代的童年"}
+    structure = {"action": "regenerate_chapter_sections", "target_ref": chapter_id}
+    legacy, _ = await preview(client, monkeypatch, story, [rename, structure], supports_composed_chapter_edits=False)
+    assert legacy.status_code == 200
+    assert legacy.json()["operations"] == []
+    for conflicting in [rename, {**rename, "new_title": "另一个名字"},
+                        {"action": "delete_chapter", "target_ref": chapter_id},
+                        {"action": "consolidate_chapter_sections", "target_ref": chapter_id}]:
+        first = structure if conflicting["action"] == "consolidate_chapter_sections" else rename
+        response, _ = await preview(client, monkeypatch, story, [first, conflicting])
+        assert response.status_code == 422, response.text
+    assert (await test_db.get(MemoirBookPlanChapter, chapter_id)).title == "童年回忆"
 
 
 async def test_regenerate_chapter_sections_rejects_stale_or_mixed_chapter_edits(

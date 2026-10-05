@@ -46,7 +46,8 @@ SYSTEM_PROMPT = """你是回忆录全局语音编辑助手。根据用户原话�
 根据完整语义理解同音字、口误、近似名称和章节/小节层级；同一层级唯一匹配可以直接定位。用户没给新名字时，基于已有内容建议简洁的新标题，不补充事实。
 可组合 delete_chapter、delete_section、delete_material、rename_chapter、rename_section、regenerate_chapter_sections、consolidate_chapter_sections、split_chapter、merge_sections。
 delete_chapter 删除该章、下属小节和章节草稿，保留原始讲述。delete_section 删除小节和归属，保留讲述，已有章节正文需要重新整理。delete_material 删除一条讲述及归属，不自动删除章节或正文，也不清除音频文件与历史版本。
-用户要求根据某章内容生成若干小节、把该章拆成若干小节或中性地重新整理小节时使用 regenerate_chapter_sections。用户要求把现有小节合并得更少、减少小节数量时必须使用 consolidate_chapter_sections，不得使用 regenerate_chapter_sections；即使没有指定具体要合并哪几个小节，也直接提出该操作供确认。两种操作的 target_ref 都必须引用章节；后台会基于现有小节和讲述异步整理，不要自行建议小节标题，不要和同一章内的其他修改组合。
+用户要求整体审阅全书章节、小节的组织和名称时，基于现有内容直接提出有依据的修改供确认；没有指定新标题或逐章列出要求本身不是歧义。不要为了整体审阅删除原始讲述。
+用户要求根据某章内容生成若干小节、把该章拆成若干小节或中性地重新整理小节时使用 regenerate_chapter_sections。用户要求把现有小节合并得更少、减少小节数量时必须使用 consolidate_chapter_sections，不得使用 regenerate_chapter_sections；即使没有指定具体要合并哪几个小节，也直接提出该操作供确认。两种操作的 target_ref 都必须引用章节；后台会基于现有小节和讲述异步整理，不要自行建议小节标题。可以同时用 rename_chapter 给该章改名，两个操作分别供用户确认；同一章只能有一种小节整理操作，不能再组合修改该章内的小节、讲述或删除该章。
 用户要把一章中已有的整个小节移到新章节时使用 split_chapter，target_ref 是原章节，section_ids 只列出要移动的小节 ref；不要把整个小节改写成 utterance_ids。只有用户指定一部分讲述而非整个小节时才使用 utterance_ids。section_ids 与 utterance_ids 二选一，不得混合。原章节至少保留一条当前收录的讲述。章节序号以 chapters.number 为准；“最后两个小节”按 sections.order 判断，“最近的讲述”可参考 materials.created_at。不能拆分单条讲述的一部分。若章节和小节均能唯一定位，直接给出操作供用户在页面确认，不要在 questions 中重复要求确认，也不要追问新章名称；用户没起名时请根据已有小节标题和内容自动拟一个简洁、不添加事实的新章节名，填入 new_title。只有无法唯一定位要移动的小节或讲述时才提问，不要猜测后同时提交操作。拆章不要和同一章内其他修改组合。
 用户要求把已有小节移到另一个章节并与其中某个已有小节合并，或明确指定几个已有小节合并时，必须使用 merge_sections：target_ref 引用要保留的目标小节，section_ids 列出被并入的来源小节；允许跨章节，目标名称保持不变，不要使用 split_chapter 新建章节，也不要改用全章重新整理。用户要把某个整个章节并入另一个章节的指定小节时，section_ids 列出来源章节中所有当前收录的小节。来源章节只有一个小节或一条讲述时同样可以合并；原章不需要保留讲述。合并搬迁全部素材归属，不复制或改写原始讲述；合并后确实没有任何小节的来源章节会移除，有其他小节（包括未收录的小节）则保留。只有目标小节无法唯一定位时才提问，不要猜测目的地。合并不要和涉及来源章或目标章的其他操作组合。
 需要删除多个层级时列出相应操作，但不要重复删除已被章节删除覆盖的小节。不要修改将被删除的对象。只引用给出的 ref。
@@ -222,16 +223,33 @@ def _operation_signature(story: dict, op: VoiceEditOperation) -> str:
     })
 
 
+def _operation_key(op: VoiceEditOperation) -> str:
+    return f"{op.action}:{op.target_ref}"
+
+
+def _has_composed_chapter_edits(operations: list[VoiceEditOperation]) -> bool:
+    renamed = {op.target_ref for op in operations if op.action == "rename_chapter"}
+    return any(
+        op.target_ref in renamed
+        and op.action in {"regenerate_chapter_sections", "consolidate_chapter_sections"}
+        for op in operations
+    )
+
+
 def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> list[VoiceEditOperation]:
     entities = {kind: {row["ref"]: row for row in story[kind + "s"]} for kind in ("chapter", "section", "material")}
-    seen = set()
+    seen: dict[str, set[str]] = {}
     for op in operations:
         kind = _operation_target_kind(op)
         if op.target_ref not in entities[kind]:
             raise HTTPException(422, "修改对象不在当前故事中，请重新说明")
-        if op.target_ref in seen:
+        actions = seen.setdefault(op.target_ref, set())
+        if op.action in actions or (actions and (actions | {op.action}) not in (
+            {"rename_chapter", "regenerate_chapter_sections"},
+            {"rename_chapter", "consolidate_chapter_sections"},
+        )):
             raise HTTPException(422, "同一对象出现重复或冲突的修改，请重新说明")
-        seen.add(op.target_ref)
+        actions.add(op.action)
         if op.action == "merge_sections":
             if any(
                 ref not in entities["section"]
@@ -277,7 +295,10 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
             if kind == "section"
             else material_chapters.get(op.target_ref)
         )
-        if chapter_ref in restructured_chapters:
+        if chapter_ref in restructured_chapters and not (
+            op.action == "rename_chapter"
+            and seen[op.target_ref] & {"regenerate_chapter_sections", "consolidate_chapter_sections"}
+        ):
             raise HTTPException(422, "拆分或重新整理章节不能和同一章内的其他修改同时执行")
     deleted_chapters = {o.target_ref for o in operations if o.action == "delete_chapter"}
     deleted_sections = {o.target_ref for o in operations if o.action == "delete_section"}
@@ -397,6 +418,11 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
             "不要转换成 split_chapter 或其他操作；operations 和 questions 均留空，"
             "reply 说明请更新小程序后再用语音合并小节。"
         )
+    if not req.supports_composed_chapter_edits:
+        client_capability += (
+            "\n当前小程序客户端不能分别确认同一章的改名和小节整理。需要同时执行时，"
+            "operations 和 questions 均留空，reply 说明请更新小程序后再调整章节名称和小节结构。"
+        )
     system = SYSTEM_PROMPT + client_capability + "\n返回 JSON Schema：\n" + json.dumps(VoiceEditProposal.model_json_schema(), ensure_ascii=False)
     # The proposal and its signatures are immutable snapshots. Do not retain a
     # database transaction while the model is producing the preview.
@@ -418,6 +444,11 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
         logger.warning("voice_edit_failed diagnostics=%s", ai_error_metadata(exc, requested_model=model, provider=client.provider_name, resolved_model=client.model_name, timeout_seconds=timeout, elapsed_ms=round((time.monotonic() - started) * 1000)))
         raise HTTPException(502, ai_user_error_message(exc, "没有得到可用的修改结果，请重新说一下")) from exc
     proposal = generated.value
+    if not req.supports_composed_chapter_edits and _has_composed_chapter_edits(proposal.operations):
+        return VoiceEditPreviewResponse(
+            signature="{}", operations=[], questions=[],
+            reply="请更新小程序后再同时调整章节名称和小节结构。",
+        )
     if not req.supports_section_merge and any(op.action == "merge_sections" for op in proposal.operations):
         return VoiceEditPreviewResponse(
             signature="{}", operations=[], questions=[],
@@ -439,7 +470,7 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
         )
     operations = [_split_title(story, op) for op in _validated_operations(story, proposal.operations)]
     logger.info("voice_edit_preview timeout=%s diagnostics=%s", timeout, generated.response.diagnostics())
-    signatures = {op.target_ref: _operation_signature(story, op) for op in operations}
+    signatures = {_operation_key(op): _operation_signature(story, op) for op in operations}
     reply = "请确认要移动的小节和新章节名。" if len(operations) == 1 and operations[0].action == "split_chapter" and operations[0].section_ids else proposal.reply
     if len(operations) == 1 and operations[0].action == "merge_sections":
         reply = "请确认来源小节、目标章节和目标小节。"
@@ -464,7 +495,7 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
         except ValidationError:
             signatures = {}
         if any(
-            signatures.get(op.target_ref) != _operation_signature(story, op)
+            signatures.get(_operation_key(op)) != _operation_signature(story, op)
             for op in req.operations
         ):
             raise HTTPException(409, "要修改的内容或关联素材已经变化，请重新查看修改结果；不要重复执行旧操作")

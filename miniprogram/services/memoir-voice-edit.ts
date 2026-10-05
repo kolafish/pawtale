@@ -21,8 +21,8 @@ export interface VoiceEditPreview {
 }
 
 export function previewVoiceEdit(projectId: string, instruction: string): Promise<VoiceEditPreview> {
-  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string; supports_chapter_split: boolean; supports_section_merge: boolean }>(
-    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction, supports_chapter_split: true, supports_section_merge: true },
+  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string; supports_chapter_split: boolean; supports_section_merge: boolean; supports_composed_chapter_edits: boolean }>(
+    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction, supports_chapter_split: true, supports_section_merge: true, supports_composed_chapter_edits: true },
     { timeoutProfile: "generation", invalidatesSnapshots: false },
   );
 }
