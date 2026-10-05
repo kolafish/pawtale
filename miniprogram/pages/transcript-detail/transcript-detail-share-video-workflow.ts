@@ -501,6 +501,8 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       });
       return;
     }
+    this.setData({ viewMode: "video" });
+    setPageNavigationTitle("分享视频");
     const job = await this.shareVideoController.create({
       utteranceId: item.id,
       startChar: this.data.shareVideoSelectedStartChar,
@@ -525,13 +527,14 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       } : {}),
     });
     if (job) {
-      this.setData({ viewMode: "video" });
-      setPageNavigationTitle("分享视频");
       trackAuditAction(
         "transcript.detail_share_video_create",
         { video_style: this.data.shareVideoStyle, duration_ms: job.duration_ms },
         { projectId: item.project_id },
       );
+    } else {
+      this.setData({ viewMode: "create" });
+      setPageNavigationTitle("做成图片或视频");
     }
   },
 

@@ -21,6 +21,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirEditingJob,
+    MemoirMaterialShareVideo,
     MemoirShareVideoCandidate,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -420,7 +421,28 @@ async def get_latest_share_video_candidate(
         candidate.status = MemoirShareVideoCandidateStatus.STALE.value
         await db.commit()
         return None
-    return _response(candidate)
+    # Remakes use the transcript endpoint and retain the original job. Resolve
+    # the latest version of this exact source range instead of its first job.
+    latest_job_id = await db.scalar(
+        select(MemoirMaterialShareVideo.id)
+        .where(
+            MemoirMaterialShareVideo.project_id == candidate.project_id,
+            MemoirMaterialShareVideo.utterance_id == candidate.utterance_id,
+            MemoirMaterialShareVideo.audio_file_id == candidate.audio_file_id,
+            MemoirMaterialShareVideo.text_hash == candidate.text_hash,
+            MemoirMaterialShareVideo.start_char == candidate.start_char,
+            MemoirMaterialShareVideo.end_char == candidate.end_char,
+            MemoirMaterialShareVideo.start_ms == candidate.start_ms,
+            MemoirMaterialShareVideo.end_ms == candidate.end_ms,
+        )
+        .order_by(MemoirMaterialShareVideo.created_at.desc(), MemoirMaterialShareVideo.id.desc())
+        .limit(1)
+    )
+    response = _response(candidate)
+    if latest_job_id:
+        response.status = MemoirShareVideoCandidateStatus.ACCEPTED
+        response.video_job_id = latest_job_id
+    return response
 
 
 async def dismiss_share_video_candidate(

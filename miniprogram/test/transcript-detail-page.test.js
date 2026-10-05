@@ -1409,6 +1409,70 @@ test("remake keeps the original range and sends the newly selected configuration
   context.shareVideoController.cancel();
 });
 
+test("remake shows progress while submitting and follows the new job through completion", async () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/transcript-media/index.wxml"), "utf8");
+  assert.match(template, /<ai-task-progress\s+wx:if="\{\{shareVideoCreating && !shareVideoJob\}\}"/);
+  let finishCreation;
+  const pendingCreation = new Promise((resolve) => { finishCreation = resolve; });
+  const newJob = sampleShareVideoJob({
+    id: "new-version", utterance_id: "utterance-result", video_style: "illustrated",
+    status: "pending", background_status: "pending", output: null,
+  });
+  let latestJob = newJob;
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async (id) => id === newJob.id
+      ? latestJob : sampleShareVideoJob({ utterance_id: "utterance-result", status: "failed" }),
+    createMemoirTranscriptShareVideoJob: async () => pendingCreation,
+    downloadMemoirShareVideoJob: async () => "/tmp/new-version.mp4",
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  const submission = page.createShareVideo.call(context);
+  try {
+    assert.equal(context.data.viewMode, "video");
+    assert.equal(context.data.shareVideoCreating, true);
+    assert.equal(context.data.shareVideoJob, null);
+  } finally {
+    finishCreation(newJob);
+    await submission;
+    context.shareVideoController.cancel();
+  }
+  assert.equal(context.data.shareVideoJob.id, newJob.id);
+  latestJob = { ...newJob, status: "running", background_status: "generating" };
+  await page.refreshShareVideoJob.call(context);
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.shareVideoStatusText, "正在生成背景图");
+  latestJob = sampleShareVideoJob({ ...newJob, status: "succeeded", background_status: "ready",
+    output: sampleShareVideoJob().output });
+  await page.refreshShareVideoJob.call(context);
+  assert.equal(context.data.shareVideoPolling, false);
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/new-version.mp4");
+  context.shareVideoController.cancel();
+});
+
+test("failed video submission returns to the editor with its chosen settings", async () => {
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "utterance-result", status: "failed" }),
+    createMemoirTranscriptShareVideoJob: async () => { throw new Error("暂时无法提交"); },
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "story_animation" } } });
+  await page.createShareVideo.call(context);
+  assert.equal(context.data.viewMode, "create");
+  assert.equal(context.data.shareVideoCreating, false);
+  assert.equal(context.data.shareVideoStyle, "story_animation");
+  assert.equal(context.data.shareVideoSelectedText, sampleShareVideoJob().selected_text);
+  assert.equal(context.data.shareVideoError, "暂时无法提交");
+});
+
 test("remake asks for a new selection when the source text has changed", async () => {
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
