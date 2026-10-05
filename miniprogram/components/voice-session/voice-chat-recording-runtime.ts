@@ -423,7 +423,14 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
       this.exitSession(this.data.sessionGoal === "book_completion"
         ? { destination: "completion", explainSaved: true }
-        : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0, finished: true });
+        : {
+          destination: "story",
+          projectId: this.data.projectId,
+          narrationSaved: saved.utterances.some((utterance) => Boolean(
+            utterance.transcript_edited.trim() || utterance.transcript_raw.trim(),
+          )),
+          finished: true,
+        });
     } catch (error) {
       const saved = await this.refreshVoiceSessionSnapshot();
       if (saved?.session.status === "failed") {

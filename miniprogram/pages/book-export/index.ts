@@ -11,6 +11,7 @@ import type {
   MemoirBookEditorialCopyJobTarget,
   MemoirBookEditorialCopyJobStatus,
 } from "../../domain/memoir-book";
+import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import {
   accessibilityPageClass,
   accessibilityPagePatch,
@@ -27,6 +28,7 @@ import {
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
 } from "../../services/memoir-book-api";
+import { getMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import { optionalApiResource } from "../../services/request";
 import { returnToBook, routeAuthError } from "../../services/navigation";
 import { isShareFileMessageCancelError, shareLocalFileMessage } from "../../services/share";
@@ -308,6 +310,7 @@ definePage<BookExportData>()({
   bookOutput: null as MemoirBookOutput | null,
   bookOutputVersion: null as MemoirBookOutputVersion | null,
   bookPlan: null as MemoirBookPlan | null,
+  bookDraftProgress: null as MemoirDraftProgress | null,
   overviewScrollTop: 0,
 
   data: {
@@ -394,10 +397,12 @@ definePage<BookExportData>()({
   async loadBookExportPage(projectId: string) {
     this.setData({ loading: true, loadError: "", error: "" });
     try {
-      const [plan, output] = await Promise.all([
+      const [plan, output, progress] = await Promise.all([
         optionalApiResource(getMemoirBookPlan(projectId)),
         optionalApiResource(getMemoirBookOutput(projectId)),
+        optionalApiResource(getMemoirDraftProgress(projectId)),
       ]);
+      this.bookDraftProgress = progress;
       this.applyBookExportData(plan, output);
       if (this.data.activeSection === "editorial") {
         await this.refreshBookEditorialCopyProgress();
@@ -504,10 +509,7 @@ definePage<BookExportData>()({
     this.bookPlan = plan;
     this.bookOutput = output;
     this.bookOutputVersion = output?.latest_version || null;
-    const includedChapterCount = (plan?.chapters || [])
-      .filter((chapter) => chapter.include_in_book !== false)
-      .length;
-    const outputData = bookOutputData(output, this.bookOutputVersion);
+    const outputData = bookOutputData(output, this.bookOutputVersion, this.bookDraftProgress);
     const bookLayoutTemplate = output?.latest_version?.manuscript?.profile.template || "classic_family";
     const bookCustomLayout = customLayoutFromOutput(output);
     if (!output && !outputData.bookTitleInput) {
@@ -515,9 +517,7 @@ definePage<BookExportData>()({
     }
     this.setData({
       planTitle: defaultTitle(plan, output),
-      totalChapterCount: plan
-        ? includedChapterCount
-        : (outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length),
+      totalChapterCount: outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length,
       bookOutputAvailable: Boolean(output?.latest_version),
       ...outputData,
       bookLayoutTemplate,
@@ -835,8 +835,10 @@ definePage<BookExportData>()({
         ? this.bookOutput.latest_version || null
         : await getMemoirBookOutputVersion(this.data.projectId, option.id);
       this.bookOutputVersion = version;
+      const outputData = bookOutputData(this.bookOutput, version, this.bookDraftProgress);
       this.setData({
-        ...bookOutputData(this.bookOutput, version),
+        ...outputData,
+        totalChapterCount: outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length,
       });
     } catch (error) {
       if (routeAuthError(error, "login")) {

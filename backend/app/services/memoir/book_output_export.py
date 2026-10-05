@@ -1055,6 +1055,7 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
             max_units=title_max_units,
             spacing_after=19, font_name=PDF_SERIF_BOLD_FONT_NAME,
             color=(0.27, 0.17, 0.13),
+            avoid_single_char_last_line=True,
         )
         _add_chapter_artwork(builder, template=template, centered=False)
         return
@@ -1072,6 +1073,7 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
             max_units=title_max_units,
             spacing_after=19, font_name=PDF_SANS_FONT_NAME,
             color=(0.10, 0.15, 0.17),
+            avoid_single_char_last_line=True,
         )
         ornament_x = builder._content_left()
         has_artwork = _add_chapter_artwork(builder, template=template, centered=False)
@@ -1098,6 +1100,7 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         max_units=title_max_units,
         spacing_after=18 if layout.mirror_body_pages else 12,
         font_name=PDF_SERIF_BOLD_FONT_NAME,
+        avoid_single_char_last_line=True,
     )
 
 

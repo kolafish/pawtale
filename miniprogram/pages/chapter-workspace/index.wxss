@@ -1049,7 +1049,9 @@ button[disabled]:active {
 
 .draft-editor {
   width: 100%;
+  height: 360rpx;
   min-height: 150rpx;
+  max-height: 45vh;
   margin-top: 22rpx;
   padding: 22rpx 24rpx;
   border: 0;

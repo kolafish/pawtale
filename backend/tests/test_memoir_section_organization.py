@@ -10,6 +10,8 @@ from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
     MemoirAutomationEvent,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirSection,
@@ -1519,6 +1521,107 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
     assert len(result.result_json["growth"]["completed_initial_chapters"]) == 2
 
 
+async def test_initial_story_deduplicates_chapter_sources_before_persisting(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "河边晨步、雨衣和一碗热汤面。",
+    )
+    plan_ai = FakeStoryGrowthAI({"title": "我的故事", "chapters": [
+        {"title": "晨步", "source_indices": [1]},
+        {"title": "雨衣", "source_indices": [1]},
+        {"title": "热汤面", "source_indices": [1]},
+    ]})
+    sections_ai = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr("app.services.memoir.book_plan_ai.get_ai_service", lambda _model=None: plan_ai)
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model=None: sections_ai)
+
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+
+    assert result.status.value == "succeeded"
+    chapters = list((await test_db.scalars(select(MemoirBookPlanChapter).where(
+        MemoirBookPlanChapter.project_id == project_id,
+    ))).all())
+    sections = list((await test_db.scalars(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+    ))).all())
+    materials = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == project_id,
+    ))).all())
+    assert len(chapters) == len(sections) == len(materials) == 1
+    assert materials[0].utterance_id == source["utterance_id"]
+    assert materials[0].section_id == sections[0].id
+    assert result.result_json["growth"]["completed_initial_chapters"] == [chapters[0].id]
+    assert result.result_json["growth"]["needs_material_chapters"] == []
+
+
+async def test_retry_initial_story_with_empty_chapters_preserves_existing_user_draft(client, test_db):
+    from app.schemas.memoir_sections import MemoirSectionVersionReference
+
+    project_id = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "河边晨步、雨衣和一碗热汤面。",
+    )
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["晨步", "用户修改过的章节", "热汤面"],
+        source_refs_by_chapter=[[], [memoir_source_ref(source)], []],
+        draft_contents=["", "用户确认后的正文必须保留。", ""],
+    )
+    sections = list((await test_db.scalars(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+    ))).all())
+    section_ids = {section.id for section in sections}
+    saved_version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[1].id,
+    ))
+    saved_version_id = saved_version.id
+    job.result_json = {"growth": story_tree_growth.StoryGrowthProgress(
+        initial_sections={
+            chapter.id: [MemoirSectionVersionReference(id=section.id, version=section.version)
+                         for section in sections if section.chapter_id == chapter.id]
+            for chapter in chapters
+        },
+        placed_ids=[source["utterance_id"]],
+    ).model_dump(mode="json")}
+    job.status = "failed"
+    job.error_message = "本章没有可用于生成小节的讲述"
+    await test_db.commit()
+
+    retry = await client.post(f"/api/mobile/memoir/projects/{project_id}/draft-progress/retry")
+    assert retry.status_code == 202, retry.text
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, job.id) is True
+    finally:
+        clear_editing_job_handlers()
+    await test_db.refresh(job)
+
+    assert job.status == "succeeded"
+    assert not job.error_message
+    progress = story_tree_growth._progress(job)
+    assert progress.completed_initial_chapters == [chapter.id for chapter in chapters]
+    assert progress.needs_material_chapters == [chapters[0].id, chapters[2].id]
+    assert set((await test_db.scalars(select(MemoirSection.id).where(
+        MemoirSection.project_id == project_id,
+    ))).all()) == section_ids
+    versions = list((await test_db.scalars(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.project_id == project_id,
+    ))).all())
+    assert [(version.id, version.content) for version in versions] == [
+        (saved_version_id, "用户确认后的正文必须保留。"),
+    ]
+    materials = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == project_id,
+    ))).all())
+    assert len(materials) == 1
+    assert materials[0].utterance_id == source["utterance_id"]
+    assert next(section.chapter_id for section in sections if section.id == materials[0].section_id) == chapters[1].id
+
+
 @pytest.mark.parametrize("reason", ["", "需要确认讲的是哪一段经历"])
 async def test_later_story_includes_omissions_but_preserves_explicit_pending_decisions(
     client, test_db, monkeypatch, reason,
@@ -1578,7 +1681,8 @@ async def test_story_assignment_resumes_saved_group_without_repeating_model_or_s
     assert await test_db.scalar(select(func.count(MemoirSection.id)).where(MemoirSection.title == "香山往事")) == 1
 
 
-async def test_initial_story_does_not_treat_model_rejection_as_completed_structure(client, test_db, monkeypatch):
+@pytest.mark.parametrize("status_code", [409, 422])
+async def test_initial_story_does_not_treat_model_rejection_as_completed_structure(client, test_db, monkeypatch, status_code):
     from fastapi import HTTPException
     from app.schemas.memoir_sections import MemoirSectionVersionReference
 
@@ -1590,7 +1694,7 @@ async def test_initial_story_does_not_treat_model_rejection_as_completed_structu
     }).model_dump(mode="json")}
     await test_db.commit()
     async def rejected(*args, **kwargs):
-        raise HTTPException(status_code=409, detail="AI 未能为本章生成任何小节，请重试")
+        raise HTTPException(status_code=status_code, detail="AI 未能为本章生成任何小节，请重试")
     monkeypatch.setattr(story_tree_growth, "regenerate_chapter_sections", rejected)
     with pytest.raises(HTTPException):
         await story_tree_growth.run_story_tree_growth_job(test_db, job)

@@ -344,6 +344,7 @@ def _validated_chapters(
 ) -> list[MemoirBookPlanChapterInput]:
     source_by_utterance = {source.utterance_id: source for source in sources}
     chapters: list[MemoirBookPlanChapterInput] = []
+    seen_plan_utterances: set[str] = set()
     for chapter in req.chapters:
         refs: list[MemoirBookChapterSourceRef] = []
         seen_utterances: set[str] = set()
@@ -353,8 +354,11 @@ def _validated_chapters(
                 raise HTTPException(status_code=400, detail="章节来源不属于当前回忆录")
             if source.utterance_id in seen_utterances:
                 continue
+            if source.utterance_id in seen_plan_utterances:
+                raise HTTPException(status_code=400, detail="同一条讲述记录不能重复归入多个章节")
             refs.append(source.ref(ref.quote))
             seen_utterances.add(source.utterance_id)
+            seen_plan_utterances.add(source.utterance_id)
         if not refs:
             raise HTTPException(status_code=400, detail="每个章节都需要至少一个来源")
         chapters.append(

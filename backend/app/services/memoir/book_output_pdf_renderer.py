@@ -337,9 +337,10 @@ def _adjust_forbidden_line_break(text: str, start: int, end: int) -> int:
 
 def _wrap_pdf_line(
     text: str,
-    max_units: int,
+    max_units: float,
     *,
     first_line_units: float | None = None,
+    avoid_single_char_last_line: bool = False,
 ) -> list[str]:
     if not text:
         return [""]
@@ -352,6 +353,19 @@ def _wrap_pdf_line(
         lines.append(text[start:end])
         start = end
         line_units = max_units
+    if avoid_single_char_last_line and len(lines) > 1 and len(lines[-1].strip()) == 1:
+        tail = lines[-2] + lines[-1]
+        original_break = len(lines[-2])
+        for candidate in range(original_break - 1, 0, -1):
+            end = _adjust_forbidden_line_break(tail, 0, candidate)
+            last_line = tail[end:]
+            if (
+                end < original_break
+                and len(last_line.strip()) > 1
+                and _text_units(last_line) <= max_units
+            ):
+                lines[-2:] = [tail[:end], last_line]
+                break
     return lines
 
 
@@ -545,6 +559,7 @@ class PDFBookBuilder:
         target_anchor: str | None = None,
         font_name: str | None = None,
         color: PDFColor | None = None,
+        avoid_single_char_last_line: bool = False,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -560,15 +575,16 @@ class PDFBookBuilder:
                 stripped,
                 max_units,
                 first_line_units=first_line_units if first_line_indent else None,
+                avoid_single_char_last_line=avoid_single_char_last_line,
             )
             if len(lines) > 1 and min_start_lines > 1:
-                self._ensure_space(min(min_start_lines, len(lines)))
+                self._ensure_space_height(min(min_start_lines, len(lines)) * line_height)
             for line_index, line in enumerate(lines):
                 remaining_lines = len(lines) - line_index
                 if keep_last_lines > 1 and remaining_lines == keep_last_lines:
-                    self._ensure_space(remaining_lines)
+                    self._ensure_space_height(remaining_lines * line_height)
                 else:
-                    self._ensure_space(1)
+                    self._ensure_space_height(line_height)
                 page = self._ensure_page()
                 line_indent = indent + (first_line_indent if line_index == 0 else 0)
                 page.commands.append(
@@ -676,6 +692,7 @@ class PDFBookBuilder:
             ),
             spacing_after=6,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
+            avoid_single_char_last_line=True,
         )
 
     def add_section_heading(self, text: str) -> None:
@@ -691,23 +708,28 @@ class PDFBookBuilder:
                 - indent
             ) // font_size,
         )
-        self._ensure_space(
-            max(3, len(_wrap_pdf_line(text.strip(), max_units)) + 1)
-            if template in {"heritage_classic", "warm_journal", "modern_minimal"}
-            else 3
+        heading_line_height = self.layout.line_height + 2
+        spacing_after = (
+            16 if template in {"heritage_classic", "modern_minimal"}
+            else 8 if template == "warm_journal" else 5
+        )
+        heading_lines = _wrap_pdf_line(
+            text.strip(), max_units, avoid_single_char_last_line=True
+        )
+        self._ensure_space_height(
+            len(heading_lines) * heading_line_height
+            + spacing_after
+            + 2 * self.layout.line_height
         )
         heading_y = self.y
         heading_x = self._content_left()
         self.add_text(
             text,
             font_size=font_size,
-            line_height=self.layout.line_height + 2,
+            line_height=heading_line_height,
             max_units=max_units,
             indent=indent,
-            spacing_after=(
-                16 if template in {"heritage_classic", "modern_minimal"}
-                else 8 if template == "warm_journal" else 5
-            ),
+            spacing_after=spacing_after,
             font_name=(
                 PDF_SANS_FONT_NAME
                 if template == "modern_minimal"
@@ -718,6 +740,7 @@ class PDFBookBuilder:
                 "warm_journal": PDF_WARM_ACCENT,
                 "modern_minimal": PDF_MODERN_ACCENT,
             }.get(template),
+            avoid_single_char_last_line=True,
         )
         if template == "heritage_classic":
             self.add_decoration(
@@ -753,8 +776,8 @@ class PDFBookBuilder:
     ) -> None:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         page = self._ensure_page()
-        for line in _wrap_pdf_line(text.strip(), max_units):
-            self._ensure_space(1)
+        for line in _wrap_pdf_line(text.strip(), max_units, avoid_single_char_last_line=True):
+            self._ensure_space_height(line_height)
             page = self._ensure_page()
             page.commands.append(
                 PDFTextCommand(
@@ -786,7 +809,7 @@ class PDFBookBuilder:
     ) -> int:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         current_y = y
-        for line in _wrap_pdf_line(text.strip(), max_units):
+        for line in _wrap_pdf_line(text.strip(), max_units, avoid_single_char_last_line=True):
             page = self._ensure_page()
             page.commands.append(
                 PDFTextCommand(
@@ -826,8 +849,10 @@ class PDFBookBuilder:
             8,
             (page_x - continuation_x - 8) / max(font_size, 1),
         )
-        label_lines = _wrap_pdf_line(label.strip(), max_label_units)
-        self._ensure_space(len(label_lines))
+        label_lines = _wrap_pdf_line(
+            label.strip(), max_label_units, avoid_single_char_last_line=True
+        )
+        self._ensure_space_height(len(label_lines) * line_height)
         for line_index, line in enumerate(label_lines):
             page = self._ensure_page()
             is_last_line = line_index == len(label_lines) - 1

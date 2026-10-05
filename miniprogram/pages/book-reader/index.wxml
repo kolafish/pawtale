@@ -75,7 +75,7 @@
             <text class="toc-chevron {{chapter.expanded ? 'is-expanded' : ''}}">›</text>
           </view>
           <view wx:if="{{chapter.expanded && chapter.sections.length}}" class="toc-section-list">
-            <view class="toc-section-row ui-pressable" data-chapter-id="{{chapter.chapterId}}" aria-role="button" bindtap="openReaderChapter">
+            <view class="toc-section-row toc-chapter-action ui-pressable" data-chapter-id="{{chapter.chapterId}}" aria-role="button" bindtap="openReaderChapter">
               <text class="toc-section-title">阅读本章</text>
             </view>
             <view

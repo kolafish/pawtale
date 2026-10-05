@@ -25,6 +25,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirEditingJob,
@@ -52,7 +53,11 @@ from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
-from app.services.memoir.section_regeneration import SectionRegenerationConflict, regenerate_chapter_sections
+from app.services.memoir.section_regeneration import (
+    SectionRegenerationConflict,
+    SectionRegenerationNeedsMaterial,
+    regenerate_chapter_sections,
+)
 from app.services.memoir.sections import place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
@@ -124,6 +129,7 @@ class GrowthBatch(BaseModel):
 class StoryGrowthProgress(BaseModel):
     initial_sections: dict[str, list[MemoirSectionVersionReference]] = Field(default_factory=dict)
     completed_initial_chapters: list[str] = Field(default_factory=list)
+    needs_material_chapters: list[str] = Field(default_factory=list)
     structure_conflicts: list[str] = Field(default_factory=list)
     batch: GrowthBatch | None = None
     deferred: dict[str, DeferredSource] = Field(default_factory=dict)
@@ -424,6 +430,18 @@ async def _finish_initial_sections(
     for chapter_id, expected in progress.initial_sections.items():
         if chapter_id in progress.completed_initial_chapters:
             continue
+        # The book pipeline can save prose while another initial chapter fails.
+        # An old structure checkpoint must not replace sections under that prose.
+        existing_draft = await db.scalar(
+            select(MemoirBookChapterDraftVersion.id).where(
+                MemoirBookChapterDraftVersion.project_id == job.project_id,
+                MemoirBookChapterDraftVersion.chapter_id == chapter_id,
+            ).limit(1)
+        )
+        if existing_draft is not None:
+            progress.completed_initial_chapters.append(chapter_id)
+            await _save_progress(db, job, progress)
+            continue
         try:
             await regenerate_chapter_sections(
                 db,
@@ -433,6 +451,11 @@ async def _finish_initial_sections(
                 req=MemoirSectionRegenerateRequest(expected_sections=expected),
                 structure_updated_by=MemoirCreatedBy.AI,
             )
+        except SectionRegenerationNeedsMaterial:
+            # Legacy plans may contain an empty chapter after duplicate refs were
+            # moved to their unique owner. Keep the chapter for future narration
+            # and finish its initial work with an explicit needs-material result.
+            progress.needs_material_chapters.append(chapter_id)
         except HTTPException as exc:
             if exc.status_code != 404 and not isinstance(exc, SectionRegenerationConflict):
                 raise

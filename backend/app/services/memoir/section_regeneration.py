@@ -146,6 +146,13 @@ class SectionRegenerationConflict(HTTPException):
     """The source snapshot changed while a section rewrite was pending."""
 
 
+class SectionRegenerationNeedsMaterial(HTTPException):
+    """An empty chapter needs a new material, rather than a provider retry."""
+
+    def __init__(self) -> None:
+        super().__init__(status_code=422, detail="本章没有可用于生成小节的讲述")
+
+
 class _SectionRegenerationCancelled(RuntimeError):
     pass
 
@@ -217,7 +224,7 @@ def _ordered_materials(
         for material in section.materials
     ]
     if not materials:
-        raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
+        raise SectionRegenerationNeedsMaterial()
     ids = [material.utterance_id for _, material in materials]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=409, detail="本章讲述存在重复归属，请先处理")
@@ -798,8 +805,6 @@ async def regenerate_chapter_sections(
     if current_section_count is not None and current_section_count < 2:
         raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
     materials = _material_snapshots(chapter)
-    if not materials:
-        raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
     chapter_title = chapter.title
     included_sections = [
         section for section in chapter.sections

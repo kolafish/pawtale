@@ -282,6 +282,10 @@
   line-height: 1.55;
 }
 
+.toc-chapter-action .toc-section-title {
+  grid-column: 2;
+}
+
 .toc-section-index {
   font-variant-numeric: tabular-nums;
 }
