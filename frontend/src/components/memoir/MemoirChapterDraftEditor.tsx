@@ -1,273 +1,49 @@
-import {
-  CheckCircle2,
-  ChevronLeft,
-  History,
-  Loader2,
-  PanelRight,
-  Save,
-  Sparkles,
-  Volume2,
-  X,
-} from 'lucide-react';
+import { ChevronLeft, History, PanelRight, Volume2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { memoirChapterSourceEditorApi } from '../../api';
-import type {
-  MemoirBookChapterDraft,
-  MemoirBookChapterDraftVersion,
-  MemoirChapterSourceEditorChapter,
-  MemoirChapterSourceEditorSource,
-} from '../../types';
-
+import { memoirMaterialEditorApi } from '../../api';
+import type { MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlanChapter, MemoirMaterialItem } from '../../types';
 
 interface MemoirChapterDraftEditorProps {
-  chapter: MemoirChapterSourceEditorChapter;
+  chapter: MemoirBookPlanChapter;
   draft: MemoirBookChapterDraft | null;
-  sources: MemoirChapterSourceEditorSource[];
-  draftText: string;
-  canEdit: boolean;
-  hasUnsavedChanges: boolean;
-  isSaving: boolean;
-  isGenerating: boolean;
-  isConfirming: boolean;
-  hasNext: boolean;
-  error: string | null;
-  onDraftChange: (text: string) => void;
-  onGenerate: (feedback: string | undefined, forceRegenerate: boolean) => void;
-  onSave: () => void;
-  onSaveAndNext: () => void;
-  onConfirm: () => void;
+  sources: MemoirMaterialItem[];
   onBack: () => void;
 }
 
-export function MemoirChapterDraftEditor({
-  chapter,
-  draft,
-  sources,
-  draftText,
-  canEdit,
-  hasUnsavedChanges,
-  isSaving,
-  isGenerating,
-  isConfirming,
-  hasNext,
-  error,
-  onDraftChange,
-  onGenerate,
-  onSave,
-  onSaveAndNext,
-  onConfirm,
-  onBack,
-}: MemoirChapterDraftEditorProps) {
-  const [rewriteOpen, setRewriteOpen] = useState(false);
-  const [feedback, setFeedback] = useState('');
+export function MemoirChapterDraftEditor({ chapter, draft, sources, onBack }: MemoirChapterDraftEditorProps) {
   const [contextTab, setContextTab] = useState<'sources' | 'versions' | null>(null);
-  const pendingSourceCount = draft?.pending_source_count ?? chapter.pending_source_count;
-  const removedSourceCount = draft?.removed_source_count ?? chapter.removed_source_count;
-  const sourceChanges = pendingSourceCount + removedSourceCount;
-  const hasDraft = Boolean(draft?.latest_version);
-  const canSave = canEdit
-    && hasUnsavedChanges
-    && Boolean(draftText.trim())
-    && !isSaving
-    && !isGenerating;
-  const canConfirm = canEdit
-    && hasDraft
-    && !hasUnsavedChanges
-    && draft?.status !== 'confirmed'
-    && sourceChanges === 0
-    && !isConfirming
-    && !isGenerating;
-  const generateLabel = sourceChanges > 0
-    ? '补写变更素材'
-    : hasDraft
-      ? 'AI 重写'
-      : '生成章节稿';
-
-  const runGeneration = () => {
-    if (hasDraft && sourceChanges === 0 && !rewriteOpen) {
-      setRewriteOpen(true);
-      return;
-    }
-    if (
-      hasUnsavedChanges
-      && !window.confirm('当前修改尚未保存，继续会丢失这些修改。确定继续吗？')
-    ) return;
-    onGenerate(feedback.trim() || undefined, hasDraft && sourceChanges === 0);
-    setRewriteOpen(false);
-    setFeedback('');
-  };
-
+  const [viewedVersionId, setViewedVersionId] = useState<string | null>(null);
+  const version = draft?.versions.find(item => item.id === viewedVersionId) ?? draft?.latest_version;
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-[#f7f8f7]">
       <header className="border-b border-black/6 bg-white px-4 py-3 sm:px-5">
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="返回章节列表"
-            title="返回章节列表"
-            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md text-[#69736e] transition-[background-color,color,transform] hover:bg-black/5 hover:text-[#29322e] active:scale-[0.96] lg:hidden"
-          >
-            <ChevronLeft size={18} />
-          </button>
+          <button type="button" onClick={onBack} aria-label="返回章节列表" className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md text-[#69736e] lg:hidden"><ChevronLeft size={18} /></button>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-lg font-semibold text-[#202824]">{chapter.title}</h2>
-              <span className={`flex-shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${
-                draft?.status === 'confirmed'
-                  ? 'bg-[#eaf3ee] text-[#2d705b]'
-                  : hasDraft
-                    ? 'bg-[#f5efe5] text-[#846633]'
-                    : 'bg-[#eef0ef] text-[#7a847f]'
-              }`}>
-                {draft?.status === 'confirmed' ? '已确认' : hasDraft ? '编辑中' : '未生成'}
-              </span>
+              <span className="rounded bg-[#eef0ef] px-2 py-0.5 text-[11px] text-[#69736e]">{draft?.status === 'confirmed' ? '已确认' : version ? '草稿' : '未生成'}</span>
             </div>
-            <p className="mt-0.5 text-xs text-[#7a847f] tabular-nums">
-              {sources.length} 段素材 · {draftText.trim().length.toLocaleString('zh-CN')} 字
-              {sourceChanges > 0 ? ` · ${sourceChanges} 处素材变更` : ''}
-            </p>
+            <p className="mt-0.5 text-xs text-[#7a847f] tabular-nums">{sources.length} 段素材 · {(version?.content.length ?? 0).toLocaleString('zh-CN')} 字</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setContextTab('sources')}
-            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-[#59635e] transition-[background-color,color,transform] hover:bg-[#f1f3f2] hover:text-[#29322e] active:scale-[0.96]"
-          >
-            <PanelRight size={15} />
-            素材
-          </button>
-          {hasDraft && (
-            <button
-              type="button"
-              onClick={() => setContextTab('versions')}
-              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-[#59635e] transition-[background-color,color,transform] hover:bg-[#f1f3f2] hover:text-[#29322e] active:scale-[0.96]"
-            >
-              <History size={15} />
-              版本 {draft?.versions.length ?? 0}
-            </button>
-          )}
+          <button type="button" onClick={() => setContextTab('sources')} className="inline-flex h-10 items-center gap-1.5 rounded-md px-2 text-sm text-[#59635e]"><PanelRight size={15} />素材</button>
+          {version && <button type="button" onClick={() => setContextTab('versions')} className="inline-flex h-10 items-center gap-1.5 rounded-md px-2 text-sm text-[#59635e]"><History size={15} />版本 {version.version}</button>}
         </div>
       </header>
-
-      {rewriteOpen && (
-        <div className="flex flex-col gap-2 border-b border-[#ddd5c7] bg-[#f8f5ef] px-4 py-3 sm:flex-row sm:items-center sm:px-5">
-          <input
-            value={feedback}
-            onChange={event => setFeedback(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') runGeneration();
-              if (event.key === 'Escape') setRewriteOpen(false);
-            }}
-            placeholder="输入本次重写要求"
-            autoFocus
-            className="h-10 min-w-0 flex-1 rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none focus:border-[#9b7c42] focus:shadow-[0_0_0_3px_rgba(155,124,66,0.12)]"
-          />
-          <button
-            type="button"
-            onClick={runGeneration}
-            disabled={isGenerating}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#846633] px-3 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[#73582c] active:scale-[0.96] disabled:opacity-50"
-          >
-            <Sparkles size={15} />
-            开始重写
-          </button>
-          <button
-            type="button"
-            onClick={() => setRewriteOpen(false)}
-            aria-label="取消重写"
-            title="取消"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[#69736e] transition-[background-color,transform] hover:bg-black/5 active:scale-[0.96]"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div className="border-b border-[#ead1d1] bg-[#fbf2f2] px-4 py-2 text-sm text-[#7c3f3f] sm:px-5">
-          {error}
-        </div>
-      )}
-
-      <div className="relative min-h-0 flex-1 p-3 sm:p-5">
-        <textarea
-          value={draftText}
-          onChange={event => onDraftChange(event.target.value)}
-          readOnly={!canEdit || isGenerating}
-          placeholder={hasDraft ? '在这里继续编辑章节稿' : '生成章节稿后，可以在这里手工修改'}
-          className="h-full min-h-[420px] w-full resize-none rounded-md bg-white px-5 py-5 text-[16px] leading-8 text-[#29322e] outline-none shadow-[0_1px_4px_rgba(23,43,35,0.08),0_0_0_1px_rgba(0,0,0,0.05)] transition-[box-shadow] placeholder:text-[#a1aaa6] focus:shadow-[0_2px_8px_rgba(23,43,35,0.1),0_0_0_2px_rgba(60,122,103,0.28)] sm:px-8 sm:py-7 sm:text-[17px]"
-        />
-        {isGenerating && (
-          <div className="absolute inset-3 flex items-center justify-center rounded-md bg-white/85 text-sm text-[#59635e] backdrop-blur-[1px] sm:inset-5">
-            <Loader2 size={18} className="mr-2 animate-spin" />
-            正在整理章节稿
-          </div>
-        )}
+      <div className="min-h-0 flex-1 p-3 sm:p-5">
+        <textarea aria-label="章节正文" value={version?.content ?? ''} readOnly placeholder="本章尚未生成正文" className="h-full min-h-[420px] w-full resize-none rounded-md bg-white px-5 py-5 text-[16px] leading-8 text-[#29322e] outline-none shadow-[0_1px_4px_rgba(23,43,35,0.08),0_0_0_1px_rgba(0,0,0,0.05)] sm:px-8 sm:py-7 sm:text-[17px]" />
       </div>
-
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-black/6 bg-white px-4 py-2.5 sm:px-5">
-        <div className="text-xs text-[#8a948f]">
-          {hasUnsavedChanges ? '有未保存修改' : hasDraft ? `当前为版本 ${draft?.latest_version?.version}` : '尚未生成稿件'}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={runGeneration}
-            disabled={!canEdit || isGenerating || isSaving}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#f1f3f2] px-3 text-sm text-[#59635e] transition-[background-color,color,transform] hover:bg-[#e8ecea] hover:text-[#29322e] active:scale-[0.96] disabled:opacity-50"
-          >
-            {isGenerating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-            {generateLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!canSave}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#3c7a67] px-3 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[#326956] active:scale-[0.96] disabled:opacity-45"
-          >
-            {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-            保存
-          </button>
-          {hasNext && (
-            <button
-              type="button"
-              onClick={onSaveAndNext}
-              disabled={!canSave}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-[#3c7a67]/25 bg-white px-3 text-sm font-medium text-[#2d705b] transition-[background-color,transform] hover:bg-[#edf5f1] active:scale-[0.96] disabled:opacity-40"
-            >
-              保存并下一章
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={!canConfirm}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#202824] px-3 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[#111714] active:scale-[0.96] disabled:opacity-35"
-          >
-            {isConfirming ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-            确认章节
-          </button>
-        </div>
-      </footer>
-
+      <footer className="border-t border-black/6 bg-white px-4 py-3 text-xs text-[#8a948f] sm:px-5">{version ? `正在查看版本 ${version.version}` : '尚未生成稿件'}</footer>
       {contextTab && (
         <ChapterContextDrawer
           tab={contextTab}
           chapterTitle={chapter.title}
           sources={sources}
           versions={draft?.versions ?? []}
-          hasUnsavedChanges={hasUnsavedChanges}
           latestVersionId={draft?.latest_version?.id ?? null}
           onTabChange={setContextTab}
-          onRestore={(version) => {
-            if (
-              hasUnsavedChanges
-              && !window.confirm('当前修改尚未保存，确定载入这个历史版本吗？')
-            ) return;
-            onDraftChange(version.content);
-            setContextTab(null);
-          }}
+          onViewVersion={item => { setViewedVersionId(item.id); setContextTab(null); }}
           onClose={() => setContextTab(null)}
         />
       )}
@@ -280,20 +56,18 @@ function ChapterContextDrawer({
   chapterTitle,
   sources,
   versions,
-  hasUnsavedChanges,
   latestVersionId,
   onTabChange,
-  onRestore,
+  onViewVersion,
   onClose,
 }: {
   tab: 'sources' | 'versions';
   chapterTitle: string;
-  sources: MemoirChapterSourceEditorSource[];
+  sources: MemoirMaterialItem[];
   versions: MemoirBookChapterDraftVersion[];
-  hasUnsavedChanges: boolean;
   latestVersionId: string | null;
   onTabChange: (tab: 'sources' | 'versions') => void;
-  onRestore: (version: MemoirBookChapterDraftVersion) => void;
+  onViewVersion: (version: MemoirBookChapterDraftVersion) => void;
   onClose: () => void;
 }) {
   const [openAudioId, setOpenAudioId] = useState<string | null>(null);
@@ -333,29 +107,29 @@ function ChapterContextDrawer({
               <div className="space-y-2">
                 {sources.map(source => (
                   <article
-                    key={source.utterance_id}
+                    key={source.id}
                     className="rounded-md bg-white p-3 shadow-[0_1px_3px_rgba(23,43,35,0.08),0_0_0_1px_rgba(0,0,0,0.04)]"
                   >
-                    <p className="text-sm leading-6 text-[#37413c] [text-wrap:pretty]">{source.text}</p>
-                    {openAudioId === source.utterance_id && source.audio_file_id && (
+                    <p className="text-sm leading-6 text-[#37413c] [text-wrap:pretty]">{source.display_text}</p>
+                    {openAudioId === source.id && source.audio_file_id && (
                       <audio
                         controls
                         autoPlay
                         preload="metadata"
-                        src={memoirChapterSourceEditorApi.audioPlaybackUrl(source.audio_file_id)}
+                        src={memoirMaterialEditorApi.audioPlaybackUrl(source.audio_file_id)}
                         className="mt-3 h-10 w-full"
                       />
                     )}
                     <button
                       type="button"
                       onClick={() => setOpenAudioId(current => (
-                        current === source.utterance_id ? null : source.utterance_id
+                        current === source.id ? null : source.id
                       ))}
                       disabled={!source.audio_file_id}
                       className="mt-2 inline-flex h-10 items-center gap-1.5 rounded-md px-2 text-xs text-[#69736e] transition-[background-color,color,transform] hover:bg-black/5 hover:text-[#29322e] active:scale-[0.96] disabled:opacity-35"
                     >
                       <Volume2 size={14} />
-                      {openAudioId === source.utterance_id ? '收起音频' : '听原音'}
+                      {openAudioId === source.id ? '收起音频' : '听原音'}
                     </button>
                   </article>
                 ))}
@@ -383,10 +157,10 @@ function ChapterContextDrawer({
                     {!isLatest && (
                       <button
                         type="button"
-                        onClick={() => onRestore(version)}
+                        onClick={() => onViewVersion(version)}
                         className="mt-3 inline-flex h-10 items-center rounded-md bg-[#f1f3f2] px-3 text-xs font-medium text-[#59635e] transition-[background-color,transform] hover:bg-[#e8ecea] active:scale-[0.96]"
                       >
-                        恢复到编辑区{hasUnsavedChanges ? '（将覆盖当前修改）' : ''}
+                        查看此版本
                       </button>
                     )}
                   </article>

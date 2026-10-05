@@ -185,6 +185,9 @@ export function MemoirMaterialWorkspace({
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(['memoirMaterial', project.id, updated.id], updated);
       queryClient.invalidateQueries({ queryKey: ['memoirMaterials', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirBookPlan', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirChapterDraft', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirBookOutput', project.id] });
       setDraft(null);
       if (variables.nextId) {
         selectWithoutPrompt(variables.nextId, true);
