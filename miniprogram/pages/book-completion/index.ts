@@ -91,6 +91,7 @@ interface BookCompletionData {
   headline: string;
   detail: string;
   progressText: string;
+  blockingIssueCount: number;
   chapters: ChapterView[];
   canReviewBook: boolean;
   bulkCheckVisible: boolean;
@@ -404,6 +405,7 @@ export function bookCompletionViewPatch(
   | "headline"
   | "detail"
   | "progressText"
+  | "blockingIssueCount"
   | "chapters"
   | "canReviewBook"
   | "bulkCheckVisible"
@@ -420,6 +422,7 @@ export function bookCompletionViewPatch(
   );
   return {
     headline: overview.headline,
+    blockingIssueCount: overview.blocking_issue_count || 0,
     detail: overview.detail,
     progressText: overview.total_chapters
       ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已更新`
@@ -450,6 +453,7 @@ definePage<BookCompletionData>()({
     headline: "逐章整理这本书",
     detail: "",
     progressText: "",
+    blockingIssueCount: 0,
     chapters: [],
     canReviewBook: false,
     bulkCheckVisible: false,

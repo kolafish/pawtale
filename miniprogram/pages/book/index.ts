@@ -205,6 +205,7 @@ definePage<BookPageData>()({
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
+    blockingIssueCount: 0,
     bookIncludedChapterCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
@@ -490,6 +491,7 @@ definePage<BookPageData>()({
       needsLogin: false,
       projectId,
       projectTitle,
+      blockingIssueCount: snapshot.blocking_issue_count || 0,
     });
     this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});
     this.applyBookOutput(snapshot.output || null, snapshot.progress || null);

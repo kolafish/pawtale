@@ -255,6 +255,16 @@ async def get_book_completion_overview(
     return MemoirBookCompletionOverviewResponse.model_validate(
         {
             **overview.model_dump(),
+            "blocking_issue_count": sum(issue.blocks_book for issue in issues.issues),
+            "chapters": [
+                chapter.model_copy(update={
+                    "blocking_issue_count": sum(
+                        issue.blocks_book and issue.chapter_id == chapter.chapter_id
+                        for issue in issues.issues
+                    ),
+                })
+                for chapter in overview.chapters
+            ],
             "completion_job": completion_job,
             "book_review": (
                 book_reviews.book_review_response(review) if review else None

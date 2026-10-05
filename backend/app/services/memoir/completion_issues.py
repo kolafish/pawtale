@@ -22,6 +22,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookPlanChapter,
     MemoirCompletionIssue,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -42,6 +43,19 @@ BLOCKING_BOOK_ISSUE_TYPES = frozenset({
     MemoirCompletionIssueType.PRIVACY.value,
     MemoirCompletionIssueType.CONFLICT.value,
 })
+
+
+def blocking_book_issues(
+    issues: Iterable[MemoirCompletionIssue],
+    all_chapter_ids: Iterable[str],
+) -> list[MemoirCompletionIssue]:
+    chapter_ids = set(all_chapter_ids)
+    return [
+        issue for issue in issues
+        if issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+        and issue.status != MemoirCompletionIssueStatus.CLOSED.value
+        and blocking_book_chapter_ids([issue], chapter_ids) & chapter_ids
+    ]
 
 
 def blocking_book_chapter_ids(
@@ -300,6 +314,7 @@ def _response(
     issue: MemoirCompletionIssue,
     *,
     active_session_id: str | None = None,
+    blocks_book: bool = False,
 ) -> MemoirCompletionIssueResponse:
     return MemoirCompletionIssueResponse(
         id=issue.id,
@@ -318,6 +333,7 @@ def _response(
         related_chapter_ids=list(issue.related_chapter_ids_json),
         input_signature=issue.input_signature,
         status=issue.status,
+        blocks_book=blocks_book,
         active_session_id=active_session_id,
         outcome=issue.outcome or None,
         outcome_note=issue.outcome_note,
@@ -632,7 +648,13 @@ async def collection_response(
         )
     )
     active_sessions: dict[str, str] = {}
+    blocking_ids: set[str] = set()
     if issue_rows:
+        chapter_ids = (await db.scalars(select(MemoirBookPlanChapter.id).where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.include_in_book.is_(True),
+        ))).all()
+        blocking_ids = {issue.id for issue in blocking_book_issues(issue_rows, chapter_ids)}
         rows = await db.execute(
             select(
                 MemoirVoiceSession.current_completion_issue_id,
@@ -663,6 +685,7 @@ async def collection_response(
             _response(
                 issue,
                 active_session_id=active_sessions.get(issue.id),
+                blocks_book=issue.id in blocking_ids,
             )
             for issue in issue_rows
         ],

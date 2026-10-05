@@ -68,12 +68,12 @@
 </block>
 
 <block wx:else>
-<view wx:if="{{requiredIssues.length}}" class="issue-group required">
-  <text class="group-title">需要确认 · {{requiredIssues.length}} 项</text>
+<view wx:for="{{requiredIssueGroups}}" wx:for-item="group" wx:key="id" class="issue-group {{group.className}}">
+  <text class="group-title">{{group.title}} · {{group.issues.length}} 项</text>
   <text class="group-detail">
-    {{allowRequiredConfirmation ? "可以回答、说明或选择不处理；已保存的草稿仍可阅读。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
+    {{group.detail || (allowRequiredConfirmation ? "可以回答、说明或选择不处理；已保存的草稿仍可阅读。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。")}}
   </text>
-  <view wx:for="{{requiredIssues}}" wx:key="id" class="issue">
+  <view wx:for="{{group.issues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
     <text class="reason">{{item.reason}}</text>
     <block wx:if="{{allowRequiredConfirmation}}">

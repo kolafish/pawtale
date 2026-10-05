@@ -11,6 +11,13 @@
   margin: 12rpx 0 0;
   color: inherit;
 }
+.book-confirmation-notice {
+  display: block;
+  padding: 12rpx 10rpx 20rpx;
+  color: var(--ui-danger-text);
+  font-size: var(--ui-font-meta);
+  line-height: var(--ui-line-body);
+}
 .book-share-panel {
   padding: 24rpx 30rpx;
   border-top: 1rpx solid var(--ui-divider);

@@ -28,6 +28,7 @@ class MemoirCompletionIssueResponse(BaseModel):
     related_chapter_ids: list[str] = Field(default_factory=list)
     input_signature: str
     status: MemoirCompletionIssueStatus
+    blocks_book: bool = False
     active_session_id: str | None = None
     outcome: MemoirCompletionIssueOutcome | None = None
     outcome_note: str

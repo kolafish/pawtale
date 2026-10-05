@@ -24,6 +24,28 @@ interface IssueInputEvent {
   detail: { value?: string };
 }
 
+export function requiredIssueGroups(issues: MemoirCompletionIssue[], bookMode: boolean) {
+  const groups = bookMode
+    ? [
+      {
+        id: "blocking",
+        title: "必须处理",
+        className: "required",
+        detail: "涉及隐私或事实冲突，处理后相关章节才能收入全书。可以填写处理说明，也可以明确选择保留现状。",
+        issues: issues.filter((issue) => issue.blocks_book),
+      },
+      {
+        id: "optional",
+        title: "可选调整",
+        className: "optional",
+        detail: "这些内容取舍不影响章节收入全书，可以按需要回答或保留现状。",
+        issues: issues.filter((issue) => !issue.blocks_book),
+      },
+    ]
+    : [{ id: "required", title: "需要确认", className: "required", detail: "", issues }];
+  return groups.filter((group) => group.issues.length);
+}
+
 Component({
   properties: {
     projectId: { type: String, value: "" },
@@ -32,6 +54,7 @@ Component({
     requiredIssues: { type: Array, value: [] },
     optionalIssues: { type: Array, value: [] },
     allowRequiredConfirmation: { type: Boolean, value: false },
+    bookConfirmationMode: { type: Boolean, value: false },
     friendlyMode: { type: Boolean, value: false },
     disabled: { type: Boolean, value: false },
   },
@@ -42,6 +65,18 @@ Component({
     requiredAnswer: "",
     requiredAnswerReady: false,
     requiredAnswerGatewayUrl: "",
+    requiredIssueGroups: [] as ReturnType<typeof requiredIssueGroups>,
+  },
+
+  observers: {
+    "requiredIssues,bookConfirmationMode"() {
+      this.setData({
+        requiredIssueGroups: requiredIssueGroups(
+          this.properties.requiredIssues as MemoirCompletionIssue[],
+          this.properties.bookConfirmationMode,
+        ),
+      });
+    },
   },
 
   methods: {

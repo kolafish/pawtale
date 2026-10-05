@@ -9,12 +9,65 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     AudioFile,
     MemoirChatMessage,
+    MemoirCompletionIssue,
     MemoirMaterialShareVideo,
     MemoirShareVideoOutput,
     MemoirVoiceUtterance,
 )
 from app.services.memoir import audio_files as memoir_audio_files
-from tests.memoir_helpers import create_test_voice_transcript
+from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript
+
+
+@pytest.mark.ci_smoke
+async def test_book_confirmation_counts_match_assembly_blockers(client, test_db):
+    project_id = (await client.post(
+        "/api/mobile/memoir/projects", json={"title": "回忆"},
+    )).json()["id"]
+    _, chapters = await create_test_book_plan_with_chapters(test_db, project_id=project_id)
+    chapters[1].include_in_book = False
+
+    def issue(index, **patch):
+        return MemoirCompletionIssue(
+            id=f"confirmation-{index}", project_id=project_id,
+            question="是否保留这段经历？", priority="high",
+            fingerprint=f"{index:064x}", input_signature="older-review",
+            **{"scope": "book", "channel": "manual_review", "issue_type": "privacy", **patch},
+        )
+
+    rows = [
+        issue(1),
+        issue(2, issue_type="conflict", related_chapter_ids_json=[chapters[0].id]),
+        issue(3, scope="chapter", chapter_id=chapters[0].id, status="in_progress"),
+        issue(4, issue_type="clarity"),
+        issue(5, channel="interview"),
+        issue(6, status="closed", outcome="confirmed"),
+        issue(7, scope="chapter", chapter_id=chapters[1].id),
+        issue(8, issue_type="conflict", related_chapter_ids_json=[chapters[1].id]),
+    ]
+    test_db.add_all(rows)
+    await test_db.commit()
+
+    book_response = await client.get("/api/mobile/memoir/book-snapshot")
+    overview_response = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    collection_response = await client.get(
+        f"/api/memoir/projects/{project_id}/completion-issues?include_closed=true",
+    )
+    assert book_response.status_code == overview_response.status_code == collection_response.status_code == 200
+    book, overview, collection = book_response.json(), overview_response.json(), collection_response.json()
+    assert book["blocking_issue_count"] == overview["blocking_issue_count"] == 3
+    assert overview["chapters"][0]["blocking_issue_count"] == 1
+    assert {item["id"] for item in collection["issues"] if item["blocks_book"]} == {
+        rows[0].id, rows[1].id, rows[2].id,
+    }
+
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{rows[0].id}/close",
+        json={"outcome": "confirmed", "note": "已确认处理方式"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["blocks_book"] is False
+    refreshed = (await client.get("/api/mobile/memoir/book-snapshot")).json()
+    assert refreshed["blocking_issue_count"] == 2
 
 
 async def test_mobile_memoir_routes_require_login(anonymous_client):

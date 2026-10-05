@@ -945,3 +945,17 @@ test("unconfirmed readable chapters can review the book and stale manual decisio
   assert.deepEqual(review.requiredBookIssues.map((issue) => issue.id), ["privacy"]);
   assert.deepEqual(review.optionalBookIssues, []);
 });
+
+test("book completion preserves chapter readiness while showing mandatory confirmations", () => {
+  const { mod } = loadBookCompletionPage();
+  const overview = confirmedOverview();
+  overview.blocking_issue_count = 3;
+  overview.chapters[0].blocking_issue_count = 1;
+  const view = mod.bookCompletionViewPatch(overview);
+  assert.equal(view.blockingIssueCount, 3);
+  assert.equal(view.chapters[0].blocking_issue_count, 1);
+  assert.equal(view.chapters[0].state, "confirmed");
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-completion/index.wxml"), "utf8");
+  assert.match(template, /book-confirmation-mode="\{\{true\}\}"/);
+  assert.match(template, /item.blocking_issue_count/);
+});
