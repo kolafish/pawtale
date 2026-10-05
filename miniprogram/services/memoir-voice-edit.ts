@@ -1,7 +1,7 @@
 import { memoirAIRequest, memoirNarrativeProjectPath, memoirRequest } from "./memoir-api-client";
 
 export interface VoiceEditOperation {
-  action: "delete_chapter" | "delete_section" | "delete_material" | "rename_chapter" | "rename_section" | "regenerate_chapter_sections" | "consolidate_chapter_sections" | "split_chapter";
+  action: "delete_chapter" | "delete_section" | "delete_material" | "rename_chapter" | "rename_section" | "regenerate_chapter_sections" | "consolidate_chapter_sections" | "split_chapter" | "merge_sections";
   target_ref: string;
   new_title: string | null;
   utterance_ids?: string[];
@@ -21,8 +21,8 @@ export interface VoiceEditPreview {
 }
 
 export function previewVoiceEdit(projectId: string, instruction: string): Promise<VoiceEditPreview> {
-  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string; supports_chapter_split: boolean }>(
-    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction, supports_chapter_split: true },
+  return memoirAIRequest<VoiceEditPreview, { instruction: string; ai_model?: string; supports_chapter_split: boolean; supports_section_merge: boolean }>(
+    memoirNarrativeProjectPath(projectId, "/voice-edit/preview"), { instruction, supports_chapter_split: true, supports_section_merge: true },
     { timeoutProfile: "generation", invalidatesSnapshots: false },
   );
 }

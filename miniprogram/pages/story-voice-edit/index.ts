@@ -139,7 +139,7 @@ definePage<EditData>()({
     const selectedItems = this.data.items.filter(item => item.selected);
     const operations = selectedItems.map(({ action, target_ref, new_title, utterance_ids, section_ids }) => ({
       action, target_ref, new_title,
-      ...(action === "split_chapter" && section_ids?.length ? { section_ids } : {}),
+      ...((action === "split_chapter" || action === "merge_sections") && section_ids?.length ? { section_ids } : {}),
       ...(action === "split_chapter" && utterance_ids?.length ? { utterance_ids } : {}),
     }));
     this.setData({ applying: true, error: "" });

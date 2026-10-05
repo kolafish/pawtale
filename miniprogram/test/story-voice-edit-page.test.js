@@ -115,6 +115,24 @@ test("section consolidation opens the affected chapter after confirmation", asyn
   assert.equal(calls.routes[0], "/pages/chapter-workspace/index?projectId=p1&chapterId=c3");
 });
 
+test("voice edit confirms the existing destination and submits all merge sources", async () => {
+  const operation = {
+    action: "merge_sections", target_ref: "destination-section", section_ids: ["source-section"],
+    new_title: null, label: "把来源小节合并到目标章节的目标小节", detail: "讲述保留，空的来源章节移除。",
+  };
+  const { context, calls } = setup({ preview: async () => ({
+    signature: "merge-sig", operations: [operation], questions: [], reply: "请确认来源和目标。",
+  }) });
+  await context.submitInstruction({ detail: { value: "把这章合并到另一章的小节里" } });
+  assert.equal(context.data.splitConfirmation, null);
+  assert.equal(context.data.items[0].label, operation.label);
+  await context.apply();
+  assert.deepEqual(calls.applies[0], ["p1", "merge-sig", [{
+    action: "merge_sections", target_ref: "destination-section", new_title: null, section_ids: ["source-section"],
+  }]]);
+  assert.equal(context.data.message, "修改已保存");
+});
+
 test("multiple chapter reductions show final counts and failures separately", async () => {
   const jobs = {
     c1: { status: "pending", section_count: 0, error_message: "" },
@@ -315,6 +333,7 @@ test("voice edit gives the model a generation deadline, uses mutation writes and
   await api.applyVoiceEdit("p1", "sig", []);
   assert.equal(calls[0][0], "ai");
   assert.equal(calls[0][2].supports_chapter_split, true);
+  assert.equal(calls[0][2].supports_section_merge, true);
   assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");
