@@ -10,6 +10,11 @@
         <text class="chapter-story-detail">{{chapterStoryDetail}}</text>
       </view>
       <image class="chapter-growth-image" src="/assets/chapter-workspace/chapter-growth.png" mode="aspectFit" />
+      <button class="chapter-more-action" aria-label="本章更多操作" disabled="{{operationKind !== '' || editingSectionId !== ''}}" bindtap="openChapterMoreActions">本章操作 ···</button>
+      <view wx:if="{{audioTarget === 'chapter' && audioPhase !== 'idle'}}" class="chapter-audio-notice">
+        <text>{{audioPhase === 'preparing' ? '正在准备整章朗读…' : '正在朗读本章'}}</text>
+        <button class="chapter-audio-stop" bindtap="stopDraftSectionPlayback">停止朗读</button>
+      </view>
       <view wx:if="{{chapterPreparationJob && !chapterPreparationJob.candidate_content}}" class="chapter-preparation-status">
         <ai-task-progress
           title="{{chapterPreparationTitle}}"

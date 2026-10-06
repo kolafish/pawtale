@@ -6,31 +6,14 @@
     <view wx:if="{{bookStaleNotice}}" class="notice warn">{{bookStaleNotice}}</view>
     <view wx:if="{{bookVersionNotice && activeSection === 'history'}}" class="notice">{{bookVersionNotice}}</view>
 
-    <view wx:if="{{!bookContent}}" class="state-card ui-card">
+    <view wx:if="{{!bookContent && pagePurpose !== 'settings'}}" class="state-card ui-card">
       <text>这本书还没有完成。完成书稿后，就可以在这里阅读和导出。</text>
       <view class="state-action ui-pressable" aria-role="button" bindtap="openBookHome">返回书稿</view>
     </view>
     <block wx:else>
+      <text wx:if="{{!bookContent}}" class="notice">正文整理完成后可修改书的信息，图片素材现在就可以管理。</text>
       <block wx:if="{{!activeSection}}">
-        <view class="export-hero ui-card">
-          <view class="hero-main">
-            <view class="hero-copy">
-              <text class="hero-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
-              <text class="hero-subtitle">{{bookNarratorNameInput ? bookNarratorNameInput + '口述回忆录' : '口述回忆录'}}</text>
-              <text class="hero-meta">{{totalChapterCount}}章 · {{bookCharCount || 0}}字</text>
-            </view>
-            <view class="hero-cover {{bookCoverStylePreviewClass}}" aria-hidden="true">
-              <image wx:if="{{bookCoverStylePreviewImage}}" class="hero-cover-image" src="{{bookCoverStylePreviewImage}}" mode="aspectFill" />
-              <image wx:else class="hero-cover-branch" src="/assets/book-reader/hero-branch.png" mode="aspectFit" />
-              <text class="hero-cover-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
-            </view>
-          </view>
-          <view class="hero-actions">
-            <view class="hero-action ui-pressable" aria-role="button" bindtap="openBookReader">阅读全书 <text>→</text></view>
-          </view>
-        </view>
-
-        <view class="overview-card ui-card">
+        <view wx:if="{{pagePurpose === 'files'}}" class="overview-card ui-card">
           <text class="section-title">导出这本书</text>
           <text class="section-description">{{exportNotice || "生成文件，留存或分享给家人。"}}</text>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="pdf" data-layout="standard" bindtap="downloadBookOutputExport">
@@ -47,19 +30,19 @@
           </view>
         </view>
 
-        <view class="overview-card ui-card">
+        <view wx:if="{{pagePurpose === 'settings'}}" class="overview-card ui-card">
           <text class="section-title">书的设置</text>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="title" bindtap="openSection"><text class="row-title">书名与信息</text><text class="row-value">{{bookManuscriptTitle || bookPreviewTitle}}</text><text class="row-arrow">›</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="editorial" bindtap="openSection"><text class="row-title">前言与后记</text><text class="row-value">{{bookPrefaceInput && bookAfterwordInput ? '已填写' : '待完善'}}</text><text class="row-arrow">›</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="layout" bindtap="openSection"><text class="row-title">封面与版式</text><text class="row-value">{{bookManuscriptTemplateLabel}}</text><text class="row-arrow">›</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="history" bindtap="openSection"><text class="row-title">历史版本</text><text class="row-value">{{bookVersionOptions.length}}个版本</text><text class="row-arrow">›</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="advanced" bindtap="openSection"><text class="row-title">高级整理</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable {{!bookContent ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContent}}" data-section="title" bindtap="openSection"><text class="row-title">书名与信息</text><text class="row-value">{{bookManuscriptTitle || bookPreviewTitle}}</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable {{!bookContent ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContent}}" data-section="editorial" bindtap="openSection"><text class="row-title">前言与后记</text><text class="row-value">{{bookPrefaceInput && bookAfterwordInput ? '已填写' : '待完善'}}</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable {{!bookContent ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContent}}" data-section="layout" bindtap="openSection"><text class="row-title">封面与版式</text><text class="row-value">{{bookManuscriptTemplateLabel}}</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable {{!bookContent ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContent}}" data-section="history" bindtap="openSection"><text class="row-title">历史版本</text><text class="row-value">{{bookVersionOptions.length}}个版本</text><text class="row-arrow">›</text></view>
+          <view class="list-row section-entry ui-pressable" aria-role="button" bindtap="openImageAssetsPage"><text class="row-title">插图与图录</text><text class="row-arrow">›</text></view>
         </view>
       </block>
 
       <block wx:else>
         <view class="subpage-back ui-pressable" aria-role="button" bindtap="closeSection">
-          <text class="subpage-back-arrow" aria-hidden="true">‹</text><text>返回我的书</text>
+          <text class="subpage-back-arrow" aria-hidden="true">‹</text><text>{{pagePurpose === "settings" ? "返回书的设置" : (pagePurpose === "regenerate" ? "返回书稿建议" : "返回导出文件")}}</text>
         </view>
         <view wx:if="{{activeSection === 'export'}}" class="detail-card ui-card">
           <text class="section-title">导出设置</text>
@@ -320,8 +303,6 @@
           <view class="detail-info-row"><text>章节</text><text>{{totalChapterCount}}章</text></view>
           <view class="detail-info-row"><text>前言</text><text>{{bookPrefaceInput ? '已填写' : '未填写'}}</text></view>
           <view class="detail-info-row"><text>后记</text><text>{{bookAfterwordInput ? '已填写' : '未填写'}}</text></view>
-          <view class="detail-info-row"><text>附上整理记录与来源信息</text><text>{{bookExportShowSourceAppendix ? '是' : '否'}}</text></view>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="export" bindtap="openSection"><text class="row-title">修改导出设置</text><text class="row-arrow">›</text></view>
         </view>
 
         <view wx:if="{{activeSection === 'history'}}" class="detail-card ui-card">
@@ -334,8 +315,7 @@
         </view>
 
         <view wx:if="{{activeSection === 'advanced'}}" class="detail-card ui-card">
-          <text class="section-title">高级整理</text>
-          <view class="list-row section-entry ui-pressable" aria-role="button" data-section="history" bindtap="openSection"><text class="row-title">历史版本</text><text class="row-arrow">›</text></view>
+          <text class="section-title">重新整理书稿</text>
           <view class="advanced-action"><text class="row-title">重新整理书稿</text><text class="row-detail">根据各章确认正文生成新版本，旧版本会保留。</text>
             <button class="detail-action ui-button" loading="{{generatingBook}}" disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}" bindtap="generateBook">重新整理书稿</button>
           </view>

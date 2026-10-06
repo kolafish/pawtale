@@ -12,7 +12,7 @@ export function bookChapterDetailUrl(projectId: string, chapterId: string): stri
   return pageUrl("/pages/chapter-workspace/index", { projectId, chapterId });
 }
 
-export function bookExportPageUrl(projectId: string, action = "preview"): string {
+export function bookExportPageUrl(projectId: string, action = "files"): string {
   return pageUrl("/pages/book-export/index", { projectId, action });
 }
 

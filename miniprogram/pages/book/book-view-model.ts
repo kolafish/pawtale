@@ -18,12 +18,9 @@ import {
   sourceRefKey,
 } from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
-import type { BookAutomationEventView } from "./book-automation-view-model";
 import { createdAtTime, trimText } from "./book-view-model-utils";
 
 export type {
-  BookAutomationEventDetailView,
-  BookAutomationEventSuggestionView,
   BookAutomationEventView,
 } from "./book-automation-view-model";
 export {
@@ -54,11 +51,11 @@ export interface BookChapterView extends Pick<
 > {
   editingTitle: string;
   titleChanged: boolean;
-  ttsTarget: string;
   sourceCount: number;
   sectionCount: number;
   sourceSummary: string;
   chapterSummaryMetaText: string;
+  chapterActivityText: string;
   sourceViews: BookChapterSourceView[];
   sourceListExpanded: boolean;
   sourceToggleText: string;
@@ -74,9 +71,6 @@ export interface BookChapterView extends Pick<
   removedSourceCount: number;
   draftAvailable: boolean;
   draftCharCount: number;
-  draftChanged: boolean;
-  draftVersionText: string;
-  draftActionText: string;
   chapterGuidanceText: string;
   bookInclusionNotice: string;
   chapterNeedsAction: boolean;
@@ -232,16 +226,6 @@ export interface BookHomeData {
   bookTTSProgressPercent: number;
   bookTTSDurationSeconds: number;
   bookTTSAlignment: TTSAlignmentSegment[];
-  automationEventItems: BookAutomationEventView[];
-  automationEventBusyTarget: string;
-  automationDismissibleCount: number;
-  automationEventClearing: boolean;
-  automationEventExpandedTargets: Record<string, boolean>;
-  automationEventLoading: boolean;
-  automationEventError: string;
-  imageAssetLoading: boolean;
-  imageAssetTotal: number;
-  imageAssetSummaryText: string;
   bookContentAvailable: boolean;
 }
 
@@ -269,7 +253,7 @@ export function chapterGuidanceText(
   if (pendingCount || removedCount) {
     return `${changeNotice}。相关内容待更新，当前正文仍可阅读。`;
   }
-  return "正文已更新，可以阅读或修改。";
+  return "";
 }
 
 export function sourceChangeNotice(
@@ -292,26 +276,6 @@ export function sourceChangeNotice(
     changes.push(`${ordinaryCount} 条新增讲述尚未写入正文`);
   }
   return changes.join("，");
-}
-
-export function draftActionText(
-  draft: MemoirBookChapterDraft | null,
-  pendingCount: number,
-  removedCount = 0,
-  sourceCount = 0,
-): string {
-  if (!draft?.latest_version?.content.trim()) {
-    return sourceCount ? "查看当前步骤" : "查看本章";
-  }
-  if (pendingCount || removedCount) {
-    return "查看更新状态";
-  }
-  return "阅读或修改";
-}
-
-export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
-  const version = draft?.latest_version?.version;
-  return version ? `历史版本 · 已修改 ${version} 次` : "暂无正文";
 }
 
 export function responseCount(value: number | null | undefined): number {
@@ -762,15 +726,15 @@ export function bookOutputStaleNotice(
   if (progress?.status === "needs_input") {
     return progress.needs_user_material_count
       ? `${subject}有变更，部分章节还需要补充讲述。请回到首页补充相关回忆。`
-      : `${subject}有变更。请点「查看待确认事项」处理，全书尚未更新。`;
+      : `${subject}有变更。请到「书稿建议」处理，全书尚未更新。`;
   }
   if (progress?.status === "failed") {
-    return `${subject}有变更，后台整理遇到问题。请点「查看待确认事项」查看原因并重试。`;
+    return `${subject}有变更，后台整理遇到问题。请到「书稿建议」查看原因并重试。`;
   }
   if (progress?.status === "processing") {
     return `${subject}有变更，后台正在整理新版全书。`;
   }
-  return `${subject}有变更，全书尚未更新。请点「查看待确认事项」查看当前步骤。`;
+  return `${subject}有变更，全书尚未更新。请到「书稿建议」查看当前步骤。`;
 }
 
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
@@ -879,10 +843,10 @@ function bookOmissionFollowUp(
   if (progress?.status === "needs_input") {
     return progress.needs_user_material_count
       ? "请回到首页补充与本章有关的讲述。"
-      : "请查看待确认事项，处理后书稿会继续更新。";
+      : "请查看书稿建议，处理后书稿会继续更新。";
   }
   if (progress?.status === "failed") {
-    return "后台整理遇到问题，请查看待确认事项并重试。";
+    return "后台整理遇到问题，请查看书稿建议并重试。";
   }
   if (progress?.status === "processing") {
     return "后台正在整理，完成后请再查看。";
@@ -892,7 +856,7 @@ function bookOmissionFollowUp(
       ? "请回到首页继续讲述与本章有关的回忆。"
       : "请进入对应章节查看当前步骤。";
   }
-  return "如需将其收入书稿，请查看待确认事项。";
+  return "如需将其收入书稿，请查看书稿建议。";
 }
 
 export function bookChapterInclusionData(
@@ -1069,13 +1033,9 @@ function chapterSummaryMetaText(
     | "draftAvailable"
   >,
 ): string {
-  const sourceText = bookOralSourceCountText(chapter.sourceCount);
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
-  const sectionText = chapter.sectionCount ? `${chapter.sectionCount} 个小节 · ` : "";
-  if (!chapter.draftAvailable) {
-    return `${inclusionText}${sectionText}${sourceText}`;
-  }
-  return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字`;
+  const sectionText = `${chapter.sectionCount} 个故事`;
+  return `${inclusionText}${sectionText}${chapter.draftAvailable ? ` · ${chapter.draftCharCount.toLocaleString("en-US")} 字` : ""}`;
 }
 
 export function bookOutlineNarrationText(
@@ -1138,11 +1098,11 @@ export function buildChapterViews(
         include_in_book: chapter.include_in_book !== false,
         editingTitle: chapter.title,
         titleChanged: false,
-        ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sectionCount,
         sourceSummary: bookChapterSourceSummary(chapter),
         chapterSummaryMetaText: chapterSummaryMetaText(viewBase),
+        chapterActivityText: "",
         sourceViews: [],
         sourceListExpanded: false,
         sourceToggleText: "",
@@ -1158,7 +1118,6 @@ export function buildChapterViews(
         removedSourceCount: assignedRemovedCount,
         draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
         draftCharCount,
-        draftChanged: false,
         chapterGuidanceText: chapterGuidanceText(
           draft,
           changeNotice,
@@ -1168,13 +1127,6 @@ export function buildChapterViews(
         ),
         chapterNeedsAction: Boolean(
           assignedPendingCount || assignedRemovedCount || !draft?.latest_version?.content?.trim(),
-        ),
-        draftVersionText: draftVersionText(draft),
-        draftActionText: draftActionText(
-          draft,
-          assignedPendingCount,
-          assignedRemovedCount,
-          chapter.source_refs.length,
         ),
         bookInclusionNotice: "",
         draftBusy: false,
@@ -1248,16 +1200,6 @@ export function guestBookData(): Partial<BookHomeData> {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
-    automationEventItems: [],
-    automationEventBusyTarget: "",
-    automationDismissibleCount: 0,
-    automationEventClearing: false,
-    automationEventExpandedTargets: {},
-    automationEventLoading: false,
-    automationEventError: "",
-    imageAssetLoading: false,
-    imageAssetTotal: 0,
-    imageAssetSummaryText: "还没有图片素材",
   };
 }
 

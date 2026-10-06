@@ -32,7 +32,6 @@ import { getMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import { optionalApiResource } from "../../services/request";
 import { returnToBook, routeAuthError } from "../../services/navigation";
 import { isShareFileMessageCancelError, shareLocalFileMessage } from "../../services/share";
-import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   datasetChoice,
   datasetString,
@@ -129,7 +128,7 @@ const SECTION_TITLES: Record<Exclude<BookExportSection, "">, string> = {
   editorial: "前言与后记",
   layout: "封面与版式",
   history: "历史版本",
-  advanced: "高级整理",
+  advanced: "重新整理书稿",
 };
 
 interface OpenDocumentOptions {
@@ -257,6 +256,7 @@ type BookExportData = BookOutputData & {
   bookEditorialCopyJobs: BookEditorialCopyJobs;
   bookOutputAvailable: boolean;
   activeSection: BookExportSection;
+  pagePurpose: "files" | "settings" | "regenerate";
   bookLayoutOptions: BookLayoutOption[];
   bookLayoutTemplate: MemoirBookManuscriptTemplate;
   bookCustomLayout: MemoirBookCustomLayout;
@@ -335,6 +335,7 @@ definePage<BookExportData>()({
     exportNotice: exportNotice("preview"),
     bookEditorialCopyJobs: emptyEditorialCopyJobs(),
     activeSection: "",
+    pagePurpose: "files",
     bookLayoutOptions: BOOK_LAYOUT_OPTIONS,
     bookLayoutTemplate: "classic_family",
     bookCustomLayout: DEFAULT_CUSTOM_LAYOUT,
@@ -359,10 +360,14 @@ definePage<BookExportData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const action = queryParam(query, "action") || "preview";
-    const activeSection: BookExportSection = queryParam(query, "settings") === "book" ? "title" : "";
+    const pagePurpose = action === "settings" || queryParam(query, "settings") === "book"
+      ? "settings"
+      : action === "regenerate" ? "regenerate" : "files";
+    const activeSection: BookExportSection = pagePurpose === "regenerate" ? "advanced" : "";
     this.setData({
       projectId,
       exportNotice: exportNotice(action),
+      pagePurpose,
       activeSection,
     });
     if (!projectId) {
@@ -375,7 +380,7 @@ definePage<BookExportData>()({
   onShow() {
     this.bookEditorialCopyPageVisible = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
-    setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : "阅读与导出");
+    setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : (this.data.pagePurpose === "settings" ? "书的设置" : "导出文件"));
     if (this.data.activeSection === "editorial" && this.bookOutput) {
       void this.refreshBookEditorialCopyProgress();
     }
@@ -1025,13 +1030,28 @@ definePage<BookExportData>()({
   },
 
   openBookHome() {
-    writeBookWorkspaceNavigationTarget("tools");
     returnToBook();
+  },
+
+  openImageAssetsPage() {
+    if (!this.data.projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/image-assets/index", { projectId: this.data.projectId }),
+    });
   },
 
   openSection(event: DatasetEvent) {
     const section = datasetString(event, "section") as BookExportSection;
     if (!section || !Object.prototype.hasOwnProperty.call(SECTION_TITLES, section)) return;
+    if (!this.data.bookContent) return;
+    const permitted = this.data.pagePurpose === "files"
+      ? section === "export"
+      : this.data.pagePurpose === "settings"
+        ? section !== "export" && section !== "advanced"
+        : section === "advanced";
+    if (!permitted) return;
     this.setData({ activeSection: section, error: "" }, () => {
       wx.pageScrollTo({ scrollTop: 0, duration: 0 });
     });
@@ -1042,6 +1062,10 @@ definePage<BookExportData>()({
   },
 
   async closeSection() {
+    if (this.data.pagePurpose === "regenerate") {
+      wx.navigateBack({ fail: () => this.openBookHome() });
+      return;
+    }
     if (this.data.activeSection === "title" || this.data.activeSection === "editorial") {
       this.clearBookDesignAutosaveTimer();
       if (bookDesignHasChanges(this.data)) {
@@ -1057,7 +1081,7 @@ definePage<BookExportData>()({
     this.setData({ activeSection: "", error: "" }, () => {
       wx.pageScrollTo({ scrollTop, duration: 0 });
     });
-    setPageNavigationTitle("阅读与导出");
+    setPageNavigationTitle(this.data.pagePurpose === "settings" ? "书的设置" : "导出文件");
   },
 
   async downloadBookOutputExport(event: DatasetEvent) {

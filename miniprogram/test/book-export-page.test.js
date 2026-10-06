@@ -96,7 +96,7 @@ test("book export page is registered", () => {
   const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-export/index.json"), "utf8"));
 
   assert.ok(appJson.pages.includes("pages/book-export/index"));
-  assert.equal(pageJson.navigationBarTitleText, "阅读与导出");
+  assert.equal(pageJson.navigationBarTitleText, "导出文件");
 });
 
 test("book export overview binds one reading entry and focused settings without duplicating the book", () => {
@@ -105,7 +105,7 @@ test("book export overview binds one reading entry and focused settings without 
   assert.match(template, /bindtap="openBookReader"/);
   assert.doesNotMatch(template, /bindtap="openBookNarration"/);
   assert.match(template, /data-section="title" bindtap="openSection"/);
-  assert.match(template, /data-section="advanced" bindtap="openSection"/);
+  assert.match(template, /bindtap="openImageAssetsPage"/);
   assert.doesNotMatch(template, /bookPreviewTocItems|bookManuscriptStructureItems|bookManuscriptChapterItems/);
 });
 
@@ -116,7 +116,6 @@ test("book design section shows one curated gallery and keeps custom reading con
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="selectBookLayout"/);
   assert.match(template, /src="\{\{option.coverPreviewImage\}\}"/);
   assert.match(template, /src="\{\{option.ornamentThumbnail\}\}"/);
-  assert.match(template, /src="\{\{bookCoverStylePreviewImage\}\}"/);
   assert.doesNotMatch(template, /bindchange="changeBookCoverStyle"/);
   assert.doesNotMatch(template, /预览整套 PDF|预览阅读版 PDF/);
   assert.match(template, /bookLayoutFeedbackTarget === option.value/);
@@ -245,7 +244,8 @@ test("book export opens book settings when linked from whole-book review", async
     settings: "book",
   });
 
-  assert.equal(context.data.activeSection, "title");
+  assert.equal(context.data.pagePurpose, "settings");
+  assert.equal(context.data.activeSection, "");
   assert.equal(outputLoads, 1);
 });
 
@@ -302,7 +302,7 @@ test("book export waits only for active draft processing and preserves failed or
     ["processing", 0, /正在整理新版全书/],
     ["failed", 0, /遇到问题.*重试/],
     ["needs_input", 1, /需要补充讲述.*首页.*回忆/],
-    ["needs_input", 0, /待确认事项.*尚未更新/],
+    ["needs_input", 0, /书稿建议.*尚未更新/],
     ["idle", 0, /尚未更新.*当前步骤/],
   ]) {
     const calls = [];
@@ -362,7 +362,7 @@ test("book export opens focused settings and the selected book for reading", asy
 test("leaving history returns the book overview to the latest version", async () => {
   global.wx = { pageScrollTo() {} };
   const { page } = loadBookExportPage();
-  const context = pageContext(page, { projectId: "project/1" });
+  const context = pageContext(page, { projectId: "project/1", pagePurpose: "settings" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
   page.openSection.call(context, { currentTarget: { dataset: { section: "history" } } });
 
@@ -379,7 +379,7 @@ test("book settings return to the overview scroll position", async () => {
   const scrolls = [];
   global.wx = { pageScrollTo(options) { scrolls.push(options); } };
   const { page } = loadBookExportPage();
-  const context = pageContext(page);
+  const context = pageContext(page, { pagePurpose: "settings", bookContent: "正文" });
 
   page.onPageScroll.call(context, { scrollTop: 920 });
   page.openSection.call(context, { currentTarget: { dataset: { section: "editorial" } } });
@@ -514,8 +514,6 @@ test("book export page suggests titles and queues book-level editorial copy", as
   assert.equal(context.data.bookEditorialCopyJobs.preface.visible, false);
   page.openBookHome.call(context);
   assert.deepEqual(navigations, ["/pages/book/index"]);
-  const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
-  assert.equal(takeBookWorkspaceNavigationTarget(), "tools");
   page.clearBookEditorialCopyPoll.call(context);
 });
 
@@ -1155,4 +1153,23 @@ test("plain text output without a manuscript does not invent book structure", as
   assert.deepEqual(data.bookManuscriptStructureItems, []);
   assert.deepEqual(data.bookManuscriptChapterItems, []);
   assert.deepEqual(data.bookPreviewChapters, []);
+});
+
+test("settings and files open distinct destinations while image assets remain reachable before a draft", async () => {
+  const navigations = [];
+  global.wx = { navigateTo: ({ url }) => navigations.push(url), pageScrollTo() {} };
+  const { page } = loadBookExportPage();
+  const context = pageContext(page, { projectId: "project-1", bookContent: "正文", pagePurpose: "files" });
+  page.openSection.call(context, { currentTarget: { dataset: { section: "title" } } });
+  assert.equal(context.data.activeSection, "");
+  context.setData({ pagePurpose: "settings" });
+  page.openSection.call(context, { currentTarget: { dataset: { section: "export" } } });
+  assert.equal(context.data.activeSection, "");
+  page.openSection.call(context, { currentTarget: { dataset: { section: "title" } } });
+  assert.equal(context.data.activeSection, "title");
+  context.setData({ bookContent: "", activeSection: "" });
+  page.openSection.call(context, { currentTarget: { dataset: { section: "title" } } });
+  assert.equal(context.data.activeSection, "");
+  page.openImageAssetsPage.call(context);
+  assert.deepEqual(navigations, ["/pages/image-assets/index?projectId=project-1"]);
 });

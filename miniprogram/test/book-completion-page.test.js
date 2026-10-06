@@ -14,6 +14,9 @@ const {
 
 function loadBookCompletionPage({ voiceApiExports = {}, navigationExports = {} } = {}) {
   mockMemoirApiModules({
+    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
+    acknowledgeMemoirAutomationEvent: async () => ({}),
+    acknowledgeDismissibleMemoirAutomationEvents: async () => ({ updated_count: 0 }),
     getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
     enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),
     cancelMemoirBookCompletionJob: unmockedAsync("cancelMemoirBookCompletionJob"),
@@ -214,7 +217,7 @@ test("book completion overview page is registered", () => {
       "utf8",
     ),
   );
-  assert.equal(pageJson.navigationBarTitleText, "整理这本书");
+  assert.equal(pageJson.navigationBarTitleText, "书稿建议");
   assert.equal(
     pageJson.usingComponents["ai-task-progress"],
     "/components/ai-task-progress/index",
@@ -958,4 +961,100 @@ test("book completion preserves chapter readiness while showing mandatory confir
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-completion/index.wxml"), "utf8");
   assert.match(template, /book-confirmation-mode="\{\{true\}\}"/);
   assert.match(template, /item.blocking_issue_count/);
+});
+
+test("book suggestions keeps completed records and dismisses a selected group", async () => {
+  const { sampleAutomationEvent } = require("./book-fixtures");
+  const calls = [];
+  const events = [sampleAutomationEvent({ id: "event-1", status: "completed" }), sampleAutomationEvent({ id: "event-2", status: "completed" })];
+  const { page } = loadBookCompletionPage({ voiceApiExports: {
+    listMemoirAutomationEvents: async () => ({ items: events, total: 2, limit: 8 }),
+    acknowledgeMemoirAutomationEvent: async (_projectId, id) => { calls.push(id); },
+  } });
+  const context = pageContext(page, { projectId: "project-1" });
+  await page.loadAutomationEvents.call(context);
+  assert.equal(context.data.automationDismissibleCount, 2);
+  await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1", eventIds: "event-1,event-2", action: "acknowledge_group" } } });
+  assert.deepEqual(calls.sort(), ["event-1", "event-2"]);
+  assert.equal(context.data.automationEventItems.length, 0);
+});
+
+test("book suggestions does not restore dismissed records from an older refresh", async () => {
+  const { sampleAutomationEvent } = require("./book-fixtures");
+  const event = sampleAutomationEvent({ id: "event-1" });
+  let resolveRefresh;
+  const { page } = loadBookCompletionPage({ voiceApiExports: {
+    listMemoirAutomationEvents: () => new Promise((resolve) => { resolveRefresh = resolve; }),
+  } });
+  const context = pageContext(page, { projectId: "project-1" });
+  page.applyAutomationEvents.call(context, [event]);
+  const refresh = page.loadAutomationEvents.call(context);
+  await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
+  resolveRefresh({ items: [event], total: 1, limit: 8 });
+  await refresh;
+  assert.equal(context.data.automationEventItems.length, 0);
+  assert.equal(context.data.automationEventLoading, false);
+});
+
+test("book suggestions serializes single-record and all-record dismissal", async () => {
+  global.wx = { showToast() {} };
+  const { sampleAutomationEvent } = require("./book-fixtures");
+  const calls = [];
+  let resolveSingle;
+  let resolveAll;
+  const { page } = loadBookCompletionPage({ voiceApiExports: {
+    acknowledgeMemoirAutomationEvent: () => new Promise((resolve) => {
+      calls.push("single");
+      resolveSingle = resolve;
+    }),
+    acknowledgeDismissibleMemoirAutomationEvents: () => new Promise((resolve) => {
+      calls.push("all");
+      resolveAll = resolve;
+    }),
+  } });
+  const context = pageContext(page, { projectId: "project-1" });
+  const events = [
+    sampleAutomationEvent({ id: "event-1", status: "completed" }),
+    sampleAutomationEvent({ id: "event-2", status: "completed" }),
+  ];
+  const tap = { currentTarget: { dataset: { id: "event-1" } } };
+  page.applyAutomationEvents.call(context, events);
+  const single = page.acknowledgeAutomationEvent.call(context, tap);
+  await page.acknowledgeDismissibleAutomationEvents.call(context);
+  assert.deepEqual(calls, ["single"]);
+  resolveSingle({});
+  await single;
+  assert.deepEqual(context.data.automationEventItems.map((item) => item.id), ["event-2"]);
+
+  const all = page.acknowledgeDismissibleAutomationEvents.call(context);
+  await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-2" } } });
+  assert.deepEqual(calls, ["single", "all"]);
+  resolveAll({ updated_count: 1 });
+  await all;
+  assert.equal(context.data.automationEventItems.length, 0);
+});
+
+test("book suggestions keeps failed dismissals retryable and routes regeneration", async () => {
+  const { sampleAutomationEvent } = require("./book-fixtures");
+  const navigations = [];
+  global.wx = { navigateTo: ({ url }) => navigations.push(url) };
+  const { page } = loadBookCompletionPage({ voiceApiExports: { acknowledgeMemoirAutomationEvent: async () => { throw new Error("网络中断"); } } });
+  const context = pageContext(page, { projectId: "project-1" });
+  page.applyAutomationEvents.call(context, [sampleAutomationEvent({ id: "event-1" })]);
+  await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
+  assert.equal(context.data.automationEventError, "网络中断");
+  assert.equal(context.data.automationEventItems[0].busy, false);
+  page.openBookRegeneration.call(context);
+  assert.deepEqual(navigations, ["/pages/book-export/index?projectId=project-1&action=regenerate"]);
+});
+
+test("book suggestions keeps chapters with issues or failed preparation visible without repeating settled chapters", () => {
+  const { mod } = loadBookCompletionPage();
+  const overview = confirmedOverview();
+  const settled = mod.bookCompletionViewPatch(overview);
+  assert.ok(settled.chapters.every((chapter) => !chapter.needsAttention));
+  overview.chapters[0].active_issue = { id: "issue-1", question: "需要核对的事实", status: "pending" };
+  overview.chapters[1].state = "failed";
+  const attention = mod.bookCompletionViewPatch(overview);
+  assert.ok(attention.chapters.every((chapter) => chapter.needsAttention));
 });
