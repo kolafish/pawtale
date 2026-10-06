@@ -40,6 +40,15 @@ import {
   writeCachedMemoirChapterWorkspace,
 } from "../../stores/memoir-read-cache";
 import { promptRequiredText } from "../../services/text-prompt";
+import { trackAuditAction } from "../../services/audit-tracker";
+import {
+  applyMemoirBookPlanStructureCommand,
+  createMemoirBookChapterDraftTTS,
+  generateMemoirBookChapterTitle,
+  getMemoirBookPlan,
+  updateMemoirBookChapterTitle,
+} from "../../services/memoir-book-api";
+import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   CLOSED_DRAFT_SECTION_EDITOR,
   PREPARATION_POLL_INTERVAL_MS,
@@ -524,6 +533,120 @@ definePage<ChapterWorkspacePageData>()({
         chapterId: this.data.chapterId,
       }),
     });
+  },
+
+  async openChapterMoreActions() {
+    if (!this.data.workspace || this.data.operationKind || this.data.editingSectionId) {
+      return;
+    }
+    this.setData({ operationKind: "chapter_settings", operationTargetId: "menu", error: "" });
+    try {
+      const plan = await getMemoirBookPlan(this.data.projectId);
+      if (!this.pageVisible) {
+        return;
+      }
+      const chapter = plan.chapters.find((item) => item.id === this.data.chapterId);
+      if (!chapter) {
+        throw new Error("没有找到这一章，请返回书稿刷新。");
+      }
+      const actions = [
+        { label: "修改章名", run: () => this.editChapterTitle(false) },
+        { label: "AI 重新起名", run: () => this.editChapterTitle(true) },
+      ];
+      if (this.data.chapterHasReadableDraft) {
+        actions.push({
+          label: this.data.audioTarget === "chapter" && this.data.audioPhase !== "idle"
+            ? "停止朗读" : "朗读整章",
+          run: () => this.playChapterAudio(),
+        });
+      }
+      const includeInBook = chapter.include_in_book === false;
+      actions.push({
+        label: includeInBook ? "恢复收入本书" : "不收入本书",
+        run: () => this.setChapterBookInclusion(includeInBook),
+      });
+      this.finishOperation("chapter_settings", "menu");
+      wx.showActionSheet({
+        itemList: actions.map((action) => action.label),
+        success: (result) => { void actions[result.tapIndex]?.run(); },
+      });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "本章操作加载失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings", "menu");
+    }
+  },
+
+  async editChapterTitle(useAI: boolean) {
+    if (!this.data.workspace || !this.beginOperation("chapter_settings")) {
+      return;
+    }
+    try {
+      if (useAI) {
+        await generateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, {});
+      } else {
+        const title = await promptRequiredText("修改章名", this.data.workspace.chapter_title);
+        if (!title || title === this.data.workspace.chapter_title) {
+          return;
+        }
+        if (title.length > 80) {
+          wx.showToast({ title: "章名不能超过 80 字", icon: "none" });
+          return;
+        }
+        await updateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, { title });
+      }
+      await this.loadPageData(true);
+      trackAuditAction(
+        useAI ? "book.chapter_title_generate" : "book.chapter_title_update",
+        {},
+        { projectId: this.data.projectId },
+      );
+      wx.showToast({ title: useAI ? "已重新起名" : "章名已修改", icon: "success" });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "章名更新失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings");
+    }
+  },
+
+  async setChapterBookInclusion(includeInBook: boolean) {
+    if (!this.data.workspace || !this.beginOperation("chapter_settings")) {
+      return;
+    }
+    try {
+      await applyMemoirBookPlanStructureCommand(this.data.projectId, {
+        type: "set_chapter_book_inclusion",
+        chapter_id: this.data.chapterId,
+        include_in_book: includeInBook,
+      });
+      await this.loadPageData(true);
+      wx.showToast({ title: includeInBook ? "已恢复收入本书" : "已设为不收入本书", icon: "success" });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "收录设置更新失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings");
+    }
+  },
+
+  async playChapterAudio() {
+    if (!this.data.chapterHasReadableDraft) {
+      return;
+    }
+    await this.playDraftAudio(
+      "chapter",
+      () => createMemoirBookChapterDraftTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        readBookTTSRequest(),
+      ),
+      "章节朗读失败",
+    );
   },
 
   showDraftUpdate() {

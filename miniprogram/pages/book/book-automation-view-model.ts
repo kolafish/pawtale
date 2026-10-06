@@ -12,34 +12,12 @@ export interface BookAutomationEventView {
   titleText: string;
   summaryText: string;
   detailText: string;
-  suggestedActionText: string;
-  suggestionItems: BookAutomationEventSuggestionView[];
-  hasSuggestions: boolean;
-  detailItems: BookAutomationEventDetailView[];
-  detailExpanded: boolean;
-  detailToggleText: string;
-  hasDetails: boolean;
   metaText: string;
   statusText: string;
   actionText: string;
   canAcknowledge: boolean;
   canAct: boolean;
   busy: boolean;
-}
-
-export interface BookAutomationEventSuggestionView {
-  id: string;
-  labelText: string;
-  bodyText: string;
-  chapterText: string;
-}
-
-export interface BookAutomationEventDetailView {
-  id: string;
-  titleText: string;
-  chapterText: string;
-  metaText: string;
-  previewText: string;
 }
 
 function automationEventTitle(event: MemoirAutomationEvent): string {
@@ -141,13 +119,11 @@ function automationEventSummaryText(event: MemoirAutomationEvent): string {
 export function buildAutomationEventViews(
   events: MemoirAutomationEvent[] = [],
   busyTarget = "",
-  expandedTargets: Record<string, boolean> = {},
 ): BookAutomationEventView[] {
   const filteredEvents = events.filter((event) => !event.metadata_json?.acknowledged_at);
   return filteredEvents
     .map((event) => {
       const actionKind = automationEventActionKind(event);
-      const expanded = Boolean(expandedTargets[event.id]);
       return {
         id: event.id,
         eventIds: [event.id],
@@ -158,13 +134,6 @@ export function buildAutomationEventViews(
         titleText: automationEventTitle(event),
         summaryText: automationEventSummaryText(event),
         detailText: automationEventDetailText(event),
-        suggestedActionText: "",
-        suggestionItems: [],
-        hasSuggestions: false,
-        detailItems: [],
-        detailExpanded: expanded,
-        detailToggleText: expanded ? "收起详情" : "查看详情",
-        hasDetails: false,
         metaText: automationEventMetaText(event),
         statusText: automationEventStatusText(event),
         actionText: automationEventActionText(event),

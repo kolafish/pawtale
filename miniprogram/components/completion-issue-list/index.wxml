@@ -122,7 +122,7 @@
 </view>
 
 <view wx:if="{{optionalIssues.length}}" class="issue-group optional">
-  <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可选补充 · " + optionalIssues.length + " 项"}}</text>
+  <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可以完善 · " + optionalIssues.length + " 项"}}</text>
   <text class="group-detail">{{chapterId ? "想聊时可以直接语音回答；暂时不想聊，也可以先放一放。" : "可以补讲、标记已处理或跳过，不会阻塞成书。"}}</text>
   <view wx:for="{{optionalIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>

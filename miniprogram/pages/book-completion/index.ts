@@ -2,6 +2,16 @@ import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
+import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
+import {
+  buildAutomationEventViews,
+  type BookAutomationEventView,
+} from "../book/book-automation-view-model";
+import {
+  listMemoirAutomationEvents,
+  acknowledgeMemoirAutomationEvent,
+  acknowledgeDismissibleMemoirAutomationEvents,
+} from "../../services/memoir-voice-session-api";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import {
   aiTaskProgressPercent,
@@ -47,6 +57,7 @@ interface ChapterView extends MemoirChapterCompletionSummary {
   actionText: string;
   chapterClass: string;
   disabled: boolean;
+  needsAttention: boolean;
 }
 
 interface EditorialActionView extends MemoirBookEditorialAction {
@@ -82,6 +93,12 @@ function activeTaskProgress(title: string, detail: string): TaskProgressView {
 }
 
 interface BookCompletionData {
+  automationEventItems: BookAutomationEventView[];
+  automationEventBusyTarget: string;
+  automationDismissibleCount: number;
+  automationEventClearing: boolean;
+  automationEventLoading: boolean;
+  automationEventError: string;
   pageClass: string;
   largeTextEnabled: boolean;
   projectId: string;
@@ -120,6 +137,9 @@ interface BookCompletionData {
 }
 
 interface ChapterDataset {
+  id?: string;
+  eventIds?: string;
+  action?: string;
   chapterId?: string;
   actionId?: string;
 }
@@ -393,6 +413,11 @@ function chapterView(
         : (item.next_action.action_text || "查看本章"))),
     chapterClass: `chapter-item ${item.state}`,
     disabled: busy && !progressAvailable,
+    needsAttention: Boolean(
+      item.active_issue
+      || item.blocking_issue_count
+      || (item.state !== "confirmed" && item.state !== "draft_ready"),
+    ),
   };
 }
 
@@ -441,9 +466,17 @@ export function bookCompletionViewPatch(
 definePage<BookCompletionData>()({
   overviewPoller: pageRuntime(() => new PollingTimer(POLL_INTERVAL_MS)),
   overviewLoadSequence: 0,
+  automationLoadSequence: 0,
+  automationEvents: [] as MemoirAutomationEvent[],
   pageVisible: false,
 
   data: {
+    automationEventItems: [],
+    automationEventBusyTarget: "",
+    automationDismissibleCount: 0,
+    automationEventClearing: false,
+    automationEventLoading: false,
+    automationEventError: "",
     pageClass: accessibilityPageClass(PAGE_CLASS),
     largeTextEnabled: readLargeTextEnabled(),
     projectId: "",
@@ -491,23 +524,25 @@ definePage<BookCompletionData>()({
   async onShow() {
     this.setData({ ...accessibilityPagePatch(PAGE_CLASS), largeTextEnabled: readLargeTextEnabled() });
     this.pageVisible = true;
-    await this.loadOverview();
+    await Promise.all([this.loadOverview(), this.loadAutomationEvents()]);
   },
 
   onHide() {
     this.pageVisible = false;
     this.overviewLoadSequence += 1;
+    this.automationLoadSequence += 1;
     this.stopPolling();
   },
 
   onUnload() {
     this.pageVisible = false;
     this.overviewLoadSequence += 1;
+    this.automationLoadSequence += 1;
     this.stopPolling();
   },
 
   async onPullDownRefresh() {
-    await this.loadOverview();
+    await Promise.all([this.loadOverview(), this.loadAutomationEvents()]);
     wx.stopPullDownRefresh();
   },
 
@@ -527,6 +562,126 @@ definePage<BookCompletionData>()({
         proposalId,
       }),
     });
+  },
+
+  openBookRegeneration() {
+    if (!this.data.projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-export/index", {
+        projectId: this.data.projectId,
+        action: "regenerate",
+      }),
+    });
+  },
+
+  async loadAutomationEvents() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.automationEventBusyTarget || this.data.automationEventClearing) {
+      return;
+    }
+    const sequence = ++this.automationLoadSequence;
+    this.setData({ automationEventLoading: true, automationEventError: "" });
+    try {
+      const response = await listMemoirAutomationEvents(projectId, 8);
+      if (sequence !== this.automationLoadSequence || projectId !== this.data.projectId) {
+        return;
+      }
+      this.applyAutomationEvents(response.items);
+      if (response.items.some((event) => event.status === "pending")) {
+        this.schedulePolling();
+      }
+    } catch (error) {
+      if (sequence !== this.automationLoadSequence || routeAuthError(error)) {
+        return;
+      }
+      this.setData({ automationEventError: error instanceof Error ? error.message : "整理记录加载失败" });
+    } finally {
+      if (sequence === this.automationLoadSequence) {
+        this.setData({ automationEventLoading: false });
+      }
+    }
+  },
+
+  applyAutomationEvents(events: MemoirAutomationEvent[]) {
+    this.automationEvents = events;
+    this.setData({
+      automationEventItems: buildAutomationEventViews(
+        events,
+        this.data.automationEventBusyTarget,
+      ),
+      automationDismissibleCount: events.filter((event) => (
+        event.status === "completed" || event.status === "failed"
+      )).length,
+    });
+  },
+
+  async acknowledgeAutomationEvent(event: ChapterTapEvent) {
+    const eventId = datasetString(event, "id");
+    const eventIdsText = datasetString(event, "eventIds") || eventId;
+    const action = datasetString(event, "action") || "acknowledge";
+    if (action !== "acknowledge" && action !== "acknowledge_group") {
+      return;
+    }
+    if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget || this.data.automationEventClearing) {
+      return;
+    }
+    const eventIds = eventIdsText.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!eventIds.length) {
+      return;
+    }
+    this.automationLoadSequence += 1;
+    this.setData({
+      automationEventLoading: false,
+      automationEventBusyTarget: eventId,
+      automationEventItems: this.data.automationEventItems.map((item) => (
+        item.id === eventId ? { ...item, busy: true } : item
+      )),
+      automationEventError: "",
+    });
+    try {
+      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(this.data.projectId, id)));
+      const acknowledgedIds = new Set(eventIds);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((item) => !acknowledgedIds.has(item.id)),
+      );
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "自动处理记录确认失败",
+      });
+    } finally {
+      this.setData({ automationEventBusyTarget: "" });
+      this.applyAutomationEvents(this.automationEvents);
+    }
+  },
+
+  async acknowledgeDismissibleAutomationEvents() {
+    if (
+      !this.data.projectId
+      || !this.data.automationDismissibleCount
+      || this.data.automationEventClearing
+      || this.data.automationEventBusyTarget
+    ) {
+      return;
+    }
+    this.automationLoadSequence += 1;
+    this.setData({ automationEventClearing: true, automationEventLoading: false, automationEventError: "" });
+    try {
+      await acknowledgeDismissibleMemoirAutomationEvents(this.data.projectId);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((event) => (
+          event.status === "pending" || event.status === "needs_review"
+        )),
+      );
+      wx.showToast({ title: "已收起完成记录", icon: "none" });
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "完成记录收起失败",
+      });
+    } finally {
+      this.setData({ automationEventClearing: false });
+    }
   },
 
   async loadOverview(silent = false) {
@@ -626,6 +781,7 @@ definePage<BookCompletionData>()({
         || reviewJobActive
         || revisionActive
         || overview.chapters.some((item) => item.state === "preparing")
+        || this.automationEvents.some((event) => event.status === "pending")
       ) {
         this.schedulePolling();
       } else {
@@ -1019,7 +1175,7 @@ definePage<BookCompletionData>()({
     }
     this.overviewPoller.schedule(() => {
       if (this.pageVisible) {
-        void this.loadOverview(true);
+        void Promise.all([this.loadOverview(true), this.loadAutomationEvents()]);
       }
     });
   },

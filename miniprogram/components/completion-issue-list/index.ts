@@ -29,14 +29,14 @@ export function requiredIssueGroups(issues: MemoirCompletionIssue[], bookMode: b
     ? [
       {
         id: "blocking",
-        title: "必须处理",
+        title: "需要核对",
         className: "required",
         detail: "涉及事实冲突，处理后相关章节才能收入全书。可以填写处理说明，也可以明确选择保留现状。",
         issues: issues.filter((issue) => issue.blocks_book),
       },
       {
         id: "optional",
-        title: "可选调整",
+        title: "可以完善",
         className: "optional",
         detail: "这些内容取舍不影响章节收入全书，可以按需要回答或保留现状。",
         issues: issues.filter((issue) => !issue.blocks_book),

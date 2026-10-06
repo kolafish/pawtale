@@ -1330,3 +1330,38 @@ button[disabled]:active {
     transition: none;
   }
 }
+
+.chapter-more-action, .chapter-audio-stop {
+  min-height: 44px;
+  margin: 12rpx 0 0;
+  padding: 0 12rpx;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  line-height: 1.4;
+}
+.chapter-more-action {
+  display: inline-flex;
+  width: auto;
+  align-items: center;
+  align-self: flex-start;
+}
+.chapter-audio-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 12rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  line-height: 1.5;
+}
+.chapter-audio-stop {
+  margin-top: 0;
+}
+.workspace-page.large-text .chapter-more-action, .workspace-page.large-text .chapter-audio-stop, .workspace-page.large-text .chapter-audio-notice {
+  min-height: 48px;
+  font-size: var(--ui-font-large-meta);
+}

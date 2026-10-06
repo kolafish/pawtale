@@ -1,8 +1,4 @@
 <view class="ui-page-shell {{pageClass}}">
-  <view class="ui-page-context-row">
-    <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
-  </view>
-
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
   <view wx:if="{{showingCachedBook}}" class="book-cache-banner ui-error-banner">
     <text>暂时无法获取最新书稿，当前显示上次保存的内容。</text>
@@ -35,9 +31,8 @@
     <view class="progress-main">
       <view class="progress-title-row">
         <text class="status-title">{{bookPreviewTitle || planTitle || "书稿"}}</text>
-        <text class="status-pill {{bookStaleNotice ? 'is-pending' : ''}}">{{bookStaleNotice ? "待更新" : stageText}}</text>
       </view>
-      <text class="status-meta">{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount ? '当前书稿收录 ' + bookIncludedChapterCount + '/' + totalChapterCount : totalChapterCount}} 章 · {{bookCharCount || 0}} 字</text>
+      <text class="status-meta">{{bookContentAvailable && bookIncludedChapterCount < totalChapterCount ? '当前书稿收录 ' + bookIncludedChapterCount + '/' + totalChapterCount : totalChapterCount}} 章 · {{bookCharCountText}} 字</text>
       <image
         class="book-header-illustration"
         src="/assets/memoir-book-header.png"
@@ -46,25 +41,21 @@
       />
     </view>
     <view class="progress-actions">
-      <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="primary-button small progress-action is-primary" bindtap="openBookReader">
-        <text>{{bookIncludedChapterCount < totalChapterCount ? "阅读当前书稿" : "阅读全书"}}</text><text class="progress-action-mark">›</text>
+      <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="hero-reading-action" bindtap="openBookReader">
+        <text>阅读全书</text><text aria-hidden="true">→</text>
       </button>
-      <button class="ghost-button small progress-action" bindtap="openBookCompletion">
-        <text>查看待确认事项{{blockingIssueCount ? '（' + blockingIssueCount + ' 项必须处理）' : ''}}</text><text class="progress-action-mark">›</text>
-      </button>
-      <text wx:if="{{blockingIssueCount}}" class="book-confirmation-notice">这些事项涉及事实冲突，处理后相关章节才能收入全书；已保存的章节正文仍可阅读。</text>
-      <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" data-action="preview" bindtap="openBookExportPage">
-        <text>导出与成书设置</text><text class="progress-action-mark">›</text>
-      </button>
-      <button wx:if="{{bookContentAvailable}}" class="ghost-button small progress-action" bindtap="openBookSharePanel">
-        <text>分享给家人</text><text class="progress-action-mark">›</text>
-      </button>
+      <button wx:if="{{bookContentAvailable}}" class="hero-share-action" bindtap="openBookSharePanel">分享阅读页</button>
+    </view>
+    <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookCompletion" aria-role="button">
+      <text>{{bookStaleNotice || bookActivityNotice}}</text><text aria-hidden="true">›</text>
     </view>
     <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
+      <text class="book-share-description">分享后，对方可以在小程序里阅读你确认分享的书稿。</text>
+      <button class="book-share-manage-button" bindtap="openBookReader" disabled="{{bookStaleNotice}}">预览阅读页</button>
       <text class="book-share-description">{{bookShareStatusKnown ? bookShareDescription : (bookShareBusy ? '正在读取阅读链接…' : '暂时无法读取阅读链接，请重试。')}}</text>
       <view class="book-share-primary-action">
         <button wx:if="{{!bookShareStatusKnown}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
-        <button wx:elif="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送给家人</button>
+        <button wx:elif="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送阅读页</button>
         <button wx:elif="{{bookShareStale}}" class="primary-button small" disabled="{{true}}">书稿更新中</button>
         <button wx:elif="{{bookShareNeedsUpdate}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="updateBookShare">更新家人阅读的书稿</button>
         <button wx:elif="{{!bookShareActive}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
@@ -82,7 +73,7 @@
     class="book-tts-shell"
   >
     <book-tts-player
-      title="{{(ttsBusyTarget || playingTarget || bookTTSActiveTarget) === 'outline' ? '目录朗读' : ((ttsBusyTarget || playingTarget || bookTTSActiveTarget) === 'book' ? '全书朗读' : '章节朗读')}}"
+      title="目录朗读"
       phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
       progress="{{bookTTSProgressPercent}}"
       spoken-text="{{bookTTSSpokenText}}"
@@ -92,114 +83,18 @@
     />
   </view>
 
-  <view class="workspace-tabs" role="tablist">
-    <button
-      class="workspace-tab {{bookWorkspaceView === 'chapters' ? 'active' : ''}}"
-      data-view="chapters"
-      aria-label="查看章节"
-      bindtap="changeBookWorkspaceView"
-    >
-      章节
-    </button>
-    <button
-      class="workspace-tab {{bookWorkspaceView === 'tools' ? 'active' : ''}}"
-      data-view="tools"
-      aria-label="查看书稿素材"
-      bindtap="changeBookWorkspaceView"
-    >
-      素材
-      <text wx:if="{{automationEventItems.length}}" class="workspace-tab-count">{{automationEventItems.length}}</text>
-    </button>
-  </view>
-
-  <block wx:if="{{bookWorkspaceView === 'tools'}}">
-  <view class="image-assets-entry" bindtap="openImageAssetsPage">
-    <view class="image-assets-entry-copy">
-      <view class="image-assets-entry-title-row">
-        <text class="image-assets-entry-title">图片素材</text>
-        <text class="image-assets-entry-count">{{imageAssetLoading ? "同步中" : imageAssetTotal + " 张"}}</text>
-      </view>
-      <text class="image-assets-entry-meta">{{imageAssetSummaryText}}</text>
-      <text class="image-assets-entry-note">统一查看生成图片，选择章节插图或书末图录。</text>
+  <view class="book-operation-list ui-card">
+    <view class="book-operation-row ui-pressable {{stage !== 'drafting' ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{stage !== 'drafting'}}" bindtap="openBookCompletion">
+      <view class="book-operation-copy"><text class="book-operation-title">书稿建议</text><text class="book-operation-detail">{{stage === 'drafting' ? '衔接、表述与需要核对的地方' : '确认章节后可查看书稿建议'}}</text><text wx:if="{{blockingIssueCount}}" class="book-operation-notice">{{blockingIssueCount}} 项需要核对，处理后相关章节才能收入全书</text></view><text class="book-row-arrow">›</text>
     </view>
-    <text class="image-assets-entry-action">管理 <text class="image-assets-entry-mark">›</text></text>
-  </view>
-
-  <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">
-    <view class="automation-head">
-      <view>
-        <text class="automation-title">整理进度</text>
-        <text class="automation-meta">书稿整理状态会在这里汇总</text>
-      </view>
-      <view class="automation-head-actions">
-        <button
-          wx:if="{{automationDismissibleCount}}"
-          class="automation-clear"
-          loading="{{automationEventClearing}}"
-          disabled="{{automationEventClearing}}"
-          bindtap="acknowledgeDismissibleAutomationEvents"
-        >
-          全部收起
-        </button>
-        <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
-      </view>
+    <view class="book-operation-row ui-pressable" aria-role="button" data-action="settings" bindtap="openBookExportPage">
+      <view class="book-operation-copy"><text class="book-operation-title">书的设置</text><text class="book-operation-detail">书名、前言后记、封面与版式</text></view><text class="book-row-arrow">›</text>
     </view>
-    <text wx:if="{{automationEventError}}" class="automation-error">{{automationEventError}}</text>
-    <view wx:for="{{automationEventItems}}" wx:key="id" class="automation-item {{item.eventType}}">
-      <view class="automation-item-main">
-        <view class="automation-item-title-row">
-          <text class="automation-item-title">{{item.titleText}}</text>
-          <text class="automation-item-status">{{item.statusText}}</text>
-        </view>
-        <text class="automation-item-summary">{{item.summaryText}}</text>
-        <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
-        <view wx:if="{{item.hasSuggestions}}" class="automation-suggestions">
-          <view wx:for="{{item.suggestionItems}}" wx:key="id" wx:for-item="suggestion" class="automation-suggestion-row">
-            <text class="automation-suggestion-label">{{suggestion.labelText}}</text>
-            <view class="automation-suggestion-copy">
-              <text class="automation-suggestion-body">{{suggestion.bodyText}}</text>
-              <text wx:if="{{suggestion.chapterText}}" class="automation-suggestion-chapter">{{suggestion.chapterText}}</text>
-            </view>
-          </view>
-        </view>
-        <text wx:if="{{item.suggestedActionText && !item.hasSuggestions}}" class="automation-item-suggestion">建议操作：{{item.suggestedActionText}}</text>
-        <view
-          wx:if="{{item.hasDetails}}"
-          class="automation-detail-toggle"
-          data-id="{{item.id}}"
-          bindtap="toggleAutomationEventDetails"
-        >
-          <text>{{item.detailToggleText}}</text>
-        </view>
-        <view wx:if="{{item.hasDetails && item.detailExpanded}}" class="automation-detail-list">
-          <view wx:for="{{item.detailItems}}" wx:key="id" wx:for-item="detail" class="automation-detail-row">
-            <view class="automation-detail-row-head">
-              <text class="automation-detail-title">{{detail.titleText}}</text>
-              <text class="automation-detail-chapter">{{detail.chapterText}}</text>
-            </view>
-            <text wx:if="{{detail.previewText}}" class="automation-detail-preview">{{detail.previewText}}</text>
-            <text wx:if="{{detail.metaText}}" class="automation-detail-meta">{{detail.metaText}}</text>
-          </view>
-        </view>
-        <text class="automation-item-meta">{{item.metaText}}</text>
-      </view>
-      <button
-        class="automation-ack"
-        data-id="{{item.id}}"
-        data-event-ids="{{item.eventIdsText}}"
-        data-action="{{item.actionKind}}"
-        data-utterance-id="{{item.primaryUtteranceId}}"
-        loading="{{item.busy}}"
-        disabled="{{item.busy || !item.canAct}}"
-        bindtap="acknowledgeAutomationEvent"
-      >
-        {{item.actionText}}
-      </button>
+    <view class="book-operation-row ui-pressable {{!bookContentAvailable ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContentAvailable}}" data-action="files" bindtap="openBookExportPage">
+      <view class="book-operation-copy"><text class="book-operation-title">导出文件</text><text class="book-operation-detail">{{bookContentAvailable ? '阅读版 PDF、打印版 PDF、纯文本' : '正文整理完成后可导出'}}</text></view><text class="book-row-arrow">›</text>
     </view>
   </view>
-  </block>
 
-  <block wx:else>
   <view wx:if="{{loading && stage === 'empty'}}" class="empty-panel ui-card">
     <text>正在加载</text>
   </view>
@@ -388,9 +283,8 @@
   <view wx:else class="section">
     <view class="section-head chapter-section-head">
       <view class="section-head-copy">
-        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节正文"}}</text>
+        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节"}}</text>
         <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
-        <text wx:else class="section-count">正文就绪 {{readyDraftCount}}/{{totalChapterCount}} 章</text>
       </view>
       <view
         class="section-head-action chapter-order-toggle {{updatingPlanStructure ? 'is-locked' : ''}}"
@@ -454,53 +348,21 @@
     </view>
 
     <block wx:else>
-      <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card summary ui-card">
-        <view class="chapter-summary-card">
-          <view class="chapter-summary-head">
-            <view class="chapter-summary-title-block">
-              <text class="chapter-index">第 {{index + 1}} 章</text>
-              <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
-              <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
-            </view>
+      <view class="chapter-directory ui-card">
+        <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-directory-row ui-pressable {{updatingPlanStructure || item.draftBusy ? 'is-disabled' : ''}}" data-id="{{item.id}}" bindtap="openChapterEditor" aria-role="button" aria-disabled="{{updatingPlanStructure || item.draftBusy}}">
+          <text class="chapter-directory-index">{{index + 1 < 10 ? '0' : ''}}{{index + 1}}</text>
+          <view class="chapter-directory-copy">
+            <text class="chapter-directory-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
+            <text class="chapter-directory-meta">{{item.chapterSummaryMetaText}}</text>
+            <text wx:if="{{item.chapterActivityText || item.bookInclusionNotice || item.chapterNeedsAction}}" class="chapter-directory-notice">{{item.chapterActivityText || item.bookInclusionNotice || item.chapterGuidanceText}}</text>
+            <text wx:if="{{item.draftError}}" class="chapter-directory-error">{{item.draftError}}</text>
           </view>
-          <view class="chapter-summary-guidance {{item.bookInclusionNotice || item.chapterNeedsAction ? 'needs-action' : 'is-complete'}}">
-            <text class="chapter-summary-guidance-label">{{item.bookInclusionNotice ? '未入书' : (item.chapterNeedsAction ? (item.draftAvailable ? '待更新' : '整理中') : '已更新')}}</text>
-            <text class="chapter-summary-guidance-text">{{item.bookInclusionNotice || item.chapterGuidanceText}}</text>
-          </view>
-          <button wx:if="{{item.bookInclusionNotice}}" class="chapter-inclusion-link" bindtap="openBookCompletion">查看收录进度 <text aria-hidden="true">›</text></button>
-          <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
-          <text
-            wx:if="{{ttsBusyTarget === item.ttsTarget || playingTarget === item.ttsTarget}}"
-            class="chapter-audio-status"
-          >
-            {{ttsBusyTarget === item.ttsTarget ? "正在准备朗读..." : "正在朗读本章"}}
-          </text>
-          <view class="chapter-summary-actions">
-            <button
-              class="primary-button small"
-              data-id="{{item.id}}"
-              bindtap="openChapterEditor"
-              loading="{{item.draftBusy}}"
-              disabled="{{updatingPlanStructure || item.draftBusy}}"
-            >
-              {{item.draftActionText}}
-            </button>
-            <button
-              class="ghost-button small"
-              data-id="{{item.id}}"
-              loading="{{ttsBusyTarget === item.ttsTarget || titleBusyTarget === item.id}}"
-              bindtap="openChapterMoreActions"
-              disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget || titleBusyTarget === item.id}}"
-            >
-              {{titleBusyTarget === item.id ? "正在改名" : (ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "更多"))}}
-            </button>
-          </view>
+          <text class="book-row-arrow" aria-hidden="true">›</text>
         </view>
       </view>
     </block>
 
   </view>
-  </block>
   </block>
   </block>
 

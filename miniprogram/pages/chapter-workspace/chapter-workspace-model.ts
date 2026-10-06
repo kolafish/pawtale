@@ -59,6 +59,7 @@ export type ChapterWorkspaceOperationKind =
   | "regenerate_sections"
   | "merge_sections"
   | "rename_section"
+  | "chapter_settings"
   | "move_material"
   | "confirm_issue"
   | "save_draft_section"

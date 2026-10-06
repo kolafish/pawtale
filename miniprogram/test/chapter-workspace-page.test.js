@@ -229,6 +229,7 @@ function loadWorkspacePage({
     createMemoirBookChapterDraftTTS: async () => ({
       audio_file_ids: [],
     }),
+    getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: true }] }),
     createMemoirBookChapterDraftSectionTTS: async () => ({
       audio_file_ids: [],
     }),
@@ -1761,5 +1762,101 @@ test("stale candidate acceptance preserves original and surfaces conflict", asyn
   assert.match(context.data.error, /正文已更新/);
   assert.equal(context.data.chapterPreparationJob, candidate);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.operationKind, "");
+});
+
+test("chapter workspace offers the migrated chapter actions and preserves narration settings", async () => {
+  installWx();
+  const sheets = [];
+  const calls = [];
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftTTS: async (projectId, chapterId, payload) => {
+        calls.push({ projectId, chapterId, payload });
+        return { audio_file_ids: [] };
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "不收入本书"]);
+  assert.equal(context.data.operationKind, "");
+  await page.playChapterAudio.call(context);
+  assert.deepEqual(calls, [{ projectId: "project-1", chapterId: "chapter-1", payload: { voice: "zh_female_xiaohe_uranus_bigtts", speed_ratio: 1.5 } }]);
+  assert.equal(context.data.audioPhase, "idle");
+  context.setData({ chapterHasReadableDraft: false });
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.deepEqual(sheets[1].itemList, ["修改章名", "AI 重新起名", "不收入本书"]);
+});
+
+test("chapter workspace renames manually or with AI through the existing APIs", async () => {
+  installWx({ editableContent: "  院子里的童年  " });
+  const calls = [];
+  let currentTitle = "第一次离家";
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => { calls.push({ projectId, chapterId, data }); currentTitle = data.title; },
+      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => { calls.push({ projectId, chapterId, data }); currentTitle = "外婆院中的日子"; },
+      getMemoirChapterWorkspace: async () => workspace({ chapter_title: currentTitle }),
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  await page.editChapterTitle.call(context, false);
+  assert.equal(context.data.workspace.chapter_title, "院子里的童年");
+  await page.editChapterTitle.call(context, true);
+  assert.equal(context.data.workspace.chapter_title, "外婆院中的日子");
+  assert.deepEqual(calls, [
+    { projectId: "project-1", chapterId: "chapter-1", data: { title: "院子里的童年" } },
+    { projectId: "project-1", chapterId: "chapter-1", data: {} },
+  ]);
+  assert.equal(context.data.operationKind, "");
+});
+
+test("chapter workspace toggles book inclusion without deleting the chapter's draft", async () => {
+  installWx();
+  let includeInBook = true;
+  const commands = [];
+  const sheets = [];
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: includeInBook }] }),
+      applyMemoirBookPlanStructureCommand: async (_projectId, command) => { commands.push(command); includeInBook = command.include_in_book; },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  await page.setChapterBookInclusion.call(context, false);
+  assert.equal(context.data.workspace.draft_content, workspace().draft_content);
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.ok(sheets[0].itemList.includes("恢复收入本书"));
+  await page.setChapterBookInclusion.call(context, true);
+  assert.equal(context.data.workspace.draft_content, workspace().draft_content);
+  assert.deepEqual(commands, [
+    { type: "set_chapter_book_inclusion", chapter_id: "chapter-1", include_in_book: false },
+    { type: "set_chapter_book_inclusion", chapter_id: "chapter-1", include_in_book: true },
+  ]);
+  context.setData({ editingSectionId: "section-1" });
+  await page.setChapterBookInclusion.call(context, false);
+  await page.editChapterTitle.call(context, true);
+  assert.equal(commands.length, 2);
+});
+
+test("chapter action sheet stays closed when its plan arrives after leaving the page", async () => {
+  installWx();
+  const sheets = [];
+  let resolvePlan;
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({ voiceApiExports: { getMemoirBookPlan: () => new Promise((resolve) => { resolvePlan = resolve; }) } });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  context.pageVisible = true;
+  const opening = page.openChapterMoreActions.call(context);
+  context.pageVisible = false;
+  resolvePlan({ chapters: [{ id: "chapter-1", include_in_book: true }] });
+  await opening;
+  assert.equal(sheets.length, 0);
   assert.equal(context.data.operationKind, "");
 });

@@ -207,12 +207,13 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
   );
 });
 
-test("book page keeps one export and settings entry", () => {
+test("book page binds separate settings and file entries", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const { page } = loadBookPage();
 
-  assert.equal((pageWxml.match(/bindtap="openBookExportPage"/g) || []).length, 1);
-  assert.match(pageWxml, /导出与成书设置/);
+  assert.equal((pageWxml.match(/bindtap="openBookExportPage"/g) || []).length, 2);
+  assert.match(pageWxml, /data-action="settings" bindtap="openBookExportPage"/);
+  assert.match(pageWxml, /data-action="files" bindtap="openBookExportPage"/);
   assert.deepEqual(page.onShareAppMessage.call(pageContext(page)), {
     title: "老余口述",
     path: "/pages/home/index",
@@ -483,100 +484,7 @@ test("book page exposes chapter reordering after the plan is confirmed", () => {
   assert.equal(context.data.chapterStructureEditing, false);
 });
 
-test("book page opens secondary chapter actions from the more sheet", () => {
-  const navigations = [];
-  const actionSheets = [];
-  const audioCalls = [];
-  const tapIndexes = [2, 99, 99];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-    showActionSheet(options) {
-      actionSheets.push(options.itemList);
-      const tapIndex = tapIndexes[actionSheets.length - 1];
-      if (tapIndex < options.itemList.length) {
-        options.success({ tapIndex });
-      }
-    },
-    showToast() {},
-  };
-  const { mod, page } = loadBookPage();
-  const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "draft"),
-  });
-  const context = pageContext(page, { projectId: "project/1", chapters });
-  context.playChapterAudioById = (chapterId) => {
-    audioCalls.push(chapterId);
-  };
 
-  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
-  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
-  context.data.ttsBusyTarget = "chapter:chapter-2";
-  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
-
-  assert.deepEqual(actionSheets, [
-    ["修改章名", "AI 重新起名", "朗读", "不收入本书"],
-    ["修改章名", "AI 重新起名", "朗读", "不收入本书"],
-    ["修改章名", "AI 重新起名", "不收入本书"],
-  ]);
-  assert.deepEqual(navigations, []);
-  assert.deepEqual(audioCalls, ["chapter-1"]);
-});
-
-test("book page hides and restores a chapter without deleting its content", async () => {
-  const calls = [];
-  const actionSheets = [];
-  global.wx = {
-    navigateTo() {},
-    showActionSheet(options) {
-      actionSheets.push(options.itemList);
-      options.success({ tapIndex: options.itemList.length - 1 });
-    },
-    showToast() {},
-    switchTab() {},
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return planFromStructureCommand("confirmed", data);
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"));
-
-  page.openChapterMoreActions.call(context, {
-    currentTarget: { dataset: { id: "chapter-2" } },
-  });
-  await flushAsyncWork();
-
-  assert.deepEqual(actionSheets[0], ["修改章名", "AI 重新起名", "不收入本书"]);
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    data: {
-      type: "set_chapter_book_inclusion",
-      chapter_id: "chapter-2",
-      include_in_book: false,
-    },
-  });
-  assert.equal(context.data.chapters[1].include_in_book, false);
-  assert.match(context.data.chapters[1].chapterSummaryMetaText, /^不收入本书/);
-  assert.equal(context.data.totalChapterCount, 1);
-
-  page.openChapterMoreActions.call(context, {
-    currentTarget: { dataset: { id: "chapter-2" } },
-  });
-  await flushAsyncWork();
-
-  assert.deepEqual(actionSheets[1], ["修改章名", "AI 重新起名", "恢复收入本书"]);
-  assert.equal(calls[1].data.include_in_book, true);
-  assert.equal(context.data.chapters[1].include_in_book, true);
-  assert.equal(context.data.totalChapterCount, 2);
-});
 
 test("book page routes reading and export actions to their focused pages", () => {
   const navigations = [];
@@ -604,33 +512,14 @@ test("book page routes reading and export actions to their focused pages", () =>
   page.openBookReader.call(context);
   context.data.bookStaleNotice = "章节已更新";
   page.openBookReader.call(context);
-  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "preview" } } });
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "files" } } });
 
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1",
-    "/pages/book-export/index?projectId=project%2F1&action=preview",
+    "/pages/book-export/index?projectId=project%2F1&action=files",
   ]);
 });
 
-test("book page switches between chapter work and secondary tools", () => {
-  const { writeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
-  const { page } = loadBookPage();
-  const context = pageContext(page, { bookWorkspaceView: "chapters" });
-
-  writeBookWorkspaceNavigationTarget("tools");
-  page.applyBookWorkspaceNavigationTarget.call(context);
-  assert.equal(context.data.bookWorkspaceView, "tools");
-
-  page.changeBookWorkspaceView.call(context, {
-    currentTarget: { dataset: { view: "tools" } },
-  });
-  assert.equal(context.data.bookWorkspaceView, "tools");
-
-  page.changeBookWorkspaceView.call(context, {
-    currentTarget: { dataset: { view: "unsupported" } },
-  });
-  assert.equal(context.data.bookWorkspaceView, "tools");
-});
 
 test("book page builds outline narration for saved chapter titles", () => {
   const { mod } = loadBookPage();
@@ -659,11 +548,9 @@ test("book page counts current readable chapters without a confirmation gate", (
 
   assert.equal(mod.bookProgressText(chapters), "2/2 章正文已更新，2 章已有正文");
   assert.equal(chapters[0].chapterNeedsAction, false);
-  assert.equal(chapters[0].chapterGuidanceText, "正文已更新，可以阅读或修改。");
-  assert.equal(chapters[0].draftActionText, "阅读或修改");
+  assert.equal(chapters[0].chapterGuidanceText, "");
   assert.equal(chapters[1].chapterNeedsAction, false);
-  assert.equal(chapters[1].chapterGuidanceText, "正文已更新，可以阅读或修改。");
-  assert.equal(chapters[1].draftActionText, "阅读或修改");
+  assert.equal(chapters[1].chapterGuidanceText, "");
   assert.doesNotMatch(chapters[0].chapterSummaryMetaText, /已确认|待确认/);
   assert.equal("draft" in chapters[0], false);
   assert.equal("draftContent" in chapters[0], false);
@@ -678,13 +565,11 @@ test("book page directs chapters without a draft to their existing workspace", (
 
   assert.equal(chapter.chapterNeedsAction, true);
   assert.match(chapter.chapterGuidanceText, /没有正文.*章节页.*当前步骤/);
-  assert.match(chapter.draftActionText, /当前步骤/);
   assert.doesNotMatch(chapter.chapterSummaryMetaText, /未生成|待确认/);
 
   const planWithNewSource = samplePlan("confirmed");
   planWithNewSource.chapters[0].pending_source_count = 1;
   const [unpreparedChapter] = mod.buildChapterViews(planWithNewSource);
-  assert.match(unpreparedChapter.draftActionText, /当前步骤/);
 });
 
 test("book page excludes hidden chapters from full-book generation readiness", () => {
@@ -723,10 +608,10 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
   assert.match(data.bookStaleNotice, /外婆家的童年.*第一次离家.*尚未更新/);
-  assert.match(data.bookStaleNotice, /查看待确认事项/);
+  assert.match(data.bookStaleNotice, /书稿建议/);
 
   page.applyBookOutput.call(context, output, { status: "needs_input" });
-  assert.match(context.data.bookStaleNotice, /待确认事项.*尚未更新/);
+  assert.match(context.data.bookStaleNotice, /书稿建议.*尚未更新/);
   page.applyBookOutput.call(context, output, { status: "processing" });
   assert.match(context.data.bookStaleNotice, /正在整理新版全书/);
   assert.equal("bookPreviewChapters" in data, false);
@@ -771,7 +656,7 @@ test("book page identifies a drafted chapter missing from the current book", () 
   assert.equal(context.data.readyDraftCount, 2);
   assert.equal(context.data.bookIncludedChapterCount, 1);
   assert.equal(context.data.chapters[0].bookInclusionNotice, "");
-  assert.match(context.data.chapters[1].bookInclusionNotice, /本章待确认.*未收入当前书稿.*待确认事项/);
+  assert.match(context.data.chapters[1].bookInclusionNotice, /本章待确认.*未收入当前书稿.*书稿建议/);
 
   const planWithNewSource = samplePlan("confirmed");
   planWithNewSource.chapters[1].pending_source_count = 1;
@@ -799,7 +684,6 @@ test("book page exposes an empty omitted chapter and guides additional narration
 
   assert.equal(context.data.chapters[1].draftAvailable, false);
   assert.match(context.data.chapters[1].chapterGuidanceText, /没有讲述素材.*继续讲述/);
-  assert.match(context.data.chapters[1].draftActionText, /查看本章/);
   assert.match(context.data.chapters[1].bookInclusionNotice, /未收入当前书稿.*首页.*讲述/);
 
   page.applyBookOutput.call(context, partialOutput, { status: "failed" });
@@ -1009,7 +893,6 @@ test("book page marks assigned sources as supplemental chapter work", () => {
 
   assert.equal(chapters[0].pendingSourceCount, 1);
   assert.match(chapters[0].chapterGuidanceText, /新增讲述尚未写入正文.*当前正文仍可阅读/);
-  assert.equal(chapters[0].draftActionText, "查看更新状态");
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -1026,7 +909,6 @@ test("book page labels completion answers separately from new narration", () => 
   assert.equal(chapters[0].pendingCompletionSourceCount, 2);
   assert.equal(chapters[0].pendingNewSourceCount, 0);
   assert.match(chapters[0].chapterGuidanceText, /补充回答尚未写入正文.*当前正文仍可阅读/);
-  assert.equal(chapters[0].draftActionText, "查看更新状态");
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -1037,7 +919,9 @@ test("book page shows the number of visible sections in each chapter", () => {
   });
 
   assert.equal(chapters[0].sectionCount, 1);
-  assert.match(chapters[0].chapterSummaryMetaText, /^1 个小节 · 1 条口述/);
+  assert.equal(chapters[0].sectionCount, 1);
+  assert.doesNotMatch(chapters[0].chapterSummaryMetaText, /口述/);
+  assert.equal(chapters[0].draftCharCount, 5);
 });
 
 test("book page marks deleted chapter sources for review", () => {
@@ -1053,7 +937,6 @@ test("book page marks deleted chapter sources for review", () => {
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
   assert.match(chapters[0].chapterGuidanceText, /讲述已删除.*当前正文仍可阅读/);
-  assert.equal(chapters[0].draftActionText, "查看更新状态");
 
   plan.chapters[0].pending_source_count = 1;
   plan.chapters[0].pending_new_source_count = 1;
@@ -1104,66 +987,6 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal(context.data.stage, "drafting");
 });
 
-test("book page renames a confirmed chapter manually or through AI", async () => {
-  const manualCalls = [];
-  const aiCalls = [];
-  const actionLabels = ["修改章名", "AI 重新起名"];
-  global.wx = {
-    showActionSheet(options) {
-      options.success({ tapIndex: options.itemList.indexOf(actionLabels.shift()) });
-    },
-    showModal(options) {
-      options.success({ confirm: true, content: "  院子里的童年  " });
-    },
-    showToast() {},
-    switchTab() {},
-  };
-  const manualPlan = samplePlan("confirmed");
-  manualPlan.chapters[0].title = "院子里的童年";
-  const aiPlan = samplePlan("confirmed");
-  aiPlan.chapters[0].title = "外婆院中的日子";
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        aiCalls.push({ projectId, chapterId, data });
-        return aiPlan;
-      },
-      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        manualCalls.push({ projectId, chapterId, data });
-        return manualPlan;
-      },
-      getMemoirBookChapterDraft: async () => sampleDraft(1, "confirmed"),
-      getMemoirBookOutput: async () => sampleBookOutput(),
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"));
-
-  page.openChapterMoreActions.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  await flushAsyncWork(12);
-
-  assert.deepEqual(manualCalls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: { title: "院子里的童年" },
-  });
-  assert.equal(context.data.chapters[0].title, "院子里的童年");
-
-  page.openChapterMoreActions.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  await flushAsyncWork(12);
-
-  assert.deepEqual(aiCalls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: {},
-  });
-  assert.equal(context.data.chapters[0].title, "外婆院中的日子");
-  assert.equal(context.data.titleBusyTarget, "");
-});
 
 test("book page reorders chapters through structure command", async () => {
   const calls = [];
@@ -1354,20 +1177,11 @@ test("book page opens automatically assembled drafts without chapter confirmatio
   assert.equal(urls.length, 1);
 });
 
-test("book page omits the misleading progress shortcut but keeps progress in tools", () => {
-  const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-  assert.doesNotMatch(template, /后台整理进度|bindtap="openStory"/);
-  assert.match(template, /class="automation-title">整理进度</);
-});
 
-test("book page sends TTS voice and speed for chapter and outline audio", async () => {
+test("book page sends saved TTS voice and speed for outline audio", async () => {
   const calls = [];
   const { page } = loadBookPage({
     voiceApiExports: {
-      createMemoirBookChapterDraftTTS: async (projectId, chapterId, data) => {
-        calls.push({ kind: "chapter", projectId, chapterId, data });
-        return sampleAudioResponse();
-      },
       createMemoirBookPlanOutlineTTS: async (projectId, data) => {
         calls.push({ kind: "outline", projectId, data });
         return sampleAudioResponse();
@@ -1382,8 +1196,7 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
   });
   const context = pageContext(page, { projectId: "project/1" });
 
-  await page.requestBookAudio.call(context, "outline");
-  await page.requestBookAudio.call(context, "chapter:chapter-1");
+  await page.requestBookAudio.call(context);
 
   assert.deepEqual(calls, [
     {
@@ -1394,40 +1207,53 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
         speed_ratio: 1.5,
       },
     },
-    {
-      kind: "chapter",
-      projectId: "project/1",
-      chapterId: "chapter-1",
-      data: {
-        voice: "zh_male_m191_uranus_bigtts",
-        speed_ratio: 1.5,
-      },
-    },
   ]);
 });
 
-test("book page shows chapter narration toast after preflight passes", async () => {
-  const toasts = [];
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookChapterDraftTTS: async () => sampleAudioResponse(),
-    },
-  });
-  global.wx = {
-    showToast(options) {
-      toasts.push(options.title);
-    },
-  };
-  const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "draft"),
-  });
-  const context = pageContext(page, { projectId: "project/1", chapters });
-  context.bookDraftsByChapterId = {
-    "chapter-1": sampleDraft(1, "draft"),
-  };
-  context.playAudioFiles = async () => {};
 
-  await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
+test("book overview routes settings before a draft and keeps export unavailable until readable", () => {
+  const urls = [];
+  global.wx = { navigateTo: ({ url }) => urls.push(url) };
+  const { page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project-1", bookContentAvailable: false });
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "settings" } } });
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "files" } } });
+  assert.deepEqual(urls, ["/pages/book-export/index?projectId=project-1&action=settings"]);
+  context.setData({ bookContentAvailable: true });
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "files" } } });
+  assert.equal(urls[1], "/pages/book-export/index?projectId=project-1&action=files");
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  assert.match(template, /<view class="book-operation-list ui-card">/);
+});
 
-  assert.deepEqual(toasts, ["正在准备朗读"]);
+test("book overview preserves processing and failure notices without marking settled chapters as unread", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const snapshot = {
+    identity: { active_project_id: "project/1", active_project: { title: "外婆回忆录" } },
+    plan: samplePlan("confirmed"),
+    drafts_by_chapter_id: { "chapter-1": sampleDraft(1, "draft") },
+    output: null,
+    automation_events: { items: [sampleAutomationEvent({ status: "pending" })] },
+  };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.chapters[0].chapterActivityText, "正在整理");
+  snapshot.automation_events.items[0].status = "failed";
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.match(context.data.chapters[0].chapterActivityText, /整理失败.*正文仍可阅读/);
+  snapshot.automation_events.items[0].status = "completed";
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.chapters[0].chapterActivityText, "");
+  assert.equal(context.data.chapters[0].chapterGuidanceText, "");
+  assert.match(context.data.chapters[1].chapterGuidanceText, /没有正文/);
+  snapshot.automation_events.items = [
+    sampleAutomationEvent({ status: "failed", updated_at: "2026-10-01T00:00:00Z" }),
+    sampleAutomationEvent({ status: "completed", updated_at: "2026-10-02T00:00:00Z" }),
+  ];
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.chapters[0].chapterActivityText, "");
+  assert.equal(context.data.bookActivityNotice, "");
+  snapshot.progress = { status: "processing", title: "正在整理新版书稿" };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.bookActivityNotice, "正在整理新版书稿");
 });

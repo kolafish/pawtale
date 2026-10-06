@@ -4,25 +4,16 @@ import type {
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
-  MemoirImageAssetListResponse,
 } from "../../domain/memoir-book";
-import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
 import type { MemoirBookSnapshot, MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
-import { promptRequiredText } from "../../services/text-prompt";
-import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 
-import {
-  acknowledgeMemoirAutomationEvent,
-  acknowledgeDismissibleMemoirAutomationEvents,
-} from "../../services/memoir-voice-session-api";
 import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
-  createMemoirBookChapterDraftTTS,
   createMemoirBookShare,
   createMemoirBookPlanOutlineTTS,
   generateMemoirBookChapterTitle,
@@ -32,7 +23,6 @@ import {
   getMemoirBookShareStatus,
   revokeMemoirBookShare,
   updateMemoirBookShare,
-  updateMemoirBookChapterTitle,
 } from "../../services/memoir-book-api";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
@@ -84,13 +74,11 @@ import {
   buildChapterViews,
   chapterCollectionData,
   guestBookData,
-  latestDraftContent,
   planStage,
   stageText,
   toPlanInput,
   trimText,
   bookOutlineNarrationText,
-  buildAutomationEventViews,
 } from "./book-view-model";
 import {
   readCachedMemoirBook,
@@ -104,7 +92,6 @@ export {
   bookChapterSourceSummary,
   bookOutlineNarrationText,
   bookProgressText,
-  buildAutomationEventViews,
   buildChapterViews,
 } from "./book-view-model";
 
@@ -121,18 +108,14 @@ export function bookReaderPageUrl(projectId: string): string {
 
 interface BookDataset {
   id?: string;
-  eventIds?: string;
   action?: string;
   direction?: string;
   utteranceId?: string;
-  view?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<BookDataset>;
 type TextInputEvent = PageTextInputEvent<BookDataset>;
 type PickerEvent = PagePickerEvent<BookDataset>;
-
-type BookWorkspaceView = "chapters" | "tools";
 
 const BOOK_SHARE_INACTIVE_DESCRIPTION = "生成后 7 天有效；你可以决定何时更新家人看到的书稿。";
 
@@ -153,7 +136,8 @@ type BookPageData = BookHomeData & {
   bookShareBusy: boolean;
   bookShareStatusKnown: boolean;
   bookShareDescription: string;
-  bookWorkspaceView: BookWorkspaceView;
+  bookActivityNotice: string;
+  bookCharCountText: string;
   planStructureBusyChapterId: string;
   planStructureBusyDirection: string;
 };
@@ -162,7 +146,6 @@ definePage<BookPageData>()({
   audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
-  automationEvents: [] as MemoirAutomationEvent[],
   bookLoadSequence: 0,
   bookPlan: null as MemoirBookPlan | null,
   bookChapterSources: {} as BookChapterSources,
@@ -182,7 +165,8 @@ definePage<BookPageData>()({
     bookShareBusy: false,
     bookShareStatusKnown: false,
     bookShareDescription: BOOK_SHARE_INACTIVE_DESCRIPTION,
-    bookWorkspaceView: "chapters",
+    bookActivityNotice: "",
+    bookCharCountText: "0",
     loading: false,
     needsLogin: false,
     generatingPlan: false,
@@ -219,20 +203,9 @@ definePage<BookPageData>()({
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
-    automationEventItems: [],
-    automationEventBusyTarget: "",
-    automationDismissibleCount: 0,
-    automationEventClearing: false,
-    automationEventExpandedTargets: {},
-    automationEventLoading: false,
-    automationEventError: "",
-    imageAssetLoading: false,
-    imageAssetTotal: 0,
-    imageAssetSummaryText: "还没有图片素材",
   },
 
   async onShow() {
-    this.applyBookWorkspaceNavigationTarget();
     this.setData({ pageClass: accessibilityPageClass("book-page") });
     hideMiniProgramShareMenu();
     await this.loadBookHome();
@@ -401,13 +374,6 @@ definePage<BookPageData>()({
     }
   },
 
-  applyBookWorkspaceNavigationTarget() {
-    const target = takeBookWorkspaceNavigationTarget();
-    if (target) {
-      this.setData({ bookWorkspaceView: target });
-    }
-  },
-
   async loadBookHome() {
     const loadSequence = ++this.bookLoadSequence;
     const cached = readCachedMemoirBook();
@@ -495,8 +461,27 @@ definePage<BookPageData>()({
     });
     this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});
     this.applyBookOutput(snapshot.output || null, snapshot.progress || null);
-    this.applyAutomationEvents(snapshot.automation_events.items || []);
-    this.applyImageAssetSummary(snapshot.image_assets);
+    const events = snapshot.automation_events.items || [];
+    const progress = snapshot.progress;
+    this.setData({
+      bookActivityNotice: progress?.status === "processing" || progress?.status === "failed"
+        ? progress.title || progress.detail : "",
+      chapters: this.data.chapters.map((chapter) => {
+        const latest = events.filter((event) => (
+          event.chapter_id === chapter.id && event.event_type === "chapter_draft_generated"
+        ))
+          .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
+        const status = latest?.metadata_json?.acknowledged_at ? undefined : latest?.status;
+        return {
+          ...chapter,
+          chapterActivityText: status === "pending"
+            ? "正在整理"
+            : status === "failed"
+              ? `整理失败${chapter.draftAvailable ? '，当前正文仍可阅读' : '，进入本章查看原因'}`
+              : "",
+        };
+      }),
+    });
   },
 
   async loadDraftsForPlan(plan: MemoirBookPlan) {
@@ -517,19 +502,6 @@ definePage<BookPageData>()({
       memo[chapterId] = draft;
       return memo;
     }, {});
-  },
-
-  applyImageAssetSummary(response: MemoirImageAssetListResponse | null) {
-    const total = response?.total || 0;
-    const included = response?.included_count || 0;
-    const unused = response?.unused_count || 0;
-    const summary = total
-      ? `${total} 张 · ${included} 张已入书 · ${unused} 张待选择`
-      : "生成分享视频背景后，会自动收集到这里";
-    this.setData({
-      imageAssetTotal: total,
-      imageAssetSummaryText: summary,
-    });
   },
 
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
@@ -564,6 +536,7 @@ definePage<BookPageData>()({
     this.bookOutput = output;
     this.setData({
       ...bookData,
+      bookCharCountText: bookData.bookCharCount.toLocaleString("en-US"),
       chapters: bookChapterInclusionData(this.data.chapters, output, progress),
       ...(shareStateChanged ? {
         bookShareReady: false,
@@ -582,127 +555,6 @@ definePage<BookPageData>()({
     });
     if (shareStateChanged && this.data.bookSharePanelOpen && this.data.projectId) {
       void this.refreshBookShareStatus();
-    }
-  },
-
-  openImageAssetsPage() {
-    if (!this.data.projectId) {
-      this.setData({ error: "请先创建回忆录" });
-      return;
-    }
-    wx.navigateTo({
-      url: `/pages/image-assets/index?projectId=${encodeURIComponent(this.data.projectId)}`,
-    });
-  },
-
-  applyAutomationEvents(events: MemoirAutomationEvent[]) {
-    this.automationEvents = events;
-    this.setData({
-      automationEventItems: buildAutomationEventViews(
-        events,
-        this.data.automationEventBusyTarget,
-        this.data.automationEventExpandedTargets,
-      ),
-      automationDismissibleCount: events.filter((event) => (
-        event.status === "completed" || event.status === "failed"
-      )).length,
-    });
-  },
-
-  toggleAutomationEventDetails(event: DatasetEvent) {
-    const eventId = datasetString(event, "id");
-    if (!eventId) {
-      return;
-    }
-    const expandedTargets = {
-      ...this.data.automationEventExpandedTargets,
-      [eventId]: !this.data.automationEventExpandedTargets[eventId],
-    };
-    this.setData({
-      automationEventExpandedTargets: expandedTargets,
-      automationEventItems: this.data.automationEventItems.map((item) => (
-        item.id === eventId
-          ? {
-            ...item,
-            detailExpanded: Boolean(expandedTargets[eventId]),
-            detailToggleText: expandedTargets[eventId]
-              ? "收起详情"
-              : `查看 ${item.detailItems.length} 条详情`,
-          }
-          : item
-      )),
-    });
-  },
-
-  async acknowledgeAutomationEvent(event: DatasetEvent) {
-    const eventId = datasetString(event, "id");
-    const eventIdsText = datasetString(event, "eventIds") || eventId;
-    const action = datasetString(event, "action") || "acknowledge";
-    if (action === "review_source") {
-      const utteranceId = datasetString(event, "utteranceId");
-      if (!utteranceId) {
-        this.setData({ automationEventError: "缺少要整理的讲述记录" });
-        return;
-      }
-      writeTranscriptNavigationTarget(utteranceId);
-      navigateToTranscripts();
-      return;
-    }
-    if (action !== "acknowledge" && action !== "acknowledge_group") {
-      return;
-    }
-    if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget) {
-      return;
-    }
-    const eventIds = eventIdsText.split(",").map((item) => item.trim()).filter(Boolean);
-    if (!eventIds.length) {
-      return;
-    }
-    this.setData({
-      automationEventBusyTarget: eventId,
-      automationEventItems: this.data.automationEventItems.map((item) => (
-        item.id === eventId ? { ...item, busy: true } : item
-      )),
-      automationEventError: "",
-    });
-    try {
-      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(this.data.projectId, id)));
-      const acknowledgedIds = new Set(eventIds);
-      this.applyAutomationEvents(
-        this.automationEvents.filter((item) => !acknowledgedIds.has(item.id)),
-      );
-    } catch (error) {
-      this.setData({
-        automationEventError: error instanceof Error ? error.message : "自动处理记录确认失败",
-      });
-    } finally {
-      this.setData({ automationEventBusyTarget: "" });
-    }
-  },
-
-  async acknowledgeDismissibleAutomationEvents() {
-    if (
-      !this.data.projectId
-      || !this.data.automationDismissibleCount
-      || this.data.automationEventClearing
-    ) {
-      return;
-    }
-    this.setData({ automationEventClearing: true, automationEventError: "" });
-    try {
-      await acknowledgeDismissibleMemoirAutomationEvents(this.data.projectId);
-      this.applyAutomationEvents(
-        this.automationEvents.filter((event) => (
-          event.status === "pending" || event.status === "needs_review"
-        )),
-      );
-      wx.showToast({ title: "已收起完成记录", icon: "none" });
-    } catch (error) {
-      this.setData({
-        automationEventError: error instanceof Error ? error.message : "完成记录收起失败",
-      });
-    } finally {
-      this.setData({ automationEventClearing: false });
     }
   },
 
@@ -804,58 +656,12 @@ definePage<BookPageData>()({
     });
   },
 
-  openChapterMoreActions(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId) {
-      this.setData({ error: "缺少章节信息" });
-      return;
-    }
-    if (this.data.titleBusyTarget) {
-      return;
-    }
-    const actions: Array<{ label: string; run: () => unknown }> = [];
-    actions.push({
-      label: "修改章名",
-      run: () => this.editChapterTitleById(chapterId),
-    });
-    actions.push({
-      label: "AI 重新起名",
-      run: () => this.generateChapterTitleById(chapterId),
-    });
-    const canShowAudioAction = chapter.draftAvailable
-      && (!this.data.ttsBusyTarget || this.data.playingTarget === chapter.ttsTarget);
-    if (canShowAudioAction) {
-      actions.push({
-        label: this.data.playingTarget === chapter.ttsTarget ? "停止朗读" : "朗读",
-        run: () => this.playChapterAudioById(chapterId, { showPreparingToast: true }),
-      });
-    }
-    const nextIncludeInBook = chapter.include_in_book === false;
-    actions.push({
-      label: nextIncludeInBook ? "恢复收入本书" : "不收入本书",
-      run: () => this.setChapterBookInclusion(chapterId, nextIncludeInBook),
-    });
-    wx.showActionSheet({
-      itemList: actions.map((item) => item.label),
-      success: (result) => {
-        const action = actions[result.tapIndex];
-        if (action) {
-          void action.run();
-        }
-      },
-    });
-  },
-
   openBookExportPage(event: DatasetEvent) {
     if (!this.data.projectId) {
       return;
     }
-    if (!this.data.bookContentAvailable) {
-      this.setData({ error: "请先生成书稿" });
-      return;
-    }
-    const action = datasetString(event, "action") || "preview";
+    const action = datasetChoice(event, "action", ["files", "settings"] as const, "files");
+    if (action !== "settings" && !this.data.bookContentAvailable) return;
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
   },
 
@@ -880,14 +686,6 @@ definePage<BookPageData>()({
     });
   },
 
-  changeBookWorkspaceView(event: DatasetEvent) {
-    const view = datasetString(event, "view");
-    if (view !== "chapters" && view !== "tools") {
-      return;
-    }
-    this.setData({ bookWorkspaceView: view });
-  },
-
   changeChapterTitle(event: TextInputEvent) {
     const id = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, id);
@@ -895,50 +693,6 @@ definePage<BookPageData>()({
       editingTitle: event.detail.value,
       titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
     });
-  },
-
-  async editChapterTitleById(chapterId: string) {
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
-      return false;
-    }
-    this.stopPlayback();
-    const title = await promptRequiredText(
-      "修改章名",
-      `当前：${chapter.title}`,
-    );
-    if (title === null) {
-      return false;
-    }
-    if (title.length > 80) {
-      wx.showToast({ title: "章名不能超过 80 字", icon: "none" });
-      return false;
-    }
-    if (title === trimText(chapter.title)) {
-      return false;
-    }
-    this.setData({ titleBusyTarget: chapterId, error: "" });
-    this.patchChapter(chapterId, { draftError: "" });
-    try {
-      const plan = await updateMemoirBookChapterTitle(
-        this.data.projectId,
-        chapterId,
-        { title },
-      );
-      await this.applyUpdatedPlan(plan, "章名已修改");
-      trackAuditAction("book.chapter_title_update", {}, { projectId: this.data.projectId });
-      return true;
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return false;
-      }
-      this.patchChapter(chapterId, {
-        draftError: error instanceof Error ? error.message : "章名修改失败",
-      });
-      return false;
-    } finally {
-      this.setData({ titleBusyTarget: "" });
-    }
   },
 
   async generateChapterTitle(event: DatasetEvent) {
@@ -989,20 +743,6 @@ definePage<BookPageData>()({
     if (patch) {
       this.setData(patch);
     }
-  },
-
-  async setChapterBookInclusion(chapterId: string, includeInBook: boolean) {
-    if (!chapterId || this.data.updatingPlanStructure) {
-      return;
-    }
-    await this.applyPlanStructureCommand(
-      {
-        type: "set_chapter_book_inclusion",
-        chapter_id: chapterId,
-        include_in_book: includeInBook,
-      },
-      includeInBook ? "已恢复收入本书" : "已设为不收入本书，请重新生成全书",
-    );
   },
 
   async moveChapter(event: DatasetEvent) {
@@ -1161,55 +901,6 @@ definePage<BookPageData>()({
     }
   },
 
-  async playChapterAudioById(chapterId: string, options: { showPreparingToast?: boolean } = {}) {
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
-      return;
-    }
-    const target = chapter.ttsTarget;
-    if (this.data.playingTarget === target) {
-      this.stopPlayback();
-      return;
-    }
-    if (this.data.ttsBusyTarget) {
-      return;
-    }
-    const draft = this.bookDraftsByChapterId[chapterId] || null;
-    if (!draft?.latest_version) {
-      this.patchChapter(chapterId, { draftError: "请先生成章节稿" });
-      return;
-    }
-    if (options.showPreparingToast) {
-      wx.showToast({ title: "正在准备朗读", icon: "none" });
-    }
-    this.stopPlayback();
-    const token = this.audioPlayback.nextToken();
-    this.playToken = token;
-    this.setData({ ttsBusyTarget: target, error: "" });
-    this.patchChapter(chapterId, { draftError: "" });
-    try {
-      const response = await this.requestBookAudio(target);
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(latestDraftContent(draft)));
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      if (token === this.playToken) {
-        this.patchChapter(chapterId, {
-          draftError: error instanceof Error ? error.message : "章节朗读失败",
-        });
-      }
-    } finally {
-      if (token === this.playToken && this.data.ttsBusyTarget === target) {
-        this.setData({ ttsBusyTarget: "" });
-      }
-    }
-  },
-
   async playBookOutlineAudio() {
     const target = "outline";
     if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
@@ -1236,7 +927,7 @@ definePage<BookPageData>()({
       error: "",
     });
     try {
-      const response = await this.requestBookAudio(target);
+      const response = await this.requestBookAudio();
       if (token !== this.playToken) {
         return;
       }
@@ -1258,15 +949,8 @@ definePage<BookPageData>()({
     }
   },
 
-  async requestBookAudio(target: string) {
-    const request = readBookTTSRequest();
-    if (target === "outline") {
-      return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
-    }
-    if (target.startsWith("chapter:")) {
-      return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), request);
-    }
-    throw new Error("朗读目标无效");
+  async requestBookAudio() {
+    return createMemoirBookPlanOutlineTTS(this.data.projectId, readBookTTSRequest());
   },
 
   async playAudioFiles(response: MemoirBookAudioResponse, target: string, token: number, activeText: string) {

@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "整理这本书",
+  "navigationBarTitleText": "书稿建议",
   "enablePullDownRefresh": true,
   "usingComponents": {
     "ai-task-progress": "/components/ai-task-progress/index",
