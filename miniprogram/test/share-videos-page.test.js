@@ -9,6 +9,7 @@ const {
   mockMemoirApiModules,
   mockModule,
   pageContext,
+  flushAsyncWork,
   unmockedAsync,
 } = require("./page-harness");
 
@@ -25,11 +26,11 @@ function video(id, utteranceId) {
   };
 }
 
-function loadLibraryPage(listMemoirShareVideos) {
+function loadLibraryPage(listMemoirShareVideos, getMemoirShareVideoJob = unmockedAsync("getMemoirShareVideoJob")) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
   });
-  mockMemoirApiModules({ listMemoirShareVideos });
+  mockMemoirApiModules({ listMemoirShareVideos, getMemoirShareVideoJob });
   return loadPageModule("../pages/share-videos/index.ts");
 }
 
@@ -42,6 +43,7 @@ test("video library lists metadata in pages and opens only the chosen video", as
     return {
       items: offset ? [video("video-1", "utterance-1")] : [video("video-2", "utterance-2")],
       total: 2,
+      active_jobs: [],
       limit: 20,
       offset,
     };
@@ -75,7 +77,7 @@ test("video library ignores a response after leaving the page", async () => {
 
   const loading = context.loadVideos(true);
   context.onHide();
-  resolve({ items: [video("video-old", "utterance-old")], total: 1, limit: 20, offset: 0 });
+  resolve({ items: [video("video-old", "utterance-old")], active_jobs: [], total: 1, limit: 20, offset: 0 });
   await loading;
   assert.deepEqual(context.data.items, []);
 });
@@ -83,4 +85,133 @@ test("video library ignores a response after leaving the page", async () => {
 test("video library route is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/share-videos/index"));
+});
+
+function job(status, patch = {}) {
+  return {
+    ...video("working", "utterance-working"),
+    status,
+    background_status: "generating",
+    background_source: "ai",
+    output: status === "succeeded" ? { download_url: "/completed.mp4", mime_type: "video/mp4", size_bytes: 1024 } : null,
+    error_message: "",
+    ...patch,
+  };
+}
+
+function libraryWithPolling(page) {
+  const { PollingTimer } = require("../services/polling-timer.ts");
+  const context = pageContext(page);
+  context.onLoad({ projectId: "project-1" });
+  let callback = null;
+  context.progressPoller = new PollingTimer(5000, {
+    schedule(next) { callback = next; return 1; },
+    cancel() { callback = null; },
+  });
+  return {
+    context,
+    hasPoll: () => Boolean(callback),
+    async tick() {
+      assert.ok(callback, "a visible active task should keep polling");
+      const next = callback;
+      callback = null;
+      next();
+      await flushAsyncWork();
+    },
+  };
+}
+
+test("video library restores queued and running tasks and opens their existing progress page", async () => {
+  const navigations = [];
+  const { page } = loadLibraryPage(async () => ({
+    items: [], active_jobs: [job("pending"), job("running", { id: "rendering" })],
+    total: 0, limit: 20, offset: 0,
+  }));
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  const { context, hasPoll } = libraryWithPolling(page);
+  context.onShow();
+  await flushAsyncWork();
+  assert.deepEqual(context.data.taskItems.map((item) => item.status), ["pending", "running"]);
+  assert.notEqual(context.data.taskItems[0].statusText, context.data.taskItems[1].statusText);
+  assert.equal(hasPoll(), true);
+  context.openVideo({ currentTarget: { dataset: { id: "working", utteranceId: "utterance-working" } } });
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-working&jobId=working"]);
+  context.onUnload();
+  assert.equal(hasPoll(), false);
+});
+
+test("video progress updates stages and moves completion into the loaded library without losing older pages", async () => {
+  let polls = 0;
+  const { page } = loadLibraryPage(async (_projectId, { offset }) => ({
+    items: [video(offset ? "video-1" : "video-2", "utterance-old")],
+    active_jobs: [job("running")], total: 2, limit: 20, offset,
+  }), async () => ++polls === 1
+    ? job("running", { background_status: "ready" }) : job("succeeded"));
+  const polling = libraryWithPolling(page);
+  const { context } = polling;
+  context.onShow();
+  await flushAsyncWork();
+  const initialStage = context.data.taskItems[0].statusText;
+  await context.loadVideos(false);
+  await polling.tick();
+  assert.notEqual(context.data.taskItems[0].statusText, initialStage);
+  await polling.tick();
+  assert.deepEqual(context.data.items.map((item) => item.id), ["working", "video-2", "video-1"]);
+  assert.equal(context.data.total, 3);
+  assert.equal(context.data.hasMore, false);
+  assert.deepEqual(context.data.taskItems, []);
+  assert.equal(polling.hasPoll(), false);
+  assert.equal(polls, 2);
+});
+
+test("video progress leaves a failed task visible with its real error and stops polling", async () => {
+  const { page } = loadLibraryPage(async () => ({
+    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+  }), async () => job("failed", { error_message: "配图服务暂时不可用" }));
+  const polling = libraryWithPolling(page);
+  polling.context.onShow();
+  await flushAsyncWork();
+  await polling.tick();
+  assert.equal(polling.context.data.taskItems[0].status, "failed");
+  assert.equal(polling.context.data.taskItems[0].statusText, "配图服务暂时不可用");
+  assert.equal(polling.hasPoll(), false);
+});
+
+test("video progress cancels polling and ignores completion after hiding, then recovers on return", async () => {
+  let resolve;
+  const pending = new Promise((done) => { resolve = done; });
+  const { page } = loadLibraryPage(async () => ({
+    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+  }), () => pending);
+  const polling = libraryWithPolling(page);
+  const { context } = polling;
+  context.onShow();
+  await flushAsyncWork();
+  const refreshing = context.refreshVideoProgress();
+  context.onHide();
+  resolve(job("succeeded"));
+  await refreshing;
+  assert.deepEqual(context.data.items, []);
+  assert.equal(context.data.taskItems[0].status, "running");
+  assert.equal(polling.hasPoll(), false);
+  context.onShow();
+  await flushAsyncWork();
+  assert.equal(polling.hasPoll(), true);
+  context.onUnload();
+});
+
+test("video progress exposes refresh failure and resumes only after an explicit reload", async () => {
+  const { page } = loadLibraryPage(async () => ({
+    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+  }), async () => { throw new Error("连接暂时中断"); });
+  const polling = libraryWithPolling(page);
+  polling.context.onShow();
+  await flushAsyncWork();
+  await polling.tick();
+  assert.equal(polling.context.data.error, "连接暂时中断");
+  assert.equal(polling.context.data.taskItems[0].status, "running");
+  assert.equal(polling.hasPoll(), false);
+  await polling.context.loadVideos(true);
+  assert.equal(polling.hasPoll(), true);
+  polling.context.onUnload();
 });

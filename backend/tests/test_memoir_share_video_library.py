@@ -129,7 +129,61 @@ async def test_share_video_library_checks_project_ownership_and_allows_admin(cli
     await test_db.commit()
     response = await client.get(url)
     assert response.status_code == 200
-    assert response.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
+    assert response.json() == {"items": [], "active_jobs": [], "total": 0, "limit": 20, "offset": 0}
+
+
+async def test_share_video_library_recovers_active_jobs_outside_completed_pagination(client, test_db):
+    created = await create_test_voice_transcript(client, test_db)
+    now = utcnow_naive()
+    pending = await _add_video_job(
+        test_db, created, job_id="waiting", status=MemoirShareVideoJobStatus.PENDING,
+        created_at=now, with_output=False,
+    )
+    running = await _add_video_job(
+        test_db, created, job_id="rendering", status=MemoirShareVideoJobStatus.RUNNING,
+        created_at=now - timedelta(minutes=1), with_output=False,
+        metadata={"background_status": "generating", "background_scene_count": 3},
+    )
+    await _add_video_job(
+        test_db, created, job_id="completed", status=MemoirShareVideoJobStatus.SUCCEEDED,
+        created_at=now - timedelta(hours=1), completed_at=now - timedelta(minutes=5),
+    )
+    other_project = Project(user_id=created["user_id"], type="memoir", title="另一份回忆")
+    test_db.add(other_project)
+    await test_db.flush()
+    other_created = await create_test_voice_transcript(client, test_db, project_id=other_project.id)
+    await _add_video_job(
+        test_db, other_created, job_id="other-project", status=MemoirShareVideoJobStatus.RUNNING,
+        created_at=now, with_output=False,
+    )
+    await test_db.commit()
+
+    url = f"/api/mobile/memoir/projects/{pending.project_id}/share-video/jobs"
+    response = await client.get(url, params={"limit": 1, "offset": 10})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["items"] == [] and data["total"] == 1
+    assert [(job["id"], job["status"]) for job in data["active_jobs"]] == [
+        (pending.id, "pending"), (running.id, "running"),
+    ]
+    assert data["active_jobs"][1]["background_status"] == "generating"
+    assert data["active_jobs"][1]["background_scene_count"] == 3
+    assert all(job["output"] is None for job in data["active_jobs"])
+
+    pending.status = MemoirShareVideoJobStatus.SUCCEEDED.value
+    pending.completed_at = now
+    pending.output = MemoirShareVideoOutput(
+        job_id=pending.id, project_id=pending.project_id,
+        storage_path=f"memoir/share-videos/{pending.user_id}/{pending.id}.mp4",
+        mime_type="video/mp4", size_bytes=1024,
+    )
+    running.status = MemoirShareVideoJobStatus.FAILED.value
+    running.error_message = "配图生成失败"
+    await test_db.commit()
+    refreshed = (await client.get(url, params={"limit": 1})).json()
+    assert refreshed["active_jobs"] == []
+    assert refreshed["total"] == 2
+    assert [item["id"] for item in refreshed["items"]] == [pending.id]
 
 
 async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(client, test_db, tmp_path, monkeypatch):

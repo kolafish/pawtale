@@ -1,9 +1,9 @@
-import type { MemoirShareVideoListItem } from "../../domain/memoir-transcript";
+import type { MemoirShareVideoJob, MemoirShareVideoListItem } from "../../domain/memoir-transcript";
 import { MEMOIR_SHARE_VIDEO_STYLES, normalizeMemoirShareVideoStyle } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { getMemoirIdentity } from "../../services/auth";
-import { definePage } from "../../services/page-definition";
-import { listMemoirShareVideos } from "../../services/memoir-transcript-api";
+import { definePage, pageRuntime } from "../../services/page-definition";
+import { getMemoirShareVideoJob, listMemoirShareVideos } from "../../services/memoir-transcript-api";
 import { isAuthError, navigateToLogin } from "../../services/navigation";
 import {
   datasetString,
@@ -14,6 +14,8 @@ import {
 } from "../../services/page-input";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
+import { PollingTimer } from "../../services/polling-timer";
+import { shareVideoJobStatusText } from "../../services/transcript-share-video";
 
 const PAGE_SIZE = 20;
 
@@ -23,6 +25,11 @@ interface ShareVideoItemView extends MemoirShareVideoListItem {
   completedAtText: string;
 }
 
+interface ShareVideoTaskView extends ShareVideoItemView {
+  status: MemoirShareVideoJob["status"];
+  statusText: string;
+}
+
 interface ShareVideosData {
   pageClass: string;
   projectId: string;
@@ -30,6 +37,7 @@ interface ShareVideosData {
   needsLogin: boolean;
   error: string;
   items: ShareVideoItemView[];
+  taskItems: ShareVideoTaskView[];
   total: number;
   hasMore: boolean;
 }
@@ -47,8 +55,18 @@ function toViewItem(item: MemoirShareVideoListItem): ShareVideoItemView {
   };
 }
 
+function toTaskView(job: MemoirShareVideoJob): ShareVideoTaskView {
+  return {
+    ...toViewItem({ ...job, completed_at: job.completed_at || null }),
+    status: job.status,
+    statusText: shareVideoJobStatusText(job),
+  };
+}
+
 definePage<ShareVideosData>()({
   requestToken: 0,
+  pageVisible: false,
+  progressPoller: pageRuntime(() => new PollingTimer(5000)),
 
   data: {
     pageClass: "detail-page",
@@ -57,6 +75,7 @@ definePage<ShareVideosData>()({
     needsLogin: false,
     error: "",
     items: [],
+    taskItems: [],
     total: 0,
     hasMore: false,
   },
@@ -66,20 +85,24 @@ definePage<ShareVideosData>()({
   },
 
   onShow() {
+    this.pageVisible = true;
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
     void this.loadVideos(true);
   },
 
   onHide() {
+    this.pageVisible = false;
+    this.progressPoller.cancel();
     this.requestToken += 1;
   },
 
   onUnload() {
-    this.requestToken += 1;
+    this.onHide();
   },
 
   async loadVideos(reset = true) {
     if (this.data.loading && !reset) return;
+    this.progressPoller.cancel();
     const requestToken = ++this.requestToken;
     this.setData({ loading: true, error: "" });
     try {
@@ -91,7 +114,7 @@ definePage<ShareVideosData>()({
         this.setData({ projectId });
       }
       if (!projectId) {
-        this.setData({ items: [], total: 0, hasMore: false });
+        this.setData({ items: [], taskItems: [], total: 0, hasMore: false });
         return;
       }
       const offset = reset ? 0 : this.data.items.length;
@@ -103,18 +126,64 @@ definePage<ShareVideosData>()({
       this.setData({
         needsLogin: false,
         items,
+        taskItems: response.active_jobs.map(toTaskView),
         total: response.total,
         hasMore: response.items.length > 0 && items.length < response.total,
       });
     } catch (error) {
       if (requestToken !== this.requestToken) return;
       if (isAuthError(error)) {
-        this.setData({ needsLogin: true, items: [], total: 0, hasMore: false });
+        this.setData({ needsLogin: true, items: [], taskItems: [], total: 0, hasMore: false });
       } else {
         this.setData({ error: error instanceof Error ? error.message : "分享视频加载失败" });
       }
     } finally {
-      if (requestToken === this.requestToken) this.setData({ loading: false });
+      if (requestToken === this.requestToken) {
+        this.setData({ loading: false });
+        this.scheduleProgressPolling();
+      }
+    }
+  },
+
+  scheduleProgressPolling() {
+    if (!this.pageVisible || this.data.loading || this.data.error || this.data.needsLogin
+      || !this.data.taskItems.some((item) => item.status === "pending" || item.status === "running")) {
+      return;
+    }
+    this.progressPoller.schedule(() => { void this.refreshVideoProgress(); });
+  },
+
+  async refreshVideoProgress() {
+    if (!this.pageVisible || this.data.loading) return;
+    const tasks = this.data.taskItems.filter((item) => item.status === "pending" || item.status === "running");
+    if (!tasks.length) return;
+    this.progressPoller.cancel();
+    const requestToken = ++this.requestToken;
+    try {
+      const jobs = await Promise.all(tasks.map((item) => getMemoirShareVideoJob(item.id)));
+      if (requestToken !== this.requestToken) return;
+      const updates = new Map(jobs.map((job) => [job.id, job]));
+      const completed = jobs
+        .filter((job) => job.status === "succeeded" && !this.data.items.some((item) => item.id === job.id))
+        .sort((left, right) => Date.parse(right.completed_at || right.created_at) - Date.parse(left.completed_at || left.created_at)
+          || right.id.localeCompare(left.id))
+        .map((job) => toViewItem({ ...job, completed_at: job.completed_at || null }));
+      this.setData({
+        taskItems: this.data.taskItems
+          .map((item) => updates.has(item.id) ? toTaskView(updates.get(item.id)!) : item)
+          .filter((item) => item.status !== "succeeded"),
+        items: [...completed, ...this.data.items],
+        total: this.data.total + completed.length,
+        error: "",
+      });
+      this.scheduleProgressPolling();
+    } catch (error) {
+      if (requestToken !== this.requestToken) return;
+      if (isAuthError(error)) {
+        this.setData({ needsLogin: true, items: [], taskItems: [], total: 0, hasMore: false });
+      } else {
+        this.setData({ error: error instanceof Error ? error.message : "视频制作进度更新失败" });
+      }
     }
   },
 

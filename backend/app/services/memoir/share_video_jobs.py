@@ -591,7 +591,7 @@ async def delete_share_video_job(
     _remove_video_completion_marker(video_path)
 
 
-async def list_completed_share_video_jobs(
+async def list_share_video_jobs(
     db: AsyncSession,
     *,
     project_id: str,
@@ -628,6 +628,22 @@ async def list_completed_share_video_jobs(
             .limit(limit)
         )
     ).all()
+    active_jobs = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                MemoirMaterialShareVideo.status.in_([
+                    MemoirShareVideoJobStatus.PENDING.value,
+                    MemoirShareVideoJobStatus.RUNNING.value,
+                ]),
+            )
+            .order_by(
+                MemoirMaterialShareVideo.created_at.desc(),
+                MemoirMaterialShareVideo.id.desc(),
+            )
+        )
+    ).all()
     return MemoirShareVideoJobListResponse(
         items=[
             MemoirShareVideoListItemResponse(
@@ -642,6 +658,7 @@ async def list_completed_share_video_jobs(
             )
             for job in jobs
         ],
+        active_jobs=[_job_response(job) for job in active_jobs],
         total=total or 0,
         limit=limit,
         offset=offset,

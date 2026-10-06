@@ -247,6 +247,7 @@ export interface MemoirShareVideoListItem {
 
 export interface MemoirShareVideoListResponse {
   items: MemoirShareVideoListItem[];
+  active_jobs: MemoirShareVideoJob[];
   total: number;
   limit: number;
   offset: number;
