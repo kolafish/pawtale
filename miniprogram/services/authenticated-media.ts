@@ -39,7 +39,7 @@ function cacheFilePath(cache: FileDownloadCache): string {
 
 function assertDownloadSession(cache: FileDownloadCache): void {
   if (readSessionCookie() !== cache.sessionCookie) {
-    throw new ApiError(401, "登录状态已变化，请重新打开书稿", {});
+    throw new ApiError(409, "登录状态已变化，请重新打开书稿", {});
   }
 }
 

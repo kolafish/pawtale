@@ -86,7 +86,7 @@ test("failed transfers retry and an account switch cannot expose a late download
   state.fail(false); state.hold();
   const next = download("project-1");
   await tick(); state.cookie("session=user-b"); state.finish();
-  await assert.rejects(next, /登录状态已变化/);
+  await assert.rejects(next, (error) => error.statusCode === 409 && /登录状态已变化/.test(error.message));
   state.key("c".repeat(64));
   const other = download("project-1");
   await tick(); state.finish(); await other;
