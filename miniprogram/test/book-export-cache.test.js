@@ -28,7 +28,7 @@ function setup() {
     },
     downloadFile(options) {
       downloads.push(options);
-      finish = () => failDownload ? options.fail({ errMsg: "download failed" }) : options.success({ statusCode: 200, tempFilePath: "/tmp/export-mock.pdf", header: {} });
+      finish = () => failDownload ? options.fail({ errMsg: "download failed" }) : options.success({ statusCode: 200, tempFilePath: `${wx.env.USER_DATA_PATH}/download.pdf`, header: {} });
       if (!hold) finish();
     },
   };
@@ -104,4 +104,23 @@ test("saved exports evict old files and keep the current named PDF", async () =>
   const root = `${wx.env.USER_DATA_PATH}/pawtale-exports-v1`;
   assert.equal(fs.readdirSync(root).length, 20);
   assert.ok(fs.statSync(file).size > 0);
+});
+
+
+test("large incoming PDFs evict old cached files before saving within the storage budget", async () => {
+  const state = setup();
+  const download = state.api();
+  fs.writeFileSync(`${wx.env.USER_DATA_PATH}/download.pdf`, Buffer.alloc(20 * 1024 * 1024, 1));
+  const native = wx.getFileSystemManager();
+  wx.getFileSystemManager = () => ({ ...native, copyFileSync(source, dest) {
+    const root = `${wx.env.USER_DATA_PATH}/pawtale-exports-v1`;
+    const existingBytes = fs.readdirSync(root).reduce((sum, key) => sum + fs.readdirSync(`${root}/${key}`).reduce((bytes, file) => bytes + fs.statSync(`${root}/${key}/${file}`).size, 0), 0);
+    if (existingBytes + fs.statSync(source).size > 40 * 1024 * 1024) throw new Error("quota exceeded");
+    native.copyFileSync(source, dest);
+  } });
+  for (let index = 1; index <= 3; index += 1) {
+    state.key(index.toString(16).padStart(64, "0"));
+    await download("project-1");
+  }
+  assert.equal(fs.readdirSync(`${wx.env.USER_DATA_PATH}/pawtale-exports-v1`).length, 2);
 });

@@ -5,6 +5,7 @@ const path = require("node:path");
 
 function fileSystemWx() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pawtale-export-test-"));
+  fs.writeFileSync(path.join(root, "download.pdf"), "%PDF-test\n%%EOF\n");
   after(() => fs.rmSync(root, { recursive: true, force: true }));
   return {
     env: { USER_DATA_PATH: root },

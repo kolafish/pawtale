@@ -43,7 +43,7 @@ function assertDownloadSession(cache: FileDownloadCache): void {
   }
 }
 
-function pruneCachedFiles(root: string, keepKey: string): void {
+function pruneCachedFiles(root: string, keepKey: string, incomingBytes = 0): void {
   const fs = wx.getFileSystemManager();
   const entries = fs.readdirSync(root).filter((key) => /^[a-f0-9]{64}$/.test(key)).flatMap((key) => {
     if (key !== keepKey && [...cachedDownloads.keys()].some((pending) => pending.endsWith(`:${key}`))) return [];
@@ -52,8 +52,8 @@ function pruneCachedFiles(root: string, keepKey: string): void {
     const stats = files.map((name) => fs.statSync(`${root}/${key}/${name}`));
     return [{ key, size: stats.reduce((sum, stat) => sum + stat.size, 0), modified: Math.max(...stats.map((stat) => stat.lastModifiedTime)) }];
   }).sort((a, b) => a.modified - b.modified);
-  let bytes = entries.reduce((sum, entry) => sum + entry.size, 0);
-  let count = entries.length;
+  let bytes = incomingBytes + entries.reduce((sum, entry) => sum + entry.size, 0);
+  let count = entries.length + (incomingBytes > 0 ? 1 : 0);
   for (const entry of entries) {
     if (count <= MAX_CACHED_FILES && bytes <= MAX_CACHED_BYTES) break;
     if (entry.key === keepKey) continue;
@@ -133,10 +133,10 @@ export async function downloadAuthenticatedFile(
       assertDownloadSession(cache);
       const fs = wx.getFileSystemManager();
       const directory = path.slice(0, path.lastIndexOf("/"));
-      fs.mkdirSync(directory, true);
       const root = `${wx.env.USER_DATA_PATH}/${FILE_CACHE_FOLDER}`;
-      pruneCachedFiles(root, cache.key);
       try {
+        fs.mkdirSync(directory, true);
+        pruneCachedFiles(root, cache.key, fs.statSync(temporaryPath).size);
         fs.copyFileSync(temporaryPath, `${path}.part`);
         fs.renameSync(`${path}.part`, path);
       } catch {

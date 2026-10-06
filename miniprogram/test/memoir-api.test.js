@@ -87,7 +87,7 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
     },
     downloadFile(options) {
       downloads.push(options);
-      options.success({ statusCode: 200, tempFilePath: "/tmp/book.pdf", header: {}, errMsg: "downloadFile:ok" });
+      options.success({ statusCode: 200, tempFilePath: `${wx.env.USER_DATA_PATH}/download.pdf`, header: {}, errMsg: "downloadFile:ok" });
     },
   };
 }
