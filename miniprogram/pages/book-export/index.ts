@@ -63,7 +63,7 @@ import {
   isBookLevelEditorialCopyTarget,
   latestBookTitle,
 } from "../book/book-design-model";
-import { chooseImageFile } from "../../services/authenticated-media";
+import { chooseImageFile, editImageFile } from "../../services/authenticated-media";
 import { PollingTimer } from "../../services/polling-timer";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 
@@ -1083,11 +1083,23 @@ definePage<BookExportData>()({
   async changeBookCoverImage(event: DatasetEvent) {
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget
       || this.data.bookTitleSaving || this.data.bookViewingHistoricalVersion || !this.data.bookManuscriptAvailable) return;
-    const restoring = datasetString(event, "action") === "restore";
-    if (restoring && !this.data.bookUploadedCoverAssetId) return;
+    const action = datasetString(event, "action");
+    const restoring = action === "restore";
+    const editing = action === "edit";
+    if ((restoring || editing) && !this.data.bookUploadedCoverAssetId) return;
     this.setData({ bookLayoutBusyTarget: "save:cover", bookLayoutFeedbackTarget: "cover", bookLayoutFeedbackText: "", bookLayoutFeedbackError: false });
     try {
-      const filePath = restoring ? null : await chooseImageFile();
+      let filePath: string | null = null;
+      if (editing) {
+        this.setData({ bookLayoutFeedbackText: "正在打开照片编辑…" });
+        const source = await downloadMemoirImageAssetFile(this.data.projectId, this.data.bookUploadedCoverAssetId, false);
+        filePath = await editImageFile(source);
+      } else if (!restoring) {
+        filePath = await chooseImageFile();
+        if (filePath && typeof wx.editImage === "function") {
+          filePath = await editImageFile(filePath);
+        }
+      }
       if (!restoring && !filePath) return;
       if (!(await this.ensureBookDesignSavedForEditorialCopy())) throw new Error(this.data.error || "请先保存书的信息");
       this.setData({ bookLayoutFeedbackText: restoring ? "正在恢复版式封面…" : "正在上传封面…" });
@@ -1105,7 +1117,7 @@ definePage<BookExportData>()({
       const output = await getMemoirBookOutput(this.data.projectId);
       this.applyBookExportData(this.bookPlan, output, true);
       if (restoring && this.data.bookUploadedCoverAssetId) throw new Error("封面已在其他地方更新，请重新选择");
-      this.setData({ bookLayoutFeedbackText: restoring ? "已恢复版式封面" : "封面图片已保存" });
+      this.setData({ bookLayoutFeedbackText: restoring ? "已恢复版式封面" : editing ? "封面照片已更新" : "封面图片已保存" });
     } catch (error) {
       if (routeAuthError(error, "login")) return;
       this.setData({ bookLayoutFeedbackText: error instanceof Error ? error.message : "保存封面失败", bookLayoutFeedbackError: true });

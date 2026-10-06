@@ -22,12 +22,14 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFColor,
     PDFLayout,
     PDFImageCommand,
+    PDFDecorationCommand,
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
     configured_pdf_layout,
     _render_pdf_pages,
     _text_units,
+    _estimated_text_width,
     _wrap_pdf_line,
 )
 from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
@@ -636,17 +638,32 @@ def _add_cover_page(
     cover_style: str,
     cover_image: dict[str, Any] | None = None,
 ) -> None:
-    if cover_image:
-        path = _illustration_file_path(cover_image)
-        if path is None:
-            raise ValueError("封面图片已不可用，请重新上传或恢复版式封面")
-        from PIL import Image
-        with Image.open(path) as image:
-            scale = min(builder.layout.page_width / image.width, builder.layout.page_height / image.height)
-            width, height = image.width * scale, image.height * scale
-        builder.new_page(show_header=False, show_footer=False, background_color=(1, 1, 1))
-        builder.pages[-1].images.append(PDFImageCommand(path=path, x=(builder.layout.page_width-width)/2, y=(builder.layout.page_height-height)/2, width=width, height=height))
+    cover_page_index = len(builder.pages)
+    _add_preset_cover_page(builder, title=title, subtitle=subtitle,
+        narrator_name=narrator_name, prepared_by=prepared_by, cover_style=cover_style)
+    if not cover_image:
         return
+    path = _illustration_file_path(cover_image)
+    if path is None:
+        raise ValueError("封面图片已不可用，请重新上传或恢复版式封面")
+    page = builder.pages[cover_page_index]
+    page.background_image_path = path
+    page.background_image_preserve_aspect = True
+    # Keep the preset's actual typography. Small backing panels make it readable
+    # over both light and dark user photos without fading the whole photograph.
+    for command in page.commands:
+        width = _estimated_text_width(command.text, command.font_size, char_spacing=command.char_spacing)
+        page.decorations.append(PDFDecorationCommand(
+            kind="rect", x=command.x - 8, y=command.y - 5,
+            width=width + 16, height=command.font_size + 12,
+            color=page.background_color or (1, 1, 1), opacity=0.9,
+        ))
+
+
+def _add_preset_cover_page(
+    builder: PDFBookBuilder, *, title: str, subtitle: str,
+    narrator_name: str, prepared_by: str, cover_style: str,
+) -> None:
     style = _cover_style(cover_style)
     if style.cover_background_image and style.image_layout == "artwork":
         _add_artwork_cover_page(

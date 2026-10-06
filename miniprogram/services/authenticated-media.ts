@@ -267,3 +267,16 @@ export function chooseImageFile(): Promise<string | null> {
     });
   });
 }
+
+export function editImageFile(src: string): Promise<string | null> {
+  if (typeof wx.editImage !== "function") {
+    return Promise.reject(new Error("当前微信版本不支持图片编辑，请升级微信后再试"));
+  }
+  return new Promise((resolve, reject) => {
+    wx.editImage!({
+      src,
+      success: (result) => result.tempFilePath ? resolve(result.tempFilePath) : reject(new Error("图片编辑未返回结果，请重试")),
+      fail: (error) => isChooseImageCancel(error) ? resolve(null) : reject(new Error(error.errMsg || "图片编辑失败")),
+    });
+  });
+}
