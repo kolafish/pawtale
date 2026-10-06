@@ -26,6 +26,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.schemas.memoir_book import (
+    MemoirBookCustomLayout,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
     MemoirBookAudioPlanRequest,
@@ -773,15 +774,15 @@ async def prepare_book_output_export(
         manuscript = manuscript.model_copy(deep=True)
         if preview_template is not None:
             manuscript.profile.template = preview_template
+            manuscript.render_settings.custom_layout = MemoirBookCustomLayout()
             matching_cover = _template_cover_style(preview_template)
             if matching_cover is not None:
                 manuscript.render_settings.cover_style = matching_cover
-        elif preview_custom_layout_patch:
-            manuscript.profile.template = "custom"
         if preview_custom_layout_patch:
             manuscript.render_settings.custom_layout = manuscript.render_settings.custom_layout.model_copy(
                 update=preview_custom_layout_patch
             )
+        manuscript.schema_version = 4
     return PreparedBookExport(
         owner_id=project.user_id, project_id=project_id, version_id=version.id,
         version=version.version, title=title, content=content, manuscript=manuscript,

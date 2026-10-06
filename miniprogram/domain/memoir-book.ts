@@ -418,13 +418,14 @@ export type MemoirBookManuscriptTemplate =
   | "custom";
 
 export interface MemoirBookCustomLayout {
+  font_family: "auto" | "serif" | "sans";
   font_scale: "standard" | "large";
   line_spacing: "compact" | "standard" | "relaxed";
   page_margin: "narrow" | "standard" | "wide";
 }
 
 export interface MemoirBookLayoutPreview {
-  template: MemoirBookManuscriptTemplate;
+  template?: MemoirBookManuscriptTemplate;
   custom_layout?: MemoirBookCustomLayout;
 }
 

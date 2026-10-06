@@ -71,6 +71,7 @@ class PDFLayout:
     mirror_body_pages: bool = False
     inner_margin_delta: int = 0
     manuscript_template: str = "classic_family"
+    body_font_name: str | None = None
 
 
 PDF_LAYOUTS = {
@@ -116,8 +117,9 @@ def configured_pdf_layout(
 ) -> PDFLayout:
     """Apply a manuscript design while retaining the reading/print page behavior."""
     if template == "classic_family":
-        return base
-    if template == "photo_memory":
+        font_delta, line_delta, margin_delta = 0, 0, 0
+        title_delta, heading_delta, small_delta = 0, 0, 0
+    elif template == "photo_memory":
         font_delta, line_delta, margin_delta = 0, 5, 10
         title_delta, heading_delta, small_delta = 6, 3, 0
     elif template == "oral_archive":
@@ -133,18 +135,23 @@ def configured_pdf_layout(
         font_delta, line_delta, margin_delta = 0, 2, 4
         title_delta, heading_delta, small_delta = 4, 1, 0
     elif template == "custom":
-        choices = custom_layout or {}
-        font_delta = 2 if choices.get("font_scale") == "large" else 0
-        line_delta = {"compact": -3, "standard": 0, "relaxed": 5}.get(
-            choices.get("line_spacing"), 0
-        ) + font_delta
-        margin_delta = {"narrow": -10, "standard": 0, "wide": 12}.get(
-            choices.get("page_margin"), 0
-        )
-        title_delta, heading_delta, small_delta = font_delta + 2, font_delta, font_delta
+        font_delta, line_delta, margin_delta = 0, 0, 0
+        title_delta, heading_delta, small_delta = 2, 0, 0
     else:
         return base
 
+    choices = custom_layout or {}
+    font_adjustment = 2 if choices.get("font_scale") == "large" else 0
+    font_delta += font_adjustment
+    line_delta += {"compact": -3, "relaxed": 5}.get(choices.get("line_spacing"), 0) + font_adjustment
+    margin_delta += {"narrow": -10, "wide": 12}.get(choices.get("page_margin"), 0)
+    title_delta += font_adjustment
+    heading_delta += font_adjustment
+    small_delta += font_adjustment
+    body_font_name = {"serif": PDF_SERIF_FONT_NAME, "sans": PDF_SANS_FONT_NAME}.get(
+        choices.get("font_family"),
+        PDF_SANS_FONT_NAME if template == "modern_minimal" else None,
+    )
     font_size = base.font_size + font_delta
     margin_x = base.margin_x + margin_delta
     max_line_units = round(
@@ -166,6 +173,7 @@ def configured_pdf_layout(
         small_font_size=base.small_font_size + small_delta,
         max_line_units=max(12, max_line_units),
         manuscript_template=template,
+        body_font_name=body_font_name,
     )
 
 
@@ -612,11 +620,7 @@ class PDFBookBuilder:
             spacing_after=spacing_after,
             min_start_lines=2,
             keep_last_lines=2,
-            font_name=(
-                PDF_SANS_FONT_NAME
-                if self.layout.manuscript_template == "modern_minimal"
-                else None
-            ),
+            font_name=self.layout.body_font_name,
         )
 
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
