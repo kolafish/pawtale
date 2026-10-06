@@ -375,6 +375,13 @@ export interface MemoirBookTitleSuggestionResponse {
   model?: string | null;
 }
 
+export interface MemoirBookOutputExportInfo {
+  version_id: string;
+  cache_key: string;
+  filename: string;
+  ready: boolean;
+}
+
 export type MemoirBookOutputExportFormat = "pdf" | "txt";
 export type MemoirBookOutputExportLayout = "standard" | "large_print";
 

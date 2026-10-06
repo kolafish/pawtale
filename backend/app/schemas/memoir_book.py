@@ -730,3 +730,10 @@ class MemoirBookShareCreateResponse(BaseModel):
 
 class MemoirBookShareReadRequest(BaseModel):
     token: str
+
+
+class MemoirBookOutputExportInfo(BaseModel):
+    version_id: str
+    cache_key: str
+    filename: str
+    ready: bool

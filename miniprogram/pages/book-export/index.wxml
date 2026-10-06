@@ -34,13 +34,13 @@
           <text class="section-title">导出这本书</text>
           <text class="section-description">{{exportNotice || "生成文件，留存或分享给家人。"}}</text>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="pdf" data-layout="standard" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">阅读版 PDF</text><text class="row-detail">适合手机和平板阅读</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:standard'}}" class="row-busy">生成中…</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">阅读版 PDF</text><text class="row-detail">适合手机和平板阅读</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="pdf" data-layout="large_print" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">打印版 PDF</text><text class="row-detail">适合打印和装订</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}" class="row-busy">生成中…</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">打印版 PDF</text><text class="row-detail">适合打印和装订</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="txt" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">纯文本</text><text class="row-detail">方便继续修改和保存</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:txt:standard'}}" class="row-busy">生成中…</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">纯文本</text><text class="row-detail">方便继续修改和保存</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:txt:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="export" bindtap="openSection">
             <view class="row-copy"><text class="row-title">导出设置</text><text class="row-detail">是否附上整理记录与来源信息</text></view><text class="row-arrow">›</text>

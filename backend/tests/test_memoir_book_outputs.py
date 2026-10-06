@@ -34,7 +34,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.models.users import User
-from app.services.memoir import book_outputs
+from app.services.memoir import book_outputs, book_output_export_cache
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
@@ -686,6 +686,7 @@ async def test_admin_reads_other_users_memoir_book_without_write_access(client, 
         "output": f"{base}/book-output",
         "version": f"{base}/book-output/versions/{version.id}",
         "export": f"{base}/book-output/export?format=txt&version_id={version.id}",
+        "export_info": f"{base}/book-output/export/info?format=txt&version_id={version.id}",
     }
     owner_responses = {}
     for key, path in paths.items():
@@ -1423,6 +1424,11 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
     assert invalid.json()["detail"] == "章首引语来源不属于当前章节"
 
 
+@pytest.fixture(autouse=True)
+def isolate_export_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(book_output_export_cache, "DATA_DIR", tmp_path)
+
+
 async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -1491,17 +1497,16 @@ async def test_book_output_export_deadline_returns_retryable_timeout(
         import time
 
         time.sleep(0.05)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
 
     monkeypatch.setattr(book_outputs, "render_book_output_export", slow_export)
 
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=(await test_db.get(Project, project_id)).user_id,
+        project_id=project_id, export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
     with pytest.raises(HTTPException) as exc_info:
-        await book_outputs.export_book_output_file(
-            test_db,
-            user_id=(await test_db.get(Project, project_id)).user_id,
-            project_id=project_id,
-            export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
-            timeout_seconds=0.01,
-        )
+        await book_outputs.export_book_output_file(prepared, timeout_seconds=0.01)
 
     assert exc_info.value.status_code == 504
     assert "请稍后重试" in str(exc_info.value.detail)
@@ -1889,3 +1894,97 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     assert len(data["audio_file_durations_seconds"]) == data["chunk_count"]
     assert data["alignment_provider"] == "fake-tts"
     assert data["alignment"][0]["text_start"] == 0
+
+
+async def test_export_info_reuses_pdf_and_changes_with_effective_settings(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+    calls = []
+    original = book_outputs.render_book_output_export
+
+    def render(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    info = (await client.get(base + "/info?format=pdf")).json()
+    assert info["version_id"] == version.id
+    assert info["ready"] is False
+    assert "外婆的回忆录" in info["filename"]
+    assert info["filename"].endswith("_阅读版_v1.pdf")
+    first = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
+    again = await client.get(base + "?format=pdf")
+    assert first.status_code == again.status_code == 200
+    assert first.content == again.content
+    assert len(calls) == 1
+    assert (await client.get(base + "/info?format=pdf")).json()["ready"] is True
+    same = (await client.get(base + "/info?format=pdf&show_source_appendix=true")).json()
+    assert same["cache_key"] == info["cache_key"]
+    for query in ("layout=large_print", "show_source_appendix=false", "preview_template=modern_minimal"):
+        changed = (await client.get(base + "/info?format=pdf&" + query)).json()
+        assert changed["cache_key"] != info["cache_key"]
+        assert changed["ready"] is False
+    changed = await client.patch(f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": "新的书名"})
+    assert changed.status_code == 200
+    latest = (await client.get(base + "/info?format=pdf")).json()
+    assert latest["version_id"] != version.id
+    assert latest["cache_key"] != info["cache_key"]
+    historical = (await client.get(base + f"/info?format=pdf&version_id={version.id}")).json()
+    assert historical == {**info, "ready": True}
+    conflict = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
+    assert conflict.status_code == 409
+
+
+async def test_concurrent_export_and_timeout_retry_share_one_render(client, test_db, monkeypatch):
+    import time
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    owner = (await test_db.get(Project, project_id)).user_id
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=owner, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    calls = []
+
+    def slow_render(**kwargs):
+        calls.append(kwargs)
+        time.sleep(0.1)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", slow_render)
+    with pytest.raises(HTTPException) as error:
+        await book_outputs.export_book_output_file(prepared, timeout_seconds=0.01)
+    assert error.value.status_code == 504
+    results = await asyncio.gather(*(book_outputs.export_book_output_file(prepared) for _ in range(4)))
+    assert len(calls) == 1
+    assert all(result.content == results[0].content for result in results)
+
+
+async def test_failed_or_missing_pdf_can_be_regenerated(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    owner = (await test_db.get(Project, project_id)).user_id
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=owner, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    calls = []
+
+    def render(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("render failed")
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    with pytest.raises(RuntimeError, match="render failed"):
+        await book_outputs.export_book_output_file(prepared)
+    await book_outputs.export_book_output_file(prepared)
+    path = book_output_export_cache.export_cache_path(prepared, prepared.cache_key)
+    path.write_bytes(b"%PDF-truncated")
+    await book_outputs.export_book_output_file(prepared)
+    assert len(calls) == 3
