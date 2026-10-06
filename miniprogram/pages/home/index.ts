@@ -11,7 +11,6 @@ import type {
 import type {
   MemoirShareVideoCandidate,
   MemoirShareVideoJob,
-  MemoirShareVideoListItem,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
@@ -25,6 +24,7 @@ import {
 import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import {
   dismissMemoirShareVideoCandidate,
+  downloadMemoirShareVideoThumbnail,
   getMemoirShareVideoCandidate,
   getMemoirShareVideoJob,
   listMemoirShareVideos,
@@ -112,7 +112,7 @@ interface HomeData extends HomeStoryData {
   shareCandidateDismissing: boolean;
   shareCandidateError: string;
   shareCandidateJob: MemoirShareVideoJob | null;
-  recentShareVideo: MemoirShareVideoListItem | null;
+  shareCandidateThumbnailPath: string;
   shareVideoTotal: number;
 }
 
@@ -243,7 +243,7 @@ function applyHomeSnapshotData(
       shareCandidateDismissing: false,
       shareCandidateError: "",
       shareCandidateJob: null,
-      recentShareVideo: null,
+      shareCandidateThumbnailPath: "",
       shareVideoTotal: 0,
     } : {}),
     lastStoryHint: latestHint,
@@ -304,7 +304,7 @@ definePage<HomeData>()({
     shareCandidateDismissing: false,
     shareCandidateError: "",
     shareCandidateJob: null,
-    recentShareVideo: null,
+    shareCandidateThumbnailPath: "",
     shareVideoTotal: 0,
     ...emptyHomeStoryData(),
   },
@@ -443,7 +443,7 @@ definePage<HomeData>()({
           shareCandidateDurationText: "",
           shareCandidateError: "",
           shareCandidateJob: null,
-          recentShareVideo: null,
+          shareCandidateThumbnailPath: "",
           shareVideoTotal: 0,
         });
         return;
@@ -481,6 +481,7 @@ definePage<HomeData>()({
           : "",
         shareCandidateError: "",
         shareCandidateJob: existingJob,
+        shareCandidateThumbnailPath: existingJob ? this.data.shareCandidateThumbnailPath : "",
       });
       if (candidate?.status === "accepted" && candidate.video_job_id
         && (!existingJob || existingJob.status === "pending" || existingJob.status === "running")) {
@@ -495,6 +496,20 @@ definePage<HomeData>()({
           if (requestSequence === this.shareCandidateRequestSequence) {
             console.warn("share video job refresh failed", error);
           }
+        }
+      }
+      const job = this.data.shareCandidateJob;
+      if (job?.status === "succeeded" && !this.data.shareCandidateThumbnailPath
+        && requestSequence === this.shareCandidateRequestSequence) {
+        try {
+          const path = await downloadMemoirShareVideoThumbnail(job.id);
+          if (requestSequence === this.shareCandidateRequestSequence && this.homeVisible
+            && this.data.projectId === projectId && this.data.shareCandidate?.id === candidate?.id
+            && this.data.shareCandidateJob?.id === job.id) {
+            this.setData({ shareCandidateThumbnailPath: path });
+          }
+        } catch (error) {
+          console.warn("share video thumbnail unavailable", error);
         }
       }
     } catch (error) {
@@ -512,7 +527,6 @@ definePage<HomeData>()({
       if (requestSequence !== this.shareVideosRequestSequence
         || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
       this.setData({
-        recentShareVideo: response.items[0] || null,
         shareVideoTotal: response.total,
       });
     } catch (error) {
@@ -539,20 +553,17 @@ definePage<HomeData>()({
   openShareCandidateVideo() {
     const candidate = this.data.shareCandidate;
     if (!candidate || candidate.status !== "accepted" || !candidate.utterance_id
-      || !candidate.video_job_id || this.data.voiceEntry) return;
+      || !candidate.video_job_id || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    const completed = this.data.shareCandidateJob?.status === "succeeded";
     wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
       id: candidate.utterance_id,
       jobId: candidate.video_job_id,
-    }) });
-  },
-
-  openRecentShareVideo() {
-    const video = this.data.recentShareVideo;
-    if (!video || this.data.voiceEntry) return;
-    wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
-      id: video.utterance_id,
-      jobId: video.id,
-    }) });
+    }), success: () => {
+      if (completed && this.data.shareCandidate?.id === candidate.id
+        && this.data.shareCandidate.video_job_id === candidate.video_job_id) {
+        void this.dismissShareCandidate();
+      }
+    } });
   },
 
   openShareVideoLibrary() {
@@ -571,7 +582,7 @@ definePage<HomeData>()({
       await dismissMemoirShareVideoCandidate(projectId, candidate.id);
       if (this.homeVisible && this.data.projectId === projectId && this.data.shareCandidate?.id === candidate.id) {
         this.shareCandidateRequestSequence += 1;
-        this.setData({ shareCandidate: null, shareCandidateDurationText: "", shareCandidateJob: null });
+        this.setData({ shareCandidate: null, shareCandidateDurationText: "", shareCandidateJob: null, shareCandidateThumbnailPath: "" });
         void this.refreshShareVideos(projectId);
       }
     } catch (error) {

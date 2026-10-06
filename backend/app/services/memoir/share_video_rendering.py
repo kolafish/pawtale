@@ -154,6 +154,25 @@ async def _run_ffmpeg(args: list[str], *, frames: Iterable[bytes] | None = None)
         raise ShareVideoGenerationError(message[0] if message else "ffmpeg 执行失败")
 
 
+async def share_video_thumbnail(source_path: Path) -> Path:
+    thumbnail_path = source_path.with_suffix(".thumbnail.jpg")
+    if thumbnail_path.is_file() and thumbnail_path.stat().st_size:
+        return thumbnail_path
+    # Use the first story image after the short title card, then reuse this
+    # immutable job's small JPEG rather than downloading the video on home.
+    with tempfile.TemporaryDirectory(prefix="thumbnail-", dir=source_path.parent) as directory:
+        temporary_path = Path(directory) / "thumbnail.jpg"
+        await asyncio.wait_for(_run_ffmpeg([
+            _ffmpeg_executable(), "-y", "-ss", "2", "-i", str(source_path),
+            "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "5", "-an",
+            str(temporary_path),
+        ]), timeout=10)
+        if not temporary_path.is_file() or not temporary_path.stat().st_size:
+            raise ShareVideoGenerationError("视频缩略图生成失败")
+        temporary_path.replace(thumbnail_path)
+    return thumbnail_path
+
+
 def _ass_time(ms: int) -> str:
     centiseconds = max(0, round(ms / 10))
     hours, remainder = divmod(centiseconds, 360000)

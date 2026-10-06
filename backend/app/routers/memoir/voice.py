@@ -718,6 +718,7 @@ async def list_mobile_memoir_share_video_jobs(
 @router.get("/share-video/jobs/{job_id}/download")
 async def download_mobile_memoir_share_video_job(
     job_id: str,
+    variant: Literal["video", "thumbnail"] = "video",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -727,6 +728,12 @@ async def download_mobile_memoir_share_video_job(
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
+    if variant == "thumbnail":
+        try:
+            thumbnail = await memoir_share_video_jobs.rendering.share_video_thumbnail(path)
+        except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="视频缩略图暂时不可用") from exc
+        return FileResponse(thumbnail, media_type="image/jpeg")
     return FileResponse(
         path,
         media_type=output.mime_type,
