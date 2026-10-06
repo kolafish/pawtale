@@ -805,7 +805,7 @@ test("current book design appears in the gallery and previews the saved design w
   const event = { currentTarget: { dataset: { template: "current" } } };
   await page.previewBookLayout.call(context, event);
   await page.selectBookLayout.call(context, event);
-  assert.deepEqual(downloads, [[
+  assert.deepEqual(downloads.map((args) => args.slice(0, 6)), [[
     "project/1", "pdf", "book-output-version-2", "standard", false, undefined,
   ]]);
   assert.deepEqual(opened, ["/tmp/current-book.pdf"]);
@@ -865,7 +865,7 @@ test("new complete templates preview without saving and apply cover with interio
     assert.ok(fs.existsSync(path.join(__dirname, `../assets/book_ornaments/${template}.png`)));
     const event = { currentTarget: { dataset: { template } } };
     await page.previewBookLayout.call(context, event);
-    assert.deepEqual(downloads.at(-1), [
+    assert.deepEqual(downloads.at(-1).slice(0, 6), [
       "project/1", "pdf", "book-output-version-2", "standard", false,
       { template, custom_layout: undefined },
     ]);
@@ -1061,7 +1061,7 @@ test("book export delivers TXT through WeChat file sharing", async () => {
     },
   };
   const { page } = loadBookExportPage({
-    downloadMemoirBookOutputExport: async () => "/tmp/book.txt",
+    downloadMemoirBookOutputExport: async () => "/tmp/《外婆回忆录》_v2.txt",
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
@@ -1070,8 +1070,8 @@ test("book export delivers TXT through WeChat file sharing", async () => {
     currentTarget: { dataset: { format: "txt" } },
   });
 
-  assert.equal(shared[0].filePath, "/tmp/book.txt");
-  assert.equal(shared[0].fileName, "外婆回忆录.txt");
+  assert.equal(shared[0].filePath, "/tmp/《外婆回忆录》_v2.txt");
+  assert.equal(shared[0].fileName, "《外婆回忆录》_v2.txt");
   assert.equal(toasts[0].title, "已打开微信分享");
   assert.equal(context.data.bookExportBusyTarget, "");
 });
@@ -1087,7 +1087,7 @@ test("canceling TXT sharing does not report a successful download", async () => 
     },
   };
   const { page } = loadBookExportPage({
-    downloadMemoirBookOutputExport: async () => "/tmp/book.txt",
+    downloadMemoirBookOutputExport: async () => "/tmp/《外婆回忆录》_v2.txt",
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());

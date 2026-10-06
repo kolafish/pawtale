@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -8,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
+from app.database import async_session_maker
+from app.models.projects import Project
+from app.services import content_storage
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
@@ -74,6 +78,7 @@ from app.services.memoir.book_output_export import (
     MemoirBookOutputExportLayout,
     render_book_output_export,
 )
+from app.services.memoir.book_output_export_cache import PreparedBookExport, render_cached_book_export
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
@@ -729,20 +734,7 @@ async def suggest_book_output_titles(
     )
 
 
-def _select_output_version(
-    output: MemoirBookOutput,
-    *,
-    version_id: str | None = None,
-) -> MemoirBookOutputVersion | None:
-    versions = sorted(output.versions, key=lambda item: item.version)
-    if not versions:
-        return None
-    if version_id:
-        return next((version for version in versions if version.id == version_id), None)
-    return versions[-1]
-
-
-async def export_book_output_file(
+async def prepare_book_output_export(
     db: AsyncSession,
     *,
     user_id: str,
@@ -754,13 +746,17 @@ async def export_book_output_file(
     preview_template: MemoirBookManuscriptTemplate | None = None,
     preview_custom_layout_patch: dict[str, str] | None = None,
     allow_admin: bool = False,
-    timeout_seconds: float | None = None,
-) -> ExportFile:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    output = await _load_output(db, project_id=project_id)
-    if not output or not output.versions:
+) -> PreparedBookExport:
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    if not output:
         raise HTTPException(status_code=404, detail="全书稿不存在")
-    version = _select_output_version(output, version_id=version_id)
+    query = select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+    if version_id:
+        query = query.where(MemoirBookOutputVersion.id == version_id)
+    else:
+        query = query.order_by(MemoirBookOutputVersion.version.desc()).limit(1)
+    version = await db.scalar(query.execution_options(populate_existing=True))
     if not version:
         raise HTTPException(status_code=404, detail="全书版本不存在")
     content = version.content.strip()
@@ -786,26 +782,65 @@ async def export_book_output_file(
             manuscript.render_settings.custom_layout = manuscript.render_settings.custom_layout.model_copy(
                 update=preview_custom_layout_patch
             )
+    return PreparedBookExport(
+        owner_id=project.user_id, project_id=project_id, version_id=version.id,
+        version=version.version, title=title, content=content, manuscript=manuscript,
+        export_format=export_format,
+        layout=layout if export_format == MemoirBookOutputExportFormat.PDF else MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=(
+            show_source_appendix if show_source_appendix is not None
+            else manuscript.render_settings.show_source_appendix if manuscript else True
+        ),
+        render_date=version.created_at.replace(tzinfo=UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat(),
+    )
+
+
+_book_export_tasks: dict[str, asyncio.Task[ExportFile]] = {}
+
+
+async def _render_project_book_export(prepared: PreparedBookExport) -> ExportFile:
+    # Reuse the project lock and directory so deletion includes cached PDFs and
+    # cannot race a render that outlives its HTTP request.
+    async with content_storage.project_content_lock(prepared.project_id):
+        async with async_session_maker() as db:
+            exists = await db.scalar(select(Project.id).where(
+                Project.id == prepared.project_id, Project.user_id == prepared.owner_id,
+            ))
+        if not exists:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        worker = asyncio.get_running_loop().run_in_executor(
+            None, lambda: render_cached_book_export(prepared, prepared.cache_key, render_book_output_export)
+        )
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await worker
+            raise
+
+
+def _finish_book_export(cache_key: str, task: asyncio.Task[ExportFile]) -> None:
+    _book_export_tasks.pop(cache_key, None)
+    if not task.cancelled():
+        task.exception()  # Retrieve failures when an HTTP waiter has already timed out.
+
+
+async def export_book_output_file(
+    prepared: PreparedBookExport, *, timeout_seconds: float | None = None,
+) -> ExportFile:
     deadline_seconds = max(
         0.01,
         timeout_seconds
         if timeout_seconds is not None
         else get_settings().memoir_book_export_deadline_seconds,
     )
+    cache_key = await asyncio.to_thread(lambda: prepared.cache_key)
+    task = _book_export_tasks.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_render_project_book_export(prepared))
+        _book_export_tasks[cache_key] = task
+        task.add_done_callback(lambda finished: _finish_book_export(cache_key, finished))
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                render_book_output_export,
-                title=title,
-                version=version.version,
-                content=content,
-                manuscript=manuscript.model_dump(mode="json") if manuscript else {},
-                show_source_appendix=show_source_appendix,
-                export_format=export_format,
-                layout=layout,
-            ),
-            timeout=deadline_seconds,
-        )
+        return await asyncio.wait_for(asyncio.shield(task), timeout=deadline_seconds)
     except TimeoutError as exc:
         minutes = max(1, round(deadline_seconds / 60))
         raise HTTPException(

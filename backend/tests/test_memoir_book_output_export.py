@@ -1026,3 +1026,72 @@ def test_print_chapters_keep_right_page_alignment_and_mirrored_body_margins():
             + (layout.inner_margin_delta if (index + 1) % 2 else -layout.inner_margin_delta)
             + 2 * layout.font_size
         )
+
+
+def test_export_cache_coalesces_processes_and_invalidates_owner_or_renderer_changes(tmp_path, monkeypatch):
+    import multiprocessing
+    import time
+    from dataclasses import replace
+    from app.services.file_exports import ExportFile
+    from app.services.memoir import book_output_export_cache as cache
+    from app.services.memoir.book_output_export_cache import PreparedBookExport
+
+    monkeypatch.setattr(cache.content_storage, "PROJECTS_DIR", tmp_path / "projects")
+    prepared = PreparedBookExport(
+        owner_id="owner", project_id="project", version_id="version", version=1,
+        title="写给他的话", content="正文", manuscript=None,
+        export_format=MemoirBookOutputExportFormat.PDF, layout=MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=False, render_date="2026-10-06",
+    )
+    log = tmp_path / "renders.txt"
+
+    def render(**_kwargs):
+        with log.open("a") as file:
+            file.write("render\n")
+        time.sleep(0.05)
+        return ExportFile(prepared.filename, "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    def worker():
+        result = cache.render_cached_book_export(prepared, prepared.cache_key, render)
+        assert result.content.startswith(b"%PDF-")
+
+    context = multiprocessing.get_context("fork")
+    workers = [context.Process(target=worker) for _ in range(3)]
+    for process in workers:
+        process.start()
+    for process in workers:
+        process.join(timeout=5)
+        assert process.exitcode == 0
+    assert log.read_text() == "render\n"
+    cache.render_cached_book_export(prepared, prepared.cache_key, render)
+    assert log.read_text() == "render\n"
+    assert replace(prepared, owner_id="other-owner").cache_key != prepared.cache_key
+    assert replace(prepared, render_date="2026-10-07").cache_key != prepared.cache_key
+    monkeypatch.setattr(cache, "BOOK_EXPORT_RENDER_REVISION", 2)
+    upgraded = prepared.cache_key  # The already-prepared request remains fixed.
+    assert replace(prepared).cache_key != upgraded
+
+
+def test_illustration_file_content_changes_export_signature(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from app.schemas.memoir_book import MemoirBookManuscript
+    from app.services.memoir.book_output_export_cache import PreparedBookExport
+
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"first image")
+    manuscript = _sample_manuscript("正文")
+    manuscript["back_matter"]["unconfirmed_facts"] = {"kind": "unconfirmed_facts", "title": "待核实"}
+    manuscript["table_of_contents"][0]["chapter_id"] = "chapter-1"
+    manuscript["chapters"][0]["illustrations"] = [{"image_asset_id": "image-1", "storage_path": "photo.png"}]
+    prepared = PreparedBookExport(
+        owner_id="owner", project_id="project", version_id="version", version=1,
+        title="写给他的话", content="正文", manuscript=MemoirBookManuscript.model_validate(manuscript),
+        export_format=MemoirBookOutputExportFormat.PDF, layout=MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=False, render_date="2026-10-06",
+    )
+    original = prepared.cache_key
+    photo.write_bytes(b"changed image")
+    assert replace(prepared).cache_key != original
+    photo.unlink()
+    assert replace(prepared).cache_key != original

@@ -598,12 +598,13 @@ async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscr
         manuscript["chapters"][0]["sections"][0]["source_ref_ids"]
     )
 
-    exported = await book_outputs.export_book_output_file(
+    prepared = await book_outputs.prepare_book_output_export(
         test_db,
         user_id=user["id"],
         project_id=project_id,
         export_format=book_output_export.MemoirBookOutputExportFormat.PDF,
     )
+    exported = await book_outputs.export_book_output_file(prepared)
     assert exported.media_type == "application/pdf"
     assert exported.content.startswith(b"%PDF")
 

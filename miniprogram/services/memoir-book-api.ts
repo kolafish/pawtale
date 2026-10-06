@@ -14,6 +14,7 @@ import type {
   MemoirBookShareStatus,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookEditorialCopyJobsResponse,
+  MemoirBookOutputExportInfo,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookLayoutPreview,
@@ -36,8 +37,8 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
-import { downloadAuthenticatedFile } from "./authenticated-media";
-import { ApiError, cleanBaseUrl, readBackendConfig, request } from "./request";
+import { downloadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
+import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
 
 export function getMemoirBookShareStatus(projectId: string): Promise<MemoirBookShareStatus> {
   return memoirRequest<MemoirBookShareStatus>(memoirProjectPath(projectId, "/book-output/share"));
@@ -432,18 +433,25 @@ export function memoirBookOutputExportUrl(
   return `${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, `/book-output/export?${params.join("&")}`)}`;
 }
 
-export function downloadMemoirBookOutputExport(
+export async function downloadMemoirBookOutputExport(
   projectId: string,
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
   preview?: MemoirBookLayoutPreview,
+  onPhase?: (phase: FileDownloadPhase) => void,
 ): Promise<string> {
-  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix, preview);
+  const sessionCookie = readSessionCookie();
+  onPhase?.("checking");
+  const infoUrl = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix, preview);
+  const infoPath = infoUrl.slice(cleanBaseUrl(readBackendConfig().httpBaseUrl).length).replace("/export?", "/export/info?");
+  const info = await memoirRequest<MemoirBookOutputExportInfo>(infoPath);
+  const url = `${memoirBookOutputExportUrl(projectId, format, info.version_id, layout, showSourceAppendix, preview)}&cache_key=${encodeURIComponent(info.cache_key)}`;
   return downloadAuthenticatedFile(url, {
     timeoutProfile: "export",
     failureMessage: "文件下载失败",
     domainLabel: "文件下载",
+    cache: { key: info.cache_key, filename: info.filename, ready: info.ready, sessionCookie, onPhase },
   });
 }

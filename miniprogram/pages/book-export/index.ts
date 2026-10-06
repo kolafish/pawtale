@@ -245,6 +245,7 @@ type BookExportData = BookOutputData & {
   planTitle: string;
   totalChapterCount: number;
   bookExportBusyTarget: string;
+  bookExportBusyText: string;
   bookExportShowSourceAppendix: boolean;
   bookTitleSaving: boolean;
   bookTitleSuggesting: boolean;
@@ -324,6 +325,7 @@ definePage<BookExportData>()({
     totalChapterCount: 0,
     bookOutputAvailable: false,
     bookExportBusyTarget: "",
+    bookExportBusyText: "",
     bookExportShowSourceAppendix: false,
     bookTitleSaving: false,
     bookTitleSuggesting: false,
@@ -941,6 +943,9 @@ definePage<BookExportData>()({
         template === "current" ? undefined : {
           template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined,
         },
+        (phase) => this.setData({ bookLayoutFeedbackText: {
+          checking: "正在检查预览…", generating: "正在生成预览…", downloading: "正在下载预览…", opening: "正在打开预览…",
+        }[phase] }),
       );
       await openBookPdf(filePath);
       this.setData({
@@ -1073,7 +1078,7 @@ definePage<BookExportData>()({
       this.setData({ error: "章节内容已更新，请先更新书稿再导出" });
       return;
     }
-    this.setData({ bookExportBusyTarget: target, error: "", exportNotice: "" });
+    this.setData({ bookExportBusyTarget: target, bookExportBusyText: "正在检查…", error: "", exportNotice: "" });
     try {
       const filePath = await downloadMemoirBookOutputExport(
         this.data.projectId,
@@ -1081,13 +1086,15 @@ definePage<BookExportData>()({
         this.data.bookSelectedVersionId,
         layout,
         format === "pdf" ? this.data.bookExportShowSourceAppendix : true,
+        undefined,
+        (phase) => this.setData({ bookExportBusyText: {
+          checking: "正在检查…", generating: "正在生成…", downloading: "正在下载…", opening: "正在打开…",
+        }[phase] }),
       );
       if (format === "pdf") {
         await openBookPdf(filePath);
       } else {
-        const title = trimText(this.data.bookManuscriptTitle || this.data.bookPreviewTitle || this.data.planTitle)
-          .replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "回忆录";
-        await shareLocalFileMessage({ filePath, fileName: `${title}.txt` });
+        await shareLocalFileMessage({ filePath, fileName: filePath.slice(filePath.lastIndexOf("/") + 1) });
       }
       wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "已打开微信分享", icon: "success" });
     } catch (error) {

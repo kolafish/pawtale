@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -132,6 +133,9 @@ class MemoirBookOutputExportFormat(StrEnum):
     TXT = "txt"
     PDF = "pdf"
 
+
+EXPORT_DATE: ContextVar[str | None] = ContextVar("memoir_export_date", default=None)
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -161,11 +165,11 @@ def _int(value: Any, fallback: int) -> int:
 
 
 def _today_date_text() -> str:
-    return datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat()
+    return EXPORT_DATE.get() or datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat()
 
 
 def _today_month_text() -> str:
-    today = datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date()
+    today = datetime.fromisoformat(_today_date_text()).date()
     return f"{today.year} 年 {today.month} 月"
 
 
@@ -1648,19 +1652,14 @@ def _filename_book_title(title: str) -> str:
     return "家庭回忆录" if title == "家庭回忆录" else f"《{title}》"
 
 
-def _book_export_filename(
+def book_export_filename(
     title: str,
     version: int,
     extension: str,
     layout: MemoirBookOutputExportLayout,
 ) -> str:
-    date_text = _today_date_text()
     suffix = PDF_LAYOUTS[layout].filename_suffix if extension == "pdf" else ""
-    version_suffix = f"v{version}" if version > 1 else ""
-    if extension == "pdf":
-        parts = [_filename_book_title(title), suffix, date_text, version_suffix]
-    else:
-        parts = [_filename_book_title(title), date_text, version_suffix]
+    parts = [_filename_book_title(title), suffix, f"v{version}"]
     return safe_filename("_".join(part for part in parts if part), extension)
 
 
@@ -1685,7 +1684,7 @@ def render_book_output_export(
             custom_layout=_dict(manuscript_settings.get("custom_layout")),
         )
         return ExportFile(
-            filename=_book_export_filename(export_title, version, "pdf", layout),
+            filename=book_export_filename(export_title, version, "pdf", layout),
             media_type="application/pdf",
             content=_render_manuscript_pdf(
                 title=export_title,
@@ -1696,7 +1695,7 @@ def render_book_output_export(
             ),
         )
     return ExportFile(
-        filename=_book_export_filename(export_title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
+        filename=book_export_filename(export_title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
         media_type="text/plain; charset=utf-8",
         content=content + "\n",
     )

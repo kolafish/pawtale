@@ -237,6 +237,14 @@ declare namespace WechatMiniprogram {
   }
 
   interface FileSystemManager {
+    accessSync(path: string): void;
+    mkdirSync(dirPath: string, recursive?: boolean): void;
+    copyFileSync(srcPath: string, destPath: string): void;
+    renameSync(oldPath: string, newPath: string): void;
+    readdirSync(dirPath: string): string[];
+    statSync(path: string): { size: number; lastModifiedTime: number };
+    unlinkSync(filePath: string): void;
+    rmdirSync(dirPath: string, recursive?: boolean): void;
     readFile(option: FileSystemReadFileOption): void;
     writeFile(option: FileSystemWriteFileOption): void;
     unlink?(option: FileSystemUnlinkOption): void;

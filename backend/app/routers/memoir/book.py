@@ -1,13 +1,15 @@
+import asyncio
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
+from app.services.memoir.book_output_export_cache import PreparedBookExport, has_cached_export, export_cache_path
 from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
     MemoirBookCustomFontScale,
@@ -25,6 +27,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputEditorialCopyGenerationJobListResponse,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
+    MemoirBookOutputExportInfo,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
@@ -613,8 +616,7 @@ async def suggest_mobile_memoir_book_output_titles(
     )
 
 
-@router.get("/projects/{project_id}/book-output/export")
-async def export_mobile_memoir_book_output(
+async def prepare_mobile_memoir_book_export(
     project_id: str,
     export_format: memoir_book_outputs.MemoirBookOutputExportFormat = Query(
         memoir_book_outputs.MemoirBookOutputExportFormat.PDF,
@@ -631,8 +633,8 @@ async def export_mobile_memoir_book_output(
     preview_page_margin: MemoirBookCustomPageMargin | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
-    export_file = await memoir_book_outputs.export_book_output_file(
+) -> PreparedBookExport:
+    return await memoir_book_outputs.prepare_book_output_export(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -652,6 +654,27 @@ async def export_mobile_memoir_book_output(
             if value is not None
         },
     )
+
+
+@router.get("/projects/{project_id}/book-output/export/info", response_model=MemoirBookOutputExportInfo)
+async def get_mobile_memoir_book_export_info(
+    prepared: PreparedBookExport = Depends(prepare_mobile_memoir_book_export),
+):
+    cache_key = await asyncio.to_thread(lambda: prepared.cache_key)
+    return MemoirBookOutputExportInfo(
+        version_id=prepared.version_id, cache_key=cache_key, filename=prepared.filename,
+        ready=await asyncio.to_thread(has_cached_export, export_cache_path(prepared, cache_key), prepared.export_format),
+    )
+
+
+@router.get("/projects/{project_id}/book-output/export")
+async def export_mobile_memoir_book_output(
+    prepared: PreparedBookExport = Depends(prepare_mobile_memoir_book_export),
+    cache_key: str | None = None,
+):
+    if cache_key is not None and cache_key != await asyncio.to_thread(lambda: prepared.cache_key):
+        raise HTTPException(status_code=409, detail="书稿导出内容已变化，请重新打开。")
+    export_file = await memoir_book_outputs.export_book_output_file(prepared)
     return Response(
         content=export_file.content,
         media_type=export_file.media_type,

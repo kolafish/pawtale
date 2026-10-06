@@ -27,6 +27,7 @@ function resetMemoirApiModules() {
 
 function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao-seed-2-0-pro-260215" } = {}) {
   global.wx = {
+    ...require("./file-system-mock").fileSystemWx(),
     getStorageSync(key) {
       if (key === "pawtale_backend_config") {
         return {
@@ -56,6 +57,12 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         return;
       }
       let data = samplePlan("confirmed");
+      if (options.url.includes("/book-output/export/info?")) {
+        const params = new URL(options.url).searchParams;
+        data = { version_id: params.get("version_id"), cache_key: require("node:crypto").createHash("sha256").update(options.url).digest("hex"), filename: "写给他的话_阅读版_v28.pdf", ready: false };
+        options.success({ statusCode: 200, data, header: {} });
+        return;
+      }
       if (
         options.url.endsWith("/draft/tts")
         || (options.url.includes("/draft/sections/") && options.url.endsWith("/tts"))
@@ -80,7 +87,7 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
     },
     downloadFile(options) {
       downloads.push(options);
-      options.success({ statusCode: 200, tempFilePath: "/tmp/book.pdf", header: {}, errMsg: "downloadFile:ok" });
+      options.success({ statusCode: 200, tempFilePath: `${wx.env.USER_DATA_PATH}/download.pdf`, header: {}, errMsg: "downloadFile:ok" });
     },
   };
 }
@@ -687,7 +694,7 @@ test("share video custom background upload and preview use backend session", asy
   assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(uploads[0].timeout, 60000);
   assert.equal(
-    downloads[0].url,
+    downloads[0].url.split("&cache_key=")[0],
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
@@ -791,19 +798,19 @@ test("book output export download encodes route and session cookie", async () =>
   });
 
   const baseExportUrl = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export";
-  assert.equal(path, "/tmp/book.pdf");
+  assert.ok(path.endsWith("/写给他的话_阅读版_v28.pdf"));
   assert.equal(
-    downloads[0].url,
+    downloads[0].url.split("&cache_key=")[0],
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=true&version_id=version%2F1`,
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(downloads[0].timeout, 300000);
   assert.equal(
-    downloads[1].url,
+    downloads[1].url.split("&cache_key=")[0],
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&version_id=version%2F1`,
   );
   assert.equal(
-    downloads[2].url,
+    downloads[2].url.split("&cache_key=")[0],
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&preview_template=custom&preview_font_scale=large&preview_line_spacing=relaxed&preview_page_margin=wide&version_id=version%2F1`,
   );
   delete global.wx;
