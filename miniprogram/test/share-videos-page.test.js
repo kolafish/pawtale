@@ -142,9 +142,9 @@ test("video library restores queued and running tasks and opens their existing p
 
 test("video progress updates stages and moves completion into the loaded library without losing older pages", async () => {
   let polls = 0;
-  const { page } = loadLibraryPage(async (_projectId, { offset }) => ({
+  const { page } = loadLibraryPage(async (_projectId, { limit, offset }) => ({
     items: [video(offset ? "video-1" : "video-2", "utterance-old")],
-    active_jobs: [job("running")], total: 2, limit: 20, offset,
+    active_jobs: [job("running")], total: limit === 1 ? 3 : 2, limit, offset,
   }), async () => ++polls === 1
     ? job("running", { background_status: "ready" }) : job("succeeded"));
   const polling = libraryWithPolling(page);
@@ -174,6 +174,35 @@ test("video progress leaves a failed task visible with its real error and stops 
   await polling.tick();
   assert.equal(polling.context.data.taskItems[0].status, "failed");
   assert.equal(polling.context.data.taskItems[0].statusText, "配图服务暂时不可用");
+  assert.equal(polling.hasPoll(), false);
+});
+
+test("pagination during completion keeps the task until its final status and does not duplicate videos or counts", async () => {
+  let resolve;
+  let polls = 0;
+  const pending = new Promise((done) => { resolve = done; });
+  const { page } = loadLibraryPage(async (_projectId, { limit, offset }) => ({
+    items: limit === 1 ? [video("working", "utterance-working")]
+      : offset ? [video("video-2", "utterance-old"), video("video-1", "utterance-old")]
+        : [video("video-2", "utterance-old")],
+    active_jobs: !offset && limit !== 1 ? [job("running")] : [],
+    total: offset || limit === 1 ? 3 : 2, limit, offset,
+  }), () => ++polls === 1 ? pending : Promise.resolve(job("succeeded")));
+  const polling = libraryWithPolling(page);
+  const { context } = polling;
+  context.onShow();
+  await flushAsyncWork();
+  const refreshing = context.refreshVideoProgress();
+  await context.loadVideos(false);
+  resolve(job("succeeded"));
+  await refreshing;
+  assert.deepEqual(context.data.items.map((item) => item.id), ["video-2", "video-1"]);
+  assert.equal(context.data.taskItems[0].id, "working");
+  await polling.tick();
+  assert.deepEqual(context.data.items.map((item) => item.id), ["working", "video-2", "video-1"]);
+  assert.equal(context.data.total, 3);
+  assert.equal(context.data.hasMore, false);
+  assert.deepEqual(context.data.taskItems, []);
   assert.equal(polling.hasPoll(), false);
 });
 

@@ -122,11 +122,15 @@ definePage<ShareVideosData>()({
       if (requestToken !== this.requestToken) return;
       const items = reset
         ? response.items.map(toViewItem)
-        : [...this.data.items, ...response.items.map(toViewItem)];
+        : [...this.data.items, ...response.items
+          .filter((item) => !this.data.items.some((existing) => existing.id === item.id))
+          .map(toViewItem)];
+      const activeIds = new Set(response.active_jobs.map((job) => job.id));
       this.setData({
         needsLogin: false,
         items,
-        taskItems: response.active_jobs.map(toTaskView),
+        taskItems: [...response.active_jobs.map(toTaskView),
+          ...(!reset ? this.data.taskItems.filter((item) => !activeIds.has(item.id)) : [])],
         total: response.total,
         hasMore: response.items.length > 0 && items.length < response.total,
       });
@@ -168,12 +172,18 @@ definePage<ShareVideosData>()({
         .sort((left, right) => Date.parse(right.completed_at || right.created_at) - Date.parse(left.completed_at || left.created_at)
           || right.id.localeCompare(left.id))
         .map((job) => toViewItem({ ...job, completed_at: job.completed_at || null }));
+      const total = completed.length
+        ? (await listMemoirShareVideos(this.data.projectId, { limit: 1, offset: 0 })).total
+        : this.data.total;
+      if (requestToken !== this.requestToken) return;
+      const items = [...completed, ...this.data.items];
       this.setData({
         taskItems: this.data.taskItems
           .map((item) => updates.has(item.id) ? toTaskView(updates.get(item.id)!) : item)
           .filter((item) => item.status !== "succeeded"),
-        items: [...completed, ...this.data.items],
-        total: this.data.total + completed.length,
+        items,
+        total,
+        hasMore: completed.length ? items.length < total : this.data.hasMore,
         error: "",
       });
       this.scheduleProgressPolling();
