@@ -153,6 +153,12 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface EditImageOption {
+    src: string;
+    success?(result: GeneralCallbackResult & { tempFilePath: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+  }
+
   interface ChooseMediaFile {
     tempFilePath: string;
     size: number;
@@ -466,6 +472,7 @@ declare namespace WechatMiniprogram {
     uploadFile(option: UploadFileOption): void;
     chooseImage(option: ChooseImageOption): void;
     chooseMedia?(option: ChooseMediaOption): void;
+    editImage?(option: EditImageOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;

@@ -1193,8 +1193,15 @@ test("upload, cancel, replace failure and restore a cover without changing body 
   const output = sampleBookOutput();
   let choice = "image";
   let failUpload = false;
+  let editChoice = "done";
   const calls = [];
   global.wx = {
+    editImage(options) {
+      calls.push(["edit", options.src]);
+      if (editChoice === "cancel") options.fail({ errMsg: "editImage:fail cancel" });
+      else if (editChoice === "failure") options.fail({ errMsg: "图片编辑失败" });
+      else options.success({ tempFilePath: "/tmp/cropped-cover.jpg" });
+    },
     chooseMedia(options) {
       if (choice === "cancel") options.fail({ errMsg: "chooseMedia:cancel" });
       else options.success({ tempFiles: [{ tempFilePath: "/tmp/family.jpg" }] });
@@ -1211,7 +1218,10 @@ test("upload, cancel, replace failure and restore a cover without changing body 
       calls.push(["place", projectId, id, payload]);
       output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "photo" };
     },
-    downloadMemoirImageAssetFile: async () => "/tmp/cover-preview.jpg",
+    downloadMemoirImageAssetFile: async (projectId, assetId, thumbnail) => {
+      calls.push(["download", projectId, assetId, thumbnail]);
+      return thumbnail ? "/tmp/cover-preview.jpg" : "/tmp/full-cover.jpg";
+    },
     listMemoirImageAssets: async () => ({ items: [{ id: "photo", placements: [{ id: "cover-place", enabled: true, placement_type: "cover" }] }] }),
     deleteMemoirBookImagePlacement: async (projectId, id, placementId) => {
       calls.push(["restore", projectId, id, placementId]);
@@ -1231,6 +1241,23 @@ test("upload, cancel, replace failure and restore a cover without changing body 
     assert.equal(context.data.bookLayoutTemplate, template);
     assert.deepEqual(context.data.bookCustomLayout, controls);
     assert.equal(context.data.bookLayoutBusyTarget, "");
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "edit" } } });
+    assert.ok(calls.some((call) => call[0] === "edit" && call[1] === "/tmp/full-cover.jpg"));
+    assert.ok(calls.some((call) => call[0] === "upload" && call[2] === "/tmp/cropped-cover.jpg"));
+    assert.deepEqual(context.data.bookCustomLayout, controls);
+    assert.equal(context.data.bookLayoutBusyTarget, "");
+    editChoice = "cancel";
+    const beforeCancel = calls.filter((call) => call[0] === "upload").length;
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "edit" } } });
+    assert.equal(calls.filter((call) => call[0] === "upload").length, beforeCancel);
+    assert.equal(context.data.bookUploadedCoverAssetId, "photo");
+    assert.equal(context.data.bookLayoutBusyTarget, "");
+    editChoice = "failure";
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "edit" } } });
+    assert.equal(context.data.bookLayoutFeedbackText, "图片编辑失败");
+    assert.equal(context.data.bookUploadedCoverAssetId, "photo");
+    assert.equal(context.data.bookLayoutBusyTarget, "");
+    editChoice = "done";
     choice = "cancel";
     const count = calls.length;
     await page.changeBookCoverImage.call(context, { currentTarget: { dataset: {} } });
@@ -1247,7 +1274,7 @@ test("upload, cancel, replace failure and restore a cover without changing body 
     assert.deepEqual(context.data.bookCustomLayout, controls);
     assert.equal(context.data.bookLayoutTemplate, template);
   }
-  assert.deepEqual(calls[0], ["upload", "project/1", "/tmp/family.jpg"]);
-  assert.deepEqual(calls[1], ["place", "project/1", "photo", { placement_type: "cover" }]);
+  assert.deepEqual(calls.find((call) => call[0] === "upload"), ["upload", "project/1", "/tmp/cropped-cover.jpg"]);
+  assert.deepEqual(calls.find((call) => call[0] === "place"), ["place", "project/1", "photo", { placement_type: "cover" }]);
   assert.ok(calls.some((call) => call[0] === "restore" && call[3] === "cover-place"));
 });

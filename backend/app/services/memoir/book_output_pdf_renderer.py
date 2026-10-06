@@ -199,6 +199,7 @@ class PDFDecorationCommand:
     color: PDFColor
     stroke_color: PDFColor | None = None
     line_width: float = 0
+    opacity: float = 1
 
 
 @dataclass
@@ -217,6 +218,7 @@ class PDFPage:
     images: list[PDFImageCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
     background_image_path: Path | None = None
+    background_image_preserve_aspect: bool = False
     text_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
@@ -1138,17 +1140,27 @@ def _render_pdf_pages(
             pdf.setFillColorRGB(*page.background_color)
             pdf.rect(0, 0, layout.page_width, layout.page_height, stroke=0, fill=1)
         if page.background_image_path:
+            background_source = (
+                _optimized_pdf_image_source(PDFImageCommand(
+                    path=page.background_image_path, x=0, y=0,
+                    width=layout.page_width, height=layout.page_height,
+                )) if page.background_image_preserve_aspect else str(page.background_image_path)
+            )
             pdf.drawImage(
-                str(page.background_image_path),
+                background_source,
                 0,
                 0,
                 width=layout.page_width,
                 height=layout.page_height,
-                preserveAspectRatio=False,
+                preserveAspectRatio=page.background_image_preserve_aspect,
+                anchor="c",
                 mask="auto",
             )
         for decoration in page.decorations:
+            pdf.saveState()
+            pdf.setFillAlpha(decoration.opacity)
             _draw_pdf_decoration(pdf, decoration)
+            pdf.restoreState()
         for image in page.images:
             image_key = (image.path, round(image.width), round(image.height))
             image_source = image_sources.get(image_key)
