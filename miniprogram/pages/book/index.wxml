@@ -104,10 +104,10 @@
     <button
       class="workspace-tab {{bookWorkspaceView === 'tools' ? 'active' : ''}}"
       data-view="tools"
-      aria-label="查看书稿工具"
+      aria-label="查看书稿素材"
       bindtap="changeBookWorkspaceView"
     >
-      工具
+      素材
       <text wx:if="{{automationEventItems.length}}" class="workspace-tab-count">{{automationEventItems.length}}</text>
     </button>
   </view>
