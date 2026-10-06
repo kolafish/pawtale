@@ -154,17 +154,21 @@ async def test_failures_retry_only_explicitly_and_keep_completed_audio(client, t
 
 
 async def test_missing_audio_file_is_regenerated(client, test_db, tts):
-    project_id, user_id, version = await seed(client, test_db, "一段正文。")
+    project_id, user_id, version = await seed(client, test_db)
     plan = await prepare(test_db, project_id, user_id, version)
-    assert await run_test_editing_job(test_db, plan.segments[0].job_id)
+    for index in range(len(plan.segments)):
+        plan = await prepare(test_db, project_id, user_id, version, start_index=index)
+        assert await run_test_editing_job(test_db, plan.segments[index].job_id)
     ready = await prepare(test_db, project_id, user_id, version)
-    audio = await test_db.get(AudioFile, ready.segments[0].audio_file_id)
+    audio = await test_db.get(AudioFile, ready.segments[-1].audio_file_id)
     audio_file_path(audio).unlink()
     next_plan = await prepare(test_db, project_id, user_id, version)
-    assert next_plan.ready_count == 0
-    assert next_plan.segments[0].status == "pending"
-    assert await run_test_editing_job(test_db, next_plan.segments[0].job_id)
-    assert (await prepare(test_db, project_id, user_id, version)).segments[0].audio_file_id != audio.id
+    assert next_plan.ready_count == len(plan.segments) - 1
+    assert next_plan.segments[-1].status == "idle"
+    queued = await prepare(test_db, project_id, user_id, version, start_index=len(plan.segments) - 1)
+    assert queued.segments[-1].status == "pending"
+    assert await run_test_editing_job(test_db, queued.segments[-1].job_id)
+    assert (await prepare(test_db, project_id, user_id, version)).segments[-1].audio_file_id != audio.id
 
 
 async def test_legacy_recording_stays_available_after_book_metadata_changes(client, test_db, tts):
@@ -211,6 +215,24 @@ async def test_plan_rejects_missing_version_and_changed_profile(client, test_db,
     assert changed.status_code == 409
     invalid = await client.post(url, json={"version_id": version.id, "start_index": 500})
     assert invalid.status_code == 400
+
+
+async def test_forced_regeneration_replaces_new_requests_but_keeps_playing_legacy_audio(client, test_db, tts):
+    project_id, user_id, version = await seed(client, test_db)
+    synthesis = await book_audio.synthesize_text_audio(test_db, user_id=user_id, text=version.content)
+    output = await test_db.get(MemoirBookOutput, version.output_id)
+    output.metadata_json = {"book_tts": book_audio.audio_cache_payload(synthesis, voice=None, speed_ratio=1)}
+    await test_db.commit()
+    legacy = await prepare(test_db, project_id, user_id, version)
+    forced = await book_audio_jobs.complete_book_audio(
+        test_db, project_id=project_id, user_id=user_id,
+        req=MemoirBookAudioPlanRequest(version_id=version.id, force_regenerate=True),
+    )
+    current = await prepare(test_db, project_id, user_id, version)
+    assert [s.audio_file_id for s in current.segments] == forced.audio_file_ids
+    assert current.profile_key != legacy.profile_key
+    pinned = await prepare(test_db, project_id, user_id, version, profile_key=legacy.profile_key)
+    assert pinned == legacy
 
 
 async def test_committed_audio_checkpoint_survives_worker_restart(client, test_db, tts):

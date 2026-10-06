@@ -164,6 +164,8 @@ async def _legacy_audio_plan(
     chunks = book_audio.split_tts_text(version.content)
     if cached is None or len(cached.audio_file_ids) != len(chunks):
         return None
+    if req.start_index >= len(chunks):
+        raise HTTPException(400, "朗读片段超出书稿范围")
     if req.profile_key and req.profile_key != signature:
         raise HTTPException(409, "音频清单已变化，请重新发起朗读")
     segments = []
@@ -250,17 +252,7 @@ async def prepare_book_audio(
     text = version.content.strip()
     profile = audio_profile(book_audio.get_tts_client(), req.voice, req.speed_ratio)
     signature = profile_key(profile)
-    if not req.force_regenerate:
-        legacy = await _legacy_audio_plan(
-            db, project_id=project_id, user_id=owner_id, version=version, profile=profile, req=req,
-        )
-        if legacy:
-            return legacy
-    if req.profile_key and req.profile_key != signature:
-        raise HTTPException(409, "朗读配置已变化，请重新发起朗读")
     chunks = split_book_audio_text(text)
-    if req.start_index >= len(chunks):
-        raise HTTPException(400, "朗读片段超出书稿范围")
     keys = [chunk_key(project_id, owner_id, profile, chunk.text) for chunk in chunks]
     jobs = {job.dedupe_key: job for job in (await db.scalars(
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key.in_(keys))
@@ -273,13 +265,29 @@ async def prepare_book_audio(
     files = {f.id: f for f in (await db.scalars(select(AudioFile).where(
         AudioFile.id.in_(cached_ids), AudioFile.user_id == owner_id,
     ))).all()} if cached_ids else {}
+    cached_by_key = {key: await _usable_audio(db, job, owner_id, files=files) for key, job in jobs.items()}
+    # Prefer a complete regenerated playlist for new requests. A playing legacy
+    # playlist keeps its own signature and audio, even after regeneration.
+    wants_legacy = req.profile_key is not None and req.profile_key != signature
+    if not req.force_regenerate and (
+        wants_legacy or (req.profile_key is None and not all(cached_by_key.get(key) for key in keys))
+    ):
+        legacy = await _legacy_audio_plan(
+            db, project_id=project_id, user_id=owner_id, version=version, profile=profile, req=req,
+        )
+        if legacy:
+            return legacy
+    if req.profile_key and req.profile_key != signature:
+        raise HTTPException(409, "朗读配置已变化，请重新发起朗读")
+    if req.start_index >= len(chunks):
+        raise HTTPException(400, "朗读片段超出书稿范围")
     segments: list[MemoirBookAudioSegmentResponse] = []
     settings = get_settings()
     window_end = req.start_index + max(1, min(3, settings.book_audio_prefetch_chunks))
     force = req.force_regenerate and req.profile_key is None
     for index, (chunk, key) in enumerate(zip(chunks, keys)):
         job = jobs.get(key)
-        cached = None if force else await _usable_audio(db, job, owner_id, files=files)
+        cached = None if force else cached_by_key.get(key)
         if cached is None and (force or req.start_index <= index < window_end):
             job = await enqueue_editing_job(
                 db, project_id=project_id,
@@ -293,6 +301,8 @@ async def prepare_book_audio(
             )
             jobs[key] = job
         status = "succeeded" if cached else (job.status if job else "idle")
+        if cached is None and status == MemoirEditingJobStatus.SUCCEEDED.value:
+            status = "idle"
         if status == MemoirEditingJobStatus.SKIPPED.value:
             status = "failed"
         segments.append(MemoirBookAudioSegmentResponse(
