@@ -248,8 +248,8 @@ _UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
         provider="volc_tts",
         model="seed-tts-2.0",
         unit="text_character",
-        rmb_per_unit=0.0005,
-        source="https://www.volcengine.com/product/ark",
+        rmb_per_unit=0.0003,
+        source="https://docs.volcengine.com/docs/DoubaoVoice/Billinginstructions-21?lang=zh",
     ),
 }
 

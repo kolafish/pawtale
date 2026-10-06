@@ -7,6 +7,7 @@ import math
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import ApplicationError
 from app.models.memoir import AudioFile
 from app.schemas.memoir_book import MemoirBookAudioResponse
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
@@ -269,7 +270,7 @@ async def synthesize_text_audio(
             audio_file_durations_seconds.append(chunk_duration_seconds)
             elapsed_ms += chunk_duration_ms
             duration_seconds = elapsed_ms / 1000 if elapsed_ms > 0 else None
-    except HTTPException:
+    except (ApplicationError, HTTPException):
         await discard_staged_audio_files(staged_audio)
         raise
     except Exception as exc:

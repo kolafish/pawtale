@@ -102,7 +102,7 @@ def test_estimates_off_text_provider_costs_and_removes_claude_pricing():
         model="seed-tts-2.0",
         character_count=1_000,
     )
-    assert tts.amount_rmb == 0.5
+    assert tts.amount_rmb == 0.3
 
     claude = estimate_ai_cost(
         provider="claude",
