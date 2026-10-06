@@ -181,6 +181,18 @@ async def test_legacy_recording_stays_available_after_book_metadata_changes(clie
     await test_db.commit()
     assert (await prepare(test_db, project_id, user_id, version, profile_key=legacy.profile_key)) == legacy
     assert len(tts.calls) == count
+    design_version = MemoirBookOutputVersion(
+        output_id=version.output_id, project_id=project_id, plan_id=version.plan_id,
+        version=version.version + 1, content=version.content, created_by=version.created_by,
+        manuscript_json={"render_settings": {"cover_style": "warm_gray"}},
+    )
+    test_db.add(design_version)
+    await test_db.commit()
+    unchanged = await prepare(test_db, project_id, user_id, design_version)
+    assert unchanged.version_id == design_version.id
+    assert [s.audio_file_id for s in unchanged.segments] == [s.audio_file_id for s in legacy.segments]
+    assert unchanged.ready_count == legacy.ready_count
+    assert len(tts.calls) == count
     output.metadata_json = {"book_tts": book_audio.audio_cache_payload(synthesis, voice=None, speed_ratio=1)}
     tts.default_voice = "changed-default"
     await test_db.commit()

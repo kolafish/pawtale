@@ -123,20 +123,20 @@ async def _legacy_audio_plan(
     db: AsyncSession, *, project_id: str, user_id: str, version: MemoirBookOutputVersion,
     profile: AudioProfile, req: MemoirBookAudioPlanRequest,
 ) -> MemoirBookAudioPlanResponse | None:
-    """Keep an existing whole-book recording pinned to its original version.
+    """Keep an existing whole-book recording for identical narration text.
 
     Old caches did not record the resolved default voice/sample rate, so they
     cannot safely populate the cross-version chunk cache.
     """
     text_hash = book_audio.source_text_hash(version.content.strip())
-    signature = book_audio.source_text_hash(f"legacy:{version.id}:{profile_key(profile)}")
+    signature = book_audio.source_text_hash(f"legacy:{text_hash}:{profile_key(profile)}")
     key = f"book-audio-legacy:{project_id}:{signature}"
     job = await db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == key))
     cached = await _usable_audio(db, job, user_id)
     imported = await db.scalar(select(MemoirEditingJob.id).where(
         MemoirEditingJob.project_id == project_id,
         MemoirEditingJob.dedupe_key.like(f"book-audio-legacy:{project_id}:%"),
-        MemoirEditingJob.payload_json["version_id"].as_string() == version.id,
+        MemoirEditingJob.payload_json["text"].as_string() == version.content.strip(),
     ).limit(1)) if job is None else None
     if job is None and imported is None:
         output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
