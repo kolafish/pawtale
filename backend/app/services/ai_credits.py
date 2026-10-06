@@ -19,6 +19,7 @@ from app.schemas.billing import AICreditSummaryResponse
 
 MONEY_QUANTUM = Decimal("0.000001")
 USAGE_DEBIT = "usage_debit"
+USAGE_REFUND = "usage_refund"
 MANUAL_ADJUSTMENT = "manual_adjustment"
 
 
@@ -58,8 +59,7 @@ async def get_ai_credit_summary(
     debit_used_rmb = await db.scalar(
         select(func.coalesce(func.sum(-AICreditTransaction.amount_rmb), 0)).where(
             AICreditTransaction.user_id == user_id,
-            AICreditTransaction.transaction_type == USAGE_DEBIT,
-            AICreditTransaction.amount_rmb < 0,
+            AICreditTransaction.transaction_type.in_((USAGE_DEBIT, USAGE_REFUND)),
         )
     )
     legacy_used_rmb = await db.scalar(

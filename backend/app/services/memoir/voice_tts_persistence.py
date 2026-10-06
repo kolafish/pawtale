@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application_errors import ApplicationError
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
 from app.models.projects import Project
@@ -223,7 +224,7 @@ async def synthesize_assistant_message(
     text = message.content_text.strip()
     try:
         result = await client.synthesize(text, voice=req.voice, speed_ratio=req.speed_ratio)
-    except HTTPException as exc:
+    except (ApplicationError, HTTPException) as exc:
         await _record_tts_usage(
             provider=client.provider_name,
             model=client.model_name,

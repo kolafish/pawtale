@@ -16,6 +16,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import Settings, get_settings
+from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.memoir.tts_alignment import (
     TTSAlignmentSegment,
     alignment_segments_from_volc_words,
@@ -137,6 +138,7 @@ class VolcTTSClient:
         )
 
         async def request() -> httpx.Response:
+            await assert_current_ai_credit_available()
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     self.endpoint,
@@ -203,6 +205,7 @@ class VolcTTSClient:
 
         try:
             async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+                await assert_current_ai_credit_available()
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     async with client.stream(
                         "POST",
@@ -301,6 +304,7 @@ class VolcTTSClient:
         session_id = str(uuid.uuid4())
 
         async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+            await assert_current_ai_credit_available()
             try:
                 started_at = asyncio.get_running_loop().time()
                 deadline = started_at + timeout

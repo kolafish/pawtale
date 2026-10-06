@@ -2,12 +2,17 @@ import base64
 from contextlib import asynccontextmanager
 import json
 import struct
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import HTTPException
 
+from app.application_errors import InsufficientAICreditError
 from app.config import Settings
+from app.schemas.memoir_voice import MemoirAssistantTTSRequest
+from app.services.memoir import book_audio, voice_tts_persistence
 from app.services.memoir.voice_tts import VolcTTSClient, get_tts_client
 
 
@@ -31,6 +36,63 @@ def test_get_tts_client_supports_volc_provider():
 def test_get_tts_client_rejects_disabled_provider():
     with pytest.raises(HTTPException):
         get_tts_client(Settings(tts_provider="disabled"))
+
+
+@pytest.mark.parametrize("mode", ["synthesize", "stream_synthesize", "stream_input_synthesize"])
+async def test_exhausted_credit_blocks_tts_after_waiting_for_provider_slot(monkeypatch, mode):
+    limiter = RecordingLimiter()
+    error = InsufficientAICreditError("AI 额度已用尽")
+
+    async def exhausted():
+        assert limiter.calls or limiter.slot_calls
+        raise error
+
+    def unexpected_network(*args, **kwargs):
+        pytest.fail("Exhausted credit must not contact the TTS provider")
+
+    monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
+    monkeypatch.setattr("app.services.memoir.voice_tts.assert_current_ai_credit_available", exhausted)
+    monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", unexpected_network)
+    monkeypatch.setattr("app.services.memoir.voice_tts.websockets.connect", unexpected_network)
+    client = VolcTTSClient(Settings(
+        volc_tts_app_id="app-id", volc_tts_access_token="access-token",
+        volc_tts_resource_id="seed-tts-2.0", volc_tts_speaker="zh_female_vv_uranus_bigtts",
+    ))
+
+    async def texts():
+        yield "你好"
+
+    with pytest.raises(InsufficientAICreditError) as caught:
+        if mode == "synthesize":
+            await client.synthesize("你好")
+        else:
+            source = texts() if mode == "stream_input_synthesize" else "你好"
+            async for _ in getattr(client, mode)(source):
+                pytest.fail("Exhausted credit must not yield audio")
+    assert caught.value is error
+
+
+@pytest.mark.parametrize("target", ["book", "assistant"])
+async def test_tts_services_preserve_credit_error(monkeypatch, target):
+    error = InsufficientAICreditError("AI 额度已用尽")
+    client = SimpleNamespace(
+        provider_name="volc_tts", model_name="seed-tts-2.0",
+        synthesize=AsyncMock(side_effect=error),
+    )
+    monkeypatch.setattr(book_audio, "record_ai_usage", AsyncMock())
+    monkeypatch.setattr(voice_tts_persistence, "_record_tts_usage", AsyncMock())
+    monkeypatch.setattr(voice_tts_persistence, "_load_assistant_message", AsyncMock(
+        return_value=SimpleNamespace(content_text="你好"),
+    ))
+    monkeypatch.setattr(voice_tts_persistence, "_load_existing_audio", AsyncMock(return_value=None))
+    with pytest.raises(InsufficientAICreditError) as caught:
+        if target == "book":
+            await book_audio.synthesize_text_audio(None, user_id="user", text="你好", tts_client=client)
+        else:
+            await voice_tts_persistence.synthesize_assistant_message(
+                None, "session", "message", "user", MemoirAssistantTTSRequest(), tts_client=client,
+            )
+    assert caught.value is error
 
 
 @pytest.mark.asyncio
