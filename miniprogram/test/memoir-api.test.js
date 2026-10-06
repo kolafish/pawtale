@@ -551,6 +551,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     createMemoirShareVideoCandidateJob,
     createMemoirTranscriptShareVideoJob,
     downloadMemoirShareVideoJob,
+    downloadMemoirShareVideoThumbnail,
     deleteMemoirShareVideoJob,
     getMemoirShareVideoJob,
     getMemoirTranscriptShareVideoContext,
@@ -568,6 +569,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     customBackgroundAssetId: "photo-1",
   });
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
+  await downloadMemoirShareVideoThumbnail("job/1");
   await deleteMemoirShareVideoJob("job/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
@@ -612,6 +614,8 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.equal(downloads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job-1/download");
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(downloads[0].timeout, 60000);
+  assert.equal(downloads[1].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1/download?variant=thumbnail");
+  assert.equal(downloads[1].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

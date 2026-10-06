@@ -1,6 +1,9 @@
 from datetime import timedelta
+from io import BytesIO
+import subprocess
 from types import SimpleNamespace
 
+from PIL import Image
 import pytest
 from sqlalchemy import select
 
@@ -129,6 +132,44 @@ async def test_share_video_library_checks_project_ownership_and_allows_admin(cli
     assert response.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
 
 
+async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
+    created = await create_test_voice_transcript(client, test_db)
+    job = await _add_video_job(
+        test_db, created, job_id="thumbnail", status=MemoirShareVideoJobStatus.SUCCEEDED,
+        created_at=utcnow_naive(),
+    )
+    await test_db.commit()
+    path = share_video_jobs.share_video_file_path(job)
+    path.parent.mkdir(parents=True)
+    subprocess.run([
+        share_video_jobs.rendering._ffmpeg_executable(), "-y", "-f", "lavfi",
+        "-i", "color=c=green:s=640x360:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+    ], check=True, capture_output=True, timeout=10)
+    original = path.read_bytes()
+    url = f"/api/mobile/memoir/share-video/jobs/{job.id}/download?variant=thumbnail"
+    first = await client.get(url)
+    assert first.status_code == 200 and first.headers["content-type"] == "image/jpeg"
+    image = Image.open(BytesIO(first.content))
+    assert image.size == (320, 180)
+    assert image.getpixel((160, 90))[1] > 100
+    assert path.read_bytes() == original
+
+    async def never_encode(*args, **kwargs):
+        pytest.fail("cached thumbnails must not be encoded again")
+
+    monkeypatch.setattr(share_video_jobs.rendering, "_run_ffmpeg", never_encode)
+    assert (await client.get(url)).content == first.content
+    other = User(email="other-thumbnail-owner@example.com", password_hash="unused", display_name="其他人")
+    test_db.add(other)
+    await test_db.flush()
+    project = await test_db.get(Project, job.project_id)
+    project.user_id = other.id
+    job.user_id = other.id
+    await test_db.commit()
+    assert (await client.get(url)).status_code == 404
+
+
 async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
     monkeypatch.setattr(share_video_jobs, "get_settings", lambda: SimpleNamespace(
@@ -204,6 +245,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path = share_video_jobs.share_video_file_path(job)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(job.id.encode())
+        path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
     url = f"/api/mobile/memoir/share-video/jobs/{chosen.id}"
     for body in (None, {}, {"confirm": False}):
         response = await client.request("DELETE", url, json=body)
@@ -214,6 +256,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     response = await client.request("DELETE", url, json={"confirm": True})
     assert response.status_code == 204, response.text
     assert not share_video_jobs.share_video_file_path(chosen).exists()
+    assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".thumbnail.jpg").exists()
     assert (await client.get(url)).status_code == 404
     assert (await client.get(f"{url}/download")).status_code == 404
     assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{retained.id}/download")).content == b"retained"
@@ -240,6 +283,7 @@ async def test_video_delete_rejects_foreign_owner_and_unfinished_job(client, tes
     await test_db.commit()
     url = f"/api/mobile/memoir/share-video/jobs/{job.id}"
     assert (await client.request("DELETE", url, json={"confirm": True})).status_code == 409
+    assert (await client.get(f"{url}/download?variant=thumbnail")).status_code == 409
     other = User(email="other-video-owner@example.com", password_hash="unused", display_name="其他人")
     test_db.add(other)
     await test_db.flush()
@@ -248,6 +292,7 @@ async def test_video_delete_rejects_foreign_owner_and_unfinished_job(client, tes
     job.user_id = other.id
     await test_db.commit()
     assert (await client.request("DELETE", url, json={"confirm": True})).status_code == 404
+    assert (await client.get(f"{url}/download?variant=thumbnail")).status_code == 404
     assert await test_db.get(MemoirMaterialShareVideo, job.id) is not None
 
 

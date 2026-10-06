@@ -253,25 +253,25 @@
 
 .home-share-candidate {
   margin-top: 20rpx;
-  padding: 24rpx;
+  padding: 16rpx 24rpx;
   border-radius: 26rpx;
   background: rgba(255, 253, 250, 0.94);
   box-shadow:
-    0 0 0 1rpx rgba(182, 93, 73, 0.14),
-    0 8rpx 24rpx rgba(63, 47, 37, 0.055);
+    0 0 0 1rpx rgba(54, 42, 34, 0.04),
+    0 4rpx 14rpx rgba(63, 47, 37, 0.035);
 }
 
 .home-share-candidate-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16rpx;
 }
 
 .home-share-candidate-heading,
-.home-share-candidate-kicker,
+.home-share-module-title,
 .home-share-candidate-title,
-.home-share-candidate-quote,
+.home-share-candidate-meta,
 .home-share-candidate-hint,
 .home-share-candidate-error {
   display: block;
@@ -279,56 +279,79 @@
 
 .home-share-candidate-heading {
   min-width: 0;
+  flex: 1;
 }
 
-.home-share-candidate-kicker {
-  color: var(--ui-accent-strong);
+.home-share-module-title {
+  color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.4;
 }
 
 .home-share-candidate-title {
-  margin-top: 4rpx;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
-  font-size: var(--ui-font-action);
+  font-size: var(--ui-font-meta);
   font-weight: 750;
   line-height: 1.4;
   text-wrap: balance;
 }
 
-.home-share-candidate-duration {
-  flex: 0 0 auto;
-  padding: 6rpx 12rpx;
-  border-radius: 999rpx;
-  color: var(--ui-accent-strong);
-  background: var(--ui-accent-surface-subtle);
-  font-size: var(--ui-font-meta);
-  font-weight: 700;
-  line-height: 1.35;
+.home-share-candidate-content {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin-top: 8rpx;
 }
 
-.home-share-candidate-quote {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+.home-share-thumbnail {
+  position: relative;
+  width: 192rpx;
+  height: 108rpx;
+  min-height: 40px;
+  flex: 0 0 192rpx;
+  margin: 0;
+  padding: 0;
+  border-radius: 12rpx;
   overflow: hidden;
-  margin-top: 18rpx;
-  color: var(--ui-text-primary);
-  font-family: var(--ui-font-editorial);
-  font-size: var(--ui-font-body);
-  line-height: 1.65;
-  overflow-wrap: anywhere;
+  background: var(--ui-surface-subtle);
+  outline: 1rpx solid rgba(0, 0, 0, 0.1);
+  outline-offset: -1rpx;
 }
 
-.home-share-candidate-hint {
-  margin-top: 12rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-meta);
-  line-height: 1.55;
-  text-wrap: pretty;
+.home-share-thumbnail-image { width: 100%; height: 100%; display: block; }
+.home-share-thumbnail-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 3rpx;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  background: rgba(48, 41, 37, 0.55);
+  font-size: 22rpx;
+  line-height: 1;
 }
+
+.home-share-candidate-meta,
+.home-share-candidate-hint {
+  margin-top: 4rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+  line-height: 1.4;
+}
+.home-share-candidate-hint { color: var(--ui-text-muted); }
 
 .home-share-candidate-error {
   margin-top: 12rpx;
@@ -340,52 +363,48 @@
 .home-share-candidate-actions {
   display: flex;
   gap: 14rpx;
-  margin-top: 20rpx;
+  margin-top: 6rpx;
 }
 
 .home-share-candidate-primary,
 .home-share-candidate-secondary {
-  min-height: 44px;
+  min-height: 40px;
   margin: 0;
-  padding: 10rpx 22rpx;
-  border-radius: 18rpx;
-  font-size: var(--ui-font-action);
-  font-weight: 750;
+  padding: 8rpx 0;
+  border-radius: 12rpx;
+  background: transparent;
+  font-size: var(--ui-font-meta);
+  font-weight: 600;
   line-height: 1.35;
-  transition-property: transform, background-color, box-shadow;
+  transition-property: transform;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
 
 .home-share-candidate-primary {
-  flex: 1 1 auto;
-  color: var(--ui-on-accent);
-  background: var(--ui-accent);
-}
-
-.home-share-candidate-primary-hover {
-  color: var(--ui-on-accent);
-  background: var(--ui-accent-strong);
-  transform: scale(0.96);
+  flex: 0 0 auto;
+  min-width: 40px;
+  color: var(--ui-accent-strong);
 }
 
 .home-share-candidate-secondary {
   flex: 0 0 auto;
   color: var(--ui-text-secondary);
-  background: var(--ui-surface-soft);
-  box-shadow: var(--ui-control-shadow);
+  min-width: 40px;
+  margin-left: auto;
 }
+.home-share-candidate-actions button:active { transform: scale(0.96); }
 
 .home-share-all {
-  display: block;
+  flex: 0 0 auto;
   min-height: 40px;
-  margin: 12rpx 0 0;
-  padding: 10rpx 0 0;
-  color: var(--ui-accent-strong);
+  margin: 0;
+  padding: 6rpx 0 6rpx 12rpx;
+  color: var(--ui-text-secondary);
   background: transparent;
-  font-size: var(--ui-font-meta);
-  font-weight: 700;
-  text-align: left;
+  font-size: var(--ui-font-caption);
+  font-weight: 500;
+  text-align: right;
 }
 
 .voice-auth-panel {
@@ -562,12 +581,12 @@
 .large-text .hero-voice-action { min-height: 56px; }
 .large-text .hero-voice-label { font-size: 37rpx; }
 .large-text .narration-choice-kicker { font-size: var(--ui-font-large-meta); }
-.large-text .home-share-candidate-kicker,
-.large-text .home-share-candidate-duration { font-size: var(--ui-font-large-meta); }
+.large-text .home-share-module-title,
+.large-text .home-share-all,
+.large-text .home-share-candidate-meta { font-size: var(--ui-font-large-meta); }
 .large-text .home-share-candidate-title { font-size: var(--ui-font-large-list-title); }
 .large-text .narration-choice-text,
 .large-text .narration-choice-action,
-.large-text .home-share-candidate-quote,
 .large-text .home-share-candidate-hint,
 .large-text .home-share-candidate-error,
 .large-text .home-share-candidate-primary,

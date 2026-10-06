@@ -352,6 +352,7 @@ declare namespace WechatMiniprogram {
 
   interface NavigateOption {
     url: string;
+    success?: (result: GeneralCallbackResult) => void;
   }
 
   interface NavigateBackOption {

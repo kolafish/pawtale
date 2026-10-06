@@ -304,6 +304,16 @@ export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<s
   });
 }
 
+export function downloadMemoirShareVideoThumbnail(jobId: string): Promise<string> {
+  const url = memoirShareVideoDownloadUrl(
+    `/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}/download?variant=thumbnail`,
+  );
+  return downloadAuthenticatedFile(url, {
+    failureMessage: "视频缩略图下载失败",
+    domainLabel: "视频缩略图",
+  });
+}
+
 export function downloadMemoirShareVideoCustomBackgroundPreview(
   asset: MemoirShareVideoCustomBackgroundAsset,
 ): Promise<string> {
