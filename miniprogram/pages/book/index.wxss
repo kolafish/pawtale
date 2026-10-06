@@ -67,8 +67,8 @@
 }
 .progress-main {
   position: relative;
-  min-height: 232rpx;
-  padding: 34rpx 248rpx 32rpx 30rpx;
+  min-height: 184rpx;
+  padding: 28rpx 248rpx 24rpx 30rpx;
   background: linear-gradient(105deg, rgba(255, 253, 250, 0.98) 0%, rgba(255, 253, 250, 0.91) 58%, rgba(245, 230, 224, 0.38) 100%);
 }
 .progress-title-row {
@@ -82,7 +82,7 @@
 .book-header-illustration {
   position: absolute;
   right: -18rpx;
-  bottom: -16rpx;
+  bottom: 8rpx;
   width: 430rpx;
   height: 172rpx;
   opacity: 0.94;
@@ -626,7 +626,7 @@
   padding: 24rpx 24rpx 112rpx;
 }
 .book-page.large-text .progress-main {
-  min-height: 270rpx;
+  min-height: 222rpx;
   padding-right: 226rpx;
 }
 .book-page.large-text .book-header-illustration {
@@ -753,7 +753,7 @@
   display: flex;
   align-items: center;
   gap: 18rpx;
-  min-height: 116rpx;
+  min-height: 44px;
   padding: 22rpx 4rpx;
 }
 .book-operation-row + .book-operation-row {
@@ -763,7 +763,7 @@
   min-width: 0;
   flex: 1;
 }
-.book-operation-title, .book-operation-detail, .chapter-directory-title, .chapter-directory-meta, .chapter-directory-notice, .chapter-directory-error {
+.book-operation-title, .chapter-directory-title, .chapter-directory-meta, .chapter-directory-notice, .chapter-directory-error {
   display: block;
 }
 .book-operation-title, .chapter-directory-title {
@@ -773,7 +773,7 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.book-operation-detail, .chapter-directory-meta {
+.chapter-directory-meta {
   margin-top: 6rpx;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
@@ -832,7 +832,7 @@
 .book-page.large-text .book-operation-title, .book-page.large-text .chapter-directory-title {
   font-size: var(--ui-font-large-body);
 }
-.book-page.large-text .book-operation-detail, .book-page.large-text .chapter-directory-meta, .book-page.large-text .chapter-directory-notice, .book-page.large-text .chapter-directory-error, .book-page.large-text .book-operation-notice, .book-page.large-text .book-activity-notice {
+.book-page.large-text .chapter-directory-meta, .book-page.large-text .chapter-directory-notice, .book-page.large-text .chapter-directory-error, .book-page.large-text .book-operation-notice, .book-page.large-text .book-activity-notice {
   font-size: var(--ui-font-large-meta);
 }
 .book-page.large-text .hero-reading-action, .book-page.large-text .hero-share-action {
