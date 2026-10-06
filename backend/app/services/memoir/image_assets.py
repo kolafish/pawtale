@@ -5,11 +5,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import mimetypes
+from io import BytesIO
 import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,7 @@ from app.schemas.memoir_images import (
     MemoirImageAssetResponse,
     MemoirImageAssetUpdateRequest,
 )
+from app.services import content_storage
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.branding import branded_image_derivative
 from app.services.memoir.book_output_state import invalidate_book_output
@@ -350,6 +352,7 @@ async def _begin_manual_image_selection(
             select(MemoirBookImagePlacement).where(
                 MemoirBookImagePlacement.project_id == project.id,
                 MemoirBookImagePlacement.enabled.is_(True),
+                MemoirBookImagePlacement.placement_type.notin_(["cover", "back_cover"]),
             )
         )
     ).all()
@@ -420,7 +423,8 @@ async def auto_place_share_video_backgrounds(
     placements = (
         await db.scalars(
             select(MemoirBookImagePlacement)
-            .where(MemoirBookImagePlacement.project_id == project_id)
+            .where(MemoirBookImagePlacement.project_id == project_id,
+                MemoirBookImagePlacement.placement_type.notin_(["cover", "back_cover"]))
             .order_by(MemoirBookImagePlacement.created_at, MemoirBookImagePlacement.id)
         )
     ).all()
@@ -469,6 +473,55 @@ async def auto_place_share_video_backgrounds(
     if changed:
         await db.flush()
     return changed
+
+
+def _store_uploaded_image(content: bytes, folder: Path) -> tuple[Path, int, int]:
+    try:
+        with Image.open(BytesIO(content)) as source:
+            if source.format not in {"JPEG", "PNG", "WEBP"}:
+                raise HTTPException(status_code=400, detail="请选择 JPEG、PNG 或 WebP 图片")
+            if source.width * source.height > 20_000_000:
+                raise HTTPException(status_code=400, detail="请选择 2000 万像素以内的图片")
+            source.verify()
+        with Image.open(BytesIO(content)) as source:
+            oriented = ImageOps.exif_transpose(source).convert("RGBA")
+            image = Image.new("RGB", oriented.size, "white")
+            image.paste(oriented, mask=oriented.getchannel("A"))
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "original").write_bytes(content)
+            path = folder / "image.jpg"
+            image.save(path, format="JPEG", quality=95)
+            return path, image.width, image.height
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=400, detail="图片文件无效，请重新选择") from exc
+
+
+async def upload_image_asset(db: AsyncSession, *, user_id: str, project_id: str, upload: UploadFile) -> MemoirImageAssetResponse:
+    project = await _lock_manual_image_selection(db, user_id=user_id, project_id=project_id)
+    content = await upload.read(10 * 1024 * 1024 + 1)
+    if not content or len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="请选择 10MB 以内的图片")
+    signature = "upload:" + sha256(content).hexdigest()
+    existing = await db.scalar(select(MemoirImageAsset).where(
+        MemoirImageAsset.project_id == project_id, MemoirImageAsset.source_signature == signature,
+    ).options(selectinload(MemoirImageAsset.placements)))
+    if existing and existing.status == MemoirImageAssetStatus.READY.value:
+        return _asset_response(existing, chapter_titles={})
+    folder = content_storage.PROJECTS_DIR / project_id / "image-uploads" / signature.removeprefix("upload:")
+    path, width, height = await asyncio.to_thread(_store_uploaded_image, content, folder)
+    asset = existing or MemoirImageAsset(project_id=project_id, user_id=project.user_id, source_signature=signature, placements=[])
+    asset.status = MemoirImageAssetStatus.READY.value
+    asset.source_type = MemoirImageAssetSourceType.MANUAL_UPLOAD.value
+    asset.storage_path = _relative_data_storage_path(path)
+    asset.mime_type, asset.size_bytes = "image/jpeg", path.stat().st_size
+    asset.width, asset.height = width, height
+    asset.title, asset.alt_text = "上传的照片", "用户上传的照片"
+    asset.provider = "user_upload"
+    asset.metadata_json = {"original_storage_path": _relative_data_storage_path(folder / "original"), "disclosure": ""}
+    db.add(asset)
+    await db.commit()
+    await db.refresh(asset, attribute_names=["placements"])
+    return _asset_response(asset, chapter_titles={})
 
 
 async def list_image_assets(
@@ -555,7 +608,7 @@ async def delete_image_asset(
         db, user_id=user_id, project_id=project_id,
     )
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
-    if any(placement.enabled for placement in asset.placements):
+    if any(placement.enabled and placement.placement_type not in {"cover", "back_cover"} for placement in asset.placements):
         await _begin_manual_image_selection(db, project=project)
     asset.status = MemoirImageAssetStatus.DELETED.value
     for placement in asset.placements:
@@ -683,7 +736,10 @@ async def create_image_placement(
             sort_order=next_sort_order,
         )
         asset.placements.append(placement)
-    await _begin_manual_image_selection(db, project=project, keep=placement)
+    if placement_type == MemoirBookImagePlacementType.COVER:
+        await _select_cover_placement(db, project_id=project_id, keep=placement)
+    else:
+        await _begin_manual_image_selection(db, project=project, keep=placement)
     placement.caption_override = req.caption_override or placement.caption_override
     placement.display_size = req.display_size
     placement.enabled = True
@@ -700,6 +756,19 @@ async def create_image_placement(
         },
     )
     return _asset_response(asset, chapter_titles=chapter_titles)
+
+
+async def _select_cover_placement(
+    db: AsyncSession, *, project_id: str, keep: MemoirBookImagePlacement,
+) -> None:
+    previous_covers = (await db.scalars(select(MemoirBookImagePlacement).where(
+        MemoirBookImagePlacement.project_id == project_id,
+        MemoirBookImagePlacement.placement_type == MemoirBookImagePlacementType.COVER.value,
+        MemoirBookImagePlacement.enabled.is_(True),
+    ))).all()
+    for previous in previous_covers:
+        if previous is not keep:
+            previous.enabled = False
 
 
 async def update_image_placement(
@@ -719,17 +788,19 @@ async def update_image_placement(
     if not placement:
         raise HTTPException(status_code=404, detail="插图位置不存在")
     fields_set = getattr(req, "model_fields_set", set())
-    await _begin_manual_image_selection(
-        db,
-        project=project,
-        keep=placement if req.enabled is not False and placement.enabled else None,
-    )
+    if placement.placement_type not in {"cover", "back_cover"}:
+        await _begin_manual_image_selection(
+            db, project=project,
+            keep=placement if req.enabled is not False and placement.enabled else None,
+        )
     if "caption_override" in fields_set and req.caption_override is not None:
         placement.caption_override = req.caption_override
     if "display_size" in fields_set and req.display_size is not None:
         placement.display_size = req.display_size
     if "enabled" in fields_set and req.enabled is not None:
         placement.enabled = req.enabled
+    if placement.placement_type == MemoirBookImagePlacementType.COVER.value and placement.enabled:
+        await _select_cover_placement(db, project_id=project_id, keep=placement)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
     await db.commit()
     await db.refresh(asset)
@@ -812,7 +883,7 @@ def _illustration_snapshot(
     section_id: str | None,
 ) -> dict[str, object]:
     metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
-    disclosure = _safe_text(metadata.get("disclosure")) or AI_GENERATED_IMAGE_DISCLOSURE
+    disclosure = "" if asset.source_type == "manual_upload" else (_safe_text(metadata.get("disclosure")) or AI_GENERATED_IMAGE_DISCLOSURE)
     caption = placement.caption_override or asset.caption or disclosure
     return {
         "image_asset_id": asset.id,
@@ -833,7 +904,7 @@ async def manuscript_image_snapshots(
     db: AsyncSession,
     *,
     project_id: str,
-) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
+) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]], dict[str, object] | None]:
     placements = (
         await db.execute(
             select(MemoirBookImagePlacement)
@@ -862,6 +933,7 @@ async def manuscript_image_snapshots(
     )
     chapter_images: dict[str, list[dict[str, object]]] = {}
     appendix_images: list[dict[str, object]] = []
+    cover_image: dict[str, object] | None = None
     seen_targets: set[tuple[str, str, str, str]] = set()
     for placement in placements:
         asset = placement.image_asset
@@ -900,7 +972,9 @@ async def manuscript_image_snapshots(
             chapter_images.setdefault(chapter_id, []).append(snapshot)
         elif effective_type == MemoirBookImagePlacementType.APPENDIX.value:
             appendix_images.append(snapshot)
-    return chapter_images, appendix_images
+        elif effective_type == "cover":
+            cover_image = snapshot
+    return chapter_images, appendix_images, cover_image
 
 
 async def sync_latest_book_output_image_snapshots(
@@ -924,7 +998,7 @@ async def sync_latest_book_output_image_snapshots(
     chapters = manuscript.get("chapters")
     if not isinstance(chapters, list):
         return False
-    chapter_images, appendix_images = await manuscript_image_snapshots(db, project_id=project_id)
+    chapter_images, appendix_images, cover_image = await manuscript_image_snapshots(db, project_id=project_id)
     changed = False
     for raw_chapter in chapters:
         if not isinstance(raw_chapter, dict):
@@ -939,6 +1013,12 @@ async def sync_latest_book_output_image_snapshots(
         changed = True
     settings = manuscript.get("render_settings")
     if isinstance(settings, dict):
+        if settings.get("cover_image") != cover_image:
+            from app.services.memoir.book_output_manuscript import stored_manuscript_design
+            settings["custom_layout"] = stored_manuscript_design(manuscript)[1].model_dump(mode="json")
+            settings["cover_image"] = cover_image
+            manuscript["schema_version"] = 5
+            changed = True
         if any(chapter_images.values()):
             photo_mode = "chapter"
         elif appendix_images:

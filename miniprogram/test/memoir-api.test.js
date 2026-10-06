@@ -697,6 +697,12 @@ test("share video custom background upload and preview use backend session", asy
   });
   assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(uploads[0].timeout, 60000);
+  const { uploadMemoirImageAsset } = require("../services/memoir-book-api.ts");
+  assert.equal((await uploadMemoirImageAsset("project/1", "/tmp/cover.png")).id, "asset-1");
+  assert.equal(uploads[1].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets");
+  assert.equal(uploads[1].filePath, "/tmp/cover.png");
+  assert.equal(uploads[1].name, "file");
+  assert.equal(uploads[1].header.Cookie, "pawtale_session=abc");
   assert.equal(
     downloads[0].url.split("&cache_key=")[0],
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",

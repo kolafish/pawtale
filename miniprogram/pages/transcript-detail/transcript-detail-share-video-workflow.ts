@@ -1,3 +1,4 @@
+import { chooseImageFile } from "../../services/authenticated-media";
 import type { MemoirShareVideoCustomBackgroundAsset } from "../../domain/memoir-transcript";
 import {
   MEMOIR_SHARE_VIDEO_STYLES,
@@ -18,7 +19,6 @@ import {
   type PageDatasetEvent,
 } from "../../services/page-input";
 import {
-  chooseShareVideoBackgroundImage,
   initialTranscriptShareVideoData,
   saveShareVideoBackgroundSelection,
   shareVideoBackgroundPatch,
@@ -358,7 +358,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     }
     let uploadToken = 0;
     try {
-      const filePath = await chooseShareVideoBackgroundImage();
+      const filePath = await chooseImageFile();
       if (!filePath) {
         return;
       }

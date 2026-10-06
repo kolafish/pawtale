@@ -23,7 +23,7 @@ from app.services.memoir.book_output_export import (
 )
 
 # Bump when rendering or bundled fonts/artwork change.
-BOOK_EXPORT_RENDER_REVISION = 2
+BOOK_EXPORT_RENDER_REVISION = 3
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ class PreparedBookExport:
         image_hashes: dict[Path, str | None] = {}
         if self.manuscript and self.export_format == MemoirBookOutputExportFormat.PDF:
             for illustration in [
+                *([self.manuscript.render_settings.cover_image] if self.manuscript.render_settings.cover_image else []),
                 *self.manuscript.image_appendix,
                 *(image for chapter in self.manuscript.chapters for image in chapter.illustrations),
             ]:

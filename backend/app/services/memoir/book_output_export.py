@@ -634,7 +634,19 @@ def _add_cover_page(
     narrator_name: str,
     prepared_by: str,
     cover_style: str,
+    cover_image: dict[str, Any] | None = None,
 ) -> None:
+    if cover_image:
+        path = _illustration_file_path(cover_image)
+        if path is None:
+            raise ValueError("封面图片已不可用，请重新上传或恢复版式封面")
+        from PIL import Image
+        with Image.open(path) as image:
+            scale = min(builder.layout.page_width / image.width, builder.layout.page_height / image.height)
+            width, height = image.width * scale, image.height * scale
+        builder.new_page(show_header=False, show_footer=False, background_color=(1, 1, 1))
+        builder.pages[-1].images.append(PDFImageCommand(path=path, x=(builder.layout.page_width-width)/2, y=(builder.layout.page_height-height)/2, width=width, height=height))
+        return
     style = _cover_style(cover_style)
     if style.cover_background_image and style.image_layout == "artwork":
         _add_artwork_cover_page(
@@ -1513,6 +1525,7 @@ def _build_structured_manuscript_pdf_pages(
     prepared_by: str,
     back_cover_quote: str,
     cover_style: str,
+    cover_image: dict[str, Any] | None,
     front_matter: list[Any],
     chapters: list[Any],
     image_appendix: list[Any],
@@ -1529,6 +1542,7 @@ def _build_structured_manuscript_pdf_pages(
         narrator_name=narrator_name,
         prepared_by=prepared_by,
         cover_style=cover_style,
+        cover_image=cover_image,
     )
     _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
     _add_table_of_contents(builder, entries=toc_entries)
@@ -1585,6 +1599,7 @@ def _build_manuscript_pdf_pages(
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
         cover_style=cover_style,
+        cover_image=_dict(settings.get("cover_image")) or None,
         front_matter=front_matter,
         chapters=chapters,
         image_appendix=image_appendix,
@@ -1605,6 +1620,7 @@ def _build_manuscript_pdf_pages(
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
         cover_style=cover_style,
+        cover_image=_dict(settings.get("cover_image")) or None,
         front_matter=front_matter,
         chapters=chapters,
         image_appendix=image_appendix,

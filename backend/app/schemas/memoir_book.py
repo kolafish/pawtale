@@ -663,6 +663,7 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     show_source_appendix: bool = True
     photo_mode: Literal["none", "chapter", "appendix"] = "none"
     cover_style: MemoirBookCoverStyle = "classic_plain"
+    cover_image: MemoirBookManuscriptIllustration | None = None
     back_cover_quote: str = ""
     editorial_copy_model: str | None = None
     custom_layout: MemoirBookCustomLayout = Field(default_factory=MemoirBookCustomLayout)
@@ -677,7 +678,7 @@ class MemoirBookManuscriptBackMatter(BaseModel):
 
 
 class MemoirBookManuscript(BaseModel):
-    schema_version: int = 4
+    schema_version: int = 5
     profile: MemoirBookManuscriptProfile
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)

@@ -116,7 +116,7 @@ test("book design section shows one curated gallery and keeps custom reading con
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="selectBookLayout"/);
   assert.match(template, /src="\{\{option.coverPreviewImage\}\}"/);
   assert.match(template, /src="\{\{option.ornamentThumbnail\}\}"/);
-  assert.match(template, /bindchange="changeBookCoverStyle"/);
+  assert.match(template, /bindtap="changeBookCoverImage"/);
   assert.doesNotMatch(template, /预览整套 PDF|预览阅读版 PDF/);
   assert.match(template, /bookLayoutFeedbackTarget === option.value/);
   assert.match(template, /data-key="font_scale" bindchange="changeBookCustomLayout"/);
@@ -284,16 +284,29 @@ test("book export page counts the current output when included plan chapters hav
   assert.equal(context.data.bookPreviewChapters.length, 1);
 });
 
-test("book export updates the chapter count with the selected historical output", async () => {
+test("book export updates the chapter count and cover with the selected historical output", async () => {
   const historical = sampleBookOutputVersion(1, "历史书稿正文", undefined, baseSampleBookManuscript());
-  const { page } = loadBookExportPage({ getMemoirBookOutputVersion: async () => historical });
+  const output = sampleBookOutput();
+  output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "new-cover" };
+  const { page } = loadBookExportPage({
+    getMemoirBookOutputVersion: async () => historical,
+    downloadMemoirImageAssetFile: async () => "/tmp/new-cover.jpg",
+  });
   const context = pageContext(page, { projectId: "project-1" });
-  page.applyBookExportData.call(context, baseSamplePlan("confirmed", { chapterCount: 2 }), sampleBookOutput());
+  page.applyBookExportData.call(context, baseSamplePlan("confirmed", { chapterCount: 2 }), output);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.bookUploadedCoverPath, "/tmp/new-cover.jpg");
   await page.changeBookOutputVersion.call(context, { detail: { value: "1" } });
 
   assert.equal(context.data.bookContent, "历史书稿正文");
   assert.equal(context.data.totalChapterCount, 2);
   assert.equal(context.data.bookPreviewChapters.length, 2);
+  assert.equal(context.data.bookUploadedCoverAssetId, "");
+  assert.equal(context.data.bookUploadedCoverPath, "");
+  await page.changeBookOutputVersion.call(context, { detail: { value: "0" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.bookUploadedCoverAssetId, "new-cover");
+  assert.equal(context.data.bookUploadedCoverPath, "/tmp/new-cover.jpg");
 });
 
 test("book export waits only for active draft processing and preserves failed or material-required guidance", async () => {
@@ -656,7 +669,7 @@ test("book export resumes editorial job updates after returning to the page", as
       return { items: [running] };
     },
   });
-  const context = pageContext(page, { projectId: "project/1", activeSection: "layout" });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
   page.applyBookEditorialCopyJobs.call(context, [running]);
   assert.equal(context.bookEditorialCopyPoller.pending, true);
@@ -998,7 +1011,7 @@ test("book layout cannot be previewed or selected for a plain text legacy book",
   assert.deepEqual(updates, []);
 });
 
-test("body adjustments and cover edits preserve the selected interior and pending controls", async () => {
+test("body adjustments preserve the selected interior and pending controls", async () => {
   const output = sampleBookOutput();
   output.latest_version.manuscript.profile.template = "warm_journal";
   output.latest_version.manuscript.render_settings.cover_style = "warm_journal";
@@ -1039,18 +1052,10 @@ test("body adjustments and cover edits preserve the selected interior and pendin
   assert.deepEqual(context.data.bookCustomLayout, controls);
   assert.equal(context.data.bookLayoutCustomChanged, true);
 
-  const coverIndex = context.data.bookCoverOptions.findIndex((option) => option.value === "modern_minimal");
-  await page.changeBookCoverStyle.call(context, { detail: { value: String(coverIndex) } });
-  assert.deepEqual(updates[1], { cover_style: "modern_minimal" });
-  assert.equal(context.data.bookLayoutTemplate, "warm_journal");
-  assert.equal(context.data.bookCoverStyle, "modern_minimal");
-  assert.deepEqual(context.data.bookCustomLayout, controls);
-  assert.equal(context.data.bookLayoutCustomChanged, true);
-
   await page.selectBookLayout.call(context, event);
-  assert.deepEqual(updates[2], { custom_layout: controls });
+  assert.deepEqual(updates[1], { custom_layout: controls });
   assert.equal(context.data.bookLayoutTemplate, "warm_journal");
-  assert.equal(context.data.bookCoverStyle, "modern_minimal");
+  assert.equal(context.data.bookCoverStyle, "warm_journal");
   assert.equal(context.data.bookLayoutCustomChanged, false);
   assert.equal(context.data.bookLayoutFontFamilyIndex, 2);
   page.clearBookDesignAutosaveTimer.call(context);
@@ -1182,4 +1187,67 @@ test("settings and files open distinct destinations while image assets remain re
   assert.equal(context.data.activeSection, "");
   page.openImageAssetsPage.call(context);
   assert.deepEqual(navigations, ["/pages/image-assets/index?projectId=project-1"]);
+});
+
+test("upload, cancel, replace failure and restore a cover without changing body settings", async () => {
+  const output = sampleBookOutput();
+  let choice = "image";
+  let failUpload = false;
+  const calls = [];
+  global.wx = {
+    chooseMedia(options) {
+      if (choice === "cancel") options.fail({ errMsg: "chooseMedia:cancel" });
+      else options.success({ tempFiles: [{ tempFilePath: "/tmp/family.jpg" }] });
+    },
+  };
+  const { page } = loadBookExportPage({
+    getMemoirBookOutput: async () => output,
+    uploadMemoirImageAsset: async (projectId, filePath) => {
+      calls.push(["upload", projectId, filePath]);
+      if (failUpload) throw new Error("网络断开");
+      return { id: "photo" };
+    },
+    createMemoirBookImagePlacement: async (projectId, id, payload) => {
+      calls.push(["place", projectId, id, payload]);
+      output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "photo" };
+    },
+    downloadMemoirImageAssetFile: async () => "/tmp/cover-preview.jpg",
+    listMemoirImageAssets: async () => ({ items: [{ id: "photo", placements: [{ id: "cover-place", enabled: true, placement_type: "cover" }] }] }),
+    deleteMemoirBookImagePlacement: async (projectId, id, placementId) => {
+      calls.push(["restore", projectId, id, placementId]);
+      output.latest_version.manuscript.render_settings.cover_image = null;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "layout" });
+  for (const template of ["warm_journal", "custom"]) {
+    output.latest_version.manuscript.profile.template = template;
+    page.applyBookExportData.call(context, samplePlan(), output);
+    page.changeBookCustomLayout.call(context, { currentTarget: { dataset: { key: "font_family" } }, detail: { value: "2" } });
+    const controls = { ...context.data.bookCustomLayout };
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: {} } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(context.data.bookUploadedCoverAssetId, "photo");
+    assert.equal(context.data.bookUploadedCoverPath, "/tmp/cover-preview.jpg");
+    assert.equal(context.data.bookLayoutTemplate, template);
+    assert.deepEqual(context.data.bookCustomLayout, controls);
+    assert.equal(context.data.bookLayoutBusyTarget, "");
+    choice = "cancel";
+    const count = calls.length;
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: {} } });
+    assert.equal(calls.length, count);
+    assert.equal(context.data.bookLayoutBusyTarget, "");
+    choice = "image";
+    failUpload = true;
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: {} } });
+    assert.equal(context.data.bookUploadedCoverAssetId, "photo");
+    assert.equal(context.data.bookLayoutFeedbackText, "网络断开");
+    failUpload = false;
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "restore" } } });
+    assert.equal(context.data.bookUploadedCoverAssetId, "");
+    assert.deepEqual(context.data.bookCustomLayout, controls);
+    assert.equal(context.data.bookLayoutTemplate, template);
+  }
+  assert.deepEqual(calls[0], ["upload", "project/1", "/tmp/family.jpg"]);
+  assert.deepEqual(calls[1], ["place", "project/1", "photo", { placement_type: "cover" }]);
+  assert.ok(calls.some((call) => call[0] === "restore" && call[3] === "cover-place"));
 });

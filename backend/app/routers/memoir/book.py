@@ -2,7 +2,7 @@ import asyncio
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -204,6 +204,14 @@ async def create_mobile_memoir_book_plan_outline_tts(
         project_id=project_id,
         req=req,
     )
+
+
+@router.post("/projects/{project_id}/image-assets", response_model=MemoirImageAssetResponse, status_code=201)
+async def upload_mobile_memoir_image_asset(
+    project_id: str, file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.upload_image_asset(db, user_id=current_user.id, project_id=project_id, upload=file)
 
 
 @router.get("/projects/{project_id}/image-assets", response_model=MemoirImageAssetListResponse)
