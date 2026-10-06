@@ -24,6 +24,7 @@ function host() {
   let end = null;
   const played = [];
   const prefetched = [];
+  const events = [];
   const context = {
     data: {
       error: "", playingTarget: "", ttsBusyTarget: "book", bookTTSActiveText: "",
@@ -41,6 +42,7 @@ function host() {
       playFile(id, candidate, options) {
         played.push(id);
         active = { currentTime: 0, duration: 1 };
+        events.push({ audio: active, options });
         return new Promise((resolve) => {
           end = () => {
             active.currentTime = 1;
@@ -54,7 +56,7 @@ function host() {
       stop() { token += 1; if (active) end(); },
     },
   };
-  return { context, played, prefetched, finish: () => end() };
+  return { context, played, prefetched, events, finish: () => end() };
 }
 
 test("full-book audio plays the first ready segment and prepares the next during playback", async () => {
@@ -145,4 +147,21 @@ test("the player rejects another book version and reports failures without autom
     assert.equal(requests, 1);
     assert.deepEqual(h.played, ["audio-1"]);
   }
+});
+
+test("late events from stopped audio cannot change a new playback session", async () => {
+  const h = host();
+  const first = playBookAudioPlan(h.context, plan("succeeded"), 1, text, async () => plan("succeeded"));
+  await flushAsyncWork();
+  const old = h.events[0];
+  stopBookPlayback(h.context);
+  await first;
+  const second = playBookAudioPlan(h.context, plan("succeeded"), h.context.playToken, text, async () => plan("succeeded"));
+  await flushAsyncWork();
+  const before = { ...h.context.data };
+  old.options.onEnded(old.audio);
+  old.options.onPlay(old.audio);
+  assert.deepEqual(h.context.data, before);
+  stopBookPlayback(h.context);
+  await second;
 });
