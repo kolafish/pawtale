@@ -114,6 +114,7 @@ interface HomeData extends HomeStoryData {
   shareCandidateJob: MemoirShareVideoJob | null;
   shareCandidateThumbnailPath: string;
   shareVideoTotal: number;
+  shareVideoActiveCount: number;
 }
 
 interface CheckboxChangeEvent {
@@ -245,6 +246,7 @@ function applyHomeSnapshotData(
       shareCandidateJob: null,
       shareCandidateThumbnailPath: "",
       shareVideoTotal: 0,
+      shareVideoActiveCount: 0,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -306,6 +308,7 @@ definePage<HomeData>()({
     shareCandidateJob: null,
     shareCandidateThumbnailPath: "",
     shareVideoTotal: 0,
+    shareVideoActiveCount: 0,
     ...emptyHomeStoryData(),
   },
 
@@ -445,6 +448,7 @@ definePage<HomeData>()({
           shareCandidateJob: null,
           shareCandidateThumbnailPath: "",
           shareVideoTotal: 0,
+          shareVideoActiveCount: 0,
         });
         return;
       }
@@ -528,6 +532,7 @@ definePage<HomeData>()({
         || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
       this.setData({
         shareVideoTotal: response.total,
+        shareVideoActiveCount: response.active_jobs.length,
       });
     } catch (error) {
       if (requestSequence === this.shareVideosRequestSequence) {

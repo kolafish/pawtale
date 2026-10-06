@@ -10,6 +10,27 @@
   gap: 18rpx;
 }
 
+.video-library-tasks {
+  margin-bottom: 24rpx;
+}
+
+.video-library-tasks .section-title {
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.video-library-progress {
+  display: block;
+  margin-top: 12rpx;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-body);
+  line-height: 1.6;
+}
+
+.video-library-progress.is-failed {
+  color: var(--ui-danger-text);
+}
+
 .video-library-card {
   padding: 24rpx;
 }

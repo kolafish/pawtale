@@ -341,7 +341,7 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
   };
 }
 
-function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
+export function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
     if (job.video_style === "story_animation") {
       return "视频已生成";

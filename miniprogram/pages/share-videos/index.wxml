@@ -20,12 +20,27 @@
 
   <block wx:else>
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
-    <button wx:if="{{error && !items.length}}" class="ghost-button video-library-action" bindtap="retryLoad">重新加载</button>
+    <button wx:if="{{error}}" class="ghost-button video-library-action" bindtap="retryLoad">重新加载</button>
 
-    <view wx:if="{{loading && !items.length}}" class="empty-panel">
+    <view wx:if="{{taskItems.length}}" class="video-library-tasks">
+      <text class="section-title">视频制作进度</text>
+      <view class="video-library-list">
+        <view wx:for="{{taskItems}}" wx:key="id" class="section-card video-library-card">
+          <text class="video-library-title">《{{item.title}}》</text>
+          <text class="video-library-progress {{item.status === 'failed' ? 'is-failed' : ''}}">{{item.statusText}}</text>
+          <text class="video-library-quote">“{{item.selected_text}}”</text>
+          <view class="video-library-card-foot">
+            <text class="video-library-date">{{item.styleLabel}}</text>
+            <button class="video-library-open ui-button" data-id="{{item.id}}" data-utterance-id="{{item.utterance_id}}" bindtap="openVideo">{{item.status === 'failed' ? '查看详情' : '查看进度'}} ›</button>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{loading && !items.length && !taskItems.length}}" class="empty-panel">
       <text>正在读取分享视频</text>
     </view>
-    <view wx:elif="{{!items.length && !error}}" class="empty-panel">
+    <view wx:elif="{{!items.length && !taskItems.length && !error}}" class="empty-panel">
       <text class="empty-title">还没有分享视频</text>
       <text class="empty-copy">讲述完成后，适合分享的片段可以做成带原声、插图和字幕的视频。</text>
     </view>

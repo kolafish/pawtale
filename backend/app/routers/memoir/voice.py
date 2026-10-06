@@ -705,7 +705,7 @@ async def list_mobile_memoir_share_video_jobs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_share_video_jobs.list_completed_share_video_jobs(
+    return await memoir_share_video_jobs.list_share_video_jobs(
         db,
         project_id=project_id,
         user_id=current_user.id,

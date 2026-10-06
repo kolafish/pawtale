@@ -567,13 +567,6 @@ class MemoirShareVideoListItemResponse(BaseModel):
     completed_at: datetime | None
 
 
-class MemoirShareVideoJobListResponse(BaseModel):
-    items: list[MemoirShareVideoListItemResponse] = Field(default_factory=list)
-    total: int
-    limit: int
-    offset: int
-
-
 class MemoirShareVideoDeleteRequest(BaseModel):
     confirm: Literal[True]
 
@@ -608,6 +601,14 @@ class MemoirShareVideoJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+
+
+class MemoirShareVideoJobListResponse(BaseModel):
+    items: list[MemoirShareVideoListItemResponse] = Field(default_factory=list)
+    active_jobs: list[MemoirShareVideoJobResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
 
 
 class MemoirShareVideoCustomBackgroundAssetResponse(BaseModel):

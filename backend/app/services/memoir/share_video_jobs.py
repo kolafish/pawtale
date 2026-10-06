@@ -591,7 +591,7 @@ async def delete_share_video_job(
     _remove_video_completion_marker(video_path)
 
 
-async def list_completed_share_video_jobs(
+async def list_share_video_jobs(
     db: AsyncSession,
     *,
     project_id: str,
@@ -605,29 +605,52 @@ async def list_completed_share_video_jobs(
         MemoirMaterialShareVideo.project_id == project_id,
         MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
     )
-    completed_jobs = (
-        select(MemoirMaterialShareVideo)
+    completed_ids = (
+        select(MemoirMaterialShareVideo.id)
         .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
         .where(*filters)
+        .order_by(
+            func.coalesce(
+                MemoirMaterialShareVideo.completed_at,
+                MemoirMaterialShareVideo.created_at,
+            ).desc(),
+            MemoirMaterialShareVideo.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .correlate(None)
     )
-    total = await db.scalar(
+    completed_total = (
         select(func.count(MemoirMaterialShareVideo.id))
         .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
         .where(*filters)
+        .correlate(None)
     )
-    jobs = (
-        await db.scalars(
-            completed_jobs.order_by(
+    active_statuses = (
+        MemoirShareVideoJobStatus.PENDING.value,
+        MemoirShareVideoJobStatus.RUNNING.value,
+    )
+    # One snapshot prevents completion between reads from hiding a task in both lists.
+    rows = (
+        await db.execute(
+            select(MemoirMaterialShareVideo, completed_total.scalar_subquery())
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                or_(
+                    MemoirMaterialShareVideo.status.in_(active_statuses),
+                    MemoirMaterialShareVideo.id.in_(completed_ids),
+                ),
+            )
+            .order_by(
                 func.coalesce(
                     MemoirMaterialShareVideo.completed_at,
                     MemoirMaterialShareVideo.created_at,
                 ).desc(),
                 MemoirMaterialShareVideo.id.desc(),
             )
-            .offset(offset)
-            .limit(limit)
         )
     ).all()
+    total = rows[0][1] if rows else await db.scalar(completed_total)
     return MemoirShareVideoJobListResponse(
         items=[
             MemoirShareVideoListItemResponse(
@@ -640,8 +663,10 @@ async def list_completed_share_video_jobs(
                 created_at=job.created_at,
                 completed_at=job.completed_at,
             )
-            for job in jobs
+            for job, _ in rows
+            if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
         ],
+        active_jobs=[_job_response(job) for job, _ in rows if job.status in active_statuses],
         total=total or 0,
         limit=limit,
         offset=offset,

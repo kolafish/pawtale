@@ -105,13 +105,13 @@
         </view>
 
         <view
-          wx:if="{{!voiceEntry && ((shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')) || shareVideoTotal)}}"
+          wx:if="{{!voiceEntry && ((shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')) || shareVideoTotal || shareVideoActiveCount)}}"
           class="home-share-candidate"
           aria-label="我的分享视频"
         >
           <view class="home-share-candidate-head">
             <text class="home-share-module-title">分享视频</text>
-            <button wx:if="{{shareVideoTotal}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">全部 {{shareVideoTotal}} 个 ›</button>
+            <button wx:if="{{shareVideoTotal || shareVideoActiveCount}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">{{shareVideoActiveCount ? '制作中 ' + shareVideoActiveCount + ' 个' : '全部 ' + shareVideoTotal + ' 个'}} ›</button>
           </view>
           <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
             <view class="home-share-candidate-content">
