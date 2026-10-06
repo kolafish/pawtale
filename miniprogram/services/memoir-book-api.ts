@@ -419,8 +419,9 @@ export function memoirBookOutputExportUrl(
     params.push(`layout=${encodeURIComponent(layout)}`);
     params.push(`show_source_appendix=${showSourceAppendix ? "true" : "false"}`);
     if (preview) {
-      params.push(`preview_template=${encodeURIComponent(preview.template)}`);
-      if (preview.template === "custom" && preview.custom_layout) {
+      if (preview.template) params.push(`preview_template=${encodeURIComponent(preview.template)}`);
+      if (preview.custom_layout) {
+        params.push(`preview_font_family=${encodeURIComponent(preview.custom_layout.font_family)}`);
         params.push(`preview_font_scale=${encodeURIComponent(preview.custom_layout.font_scale)}`);
         params.push(`preview_line_spacing=${encodeURIComponent(preview.custom_layout.line_spacing)}`);
         params.push(`preview_page_margin=${encodeURIComponent(preview.custom_layout.page_margin)}`);

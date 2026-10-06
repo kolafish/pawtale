@@ -388,10 +388,10 @@
 .layout-action[disabled] { opacity: 0.55; }
 .layout-feedback { display: block; margin-top: 12rpx; color: var(--ui-text-secondary); font-size: var(--ui-font-caption); line-height: 1.5; }
 .layout-feedback.error { color: var(--ui-accent-strong); }
-.layout-custom-panel { margin-top: 8rpx; padding: 22rpx; border-radius: 24rpx; background: var(--ui-surface-soft); box-shadow: inset 0 0 0 1rpx rgba(54, 42, 34, 0.055); }
+.layout-custom-panel { margin-top: 24rpx; padding: 22rpx; border-radius: 24rpx; background: var(--ui-surface-soft); box-shadow: inset 0 0 0 1rpx rgba(54, 42, 34, 0.055); }
 .layout-custom-controls { margin-top: 14rpx; }
 .layout-custom-row {
-  min-height: 78rpx;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;

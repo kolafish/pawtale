@@ -13,6 +13,7 @@ from app.services.memoir.book_output_export_cache import PreparedBookExport, has
 from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
     MemoirBookCustomFontScale,
+    MemoirBookCustomFontFamily,
     MemoirBookCustomLineSpacing,
     MemoirBookCustomPageMargin,
     MemoirBookManuscriptTemplate,
@@ -629,6 +630,7 @@ async def prepare_mobile_memoir_book_export(
     show_source_appendix: bool | None = None,
     preview_template: MemoirBookManuscriptTemplate | None = None,
     preview_font_scale: MemoirBookCustomFontScale | None = None,
+    preview_font_family: MemoirBookCustomFontFamily | None = None,
     preview_line_spacing: MemoirBookCustomLineSpacing | None = None,
     preview_page_margin: MemoirBookCustomPageMargin | None = None,
     db: AsyncSession = Depends(get_db),
@@ -648,6 +650,7 @@ async def prepare_mobile_memoir_book_export(
             key: value
             for key, value in (
                 ("font_scale", preview_font_scale),
+                ("font_family", preview_font_family),
                 ("line_spacing", preview_line_spacing),
                 ("page_margin", preview_page_margin),
             )

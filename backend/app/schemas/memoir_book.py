@@ -420,6 +420,7 @@ MemoirBookManuscriptTemplate = Literal[
     "custom",
 ]
 MemoirBookCustomFontScale = Literal["standard", "large"]
+MemoirBookCustomFontFamily = Literal["auto", "serif", "sans"]
 MemoirBookCustomLineSpacing = Literal["compact", "standard", "relaxed"]
 MemoirBookCustomPageMargin = Literal["narrow", "standard", "wide"]
 
@@ -427,6 +428,7 @@ MemoirBookCustomPageMargin = Literal["narrow", "standard", "wide"]
 class MemoirBookCustomLayout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    font_family: MemoirBookCustomFontFamily = "auto"
     font_scale: MemoirBookCustomFontScale = "standard"
     line_spacing: MemoirBookCustomLineSpacing = "standard"
     page_margin: MemoirBookCustomPageMargin = "standard"
@@ -675,7 +677,7 @@ class MemoirBookManuscriptBackMatter(BaseModel):
 
 
 class MemoirBookManuscript(BaseModel):
-    schema_version: int = 3
+    schema_version: int = 4
     profile: MemoirBookManuscriptProfile
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
@@ -683,6 +685,14 @@ class MemoirBookManuscript(BaseModel):
     image_appendix: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
     back_matter: MemoirBookManuscriptBackMatter
     render_settings: MemoirBookManuscriptRenderSettings = Field(default_factory=MemoirBookManuscriptRenderSettings)
+
+    @model_validator(mode="after")
+    def _preserve_legacy_preset_layout(self):
+        # Before v4, only the custom template used these adjustments. Residual
+        # values on an old preset must not suddenly change its printed layout.
+        if self.schema_version in {1, 2, 3} and self.profile.template != "custom":
+            self.render_settings.custom_layout = MemoirBookCustomLayout()
+        return self
 
 
 class MemoirBookOutputVersionResponse(BaseModel):

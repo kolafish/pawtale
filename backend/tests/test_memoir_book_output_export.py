@@ -9,12 +9,13 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app.schemas.memoir_book import (
     MemoirBookCoverStyle,
+    MemoirBookManuscript,
     MemoirBookManuscriptProfile,
     MemoirBookManuscriptTemplate,
 )
 from app.services.memoir import book_output_export
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
-from app.services.memoir.book_output_manuscript import stored_manuscript_design
+from app.services.memoir.book_output_manuscript import editable_manuscript, stored_manuscript_design
 from app.services.memoir.book_output_export import (
     PDF_COVER_STYLES,
     MemoirBookOutputExportFormat,
@@ -207,6 +208,48 @@ def test_manuscript_design_changes_chapter_and_body_pdf_layout():
         print_layout = configured_pdf_layout(print_base, template=template)
         assert print_layout.mirror_body_pages is True
         assert print_layout.inner_margin_delta == print_base.inner_margin_delta
+
+
+def test_body_font_and_spacing_overrides_keep_preset_chapter_design():
+    text = "这是正文，留给家人阅读。"
+    base = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        manuscript = _sample_manuscript(text, cover_style="dark_album")
+        manuscript["profile"]["template"] = template
+        original = configured_pdf_layout(base, template=template)
+        for family, font in (("serif", PDF_SERIF_FONT_NAME), ("sans", PDF_SANS_FONT_NAME)):
+            adjusted = configured_pdf_layout(
+                base, template=template,
+                custom_layout={"font_family": family, "font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"},
+            )
+            assert adjusted.manuscript_template == original.manuscript_template
+            assert adjusted.font_size == original.font_size + 2
+            assert adjusted.margin_x == original.margin_x + 12
+            pages = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=adjusted)
+            chapter = next(page for page in pages if page.anchor == "chapter-1")
+            assert _text_command(chapter, text).font_name == font
+            assert any(image.path.name == f"{template}.png" for image in chapter.images)
+            assert pages[0].background_color == PDF_COVER_STYLES["dark_album"].background
+            assert _text_command(chapter, "院子里的日子").font_name == (
+                PDF_SANS_FONT_NAME if template == "modern_minimal" else PDF_SERIF_BOLD_FONT_NAME
+            )
+
+
+def test_legacy_preset_ignores_unused_adjustments_but_custom_keeps_them():
+    legacy = _sample_manuscript("旧正文。")
+    legacy["table_of_contents"][0]["chapter_id"] = "chapter-1"
+    legacy["back_matter"]["unconfirmed_facts"] = {"kind": "unconfirmed_facts", "title": "待确认", "content": ""}
+    legacy["schema_version"] = 3
+    legacy["profile"]["template"] = "warm_journal"
+    legacy["render_settings"]["custom_layout"] = {"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"}
+    assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "standard"
+    assert stored_manuscript_design(legacy)[1].font_scale == "standard"
+    upgraded = editable_manuscript(title="外婆回忆录", content="", snapshot=[], stored=legacy)
+    assert upgraded.schema_version == 4
+    assert upgraded.render_settings.custom_layout.font_scale == "standard"
+    legacy["profile"]["template"] = "custom"
+    assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "large"
+    assert stored_manuscript_design(legacy)[1].font_scale == "large"
 
 
 def test_additional_manuscript_templates_render_distinct_inner_pages_and_preserve_cover():
@@ -1067,7 +1110,7 @@ def test_export_cache_coalesces_processes_and_invalidates_owner_or_renderer_chan
     assert log.read_text() == "render\n"
     assert replace(prepared, owner_id="other-owner").cache_key != prepared.cache_key
     assert replace(prepared, render_date="2026-10-07").cache_key != prepared.cache_key
-    monkeypatch.setattr(cache, "BOOK_EXPORT_RENDER_REVISION", 2)
+    monkeypatch.setattr(cache, "BOOK_EXPORT_RENDER_REVISION", cache.BOOK_EXPORT_RENDER_REVISION + 1)
     upgraded = prepared.cache_key  # The already-prepared request remains fixed.
     assert replace(prepared).cache_key != upgraded
 

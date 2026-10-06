@@ -279,6 +279,8 @@ def stored_manuscript_design(stored: object) -> tuple[MemoirBookManuscriptTempla
         template = "classic_family"
     settings = manuscript.get("render_settings")
     settings = settings if isinstance(settings, dict) else {}
+    if manuscript.get("schema_version", 1) in {1, 2, 3} and template != "custom":
+        return template, MemoirBookCustomLayout()
     try:
         custom_layout = MemoirBookCustomLayout.model_validate(settings.get("custom_layout") or {})
     except ValueError:
@@ -535,7 +537,7 @@ def editable_manuscript(
             manuscript = MemoirBookManuscript.model_validate(
                 sanitize_manuscript_payload(title=title, manuscript=stored)
             )
-            manuscript.schema_version = 3
+            manuscript.schema_version = 4
             return manuscript
         except ValueError:
             pass
@@ -565,6 +567,7 @@ def updated_manuscript_payload(
     manuscript.profile.title = title
     if manuscript_template is not None:
         manuscript.profile.template = manuscript_template
+        manuscript.render_settings.custom_layout = MemoirBookCustomLayout()
     if custom_layout is not None:
         manuscript.render_settings.custom_layout = custom_layout
     manuscript.profile.subtitle = metadata["subtitle"]

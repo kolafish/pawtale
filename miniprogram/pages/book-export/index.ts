@@ -90,6 +90,9 @@ interface BookEditorialCopyJobView {
 type BookEditorialCopyJobs = Record<MemoirBookEditorialCopyJobTarget, BookEditorialCopyJobView>;
 
 const EDITORIAL_TARGETS: readonly MemoirBookEditorialCopyJobTarget[] = ["preface", "afterword", "back_cover_quote"];
+function editorialTargetsForSection(section: BookExportSection): readonly MemoirBookEditorialCopyJobTarget[] {
+  return section === "layout" ? ["back_cover_quote"] : ["preface", "afterword"];
+}
 const EDITORIAL_TARGET_LABELS: Record<MemoirBookEditorialCopyJobTarget, string> = {
   preface: "前言",
   afterword: "后记",
@@ -185,7 +188,12 @@ const BOOK_LAYOUT_OPTIONS = [
 ] satisfies BookLayoutOption[];
 
 const BOOK_LAYOUT_TEMPLATES: readonly MemoirBookManuscriptTemplate[] = [
-  ...BOOK_LAYOUT_OPTIONS.map((option) => option.value), "custom",
+  ...BOOK_LAYOUT_OPTIONS.map((option) => option.value),
+];
+const CUSTOM_FONT_FAMILY_OPTIONS: { value: MemoirBookCustomLayout["font_family"]; label: string }[] = [
+  { value: "auto", label: "跟随版式" },
+  { value: "serif", label: "宋体阅读" },
+  { value: "sans", label: "黑体清晰" },
 ];
 const CUSTOM_FONT_SCALE_OPTIONS: { value: MemoirBookCustomLayout["font_scale"]; label: string }[] = [
   { value: "standard", label: "标准" },
@@ -202,6 +210,7 @@ const CUSTOM_PAGE_MARGIN_OPTIONS: { value: MemoirBookCustomLayout["page_margin"]
   { value: "wide", label: "宽" },
 ];
 const DEFAULT_CUSTOM_LAYOUT: MemoirBookCustomLayout = {
+  font_family: "auto",
   font_scale: "standard",
   line_spacing: "standard",
   page_margin: "standard",
@@ -210,6 +219,7 @@ const DEFAULT_CUSTOM_LAYOUT: MemoirBookCustomLayout = {
 function customLayoutFromOutput(output: MemoirBookOutput | null): MemoirBookCustomLayout {
   const settings = output?.latest_version?.manuscript?.render_settings?.custom_layout;
   return {
+    font_family: CUSTOM_FONT_FAMILY_OPTIONS.find((option) => option.value === settings?.font_family)?.value || "auto",
     font_scale: settings?.font_scale === "large" ? "large" : "standard",
     line_spacing: CUSTOM_LINE_SPACING_OPTIONS.find((option) => option.value === settings?.line_spacing)?.value || "standard",
     page_margin: CUSTOM_PAGE_MARGIN_OPTIONS.find((option) => option.value === settings?.page_margin)?.value || "standard",
@@ -260,6 +270,10 @@ type BookExportData = BookOutputData & {
   bookLayoutOptions: BookLayoutOption[];
   bookLayoutTemplate: MemoirBookManuscriptTemplate;
   bookCustomLayout: MemoirBookCustomLayout;
+  bookLayoutFontFamilyOptions: typeof CUSTOM_FONT_FAMILY_OPTIONS;
+  bookLayoutFontFamilyIndex: number;
+  bookCoverOptions: { value: MemoirBookCoverStyle; label: string }[];
+  bookCoverIndex: number;
   bookLayoutFontScaleOptions: typeof CUSTOM_FONT_SCALE_OPTIONS;
   bookLayoutLineSpacingOptions: typeof CUSTOM_LINE_SPACING_OPTIONS;
   bookLayoutPageMarginOptions: typeof CUSTOM_PAGE_MARGIN_OPTIONS;
@@ -339,6 +353,10 @@ definePage<BookExportData>()({
     bookLayoutOptions: BOOK_LAYOUT_OPTIONS,
     bookLayoutTemplate: "classic_family",
     bookCustomLayout: DEFAULT_CUSTOM_LAYOUT,
+    bookLayoutFontFamilyOptions: CUSTOM_FONT_FAMILY_OPTIONS,
+    bookLayoutFontFamilyIndex: 0,
+    bookCoverOptions: [],
+    bookCoverIndex: 0,
     bookLayoutFontScaleOptions: CUSTOM_FONT_SCALE_OPTIONS,
     bookLayoutLineSpacingOptions: CUSTOM_LINE_SPACING_OPTIONS,
     bookLayoutPageMarginOptions: CUSTOM_PAGE_MARGIN_OPTIONS,
@@ -381,7 +399,7 @@ definePage<BookExportData>()({
     this.bookEditorialCopyPageVisible = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : (this.data.pagePurpose === "settings" ? "书的设置" : "导出文件"));
-    if (this.data.activeSection === "editorial" && this.bookOutput) {
+    if ((this.data.activeSection === "editorial" || this.data.activeSection === "layout") && this.bookOutput) {
       void this.refreshBookEditorialCopyProgress();
     }
   },
@@ -412,7 +430,7 @@ definePage<BookExportData>()({
       ]);
       this.bookDraftProgress = progress;
       this.applyBookExportData(plan, output);
-      if (this.data.activeSection === "editorial") {
+      if (this.data.activeSection === "editorial" || this.data.activeSection === "layout") {
         await this.refreshBookEditorialCopyProgress();
       }
     } catch (error) {
@@ -452,21 +470,22 @@ definePage<BookExportData>()({
         return;
       }
       const jobs = response.items || [];
+      const visibleTargets = editorialTargetsForSection(this.data.activeSection);
       const completed = jobs.filter((job) => (
-        job.status === "succeeded" && (
+        visibleTargets.includes(job.target) && job.status === "succeeded" && (
           previous[job.target]?.active
           || (!previous[job.target].visible && job.updated_at > (this.bookOutput?.updated_at || job.updated_at))
         )
       ));
       const failed = jobs.filter((job) => (
-        (job.status === "failed" || job.status === "skipped") && previous[job.target]?.active
+        visibleTargets.includes(job.target) && (job.status === "failed" || job.status === "skipped") && previous[job.target]?.active
       ));
       if (completed.length) {
         const output = await optionalApiResource(getMemoirBookOutput(this.data.projectId));
         if (submissionVersion !== this.bookEditorialCopySubmissionVersion) {
           return;
         }
-        this.applyBookExportData(this.bookPlan, output);
+        this.applyBookExportData(this.bookPlan, output, true);
       }
       this.applyBookEditorialCopyJobs(jobs);
       this.setData({ bookEditorialCopyStatusError: "" });
@@ -496,10 +515,10 @@ definePage<BookExportData>()({
     if (
       this.bookEditorialCopyPoller.pending
       || !this.bookEditorialCopyPageVisible
-      || this.data.activeSection !== "editorial"
+      || (this.data.activeSection !== "editorial" && this.data.activeSection !== "layout")
       || (
         !this.data.bookEditorialCopyStatusError
-        && !EDITORIAL_TARGETS.some((target) => this.data.bookEditorialCopyJobs[target].active)
+        && !editorialTargetsForSection(this.data.activeSection).some((target) => this.data.bookEditorialCopyJobs[target].active)
       )
     ) {
       return;
@@ -513,7 +532,7 @@ definePage<BookExportData>()({
     this.bookEditorialCopyPoller.cancel();
   },
 
-  applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
+  applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null, preserveLayoutChanges = false) {
     this.bookPlan = plan;
     this.bookOutput = output;
     this.bookOutputVersion = output?.latest_version || null;
@@ -533,7 +552,15 @@ definePage<BookExportData>()({
         ornamentThumbnail: matchingLayout?.ornamentThumbnail || "",
       });
     }
-    const bookCustomLayout = customLayoutFromOutput(output);
+    const storedLayout = customLayoutFromOutput(output);
+    const bookCustomLayout = preserveLayoutChanges && this.data.bookLayoutCustomChanged
+      ? this.data.bookCustomLayout : storedLayout;
+    const bookCoverOptions: { value: MemoirBookCoverStyle; label: string }[] = BOOK_LAYOUT_OPTIONS.map(
+      (option) => ({ value: option.coverStyle, label: option.label }),
+    );
+    if (!bookCoverOptions.some((option) => option.value === outputData.bookCoverStyle)) {
+      bookCoverOptions.unshift({ value: outputData.bookCoverStyle, label: "当前封面" });
+    }
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultTitle(plan, output);
     }
@@ -545,10 +572,16 @@ definePage<BookExportData>()({
       bookLayoutTemplate,
       bookLayoutOptions,
       bookCustomLayout,
+      bookCoverOptions,
+      bookCoverIndex: Math.max(0, bookCoverOptions.findIndex((option) => option.value === outputData.bookCoverStyle)),
+      bookLayoutFontFamilyIndex: customLayoutIndex(CUSTOM_FONT_FAMILY_OPTIONS, bookCustomLayout.font_family),
       bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, bookCustomLayout.font_scale),
       bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, bookCustomLayout.line_spacing),
       bookLayoutPageMarginIndex: customLayoutIndex(CUSTOM_PAGE_MARGIN_OPTIONS, bookCustomLayout.page_margin),
-      bookLayoutCustomChanged: false,
+      bookLayoutCustomChanged: bookCustomLayout.font_family !== storedLayout.font_family
+        || bookCustomLayout.font_scale !== storedLayout.font_scale
+        || bookCustomLayout.line_spacing !== storedLayout.line_spacing
+        || bookCustomLayout.page_margin !== storedLayout.page_margin,
       bookLayoutSampleTitle: outputData.bookPreviewChapters[0]?.title || "那些年的故事",
       bookLayoutSampleExcerpt: outputData.bookPreviewChapters[0]?.excerpt || "回忆从家里的故事开始，慢慢写下那些值得留住的日子。",
       bookLayoutSampleSectionTitle: (outputData.bookPreviewChapters[0]?.sections?.[0]?.title || "院子里的夏天").slice(0, 30),
@@ -712,7 +745,7 @@ definePage<BookExportData>()({
         afterword: metadata.afterword,
         back_cover_quote: metadata.back_cover_quote,
       });
-      this.applyBookExportData(this.bookPlan, output);
+      this.applyBookExportData(this.bookPlan, output, true);
       this.setData({
         bookTitleInput: title,
         bookSubtitleInput: metadata.subtitle,
@@ -881,7 +914,11 @@ definePage<BookExportData>()({
     const key = datasetString(event, "key");
     const index = pickerIndex(event);
     const next = { ...this.data.bookCustomLayout };
-    if (key === "font_scale") {
+    if (key === "font_family") {
+      const option = CUSTOM_FONT_FAMILY_OPTIONS[index];
+      if (!option) return;
+      next.font_family = option.value;
+    } else if (key === "font_scale") {
       const option = CUSTOM_FONT_SCALE_OPTIONS[index];
       if (!option) return;
       next.font_scale = option.value;
@@ -899,10 +936,11 @@ definePage<BookExportData>()({
     const stored = customLayoutFromOutput(this.bookOutput);
     this.setData({
       bookCustomLayout: next,
+      bookLayoutFontFamilyIndex: customLayoutIndex(CUSTOM_FONT_FAMILY_OPTIONS, next.font_family),
       bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, next.font_scale),
       bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, next.line_spacing),
       bookLayoutPageMarginIndex: customLayoutIndex(CUSTOM_PAGE_MARGIN_OPTIONS, next.page_margin),
-      bookLayoutCustomChanged: next.font_scale !== stored.font_scale
+      bookLayoutCustomChanged: next.font_family !== stored.font_family || next.font_scale !== stored.font_scale
         || next.line_spacing !== stored.line_spacing
         || next.page_margin !== stored.page_margin,
       error: "",
@@ -910,7 +948,10 @@ definePage<BookExportData>()({
   },
 
   async previewBookLayout(event: DatasetEvent) {
+    const adjusting = datasetString(event, "template") === "adjust";
     const template = datasetChoice(event, "template", [...BOOK_LAYOUT_TEMPLATES, "current"] as const, "heritage_classic");
+    const target = adjusting ? "adjust" : template;
+    const pendingLayout = { ...this.data.bookCustomLayout };
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget) return;
     if (!this.bookOutput?.latest_version) {
       this.setData({
@@ -932,22 +973,24 @@ definePage<BookExportData>()({
     }
     const isStale = this.bookOutput.is_stale;
     this.setData({
-      bookLayoutBusyTarget: `preview:${template}`,
-      bookLayoutFeedbackTarget: template,
+      bookLayoutBusyTarget: `preview:${target}`,
+      bookLayoutFeedbackTarget: target,
       bookLayoutFeedbackText: isStale ? "正在预览上次保存的书稿…" : "正在生成预览…",
       bookLayoutFeedbackError: false,
       error: "",
     });
     try {
+      if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+        this.setData({ bookLayoutFeedbackText: this.data.error || "请先保存成书信息", bookLayoutFeedbackError: true });
+        return;
+      }
       const filePath = await downloadMemoirBookOutputExport(
         this.data.projectId,
         "pdf",
         this.bookOutput.latest_version.id,
         "standard",
         this.data.bookExportShowSourceAppendix,
-        template === "current" ? undefined : {
-          template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined,
-        },
+        adjusting ? { custom_layout: pendingLayout } : template === "current" ? undefined : { template },
         (phase) => this.setData({ bookLayoutFeedbackText: {
           checking: "正在检查预览…", generating: "正在生成预览…", downloading: "正在下载预览…", opening: "正在打开预览…",
         }[phase] }),
@@ -967,9 +1010,11 @@ definePage<BookExportData>()({
 
   async selectBookLayout(event: DatasetEvent) {
     if (datasetString(event, "template") === "current") return;
-    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
+    const adjusting = datasetString(event, "template") === "adjust";
+    const template = adjusting ? this.data.bookLayoutTemplate : datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
+    const pendingLayout = { ...this.data.bookCustomLayout };
     const option = BOOK_LAYOUT_OPTIONS.find((candidate) => candidate.value === template);
-    const coverStyle = option?.coverStyle;
+    const coverStyle = adjusting ? undefined : option?.coverStyle;
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget || this.data.bookTitleSaving) return;
     if (!this.bookOutput?.latest_version) {
       this.setData({ error: "请先生成书稿" });
@@ -983,14 +1028,15 @@ definePage<BookExportData>()({
       this.setData({ error: "请切回最新版后再修改版式" });
       return;
     }
-    if (
+    if (adjusting && !this.data.bookLayoutCustomChanged) return;
+    if (!adjusting && (
       template === this.data.bookLayoutTemplate
       && (!coverStyle || this.data.bookCoverStyle === coverStyle)
-      && (template !== "custom" || !this.data.bookLayoutCustomChanged)
-    ) return;
+    )) return;
+    const target = adjusting ? "adjust" : template;
     this.setData({
-      bookLayoutBusyTarget: `save:${template}`,
-      bookLayoutFeedbackTarget: template,
+      bookLayoutBusyTarget: `save:${target}`,
+      bookLayoutFeedbackTarget: target,
       bookLayoutFeedbackText: "正在应用版式…",
       bookLayoutFeedbackError: false,
       error: "",
@@ -1001,9 +1047,8 @@ definePage<BookExportData>()({
         return;
       }
       const output = await updateMemoirBookOutput(this.data.projectId, {
-        manuscript_template: template,
+        ...(adjusting ? { custom_layout: pendingLayout } : { manuscript_template: template }),
         ...(coverStyle ? { cover_style: coverStyle } : {}),
-        ...(template === "custom" ? { custom_layout: this.data.bookCustomLayout } : {}),
       });
       this.applyBookExportData(this.bookPlan, output);
       this.setData({ bookLayoutFeedbackText: "版式已应用" });
@@ -1012,6 +1057,29 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) return;
       const message = error instanceof Error ? error.message : "保存书稿版式失败";
       this.setData({ error: message, bookLayoutFeedbackText: message, bookLayoutFeedbackError: true });
+    } finally {
+      this.setData({ bookLayoutBusyTarget: "" });
+    }
+  },
+
+  async changeBookCoverStyle(event: PickerEvent) {
+    const option = this.data.bookCoverOptions[pickerIndex(event)];
+    if (!option || option.value === this.data.bookCoverStyle || !this.data.projectId
+      || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget
+      || this.data.bookTitleSaving || this.data.bookViewingHistoricalVersion || !this.data.bookManuscriptAvailable) return;
+    this.setData({ bookLayoutBusyTarget: "save:cover", bookLayoutFeedbackTarget: "cover",
+      bookLayoutFeedbackText: "正在保存封面…", bookLayoutFeedbackError: false, error: "" });
+    try {
+      if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+        this.setData({ bookLayoutFeedbackText: this.data.error || "请先保存成书信息", bookLayoutFeedbackError: true });
+        return;
+      }
+      const output = await updateMemoirBookOutput(this.data.projectId, { cover_style: option.value });
+      this.applyBookExportData(this.bookPlan, output, true);
+      this.setData({ bookLayoutFeedbackText: "封面与封底风格已保存" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) return;
+      this.setData({ bookLayoutFeedbackText: error instanceof Error ? error.message : "保存封面失败", bookLayoutFeedbackError: true });
     } finally {
       this.setData({ bookLayoutBusyTarget: "" });
     }
@@ -1056,7 +1124,7 @@ definePage<BookExportData>()({
       wx.pageScrollTo({ scrollTop: 0, duration: 0 });
     });
     setPageNavigationTitle(SECTION_TITLES[section]);
-    if (section === "editorial") {
+    if (section === "editorial" || section === "layout") {
       void this.refreshBookEditorialCopyProgress();
     }
   },
@@ -1066,7 +1134,7 @@ definePage<BookExportData>()({
       wx.navigateBack({ fail: () => this.openBookHome() });
       return;
     }
-    if (this.data.activeSection === "title" || this.data.activeSection === "editorial") {
+    if (this.data.activeSection === "title" || this.data.activeSection === "editorial" || this.data.activeSection === "layout") {
       this.clearBookDesignAutosaveTimer();
       if (bookDesignHasChanges(this.data)) {
         await this.autosaveBookDesignSettings();

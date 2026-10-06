@@ -814,7 +814,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     manuscript = data["latest_version"]["manuscript"]
-    assert manuscript["schema_version"] == 3
+    assert manuscript["schema_version"] == 4
     assert manuscript["profile"]["template"] == "classic_family"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
@@ -932,7 +932,7 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert project.title == "外婆慢慢说"
 
 
-async def test_book_manuscript_design_saves_and_preview_does_not_change_selection(client, test_db):
+async def test_book_manuscript_design_saves_and_preview_does_not_change_selection(client, test_db, monkeypatch):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
     await _seed_confirmed_book_output(test_db, project_id=project_id)
@@ -940,8 +940,10 @@ async def test_book_manuscript_design_saves_and_preview_does_not_change_selectio
     selected = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/book-output",
         json={
-            "manuscript_template": "custom",
+            "manuscript_template": "warm_journal",
+            "cover_style": "navy_gilt",
             "custom_layout": {
+                "font_family": "sans",
                 "font_scale": "large",
                 "line_spacing": "relaxed",
                 "page_margin": "wide",
@@ -950,21 +952,30 @@ async def test_book_manuscript_design_saves_and_preview_does_not_change_selectio
     )
     assert selected.status_code == 200
     version = selected.json()["latest_version"]
-    assert version["manuscript"]["schema_version"] == 3
-    assert version["manuscript"]["profile"]["template"] == "custom"
+    assert version["manuscript"]["schema_version"] == 4
+    assert version["manuscript"]["profile"]["template"] == "warm_journal"
     assert version["manuscript"]["render_settings"]["custom_layout"] == {
+        "font_family": "sans",
         "font_scale": "large",
         "line_spacing": "relaxed",
         "page_margin": "wide",
     }
 
+    rendered_designs = []
+    render_export = book_outputs.render_book_output_export
+
+    def capture_rendered_design(**kwargs):
+        rendered_designs.append(kwargs["manuscript"])
+        return render_export(**kwargs)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", capture_rendered_design)
     preview = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output/export"
         "?format=pdf&preview_template=photo_memory"
     )
     custom_preview = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output/export"
-        "?format=pdf&preview_template=custom&preview_font_scale=standard"
+        "?format=pdf&preview_font_family=serif&preview_font_scale=standard"
         "&preview_line_spacing=compact&preview_page_margin=narrow"
     )
     current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
@@ -973,12 +984,28 @@ async def test_book_manuscript_design_saves_and_preview_does_not_change_selectio
     assert custom_preview.status_code == 200
     assert preview.content.startswith(b"%PDF-")
     assert custom_preview.content.startswith(b"%PDF-")
+    adjusted = rendered_designs[-1]
+    assert adjusted["profile"]["template"] == "warm_journal"
+    assert adjusted["render_settings"]["cover_style"] == "navy_gilt"
+    assert adjusted["render_settings"]["custom_layout"]["font_family"] == "serif"
+    assert adjusted["chapters"] == version["manuscript"]["chapters"]
     assert current.status_code == 200
     assert current.json()["latest_version"]["id"] == version["id"]
-    assert current.json()["latest_version"]["manuscript"]["profile"]["template"] == "custom"
+    assert current.json()["latest_version"]["manuscript"]["profile"]["template"] == "warm_journal"
     assert current.json()["latest_version"]["manuscript"]["render_settings"]["custom_layout"] == (
         version["manuscript"]["render_settings"]["custom_layout"]
     )
+
+    saved = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"custom_layout": {"font_family": "serif", "font_scale": "large"}},
+    )
+    assert saved.status_code == 200
+    saved_manuscript = saved.json()["latest_version"]["manuscript"]
+    assert saved_manuscript["profile"]["template"] == "warm_journal"
+    assert saved_manuscript["render_settings"]["cover_style"] == "navy_gilt"
+    assert saved_manuscript["render_settings"]["custom_layout"]["font_family"] == "serif"
+    assert saved_manuscript["chapters"] == version["manuscript"]["chapters"]
 
 
 async def test_new_manuscript_templates_pair_covers_without_saving_preview(client, test_db, monkeypatch):
@@ -1073,6 +1100,16 @@ async def test_book_manuscript_design_rejects_unsupported_values(client, test_db
     assert update.status_code == 422
     assert preview.status_code == 422
 
+    invalid_font = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"custom_layout": {"font_family": "kai"}},
+    )
+    invalid_preview_font = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?preview_font_family=kai"
+    )
+    assert invalid_font.status_code == 422
+    assert invalid_preview_font.status_code == 422
+
 
 async def test_book_manuscript_design_requires_structured_manuscript(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
@@ -1105,8 +1142,9 @@ async def test_book_manuscript_design_survives_new_book_assembly(client, test_db
     selected = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/book-output",
         json={
-            "manuscript_template": "custom",
+            "manuscript_template": "warm_journal",
             "custom_layout": {
+                "font_family": "sans",
                 "font_scale": "large",
                 "line_spacing": "compact",
                 "page_margin": "narrow",
@@ -1144,8 +1182,9 @@ async def test_book_manuscript_design_survives_new_book_assembly(client, test_db
     assert current.status_code == 200
     assert current.json()["latest_version"]["id"] == assembled.json()["output_version_id"]
     manuscript = current.json()["latest_version"]["manuscript"]
-    assert manuscript["profile"]["template"] == "custom"
+    assert manuscript["profile"]["template"] == "warm_journal"
     assert manuscript["render_settings"]["custom_layout"] == {
+        "font_family": "sans",
         "font_scale": "large",
         "line_spacing": "compact",
         "page_margin": "narrow",

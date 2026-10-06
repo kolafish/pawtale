@@ -116,7 +116,7 @@ test("book design section shows one curated gallery and keeps custom reading con
   assert.match(template, /data-template="\{\{option.value\}\}" bindtap="selectBookLayout"/);
   assert.match(template, /src="\{\{option.coverPreviewImage\}\}"/);
   assert.match(template, /src="\{\{option.ornamentThumbnail\}\}"/);
-  assert.doesNotMatch(template, /bindchange="changeBookCoverStyle"/);
+  assert.match(template, /bindchange="changeBookCoverStyle"/);
   assert.doesNotMatch(template, /预览整套 PDF|预览阅读版 PDF/);
   assert.match(template, /bookLayoutFeedbackTarget === option.value/);
   assert.match(template, /data-key="font_scale" bindchange="changeBookCustomLayout"/);
@@ -644,15 +644,19 @@ test("book export tracks all editorial jobs through queue, execution, completion
 });
 
 test("book export resumes editorial job updates after returning to the page", async () => {
+  global.wx = { showToast() {} };
   let refreshes = 0;
-  const running = sampleEditorialJob("preface", "running");
+  let running = sampleEditorialJob("back_cover_quote", "running");
+  const updatedOutput = sampleBookOutput();
+  updatedOutput.latest_version.manuscript.render_settings.back_cover_quote = "新的封底文字。";
   const { page } = loadBookExportPage({
+    getMemoirBookOutput: async () => updatedOutput,
     getMemoirBookEditorialCopyJobs: async () => {
       refreshes += 1;
       return { items: [running] };
     },
   });
-  const context = pageContext(page, { projectId: "project/1", activeSection: "editorial" });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "layout" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
   page.applyBookEditorialCopyJobs.call(context, [running]);
   assert.equal(context.bookEditorialCopyPoller.pending, true);
@@ -663,8 +667,12 @@ test("book export resumes editorial job updates after returning to the page", as
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(refreshes, 1);
-  assert.equal(context.data.bookEditorialCopyJobs.preface.statusText, "执行中");
+  assert.equal(context.data.bookEditorialCopyJobs.back_cover_quote.statusText, "执行中");
   assert.equal(context.bookEditorialCopyPoller.pending, true);
+  running = sampleEditorialJob("back_cover_quote", "succeeded");
+  await page.refreshBookEditorialCopyProgress.call(context);
+  assert.equal(context.data.bookBackCoverQuoteInput, "新的封底文字。");
+  assert.equal(context.bookEditorialCopyPoller.pending, false);
   page.clearBookEditorialCopyPoll.call(context);
 });
 
@@ -865,7 +873,7 @@ test("new complete templates preview without saving and apply cover with interio
     await page.previewBookLayout.call(context, event);
     assert.deepEqual(downloads.at(-1).slice(0, 6), [
       "project/1", "pdf", "book-output-version-2", "standard", false,
-      { template, custom_layout: undefined },
+      { template },
     ]);
     assert.equal(updates.length, downloads.length - 1);
     assert.equal(context.data.bookLayoutFeedbackTarget, template);
@@ -990,14 +998,13 @@ test("book layout cannot be previewed or selected for a plain text legacy book",
   assert.deepEqual(updates, []);
 });
 
-test("custom book layout previews pending changes and saves all three controls", async () => {
+test("body adjustments and cover edits preserve the selected interior and pending controls", async () => {
   const output = sampleBookOutput();
+  output.latest_version.manuscript.profile.template = "warm_journal";
+  output.latest_version.manuscript.render_settings.cover_style = "warm_journal";
   const updates = [];
   const downloads = [];
-  global.wx = {
-    openDocument(options) { options.success(); },
-    showToast() {},
-  };
+  global.wx = { openDocument(options) { options.success(); }, showToast() {} };
   const { page } = loadBookExportPage({
     downloadMemoirBookOutputExport: async (...args) => {
       downloads.push(args);
@@ -1005,45 +1012,48 @@ test("custom book layout previews pending changes and saves all three controls",
     },
     updateMemoirBookOutput: async (_projectId, payload) => {
       updates.push(payload);
-      output.latest_version.manuscript.profile.template = payload.manuscript_template;
-      output.latest_version.manuscript.render_settings.custom_layout = payload.custom_layout;
+      if (payload.title) {
+        output.title = payload.title;
+        output.latest_version.manuscript.profile.title = payload.title;
+      }
+      if (payload.cover_style) output.latest_version.manuscript.render_settings.cover_style = payload.cover_style;
+      if (payload.custom_layout) output.latest_version.manuscript.render_settings.custom_layout = payload.custom_layout;
       return output;
     },
   });
-  const context = pageContext(page, { projectId: "project/1" });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "layout" });
   page.applyBookExportData.call(context, samplePlan(), output);
-  page.changeBookCustomLayout.call(context, {
-    currentTarget: { dataset: { key: "font_scale" } }, detail: { value: "1" },
-  });
-  page.changeBookCustomLayout.call(context, {
-    currentTarget: { dataset: { key: "line_spacing" } }, detail: { value: "2" },
-  });
-  page.changeBookCustomLayout.call(context, {
-    currentTarget: { dataset: { key: "page_margin" } }, detail: { value: "0" },
-  });
+  for (const [key, value] of [["font_family", "2"], ["font_scale", "1"], ["line_spacing", "2"], ["page_margin", "0"]]) {
+    page.changeBookCustomLayout.call(context, { currentTarget: { dataset: { key } }, detail: { value } });
+  }
+  const controls = { font_family: "sans", font_scale: "large", line_spacing: "relaxed", page_margin: "narrow" };
+  assert.deepEqual(context.data.bookCustomLayout, controls);
   assert.equal(context.data.bookLayoutCustomChanged, true);
-  assert.deepEqual(context.data.bookCustomLayout, {
-    font_scale: "large", line_spacing: "relaxed", page_margin: "narrow",
-  });
 
-  await page.previewBookLayout.call(context, {
-    currentTarget: { dataset: { template: "custom" } },
-  });
-  assert.deepEqual(downloads[0][5], {
-    template: "custom",
-    custom_layout: { font_scale: "large", line_spacing: "relaxed", page_margin: "narrow" },
-  });
-  assert.deepEqual(updates, []);
+  page.changeBookTitle.call(context, { detail: { value: "给家人的回忆" } });
+  const event = { currentTarget: { dataset: { template: "adjust" } } };
+  await page.previewBookLayout.call(context, event);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].title, "给家人的回忆");
+  assert.deepEqual(downloads[0][5], { custom_layout: controls });
+  assert.deepEqual(context.data.bookCustomLayout, controls);
+  assert.equal(context.data.bookLayoutCustomChanged, true);
 
-  await page.selectBookLayout.call(context, {
-    currentTarget: { dataset: { template: "custom" } },
-  });
-  assert.deepEqual(updates[0], {
-    manuscript_template: "custom",
-    custom_layout: { font_scale: "large", line_spacing: "relaxed", page_margin: "narrow" },
-  });
+  const coverIndex = context.data.bookCoverOptions.findIndex((option) => option.value === "modern_minimal");
+  await page.changeBookCoverStyle.call(context, { detail: { value: String(coverIndex) } });
+  assert.deepEqual(updates[1], { cover_style: "modern_minimal" });
+  assert.equal(context.data.bookLayoutTemplate, "warm_journal");
+  assert.equal(context.data.bookCoverStyle, "modern_minimal");
+  assert.deepEqual(context.data.bookCustomLayout, controls);
+  assert.equal(context.data.bookLayoutCustomChanged, true);
+
+  await page.selectBookLayout.call(context, event);
+  assert.deepEqual(updates[2], { custom_layout: controls });
+  assert.equal(context.data.bookLayoutTemplate, "warm_journal");
+  assert.equal(context.data.bookCoverStyle, "modern_minimal");
   assert.equal(context.data.bookLayoutCustomChanged, false);
-  assert.equal(context.data.bookManuscriptTemplateLabel, "自定义版式");
+  assert.equal(context.data.bookLayoutFontFamilyIndex, 2);
+  page.clearBookDesignAutosaveTimer.call(context);
 });
 
 test("book export delivers TXT through WeChat file sharing", async () => {
