@@ -1,8 +1,10 @@
+from copy import deepcopy
 from io import BytesIO
 
 import pytest
 from PIL import Image
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -689,3 +691,68 @@ async def test_image_assets_are_project_owner_scoped(client, test_db, tmp_path, 
         json={"caption": "不应该能改"},
     )
     assert response.status_code == 404
+
+
+async def test_uploaded_cover_is_independent_of_auto_body_images_and_templates(client, test_db, tmp_path, monkeypatch):
+    _, project_id, _, body_asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    latest = await test_db.scalar(select(MemoirBookOutputVersion).where(
+        MemoirBookOutputVersion.project_id == project_id,
+    ).order_by(MemoirBookOutputVersion.version.desc()))
+    # A pre-v4 preset could carry unused custom controls. Adding a cover must
+    # preserve its effective typography when upgrading the snapshot.
+    legacy = deepcopy(latest.manuscript_json)
+    legacy["schema_version"] = 3
+    legacy["render_settings"]["custom_layout"] = {"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"}
+    latest.manuscript_json = legacy
+    flag_modified(latest, "manuscript_json")
+    await test_db.commit()
+    base = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
+    uploaded = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets", files={"file": ("photo.png", _png_bytes((480, 640)), "image/png")})
+    assert uploaded.status_code == 201
+    asset = uploaded.json()
+    assert (asset["width"], asset["height"]) == (480, 640)
+    assert asset["source_type"] == "manual_upload"
+    duplicate = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets", files={"file": ("photo.png", _png_bytes((480, 640)), "image/png")})
+    assert duplicate.json()["id"] == asset["id"]
+    selected = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements", json={"placement_type": "cover"})
+    assert selected.status_code == 201
+    cover_placement = next(p for p in selected.json()["placements"] if p["placement_type"] == "cover")
+    after_upload = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
+    assert after_upload["schema_version"] == 5
+    assert after_upload["render_settings"]["custom_layout"]["font_scale"] == "standard"
+    replacement = (await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets", files={"file": ("new.png", _png_bytes((600, 800)), "image/png")})).json()
+    placed = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets/{replacement['id']}/placements", json={"placement_type": "cover"})
+    assert placed.status_code == 201
+    reenabled = await client.patch(f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements/{cover_placement['id']}", json={"enabled": True})
+    assert reenabled.status_code == 200
+    covers = (await test_db.scalars(select(MemoirBookImagePlacement).where(
+        MemoirBookImagePlacement.project_id == project_id,
+        MemoirBookImagePlacement.placement_type == "cover",
+        MemoirBookImagePlacement.enabled.is_(True),
+    ))).all()
+    assert [cover.image_asset_id for cover in covers] == [asset["id"]]
+    for template in ("heritage_classic", "warm_journal", "modern_minimal", "custom"):
+        changed = await client.patch(f"/api/mobile/memoir/projects/{project_id}/book-output", json={"manuscript_template": template})
+        assert changed.status_code == 200
+        manuscript = changed.json()["latest_version"]["manuscript"]
+        assert manuscript["render_settings"]["cover_image"]["image_asset_id"] == asset["id"]
+        assert manuscript["chapters"] == base["chapters"]
+        assert manuscript["render_settings"]["back_cover_quote"] == base["render_settings"]["back_cover_quote"]
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    await test_db.commit()
+    version = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    assert version.manuscript_json["render_settings"]["cover_image"]["image_asset_id"] == asset["id"]
+    assert [image["image_asset_id"] for image in version.manuscript_json["chapters"][0]["illustrations"]] == [body_asset_id]
+    restored = await client.delete(f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements/{cover_placement['id']}")
+    assert restored.status_code == 200
+    current = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
+    assert current["render_settings"]["cover_image"] is None
+    assert current["chapters"] == base["chapters"]
+    from app.models.projects import Project
+    project = await test_db.get(Project, project_id)
+    await test_db.refresh(project)
+    assert project.memoir_book_image_selection_manual is False
+    invalid = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets", files={"file": ("photo.png", b"invalid image", "image/png")})
+    assert invalid.status_code == 400

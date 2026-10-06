@@ -37,7 +37,7 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
-import { downloadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
+import { downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
 
 export function getMemoirBookShareStatus(projectId: string): Promise<MemoirBookShareStatus> {
@@ -150,6 +150,22 @@ export async function deleteMemoirImageAsset(projectId: string, assetId: string)
       method: "DELETE",
     },
   );
+}
+
+export function uploadMemoirImageAsset(projectId: string, filePath: string): Promise<MemoirImageAsset> {
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  return uploadAuthenticatedFile(`${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, "/image-assets")}`, {
+    filePath, name: "file", failureMessage: "图片上传失败", domainLabel: "图片上传",
+    parseResponse: (data) => {
+      try { return JSON.parse(data) as MemoirImageAsset; }
+      catch (error) { throw new ApiError(0, "图片上传结果解析失败", error); }
+    },
+    responseErrorMessage: (data) => {
+      try { const response = JSON.parse(data) as { detail?: unknown }; return typeof response.detail === "string" ? response.detail : "图片上传失败"; }
+      catch { return "图片上传失败"; }
+    },
+  });
 }
 
 export function createMemoirBookImagePlacement(

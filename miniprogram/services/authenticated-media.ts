@@ -227,3 +227,43 @@ export async function uploadAuthenticatedFile<T>(
     });
   });
 }
+
+function isChooseImageCancel(error: WechatMiniprogram.GeneralCallbackResult): boolean {
+  return String(error.errMsg || "").toLowerCase().includes("cancel");
+}
+
+export function chooseImageFile(): Promise<string | null> {
+  if (typeof wx.chooseMedia === "function") {
+    return new Promise((resolve, reject) => {
+      wx.chooseMedia?.({
+        count: 1,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        sizeType: ["original", "compressed"],
+        success: (result) => resolve(result.tempFiles[0]?.tempFilePath || null),
+        fail: (error) => {
+          if (isChooseImageCancel(error)) {
+            resolve(null);
+            return;
+          }
+          reject(new Error(error.errMsg || "选择图片失败"));
+        },
+      });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    wx.chooseImage({
+      count: 1,
+      sourceType: ["album", "camera"],
+      sizeType: ["original", "compressed"],
+      success: (result) => resolve(result.tempFilePaths[0] || null),
+      fail: (error) => {
+        if (isChooseImageCancel(error)) {
+          resolve(null);
+          return;
+        }
+        reject(new Error(error.errMsg || "选择图片失败"));
+      },
+    });
+  });
+}

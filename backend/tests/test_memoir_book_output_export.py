@@ -245,7 +245,7 @@ def test_legacy_preset_ignores_unused_adjustments_but_custom_keeps_them():
     assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "standard"
     assert stored_manuscript_design(legacy)[1].font_scale == "standard"
     upgraded = editable_manuscript(title="外婆回忆录", content="", snapshot=[], stored=legacy)
-    assert upgraded.schema_version == 4
+    assert upgraded.schema_version == 5
     assert upgraded.render_settings.custom_layout.font_scale == "standard"
     legacy["profile"]["template"] = "custom"
     assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "large"
@@ -1138,3 +1138,24 @@ def test_illustration_file_content_changes_export_signature(tmp_path, monkeypatc
     assert replace(prepared).cache_key != original
     photo.unlink()
     assert replace(prepared).cache_key != original
+
+
+def test_uploaded_cover_preserves_aspect_ratio_and_replaces_only_front_cover(tmp_path, monkeypatch):
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    photo = tmp_path / "photo.jpg"
+    Image.new("RGB", (800, 600), "red").save(photo)
+    for template in ("classic_family", "heritage_classic", "warm_journal", "modern_minimal", "custom"):
+        manuscript = _sample_manuscript("正文保持原样。", cover_style="warm_journal")
+        manuscript["profile"]["template"] = template
+        manuscript["render_settings"]["cover_image"] = {"image_asset_id": "photo", "storage_path": "photo.jpg"}
+        layout = configured_pdf_layout(PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template)
+        pages = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=layout)
+        assert pages[0].commands == []
+        image = pages[0].images[0]
+        assert image.path == photo
+        assert image.width / image.height == pytest.approx(800 / 600)
+        assert 0 <= image.x and 0 <= image.y
+        assert image.x + image.width <= layout.page_width
+        assert image.y + image.height <= layout.page_height
+        assert pages[-1].background_image_path == PDF_COVER_STYLES["warm_journal"].back_cover_background_image
+        assert any(command.text == "正文保持原样。" for page in pages for command in page.commands)

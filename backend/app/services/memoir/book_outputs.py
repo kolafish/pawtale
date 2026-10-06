@@ -782,7 +782,7 @@ async def prepare_book_output_export(
             manuscript.render_settings.custom_layout = manuscript.render_settings.custom_layout.model_copy(
                 update=preview_custom_layout_patch
             )
-        manuscript.schema_version = 4
+        manuscript.schema_version = 5
     return PreparedBookExport(
         owner_id=project.user_id, project_id=project_id, version_id=version.id,
         version=version.version, title=title, content=content, manuscript=manuscript,

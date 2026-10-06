@@ -170,6 +170,9 @@ function placementText(asset: MemoirImageAsset): string {
   if (appendixCount) {
     parts.push("已加入书末图录");
   }
+  if (enabled.some((placement) => placement.placement_type === "cover")) {
+    parts.push("已用于封面");
+  }
   const extra = enabled.length > parts.length ? `等 ${enabled.length} 处` : "";
   return [...parts, extra].filter(Boolean).join(" · ");
 }

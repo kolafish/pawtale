@@ -198,11 +198,40 @@
           />
         </view>
 
+        <view class="book-metadata-field book-editorial-section">
+          <view class="book-metadata-label-row book-editorial-label-row">
+            <text class="book-metadata-label book-editorial-label">封底摘要</text>
+            <button
+              class="book-editorial-generate ui-button"
+              data-target="back_cover_quote"
+              loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookEditorialCopyJobs.back_cover_quote.active || !bookContent}}"
+              bindtap="regenerateBookEditorialCopy"
+            >
+              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交…" : (bookEditorialCopyJobs.back_cover_quote.active ? "任务进行中" : "请小余重写")}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'back_cover_quote' && !bookEditorialCopyJobs.back_cover_quote.active}}" class="book-editorial-generate-arrow">›</text>
+            </button>
+          </view>
+          <view wx:if="{{bookEditorialCopyJobs.back_cover_quote.visible}}" class="book-editorial-job-status {{bookEditorialCopyJobs.back_cover_quote.status}}">
+            <view class="book-editorial-job-dot" aria-hidden="true"></view>
+            <text>{{bookEditorialCopyJobs.back_cover_quote.statusText}}</text>
+            <text wx:if="{{bookEditorialCopyJobs.back_cover_quote.errorText}}" class="book-editorial-job-error">{{bookEditorialCopyJobs.back_cover_quote.errorText}}</text>
+          </view>
+          <textarea
+            class="book-metadata-textarea book-editorial-textarea compact"
+            value="{{bookBackCoverQuoteInput}}"
+            placeholder="写一句适合放在封底的话"
+            maxlength="80"
+            auto-height
+            disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
+            data-key="back_cover_quote"
+            bindinput="changeBookMetadataField"
+          />
+        </view>
         </view>
 
         <view wx:if="{{activeSection === 'layout'}}" class="detail-card ui-card">
           <text class="section-title">封面与版式</text>
-          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">挑选一套封面、封底和内页。预览 PDF 不会保存选择，点使用后才会应用到这本书。</text>
+          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">选择整体版式，再按需要上传自己的封面图片。预览 PDF 不会保存版式选择。</text>
           <text wx:else class="section-description">这份旧书稿还没有版式结构。请先更新书稿，再选择或预览版式。</text>
           <text wx:if="{{bookManuscriptAvailable && bookStaleNotice}}" class="layout-preview-note">章节已有更新；预览使用上次保存的书稿。</text>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前版式</text><text>{{bookManuscriptTemplateLabel}}</text></view>
@@ -249,52 +278,22 @@
             </view>
           </view>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-custom-panel">
-            <view class="detail-heading"><text class="layout-option-title">封面与封底</text><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
-            <picker mode="selector" range="{{bookCoverOptions}}" range-key="label" value="{{bookCoverIndex}}" bindchange="changeBookCoverStyle" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion}}">
-              <view class="layout-custom-row"><text>封面与封底风格</text><text>{{bookCoverOptions[bookCoverIndex].label}} ›</text></view>
-            </picker>
-            <view class="book-metadata-field">
-              <text class="book-metadata-label">书名</text>
-              <input class="book-metadata-input" value="{{bookTitleInput}}" placeholder="输入书名" maxlength="40" disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}" bindinput="changeBookTitle" />
-              <text class="book-title-sync-hint">这里修改的书名，也会同步为回忆录名称</text>
-            </view>
-            <view class="book-metadata-field">
-              <text class="book-metadata-label">副标题</text>
-              <input class="book-metadata-input" value="{{bookSubtitleInput}}" placeholder="根据口述访谈整理" maxlength="80" disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}" data-key="subtitle" bindinput="changeBookMetadataField" />
-            </view>
-            <text wx:if="{{bookEditorialCopyStatusError}}" class="book-editorial-status-error">{{bookEditorialCopyStatusError}}</text>
-            <view class="book-metadata-field book-editorial-section">
-              <view class="book-metadata-label-row book-editorial-label-row">
-                <text class="book-metadata-label book-editorial-label">封底摘要</text>
-                <button
-                  class="book-editorial-generate ui-button"
-                  data-target="back_cover_quote"
-                  loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
-                  disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookEditorialCopyJobs.back_cover_quote.active || !bookContent}}"
-                  bindtap="regenerateBookEditorialCopy"
-                >
-                  {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交…" : (bookEditorialCopyJobs.back_cover_quote.active ? "任务进行中" : "请小余重写")}}<text wx:if="{{bookEditorialCopyBusyTarget !== 'back_cover_quote' && !bookEditorialCopyJobs.back_cover_quote.active}}" class="book-editorial-generate-arrow">›</text>
-                </button>
+            <text class="layout-option-title">封面图片</text>
+            <view class="book-cover-image-row">
+              <view class="book-cover-image-preview">
+                <image wx:if="{{bookUploadedCoverPath}}" src="{{bookUploadedCoverPath}}" mode="aspectFit" />
+                <text wx:elif="{{bookUploadedCoverAssetId}}">封面图片</text>
+                <view wx:else class="layout-cover-art {{bookCoverStylePreviewClass}}">
+                  <image wx:if="{{bookCoverStylePreviewImage}}" class="layout-cover-image" src="{{bookCoverStylePreviewImage}}" mode="aspectFill" />
+                  <text class="layout-cover-kicker">家庭回忆录</text>
+                  <text class="layout-cover-title">{{bookTitleInput || bookPreviewTitle}}</text>
+                </view>
               </view>
-              <view wx:if="{{bookEditorialCopyJobs.back_cover_quote.visible}}" class="book-editorial-job-status {{bookEditorialCopyJobs.back_cover_quote.status}}">
-                <view class="book-editorial-job-dot" aria-hidden="true"></view>
-                <text>{{bookEditorialCopyJobs.back_cover_quote.statusText}}</text>
-                <text wx:if="{{bookEditorialCopyJobs.back_cover_quote.errorText}}" class="book-editorial-job-error">{{bookEditorialCopyJobs.back_cover_quote.errorText}}</text>
+              <view class="book-cover-image-actions">
+                <button class="layout-action preview ui-button" bindtap="changeBookCoverImage" loading="{{bookLayoutBusyTarget === 'save:cover'}}" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">{{bookUploadedCoverAssetId ? '更换图片' : '上传图片'}}</button>
+                <button wx:if="{{bookUploadedCoverAssetId}}" class="book-cover-image-link ui-button" data-action="restore" bindtap="changeBookCoverImage" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">恢复版式封面</button>
+                <button class="book-cover-image-link ui-button" data-template="current" bindtap="previewBookLayout" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget}}">预览 PDF ›</button>
               </view>
-              <textarea
-                class="book-metadata-textarea book-editorial-textarea compact"
-                value="{{bookBackCoverQuoteInput}}"
-                placeholder="写一句适合放在封底的话"
-                maxlength="80"
-                auto-height
-                disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
-                data-key="back_cover_quote"
-                bindinput="changeBookMetadataField"
-              />
-            </view>
-            <view class="layout-option-actions">
-              <button class="layout-action preview ui-button" data-template="current" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:current'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
-              <button class="layout-action select ui-button" bindtap="saveBookDesignSettings" loading="{{bookTitleSaving}}" disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">保存文字</button>
             </view>
             <text wx:if="{{(bookLayoutFeedbackTarget === 'cover' || bookLayoutFeedbackTarget === 'current') && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
           </view>

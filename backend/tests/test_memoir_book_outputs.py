@@ -28,6 +28,8 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirImageAsset,
+    MemoirBookImagePlacement,
     MemoirSection,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -814,7 +816,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     manuscript = data["latest_version"]["manuscript"]
-    assert manuscript["schema_version"] == 4
+    assert manuscript["schema_version"] == 5
     assert manuscript["profile"]["template"] == "classic_family"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
@@ -952,7 +954,7 @@ async def test_book_manuscript_design_saves_and_preview_does_not_change_selectio
     )
     assert selected.status_code == 200
     version = selected.json()["latest_version"]
-    assert version["manuscript"]["schema_version"] == 4
+    assert version["manuscript"]["schema_version"] == 5
     assert version["manuscript"]["profile"]["template"] == "warm_journal"
     assert version["manuscript"]["render_settings"]["custom_layout"] == {
         "font_family": "sans",
@@ -1139,6 +1141,14 @@ async def test_book_manuscript_design_survives_new_book_assembly(client, test_db
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     await _seed_confirmed_book_output(test_db, project_id=project_id)
+    project = await test_db.get(Project, project_id)
+    image = MemoirImageAsset(project_id=project_id, user_id=project.user_id,
+        status="ready", source_type="manual_upload", source_signature="uploaded-cover",
+        storage_path="projects/cover.jpg", width=600, height=800)
+    test_db.add(image)
+    await test_db.flush()
+    test_db.add(MemoirBookImagePlacement(project_id=project_id, image_asset_id=image.id, placement_type="cover", enabled=True))
+    await test_db.commit()
     selected = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/book-output",
         json={
@@ -1183,6 +1193,7 @@ async def test_book_manuscript_design_survives_new_book_assembly(client, test_db
     assert current.json()["latest_version"]["id"] == assembled.json()["output_version_id"]
     manuscript = current.json()["latest_version"]["manuscript"]
     assert manuscript["profile"]["template"] == "warm_journal"
+    assert manuscript["render_settings"]["cover_image"]["image_asset_id"] == image.id
     assert manuscript["render_settings"]["custom_layout"] == {
         "font_family": "sans",
         "font_scale": "large",

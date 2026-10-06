@@ -651,3 +651,14 @@
   height: 96rpx;
   line-height: 96rpx;
 }
+
+.book-cover-image-row { display: flex; gap: 22rpx; align-items: center; margin-top: 16rpx; }
+.book-cover-image-preview { width: 150rpx; height: 210rpx; flex-shrink: 0; position: relative; overflow: hidden; background: #fff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); }
+.book-cover-image-preview image { width: 100%; height: 100%; }
+.book-cover-image-preview > text { display: block; padding: 20rpx; color: var(--ui-text-secondary); }
+.book-cover-image-preview .layout-cover-art { height: 100%; }
+.book-cover-image-actions { flex: 1; min-width: 0; }
+.book-cover-image-actions .layout-action { width: 100%; }
+.book-cover-image-link { min-height: 40px; width: 100%; padding: 8rpx 0; display: flex; align-items: center; justify-content: center; color: var(--ui-text-secondary); background: transparent; font-size: var(--ui-font-body); line-height: 1.4; }
+.book-cover-image-link::after { border: 0; }
+.book-cover-image-link:active { transform: scale(0.96); }

@@ -367,7 +367,7 @@ async def assemble_book_output(
         }
         output.updated_at = utcnow_naive()
         db.add(output)
-    chapter_illustrations, image_appendix = await manuscript_image_snapshots(
+    chapter_illustrations, image_appendix, cover_image = await manuscript_image_snapshots(
         db,
         project_id=project_id,
     )
@@ -385,6 +385,7 @@ async def assemble_book_output(
         ),
         template=template,
         custom_layout=custom_layout,
+        cover_image=cover_image,
         metadata=effective_book_metadata(
             project=project,
             stored=previous_version.manuscript_json if previous_version else None,

@@ -373,6 +373,7 @@ def manuscript_from_snapshot(
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
     template: MemoirBookManuscriptTemplate = "classic_family",
     custom_layout: MemoirBookCustomLayout | None = None,
+    cover_image: dict[str, object] | None = None,
     metadata: dict[str, str] | None = None,
     chapter_illustrations_by_chapter: dict[str, list[dict[str, object]]] | None = None,
     image_appendix: list[dict[str, object]] | None = None,
@@ -501,6 +502,7 @@ def manuscript_from_snapshot(
             back_cover_quote=back_cover_quote,
             editorial_copy_model=editorial_copy.model if editorial_copy else None,
             custom_layout=custom_layout or MemoirBookCustomLayout(),
+            cover_image=cover_image,
         ),
     )
 
@@ -537,7 +539,7 @@ def editable_manuscript(
             manuscript = MemoirBookManuscript.model_validate(
                 sanitize_manuscript_payload(title=title, manuscript=stored)
             )
-            manuscript.schema_version = 4
+            manuscript.schema_version = 5
             return manuscript
         except ValueError:
             pass

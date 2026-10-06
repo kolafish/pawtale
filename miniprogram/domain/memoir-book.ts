@@ -510,6 +510,7 @@ export interface MemoirBookManuscriptRenderSettings {
   show_source_appendix: boolean;
   photo_mode: "none" | "chapter" | "appendix";
   cover_style: MemoirBookCoverStyle;
+  cover_image?: MemoirBookManuscriptIllustration | null;
   back_cover_quote: string;
   editorial_copy_model?: string | null;
 }
