@@ -52,7 +52,7 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 logger = logging.getLogger(__name__)
 
-MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v2"
+MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v3"
 MATERIAL_IMAGE_CONTENT_MAX_CHARS = 500
 MATERIAL_IMAGE_DIR = Path("memoir") / "material-images"
 
@@ -75,7 +75,7 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
     )
     content = _prompt_content(selected_text)
     style = share_video_background_style(normalized_style)
-    prompt = f"""根据以下老人口述内容，创作一张适合放进家庭回忆录正文的横版绘画插图：
+    prompt = f"""根据以下口述内容，创作一张适合放进家庭回忆录正文的横版绘画插图：
 
 {content}
 
