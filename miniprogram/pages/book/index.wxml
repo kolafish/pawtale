@@ -85,13 +85,13 @@
 
   <view class="book-operation-list ui-card">
     <view class="book-operation-row ui-pressable {{stage !== 'drafting' ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{stage !== 'drafting'}}" bindtap="openBookCompletion">
-      <view class="book-operation-copy"><text class="book-operation-title">书稿建议</text><text class="book-operation-detail">{{stage === 'drafting' ? '衔接、表述与需要核对的地方' : '确认章节后可查看书稿建议'}}</text><text wx:if="{{blockingIssueCount}}" class="book-operation-notice">{{blockingIssueCount}} 项需要核对，处理后相关章节才能收入全书</text></view><text class="book-row-arrow">›</text>
+      <view class="book-operation-copy"><text class="book-operation-title">书稿建议</text><text wx:if="{{blockingIssueCount}}" class="book-operation-notice">{{blockingIssueCount}} 项需要核对，处理后相关章节才能收入全书</text></view><text class="book-row-arrow">›</text>
     </view>
     <view class="book-operation-row ui-pressable" aria-role="button" data-action="settings" bindtap="openBookExportPage">
-      <view class="book-operation-copy"><text class="book-operation-title">书的设置</text><text class="book-operation-detail">书名、前言后记、封面与版式</text></view><text class="book-row-arrow">›</text>
+      <view class="book-operation-copy"><text class="book-operation-title">书的设置</text></view><text class="book-row-arrow">›</text>
     </view>
     <view class="book-operation-row ui-pressable {{!bookContentAvailable ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{!bookContentAvailable}}" data-action="files" bindtap="openBookExportPage">
-      <view class="book-operation-copy"><text class="book-operation-title">导出文件</text><text class="book-operation-detail">{{bookContentAvailable ? '阅读版 PDF、打印版 PDF、纯文本' : '正文整理完成后可导出'}}</text></view><text class="book-row-arrow">›</text>
+      <view class="book-operation-copy"><text class="book-operation-title">导出文件</text></view><text class="book-row-arrow">›</text>
     </view>
   </view>
 
