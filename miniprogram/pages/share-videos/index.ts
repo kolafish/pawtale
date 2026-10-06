@@ -125,12 +125,13 @@ definePage<ShareVideosData>()({
         : [...this.data.items, ...response.items
           .filter((item) => !this.data.items.some((existing) => existing.id === item.id))
           .map(toViewItem)];
-      const activeIds = new Set(response.active_jobs.map((job) => job.id));
+      const tasks = [...response.active_jobs, ...response.failed_jobs];
+      const taskIds = new Set(tasks.map((job) => job.id));
       this.setData({
         needsLogin: false,
         items,
-        taskItems: [...response.active_jobs.map(toTaskView),
-          ...(!reset ? this.data.taskItems.filter((item) => !activeIds.has(item.id)) : [])],
+        taskItems: [...tasks.map(toTaskView),
+          ...(!reset ? this.data.taskItems.filter((item) => !taskIds.has(item.id)) : [])],
         total: response.total,
         hasMore: response.items.length > 0 && items.length < response.total,
       });

@@ -49,7 +49,7 @@ function loadHomePage({
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
     getMemoirShareVideoCandidate: async () => ({ candidate: null }),
-    listMemoirShareVideos: async () => ({ items: [], active_jobs: [], total: 0, limit: 1, offset: 0 }),
+    listMemoirShareVideos: async () => ({ items: [], active_jobs: [], failed_jobs: [], total: 0, limit: 1, offset: 0 }),
     downloadMemoirShareVideoThumbnail: async () => "/tmp/share-video-thumbnail.jpg",
     getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
@@ -296,7 +296,7 @@ test("home keeps completed videos in the library after handling the latest sugge
   const { page } = loadHomePage({ voiceApiExports: {
     listMemoirShareVideos: async (...args) => {
       calls.push(args);
-      return { items: [latest], active_jobs: [], total: 5, limit: 1, offset: 0 };
+      return { items: [latest], active_jobs: [], failed_jobs: [], total: 5, limit: 1, offset: 0 };
     },
   } });
   const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
@@ -317,7 +317,7 @@ test("home exposes the video progress library while the first manually selected 
   const navigations = [];
   const { page } = loadHomePage({ voiceApiExports: {
     listMemoirShareVideos: async () => ({
-      items: [], active_jobs: [{ id: "first-video", status: "running" }], total: 0, limit: 1, offset: 0,
+      items: [], active_jobs: [{ id: "first-video", status: "running" }], failed_jobs: [], total: 0, limit: 1, offset: 0,
     }),
   } });
   const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
@@ -331,6 +331,28 @@ test("home exposes the video progress library while the first manually selected 
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   assert.match(wxml, /wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"\s+class="home-share-candidate"/);
   assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
+});
+
+test("home keeps the video library reachable when all manually selected video tasks have failed", async () => {
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async () => ({
+      items: [], active_jobs: [], failed_jobs: [{ id: "first-video", status: "failed" }],
+      total: 0, limit: 1, offset: 0,
+    }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareVideos("p1");
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 0);
+  assert.equal(context.data.shareVideoActiveCount, 0);
+  assert.equal(context.data.shareVideoFailedCount, 1);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
 });
 
 test("only a successful completed-video preview dismisses the latest suggestion", async () => {

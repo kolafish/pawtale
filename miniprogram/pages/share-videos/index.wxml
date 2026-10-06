@@ -27,7 +27,7 @@
       <view class="video-library-list">
         <view wx:for="{{taskItems}}" wx:key="id" class="section-card video-library-card">
           <text class="video-library-title">《{{item.title}}》</text>
-          <text class="video-library-progress {{item.status === 'failed' ? 'is-failed' : ''}}">{{item.statusText}}</text>
+          <text class="video-library-progress {{item.status === 'failed' ? 'is-failed' : ''}}">{{item.status === 'failed' ? '制作失败：' + item.statusText : item.statusText}}</text>
           <text class="video-library-quote">“{{item.selected_text}}”</text>
           <view class="video-library-card-foot">
             <text class="video-library-date">{{item.styleLabel}}</text>
