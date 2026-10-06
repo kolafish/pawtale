@@ -254,39 +254,43 @@
           <text wx:if="{{bookManuscriptAvailable && bookStaleNotice}}" class="layout-preview-note">章节已有更新；预览使用上次保存的书稿。</text>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前版式</text><text>{{bookManuscriptTemplateLabel}}</text></view>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-option-list">
-            <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle ? 'is-selected' : ''}}">
+            <view wx:for="{{bookLayoutOptions}}" wx:key="value" wx:for-item="option" class="layout-option {{option.value === 'current' || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle) ? 'is-selected' : ''}}">
               <view class="layout-option-main has-cover">
                 <view class="layout-option-visuals">
                   <view class="layout-cover-preview">
-                    <view class="layout-cover-art {{option.previewClass}}" aria-hidden="true">
-                      <image class="layout-cover-image" src="{{option.coverPreviewImage}}" mode="aspectFill" />
+                    <view class="layout-cover-art {{option.coverPreviewClass || option.previewClass}}" aria-hidden="true">
+                      <image wx:if="{{option.coverPreviewImage}}" class="layout-cover-image" src="{{option.coverPreviewImage}}" mode="aspectFill" />
+                      <block wx:else>
+                        <view class="layout-cover-rule top" />
+                        <view class="layout-cover-rule bottom" />
+                      </block>
                       <text class="layout-cover-kicker">家庭回忆录</text>
                       <text class="layout-cover-title">{{bookTitleInput || bookPreviewTitle || '回忆录'}}</text>
                       <text class="layout-cover-credit">整理：{{bookPreparedByInput || '家人'}}</text>
                     </view>
-                    <text class="layout-preview-caption">封面</text>
+                    <text class="layout-preview-caption">{{option.value === 'current' ? '封面示意' : '封面'}}</text>
                   </view>
                   <view class="layout-interior-preview">
                     <view class="layout-sample {{option.previewClass}}" aria-hidden="true">
-                      <text class="layout-sample-kicker">{{option.value === 'modern_minimal' ? '01' : '第一章'}}</text>
+                      <text class="layout-sample-kicker">{{option.previewClass === 'modern' ? '01' : '第一章'}}</text>
                       <text class="layout-sample-title">{{bookLayoutSampleTitle}}</text>
-                      <view class="layout-sample-ornament-art"><image src="{{option.ornamentThumbnail}}" mode="aspectFit" /></view>
+                      <view wx:if="{{option.ornamentThumbnail}}" class="layout-sample-ornament-art"><image src="{{option.ornamentThumbnail}}" mode="aspectFit" /></view>
                       <text class="layout-sample-body">{{bookLayoutSampleExcerpt}}</text>
                       <text class="layout-sample-section">{{bookLayoutSampleSectionTitle}}</text>
                       <text class="layout-sample-quote">{{bookLayoutSampleQuote}}</text>
                     </view>
-                    <text class="layout-preview-caption">内页</text>
+                    <text class="layout-preview-caption">{{option.value === 'current' ? '内页示意' : '内页'}}</text>
                   </view>
                 </view>
                 <view class="layout-option-copy">
                   <text class="layout-option-title">{{option.label}}</text>
                   <text class="layout-option-description">{{option.description}}</text>
-                  <text wx:if="{{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle}}" class="layout-selected-label">当前使用</text>
+                  <text wx:if="{{option.value === 'current' || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle)}}" class="layout-selected-label">当前使用</text>
                 </view>
               </view>
               <view class="layout-option-actions">
                 <button class="layout-action preview ui-button" data-template="{{option.value}}" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
-                <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle)}}">{{bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle ? '已使用' : '使用此版式'}}</button>
+                <button class="layout-action select ui-button" data-template="{{option.value}}" bindtap="selectBookLayout" loading="{{bookLayoutBusyTarget === 'save:' + option.value}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== '' || bookTitleSaving || bookViewingHistoricalVersion || option.value === 'current' || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle)}}">{{option.value === 'current' || (bookLayoutTemplate === option.value && bookCoverStyle === option.coverStyle) ? '已使用' : '使用此版式'}}</button>
               </view>
               <text wx:if="{{bookLayoutFeedbackTarget === option.value && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>
             </view>
