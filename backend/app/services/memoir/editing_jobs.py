@@ -363,6 +363,7 @@ async def claim_due_editing_jobs(
         statement = statement.where(MemoirEditingJob.project_id == project_id)
     statement = statement.order_by(
         case(
+            (MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK.value, -1),
             (
                 MemoirEditingJob.job_type.in_(
                     (

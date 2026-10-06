@@ -99,6 +99,37 @@ function createManualAudioContext() {
   return { audio, callbacks };
 }
 
+test("prefetch shares an in-flight download with playback and stop invalidates it", async () => {
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  let finishDownload;
+  let downloads = 0;
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: () => {
+      downloads += 1;
+      return new Promise((resolve) => { finishDownload = resolve; });
+    },
+    createAudioContext: () => created.audio,
+    configureAudio: () => {},
+  });
+  const token = controller.nextToken();
+  const prefetch = controller.prefetchFile("audio-1");
+  const playback = controller.playFile("audio-1", token);
+  assert.equal(downloads, 1);
+  finishDownload("/tmp/audio-1.mp3");
+  await prefetch;
+  assert.equal(created.audio.playCalls, 1);
+  created.callbacks.ended();
+  await playback;
+  const another = controller.prefetchFile("audio-2");
+  const stopped = controller.playFile("audio-2", token);
+  controller.stop();
+  finishDownload("/tmp/audio-2.mp3");
+  await Promise.all([another, stopped]);
+  assert.equal(downloads, 2);
+  assert.equal(created.audio.playCalls, 1);
+});
+
 test("AudioPlaybackController plays and releases an audio file", async () => {
   delete require.cache[require.resolve("../services/audio-playback.ts")];
   const { AudioPlaybackController } = require("../services/audio-playback.ts");

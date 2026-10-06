@@ -16,6 +16,8 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptTemplate,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
+    MemoirBookAudioPlanRequest,
+    MemoirBookAudioPlanResponse,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftRevisionRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
@@ -48,6 +50,7 @@ from app.schemas.memoir_images import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
 from app.services.memoir import book_outputs as memoir_book_outputs
+from app.services.memoir import book_audio_jobs
 from app.services.memoir import book_shares as memoir_book_shares
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
@@ -668,4 +671,16 @@ async def create_mobile_memoir_book_output_tts(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-output/tts/plan", response_model=MemoirBookAudioPlanResponse)
+async def prepare_mobile_memoir_book_audio(
+    project_id: str,
+    req: MemoirBookAudioPlanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await book_audio_jobs.prepare_book_audio(
+        db, user_id=current_user.id, project_id=project_id, req=req,
     )

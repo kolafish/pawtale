@@ -368,6 +368,38 @@ class MemoirBookAudioResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
+class MemoirBookAudioPlanRequest(MemoirBookAudioRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str = Field(min_length=1, max_length=36)
+    start_index: int = Field(default=0, ge=0)
+    profile_key: str | None = Field(default=None, min_length=64, max_length=64)
+    retry_failed: bool = False
+
+
+class MemoirBookAudioSegmentResponse(BaseModel):
+    index: int
+    text_start: int
+    text_end: int
+    status: Literal["idle", "pending", "running", "succeeded", "failed"]
+    job_id: str | None = None
+    audio_file_id: str | None = None
+    duration_seconds: float | None = None
+    alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
+    error_message: str = ""
+
+
+class MemoirBookAudioPlanResponse(BaseModel):
+    version_id: str
+    source_text_hash: str
+    profile_key: str
+    voice: str | None
+    speed_ratio: float
+    segments: list[MemoirBookAudioSegmentResponse]
+    ready_count: int
+    poll_after_ms: int
+
+
 MemoirBookCoverStyle = Literal[
     "classic_plain",
     "warm_gray",

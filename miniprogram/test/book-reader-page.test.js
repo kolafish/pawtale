@@ -25,7 +25,7 @@ function sampleFinishedBook(content = "全书正文") {
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockMemoirApiModules({
     createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
-    createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
+    prepareMemoirBookAudio: unmockedAsync("prepareMemoirBookAudio"),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
     getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
@@ -446,7 +446,7 @@ test("book reader reads the latest full book with saved book voice settings", as
   const requests = [];
   const playCalls = [];
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async (...args) => {
+    prepareMemoirBookAudio: async (...args) => {
       requests.push(args);
       return {
         audio_file_ids: ["audio-book-1"],
@@ -472,7 +472,8 @@ test("book reader reads the latest full book with saved book voice settings", as
     bookViewingHistoricalVersion: false,
   });
   context.readerText = "外婆回忆录正文";
-  context.playAudioFiles = async (...args) => {
+  context.readerAudioVersionId = "book-output-version-1";
+  context.playAudioPlan = async (...args) => {
     playCalls.push(args);
   };
 
@@ -483,11 +484,12 @@ test("book reader reads the latest full book with saved book voice settings", as
     {
       voice: "zh_male_m191_uranus_bigtts",
       speed_ratio: 1.25,
+      version_id: "book-output-version-1",
+      retry_failed: true,
     },
   ]]);
   assert.equal(playCalls.length, 1);
-  assert.equal(playCalls[0][1], "book");
-  assert.equal(playCalls[0][3], "外婆回忆录正文");
+  assert.deepEqual(playCalls[0][2], { voice: "zh_male_m191_uranus_bigtts", speed_ratio: 1.25 });
   assert.equal(context.data.playbackError, "");
 });
 
@@ -507,7 +509,7 @@ test("book reader opens the full text without starting narration", async () => {
 test("book reader does not mismatch latest audio with historical text", async () => {
   let requestCount = 0;
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async () => {
+    prepareMemoirBookAudio: async () => {
       requestCount += 1;
       throw new Error("should not run");
     },
@@ -527,7 +529,7 @@ test("book reader does not mismatch latest audio with historical text", async ()
 
 test("book reader keeps the full text visible when narration fails", async () => {
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async () => {
+    prepareMemoirBookAudio: async () => {
       throw new Error("朗读服务暂时不可用");
     },
   });
