@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     tts_provider: str = "disabled"
     tts_timeout_seconds: float = 30.0
     tts_max_concurrent_requests: int = 3
+    book_audio_prefetch_chunks: int = 2
+    book_audio_poll_seconds: float = 1.5
     volc_tts_app_id: str = ""
     volc_tts_access_token: str = ""
     volc_tts_api_key: str = ""

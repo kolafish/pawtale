@@ -282,6 +282,36 @@ export interface MemoirBookAudioResponse {
   alignment?: TTSAlignmentSegment[];
 }
 
+export interface MemoirBookAudioPlanRequest extends MemoirBookAudioRequest {
+  version_id: string;
+  start_index?: number;
+  profile_key?: string;
+  retry_failed?: boolean;
+}
+
+export interface MemoirBookAudioSegment {
+  index: number;
+  text_start: number;
+  text_end: number;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed";
+  job_id?: string | null;
+  audio_file_id?: string | null;
+  duration_seconds?: number | null;
+  alignment: TTSAlignmentSegment[];
+  error_message: string;
+}
+
+export interface MemoirBookAudioPlan {
+  version_id: string;
+  source_text_hash: string;
+  profile_key: string;
+  voice: string | null;
+  speed_ratio: number;
+  segments: MemoirBookAudioSegment[];
+  ready_count: number;
+  poll_after_ms: number;
+}
+
 export type MemoirBookCoverStyle =
   | "classic_plain"
   | "warm_gray"

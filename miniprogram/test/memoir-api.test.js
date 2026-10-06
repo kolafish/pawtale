@@ -726,6 +726,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.createMemoirBookChapterDraftSectionTTS("project/1", "chapter/1", "section/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/sections/section%2F1/tts`, timeout: 600000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 600000 },
     { call: () => api.createMemoirBookOutputTTS("project/1", {}), method: "POST", url: `${base}/book-output/tts`, timeout: 600000 },
+    { call: () => api.prepareMemoirBookAudio("project/1", { version_id: "version/1", start_index: 2 }), method: "POST", url: `${base}/book-output/tts/plan`, timeout: 30000, data: { version_id: "version/1", start_index: 2 } },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
     { call: () => api.getMemoirBookCompletionOverview("project/1"), method: "GET", url: `${narrativeBase}/book-completion/overview` },
     { call: () => api.enqueueMemoirBookReviewJob("project/1", true), method: "POST", url: `${narrativeBase}/book-review/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },

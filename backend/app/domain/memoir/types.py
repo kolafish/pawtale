@@ -110,6 +110,7 @@ class MemoirSectionMaterialAssignedBy(str, Enum):
 
 
 class MemoirEditingJobType(str, Enum):
+    GENERATE_BOOK_AUDIO_CHUNK = "generate_book_audio_chunk"
     CORRECT_TRANSCRIPT = "correct_transcript"
     EVALUATE_SHARE_VIDEO_CANDIDATE = "evaluate_share_video_candidate"
     INDEX_RETRIEVAL_SOURCE = "index_retrieval_source"

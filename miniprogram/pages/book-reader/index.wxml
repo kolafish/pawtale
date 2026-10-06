@@ -47,6 +47,7 @@
       <book-tts-player
         title="{{readerMode === 'chapter' ? '整章朗读' : '全书朗读'}}"
         phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
+        preparing-text="{{bookTTSPreparingText || ''}}"
         progress="{{bookTTSProgressPercent}}"
         spoken-text="{{readerMode === 'chapter' ? '' : bookTTSSpokenText}}"
         current-text="{{readerMode === 'chapter' ? '' : bookTTSCurrentText}}"

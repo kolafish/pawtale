@@ -1865,6 +1865,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     tmp_path,
     monkeypatch,
 ):
+    register_memoir_editing_job_handlers()
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)

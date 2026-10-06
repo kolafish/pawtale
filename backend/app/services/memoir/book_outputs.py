@@ -24,6 +24,7 @@ from app.models.memoir import (
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
+    MemoirBookAudioPlanRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputResponse,
@@ -41,15 +42,6 @@ from app.services.memoir import (
     book_review_answer_state,
     book_reviews,
     completion_issues,
-)
-from app.services.memoir.book_audio import (
-    audio_cache_payload,
-    audio_response,
-    cached_audio_response,
-    discard_staged_audio_files,
-    effective_tts_speed_ratio,
-    source_text_hash,
-    synthesize_text_audio,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_output_manuscript import (
@@ -92,7 +84,6 @@ from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
     select_project_ai_model,
 )
-from app.services.memoir.voice_tts_types import TTSClient
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
@@ -829,7 +820,6 @@ async def synthesize_book_output_audio(
     user_id: str,
     project_id: str,
     req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None = None,
     allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
@@ -837,37 +827,13 @@ async def synthesize_book_output_audio(
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
-    text = latest.content.strip()
-    text_hash = source_text_hash(text)
-    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
-    cached = cached_audio_response(
-        output.metadata_json or {},
-        cache_key=BOOK_TTS_CACHE_KEY,
-        text_hash=text_hash,
-        voice=req.voice,
-        speed_ratio=speed_ratio,
-        force_regenerate=req.force_regenerate,
-    )
-    if cached:
-        return cached
+    from app.services.memoir.book_audio_jobs import complete_book_audio
 
-    synthesis = await synthesize_text_audio(
-        db,
-        user_id=user_id,
-        text=text,
-        voice=req.voice,
-        speed_ratio=req.speed_ratio,
-        tts_client=tts_client,
+    return await complete_book_audio(
+        db, user_id=user_id, project_id=project_id,
+        req=MemoirBookAudioPlanRequest(
+            version_id=latest.id, voice=req.voice, speed_ratio=req.speed_ratio,
+            force_regenerate=req.force_regenerate, retry_failed=True,
+        ),
+        allow_admin=allow_admin,
     )
-    try:
-        output.metadata_json = {
-            **(output.metadata_json or {}),
-            BOOK_TTS_CACHE_KEY: audio_cache_payload(synthesis, voice=req.voice, speed_ratio=speed_ratio),
-        }
-        db.add(output)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
-        raise
-    return audio_response(synthesis)

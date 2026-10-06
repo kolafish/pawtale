@@ -1,6 +1,8 @@
 import type {
   MemoirBookAudioRequest,
   MemoirBookAudioResponse,
+  MemoirBookAudioPlan,
+  MemoirBookAudioPlanRequest,
   MemoirBookAssemblyResponse,
   MemoirBookChapterDraft,
   MemoirBookChapterDraftRevisionRequest,
@@ -329,6 +331,15 @@ export function createMemoirBookOutputTTS(
       invalidatesSnapshots: false,
     },
   );
+}
+
+export function prepareMemoirBookAudio(
+  projectId: string,
+  data: MemoirBookAudioPlanRequest,
+): Promise<MemoirBookAudioPlan> {
+  return memoirRequest<MemoirBookAudioPlan>(memoirProjectPath(projectId, "/book-output/tts/plan"), {
+    method: "POST", data, timeoutProfile: "interactive", invalidatesSnapshots: false,
+  });
 }
 
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
