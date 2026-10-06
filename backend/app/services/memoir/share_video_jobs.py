@@ -637,7 +637,7 @@ async def list_share_video_jobs(
             .where(
                 MemoirMaterialShareVideo.project_id == project_id,
                 or_(
-                    MemoirMaterialShareVideo.status.in_(active_statuses),
+                    MemoirMaterialShareVideo.status.in_((*active_statuses, MemoirShareVideoJobStatus.FAILED.value)),
                     MemoirMaterialShareVideo.id.in_(completed_ids),
                 ),
             )
@@ -667,6 +667,10 @@ async def list_share_video_jobs(
             if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
         ],
         active_jobs=[_job_response(job) for job, _ in rows if job.status in active_statuses],
+        failed_jobs=[
+            _job_response(job) for job, _ in rows
+            if job.status == MemoirShareVideoJobStatus.FAILED.value
+        ],
         total=total or 0,
         limit=limit,
         offset=offset,

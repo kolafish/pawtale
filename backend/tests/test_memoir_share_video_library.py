@@ -129,7 +129,7 @@ async def test_share_video_library_checks_project_ownership_and_allows_admin(cli
     await test_db.commit()
     response = await client.get(url)
     assert response.status_code == 200
-    assert response.json() == {"items": [], "active_jobs": [], "total": 0, "limit": 20, "offset": 0}
+    assert response.json() == {"items": [], "active_jobs": [], "failed_jobs": [], "total": 0, "limit": 20, "offset": 0}
 
 
 async def test_share_video_library_recovers_active_jobs_outside_completed_pagination(client, test_db):
@@ -154,6 +154,10 @@ async def test_share_video_library_recovers_active_jobs_outside_completed_pagina
     other_created = await create_test_voice_transcript(client, test_db, project_id=other_project.id)
     await _add_video_job(
         test_db, other_created, job_id="other-project", status=MemoirShareVideoJobStatus.RUNNING,
+        created_at=now, with_output=False,
+    )
+    await _add_video_job(
+        test_db, other_created, job_id="other-failure", status=MemoirShareVideoJobStatus.FAILED,
         created_at=now, with_output=False,
     )
     await test_db.commit()
@@ -184,6 +188,20 @@ async def test_share_video_library_recovers_active_jobs_outside_completed_pagina
     assert refreshed["active_jobs"] == []
     assert refreshed["total"] == 2
     assert [item["id"] for item in refreshed["items"]] == [pending.id]
+    assert [(job["id"], job["error_message"]) for job in refreshed["failed_jobs"]] == [
+        (running.id, "配图生成失败"),
+    ]
+
+    next_job = await _add_video_job(
+        test_db, created, job_id="next-video", status=MemoirShareVideoJobStatus.PENDING,
+        created_at=now + timedelta(minutes=1), with_output=False,
+    )
+    await test_db.commit()
+    reopened = (await client.get(url, params={"limit": 1, "offset": 10})).json()
+    assert [job["id"] for job in reopened["active_jobs"]] == [next_job.id]
+    assert [job["id"] for job in reopened["failed_jobs"]] == [running.id]
+    assert reopened["failed_jobs"][0]["output"] is None
+    assert reopened["items"] == [] and reopened["total"] == 2
 
 
 async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(client, test_db, tmp_path, monkeypatch):

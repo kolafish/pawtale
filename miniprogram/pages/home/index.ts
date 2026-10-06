@@ -115,6 +115,7 @@ interface HomeData extends HomeStoryData {
   shareCandidateThumbnailPath: string;
   shareVideoTotal: number;
   shareVideoActiveCount: number;
+  shareVideoFailedCount: number;
 }
 
 interface CheckboxChangeEvent {
@@ -247,6 +248,7 @@ function applyHomeSnapshotData(
       shareCandidateThumbnailPath: "",
       shareVideoTotal: 0,
       shareVideoActiveCount: 0,
+      shareVideoFailedCount: 0,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -309,6 +311,7 @@ definePage<HomeData>()({
     shareCandidateThumbnailPath: "",
     shareVideoTotal: 0,
     shareVideoActiveCount: 0,
+    shareVideoFailedCount: 0,
     ...emptyHomeStoryData(),
   },
 
@@ -449,6 +452,7 @@ definePage<HomeData>()({
           shareCandidateThumbnailPath: "",
           shareVideoTotal: 0,
           shareVideoActiveCount: 0,
+          shareVideoFailedCount: 0,
         });
         return;
       }
@@ -533,6 +537,7 @@ definePage<HomeData>()({
       this.setData({
         shareVideoTotal: response.total,
         shareVideoActiveCount: response.active_jobs.length,
+        shareVideoFailedCount: response.failed_jobs.length,
       });
     } catch (error) {
       if (requestSequence === this.shareVideosRequestSequence) {

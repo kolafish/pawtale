@@ -44,6 +44,7 @@ test("video library lists metadata in pages and opens only the chosen video", as
       items: offset ? [video("video-1", "utterance-1")] : [video("video-2", "utterance-2")],
       total: 2,
       active_jobs: [],
+      failed_jobs: [],
       limit: 20,
       offset,
     };
@@ -77,7 +78,7 @@ test("video library ignores a response after leaving the page", async () => {
 
   const loading = context.loadVideos(true);
   context.onHide();
-  resolve({ items: [video("video-old", "utterance-old")], active_jobs: [], total: 1, limit: 20, offset: 0 });
+  resolve({ items: [video("video-old", "utterance-old")], active_jobs: [], failed_jobs: [], total: 1, limit: 20, offset: 0 });
   await loading;
   assert.deepEqual(context.data.items, []);
 });
@@ -124,7 +125,7 @@ function libraryWithPolling(page) {
 test("video library restores queued and running tasks and opens their existing progress page", async () => {
   const navigations = [];
   const { page } = loadLibraryPage(async () => ({
-    items: [], active_jobs: [job("pending"), job("running", { id: "rendering" })],
+    items: [], active_jobs: [job("pending"), job("running", { id: "rendering" })], failed_jobs: [],
     total: 0, limit: 20, offset: 0,
   }));
   global.wx = { navigateTo({ url }) { navigations.push(url); } };
@@ -144,7 +145,7 @@ test("video progress updates stages and moves completion into the loaded library
   let polls = 0;
   const { page } = loadLibraryPage(async (_projectId, { limit, offset }) => ({
     items: [video(offset ? "video-1" : "video-2", "utterance-old")],
-    active_jobs: [job("running")], total: limit === 1 ? 3 : 2, limit, offset,
+    active_jobs: [job("running")], failed_jobs: [], total: limit === 1 ? 3 : 2, limit, offset,
   }), async () => ++polls === 1
     ? job("running", { background_status: "ready" }) : job("succeeded"));
   const polling = libraryWithPolling(page);
@@ -166,7 +167,7 @@ test("video progress updates stages and moves completion into the loaded library
 
 test("video progress leaves a failed task visible with its real error and stops polling", async () => {
   const { page } = loadLibraryPage(async () => ({
-    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+    items: [], active_jobs: [job("running")], failed_jobs: [], total: 0, limit: 20, offset: 0,
   }), async () => job("failed", { error_message: "配图服务暂时不可用" }));
   const polling = libraryWithPolling(page);
   polling.context.onShow();
@@ -175,6 +176,49 @@ test("video progress leaves a failed task visible with its real error and stops 
   assert.equal(polling.context.data.taskItems[0].status, "failed");
   assert.equal(polling.context.data.taskItems[0].statusText, "配图服务暂时不可用");
   assert.equal(polling.hasPoll(), false);
+});
+
+test("reopening the library after starting another video restores the earlier failure and polls only active tasks", async () => {
+  const first = job("running", { id: "first-video", utterance_id: "first-story" });
+  const second = job("pending", { id: "second-video", utterance_id: "second-story" });
+  const failure = { ...first, status: "failed", error_message: "AI 额度已用尽，请添加微信联系管理员" };
+  const response = { items: [], active_jobs: [first], failed_jobs: [], total: 0, limit: 20, offset: 0 };
+  const polled = [];
+  const navigations = [];
+  const { page } = loadLibraryPage(async () => response, async (id) => {
+    polled.push(id);
+    return { ...second, status: "running" };
+  });
+  const initial = libraryWithPolling(page);
+  initial.context.onShow();
+  await flushAsyncWork();
+  initial.context.onUnload();
+
+  response.active_jobs = [second];
+  response.failed_jobs = [failure];
+  const reopened = libraryWithPolling(page);
+  reopened.context.onShow();
+  await flushAsyncWork();
+  assert.deepEqual(reopened.context.data.taskItems.map(({ id, status }) => ({ id, status })), [
+    { id: "second-video", status: "pending" }, { id: "first-video", status: "failed" },
+  ]);
+  assert.equal(reopened.context.data.taskItems[1].statusText, failure.error_message);
+  await reopened.tick();
+  assert.deepEqual(polled, ["second-video"]);
+  assert.equal(reopened.context.data.taskItems[1].status, "failed");
+
+  response.active_jobs = [];
+  response.failed_jobs = [{ ...second, status: "failed", error_message: failure.error_message }, failure];
+  reopened.context.onHide();
+  reopened.context.onShow();
+  await flushAsyncWork();
+  assert.deepEqual(reopened.context.data.taskItems.map((item) => item.id), ["second-video", "first-video"]);
+  assert.equal(reopened.hasPoll(), false);
+  assert.equal(reopened.context.data.total, 0);
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  reopened.context.openVideo({ currentTarget: { dataset: { id: failure.id, utteranceId: failure.utterance_id } } });
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=first-story&jobId=first-video"]);
+  reopened.context.onUnload();
 });
 
 test("pagination during completion keeps the task until its final status and does not duplicate videos or counts", async () => {
@@ -186,6 +230,7 @@ test("pagination during completion keeps the task until its final status and doe
       : offset ? [video("video-2", "utterance-old"), video("video-1", "utterance-old")]
         : [video("video-2", "utterance-old")],
     active_jobs: !offset && limit !== 1 ? [job("running")] : [],
+    failed_jobs: [],
     total: offset || limit === 1 ? 3 : 2, limit, offset,
   }), () => ++polls === 1 ? pending : Promise.resolve(job("succeeded")));
   const polling = libraryWithPolling(page);
@@ -210,7 +255,7 @@ test("video progress cancels polling and ignores completion after hiding, then r
   let resolve;
   const pending = new Promise((done) => { resolve = done; });
   const { page } = loadLibraryPage(async () => ({
-    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+    items: [], active_jobs: [job("running")], failed_jobs: [], total: 0, limit: 20, offset: 0,
   }), () => pending);
   const polling = libraryWithPolling(page);
   const { context } = polling;
@@ -231,7 +276,7 @@ test("video progress cancels polling and ignores completion after hiding, then r
 
 test("video progress exposes refresh failure and resumes only after an explicit reload", async () => {
   const { page } = loadLibraryPage(async () => ({
-    items: [], active_jobs: [job("running")], total: 0, limit: 20, offset: 0,
+    items: [], active_jobs: [job("running")], failed_jobs: [], total: 0, limit: 20, offset: 0,
   }), async () => { throw new Error("连接暂时中断"); });
   const polling = libraryWithPolling(page);
   polling.context.onShow();

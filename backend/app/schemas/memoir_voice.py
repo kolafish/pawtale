@@ -606,6 +606,7 @@ class MemoirShareVideoJobResponse(BaseModel):
 class MemoirShareVideoJobListResponse(BaseModel):
     items: list[MemoirShareVideoListItemResponse] = Field(default_factory=list)
     active_jobs: list[MemoirShareVideoJobResponse] = Field(default_factory=list)
+    failed_jobs: list[MemoirShareVideoJobResponse] = Field(default_factory=list)
     total: int
     limit: int
     offset: int
