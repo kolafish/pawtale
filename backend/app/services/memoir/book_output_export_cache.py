@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
-from app.config import DATA_DIR
+from app.services import content_storage
 from app.schemas.memoir_book import MemoirBookManuscript
 from app.services.file_exports import ExportFile
 from app.services.memoir.book_output_export import (
@@ -76,7 +76,7 @@ class PreparedBookExport:
 
 
 def export_cache_path(prepared: PreparedBookExport, cache_key: str) -> Path:
-    return DATA_DIR / "book_exports" / f"{cache_key}.{prepared.export_format.value}"
+    return content_storage.PROJECTS_DIR / prepared.project_id / "book-exports" / f"{cache_key}.{prepared.export_format.value}"
 
 
 def has_cached_export(path: Path, export_format: MemoirBookOutputExportFormat) -> bool:

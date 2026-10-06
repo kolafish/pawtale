@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
+from app.database import async_session_maker
+from app.models.projects import Project
+from app.services import content_storage
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
@@ -792,6 +795,35 @@ async def prepare_book_output_export(
     )
 
 
+_book_export_tasks: dict[str, asyncio.Task[ExportFile]] = {}
+
+
+async def _render_project_book_export(prepared: PreparedBookExport) -> ExportFile:
+    # Reuse the project lock and directory so deletion includes cached PDFs and
+    # cannot race a render that outlives its HTTP request.
+    async with content_storage.project_content_lock(prepared.project_id):
+        async with async_session_maker() as db:
+            exists = await db.scalar(select(Project.id).where(
+                Project.id == prepared.project_id, Project.user_id == prepared.owner_id,
+            ))
+        if not exists:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        worker = asyncio.get_running_loop().run_in_executor(
+            None, lambda: render_cached_book_export(prepared, prepared.cache_key, render_book_output_export)
+        )
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await worker
+            raise
+
+
+def _finish_book_export(cache_key: str, task: asyncio.Task[ExportFile]) -> None:
+    _book_export_tasks.pop(cache_key, None)
+    if not task.cancelled():
+        task.exception()  # Retrieve failures when an HTTP waiter has already timed out.
+
+
 async def export_book_output_file(
     prepared: PreparedBookExport, *, timeout_seconds: float | None = None,
 ) -> ExportFile:
@@ -801,11 +833,14 @@ async def export_book_output_file(
         if timeout_seconds is not None
         else get_settings().memoir_book_export_deadline_seconds,
     )
+    cache_key = await asyncio.to_thread(lambda: prepared.cache_key)
+    task = _book_export_tasks.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_render_project_book_export(prepared))
+        _book_export_tasks[cache_key] = task
+        task.add_done_callback(lambda finished: _finish_book_export(cache_key, finished))
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(lambda: render_cached_book_export(prepared, prepared.cache_key, render_book_output_export)),
-            timeout=deadline_seconds,
-        )
+        return await asyncio.wait_for(asyncio.shield(task), timeout=deadline_seconds)
     except TimeoutError as exc:
         minutes = max(1, round(deadline_seconds / 60))
         raise HTTPException(

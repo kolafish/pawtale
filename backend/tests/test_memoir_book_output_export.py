@@ -1036,7 +1036,7 @@ def test_export_cache_coalesces_processes_and_invalidates_owner_or_renderer_chan
     from app.services.memoir import book_output_export_cache as cache
     from app.services.memoir.book_output_export_cache import PreparedBookExport
 
-    monkeypatch.setattr(cache, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(cache.content_storage, "PROJECTS_DIR", tmp_path / "projects")
     prepared = PreparedBookExport(
         owner_id="owner", project_id="project", version_id="version", version=1,
         title="写给他的话", content="正文", manuscript=None,

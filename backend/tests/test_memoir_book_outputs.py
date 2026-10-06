@@ -35,6 +35,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.models.users import User
 from app.services.memoir import book_outputs, book_output_export_cache
+from app.services import content_storage
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
@@ -1426,7 +1427,7 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
 
 @pytest.fixture(autouse=True)
 def isolate_export_cache(monkeypatch, tmp_path):
-    monkeypatch.setattr(book_output_export_cache, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(content_storage, "PROJECTS_DIR", tmp_path / "projects")
 
 
 async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
@@ -1988,3 +1989,49 @@ async def test_failed_or_missing_pdf_can_be_regenerated(client, test_db, monkeyp
     path.write_bytes(b"%PDF-truncated")
     await book_outputs.export_book_output_file(prepared)
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("interruption", ["timeout", "cancel"])
+async def test_project_deletion_waits_for_export_and_removes_the_pdf_cache(client, test_db, monkeypatch, interruption):
+    from threading import Event
+    from app.services.projects import core as project_core
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    project = await test_db.get(Project, project_id)
+    user = await test_db.get(User, project.user_id)
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=user.id, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    started = Event()
+    release = Event()
+
+    def render(**kwargs):
+        started.set()
+        assert release.wait(5)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    export = asyncio.create_task(book_outputs.export_book_output_file(
+        prepared, timeout_seconds=0.02 if interruption == "timeout" else 5,
+    ))
+    assert await asyncio.to_thread(started.wait, 5)
+    if interruption == "cancel":
+        export.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await export
+    else:
+        with pytest.raises(HTTPException) as error:
+            await export
+        assert error.value.status_code == 504
+    deletion = asyncio.create_task(project_core.delete_project(test_db, project_id, user))
+    await asyncio.sleep(0.03)
+    assert not deletion.done()
+    release.set()
+    await deletion
+    assert not (content_storage.PROJECTS_DIR / project_id).exists()
+    with pytest.raises(HTTPException) as error:
+        await book_outputs.export_book_output_file(prepared)
+    assert error.value.status_code == 404
+    assert not (content_storage.PROJECTS_DIR / project_id).exists()
