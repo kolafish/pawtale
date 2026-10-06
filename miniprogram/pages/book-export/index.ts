@@ -145,16 +145,17 @@ type WxWithDocument = WechatMiniprogram.Wx & {
 };
 
 interface BookLayoutOption {
-  value: MemoirBookManuscriptTemplate;
+  value: MemoirBookManuscriptTemplate | "current";
   label: string;
   description: string;
   previewClass: string;
+  coverPreviewClass?: string;
   coverStyle: MemoirBookCoverStyle;
   coverPreviewImage: string;
   ornamentThumbnail: string;
 }
 
-const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = [
+const BOOK_LAYOUT_OPTIONS = [
   {
     value: "heritage_classic",
     label: "典藏文集版",
@@ -182,7 +183,7 @@ const BOOK_LAYOUT_OPTIONS: BookLayoutOption[] = [
     coverPreviewImage: "/assets/book_covers/modern_minimal.jpg",
     ornamentThumbnail: "/assets/book_ornaments/modern_minimal.png",
   },
-];
+] satisfies BookLayoutOption[];
 
 const BOOK_LAYOUT_TEMPLATES: readonly MemoirBookManuscriptTemplate[] = [
   ...BOOK_LAYOUT_OPTIONS.map((option) => option.value), "custom",
@@ -511,6 +512,20 @@ definePage<BookExportData>()({
     this.bookOutputVersion = output?.latest_version || null;
     const outputData = bookOutputData(output, this.bookOutputVersion, this.bookDraftProgress);
     const bookLayoutTemplate = output?.latest_version?.manuscript?.profile.template || "classic_family";
+    const matchingLayout = BOOK_LAYOUT_OPTIONS.find((option) => option.value === bookLayoutTemplate);
+    const bookLayoutOptions: BookLayoutOption[] = [...BOOK_LAYOUT_OPTIONS];
+    if (outputData.bookManuscriptAvailable && matchingLayout?.coverStyle !== outputData.bookCoverStyle) {
+      bookLayoutOptions.unshift({
+        value: "current",
+        label: outputData.bookManuscriptTemplateLabel,
+        description: "当前封面与内页示意，完整效果请预览 PDF。",
+        previewClass: matchingLayout?.previewClass || "classic",
+        coverPreviewClass: outputData.bookCoverStylePreviewClass,
+        coverStyle: outputData.bookCoverStyle,
+        coverPreviewImage: outputData.bookCoverStylePreviewImage,
+        ornamentThumbnail: matchingLayout?.ornamentThumbnail || "",
+      });
+    }
     const bookCustomLayout = customLayoutFromOutput(output);
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultTitle(plan, output);
@@ -521,6 +536,7 @@ definePage<BookExportData>()({
       bookOutputAvailable: Boolean(output?.latest_version),
       ...outputData,
       bookLayoutTemplate,
+      bookLayoutOptions,
       bookCustomLayout,
       bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, bookCustomLayout.font_scale),
       bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, bookCustomLayout.line_spacing),
@@ -887,7 +903,7 @@ definePage<BookExportData>()({
   },
 
   async previewBookLayout(event: DatasetEvent) {
-    const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
+    const template = datasetChoice(event, "template", [...BOOK_LAYOUT_TEMPLATES, "current"] as const, "heritage_classic");
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget) return;
     if (!this.bookOutput?.latest_version) {
       this.setData({
@@ -922,7 +938,9 @@ definePage<BookExportData>()({
         this.bookOutput.latest_version.id,
         "standard",
         this.data.bookExportShowSourceAppendix,
-        { template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined },
+        template === "current" ? undefined : {
+          template, custom_layout: template === "custom" ? this.data.bookCustomLayout : undefined,
+        },
       );
       await openBookPdf(filePath);
       this.setData({
@@ -938,6 +956,7 @@ definePage<BookExportData>()({
   },
 
   async selectBookLayout(event: DatasetEvent) {
+    if (datasetString(event, "template") === "current") return;
     const template = datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
     const option = BOOK_LAYOUT_OPTIONS.find((candidate) => candidate.value === template);
     const coverStyle = option?.coverStyle;

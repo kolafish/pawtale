@@ -775,6 +775,55 @@ test("book export page downloads reading PDF with the standard layout", async ()
   assert.equal(toasts[0].title, "PDF 已打开");
 });
 
+test("current book design appears in the gallery and previews the saved design without changes", async () => {
+  const output = sampleBookOutput();
+  const downloads = [];
+  const updates = [];
+  const opened = [];
+  global.wx = {
+    openDocument(options) { opened.push(options.filePath); options.success(); },
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (...args) => {
+      downloads.push(args);
+      return "/tmp/current-book.pdf";
+    },
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      updates.push(payload);
+      return output;
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), output);
+  const current = context.data.bookLayoutOptions[0];
+  assert.equal(current.value, "current");
+  assert.equal(current.label, context.data.bookManuscriptTemplateLabel);
+  assert.equal(current.previewClass, "classic");
+  assert.equal(current.coverStyle, "classic_plain");
+  assert.equal(current.coverPreviewClass, context.data.bookCoverStylePreviewClass);
+  assert.equal(current.coverPreviewImage, "");
+  assert.equal(current.ornamentThumbnail, "");
+
+  const event = { currentTarget: { dataset: { template: "current" } } };
+  await page.previewBookLayout.call(context, event);
+  await page.selectBookLayout.call(context, event);
+  assert.deepEqual(downloads, [[
+    "project/1", "pdf", "book-output-version-2", "standard", false, undefined,
+  ]]);
+  assert.deepEqual(opened, ["/tmp/current-book.pdf"]);
+  assert.deepEqual(updates, []);
+  assert.equal(context.data.bookLayoutFeedbackTarget, "current");
+  assert.equal(context.data.bookLayoutBusyTarget, "");
+
+  output.latest_version.manuscript.render_settings.cover_style = "modern_minimal";
+  page.applyBookExportData.call(context, samplePlan(), output);
+  assert.equal(context.data.bookLayoutOptions[0].coverPreviewImage, context.data.bookCoverStylePreviewImage);
+  assert.equal(context.data.bookLayoutOptions[0].previewClass, "classic");
+  output.latest_version.manuscript.profile.template = "modern_minimal";
+  page.applyBookExportData.call(context, samplePlan(), output);
+  assert.equal(context.data.bookLayoutOptions.some((option) => option.value === "current"), false);
+});
+
 test("new complete templates preview without saving and apply cover with interior", async () => {
   const output = sampleBookOutput();
   const downloads = [];
@@ -799,7 +848,7 @@ test("new complete templates preview without saving and apply cover with interio
   page.applyBookExportData.call(context, samplePlan(), output);
   assert.deepEqual(
     context.data.bookLayoutOptions.map((option) => option.value),
-    ["heritage_classic", "warm_journal", "modern_minimal"],
+    ["current", "heritage_classic", "warm_journal", "modern_minimal"],
   );
 
   const newTemplates = [
