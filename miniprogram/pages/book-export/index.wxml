@@ -26,8 +26,7 @@
             </view>
           </view>
           <view class="hero-actions">
-            <view class="hero-action primary ui-pressable" aria-role="button" bindtap="openBookReader">读这本书 <text>→</text></view>
-            <view class="hero-action secondary ui-pressable" aria-role="button" bindtap="openBookNarration">朗读全书 <text>→</text></view>
+            <view class="hero-action ui-pressable" aria-role="button" bindtap="openBookReader">阅读全书 <text>→</text></view>
           </view>
         </view>
 

@@ -99,11 +99,11 @@ test("book export page is registered", () => {
   assert.equal(pageJson.navigationBarTitleText, "阅读与导出");
 });
 
-test("book export overview binds reading, narration, and focused settings without duplicating the book", () => {
+test("book export overview binds one reading entry and focused settings without duplicating the book", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
 
   assert.match(template, /bindtap="openBookReader"/);
-  assert.match(template, /bindtap="openBookNarration"/);
+  assert.doesNotMatch(template, /bindtap="openBookNarration"/);
   assert.match(template, /data-section="title" bindtap="openSection"/);
   assert.match(template, /data-section="advanced" bindtap="openSection"/);
   assert.doesNotMatch(template, /bookPreviewTocItems|bookManuscriptStructureItems|bookManuscriptChapterItems/);
@@ -332,7 +332,7 @@ test("book export uses the finished book for chapter count when the plan is unav
   assert.equal(context.data.totalChapterCount, 1);
 });
 
-test("book export opens focused settings, reading, and narration", async () => {
+test("book export opens focused settings and the selected book for reading", async () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -354,10 +354,8 @@ test("book export opens focused settings, reading, and narration", async () => {
   assert.equal(context.data.activeSection, "");
 
   page.openBookReader.call(context);
-  page.openBookNarration.call(context);
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1&versionId=book-output-version-2",
-    "/pages/book-reader/index?projectId=project%2F1&listen=1",
   ]);
 });
 
