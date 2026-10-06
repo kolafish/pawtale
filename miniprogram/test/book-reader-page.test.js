@@ -491,33 +491,16 @@ test("book reader reads the latest full book with saved book voice settings", as
   assert.equal(context.data.playbackError, "");
 });
 
-test("book reader starts existing narration when opened from the listen action", async () => {
+test("book reader opens the full text without starting narration", async () => {
   const { page } = loadBookReaderPage();
   const context = pageContext(page);
   let starts = 0;
   context.playReaderAudio = async () => { starts += 1; };
 
-  await page.onLoad.call(context, { projectId: "project/1", listen: "1" });
+  await page.onLoad.call(context, { projectId: "project/1" });
 
   assert.equal(context.data.loading, false);
   assert.equal(context.readerText, "全书正文");
-  assert.equal(starts, 1);
-});
-
-test("book reader does not start deferred narration after leaving the page", async () => {
-  let finishLoad;
-  const { page } = loadBookReaderPage({
-    getMemoirBookOutput: () => new Promise((resolve) => { finishLoad = resolve; }),
-  });
-  const context = pageContext(page);
-  let starts = 0;
-  context.playReaderAudio = async () => { starts += 1; };
-
-  const loading = page.onLoad.call(context, { projectId: "project/1", listen: "1" });
-  page.onHide.call(context);
-  finishLoad(sampleFinishedBook());
-  await loading;
-
   assert.equal(starts, 0);
 });
 

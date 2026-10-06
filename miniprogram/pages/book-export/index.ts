@@ -1000,16 +1000,6 @@ definePage<BookExportData>()({
     });
   },
 
-  openBookNarration() {
-    if (!this.data.projectId || !this.data.bookContent) return;
-    wx.navigateTo({
-      url: pageUrl("/pages/book-reader/index", {
-        projectId: this.data.projectId,
-        listen: "1",
-      }),
-    });
-  },
-
   openBookHome() {
     writeBookWorkspaceNavigationTarget("tools");
     returnToBook();
