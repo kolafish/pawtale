@@ -284,16 +284,29 @@ test("book export page counts the current output when included plan chapters hav
   assert.equal(context.data.bookPreviewChapters.length, 1);
 });
 
-test("book export updates the chapter count with the selected historical output", async () => {
+test("book export updates the chapter count and cover with the selected historical output", async () => {
   const historical = sampleBookOutputVersion(1, "历史书稿正文", undefined, baseSampleBookManuscript());
-  const { page } = loadBookExportPage({ getMemoirBookOutputVersion: async () => historical });
+  const output = sampleBookOutput();
+  output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "new-cover" };
+  const { page } = loadBookExportPage({
+    getMemoirBookOutputVersion: async () => historical,
+    downloadMemoirImageAssetFile: async () => "/tmp/new-cover.jpg",
+  });
   const context = pageContext(page, { projectId: "project-1" });
-  page.applyBookExportData.call(context, baseSamplePlan("confirmed", { chapterCount: 2 }), sampleBookOutput());
+  page.applyBookExportData.call(context, baseSamplePlan("confirmed", { chapterCount: 2 }), output);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.bookUploadedCoverPath, "/tmp/new-cover.jpg");
   await page.changeBookOutputVersion.call(context, { detail: { value: "1" } });
 
   assert.equal(context.data.bookContent, "历史书稿正文");
   assert.equal(context.data.totalChapterCount, 2);
   assert.equal(context.data.bookPreviewChapters.length, 2);
+  assert.equal(context.data.bookUploadedCoverAssetId, "");
+  assert.equal(context.data.bookUploadedCoverPath, "");
+  await page.changeBookOutputVersion.call(context, { detail: { value: "0" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.bookUploadedCoverAssetId, "new-cover");
+  assert.equal(context.data.bookUploadedCoverPath, "/tmp/new-cover.jpg");
 });
 
 test("book export waits only for active draft processing and preserves failed or material-required guidance", async () => {

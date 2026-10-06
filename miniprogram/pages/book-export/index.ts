@@ -558,8 +558,6 @@ definePage<BookExportData>()({
     const storedLayout = customLayoutFromOutput(output);
     const bookCustomLayout = preserveLayoutChanges && this.data.bookLayoutCustomChanged
       ? this.data.bookCustomLayout : storedLayout;
-    const bookUploadedCoverAssetId = output?.latest_version?.manuscript?.render_settings.cover_image?.image_asset_id || "";
-    const bookUploadedCoverPath = bookUploadedCoverAssetId === this.data.bookUploadedCoverAssetId ? this.data.bookUploadedCoverPath : "";
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultTitle(plan, output);
     }
@@ -571,8 +569,6 @@ definePage<BookExportData>()({
       bookLayoutTemplate,
       bookLayoutOptions,
       bookCustomLayout,
-      bookUploadedCoverAssetId,
-      bookUploadedCoverPath,
       bookLayoutFontFamilyIndex: customLayoutIndex(CUSTOM_FONT_FAMILY_OPTIONS, bookCustomLayout.font_family),
       bookLayoutFontScaleIndex: customLayoutIndex(CUSTOM_FONT_SCALE_OPTIONS, bookCustomLayout.font_scale),
       bookLayoutLineSpacingIndex: customLayoutIndex(CUSTOM_LINE_SPACING_OPTIONS, bookCustomLayout.line_spacing),
@@ -587,7 +583,7 @@ definePage<BookExportData>()({
       bookLayoutSampleQuote: (output?.latest_version?.manuscript?.chapters?.[0]?.pull_quotes?.[0]?.text || "家里的故事，总会有人记得。").slice(0, 48),
       bookExportBusyTarget: "",
     });
-    if (bookUploadedCoverAssetId && !bookUploadedCoverPath) void this.loadUploadedCoverPreview();
+    this.applyUploadedCoverPreview(this.bookOutputVersion);
   },
 
   changeBookTitle(event: TextInputEvent) {
@@ -896,6 +892,7 @@ definePage<BookExportData>()({
         ...outputData,
         totalChapterCount: outputData.bookPreviewChapters.length || outputData.bookPreviewTocItems.length,
       });
+      this.applyUploadedCoverPreview(version);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -1060,6 +1057,13 @@ definePage<BookExportData>()({
     } finally {
       this.setData({ bookLayoutBusyTarget: "" });
     }
+  },
+
+  applyUploadedCoverPreview(version: MemoirBookOutputVersion | null) {
+    const assetId = version?.manuscript?.render_settings.cover_image?.image_asset_id || "";
+    const path = assetId === this.data.bookUploadedCoverAssetId ? this.data.bookUploadedCoverPath : "";
+    this.setData({ bookUploadedCoverAssetId: assetId, bookUploadedCoverPath: path });
+    if (assetId && !path) void this.loadUploadedCoverPreview();
   },
 
   async loadUploadedCoverPreview() {
