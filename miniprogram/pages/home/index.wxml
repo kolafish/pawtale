@@ -112,7 +112,7 @@
           <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
             <view class="home-share-candidate-head">
               <view class="home-share-candidate-heading">
-                <text class="home-share-candidate-kicker">{{shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '刚刚生成' : '从最近的讲述里'}}</text>
+                <text class="home-share-candidate-kicker">{{shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '视频已生成' : '从最近的讲述里'}}</text>
                 <text class="home-share-candidate-title">{{shareCandidate.status === 'ready' ? '这段可以做成分享视频' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '《' + shareCandidateJob.title + '》' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '视频制作未完成' : '分享视频制作中'))}}</text>
               </view>
               <text wx:if="{{shareCandidateDurationText}}" class="home-share-candidate-duration ui-tabular">约 {{shareCandidateDurationText}}</text>
