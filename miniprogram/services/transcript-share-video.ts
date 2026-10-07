@@ -61,6 +61,9 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoUsesIllustration: boolean;
   shareVideoStyleUnavailable: boolean;
   shareVideoCandidate: MemoirShareVideoCandidate | null;
+  // "" lets the title step pick the opening line; choices are the clip's short sentences.
+  shareVideoHookText: string;
+  shareVideoHookChoices: string[];
   shareVideoBackgroundSource: string;
   shareVideoBackgroundUsesAi: boolean;
   shareVideoBackgroundUsesCustom: boolean;
@@ -86,6 +89,8 @@ type ShareVideoSelectionPatch = Pick<
   | "shareVideoSelectedText"
   | "shareVideoSelectedMetaText"
   | "shareVideoSelectedCanGenerate"
+  | "shareVideoHookText"
+  | "shareVideoHookChoices"
   | "shareVideoStatusText"
   | "shareVideoStatusClass"
 >;
@@ -106,6 +111,7 @@ export interface TranscriptShareVideoCreateOptions {
   backgroundStyle?: string;
   backgroundMode?: string;
   customBackgroundAssetId?: string;
+  hookText?: string;
 }
 
 export interface TranscriptShareVideoCreateInput {
@@ -183,6 +189,18 @@ function shareVideoSegmentViews(
   });
 }
 
+// Mirrors the renderer's limit on the opening line shown before the narration.
+const HOOK_MAX_VISIBLE_CHARS = 20;
+
+function shareVideoHookChoices(
+  context: MemoirTranscriptShareVideoContext,
+  segments: MemoirTranscriptShareVideoSegment[],
+): string[] {
+  return segments
+    .map((segment) => sliceShareVideoText(context.transcript_text, segment.start_char, segment.end_char).trim())
+    .filter((text) => text && Array.from(text).filter((char) => char.trim()).length <= HOOK_MAX_VISIBLE_CHARS);
+}
+
 export function shareVideoSelectionPatch(
   context: MemoirTranscriptShareVideoContext | null,
   selectedStartIndex: number,
@@ -216,7 +234,7 @@ export function shareVideoSelectionPatch(
     statusText = "暂无可截取片段";
     statusClass = "failed";
   } else if (context && !selectedSegments.length) {
-    statusText = "选择一段校正文后生成图片或视频";
+    statusText = "选择一段话后生成图片或视频";
   } else if (!allSelectable) {
     statusText = "这段文字暂不能截取";
     statusClass = "failed";
@@ -235,6 +253,8 @@ export function shareVideoSelectionPatch(
     shareVideoSelectedStartChar: startChar,
     shareVideoSelectedEndChar: endChar,
     shareVideoSelectedText: selectedText,
+    shareVideoHookText: "",
+    shareVideoHookChoices: context ? shareVideoHookChoices(context, selectedSegments) : [],
     shareVideoSelectedMetaText: selectedText
       ? `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)} · ${Array.from(selectedText).length} 字`
       : "",

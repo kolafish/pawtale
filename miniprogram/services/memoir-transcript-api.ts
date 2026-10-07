@@ -51,6 +51,8 @@ interface ShareVideoJobOptions {
   backgroundStyle?: string;
   backgroundMode?: string;
   customBackgroundAssetId?: string;
+  // Undefined keeps the default opening line; "" asks for an automatic one.
+  hookText?: string;
 }
 
 interface ShareVideoJobRequest {
@@ -62,6 +64,7 @@ interface ShareVideoJobRequest {
   background_style?: string;
   background_mode?: string;
   custom_background_asset_id?: string;
+  hook_text?: string;
 }
 
 interface ShareVideoCandidateJobRequest {
@@ -71,6 +74,7 @@ interface ShareVideoCandidateJobRequest {
   background_style?: string;
   background_mode?: string;
   custom_background_asset_id?: string;
+  hook_text?: string;
 }
 
 interface MaterialImageGenerationJobRequest {
@@ -148,6 +152,7 @@ export function createMemoirTranscriptShareVideoJob(
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.hookText ? { hook_text: options.hookText } : {}),
     },
     { timeoutProfile: "mutation" },
   );
@@ -197,6 +202,7 @@ export function createMemoirShareVideoCandidateJob(
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.hookText !== undefined ? { hook_text: options.hookText } : {}),
     },
     { timeoutProfile: "mutation" },
   );

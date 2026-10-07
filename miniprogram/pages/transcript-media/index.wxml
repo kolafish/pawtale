@@ -162,6 +162,14 @@
           <text class="share-video-selection-meta">{{shareVideoSelectedMetaText}}</text>
         </view>
 
+        <view wx:if="{{shareVideoSelectedText && shareVideoHookChoices.length}}" class="share-video-hook">
+          <view class="share-video-hook-copy">
+            <text class="voice-edit-label">开场一句</text>
+            <text class="share-video-hook-text">{{shareVideoHookText ? '“' + shareVideoHookText + '”' : '自动挑一句最打动人的话'}}</text>
+          </view>
+          <button class="text-action-button" bindtap="chooseShareVideoHook" disabled="{{shareVideoCreating || shareVideoPolling}}">换一句</button>
+        </view>
+
         <view class="share-video-background">
           <view class="share-video-background-head">
             <text class="voice-edit-label">本次视频风格</text>

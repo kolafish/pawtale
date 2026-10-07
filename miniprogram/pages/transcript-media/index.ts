@@ -62,6 +62,8 @@ definePage<TranscriptMediaData>()({
   loadToken: 0,
   requestedShareVideoJobId: "",
   requestedShareVideoCandidateId: "",
+  // Set by the home card's primary action: start the recommended clip with default settings.
+  createRequestedCandidate: false,
   shareVideoBackgroundUploadToken: 0,
 
   data: {
@@ -84,12 +86,16 @@ definePage<TranscriptMediaData>()({
     this.resetShareVideoState();
     this.requestedShareVideoJobId = queryParam(options, "jobId");
     this.requestedShareVideoCandidateId = queryParam(options, "candidateId");
+    this.createRequestedCandidate = Boolean(this.requestedShareVideoCandidateId) && queryParam(options, "create") === "1";
     this.setData({
       utteranceId: queryParam(options, "id"),
       viewMode: this.requestedShareVideoJobId ? "video" : "create",
     });
     setPageNavigationTitle(this.requestedShareVideoJobId ? "分享视频" : "做成图片或视频");
     await this.loadTranscript();
+    if (this.createRequestedCandidate && this.data.shareVideoCandidate && this.data.shareVideoSelectedCanGenerate) {
+      await this.createShareVideo();
+    }
   },
 
   onShareAppMessage() {
@@ -148,9 +154,15 @@ definePage<TranscriptMediaData>()({
           if (startIndex < 0 || endIndex < startIndex) {
             throw new Error("推荐片段已更新，请从这段讲述重新选择内容");
           }
+          const selection = shareVideoSelectionPatch(context, startIndex, endIndex);
+          const hookText = candidate.hook_text;
           this.setData({
             shareVideoCandidate: candidate,
-            ...shareVideoSelectionPatch(context, startIndex, endIndex),
+            ...selection,
+            shareVideoHookText: hookText,
+            shareVideoHookChoices: hookText && !selection.shareVideoHookChoices.includes(hookText)
+              ? [hookText, ...selection.shareVideoHookChoices]
+              : selection.shareVideoHookChoices,
           });
         }
       }

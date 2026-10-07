@@ -401,3 +401,24 @@
   font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }
+
+.share-video-hook {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 18rpx;
+}
+
+.share-video-hook-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.share-video-hook-text {
+  display: block;
+  margin-top: 6rpx;
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-body);
+  line-height: 1.5;
+}

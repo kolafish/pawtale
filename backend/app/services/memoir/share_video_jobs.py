@@ -296,6 +296,9 @@ async def _find_duplicate_or_reusable_share_video_job(
         candidate_metadata = ShareVideoJobMetadata.from_json(candidate.metadata_json)
         if _share_video_options_signature(candidate_metadata) != request_signature:
             continue
+        # An automatic opening line matches any version; a chosen one only its own.
+        if metadata.hook_text and candidate_metadata.hook_text != metadata.hook_text:
+            continue
         if candidate.status in _ACTIVE_SHARE_VIDEO_STATUSES or _completed_share_video_is_reusable(
             candidate, candidate_metadata
         ):
@@ -429,9 +432,7 @@ async def create_share_video_job(
     req: MemoirShareVideoJobCreateRequest,
     *,
     allow_admin: bool = False,
-    hook_text: str = "",
 ) -> MemoirShareVideoJobResponse:
-    """hook_text is a sentence a recommendation already chose; otherwise the title step picks one."""
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     settings = get_settings()
     ai_background_enabled = bool(
@@ -513,10 +514,14 @@ async def create_share_video_job(
         else background_orchestration.effective_background_mode(background_mode, duration_ms)
     )
 
+    hook_text = rendering.usable_hook_text(req.hook_text, alignment.transcript_text[start_char:end_char])
+    if req.hook_text.strip() and not hook_text:
+        raise HTTPException(status_code=422, detail="开场句要是所选片段里不超过 20 字的一句原话")
+
     metadata = ShareVideoJobMetadata(
         pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
         title=fallback_share_video_title(alignment.transcript_text[start_char:end_char]),
-        hook_text=rendering.usable_hook_text(hook_text, alignment.transcript_text[start_char:end_char]),
+        hook_text=hook_text,
         alignment_strategy=alignment.strategy,
         alignment_confidence=alignment.confidence,
         char_timings=alignment.char_timings[start_char:end_char],

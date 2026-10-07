@@ -485,6 +485,8 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
+    # A verbatim sentence from the selection shown before the narration; empty lets the title step pick.
+    hook_text: str = Field(default="", max_length=200)
 
     @field_validator(
         "ai_model",
@@ -516,6 +518,8 @@ class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
+    # None keeps the recommendation's own opening line; "" lets the title step pick.
+    hook_text: str | None = Field(default=None, max_length=200)
 
 
 class MemoirShareVideoCandidateResponse(BaseModel):
@@ -535,6 +539,7 @@ class MemoirShareVideoCandidateResponse(BaseModel):
     status: MemoirShareVideoCandidateStatus
     # Why the model thinks this range is worth a video, shown on the card.
     reason: str = ""
+    hook_text: str = ""
     video_job_id: str | None
     created_at: datetime
     updated_at: datetime
