@@ -11,6 +11,7 @@
     "pages/transcript-detail/index",
     "pages/transcript-media/index",
     "pages/share-videos/index",
+    "pages/share-video-player/index",
     "pages/book/index",
     "pages/image-assets/index",
     "pages/chapter-workspace/index",

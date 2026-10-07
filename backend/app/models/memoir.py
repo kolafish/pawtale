@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import TYPE_CHECKING
+import secrets
 import uuid
 
 from sqlalchemy import (
@@ -396,6 +397,7 @@ class MemoirMaterialShareVideo(Base):
             f"status IN ({_enum_values(MemoirShareVideoJobStatus)})",
             name="ck_memoir_material_share_videos_status",
         ),
+        UniqueConstraint("share_code", name="uq_memoir_material_share_videos_share_code"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -427,6 +429,8 @@ class MemoirMaterialShareVideo(Base):
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    # Public handle for the forwarded card and the mini program code in the video.
+    share_code: Mapped[str] = mapped_column(String(20), default=lambda: secrets.token_hex(10), nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

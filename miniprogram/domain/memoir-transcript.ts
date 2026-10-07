@@ -200,6 +200,17 @@ export interface MemoirShareVideoOutput {
   mime_type: string;
   size_bytes: number;
   download_url: string;
+  share_code: string;
+}
+
+export interface MemoirSharedVideo {
+  title: string;
+  book_title: string;
+  narrator_name: string;
+  duration_ms: number;
+  video_url: string;
+  poster_url: string;
+  book_share_token: string | null;
 }
 
 export interface MemoirShareVideoJob {

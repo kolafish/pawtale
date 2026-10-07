@@ -66,3 +66,17 @@ export function homeShareTimeline(): WechatMiniprogram.ShareTimelinePayload {
     query: HOME_SHARE_QUERY,
   };
 }
+
+export const SHARED_VIDEO_PAGE = "/pages/share-video-player/index";
+
+export function sharedVideoShareMessage(
+  title: string,
+  shareCode: string,
+  imageUrl = "",
+): WechatMiniprogram.ShareAppMessagePayload {
+  return {
+    title: title.trim() || "一段家里人的口述",
+    path: `${SHARED_VIDEO_PAGE}?code=${encodeURIComponent(shareCode)}`,
+    ...(imageUrl ? { imageUrl } : {}),
+  };
+}

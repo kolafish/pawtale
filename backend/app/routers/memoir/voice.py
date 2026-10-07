@@ -19,6 +19,8 @@ from app.schemas.memoir_images import (
     MemoirMaterialImageGenerationRequest,
 )
 from app.schemas.memoir_voice import (
+    MemoirSharedVideoReadRequest,
+    MemoirSharedVideoResponse,
     MemoirAssistantTTSRequest,
     MemoirAssistantTTSResponse,
     MemoirMaterialOfflineASRRequest,
@@ -74,6 +76,7 @@ from app.services.memoir import voice_tts_persistence as memoir_voice_tts
 from app.services.memoir import share_video_alignment as memoir_share_video_alignment
 from app.services.memoir import share_video_custom_backgrounds as memoir_share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs as memoir_share_video_jobs
+from app.services.memoir import share_video_shares as memoir_share_video_shares
 from app.services.memoir import share_video_candidates as memoir_share_video_candidates
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import material_offline_asr_jobs as memoir_material_offline_asr_jobs
@@ -715,6 +718,20 @@ async def list_mobile_memoir_share_video_jobs(
     )
 
 
+async def _share_video_file_response(path: Path, mime_type: str, title: str, variant: str) -> FileResponse:
+    if variant == "thumbnail":
+        try:
+            thumbnail = await memoir_share_video_jobs.rendering.share_video_thumbnail(path)
+        except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="视频缩略图暂时不可用") from exc
+        return FileResponse(thumbnail, media_type="image/jpeg")
+    return FileResponse(
+        path,
+        media_type=mime_type,
+        filename=memoir_share_video_jobs.share_video_download_filename(title),
+    )
+
+
 @router.get("/share-video/jobs/{job_id}/download")
 async def download_mobile_memoir_share_video_job(
     job_id: str,
@@ -728,17 +745,27 @@ async def download_mobile_memoir_share_video_job(
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
-    if variant == "thumbnail":
-        try:
-            thumbnail = await memoir_share_video_jobs.rendering.share_video_thumbnail(path)
-        except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
-            raise HTTPException(status_code=503, detail="视频缩略图暂时不可用") from exc
-        return FileResponse(thumbnail, media_type="image/jpeg")
-    return FileResponse(
-        path,
-        media_type=output.mime_type,
-        filename=memoir_share_video_jobs.share_video_download_filename(title),
-    )
+    return await _share_video_file_response(path, output.mime_type, title, variant)
+
+
+@router.post("/share-video/shares/read", response_model=MemoirSharedVideoResponse)
+async def read_mobile_memoir_shared_video(
+    req: MemoirSharedVideoReadRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_share_video_shares.read_shared_video(db, req.code)
+
+
+@router.get("/share-video/shares/{code}/video")
+async def download_mobile_memoir_shared_video(
+    code: str,
+    variant: Literal["video", "thumbnail"] = "video",
+    db: AsyncSession = Depends(get_db),
+):
+    output, path, title = await memoir_share_video_shares.load_shared_video_file(db, code)
+    return await _share_video_file_response(path, output.mime_type, title, variant)
 
 
 @router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)

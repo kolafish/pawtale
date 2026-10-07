@@ -1,4 +1,5 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
+import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   createMemoirMaterialImageGenerationJob,
@@ -10,6 +11,7 @@ import {
   getMemoirShareVideoJob,
   getMemoirShareVideoCandidate,
   getMemoirVoiceTranscript,
+  memoirShareVideoDownloadUrl,
 } from "../../services/memoir-transcript-api";
 import {
   isAuthError,
@@ -19,7 +21,7 @@ import {
   queryParam,
   type PageQuery,
 } from "../../services/page-input";
-import { shareLocalFileMessage } from "../../services/share";
+import { homeShareAppMessage, shareLocalFileMessage, sharedVideoShareMessage } from "../../services/share";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
   initialTranscriptMaterialImageTaskState,
@@ -81,6 +83,20 @@ definePage<TranscriptMediaData>()({
     });
     setPageNavigationTitle(this.requestedShareVideoJobId ? "分享视频" : "做成图片或视频");
     await this.loadTranscript();
+  },
+
+  onShareAppMessage() {
+    const job = this.data.shareVideoJob;
+    const shareCode = job?.output?.share_code;
+    if (!job || !shareCode) {
+      return homeShareAppMessage();
+    }
+    trackAuditAction("transcript.detail_share_video_card", { job_id: job.id }, { projectId: job.project_id });
+    return sharedVideoShareMessage(
+      job.title,
+      shareCode,
+      memoirShareVideoDownloadUrl(`/api/mobile/memoir/share-video/shares/${shareCode}/video?variant=thumbnail`),
+    );
   },
 
   markShareVideoPreviewShape(event: { detail: { width: number; height: number } }) {

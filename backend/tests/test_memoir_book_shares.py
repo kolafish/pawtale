@@ -16,6 +16,7 @@ from app.models.memoir import (
     MemoirBookShare,
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_shares import readable_share_token
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -104,10 +105,13 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
         await test_db.commit()
         assert (await read(first_token)).status_code == 409
         assert (await client.get(share_path)).json()["current"] is False
+        # Share videos only point at a book link a reader can open now.
+        assert await readable_share_token(test_db, project_id) is None
 
         updated = await client.put(share_path)
         assert updated.status_code == 200
         assert updated.json()["token"] == first_token
+        assert await readable_share_token(test_db, project_id) == first_token
         assert (await read(first_token)).json()["latest_version"]["content"] == second.content
 
         rotated = await client.post(share_path)
@@ -122,6 +126,7 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
         share.expires_at = utcnow_naive() - timedelta(seconds=1)
         await test_db.commit()
         assert (await read(second_token)).status_code == 404
+        assert await readable_share_token(test_db, project_id) is None
         assert (await client.get(share_path)).json() == {
             "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
         }

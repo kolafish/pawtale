@@ -117,3 +117,17 @@ async def test_cancelled_frame_encoding_stops_the_child_process(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=5)
     assert captured[0].returncode is not None
+
+
+def test_closing_card_prints_the_mini_program_code_when_available():
+    code = BytesIO()
+    Image.new("RGBA", (430, 430), (20, 20, 20, 255)).save(code, format="PNG")
+    code_area = (300, 600, 420, 720)
+
+    with_code = rendering._end_card("相约出发", "余老师", code.getvalue()).crop(code_area).convert("L")
+    without_code = rendering._end_card("相约出发", "余老师").crop(code_area).convert("L")
+    unreadable = rendering._end_card("相约出发", "余老师", b"not an image").crop(code_area).convert("L")
+
+    assert with_code.getextrema()[1] < 60
+    assert without_code.getextrema()[0] > 150
+    assert ImageChops.difference(unreadable, without_code).getbbox() is None

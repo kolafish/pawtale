@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta
 import json
 import logging
@@ -40,6 +41,7 @@ from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_usage_records import AIUsageContext, reset_ai_usage_context, set_ai_usage_context
+from app.services import wechat_miniprogram_code
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
@@ -84,7 +86,9 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
-SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v3"
+SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v4"
+# Mini program page that plays a forwarded clip; the code passes share_code as its scene.
+SHARE_VIDEO_PLAYER_PAGE = "pages/share-video-player/index"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
@@ -150,13 +154,26 @@ def share_video_download_filename(title: str) -> str:
     return f"{safe_title or _TITLE_FALLBACK}.mp4"
 
 
-async def _share_video_end_card_source(db: AsyncSession, project_id: str) -> tuple[str, str]:
+async def share_video_end_card_source(db: AsyncSession, project_id: str) -> tuple[str, str]:
     """The book a shared clip comes from, named on the video's closing card."""
     project = await db.get(Project, project_id)
     book_title = await db.scalar(select(MemoirBookOutput.title).where(MemoirBookOutput.project_id == project_id))
     if project is None:
         return book_title or "", ""
     return book_title or project.title, project_narrator_name(project)
+
+
+async def _share_video_mini_program_code(share_code: str) -> bytes | None:
+    """A code on the closing card that opens this clip; the video renders without it if WeChat fails."""
+    if not wechat_miniprogram_code.miniprogram_code_configured():
+        return None
+    try:
+        return await wechat_miniprogram_code.fetch_miniprogram_code(
+            scene=share_code, page=SHARE_VIDEO_PLAYER_PAGE,
+        )
+    except wechat_miniprogram_code.WeChatMiniProgramCodeError:
+        logger.warning("share video mini program code unavailable share_code=%s", share_code, exc_info=True)
+        return None
 
 
 def _hook_sentences(selected_text: str) -> list[str]:
@@ -393,6 +410,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
                 mime_type=output.mime_type,
                 size_bytes=output.size_bytes,
                 download_url=f"/api/mobile/memoir/share-video/jobs/{job.id}/download",
+                share_code=job.share_code,
             )
             if output is not None
             else None
@@ -777,8 +795,14 @@ async def load_completed_share_video_job(
     allow_admin: bool = False,
 ) -> tuple[MemoirShareVideoOutput, Path, str]:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or job.output is None:
+        raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
+    return completed_share_video_file(job)
+
+
+def completed_share_video_file(job: MemoirMaterialShareVideo) -> tuple[MemoirShareVideoOutput, Path, str]:
     output = job.output
-    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or output is None:
+    if output is None:
         raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
     path = share_video_file_path(job, output)
     if not path.exists():
@@ -1241,7 +1265,8 @@ async def run_share_video_job_with_session(
             background_image_path = prepared_background.image_path
             background_segments = prepared_background.segments
         target_path = share_video_file_path(job)
-        book_title, narrator_name = await _share_video_end_card_source(db, job.project_id)
+        book_title, narrator_name = await share_video_end_card_source(db, job.project_id)
+        mini_program_code = await _share_video_mini_program_code(job.share_code)
         render_request = rendering.ShareVideoRenderRequest(
             source_audio_path=audio_file_path(job.audio_file),
             source_audio_mime_type=job.audio_file.mime_type,
@@ -1257,6 +1282,7 @@ async def run_share_video_job_with_session(
             hook_text=metadata.hook_text,
             book_title=book_title,
             narrator_name=narrator_name,
+            mini_program_code=mini_program_code,
         )
         try:
             await rendering.render_share_video_clip(render_request)
@@ -1270,20 +1296,7 @@ async def run_share_video_job_with_session(
             _set_job_metadata(job, metadata)
             await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
             await rendering.render_share_video_clip(
-                rendering.ShareVideoRenderRequest(
-                    source_audio_path=render_request.source_audio_path,
-                    source_audio_mime_type=render_request.source_audio_mime_type,
-                    target_path=render_request.target_path,
-                    selected_text=render_request.selected_text,
-                    char_timings=render_request.char_timings,
-                    start_ms=render_request.start_ms,
-                    end_ms=render_request.end_ms,
-                    background_image_path=None,
-                    background_segments=None,
-                    hook_text=render_request.hook_text,
-                    book_title=render_request.book_title,
-                    narrator_name=render_request.narrator_name,
-                )
+                replace(render_request, background_image_path=None, background_segments=None, video_style="illustrated"),
             )
         size_bytes = _publish_completed_video(target_path)
         completed = await _complete_share_video_job(
