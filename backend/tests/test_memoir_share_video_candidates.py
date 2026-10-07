@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,25 @@ STORY = (
     "我小时候在村口等父亲回家，他总会从包里拿出一颗糖。"
     "有一年冬天雪很大，我一路跑过去，鞋都湿透了，他把围巾围在我脖子上。"
 )
+
+
+def _model_picks(monkeypatch, **overrides):
+    """Answer the selection prompt with the whole first narration unless told otherwise."""
+    prompts = []
+
+    async def generate(client, system_prompt, user_prompt, *, output_model, **kwargs):
+        prompts.append(json.loads(user_prompt))
+        sentences = prompts[-1]["narrations"][0]["sentences"]
+        pick = {
+            "start_sentence_id": sentences[0]["id"], "end_sentence_id": sentences[-1]["id"],
+            "hook_sentence_id": None, "emotion": 4, "visual": 4, "standalone": 4,
+            "reason": "讲了雪天父亲把围巾给我", **overrides,
+        }
+        return SimpleNamespace(value=output_model.model_validate(pick))
+
+    monkeypatch.setattr(share_video_candidates, "get_ai_service", lambda model: object())
+    monkeypatch.setattr(share_video_candidates, "generate_structured_with_client", generate)
+    return prompts
 
 
 async def _stopped_story(client, test_db):
@@ -51,14 +71,11 @@ async def _stopped_story(client, test_db):
 
 async def test_completed_narration_can_be_accepted_for_video(client, test_db, monkeypatch):
     created, job_id = await _stopped_story(client, test_db)
-
-    async def choose_first(windows, *, ai_model):
-        assert windows and 15_000 <= windows[0].duration_ms <= 45_000
-        return 0
-
-    monkeypatch.setattr(share_video_candidates, "_choose_window", choose_first)
+    prompts = _model_picks(monkeypatch)
     register_memoir_editing_job_handlers()
     assert await run_test_editing_job(test_db, job_id)
+    # The model reads the narration sentence by sentence, not pre-cut windows.
+    assert "".join(item["text"] for item in prompts[0]["narrations"][0]["sentences"]) == STORY
 
     project_id = created["session"]["project_id"]
     url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidate"
@@ -68,7 +85,8 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     assert candidate["status"] == "ready"
     assert candidate["utterance_id"] == created["utterance_id"]
     assert candidate["duration_ms"] >= 15_000
-    assert candidate["selected_text"] in STORY
+    assert candidate["selected_text"] == STORY
+    assert candidate["reason"] == "讲了雪天父亲把围巾给我"
 
     create_url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidates/{candidate['id']}/create-video"
     created_job = await client.post(create_url, json={"background_source": "classic"})
@@ -91,11 +109,7 @@ async def test_recommendation_follows_latest_manual_video_for_its_source_range(
     client, test_db, monkeypatch, accept_original,
 ):
     created, evaluation_id = await _stopped_story(client, test_db)
-
-    async def choose_first(windows, *, ai_model):
-        return 0
-
-    monkeypatch.setattr(share_video_candidates, "_choose_window", choose_first)
+    _model_picks(monkeypatch)
     register_memoir_editing_job_handlers()
     assert await run_test_editing_job(test_db, evaluation_id)
     project_id = created["session"]["project_id"]
@@ -148,16 +162,14 @@ async def test_recommendation_follows_latest_manual_video_for_its_source_range(
         assert old_job.status == "failed"
 
 
-async def test_model_can_decline_without_failing_candidate_job(client, test_db, monkeypatch):
+@pytest.mark.parametrize(("pick", "reason_code"), [
+    ({"start_sentence_id": None}, "model_declined"),
+    ({"emotion": 2, "visual": 5, "standalone": 5}, "low_score"),
+    ({"emotion": 3, "visual": 4, "standalone": 3}, "low_score"),
+])
+async def test_weak_or_declined_picks_are_not_recommended(client, test_db, monkeypatch, pick, reason_code):
     created, job_id = await _stopped_story(client, test_db)
-
-    async def choose_with_model(client, system_prompt, user_prompt, *, output_model, **kwargs):
-        assert '{"candidate_id":1}' in system_prompt
-        assert '{"candidate_id":null}' in system_prompt
-        return SimpleNamespace(value=output_model.model_validate({"candidate_id": None}))
-
-    monkeypatch.setattr(share_video_candidates, "get_ai_service", lambda model: object())
-    monkeypatch.setattr(share_video_candidates, "generate_structured_with_client", choose_with_model)
+    _model_picks(monkeypatch, **pick)
     register_memoir_editing_job_handlers()
     assert await run_test_editing_job(test_db, job_id)
 
@@ -166,16 +178,21 @@ async def test_model_can_decline_without_failing_candidate_job(client, test_db, 
     ))
     assert candidate is not None
     assert candidate.status == "none"
-    assert candidate.reason_code == "model_declined"
+    assert candidate.reason_code == reason_code
+    if reason_code == "low_score":
+        # Scores stay with the judged range so the threshold can be revisited.
+        assert (candidate.emotion_score, candidate.visual_score, candidate.standalone_score) == (
+            pick["emotion"], pick["visual"], pick["standalone"],
+        )
+        assert candidate.selected_text == STORY
+    project_id = created["session"]["project_id"]
+    latest = await client.get(f"/api/mobile/memoir/projects/{project_id}/share-video-candidate")
+    assert latest.json()["candidate"] is None
 
 
 async def test_recommendation_is_hidden_after_transcript_edit(client, test_db, monkeypatch):
     created, job_id = await _stopped_story(client, test_db)
-
-    async def choose_first(windows, *, ai_model):
-        return 0
-
-    monkeypatch.setattr(share_video_candidates, "_choose_window", choose_first)
+    _model_picks(monkeypatch)
     register_memoir_editing_job_handlers()
     assert await run_test_editing_job(test_db, job_id)
     project_id = created["session"]["project_id"]
@@ -237,3 +254,50 @@ async def test_pending_correction_delays_candidate_evaluation(client, test_db):
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.PENDING.value
     assert job.result_json["stage"] == "waiting_for_transcripts"
+
+
+def _sentences(*parts):
+    """(utterance, text, seconds) parts laid out back to back within each utterance."""
+    sentences, offsets = [], {}
+    texts = {}
+    for utterance, text, _seconds in parts:
+        texts[utterance] = texts.get(utterance, "") + text
+    for index, (utterance, text, seconds) in enumerate(parts, start=1):
+        char, ms = offsets.get(utterance, (0, 0))
+        sentences.append(share_video_candidates.CandidateSentence(
+            id=index, narration=1 if utterance == "a" else 2, utterance_id=utterance, audio_file_id="audio",
+            transcript_version_id="version", text_hash="hash", transcript_text=texts[utterance],
+            start_char=char, end_char=char + len(text), start_ms=ms, end_ms=ms + seconds * 1000,
+        ))
+        offsets[utterance] = (char + len(text), ms + seconds * 1000)
+    return sentences
+
+
+def test_model_range_must_stay_in_one_narration_and_quote_its_own_hook():
+    sentences = _sentences(
+        ("a", "那年中秋父亲没有回来。", 4),
+        ("a", "母亲在门口一直等到半夜，桌上的月饼一块都没有动过，我们谁也不敢先睡。", 12),
+        ("a", "后来才知道他在路上救了一个落水的孩子。", 6),
+        ("b", "这件事我记了一辈子，每年中秋都会想起那个晚上。", 8),
+    )
+    pick = share_video_candidates._CandidatePick
+
+    window, code = share_video_candidates.window_from_pick(sentences, pick(
+        start_sentence_id=1, end_sentence_id=3, hook_sentence_id=1, emotion=5, visual=4, standalone=4,
+        reason="  讲了父亲没回来的\n那个中秋 ",
+    ))
+    assert code == "model_selected"
+    assert window.selected_text.startswith("那年中秋") and window.selected_text.endswith("孩子。")
+    assert window.hook_text == "那年中秋父亲没有回来。"
+    assert window.reason == "讲了父亲没回来的 那个中秋"
+
+    outside_hook, _ = share_video_candidates.window_from_pick(sentences, pick(
+        start_sentence_id=2, end_sentence_id=3, hook_sentence_id=1, emotion=4, visual=4, standalone=4,
+    ))
+    assert outside_hook.hook_text == ""
+    assert share_video_candidates.window_from_pick(sentences, pick(
+        start_sentence_id=3, end_sentence_id=4, emotion=5, visual=5, standalone=5,
+    )) == (None, "invalid_range")
+    assert share_video_candidates.window_from_pick(sentences, pick(
+        start_sentence_id=1, end_sentence_id=1, emotion=5, visual=5, standalone=5,
+    )) == (None, "out_of_bounds")

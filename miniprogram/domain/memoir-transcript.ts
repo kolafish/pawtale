@@ -187,6 +187,7 @@ export interface MemoirShareVideoCandidate {
   end_ms: number | null;
   duration_ms: number | null;
   status: "ready" | "accepted" | "dismissed" | "stale" | "none";
+  reason: string;
   video_job_id: string | null;
   created_at: string;
   updated_at: string;

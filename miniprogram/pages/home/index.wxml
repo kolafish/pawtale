@@ -123,7 +123,7 @@
               <view class="home-share-candidate-heading">
                 <text class="home-share-candidate-title">{{shareCandidate.status === 'ready' ? shareCandidate.selected_text : '《' + (shareCandidateJob ? shareCandidateJob.title : '讲述片段') + '》'}}</text>
                 <text class="home-share-candidate-meta ui-tabular">{{shareCandidate.status === 'ready' ? '待制作' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '刚刚生成' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '制作未完成' : '制作中'))}}{{shareCandidateDurationText ? ' · ' + shareCandidateDurationText : ''}}</text>
-                <text class="home-share-candidate-hint">来自最近的一段讲述</text>
+                <text class="home-share-candidate-hint">{{shareCandidate.reason || '来自最近的一段讲述'}}</text>
               </view>
             </view>
             <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>

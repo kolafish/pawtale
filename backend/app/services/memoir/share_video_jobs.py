@@ -429,7 +429,9 @@ async def create_share_video_job(
     req: MemoirShareVideoJobCreateRequest,
     *,
     allow_admin: bool = False,
+    hook_text: str = "",
 ) -> MemoirShareVideoJobResponse:
+    """hook_text is a sentence a recommendation already chose; otherwise the title step picks one."""
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     settings = get_settings()
     ai_background_enabled = bool(
@@ -514,6 +516,7 @@ async def create_share_video_job(
     metadata = ShareVideoJobMetadata(
         pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
         title=fallback_share_video_title(alignment.transcript_text[start_char:end_char]),
+        hook_text=rendering.usable_hook_text(hook_text, alignment.transcript_text[start_char:end_char]),
         alignment_strategy=alignment.strategy,
         alignment_confidence=alignment.confidence,
         char_timings=alignment.char_timings[start_char:end_char],
@@ -1213,9 +1216,10 @@ async def run_share_video_job_with_session(
                 operation_id=usage_context.operation_id,
             )
             try:
-                suggested_title, metadata.hook_text = await _suggest_share_video_title_and_hook(
+                suggested_title, suggested_hook = await _suggest_share_video_title_and_hook(
                     job.selected_text, ai_model=metadata.ai_model,
                 )
+                metadata.hook_text = metadata.hook_text or suggested_hook
                 if suggested_title:
                     metadata.title = suggested_title
             except Exception:

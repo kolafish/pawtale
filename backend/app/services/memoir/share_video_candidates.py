@@ -45,19 +45,42 @@ from app.services.memoir.share_video_alignment import (
     share_video_char_range_ms,
 )
 from app.services.memoir.share_video_jobs import create_share_video_job
+from app.services.memoir.share_video_rendering import usable_hook_text
 from app.services.memoir.transcript_projection import current_transcript_version_id
 
 
 logger = logging.getLogger(__name__)
-ALGORITHM_VERSION = "share-candidate-v1"
+ALGORITHM_VERSION = "share-candidate-v2"
 MIN_CANDIDATE_MS = 15_000
 MAX_CANDIDATE_MS = 45_000
-TARGET_CANDIDATE_MS = 30_000
 MIN_ALIGNMENT_CONFIDENCE = 0.72
-MAX_MODEL_WINDOWS = 12
-MAX_WINDOWS_PER_UTTERANCE = 3
+# Keeps one session's numbered sentences within a single model request.
+MAX_MODEL_SENTENCES = 400
+# A range is recommended only if every score reaches MIN_SCORE and their sum MIN_TOTAL_SCORE.
+MIN_SCORE = 3
+MIN_TOTAL_SCORE = 11
+MAX_REASON_CHARS = 40
 CANDIDATE_AGE_LIMIT = timedelta(days=7)
 _SENSITIVE_NUMBER = re.compile(r"(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)")
+
+
+@dataclass(frozen=True)
+class CandidateSentence:
+    id: int
+    narration: int
+    utterance_id: str
+    audio_file_id: str
+    transcript_version_id: str
+    text_hash: str
+    transcript_text: str
+    start_char: int
+    end_char: int
+    start_ms: int
+    end_ms: int
+
+    @property
+    def text(self) -> str:
+        return self.transcript_text[self.start_char:self.end_char]
 
 
 @dataclass(frozen=True)
@@ -71,28 +94,37 @@ class CandidateWindow:
     end_char: int
     start_ms: int
     end_ms: int
-    score: float
+    emotion_score: int
+    visual_score: int
+    standalone_score: int
+    reason: str
+    hook_text: str
 
     @property
     def duration_ms(self) -> int:
         return self.end_ms - self.start_ms
 
+    @property
+    def recommended(self) -> bool:
+        scores = (self.emotion_score, self.visual_score, self.standalone_score)
+        return min(scores) >= MIN_SCORE and sum(scores) >= MIN_TOTAL_SCORE
 
-class _CandidateChoice(BaseModel):
+
+class _CandidatePick(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    candidate_id: int | None
+    start_sentence_id: int | None
+    end_sentence_id: int | None = None
+    hook_sentence_id: int | None = None
+    emotion: int = 0
+    visual: int = 0
+    standalone: int = 0
+    reason: str = ""
 
 
-def _trim_range(text: str, start: int, end: int) -> tuple[int, int]:
-    while start < end and text[start].isspace():
-        start += 1
-    while end > start and text[end - 1].isspace():
-        end -= 1
-    return start, end
-
-
-def candidate_windows_for_utterance(utterance: MemoirVoiceUtterance) -> list[CandidateWindow]:
+def candidate_sentences_for_utterance(
+    utterance: MemoirVoiceUtterance, *, narration: int, first_id: int,
+) -> list[CandidateSentence]:
     if (
         not is_narrator_material(utterance)
         or utterance.completion_issue_id is not None
@@ -109,80 +141,123 @@ def candidate_windows_for_utterance(utterance: MemoirVoiceUtterance) -> list[Can
         return []
     if (alignment.confidence or 0) < MIN_ALIGNMENT_CONFIDENCE:
         return []
-    text = alignment.transcript_text
-    windows: list[CandidateWindow] = []
-    for first_index, first in enumerate(alignment.segments):
-        best: CandidateWindow | None = None
-        for last in alignment.segments[first_index:]:
-            start_char, end_char = _trim_range(text, int(first["start_char"]), int(last["end_char"]))
-            if end_char <= start_char:
-                continue
-            start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
-            duration_ms = end_ms - start_ms
-            if duration_ms > MAX_CANDIDATE_MS:
-                break
-            if duration_ms < MIN_CANDIDATE_MS:
-                continue
-            selected_text = text[start_char:end_char]
-            visible_chars = sum(not char.isspace() for char in selected_text)
-            if not 26 <= visible_chars <= 220 or _SENSITIVE_NUMBER.search(selected_text):
-                continue
-            score = 6 * min(visible_chars, 120) / 120 - abs(duration_ms - TARGET_CANDIDATE_MS) / 5000
-            window = CandidateWindow(
-                utterance_id=utterance.id,
-                audio_file_id=utterance.audio_file_id,
-                transcript_version_id=transcript_version_id,
-                text_hash=alignment.text_hash,
-                selected_text=selected_text,
-                start_char=start_char,
-                end_char=end_char,
-                start_ms=start_ms,
-                end_ms=end_ms,
-                score=score,
-            )
-            if best is None or window.score > best.score:
-                best = window
-        if best is not None:
-            windows.append(best)
-    chosen: list[CandidateWindow] = []
-    for window in sorted(windows, key=lambda item: item.score, reverse=True):
-        if any(
-            max(0, min(window.end_ms, item.end_ms) - max(window.start_ms, item.start_ms))
-            > min(window.duration_ms, item.duration_ms) / 2
-            for item in chosen
-        ):
-            continue
-        chosen.append(window)
-        if len(chosen) >= MAX_WINDOWS_PER_UTTERANCE:
+    sentences: list[CandidateSentence] = []
+    for segment in alignment.segments:
+        start_char, end_char = int(segment["start_char"]), int(segment["end_char"])
+        start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
+        sentences.append(CandidateSentence(
+            id=first_id + len(sentences),
+            narration=narration,
+            utterance_id=utterance.id,
+            audio_file_id=utterance.audio_file_id,
+            transcript_version_id=transcript_version_id,
+            text_hash=alignment.text_hash,
+            transcript_text=alignment.transcript_text,
+            start_char=start_char,
+            end_char=end_char,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        ))
+    # Too short to hold any clip, so the model need not read it.
+    if not sentences or sentences[-1].end_ms - sentences[0].start_ms < MIN_CANDIDATE_MS:
+        return []
+    return sentences
+
+
+def session_candidate_sentences(utterances: list[MemoirVoiceUtterance]) -> list[CandidateSentence]:
+    sentences: list[CandidateSentence] = []
+    for narration, utterance in enumerate(sorted(utterances, key=lambda item: (item.created_at, item.id)), start=1):
+        found = candidate_sentences_for_utterance(utterance, narration=narration, first_id=len(sentences) + 1)
+        if len(sentences) + len(found) > MAX_MODEL_SENTENCES:
             break
-    return sorted(chosen, key=lambda item: item.start_ms)
+        sentences.extend(found)
+    return sentences
 
 
-async def _choose_window(windows: list[CandidateWindow], *, ai_model: str | None) -> int | None:
+def _clamp_score(value: int) -> int:
+    return max(1, min(5, int(value)))
+
+
+def window_from_pick(sentences: list[CandidateSentence], pick: _CandidatePick) -> tuple[CandidateWindow | None, str]:
+    """Check the model's range against the hard limits; the reason code says why a pick is unusable."""
+    if pick.start_sentence_id is None:
+        return None, "model_declined"
+    by_id = {sentence.id: sentence for sentence in sentences}
+    first = by_id.get(pick.start_sentence_id)
+    last = by_id.get(pick.end_sentence_id if pick.end_sentence_id is not None else pick.start_sentence_id)
+    if first is None or last is None or first.utterance_id != last.utterance_id or first.id > last.id:
+        return None, "invalid_range"
+    start_char, end_char = first.start_char, last.end_char
+    start_ms, end_ms = first.start_ms, last.end_ms
+    selected_text = first.transcript_text[start_char:end_char]
+    visible_chars = sum(not char.isspace() for char in selected_text)
+    if (
+        not MIN_CANDIDATE_MS <= end_ms - start_ms <= MAX_CANDIDATE_MS
+        or not 26 <= visible_chars <= 220
+        or _SENSITIVE_NUMBER.search(selected_text)
+    ):
+        return None, "out_of_bounds"
+    hook = by_id.get(pick.hook_sentence_id) if pick.hook_sentence_id is not None else None
+    hook_text = usable_hook_text(hook.text, selected_text) if hook and first.id <= hook.id <= last.id else ""
+    window = CandidateWindow(
+        utterance_id=first.utterance_id,
+        audio_file_id=first.audio_file_id,
+        transcript_version_id=first.transcript_version_id,
+        text_hash=first.text_hash,
+        selected_text=selected_text,
+        start_char=start_char,
+        end_char=end_char,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        emotion_score=_clamp_score(pick.emotion),
+        visual_score=_clamp_score(pick.visual),
+        standalone_score=_clamp_score(pick.standalone),
+        reason=" ".join(pick.reason.split())[:MAX_REASON_CHARS],
+        hook_text=hook_text,
+    )
+    return window, "model_selected" if window.recommended else "low_score"
+
+
+async def _pick_window(
+    sentences: list[CandidateSentence], *, ai_model: str | None,
+) -> tuple[CandidateWindow | None, str]:
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
-    prompt = json.dumps({
-        "candidates": [
-            {"id": index, "duration_seconds": round(window.duration_ms / 1000), "text": window.selected_text}
-            for index, window in enumerate(windows, start=1)
-        ]
-    }, ensure_ascii=False)
+    narrations: dict[int, list[dict[str, object]]] = {}
+    for sentence in sentences:
+        narrations.setdefault(sentence.narration, []).append({
+            "id": sentence.id,
+            "seconds": round((sentence.end_ms - sentence.start_ms) / 1000, 1),
+            "text": sentence.text,
+        })
+    prompt = json.dumps(
+        {"narrations": [{"sentences": items} for items in narrations.values()]},
+        ensure_ascii=False,
+    )
     generated = await generate_structured_with_client(
         get_ai_service(ai_model),
-        "你在为家庭回忆录筛选一段讲述原声。只选一条独立看也能理解、具体生动、保留讲述者真实口吻、适合家人观看的片段。"
-        "若内容只是寒暄、采访提问、重复、语义不完整、缺少具体故事，或明显包含私密身份信息，candidate_id 就填 null。"
-        "不要改写内容；candidate_id 只能填候选列表中的编号。宁可不推荐，也不要凑数。"
-        '只返回一个 JSON 对象，且只能包含 candidate_id 字段：推荐时如 {"candidate_id":1}，不推荐时为 {"candidate_id":null}。'
-        "不要返回裸编号、裸 null、Markdown 或解释。",
+        "你在为家庭回忆录挑一段讲述原声，做成 15 到 45 秒的竖屏短视频发给家人看。"
+        "输入是这次讲述按句编号的原话，seconds 是每句的时长。\n"
+        "挑出最值得做成视频的一段连续句子：\n"
+        "- start_sentence_id 和 end_sentence_id 必须在同一个 narration 里，前者不大于后者，合计 15 到 45 秒；\n"
+        "- 从一个完整的意思开始，在故事的落点结束；不要从“后来他就……”这类依赖上文的句子开始；\n"
+        "- hook_sentence_id 是这段里最打动人、单独放在片头也成立的一句，必须在起止范围内；\n"
+        "- emotion（情绪或转折）、visual（画面感，能否画出具体场景）、standalone（不看上下文也能懂）各打 1 到 5 分，"
+        "照实打分，不要为了推荐而抬高；\n"
+        "- reason 用一句不超过 30 字的话告诉讲述者这段讲了什么、为什么值得做成视频，"
+        "例如“讲了父亲没回来的那个中秋”，不要评价讲述者本人。\n"
+        "如果都是寒暄、采访提问、重复，没有具体故事，或含手机号、证件号等私密信息，"
+        "start_sentence_id 填 null。宁可不推荐，也不要凑数。\n"
+        "只返回一个 JSON 对象，字段为 start_sentence_id、end_sentence_id、hook_sentence_id、"
+        "emotion、visual、standalone、reason。不要返回 Markdown 或解释。",
         prompt,
-        output_model=_CandidateChoice,
+        output_model=_CandidatePick,
         requested_model=ai_model,
         temperature=0.1,
         max_tokens=policy.max_tokens,
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
-    choice = generated.value.candidate_id
-    return choice - 1 if choice is not None and 1 <= choice <= len(windows) else None
+    return window_from_pick(sentences, generated.value)
 
 
 async def _load_session(db: AsyncSession, project_id: str, session_id: str) -> MemoirVoiceSession | None:
@@ -253,6 +328,7 @@ def _response(candidate: MemoirShareVideoCandidate) -> MemoirShareVideoCandidate
         end_ms=candidate.end_ms,
         duration_ms=(candidate.end_ms - candidate.start_ms) if candidate.end_ms is not None and candidate.start_ms is not None else None,
         status=candidate.status,
+        reason=candidate.reason,
         video_job_id=candidate.video_job_id,
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
@@ -282,23 +358,17 @@ async def run_share_video_candidate_job(db: AsyncSession, job: MemoirEditingJob)
             result_json={"stage": "waiting_for_transcripts", "voice_session_id": session_id},
         )
 
-    windows = [
-        window
-        for utterance in sorted(session.utterances, key=lambda item: (item.created_at, item.id))
-        for window in candidate_windows_for_utterance(utterance)
-    ]
-    windows = sorted(windows, key=lambda item: item.score, reverse=True)[:MAX_MODEL_WINDOWS]
-    if windows:
+    sentences = session_candidate_sentences(session.utterances)
+    selected: CandidateWindow | None = None
+    reason_code = "no_eligible_window"
+    if sentences:
         # Release read locks before the external model call. The selected source is
         # checked again against the current audio and transcript before storage.
         await db.commit()
         ai_model = await load_project_ai_model(db, job.project_id)
-        choice = await _choose_window(windows, ai_model=ai_model)
-        selected = windows[choice] if choice is not None else None
-    else:
-        selected = None
+        selected, reason_code = await _pick_window(sentences, ai_model=ai_model)
 
-    if selected is not None:
+    if selected is not None and selected.recommended:
         probe = MemoirShareVideoCandidate(
             project_id=job.project_id,
             voice_session_id=session_id,
@@ -332,11 +402,12 @@ async def run_share_video_candidate_job(db: AsyncSession, job: MemoirEditingJob)
     }:
         return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="candidate already handled")
     candidate = existing or MemoirShareVideoCandidate(project_id=job.project_id, voice_session_id=session_id)
+    candidate.reason_code = reason_code
     if selected is None:
         candidate.status = MemoirShareVideoCandidateStatus.NONE.value
-        candidate.reason_code = "no_eligible_window" if not windows else "model_declined"
         candidate.selected_text = ""
     else:
+        # Ranges below the threshold are kept with their scores for later tuning.
         candidate.utterance_id = selected.utterance_id
         candidate.audio_file_id = selected.audio_file_id
         candidate.transcript_version_id = selected.transcript_version_id
@@ -346,20 +417,28 @@ async def run_share_video_candidate_job(db: AsyncSession, job: MemoirEditingJob)
         candidate.end_char = selected.end_char
         candidate.start_ms = selected.start_ms
         candidate.end_ms = selected.end_ms
-        candidate.status = MemoirShareVideoCandidateStatus.READY.value
-        candidate.reason_code = "model_selected"
+        candidate.emotion_score = selected.emotion_score
+        candidate.visual_score = selected.visual_score
+        candidate.standalone_score = selected.standalone_score
+        candidate.reason = selected.reason
+        candidate.hook_text = selected.hook_text
+        candidate.status = (
+            MemoirShareVideoCandidateStatus.READY.value
+            if selected.recommended
+            else MemoirShareVideoCandidateStatus.NONE.value
+        )
     candidate.algorithm_version = ALGORITHM_VERSION
     db.add(candidate)
     await db.flush()
     logger.info(
-        "share_video_candidate_evaluated project_id=%s session_id=%s status=%s reason=%s windows=%s",
-        job.project_id, session_id, candidate.status, candidate.reason_code, len(windows),
+        "share_video_candidate_evaluated project_id=%s session_id=%s status=%s reason=%s sentences=%s",
+        job.project_id, session_id, candidate.status, candidate.reason_code, len(sentences),
     )
     return EditingJobResult(result_json={
         "candidate_id": candidate.id,
         "status": candidate.status,
         "reason_code": candidate.reason_code,
-        "windows_considered": len(windows),
+        "sentences_considered": len(sentences),
     })
 
 
@@ -487,6 +566,7 @@ async def create_candidate_share_video(
             background_mode=req.background_mode,
             custom_background_asset_id=req.custom_background_asset_id,
         ),
+        hook_text=candidate.hook_text,
     )
     candidate.status = MemoirShareVideoCandidateStatus.ACCEPTED.value
     candidate.video_job_id = job.id

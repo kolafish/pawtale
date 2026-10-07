@@ -533,6 +533,8 @@ class MemoirShareVideoCandidateResponse(BaseModel):
     end_ms: int | None
     duration_ms: int | None
     status: MemoirShareVideoCandidateStatus
+    # Why the model thinks this range is worth a video, shown on the card.
+    reason: str = ""
     video_job_id: str | None
     created_at: datetime
     updated_at: datetime
