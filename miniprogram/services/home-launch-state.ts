@@ -16,6 +16,7 @@ export interface HomeLaunchUserState {
   first_seen_at?: string;
   last_opened_at?: string;
   last_soft_launch_at?: string;
+  book_opened_at?: string;
   pending_new_project?: PendingNewProjectLaunch;
 }
 
@@ -198,6 +199,28 @@ export function dismissHomeLaunch(userId: string, variant: HomeLaunchVariant, pr
     users: {
       ...store.users,
       [userId]: nextState,
+    },
+  });
+}
+
+export function homeBookOpened(userId: string): boolean {
+  return Boolean(userId && userState(readStore(), userId).book_opened_at);
+}
+
+export function markHomeBookOpened(userId: string, nowMs = Date.now()): void {
+  if (!userId) {
+    return;
+  }
+  const store = readStore();
+  const state = userState(store, userId);
+  if (state.book_opened_at) {
+    return;
+  }
+  writeStore({
+    ...store,
+    users: {
+      ...store.users,
+      [userId]: { ...state, book_opened_at: isoTime(nowMs) },
     },
   });
 }

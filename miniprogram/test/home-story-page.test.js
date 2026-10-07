@@ -27,11 +27,14 @@ function snapshot(patch = {}) {
     unassigned_image_count: 2, unassigned_video_count: 1, growth_events: [], latest_transcript: null, ...patch,
   };
 }
-function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null } = {}) {
-  const calls = { acknowledgedEventIds: [], bookNavigations: 0 };
+function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null, bookOpened = false } = {}) {
+  const calls = { acknowledgedEventIds: [], bookNavigations: 0, bookOpenedMarks: [] };
   mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", { readCachedMemoirHome: () => ({status:"miss"}), readCachedMemoirIdentity: () => null, writeCachedMemoirHome: () => {} });
-  mockModule("../services/home-launch-state.ts", { resolveHomeLaunch: () => "none", dismissHomeLaunch: () => {} });
+  mockModule("../services/home-launch-state.ts", {
+    resolveHomeLaunch: () => "none", dismissHomeLaunch: () => {},
+    homeBookOpened: () => bookOpened, markHomeBookOpened: (userId) => { calls.bookOpenedMarks.push(userId); },
+  });
   mockModule("../services/voice-authorization.ts", { readVoiceAuthorizationConsent: () => true });
   mockModule("../services/accessibility-settings.ts", { readLargeTextEnabled: () => largeText, accessibilityPageClass: (base) => largeText ? `${base} large-text` : base });
   mockModule("../services/memoir-snapshot-api.ts", {
@@ -218,11 +221,22 @@ test("story tree always opens the book workspace", async () => {
   const { page, calls } = loadStoryPage();
   const context = pageContext(page);
   await context.onShow();
+  assert.equal(context.data.showBookHint, true);
   context.openBook();
   assert.equal(calls.bookNavigations, 1);
+  assert.deepEqual(calls.bookOpenedMarks, ["user-1"]);
+  assert.equal(context.data.showBookHint, false);
   context.setData({ projectId: "" });
   context.openBook();
   assert.equal(calls.bookNavigations, 1);
+  context.onHide();
+});
+
+test("story tree book hint stays hidden once the user has opened the book", async () => {
+  const { page } = loadStoryPage({ bookOpened: true });
+  const context = pageContext(page);
+  await context.onShow();
+  assert.equal(context.data.showBookHint, false);
   context.onHide();
 });
 

@@ -32,6 +32,7 @@
       can-open-book="{{hasProject}}"
       can-switch-project="{{hasProject}}"
       can-voice-edit="{{hasProject}}"
+      show-book-hint="{{showBookHint}}"
       bind:focusgrowth="focusStoryGrowth"
       bind:openbook="openBook"
       bind:openprojects="openProjects"

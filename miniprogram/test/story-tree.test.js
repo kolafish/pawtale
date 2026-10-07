@@ -51,7 +51,7 @@ test("tree template folds the complete story list into the hero without timeline
   const template = fs.readFileSync(path.join(__dirname, "../components/story-tree/index.wxml"), "utf8");
   assert.match(template, /class="story-hero/);
   assert.match(template, /id="story-book-action"[\s\S]*?bindtap="openBook"/);
-  assert.match(template, /aria-label="\{\{canOpenBook \? '进入'/);
+  assert.match(template, /aria-label="\{\{canOpenBook \? '看整本书/);
   assert.doesNotMatch(template, />读整本书|>阅读全书|>看看书稿/);
   assert.match(template, /id="story-summary-toggle"/);
   assert.match(template, /class="story-list-expand/);

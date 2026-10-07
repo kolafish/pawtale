@@ -37,6 +37,8 @@ import { emptyHomeStoryData, homeStorySnapshotData, clearStoryGrowthAnimation, H
 import type { StoryTreeChapterEvent, StoryTreeHandle, StoryTreeFocusEvent } from "../../components/story-tree/events";
 import {
   dismissHomeLaunch,
+  homeBookOpened,
+  markHomeBookOpened,
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
@@ -92,6 +94,7 @@ interface HomeData extends HomeStoryData {
   lastStoryHint: string;
   hasLastStoryHint: boolean;
   launchVariant: HomeLaunchVariant;
+  showBookHint: boolean;
   hasProject: boolean;
   selectedMode: NarrationMode;
   voiceAuthorizationAgreed: boolean;
@@ -253,6 +256,7 @@ function applyHomeSnapshotData(
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
     launchVariant,
+    showBookHint: !homeBookOpened(identity.id),
     hasProject,
     selectedMode: changedProject || !context.data.voiceEntry
       ? profile.defaultNarrationMode
@@ -288,6 +292,7 @@ definePage<HomeData>()({
     lastStoryHint: "",
     hasLastStoryHint: false,
     launchVariant: "none",
+    showBookHint: false,
     hasProject: false,
     selectedMode: "free_narration",
     voiceAuthorizationAgreed: false,
@@ -703,6 +708,8 @@ definePage<HomeData>()({
 
   openBook() {
     if (!this.data.projectId) return;
+    markHomeBookOpened(this.data.userId);
+    if (this.data.showBookHint) setHomeData(this, { showBookHint: false });
     navigateToBook();
   },
 
