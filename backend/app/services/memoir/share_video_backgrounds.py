@@ -22,7 +22,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v5"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v6"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 SHARE_VIDEO_REFERENCE_IMAGE_MAX_EDGE = 1024
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
@@ -71,7 +71,7 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
         self.status_code = status_code
 
 
-_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
+_VIDEO_BACKGROUND_PROMPT = """{reference}根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
 {story_context}
@@ -98,10 +98,11 @@ _VIDEO_BACKGROUND_STORY_CONTEXT = """
 这张画面是同一段视频里的其中一张，上面只是其中一部分。整段口述如下，用来理解“我”“他”等称呼指的是谁、事情发生在哪里和什么年代；画面只表现上面那部分内容：
 
 {story_text}
-{visual_context}{reference}"""
+{visual_context}"""
 
-_VIDEO_BACKGROUND_REFERENCE = """
-附带的参考图是同一视频的第一张画面。参考图里的人物就是这段故事里的同一组人物，保持他们的长相、年龄、发型和穿着一致；构图、动作和场景按上面这部分内容重新画，不照搬参考图。
+_VIDEO_BACKGROUND_REFERENCE = """参考图只用来确定人物长什么样：沿用参考图中人物的长相、性别、年龄、发型和穿着。
+请画一张全新的画面，不要在参考图上修改、延伸或添加元素：场景、背景、构图、镜头角度和人物动作都按下面的口述内容重新设计，要和参考图明显不同。
+
 """
 
 _VIDEO_BACKGROUND_VISUAL_CONTEXT = """
@@ -241,7 +242,7 @@ def _prompt_content(text: str) -> str:
     return "".join(characters[:SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS]).rstrip() + "..."
 
 
-def _story_context(story_text: str, visual_context: str, *, has_reference: bool) -> str:
+def _story_context(story_text: str, visual_context: str) -> str:
     story = re.sub(r"\s+", " ", (story_text or "").strip())
     if not story:
         return ""
@@ -249,7 +250,6 @@ def _story_context(story_text: str, visual_context: str, *, has_reference: bool)
     return _VIDEO_BACKGROUND_STORY_CONTEXT.format(
         story_text=_prompt_content(story),
         visual_context=_VIDEO_BACKGROUND_VISUAL_CONTEXT.format(visual_context=visual) if visual else "",
-        reference=_VIDEO_BACKGROUND_REFERENCE if has_reference else "",
     )
 
 
@@ -277,8 +277,9 @@ def build_share_video_background_prompt(
     style = share_video_background_style(style_id)
     content = _prompt_content(selected_text)
     prompt = _VIDEO_BACKGROUND_PROMPT.format(
+        reference=_VIDEO_BACKGROUND_REFERENCE if reference_image else "",
         content=content,
-        story_context=_story_context(story_text, visual_context, has_reference=bool(reference_image)),
+        story_context=_story_context(story_text, visual_context),
         drawing_instruction=style.drawing_instruction,
     ).strip()
     prompt_hash = hashlib.sha256(
@@ -436,7 +437,11 @@ async def get_or_generate_share_video_background(
     if not settings.volc_ark_api_key.strip():
         return None
 
-    reference_image = reference_image_data_uri(reference_image_path) if reference_image_path else ""
+    reference_image = (
+        reference_image_data_uri(reference_image_path)
+        if reference_image_path and settings.memoir_share_video_reference_image_enabled
+        else ""
+    )
     try:
         return await _get_or_generate_background(
             selected_text,
