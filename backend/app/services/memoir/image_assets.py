@@ -650,6 +650,8 @@ async def create_image_placement(
         chapter_id = source_location[1]
     elif placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE and source_location:
         chapter_id = source_location[1]
+    # Validate before touching any placement, so a rejected request changes nothing.
+    display_size = _placement_display_size(placement_type.value, req.display_size, fallback_cover_layout=True)
     if placement_type in {
         MemoirBookImagePlacementType.CHAPTER_OPENING,
         MemoirBookImagePlacementType.CHAPTER_INLINE,
@@ -742,11 +744,7 @@ async def create_image_placement(
     else:
         await _begin_manual_image_selection(db, project=project, keep=placement)
     placement.caption_override = req.caption_override or placement.caption_override
-    placement.display_size = _placement_display_size(
-        placement_type.value,
-        req.display_size,
-        fallback_cover_layout=True,
-    )
+    placement.display_size = display_size
     placement.enabled = True
     db.add(asset)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
@@ -806,6 +804,10 @@ async def update_image_placement(
     if not placement:
         raise HTTPException(status_code=404, detail="插图位置不存在")
     fields_set = getattr(req, "model_fields_set", set())
+    display_size = (
+        _placement_display_size(placement.placement_type, req.display_size)
+        if "display_size" in fields_set and req.display_size is not None else None
+    )
     if placement.placement_type not in {"cover", "back_cover"}:
         await _begin_manual_image_selection(
             db, project=project,
@@ -813,8 +815,8 @@ async def update_image_placement(
         )
     if "caption_override" in fields_set and req.caption_override is not None:
         placement.caption_override = req.caption_override
-    if "display_size" in fields_set and req.display_size is not None:
-        placement.display_size = _placement_display_size(placement.placement_type, req.display_size)
+    if display_size is not None:
+        placement.display_size = display_size
     if "enabled" in fields_set and req.enabled is not None:
         placement.enabled = req.enabled
     if placement.placement_type == MemoirBookImagePlacementType.COVER.value and placement.enabled:
