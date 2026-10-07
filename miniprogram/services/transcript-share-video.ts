@@ -77,6 +77,8 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoCustomBackgroundAssetId: string;
   shareVideoCustomBackgroundPreviewPath: string;
   shareVideoCustomBackgroundStatusText: string;
+  // Illustration style and image mode stay folded behind one row until asked for.
+  shareVideoMoreSettingsOpen: boolean;
 }
 
 type ShareVideoSelectionPatch = Pick<
@@ -363,6 +365,7 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
     shareVideoCustomBackgroundAssetId: "",
     shareVideoCustomBackgroundPreviewPath: "",
     shareVideoCustomBackgroundStatusText: "",
+    shareVideoMoreSettingsOpen: false,
     ...initialTranscriptShareVideoTaskState(),
   };
 }

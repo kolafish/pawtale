@@ -196,6 +196,14 @@
 
         <view wx:if="{{shareVideoUsesIllustration}}" class="share-video-background">
           <view class="share-video-background-head">
+            <text class="voice-edit-label">画风和张数</text>
+            <button class="text-action-button" bindtap="toggleShareVideoMoreSettings">{{shareVideoMoreSettingsOpen ? "收起" : "调整"}}</button>
+          </view>
+          <text wx:if="{{!shareVideoMoreSettingsOpen}}" class="share-video-background-help">{{shareVideoBackgroundStyleLabel}}，张数：{{shareVideoBackgroundModeLabel}}</text>
+        </view>
+
+        <view wx:if="{{shareVideoUsesIllustration && shareVideoMoreSettingsOpen}}" class="share-video-background">
+          <view class="share-video-background-head">
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
@@ -217,7 +225,7 @@
           </view>
         </view>
 
-        <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
+        <view wx:if="{{shareVideoBackgroundUsesAi && shareVideoMoreSettingsOpen}}" class="share-video-background">
           <view class="share-video-background-head">
             <text class="voice-edit-label">视频画面模式</text>
             <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>

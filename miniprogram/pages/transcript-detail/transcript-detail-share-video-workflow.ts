@@ -74,6 +74,7 @@ export interface TranscriptMediaWorkflowMethods {
   selectShareVideoStyle(event: ShareVideoStyleEvent): void;
   selectShareVideoBackgroundStyle(event: ShareVideoBackgroundEvent): void;
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent): void;
+  toggleShareVideoMoreSettings(): void;
   chooseShareVideoCustomBackground(): Promise<void>;
   createMaterialImage(): Promise<void>;
   openImageAssets(): void;
@@ -318,6 +319,10 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     this.setData({
       ...backgroundPatch,
     });
+  },
+
+  toggleShareVideoMoreSettings() {
+    this.setData({ shareVideoMoreSettingsOpen: !this.data.shareVideoMoreSettingsOpen });
   },
 
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent) {
