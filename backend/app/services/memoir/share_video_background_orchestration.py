@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.services.memoir.image_assets import (
 )
 from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+    ShareVideoBackgroundAsset,
     SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
@@ -204,69 +206,102 @@ async def prepare_share_video_background(
         metadata.background_error_message = ""
         await persist_progress(metadata)
 
-        scene_assets: list[ShareVideoSceneAssetMetadata] = []
-        valid_paths: list[Path | None] = []
-        first_valid_path: Path | None = None
-        first_asset_provider: str | None = None
-        first_asset_model: str | None = None
-        generated_count = 0
-        errors: list[str] = []
         story_text = job.selected_text if len(plan.scenes) > 1 else ""
-        for scene in plan.scenes:
-            scene_info = ShareVideoSceneAssetMetadata.model_validate(_scene_metadata(scene))
-            scene_source_text = _scene_source_text(job.selected_text, scene)
+        visual_context = plan.visual_context if story_text else ""
+        scene_assets: dict[int, ShareVideoSceneAssetMetadata] = {}
+        scene_paths: dict[int, Path | None] = {}
+        errors: dict[int, str] = {}
+
+        async def generate_scene(
+            scene: ShareVideoScene,
+            reference_image_path: Path | None,
+        ) -> tuple[ShareVideoScene, ShareVideoBackgroundAsset | None, ShareVideoBackgroundGenerationError | None]:
             try:
                 asset = await get_or_generate_share_video_background(
-                    scene_source_text,
+                    _scene_source_text(job.selected_text, scene),
                     background_style,
                     story_text=story_text,
-                    visual_context=plan.visual_context if story_text else "",
+                    visual_context=visual_context,
+                    reference_image_path=reference_image_path,
                     usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError as exc:
-                errors.append(f"{scene.index + 1}: {str(exc)[:120]}")
+                return scene, None, exc
+            return scene, asset, None
+
+        async def record_scene(
+            scene: ShareVideoScene,
+            asset: ShareVideoBackgroundAsset | None,
+            error: ShareVideoBackgroundGenerationError | None,
+        ) -> None:
+            scene_info = ShareVideoSceneAssetMetadata.model_validate(_scene_metadata(scene))
+            if error is not None:
+                errors[scene.index] = f"{scene.index + 1}: {str(error)[:120]}"
                 scene_info.background_status = "failed"
-                scene_info.background_error_message = str(exc)[:300]
-                valid_paths.append(None)
+                scene_info.background_error_message = str(error)[:300]
+                scene_paths[scene.index] = None
+            elif asset is None:
+                scene_info.background_status = "disabled"
+                scene_info.background_error_message = ""
+                scene_paths[scene.index] = None
             else:
-                if asset is None:
-                    scene_info.background_status = "disabled"
-                    scene_info.background_error_message = ""
-                    valid_paths.append(None)
-                else:
-                    generated_count += 1
-                    first_valid_path = first_valid_path or asset.path
-                    first_asset_provider = first_asset_provider or asset.provider
-                    first_asset_model = first_asset_model or asset.model
-                    valid_paths.append(asset.path)
-                    await register_share_video_background_asset(
-                        db,
-                        job=job,
-                        background=asset,
-                        context=RegisteredShareVideoBackground(
-                            source_quote=scene_source_text,
-                            scene_index=scene.index,
-                            scene_title=scene.title,
-                            evidence_quote=scene.evidence_quote,
-                        ),
-                    )
-                    scene_info.background_status = "ready"
-                    scene_info.background_storage_path = asset.storage_path
-                    scene_info.background_prompt_hash = asset.prompt_hash
-                    scene_info.background_prompt_version = asset.prompt_template_version
-                    scene_info.background_provider = asset.provider
-                    scene_info.background_model = asset.model
-                    scene_info.background_cache_hit = asset.cache_hit
-                    scene_info.background_error_message = ""
-            scene_assets.append(scene_info)
-            metadata.background_generated_count = generated_count
-            metadata.background_scenes = scene_assets
+                scene_paths[scene.index] = asset.path
+                await register_share_video_background_asset(
+                    db,
+                    job=job,
+                    background=asset,
+                    context=RegisteredShareVideoBackground(
+                        source_quote=_scene_source_text(job.selected_text, scene),
+                        scene_index=scene.index,
+                        scene_title=scene.title,
+                        evidence_quote=scene.evidence_quote,
+                    ),
+                )
+                scene_info.background_status = "ready"
+                scene_info.background_storage_path = asset.storage_path
+                scene_info.background_prompt_hash = asset.prompt_hash
+                scene_info.background_prompt_version = asset.prompt_template_version
+                scene_info.background_provider = asset.provider
+                scene_info.background_model = asset.model
+                scene_info.background_cache_hit = asset.cache_hit
+                scene_info.background_error_message = ""
+            scene_assets[scene.index] = scene_info
+            metadata.background_generated_count = sum(path is not None for path in scene_paths.values())
+            metadata.background_scenes = [scene_assets[index] for index in sorted(scene_assets)]
             await persist_progress(metadata)
+
+        # The first scene is drawn alone so the rest can use it as a reference
+        # image and keep the same people; the rest are drawn in parallel.
+        first_scene, first_asset, first_error = await generate_scene(plan.scenes[0], None)
+        await record_scene(first_scene, first_asset, first_error)
+        reference_image_path = first_asset.path if first_asset is not None else None
+        pending = [
+            asyncio.create_task(generate_scene(scene, reference_image_path))
+            for scene in plan.scenes[1:]
+        ]
+        try:
+            for finished in asyncio.as_completed(pending):
+                await record_scene(*await finished)
+        finally:
+            for task in pending:
+                task.cancel()
+
+        valid_paths = [scene_paths.get(scene.index) for scene in plan.scenes]
+        ready_assets = [
+            scene_assets[scene.index]
+            for scene in plan.scenes
+            if scene_paths.get(scene.index) is not None
+        ]
+        first_valid_path = next((path for path in valid_paths if path is not None), None)
+        first_asset_provider = ready_assets[0].background_provider if ready_assets else None
+        first_asset_model = ready_assets[0].background_model if ready_assets else None
+        scene_asset_list = [scene_assets[index] for index in sorted(scene_assets)]
+        error_messages = [errors[index] for index in sorted(errors)]
 
         if first_valid_path is None:
             metadata.background_status = "failed"
             metadata.background_error_message = "智能多图背景生成失败，已使用经典背景"
-            metadata.background_scenes = scene_assets
+            metadata.background_scenes = scene_asset_list
         else:
             filled_paths: list[Path] = []
             previous_path: Path | None = None
@@ -282,9 +317,9 @@ async def prepare_share_video_background(
                 filled_paths,
                 duration_ms,
             )
-            metadata.background_status = "partial" if errors or reused_count else "ready"
-            metadata.background_error_message = "；".join(errors)[:500]
-            metadata.background_scenes = scene_assets
+            metadata.background_status = "partial" if error_messages or reused_count else "ready"
+            metadata.background_error_message = "；".join(error_messages)[:500]
+            metadata.background_scenes = scene_asset_list
             metadata.background_reused_scene_count = reused_count
             metadata.background_provider = first_asset_provider
             metadata.background_model = first_asset_model
