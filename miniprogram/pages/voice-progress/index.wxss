@@ -5,7 +5,9 @@
 }
 
 .refresh-button {
-  width: 128rpx;
+  width: 150rpx;
+  padding: 0;
+  white-space: nowrap;
   height: var(--ui-hit-size);
   border-radius: 18rpx;
   background: var(--ui-surface);
@@ -303,11 +305,13 @@
 }
 
 .continue-button {
-  width: 120rpx;
+  width: 150rpx;
+  padding: 0;
+  white-space: nowrap;
   height: 80rpx;
   border-radius: 18rpx;
   background: var(--ui-accent-surface);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 800;
   flex: 0 0 auto;

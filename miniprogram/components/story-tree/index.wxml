@@ -99,7 +99,6 @@
   <view wx:if="{{canVoiceEdit}}" class="story-utilities">
     <view class="story-utility ui-pressable" bindtap="openTranscripts" hover-class="ui-subtle-action-hover"
       aria-role="button" aria-label="查看全部回忆">全部回忆</view>
-    <view class="story-utility-divider" aria-hidden="true"></view>
     <view class="story-utility ui-pressable" bindtap="openVoiceEdit" hover-class="ui-subtle-action-hover"
       aria-role="button" aria-label="用语音编辑故事">语音编辑</view>
   </view>

@@ -281,48 +281,25 @@
 .primary-action,
 .secondary-action {
   position: relative;
-  min-height: 104rpx;
-  padding: 18rpx 58rpx 18rpx 66rpx;
-  justify-content: flex-start;
-  border-radius: var(--ui-radius-inner);
+  min-height: 96rpx;
+  padding: 0 24rpx;
+  justify-content: center;
+  border-radius: var(--ui-radius-control);
   font-size: var(--ui-font-action);
   font-weight: 700;
-  text-align: left;
+  text-align: center;
 }
 
 .primary-action {
-  background: var(--ui-surface);
-  color: var(--ui-text-primary);
-  box-shadow: var(--ui-card-shadow-raised);
-}
-
-.primary-action::before {
-  content: "";
-  position: absolute;
-  left: 24rpx;
-  width: 20rpx;
-  height: 20rpx;
-  border-radius: 50%;
   background: var(--ui-accent);
-  box-shadow: 0 0 0 10rpx var(--ui-accent-surface);
-}
-
-.primary-action::after {
-  content: "›";
-  position: absolute;
-  right: 24rpx;
-  color: var(--ui-accent);
-  font-size: 40rpx;
-  font-weight: 300;
+  color: var(--ui-on-accent);
+  box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.18);
 }
 
 .secondary-action {
   min-height: 88rpx;
   margin-top: 12rpx;
-  padding: 0 24rpx;
-  justify-content: center;
-  background: transparent;
+  background: var(--ui-surface);
   color: var(--ui-text-secondary);
-  font-size: var(--ui-font-action);
-  box-shadow: inset 0 0 0 1rpx var(--ui-divider);
+  box-shadow: inset 0 0 0 2rpx var(--ui-border);
 }

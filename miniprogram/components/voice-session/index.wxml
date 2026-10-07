@@ -1,5 +1,5 @@
 <view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}} {{embedded ? 'voice-session-embedded' : ''}}">
-  <view class="top-bar">
+  <view class="top-bar {{embedded ? '' : 'top-bar-balanced'}}">
     <button
       wx:if="{{embedded}}"
       id="voice-home-action"
