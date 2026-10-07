@@ -341,6 +341,14 @@
   box-shadow: var(--ui-card-shadow);
 }
 
+.share-video-preview.is-portrait {
+  display: block;
+  width: 480rpx;
+  height: 853rpx;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .share-video-result-card .share-video-preview,
 .share-video-result-card .share-video-task-progress {
   margin-top: 0;

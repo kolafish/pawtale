@@ -47,6 +47,8 @@ export interface TranscriptMediaData
   extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
   viewMode: "create" | "video";
   shareVideoDeleting: boolean;
+  // Share videos are portrait since the vertical renderer; older ones are landscape.
+  shareVideoPreviewPortrait: boolean;
   pageClass: string;
   loading: boolean;
   needsLogin: boolean;

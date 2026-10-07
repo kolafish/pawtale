@@ -357,6 +357,13 @@
   outline: 1rpx solid rgba(0, 0, 0, 0.1);
 }
 
+.video-preview.is-portrait {
+  width: 480rpx;
+  height: 853rpx;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .action-button.disabled,
 .action-button[disabled],
 .minor-button[disabled] {

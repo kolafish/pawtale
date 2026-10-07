@@ -33,8 +33,6 @@ def _ride_plan(text: str) -> ShareVideoStoryPlan:
 
 async def test_story_video_encodes_moving_scenes_with_the_same_cut_original_audio(tmp_path: Path):
     ffmpeg = rendering._ffmpeg_executable()
-    if not rendering._ffmpeg_filter_available(ffmpeg, "subtitles"):
-        pytest.skip("This encoder has no subtitle filter")
     audio = tmp_path / "source.wav"
     rate = 48000
     # A distinct middle second proves that the shared, nonzero source range
@@ -50,7 +48,7 @@ async def test_story_video_encodes_moving_scenes_with_the_same_cut_original_audi
         target_path=tmp_path / "story.mp4", selected_text=text,
         char_timings=[{"start_ms": 1000+round(i*1000/len(text)),
                        "end_ms": 1000+round((i+1)*1000/len(text))} for i in range(len(text))],
-        start_ms=1000, end_ms=2000, title="相约出发",
+        start_ms=1000, end_ms=2000, book_title="相约出发",
         video_style="story_animation", animation_plan=_ride_plan(text),
     )
     await rendering.render_share_video_clip(request)
@@ -65,9 +63,39 @@ async def test_story_video_encodes_moving_scenes_with_the_same_cut_original_audi
         data = subprocess.check_output([ffmpeg, "-v", "error", "-ss", str(at), "-i", str(request.target_path),
                                         "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
         return Image.open(BytesIO(data)).convert("RGB")
-    first, later = frame(1.1), frame(1.6)
-    assert first.size == later.size == (1280, 720)
-    assert ImageChops.difference(first.crop((0,100,1280,500)), later.crop((0,100,1280,500))).getbbox()
+    first, later = frame(0.1), frame(0.6)
+    assert first.size == later.size == (720, 1280)
+    stage = (0, 360, 720, 700)
+    assert ImageChops.difference(first.crop(stage), later.crop(stage)).getbbox()
+
+
+async def test_opening_hook_plays_before_the_narration(tmp_path: Path):
+    ffmpeg = rendering._ffmpeg_executable()
+    audio = tmp_path / "source.wav"
+    rate = 16000
+    with wave.open(str(audio), "wb") as wav:
+        wav.setparams((1, 2, rate, 0, "NONE", "not compressed"))
+        # Audio after the clip must not reach the closing card.
+        wav.writeframes(b"".join(struct.pack("<h", round(9000 * math.sin(math.tau * 440 * i / rate)))
+                                 for i in range(4 * rate)))
+    text = "我们坐车出发。"
+    request = rendering.ShareVideoRenderRequest(
+        source_audio_path=audio, source_audio_mime_type="audio/wav",
+        target_path=tmp_path / "hook.mp4", selected_text=text,
+        char_timings=[{"start_ms": round(i*1000/len(text)), "end_ms": round((i+1)*1000/len(text))}
+                      for i in range(len(text))],
+        start_ms=0, end_ms=1000, hook_text=text,
+    )
+    await rendering.render_share_video_clip(request)
+    hook_seconds = rendering._hook_seconds(text)
+    pcm = subprocess.check_output([ffmpeg, "-v", "error", "-i", str(request.target_path), "-map", "0:a:0",
+                                   "-ac", "1", "-ar", "8000", "-f", "s16le", "-acodec", "pcm_s16le", "-"])
+    samples = struct.unpack(f"<{len(pcm)//2}h", pcm)
+    def loudest(start, end):
+        return max(abs(value) for value in samples[round(start*8000):round(end*8000)])
+    assert loudest(0.1, hook_seconds - 0.2) < 200
+    assert loudest(hook_seconds + 0.2, hook_seconds + 0.8) > 2000
+    assert loudest(hook_seconds + 1.3, hook_seconds + 2.5) < 200
 
 
 async def test_cancelled_frame_encoding_stops_the_child_process(monkeypatch):

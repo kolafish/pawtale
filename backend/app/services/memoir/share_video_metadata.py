@@ -71,6 +71,7 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     pipeline_version: str = ""
     title: str = ""
     title_attempted: bool = False
+    hook_text: str = ""
     alignment_strategy: str = ""
     alignment_confidence: float | None = None
     char_timings: list[ShareVideoCharTiming] = Field(default_factory=list)

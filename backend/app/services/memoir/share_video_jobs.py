@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import json
 import logging
 from pathlib import Path
 import re
@@ -20,6 +21,7 @@ from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import (
+    MemoirBookOutput,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
     MemoirShareVideoOutput,
@@ -42,6 +44,7 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
 from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.book_output_manuscript import project_narrator_name
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -81,7 +84,7 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
-SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v2"
+SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v3"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
@@ -108,6 +111,7 @@ class _ShareVideoTitleChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=2, max_length=24)
+    hook_sentence_id: int | None = None
 
 
 def _clean_share_video_title(value: str) -> str:
@@ -146,15 +150,41 @@ def share_video_download_filename(title: str) -> str:
     return f"{safe_title or _TITLE_FALLBACK}.mp4"
 
 
-async def _suggest_share_video_title(selected_text: str, *, ai_model: str | None) -> str | None:
+async def _share_video_end_card_source(db: AsyncSession, project_id: str) -> tuple[str, str]:
+    """The book a shared clip comes from, named on the video's closing card."""
+    project = await db.get(Project, project_id)
+    book_title = await db.scalar(select(MemoirBookOutput.title).where(MemoirBookOutput.project_id == project_id))
+    if project is None:
+        return book_title or "", ""
+    return book_title or project.title, project_narrator_name(project)
+
+
+def _hook_sentences(selected_text: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in re.findall(r"[^。！？!?；;\n]+[。！？!?；;…]*", selected_text)
+        if sentence.strip()
+    ]
+
+
+async def _suggest_share_video_title_and_hook(
+    selected_text: str, *, ai_model: str | None,
+) -> tuple[str | None, str]:
+    """Title the clip and pick one of its own sentences to open the video."""
+    sentences = _hook_sentences(selected_text)
     policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
     generated = await generate_structured_with_client(
         get_ai_service(ai_model),
-        "你为家庭回忆录的分享视频拟短标题。只根据提供的实际视频片段起名，忠实于原话，突出具体的人、事或场景。"
+        "你为家庭回忆录的分享视频拟短标题，并从原话里挑一句放在视频开头。只根据提供的实际视频片段，忠实于原话，突出具体的人、事或场景。"
         "不要杜撰原文没有的事实，不要写营销文案，不要暴露电话号码或身份证号码。"
-        '只返回 JSON 对象，且只能包含 title 字段，格式为 {"title":"..."}；不要 Markdown 或解释。'
-        "标题用自然简洁的中文，建议 6 到 12 个字，最多 18 个字。",
-        selected_text,
+        "标题用自然简洁的中文，建议 6 到 12 个字，最多 18 个字。"
+        "hook_sentence_id 填 sentences 中最能让人想听下去的一句的编号：情绪最重、或留下悬念的那一句，最好不超过 20 个字；"
+        "没有合适的句子时填 null。"
+        '只返回 JSON 对象，格式为 {"title":"...","hook_sentence_id":0}；不要 Markdown 或解释。',
+        json.dumps({
+            "text": selected_text,
+            "sentences": [{"id": index, "text": sentence} for index, sentence in enumerate(sentences)],
+        }, ensure_ascii=False),
         output_model=_ShareVideoTitleChoice,
         requested_model=ai_model,
         temperature=0.2,
@@ -163,10 +193,12 @@ async def _suggest_share_video_title(selected_text: str, *, ai_model: str | None
         max_attempts=policy.max_attempts,
     )
     proposed = generated.value.title
-    if _title_contains_sensitive_number(proposed):
-        return None
-    cleaned = _clean_share_video_title(proposed)
-    return cleaned if len(cleaned) >= 2 else None
+    cleaned = "" if _title_contains_sensitive_number(proposed) else _clean_share_video_title(proposed)
+    hook_id = generated.value.hook_sentence_id
+    hook = sentences[hook_id] if hook_id is not None and 0 <= hook_id < len(sentences) else ""
+    if _title_contains_sensitive_number(hook):
+        hook = ""
+    return (cleaned if len(cleaned) >= 2 else None), rendering.usable_hook_text(hook, selected_text)
 
 
 def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
@@ -1157,7 +1189,7 @@ async def run_share_video_job_with_session(
                 operation_id=usage_context.operation_id,
             )
             try:
-                suggested_title = await _suggest_share_video_title(
+                suggested_title, metadata.hook_text = await _suggest_share_video_title_and_hook(
                     job.selected_text, ai_model=metadata.ai_model,
                 )
                 if suggested_title:
@@ -1209,6 +1241,7 @@ async def run_share_video_job_with_session(
             background_image_path = prepared_background.image_path
             background_segments = prepared_background.segments
         target_path = share_video_file_path(job)
+        book_title, narrator_name = await _share_video_end_card_source(db, job.project_id)
         render_request = rendering.ShareVideoRenderRequest(
             source_audio_path=audio_file_path(job.audio_file),
             source_audio_mime_type=job.audio_file.mime_type,
@@ -1219,9 +1252,11 @@ async def run_share_video_job_with_session(
             end_ms=job.end_ms,
             background_image_path=background_image_path,
             background_segments=background_segments,
-            title=share_video_title(metadata, job.selected_text),
             video_style=metadata.video_style,
             animation_plan=metadata.animation_plan,
+            hook_text=metadata.hook_text,
+            book_title=book_title,
+            narrator_name=narrator_name,
         )
         try:
             await rendering.render_share_video_clip(render_request)
@@ -1245,7 +1280,9 @@ async def run_share_video_job_with_session(
                     end_ms=render_request.end_ms,
                     background_image_path=None,
                     background_segments=None,
-                    title=render_request.title,
+                    hook_text=render_request.hook_text,
+                    book_title=render_request.book_title,
+                    narrator_name=render_request.narrator_name,
                 )
             )
         size_bytes = _publish_completed_video(target_path)

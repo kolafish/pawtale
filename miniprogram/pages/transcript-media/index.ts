@@ -62,6 +62,7 @@ definePage<TranscriptMediaData>()({
     error: "",
     viewMode: "create",
     shareVideoDeleting: false,
+    shareVideoPreviewPortrait: true,
     utteranceId: "",
     item: null,
     ...initialTranscriptShareVideoData(),
@@ -80,6 +81,10 @@ definePage<TranscriptMediaData>()({
     });
     setPageNavigationTitle(this.requestedShareVideoJobId ? "分享视频" : "做成图片或视频");
     await this.loadTranscript();
+  },
+
+  markShareVideoPreviewShape(event: { detail: { width: number; height: number } }) {
+    this.setData({ shareVideoPreviewPortrait: event.detail.height >= event.detail.width });
   },
 
   async loadTranscript() {
