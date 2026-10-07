@@ -95,13 +95,11 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
           ) : view === 'drafts' ? (
             <MemoirChapterDraftWorkspace
               project={project}
-              onUnsavedChange={setHasUnsavedChanges}
               onOpenChapters={() => changeView('chapters')}
             />
           ) : view === 'book' ? (
             <MemoirBookWorkspace
               project={project}
-              onUnsavedChange={setHasUnsavedChanges}
               onOpenChapters={() => changeView('chapters')}
               onOpenDrafts={openDrafts}
             />

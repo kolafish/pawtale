@@ -242,9 +242,9 @@ class TestAIRevise:
 
 @pytest.mark.asyncio
 class TestAIReviseMulti:
-    async def test_multi_all_succeed(self, client):
+    async def test_multi_all_succeed(self, admin_client):
         project_id, document_id = await create_document_with_content(
-            client,
+            admin_client,
             "多模型测试",
             "她走进咖啡馆，看到了他。",
         )
@@ -255,7 +255,7 @@ class TestAIReviseMulti:
             mock_service = AsyncMock()
             mock_get_service.return_value = mock_service
 
-            response = await client.post(
+            response = await admin_client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
                 json={"instruction": "改得更好", "models": ["claude-fable-5", "deepseek"]},
             )
@@ -268,9 +268,9 @@ class TestAIReviseMulti:
             assert item["revised_text"] is not None
             assert item.get("error") is None
 
-    async def test_multi_partial_failure(self, client):
+    async def test_multi_partial_failure(self, admin_client):
         project_id, document_id = await create_document_with_content(
-            client,
+            admin_client,
             "多模型测试",
             "她走进咖啡馆，看到了他。",
         )
@@ -291,7 +291,7 @@ class TestAIReviseMulti:
 
             mock_get_service.side_effect = pick_service
 
-            response = await client.post(
+            response = await admin_client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
                 json={"instruction": "改", "models": ["claude-fable-5", "deepseek"]},
             )

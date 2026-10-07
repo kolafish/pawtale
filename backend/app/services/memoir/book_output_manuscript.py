@@ -6,6 +6,8 @@ from fastapi import HTTPException
 
 from app.models.memoir import MemoirBookOutputVersion
 from app.schemas.memoir_book import (
+    MemoirBookCoverStyle,
+    MemoirBookCustomLayout,
     MemoirBookManuscript,
     MemoirBookManuscriptBackMatter,
     MemoirBookManuscriptChapter,
@@ -14,18 +16,20 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptRenderSettings,
     MemoirBookManuscriptSection,
     MemoirBookManuscriptSourceRef,
+    MemoirBookManuscriptTemplate,
     MemoirBookOutputSectionResponse,
     MemoirBookOutputSectionTableOfContentsItemResponse,
     MemoirBookOutputTableOfContentsItemResponse,
 )
 from app.services.memoir.book_manuscript_ai import GeneratedManuscriptCopy
 from app.services.memoir.book_manuscript_cleanup import (
+    brief_text,
     expanded_afterword,
     fallback_back_cover_quote,
     fallback_chapter_intro,
     fallback_preface,
+    first_sentence,
     formal_book_title as cleanup_formal_book_title,
-    normalize_book_identity,
     sanitize_manuscript_payload,
 )
 
@@ -55,8 +59,25 @@ SUPPORTED_BOOK_COVER_STYLES = {
     "dark_album",
     "moonlit_courtyard",
     "navy_gilt",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+}
+TEMPLATE_COVER_STYLES: dict[MemoirBookManuscriptTemplate, MemoirBookCoverStyle] = {
+    "heritage_classic": "heritage_classic",
+    "warm_journal": "warm_journal",
+    "modern_minimal": "modern_minimal",
 }
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
+BOOK_MANUSCRIPT_TEMPLATES = {
+    "classic_family",
+    "photo_memory",
+    "oral_archive",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+    "custom",
+}
 
 
 def positive_int(value: object) -> int:
@@ -149,23 +170,14 @@ def cover_style(value: str | None) -> str:
     return value if value in SUPPORTED_BOOK_COVER_STYLES else DEFAULT_BOOK_COVER_STYLE
 
 
+def template_cover_style(template: MemoirBookManuscriptTemplate | None) -> MemoirBookCoverStyle | None:
+    return TEMPLATE_COVER_STYLES.get(template) if template is not None else None
+
+
 def project_narrator_name(project: object) -> str:
     metadata = getattr(project, "metadata_json", None)
     profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY) if isinstance(metadata, dict) else None
     return limited_book_text(profile.get("narrator_name"), max_chars=80) if isinstance(profile, dict) else ""
-
-
-def _brief_text(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    return normalized if len(normalized) <= max_chars else normalized[:max_chars].rstrip("，。；、,. ") + "。"
-
-
-def _first_sentence(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    for index, char in enumerate(normalized):
-        if char in "。！？!?":
-            return _brief_text(normalized[: index + 1], max_chars=max_chars)
-    return _brief_text(normalized, max_chars=max_chars) if normalized else ""
 
 
 def _strip_title_wrappers(title: str) -> str:
@@ -258,6 +270,24 @@ def stored_manuscript_metadata(stored: object) -> dict[str, str]:
     }
 
 
+def stored_manuscript_design(stored: object) -> tuple[MemoirBookManuscriptTemplate, MemoirBookCustomLayout]:
+    manuscript = stored if isinstance(stored, dict) else {}
+    profile = manuscript.get("profile")
+    profile = profile if isinstance(profile, dict) else {}
+    template = profile.get("template")
+    if not isinstance(template, str) or template not in BOOK_MANUSCRIPT_TEMPLATES:
+        template = "classic_family"
+    settings = manuscript.get("render_settings")
+    settings = settings if isinstance(settings, dict) else {}
+    if manuscript.get("schema_version", 1) in {1, 2, 3} and template != "custom":
+        return template, MemoirBookCustomLayout()
+    try:
+        custom_layout = MemoirBookCustomLayout.model_validate(settings.get("custom_layout") or {})
+    except ValueError:
+        custom_layout = MemoirBookCustomLayout()
+    return template, custom_layout
+
+
 def request_book_metadata_patch(req: object) -> dict[str, str]:
     fields_set = getattr(req, "model_fields_set", set())
     patch: dict[str, str] = {}
@@ -309,10 +339,10 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
 
 def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
     for ref in source_refs:
-        quote = _brief_text(ref.quote, max_chars=80)
+        quote = brief_text(ref.quote, max_chars=80)
         if quote:
             return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
-    quote = _first_sentence(content, max_chars=80)
+    quote = first_sentence(content, max_chars=80)
     return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
 
 
@@ -341,6 +371,9 @@ def manuscript_from_snapshot(
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
+    template: MemoirBookManuscriptTemplate = "classic_family",
+    custom_layout: MemoirBookCustomLayout | None = None,
+    cover_image: dict[str, object] | None = None,
     metadata: dict[str, str] | None = None,
     chapter_illustrations_by_chapter: dict[str, list[dict[str, object]]] | None = None,
     image_appendix: list[dict[str, object]] | None = None,
@@ -396,12 +429,8 @@ def manuscript_from_snapshot(
     if subtitle is None:
         subtitle = editorial_copy.cover_subtitle if editorial_copy and editorial_copy.cover_subtitle else _fallback_cover_subtitle(chapter_titles)
     narrator_name = metadata.get("narrator_name", "")
-    formal_title, subtitle = normalize_book_identity(
-        title=title,
-        subtitle=subtitle,
-        narrator_name=narrator_name,
-        chapter_titles=chapter_titles,
-    )
+    book_title = title.strip() or "家庭回忆录"
+    subtitle = safe_str(subtitle)
     prepared_by = metadata.get("prepared_by", "家人整理") or "家人整理"
     preface = metadata.get("preface")
     if preface is None:
@@ -417,13 +446,14 @@ def manuscript_from_snapshot(
     source_count = sum(item.source_count for item in toc)
     return MemoirBookManuscript(
         profile=MemoirBookManuscriptProfile(
-            title=formal_title,
+            template=template,
+            title=book_title,
             subtitle=subtitle,
             narrator_name=narrator_name,
             prepared_by=prepared_by,
         ),
         front_matter=[
-            MemoirBookManuscriptSection(kind="cover", title=formal_title, content=f"{formal_title}\n{subtitle}"),
+            MemoirBookManuscriptSection(kind="cover", title=book_title, content=f"{book_title}\n{subtitle}"),
             MemoirBookManuscriptSection(
                 kind="title_page",
                 title="扉页",
@@ -471,6 +501,8 @@ def manuscript_from_snapshot(
             cover_style=cover_style(cover_style_value),
             back_cover_quote=back_cover_quote,
             editorial_copy_model=editorial_copy.model if editorial_copy else None,
+            custom_layout=custom_layout or MemoirBookCustomLayout(),
+            cover_image=cover_image,
         ),
     )
 
@@ -504,9 +536,11 @@ def editable_manuscript(
 ) -> MemoirBookManuscript | None:
     if isinstance(stored, dict) and stored:
         try:
-            return MemoirBookManuscript.model_validate(
+            manuscript = MemoirBookManuscript.model_validate(
                 sanitize_manuscript_payload(title=title, manuscript=stored)
             )
+            manuscript.schema_version = 5
+            return manuscript
         except ValueError:
             pass
     return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
@@ -520,6 +554,8 @@ def updated_manuscript_payload(
     snapshot: list[dict[str, object]],
     cover_style_value: str | None,
     metadata_patch: dict[str, str] | None = None,
+    manuscript_template: MemoirBookManuscriptTemplate | None = None,
+    custom_layout: MemoirBookCustomLayout | None = None,
 ) -> dict[str, object]:
     manuscript = editable_manuscript(
         title=title,
@@ -531,6 +567,11 @@ def updated_manuscript_payload(
         return {}
     metadata = effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)
     manuscript.profile.title = title
+    if manuscript_template is not None:
+        manuscript.profile.template = manuscript_template
+        manuscript.render_settings.custom_layout = MemoirBookCustomLayout()
+    if custom_layout is not None:
+        manuscript.render_settings.custom_layout = custom_layout
     manuscript.profile.subtitle = metadata["subtitle"]
     manuscript.profile.narrator_name = metadata["narrator_name"]
     manuscript.profile.prepared_by = metadata["prepared_by"]

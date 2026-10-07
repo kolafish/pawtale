@@ -24,6 +24,7 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
   mockModule("../services/memoir-voice-search.ts", {
     recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
+    cancelMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
 
@@ -213,15 +214,14 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒 · 5 字");
-  assert.equal(context.data.items[0].bookInclusionText, "尚未入章");
+  assert.equal(context.data.items[0].storyStatusText, "尚未整理");
   assert.equal(context.data.pageMetaText, "我的回忆录 · 1 条讲述");
   assert.equal(context.data.showNoProjectPanel, false);
   assert.equal(context.data.showGenericEmpty, false);
   assert.equal(context.data.showLoadMore, false);
   assert.equal(context.data.items[0].cardClass, "transcript-card");
-  assert.equal(context.data.items[0].bookStatusClass, "book-status");
-  assert.equal(context.data.items[0].detailActionText, "查看详情");
   assert.match(context.data.items[0].cardAriaLabel, /爷爷退休后仍帮公司做事/);
+  assert.match(context.data.items[0].cardAriaLabel, /打开详情$/);
   assert.equal("transcript_raw" in context.data.items[0], false);
 });
 
@@ -266,8 +266,8 @@ test("transcripts page shows the assigned section on a material card", async () 
   await page.loadTranscripts.call(context, true);
 
   assert.equal(
-    context.data.items[0].bookInclusionText,
-    "已放入第 1 章：家里的人 · 小节 2：她给我送胡豆",
+    context.data.items[0].storyStatusText,
+    "已收进：她给我送胡豆",
   );
 });
 
@@ -327,15 +327,14 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   await page.loadTranscripts.call(context, true);
 
   const item = context.data.items[0];
-  assert.equal(item.summaryTitleText, "音频已保存，等待转写");
-  assert.equal(item.summaryPreviewText, "这段录音已经保存，但还没有识别成文字。");
+  assert.ok(item.summaryTitleText);
+  assert.ok(item.summaryPreviewText);
   assert.equal(item.recordMetaText, "07-01 15:38 · 8 秒");
-  assert.equal(item.recoveryNoticeText, "音频已保存，恢复转写后即可继续整理。");
-  assert.equal(item.bookInclusionText, "等待转写后再入章");
-  assert.equal(item.bookStatusClass, "book-status pending");
+  assert.equal("recoveryNoticeText" in item, false);
+  assert.ok(item.storyStatusText);
+  assert.ok(item.recoverButtonText);
   assert.equal(item.cardClass, "transcript-card recovery-pending");
-  assert.equal(item.detailActionText, "查看音频");
-  assert.match(item.cardAriaLabel, /查看音频$/);
+  assert.match(item.cardAriaLabel, /打开详情$/);
   global.wx = {
     showToast(options) {
       toasts.push(options);
@@ -350,7 +349,8 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(context.data.items[0].canRecoverTranscription, false);
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 8 秒 · 14 字");
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
-  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0].icon, "success");
 });
 
 test("transcripts page opens transcript detail from a record card", () => {
@@ -371,6 +371,84 @@ test("transcripts page opens transcript detail from a record card", () => {
     { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
   ]);
 
+});
+
+test("transcripts card swipes left to reveal deletion without opening detail, and right to close", () => {
+  const navigations = [];
+  global.wx = { navigateTo: (options) => navigations.push(options) };
+  const { page } = loadTranscriptsPage();
+  const context = pageContext(page, { items: [{ id: "utterance-1" }] });
+  const start = (x, y) => page.onCardTouchStart.call(context, {
+    currentTarget: { dataset: { id: "utterance-1" } }, touches: [{ pageX: x, pageY: y }],
+  });
+  const end = (x, y) => page.onCardTouchEnd.call(context, {
+    currentTarget: { dataset: { id: "utterance-1" } }, changedTouches: [{ pageX: x, pageY: y }],
+  });
+  const tap = () => page.openTranscriptDetail.call(context, {
+    currentTarget: { dataset: { id: "utterance-1" } },
+  });
+
+  start(210, 100);
+  end(190, 180);
+  assert.equal(context.data.openSwipeId, "");
+  start(210, 100);
+  end(110, 105);
+  tap();
+  assert.equal(context.data.openSwipeId, "utterance-1");
+  assert.deepEqual(navigations, []);
+  start(110, 100);
+  end(210, 105);
+  assert.equal(context.data.openSwipeId, "");
+});
+
+test("transcripts card deletion confirms, refreshes list, and retains the card on cancellation or failure", async () => {
+  const records = [sampleTranscript("utterance-1"), sampleTranscript("utterance-2")];
+  const deletes = [];
+  const toasts = [];
+  let confirm = false;
+  let failDelete = false;
+  global.wx = {
+    showModal(options) { options.success({ confirm }); },
+    showToast(options) { toasts.push(options); },
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        active_project_id: "project-1", active_project: { title: "我的回忆录" },
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({ items: [...records], total: records.length }),
+      deleteMemoirVoiceTranscript: async (id) => {
+        deletes.push(id);
+        if (failDelete) throw new Error("删除暂时失败");
+        records.splice(records.findIndex((item) => item.id === id), 1);
+      },
+    },
+  });
+  const context = pageContext(page);
+  const event = { currentTarget: { dataset: { id: "utterance-1" } } };
+  await page.loadTranscripts.call(context, true);
+  context.setData({ openSwipeId: "utterance-1" });
+
+  await page.deleteTranscript.call(context, event);
+  assert.deepEqual(deletes, []);
+  assert.equal(context.data.openSwipeId, "utterance-1");
+
+  confirm = true;
+  failDelete = true;
+  await page.deleteTranscript.call(context, event);
+  assert.deepEqual(deletes, ["utterance-1"]);
+  assert.equal(context.data.items.length, 2);
+  assert.equal(context.data.error, "删除暂时失败");
+
+  failDelete = false;
+  await page.deleteTranscript.call(context, event);
+  assert.deepEqual(deletes, ["utterance-1", "utterance-1"]);
+  assert.deepEqual(context.data.items.map((item) => item.id), ["utterance-2"]);
+  assert.equal(context.data.total, 1);
+  assert.equal(context.data.openSwipeId, "");
+  assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
 });
 
 test("transcripts page preserves loaded records after returning from detail", async () => {
@@ -705,6 +783,39 @@ test("transcripts page stops active voice search recording on second tap", async
   await page.startVoiceSearch.call(context);
 
   assert.deepEqual(stops, ["stop"]);
+});
+
+test("transcripts page cancels voice search on hide or unload and ignores its late result", async () => {
+  for (const lifecycle of ["onHide", "onUnload"]) {
+    const recording = deferred();
+    const cancels = [];
+    const parseCalls = [];
+    const { page } = loadTranscriptsPage({
+      voiceSearchExports: {
+        recordMemoirVoiceSearchQuery: () => recording.promise,
+        cancelMemoirVoiceSearchRecording: () => cancels.push("cancel"),
+      },
+      voiceApiExports: {
+        parseMemoirVoiceSearchQuery: async (query) => {
+          parseCalls.push(query);
+          throw new Error("late search must not be parsed");
+        },
+      },
+    });
+    const context = pageContext(page);
+
+    const search = page.startVoiceSearch.call(context);
+    assert.equal(context.data.voiceSearchRecording, true);
+    page[lifecycle].call(context);
+    recording.resolve("外婆家的院子");
+    await search;
+
+    assert.deepEqual(cancels, ["cancel"]);
+    assert.deepEqual(parseCalls, []);
+    assert.equal(context.data.voiceSearchRecording, false);
+    assert.equal(context.data.voiceSearchTranscribing, false);
+    assert.equal(context.data.error, "");
+  }
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

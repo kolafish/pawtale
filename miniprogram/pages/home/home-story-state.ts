@@ -1,25 +1,19 @@
-import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot, MemoirStoryIssueCounts } from "../../domain/memoir-snapshots";
+import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
 import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
 
 export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
 
-interface StoryNotice {
-  reviewNoticeText: string;
-  reviewNoticeDetail: string;
-  reviewNoticeAction: "issues" | "transcripts" | "book" | "";
-}
-
-export interface HomeStoryData extends StoryNotice {
+export interface HomeStoryData {
   story: StoryViewData;
   storyLoaded: boolean;
   hasStories: boolean;
   storyError: string;
   progress: MemoirDraftProgress | null;
-  bookReadable: boolean;
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
+  growthNoticeContext: string;
   growthTarget: StoryGrowthTarget | null;
   narrationSaved: boolean;
   dismissingGrowth: boolean;
@@ -48,24 +42,24 @@ export class HomeGrowthTracker {
 
 export function emptyHomeStoryData(): HomeStoryData {
   return {
-    reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "",
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
-    bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
-    growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
+    growthEvents: [], growthNoticeTitle: "", growthNoticeText: "", growthNoticeContext: "",
+    growthTarget: null, narrationSaved: false,
+    dismissingGrowth: false, retryingDraft: false,
   };
 }
 
 export function homeStorySnapshotData(
   snapshot: MemoirStorySnapshot,
-  previous: StoryViewData,
+  _previous: StoryViewData,
   freshEventIds: Set<string> = new Set(),
 ): Partial<HomeStoryData> {
   const story = storyViewData(snapshot);
-  const expanded = new Map(previous.chapters.map((chapter) => [chapter.id, chapter.expanded]));
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
   const newChapters = new Set<string>(), newSections = new Set<string>();
   const updatedChapters = new Set<string>(), updatedSections = new Set<string>();
   const sectionParents = new Set<string>();
+  const changedChapterTitles = new Set<string>();
   let bookUpdated = false;
   let growthTarget: StoryGrowthTarget | null = null;
   for (const event of snapshot.growth_events) {
@@ -77,79 +71,61 @@ export function homeStorySnapshotData(
       if ("section_id" in change) {
         const section = chapter.sections.find(item => item.id === change.section_id);
         if (!section) continue;
+        changedChapterTitles.add(chapter.title);
         (added ? newSections : updatedSections).add(section.id);
         sectionParents.add(chapter.id);
         section.growthLabel = added || section.growthLabel === "新长出" ? "新长出" : "已补充";
         section.highlighted = true;
         section.growthAnimating ||= freshEventIds.has(event.event_id);
+        if (added) chapter.growthLabel = "新长出";
+        chapter.growthAnimating ||= freshEventIds.has(event.event_id);
         growthTarget ||= { chapterId: chapter.id, sectionId: section.id };
       } else {
+        changedChapterTitles.add(chapter.title);
         (added ? newChapters : updatedChapters).add(chapter.id);
-        chapter.growthLabel = added || chapter.growthLabel === "新长出" ? "新长出" : "已更新";
+        if (added) chapter.growthLabel = "新长出";
         chapter.growthAnimating ||= freshEventIds.has(event.event_id);
         growthTarget ||= { chapterId: chapter.id };
       }
       chapter.highlighted = true;
     }
   }
-  // A repeated snapshot must not reopen a chapter the reader has collapsed.
-  for (const chapter of story.chapters) {
-    chapter.expanded = expanded.get(chapter.id) ?? chapter.expanded;
-    if (chapter.highlighted && !chapter.growthLabel) chapter.growthLabel = "有更新";
-  }
   const addedCount = newChapters.size + newSections.size;
   const updatedCount = [...updatedSections].filter(id => !newSections.has(id)).length
     + [...updatedChapters].filter(id => !newChapters.has(id) && !sectionParents.has(id)).length;
-  const summary = [
-    newChapters.size ? `新长出 ${newChapters.size} 章` : "",
-    newSections.size ? `新长出 ${newSections.size} 个小节` : "",
-    updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
-    bookUpdated ? "书稿已更新" : "",
-  ].filter(Boolean).join("，");
+  const bookCharCountDelta = snapshot.growth_events.reduce(
+    (total, event) => total + Math.max(0, event.book_char_count_delta || 0),
+    0,
+  );
+  const growthMetrics = [
+    newChapters.size ? `新增 ${newChapters.size} 个主题` : "",
+    newSections.size ? `${newChapters.size ? "" : "新增 "}${newSections.size} 个故事` : "",
+    updatedCount ? `补充 ${updatedCount} 个已有故事` : "",
+    bookCharCountDelta ? `书稿 +${bookCharCountDelta} 字` : "",
+  ].filter(Boolean);
+  const fallbackText = snapshot.growth_events.map(event => event.summary_text).filter(Boolean).join(" · ");
+  const growthNoticeText = growthMetrics.slice(0, 2).join(" · ")
+    || (bookUpdated ? "书稿已更新" : fallbackText);
+  const chapterTitles = [...changedChapterTitles];
+  const growthNoticeContext = chapterTitles.length
+    ? `${chapterTitles[0]}等内容已更新`
+    : "";
+  story.overview.growthAnimating = freshEventIds.size > 0
+    && Boolean(addedCount || updatedCount || bookCharCountDelta);
   return {
-    ...homeStoryNotice(snapshot),
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
-    bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
-    growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
-    growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),
+    growthEvents: snapshot.growth_events, growthTarget,
+    growthNoticeTitle: addedCount || bookCharCountDelta
+      ? "你的书又长了一点"
+      : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",
+    growthNoticeText,
+    growthNoticeContext,
   };
 }
 
 export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
-  return { ...story, chapters: story.chapters.map(chapter => ({
+  return { ...story, overview: { ...story.overview, growthAnimating: false }, chapters: story.chapters.map(chapter => ({
     ...chapter, growthAnimating: false,
     sections: chapter.sections.map(section => ({ ...section, growthAnimating: false })),
   })) };
-}
-
-
-function issueSummary(counts: MemoirStoryIssueCounts): string {
-  return [
-    counts.review_count ? `${counts.review_count} 项待确认` : "",
-    counts.supplement_count ? `${counts.supplement_count} 项待补充` : "",
-  ].filter(Boolean).join(" · ");
-}
-
-export function homeStoryNotice(snapshot: MemoirStorySnapshot): StoryNotice {
-  const chapters = snapshot.chapters.reduce((counts, chapter) => ({
-    review_count: counts.review_count + (chapter.issues?.review_count || 0),
-    supplement_count: counts.supplement_count + (chapter.issues?.supplement_count || 0),
-  }), { review_count: 0, supplement_count: 0 });
-  const chapterText = issueSummary(chapters);
-  const bookText = snapshot.book_issues ? issueSummary(snapshot.book_issues) : "";
-  if (chapterText || bookText) return {
-    reviewNoticeText: chapterText ? `章节：${chapterText}` : `全书：${bookText}`,
-    reviewNoticeDetail: chapterText && bookText ? `全书：${bookText}` : "",
-    reviewNoticeAction: "issues",
-  };
-  const materials = snapshot.progress?.needs_user_material_count || 0;
-  if (materials) return {
-    reviewNoticeText: `有 ${materials} 段讲述需要您查看`, reviewNoticeDetail: "", reviewNoticeAction: "transcripts",
-  };
-  if (snapshot.book_manual_edit_preserved) return {
-    reviewNoticeText: "已保留您修改的稿件", reviewNoticeDetail: "", reviewNoticeAction: "book",
-  };
-  // Finished/closed issues disappear even while an older generation job still
-  // reports needs_input or omitted chapters. Those job records are not tasks.
-  return { reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "" };
 }

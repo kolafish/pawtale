@@ -4,21 +4,23 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
-from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_calls import AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import (
-    DEEPSEEK_V4_FLASH_MODEL,
+    DEEPSEEK_FLASH_ALIASES,
     DEEPSEEK_V4_PRO_MODEL,
     VOLC_DOUBAO_PRO_MODEL,
     get_ai_service,
 )
 from app.services.ai_references import ModelReferenceMap
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.book_manuscript_cleanup import brief_text
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
@@ -362,16 +364,15 @@ def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object
 def _text_ai_configured(ai_model: str | None) -> bool:
     settings = get_settings()
     model = (ai_model or settings.default_ai_model or "").lower()
-    if model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL, DEEPSEEK_V4_PRO_MODEL}:
+    if model in DEEPSEEK_FLASH_ALIASES or model == DEEPSEEK_V4_PRO_MODEL:
         return bool(settings.deepseek_api_key.strip())
     if model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
         return bool(settings.volc_ark_api_key.strip())
-    if model.startswith("claude") or not model:
-        return bool(settings.anthropic_auth_token.strip())
+    if not model:
+        return bool(settings.deepseek_api_key.strip() or settings.volc_ark_api_key.strip())
     return bool(
         settings.deepseek_api_key.strip()
         or settings.volc_ark_api_key.strip()
-        or settings.anthropic_auth_token.strip()
     )
 
 
@@ -422,8 +423,9 @@ def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str,
                     _string(raw_ref.get("representative_quote"))
                     or _string(raw_ref.get("quote"))
                 )
+                quote = brief_text(quote, max_chars=90)
                 if utterance_id and quote:
-                    candidates[utterance_id] = _compact_text(quote, 90)
+                    candidates[utterance_id] = quote
         result[chapter_id] = candidates
     return result
 
@@ -435,7 +437,7 @@ def _validated_original_quote(
     source_ref_id: object,
     quote_candidates: dict[str, dict[str, str]],
 ) -> tuple[str, str]:
-    quote = _clean_copy_text(value, max_chars=90).strip("“”\"'「」")
+    quote = _clean_copy_text(brief_text(_string(value), max_chars=90), max_chars=90).strip("“”\"'「」")
     candidate_by_source = quote_candidates.get(chapter_id, {})
     source_id = _string(source_ref_id)
     if source_id and source_id in candidate_by_source:
@@ -456,7 +458,7 @@ def _validated_original_quote(
 
 
 def _validated_back_cover_quote(value: object, quote_candidates: dict[str, dict[str, str]]) -> str:
-    quote = _clean_copy_text(value, max_chars=60).strip("“”\"'「」")
+    quote = _clean_copy_text(brief_text(_string(value), max_chars=60), max_chars=60).strip("“”\"'「」")
     if not quote:
         return ""
     for candidate_by_source in quote_candidates.values():
@@ -576,7 +578,7 @@ async def generate_manuscript_editorial_copy(
             raise
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except Exception:
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
@@ -620,7 +622,7 @@ async def generate_title_suggestions(
             raise
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except Exception:
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 

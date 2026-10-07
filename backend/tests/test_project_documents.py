@@ -51,6 +51,32 @@ async def test_commit_document_update_restores_previous_content_when_commit_fail
 
 
 @pytest.mark.asyncio
+async def test_content_write_failure_preserves_previous_file(tmp_path):
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        await write_content("project-1", "doc-1", "old content")
+        with patch("app.services.content_storage.os.replace", side_effect=OSError("replace failed")):
+            with pytest.raises(OSError, match="replace failed"):
+                await write_content("project-1", "doc-1", "new content")
+        assert await read_content("project-1", "doc-1") == "old content"
+        assert {item.name for item in (tmp_path / "projects" / "project-1").iterdir()} == {"doc-1.md"}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_document_commit_restores_previous_content(tmp_path):
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        await write_content("project-1", "doc-1", "old content")
+        db = _failing_db()
+        db.commit.side_effect = asyncio.CancelledError()
+        doc = SimpleNamespace(id="doc-1", word_count=0, content_revision=0)
+
+        with pytest.raises(asyncio.CancelledError):
+            await commit_document_update(db, "project-1", doc, "new content")
+
+        assert await read_content("project-1", "doc-1") == "old content"
+        db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_delete_document_restores_file_when_commit_fails(tmp_path):
     with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
         await write_content("project-1", "doc-1", "keep me")

@@ -1,4 +1,5 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import type { MemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
 import type {
   MemoirChapterSectionMaterialSummary,
   MemoirChapterSectionSummary,
@@ -24,6 +25,7 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
   mergeTargetTitle: string;
   hasDraft: boolean;
   draftContent: string;
+  draftCanExpand: boolean;
   draftNeedsUpdate: boolean;
   expanded: boolean;
   visibleMaterials: ChapterSectionMaterialView[];
@@ -31,6 +33,11 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
 
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
+  chapterHeroKicker: string;
+  chapterStoryCountText: string;
+  chapterStoryDetail: string;
+  chapterHasReadableDraft: boolean;
+  chapterEditingHint: string;
   readinessTitle: string;
   readinessDetail: string;
   rewriteNoticeTitle: string;
@@ -47,7 +54,110 @@ export interface ChapterWorkspaceViewPatch {
   rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
   retainedDraftSectionCount: number;
-  canConfirmChapter: boolean;
+}
+
+export type ChapterCandidateMode = "changes" | "whole";
+export type ChapterCandidatePreviewVersion = "before" | "after";
+
+export type ChapterCandidateDiffKind = "equal" | "deleted" | "modified" | "added";
+
+export interface ChapterCandidateDiffSegmentView {
+  key: string;
+  kind: ChapterCandidateDiffKind;
+  text: string;
+}
+
+export interface ChapterCandidateViewPatch {
+  candidateMode: ChapterCandidateMode;
+  candidatePreviewVersion: ChapterCandidatePreviewVersion;
+  candidateComparisonAvailable: boolean;
+  candidateSummaryText: string;
+  candidateDiffSegments: ChapterCandidateDiffSegmentView[];
+  candidateWholeContent: string;
+}
+
+function visibleCharCount(value: string): number {
+  return value.replace(/\s/g, "").length;
+}
+
+export function chapterCandidateViewPatch(
+  workspace: MemoirChapterWorkspace | null,
+  job: MemoirChapterPreparationJob | null,
+  mode: ChapterCandidateMode = "changes",
+  previewVersion: ChapterCandidatePreviewVersion = "after",
+): ChapterCandidateViewPatch {
+  const candidateContent = job?.candidate_content || "";
+  const candidateSections = job?.candidate_sections || [];
+  const candidateDiffSegments = (job?.candidate_diff_segments || []).map(
+    (segment, index) => ({ ...segment, key: `${index}-${segment.kind}` }),
+  );
+  const hasTextChanges = candidateDiffSegments.some((segment) => segment.kind !== "equal");
+  const comparisonAvailable = Boolean(
+    workspace
+    && candidateContent
+    && candidateDiffSegments.length
+    && job?.candidate_base_version_id === (workspace.draft_version_id || null),
+  );
+  if (!workspace || !candidateContent) {
+    return {
+      candidateMode: mode,
+      candidatePreviewVersion: previewVersion,
+      candidateComparisonAvailable: false,
+      candidateSummaryText: "",
+      candidateDiffSegments: [],
+      candidateWholeContent: "",
+    };
+  }
+  if (!comparisonAvailable) {
+    return {
+      candidateMode: "whole",
+      candidatePreviewVersion: "after",
+      candidateComparisonAvailable: false,
+      candidateSummaryText: "当前稿仍在使用。请核对这次更新后再决定是否采用。",
+      candidateDiffSegments: [],
+      candidateWholeContent: candidateContent,
+    };
+  }
+
+  const beforeById = new Map(
+    workspace.draft_sections.map((section) => [section.section_id, section]),
+  );
+  const afterIds = new Set(candidateSections.map((section) => section.section_id));
+  const changed = [
+    ...candidateSections.map((section) => ({
+      section_id: section.section_id,
+      title: section.title || beforeById.get(section.section_id)?.title || "故事正文",
+      before_content: beforeById.get(section.section_id)?.content || "",
+      after_content: section.content,
+    })),
+    ...workspace.draft_sections
+      .filter((section) => !afterIds.has(section.section_id))
+      .map((section) => ({
+        section_id: section.section_id,
+        title: section.title,
+        before_content: section.content,
+        after_content: "",
+      })),
+  ].filter((section) => section.before_content !== section.after_content);
+  const delta = visibleCharCount(candidateContent) - visibleCharCount(workspace.draft_content);
+  const deltaText = delta > 0
+    ? `增加 ${delta} 字`
+    : delta < 0
+      ? `减少 ${Math.abs(delta)} 字`
+      : "字数不变";
+  const effectiveMode = hasTextChanges ? mode : "whole";
+  return {
+    candidateMode: effectiveMode,
+    candidatePreviewVersion: previewVersion,
+    candidateComparisonAvailable: true,
+    candidateSummaryText: hasTextChanges
+      ? `与当前稿相比：${changed.length ? `${changed.length} 个故事有变化` : "正文有变化"} · ${deltaText}`
+      : "新稿正文与当前稿相同。",
+    candidateDiffSegments,
+    candidateWholeContent: previewVersion === "before"
+      ? workspace.draft_content
+      : candidateContent,
+  };
 }
 
 const SECTION_TYPE_TEXT: Record<MemoirSectionType, string> = {
@@ -80,7 +190,7 @@ function visibleSectionViews(
     }));
   assignmentOptions.push({
     id: "",
-    title: "＋ 新建小节",
+    title: "＋ 新建故事",
     action: "create_section",
   });
   const visibleSections = [...(workspace.sections || [])]
@@ -124,7 +234,7 @@ function visibleSectionViews(
         .sort((left, right) => left.sort_order - right.sort_order)
         .map((material, materialIndex) => ({
           ...material,
-          indexText: `讲述 ${materialIndex + 1}`,
+          indexText: `第 ${materialIndex + 1} 段`,
           assignmentOptions: section.requires_user_assignment
             ? assignmentOptions
             : [],
@@ -136,27 +246,27 @@ function visibleSectionViews(
         ...section,
         indexText: section.requires_user_assignment
           ? "待"
-          : `${sectionIndex + 1}`,
+          : String(sectionIndex + 1).padStart(2, "0"),
         typeText: section.requires_user_assignment
           ? "暂不纳入正文"
-          : SECTION_TYPE_TEXT[section.section_type] || "内容小节",
-        metaText: [
-          `${visibleMaterials.length} 条讲述`,
-          ...(section.requires_user_assignment
-            ? []
-            : [
-              draft
-                ? `${draft.content.replace(/\s/g, "").length} 字正文${draftNeedsUpdate ? " · 待更新" : ""}`
-                : "正文待生成",
-            ]),
-        ].join(" · "),
+          : SECTION_TYPE_TEXT[section.section_type] || "故事",
+        metaText: section.requires_user_assignment
+          ? `${visibleMaterials.length} 段待整理的回忆`
+          : `${visibleMaterials.length} 段回忆${draftNeedsUpdate ? " · 故事待更新" : ""}`,
         assignmentHint: section.requires_user_assignment
-          ? "这些讲述暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击讲述进入编辑或删除。"
+          ? "这些回忆暂未归入故事，因此不会纳入本章正文。您可以稍后归类，也可以点击回忆进入编辑或删除。"
           : "",
         mergeTargetId: mergeTarget?.id || "",
         mergeTargetTitle: mergeTarget?.title || "",
         hasDraft: Boolean(draft),
         draftContent: draft?.content || "",
+        draftCanExpand: Boolean(
+          draft
+          && (
+            visibleCharCount(draft.content) > 140
+            || draft.content.split("\n").length > 7
+          )
+        ),
         draftNeedsUpdate,
         expanded: section.requires_user_assignment
           ? expandedSectionIds[section.id] !== false
@@ -229,18 +339,18 @@ function rewriteNoticeTitle(
   const completionCount = workspace.pending_completion_source_count || 0;
   const newCount = workspace.pending_new_source_count || 0;
   if (completionCount && newCount) {
-    return `${completionCount} 条补充回答和 ${newCount} 条新增讲述尚未写入正文`;
+    return `${completionCount} 条补充回答和 ${newCount} 段新增回忆尚未写入正文`;
   }
   if (completionCount) {
     return `${completionCount} 条补充回答尚未写入正文`;
   }
   if (newCount) {
-    return `${newCount} 条新增讲述尚未写入正文`;
+    return `${newCount} 段新增回忆尚未写入正文`;
   }
   if (structureChanged) {
-    return "现有正文仍按原来的小节保留";
+    return "现有正文仍按原来的故事保留";
   }
-  return "本章素材已经变化";
+  return "本章回忆已经变化";
 }
 
 function draftRecoveryPatch(
@@ -277,7 +387,7 @@ function draftRecoveryPatch(
   if (nextAction.actionText) {
     return {
       draftRecoveryTitle: "先完成本章当前一步",
-      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“${rewriteDraftActionText}”。上方“重新整理小节分组”不是当前必做步骤。`,
+      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“${rewriteDraftActionText}”。“重新整理故事分组”不是当前必做步骤。`,
       draftRecoveryActionText: nextAction.actionText,
       draftRecoveryActionKind: "next",
       draftRecoveryActionDisabled: nextAction.disabled,
@@ -285,7 +395,7 @@ function draftRecoveryPatch(
   }
   return {
     draftRecoveryTitle: "先查看本章当前步骤",
-    draftRecoveryDetail: `完成页面顶部要求处理的事项后，即可在这里${rewriteDraftActionText}。上方“重新整理小节分组”不是当前必做步骤。`,
+    draftRecoveryDetail: `完成页面顶部要求处理的事项后，即可在这里${rewriteDraftActionText}。“重新整理故事分组”不是当前必做步骤。`,
     draftRecoveryActionText: "查看当前步骤",
     draftRecoveryActionKind: "status",
     draftRecoveryActionDisabled: false,
@@ -305,15 +415,11 @@ export function chapterWorkspaceViewPatch(
     (section) => !section.requires_user_assignment,
   ).length;
   const affectedSectionCount = changedDraftSectionCount(workspace);
-  const rewriteDraftActionText = affectedSectionCount
-    ? `更新 ${affectedSectionCount} 个有变化的小节正文`
-    : "按当前小节更新正文";
-  const rewriteDraftBusyText = affectedSectionCount
-    ? `正在更新 ${affectedSectionCount} 个小节正文…`
-    : "正在更新本章正文…";
+  const rewriteDraftActionText = "更新相关故事";
+  const rewriteDraftBusyText = "正在更新相关故事…";
   const rewriteDraftScopeDetail = affectedSectionCount
-    ? `只重新生成当前 ${affectedSectionCount} 个素材或结构发生变化的小节，其他小节沿用现有正文；完成后保存一个新的整章版本，旧正文仍保留在历史版本中。`
-    : "沿用没有变化的小节正文，按当前小节结构保存一个新的整章版本；旧正文仍保留在历史版本中。";
+    ? `本章有 ${affectedSectionCount} 个故事的素材或结构发生变化。会重点更新相关内容，并按需要调整有联系的故事衔接；旧正文保留在历史版本中。`
+    : "会根据当前故事整理相关内容，并按需要调整衔接；旧正文保留在历史版本中。";
   const includedMaterialCount = sectionViews.reduce(
     (total, section) => (
       section.requires_user_assignment
@@ -323,10 +429,40 @@ export function chapterWorkspaceViewPatch(
     0,
   );
   const structureChanged = draftStructureChanged(workspace);
+  const chapterHasReadableDraft = Boolean(
+    workspace.draft_version_id
+    && workspace.draft_content.trim(),
+  );
+  const needsMaterial = !chapterHasReadableDraft && !includedMaterialCount && !pendingAssignmentCount;
+  const emptyDraftTitle = summary.state === "failed" || summary.state === "preparing"
+    ? summary.headline
+    : needsMaterial ? "本章还需要讲述素材" : summary.headline;
+  const emptyDraftDetail = summary.state === "failed" || summary.state === "preparing"
+    ? summary.detail
+    : needsMaterial ? "请回到首页继续讲述与本章有关的回忆，补充后再查看本章当前步骤。" : summary.detail;
   return {
     nextAction,
-    readinessTitle: summary.headline,
-    readinessDetail: summary.detail,
+    chapterHeroKicker: chapterHasReadableDraft
+      ? "这一章已经整理成"
+      : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
+    chapterStoryCountText: narrativeSectionCount
+      ? `${narrativeSectionCount} 个故事`
+      : "暂无故事",
+    chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
+      ? "本章有新变化，当前正文仍可阅读，相关内容待更新。"
+      : summary.state === "draft_ready"
+        ? "本章正文已整理好，可以随时阅读或修改。"
+        : chapterHasReadableDraft
+          ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
+          : emptyDraftDetail,
+    chapterHasReadableDraft,
+    chapterEditingHint: pendingAssignmentCount
+      ? `${pendingAssignmentCount} 段回忆待整理`
+      : workspace.draft_needs_rewrite
+        ? "有新回忆等待写进故事"
+        : "",
+    readinessTitle: chapterHasReadableDraft ? summary.headline : emptyDraftTitle,
+    readinessDetail: chapterHasReadableDraft ? summary.detail : emptyDraftDetail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace, structureChanged),
     rewriteNoticeDetail: structureChanged
       ? (
@@ -337,7 +473,7 @@ export function chapterWorkspaceViewPatch(
       : (
         workspace.can_rewrite_draft
           ? `可以继续补充，也可以现在生成。${rewriteDraftScopeDetail}`
-          : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分小节。`
+          : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分故事。`
       ),
     ...draftRecoveryPatch(
       workspace,
@@ -347,10 +483,10 @@ export function chapterWorkspaceViewPatch(
     ),
     narrativeSectionCount,
     sectionStructureSummary: [
-      `${narrativeSectionCount} 个小节`,
-      `${includedMaterialCount} 条讲述`,
+      `${narrativeSectionCount} 个故事`,
+      `${includedMaterialCount} 段回忆`,
       ...(pendingAssignmentCount
-        ? [`${pendingAssignmentCount} 条暂未归类`]
+        ? [`${pendingAssignmentCount} 段待整理`]
         : []),
     ].join(" · "),
     rewriteDraftActionText,
@@ -358,13 +494,5 @@ export function chapterWorkspaceViewPatch(
     rewriteDraftScopeDetail,
     sectionViews,
     retainedDraftSectionCount: retainedDraftSectionCount(workspace),
-    canConfirmChapter:
-      summary.state === "draft_ready"
-      && !workspace.draft_needs_rewrite
-      && Boolean(workspace.draft_version_id)
-      && workspace.draft_sections.length > 0
-      && workspace.draft_sections.every(
-        (section) => Boolean(section.content.trim()),
-      ),
   };
 }

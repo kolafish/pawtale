@@ -29,6 +29,12 @@ def _avatar_root() -> Path:
     return DATA_DIR / "user-avatars"
 
 
+def avatar_directory(user_id: str) -> Path:
+    if not _is_canonical_user_id(user_id):
+        raise ValueError("Account id is not a canonical UUID")
+    return _avatar_root() / user_id
+
+
 def _is_canonical_user_id(user_id: str) -> bool:
     try:
         return str(uuid.UUID(user_id)) == user_id

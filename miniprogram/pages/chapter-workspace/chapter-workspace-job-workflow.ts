@@ -18,10 +18,12 @@ import {
   datasetString,
   type PageDatasetEvent,
 } from "../../services/page-input";
-import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
+import {
+  chapterCandidateViewPatch,
+  chapterWorkspaceViewPatch,
+} from "./chapter-workspace-view";
 import {
   chapterPreparationView,
-  CLOSED_DRAFT_SECTION_EDITOR,
   isActiveChapterPreparation,
   isActiveSectionRegeneration,
   scrollToSection,
@@ -41,7 +43,6 @@ interface ChapterWorkspaceJobHost {
   beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
   loadPageData(silent?: boolean): Promise<void>;
-  leaveAfterEditConfirmation(navigate: () => void): void;
 }
 
 function defineChapterWorkspaceJobMethods<TMethods extends object>(
@@ -51,22 +52,29 @@ function defineChapterWorkspaceJobMethods<TMethods extends object>(
 }
 
 export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
-  toggleSuggestions() {
+  toggleEditingTools() {
+    if (this.data.operationKind || this.data.editingSectionId) {
+      return;
+    }
     this.setData({
-      suggestionsExpanded: !this.data.suggestionsExpanded,
+      editingToolsExpanded: !this.data.editingToolsExpanded,
     });
   },
 
-  openSectionStructure() {
-    if (this.data.operationKind) {
+  switchCandidateView(event: PageDatasetEvent<{ mode?: string; version?: string }>) {
+    const mode = datasetString(event, "mode");
+    const version = datasetString(event, "version");
+    if (!this.data.workspace) {
       return;
     }
-    this.leaveAfterEditConfirmation(() => {
-      this.setData({
-        ...CLOSED_DRAFT_SECTION_EDITOR,
-      });
-      scrollToSection("#chapter-sections");
-    });
+    this.setData(chapterCandidateViewPatch(
+      this.data.workspace,
+      this.data.chapterPreparationJob,
+      mode === "changes" || mode === "whole" ? mode : this.data.candidateMode,
+      version === "before" || version === "after"
+        ? version
+        : this.data.candidatePreviewVersion,
+    ));
   },
 
   toggleSection(event: PageDatasetEvent<{ id?: string }>) {
@@ -101,8 +109,8 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       return;
     }
     wx.showModal({
-      title: "重新整理小节分组",
-      content: "AI 会重新划分本章讲述的分组和顺序。原始讲述、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
+      title: "重新整理故事分组",
+      content: "AI 会重新划分本章回忆的分组和顺序。原始回忆、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
       confirmText: "开始整理",
       cancelText: "暂不整理",
       success: (result) => {
@@ -134,8 +142,8 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       return;
     }
     wx.showModal({
-      title: "与上一小节合并？",
-      content: `“${sourceTitle}”中的讲述会并入“${targetTitle}”。现有正文会保留为历史版本，合并后需要重新生成本章正文并再次确认。`,
+      title: "与上一个故事合并？",
+      content: `“${sourceTitle}”中的回忆会并入“${targetTitle}”。现有正文会保留为历史版本，合并后需要重新生成本章正文并再次确认。`,
       confirmText: "确认合并",
       cancelText: "暂不合并",
       success: (result) => {
@@ -163,13 +171,13 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         },
       });
       await this.loadPageData(true);
-      wx.showToast({ title: "小节已合并", icon: "success" });
+      wx.showToast({ title: "故事已合并", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "小节合并失败",
+        error: error instanceof Error ? error.message : "故事合并失败",
       });
     } finally {
       this.finishOperation("merge_sections", sourceId);
@@ -200,7 +208,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       }
       this.finishOperation("regenerate_sections");
       this.setData({
-        error: error instanceof Error ? error.message : "小节重新生成失败",
+        error: error instanceof Error ? error.message : "故事重新整理失败",
       });
     }
   },
@@ -271,16 +279,27 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     );
     if (job.status === "succeeded") {
       if (job.outcome === "needs_review" && job.candidate_content) {
-        this.setData({ chapterPreparationJob: job });
+        this.setData({
+          chapterPreparationJob: job,
+          ...chapterCandidateViewPatch(
+            this.data.workspace,
+            job,
+            this.data.candidateMode,
+            this.data.candidatePreviewVersion,
+          ),
+        });
         return;
       }
-      this.setData({ chapterPreparationJob: null });
+      this.setData({
+        chapterPreparationJob: null,
+        ...chapterCandidateViewPatch(this.data.workspace, null),
+      });
       if (!wasActive) {
         return;
       }
       await this.loadPageData(true);
       wx.showToast({
-        title: job.operation === "rewrite" ? "小节正文已更新" : "本章处理完成",
+        title: job.operation === "rewrite" ? "故事正文已更新" : "本章处理完成",
         icon: "success",
       });
       return;
@@ -349,7 +368,10 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     try {
       await acceptMemoirChapterCandidate(projectId, chapterId, job.job_id);
       if (!this.pageVisible || this.data.projectId !== projectId || this.data.chapterId !== chapterId) return;
-      this.setData({ chapterPreparationJob: null });
+      this.setData({
+        chapterPreparationJob: null,
+        ...chapterCandidateViewPatch(this.data.workspace, null),
+      });
       await this.loadPageData(true);
       wx.showToast({ title: "已采用新稿", icon: "success" });
     } catch (error) {
@@ -432,10 +454,10 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       await this.loadPageData(true);
       if (job.unassigned_count > 0) {
         wx.showModal({
-          title: "有讲述暂未归类",
-          content: `已整理为 ${job.section_count} 个小节；另有 ${job.unassigned_count} 条讲述暂不纳入本章正文。您可以稍后归类，也可以进入讲述详情编辑或删除。`,
+          title: "有回忆暂未归类",
+          content: `已整理为 ${job.section_count} 个故事；另有 ${job.unassigned_count} 段回忆暂不纳入本章正文。您可以稍后归类，也可以进入回忆详情编辑或删除。`,
           showCancel: true,
-          confirmText: "查看素材",
+          confirmText: "查看回忆",
           cancelText: "稍后处理",
           success: (modalResult) => {
             if (modalResult.confirm) {
@@ -445,7 +467,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         });
       } else {
         wx.showToast({
-          title: `已整理为${job.section_count}个小节`,
+          title: `已整理为${job.section_count}个故事`,
           icon: "success",
         });
       }
@@ -478,7 +500,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     this.setData({
       sectionRegenerationJob: { ...job, can_cancel: false },
       sectionRegenerationTitle: "正在取消整理",
-      sectionRegenerationDetail: "正在停止后续处理，原小节结构会保持不变",
+      sectionRegenerationDetail: "正在停止后续处理，原故事结构会保持不变",
       sectionRegenerationProgressMode: "indeterminate",
     });
     try {

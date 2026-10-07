@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +15,10 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
-    MemoirBookReview,
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookAssemblyResponse
+from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookManuscriptQuote
 from app.services.memoir import (
     automation_events,
     book_editorial_actions,
@@ -29,10 +27,11 @@ from app.services.memoir import (
     book_reviews,
     completion_issues,
 )
+from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
-    formal_book_title,
     manuscript_from_snapshot,
+    stored_manuscript_design,
     stored_cover_style,
 )
 from app.services.memoir.book_output_snapshots import (
@@ -44,7 +43,155 @@ from app.services.memoir.book_output_snapshots import (
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.image_assets import manuscript_image_snapshots
+from app.services.memoir.image_assets import (
+    auto_place_share_video_backgrounds,
+    manuscript_image_snapshots,
+    sync_latest_book_output_image_snapshots,
+)
+
+
+def _manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str, object]]:
+    manuscript = version.manuscript_json if isinstance(version.manuscript_json, dict) else {}
+    chapters = manuscript.get("chapters")
+    return {
+        chapter["chapter_id"]: chapter
+        for chapter in (chapters if isinstance(chapters, list) else [])
+        if isinstance(chapter, dict) and isinstance(chapter.get("chapter_id"), str)
+    }
+
+
+def _local_copy_changes(
+    before: MemoirBookOutputVersion,
+    after: MemoirBookOutputVersion,
+) -> dict[str, set[str]] | None:
+    """Recognize a user edit confined to chapter introductions and quotations."""
+    if before.chapter_snapshot_json != after.chapter_snapshot_json:
+        return None
+    for version in (before, after):
+        if version.content != book_content_from_chapter_snapshots(
+            title=book_output_versions.book_output_version_title(version, fallback=""),
+            snapshots=version.chapter_snapshot_json,
+        ):
+            return None
+    old_chapters = _manuscript_chapters(before)
+    new_chapters = _manuscript_chapters(after)
+    if not old_chapters or old_chapters.keys() != new_chapters.keys():
+        return None
+    changes: dict[str, set[str]] = {}
+    for chapter_id, old in old_chapters.items():
+        new = new_chapters[chapter_id]
+        # Image placement is independent of the chapter's editorial text.
+        old_body = {key: value for key, value in old.items() if key not in {"intro", "pull_quotes", "illustrations"}}
+        new_body = {key: value for key, value in new.items() if key not in {"intro", "pull_quotes", "illustrations"}}
+        if old_body != new_body:
+            return None
+        changed = {
+            field for field in ("intro", "pull_quotes")
+            if old.get(field) != new.get(field)
+        }
+        if changed:
+            changes[chapter_id] = changed
+    return changes or None
+
+
+def _manual_copy_fields(
+    versions: list[MemoirBookOutputVersion],
+) -> dict[str, set[str]]:
+    latest_chapters = _manuscript_chapters(versions[-1])
+    edits: dict[tuple[str, str], object] = {}
+    for before, after in zip(versions, versions[1:]):
+        if after.created_by != MemoirCreatedBy.USER.value:
+            continue
+        changes = _local_copy_changes(before, after)
+        if changes is None:
+            continue
+        chapters = _manuscript_chapters(after)
+        for chapter_id, fields in changes.items():
+            for field in fields:
+                edits[(chapter_id, field)] = chapters[chapter_id].get(field)
+    manual: dict[str, set[str]] = {}
+    for (chapter_id, field), value in edits.items():
+        if latest_chapters.get(chapter_id, {}).get(field) == value:
+            manual.setdefault(chapter_id, set()).add(field)
+    return manual
+
+
+def _only_local_copy_is_protected(
+    output: MemoirBookOutput,
+    versions: list[MemoirBookOutputVersion],
+) -> bool:
+    metadata = output.metadata_json if isinstance(output.metadata_json, dict) else {}
+    applied_ids = {
+        marker.get("output_version_id")
+        for marker in (
+            metadata.get(book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY),
+            metadata.get(book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY),
+        )
+        if isinstance(marker, dict)
+    }
+    for index in range(len(versions) - 1, 0, -1):
+        current = versions[index]
+        if current.id in applied_ids:
+            return False
+        previous = versions[index - 1]
+        if book_output_versions._same_book_body(current, previous):
+            continue
+        return (
+            current.created_by == MemoirCreatedBy.USER.value
+            and _local_copy_changes(previous, current) is not None
+        )
+    return False
+
+
+def _same_chapter_copy_context(left: dict[str, object], right: dict[str, object]) -> bool:
+    def sections(snapshot: dict[str, object]) -> list[tuple[object, ...]]:
+        value = snapshot.get("sections")
+        return [
+            (
+                section.get("section_id"),
+                section.get("title"),
+                section.get("section_type"),
+                section.get("used_material_ids"),
+            )
+            for section in (value if isinstance(value, list) else [])
+            if isinstance(section, dict)
+        ]
+
+    return (
+        left.get("chapter_title") == right.get("chapter_title")
+        and sections(left) == sections(right)
+        and _chapter_source_refs(left) == _chapter_source_refs(right)
+    )
+
+
+def _chapter_source_refs(snapshot: dict[str, object]) -> dict[str, tuple[object, object]]:
+    refs = snapshot.get("source_refs")
+    return {
+        ref["utterance_id"]: (ref.get("transcript_version_id"), ref.get("quote"))
+        for ref in (refs if isinstance(refs, list) else [])
+        if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str)
+    }
+
+
+def _chapter_lost_sources(left: dict[str, object], right: dict[str, object]) -> bool:
+    def source_ids(snapshot: dict[str, object]) -> set[str]:
+        sections = snapshot.get("sections")
+        materials = {
+            material_id
+            for section in (sections if isinstance(sections, list) else [])
+            if isinstance(section, dict)
+            for material_id in section.get("used_material_ids", [])
+            if isinstance(material_id, str)
+        }
+        if materials:
+            return materials
+        return set(_chapter_source_refs(snapshot))
+
+    old_refs = _chapter_source_refs(left)
+    new_refs = _chapter_source_refs(right)
+    return bool(source_ids(left) - source_ids(right)) or any(
+        new_refs.get(source_id) != source for source_id, source in old_refs.items()
+    )
 
 
 async def assemble_book_output(
@@ -58,36 +205,28 @@ async def assemble_book_output(
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("请先确认章节规划")
     chapters = included_book_chapters(plan)
-    chapter_versions = readable_chapter_versions(plan, allow_partial=automatic)
+    chapter_versions = readable_chapter_versions(plan, allow_partial=True)
     if eligible_chapter_ids is not None:
         chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id in eligible_chapter_ids]
     current_review = await book_reviews.get_current_book_review(
         db,
         project_id=project_id,
-    )
+    ) if chapters else None
     decisions = (await db.scalars(select(MemoirCompletionIssue).where(
         MemoirCompletionIssue.project_id == project_id,
         MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
         MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
     ))).all()
-    if decisions and not automatic:
-        raise ValueError("book output requires resolving book review decisions")
-    blocked_chapter_ids = {issue.chapter_id for issue in decisions if issue.chapter_id}
-    unresolved = {issue.fingerprint for issue in decisions if issue.scope == "book"}
-    # An unresolved decision outlives the review cache that first identified it.
-    decision_reviews = (await db.scalars(select(MemoirBookReview).where(
-        MemoirBookReview.project_id == project_id,
-        MemoirBookReview.input_signature.in_({issue.input_signature for issue in decisions if issue.scope == "book"}),
-    ))).all() if unresolved else []
-    for review in decision_reviews:
-        for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(review.review_json.get("candidate_issues", [])):
-            if fingerprint in unresolved:
-                blocked_chapter_ids.update(candidate.get("chapter_ids", []))
-                unresolved.discard(fingerprint)
-    if unresolved:
-        # Missing scope evidence cannot establish which chapters are safe to include.
-        blocked_chapter_ids.update(chapter.id for chapter in chapters)
+    blocking_decisions = [
+        issue for issue in decisions
+        if issue.issue_type in completion_issues.BLOCKING_BOOK_ISSUE_TYPES
+    ]
+    blocked_chapter_ids = completion_issues.blocking_book_chapter_ids(
+        blocking_decisions, (chapter.id for chapter in chapters),
+    )
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
+    if not chapter_versions and not automatic:
+        raise ValueError("还没有可收录的章节正文，请先处理相关章节的待确认事项")
     omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]
     answer_context = await book_review_answer_state.load_answer_context(db, review=current_review) if current_review else None
 
@@ -105,15 +244,16 @@ async def assemble_book_output(
                 source_refs=source_refs_by_chapter.get(chapter.id),
             )
         )
+    auto_images_changed = await auto_place_share_video_backgrounds(
+        db,
+        project_id=project_id,
+        chapter_ids={chapter.id for chapter, _ in chapter_versions},
+    )
     output = await db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
         .with_for_update().execution_options(populate_existing=True)
     )
-    title = (
-        output.title
-        if output is not None
-        else formal_book_title(plan.title or "我的回忆录")
-    )
+    title = project.title.strip()
     content = book_content_from_chapter_snapshots(
         title=title,
         snapshots=chapter_snapshots,
@@ -134,17 +274,51 @@ async def assemble_book_output(
             db,
             output_id=output.id,
         )
-        protected = bool(previous_version and (
-            previous_version.created_by == MemoirCreatedBy.USER.value
-            or book_review_answer_state.application_marker(output).get("output_version_id") == previous_version.id
-            or book_editorial_actions.application_marker(output).get("output_version_id") == previous_version.id
+        protected = bool(previous_version and await book_output_versions.book_body_is_protected(
+            db, output=output, version=previous_version,
         ))
         preserves_applied_answers = bool(answer_context and (
             book_review_answer_state.marker_matches_context(output=output, version=previous_version, context=answer_context)
             or book_editorial_actions.marker_matches_review(output=output, version=previous_version,
                 review=current_review, answers_signature=answer_context.answers_signature)
         ))
-        if (automatic and protected) or preserves_applied_answers:
+        versions = list((await db.scalars(
+            select(MemoirBookOutputVersion)
+            .where(MemoirBookOutputVersion.output_id == output.id)
+            .order_by(MemoirBookOutputVersion.version)
+        )).all()) if previous_version else []
+        manual_copy_fields = _manual_copy_fields(versions) if versions else {}
+        previous_snapshots = {
+            item["chapter_id"]: item
+            for item in (previous_version.chapter_snapshot_json if previous_version else [])
+            if isinstance(item, dict) and isinstance(item.get("chapter_id"), str)
+        }
+        previous_contains_blocked_chapter = bool(
+            blocked_chapter_ids.intersection(previous_snapshots)
+        )
+        next_snapshots = {
+            item["chapter_id"]: item for item in chapter_snapshots
+        }
+        changed_manual_copy = any(
+            chapter_id in next_snapshots
+            and not _chapter_lost_sources(previous_snapshots.get(chapter_id, {}), next_snapshots[chapter_id])
+            and not _same_chapter_copy_context(previous_snapshots.get(chapter_id, {}), next_snapshots[chapter_id])
+            for chapter_id in manual_copy_fields
+        )
+        if (
+            not previous_contains_blocked_chapter
+            and (
+                preserves_applied_answers
+                or (automatic and changed_manual_copy)
+                or (automatic and protected and not _only_local_copy_is_protected(output, versions))
+            )
+        ):
+            if auto_images_changed:
+                await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+                previous_version = await book_output_versions.load_latest_book_output_version(
+                    db, output_id=output.id,
+                )
+                assert previous_version is not None
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -154,7 +328,7 @@ async def assemble_book_output(
                 chapter_snapshot_json=list(
                     previous_version.chapter_snapshot_json or []
                 ),
-                preserved_manual=protected,
+                preserved_manual=protected or changed_manual_copy,
                 omitted_chapter_ids=omitted,
                 created_at=previous_version.created_at,
             )
@@ -163,6 +337,12 @@ async def assemble_book_output(
             and previous_version.content == content
             and previous_version.chapter_snapshot_json == chapter_snapshots
         ):
+            if auto_images_changed:
+                await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+                previous_version = await book_output_versions.load_latest_book_output_version(
+                    db, output_id=output.id,
+                )
+                assert previous_version is not None
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -187,9 +367,12 @@ async def assemble_book_output(
         }
         output.updated_at = utcnow_naive()
         db.add(output)
-    chapter_illustrations, image_appendix = await manuscript_image_snapshots(
+    chapter_illustrations, image_appendix, cover_image = await manuscript_image_snapshots(
         db,
         project_id=project_id,
+    )
+    template, custom_layout = stored_manuscript_design(
+        previous_version.manuscript_json if previous_version else None
     )
     manuscript = manuscript_from_snapshot(
         title=title,
@@ -200,6 +383,9 @@ async def assemble_book_output(
             if previous_version
             else "classic_plain"
         ),
+        template=template,
+        custom_layout=custom_layout,
+        cover_image=cover_image,
         metadata=effective_book_metadata(
             project=project,
             stored=previous_version.manuscript_json if previous_version else None,
@@ -207,6 +393,19 @@ async def assemble_book_output(
         chapter_illustrations_by_chapter=chapter_illustrations,
         image_appendix=image_appendix,
     )
+    if manuscript and previous_version:
+        old_chapters = _manuscript_chapters(previous_version)
+        for chapter in manuscript.chapters:
+            old = old_chapters.get(chapter.chapter_id)
+            previous_snapshot = previous_snapshots.get(chapter.chapter_id)
+            next_snapshot = next_snapshots.get(chapter.chapter_id)
+            if old and previous_snapshot and next_snapshot and _same_chapter_copy_context(previous_snapshot, next_snapshot):
+                chapter.intro = str(old.get("intro") or "")
+                chapter.pull_quotes = [
+                    MemoirBookManuscriptQuote.model_validate(value)
+                    for value in repair_original_pull_quotes(old)
+                    if isinstance(value, dict)
+                ]
     version = await book_output_versions.append_book_output_version(
         db,
         output=output,

@@ -18,12 +18,14 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirAutomationEvent,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
 from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import voice_transcript_correction
 from app.services.asr.gateway import (
     MAX_AUDIO_FRAME_BYTES,
@@ -75,6 +77,27 @@ def test_voice_gateway_validates_transcript_polish_level():
         )
 
 
+async def test_voice_gateway_stops_before_recording_when_consent_is_revoked():
+    client = FakeGatewayClient()
+
+    async def revoked() -> bool:
+        return False
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: FakeStreamingASRClient(),
+        authorize_audio=revoked,
+    )
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+
+    error = await _wait_for_event(client, "session.error")
+    await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+    assert error["error"] == "voice_authorization_revoked"
+
+
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -123,6 +146,8 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     assert ended["state"] == "ready"
     assert stopped["state"] == "stopped"
     assert stopped_with == [None]
+    assert session.total_audio_bytes == 3
+    assert session.total_audio_duration_seconds == 3 / (16_000 * 2)
 
 
 async def test_voice_gateway_logs_structured_diagnostics(caplog):
@@ -755,6 +780,51 @@ async def test_voice_gateway_masks_final_persistence_errors():
     assert stopped_with == ["asr_final_persistence_failed"]
 
 
+async def test_mobile_voice_gateway_rejects_missing_voice_consent(monkeypatch):
+    from app.routers.memoir import voice_gateway as voice_gateway_router
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def accept(self):
+            return None
+
+        async def send_json(self, payload):
+            self.sent.append(payload)
+
+        async def close(self, **_kwargs):
+            return None
+
+    async def authenticate(_websocket, _db):
+        return type("User", (), {"id": "user-1"})()
+
+    async def denied(_db, _user_id):
+        return False
+
+    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", authenticate)
+
+    async def credit_available(_user_id):
+        return None
+
+    monkeypatch.setattr(voice_gateway_router, "assert_ai_credit_available", credit_available)
+
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "has_current_voice_authorization_consent",
+        denied,
+    )
+    websocket = FakeWebSocket()
+
+    await voice_gateway_router.mobile_memoir_voice_gateway(websocket, "voice-1", object())
+
+    assert websocket.sent == [{
+        "type": "session.error",
+        "state": "failed",
+        "error": "voice_authorization_required",
+    }]
+
+
 async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch):
     from app.routers.memoir import voice_gateway as voice_gateway_router
 
@@ -826,6 +896,7 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
 
         async def run(self) -> None:
             await calls["gateway_kwargs"]["on_stop"](None, "transport_closed")
+            calls["released_before_stopped"] = lease.released
 
     def fake_log(event: str, **payload: Any) -> None:
         calls["logs"].append({"event": event, **payload})
@@ -833,6 +904,25 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     websocket = FakeWebSocket()
     db = object()
     monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+
+    async def credit_available(_user_id):
+        return None
+
+    monkeypatch.setattr(voice_gateway_router, "assert_ai_credit_available", credit_available)
+
+    async def authorized(_db: Any, _user_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "has_current_voice_authorization_consent",
+        authorized,
+    )
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_authorization,
+        "audio_authorizer",
+        lambda _db, _user_id: authorized,
+    )
     monkeypatch.setattr(
         voice_gateway_router.memoir_voice_sessions,
         "get_voice_session_detail",
@@ -850,6 +940,7 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     assert websocket.accepted
     assert persistence.discard_calls == 0
     assert lease.released
+    assert calls["released_before_stopped"] is True
     assert "stop" not in calls
     assert calls["logs"][0]["event"] == "websocket.accepted"
     assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
@@ -918,6 +1009,11 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
             )
         )
     ).scalars().all()
+    progress_notice = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+        )
+    )
     jobs_by_type = {job.job_type: job for job in editing_jobs}
     versions = (
         await test_db.execute(
@@ -968,6 +1064,10 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert retrieval_job.payload_json["text_source"] == "raw"
     assert "search_text" not in retrieval_job.payload_json
     assert MemoirEditingJobType.ORGANIZE_MATERIAL.value not in jobs_by_type
+    assert progress_notice is not None
+    assert progress_notice.summary_text == "这个项目已经留下 1 条讲述记录。"
+    assert progress_notice.utterance_ids_json == [utterance.id]
+    assert progress_notice.metadata_json[automation_event_metadata.VOICE_ONLY_KEY] is True
     assert MemoirEditingJobType.UPDATE_TOPIC_MAP.value not in jobs_by_type
 
 
@@ -1094,7 +1194,7 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
         assert strict is False
         assert kwargs["context"].scene == "voice_chat"
         assert kwargs["context"].guidance_mode == "free_narration"
-        assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.LOW
+        assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.MEDIUM
         return CleanedTranscriptText(
             content="我小时候住在外婆家。",
             provider="fake-ai",
@@ -1156,7 +1256,7 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     assert message.metadata_json["auto_corrected"] is True
     assert message.metadata_json["correction_status"] == "succeeded"
     assert message.metadata_json["correction_provider"] == "fake-ai"
-    assert message.metadata_json["correction_polish_level"] == "low"
+    assert message.metadata_json["correction_polish_level"] == "medium"
     assert message.metadata_json["correction_polish_fallback"] is False
     assert utterance is not None
     assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"

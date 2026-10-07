@@ -1,4 +1,5 @@
 const http = require("node:http");
+const { randomUUID } = require("node:crypto");
 const { WebSocketServer } = require("ws");
 
 const FIXTURE_PROJECT_ID = "e2e-project";
@@ -13,11 +14,26 @@ function timestamp() {
   return "2026-08-25T00:00:00Z";
 }
 
-function initialAssistantMessage() {
+function voiceConsentAudit({ version, agreed = true, source = "miniprogram", source_session_id = null, metadata_json = {} }) {
+  return {
+    id: "e2e-consent",
+    user_id: "e2e-user",
+    consent_type: "voice_authorization",
+    version,
+    agreed,
+    source,
+    source_session_id,
+    metadata_json,
+    created_at: timestamp(),
+    updated_at: timestamp(),
+  };
+}
+
+function initialAssistantMessage(sessionId = FIXTURE_SESSION_ID) {
   return {
     id: "e2e-opening-message",
     project_id: FIXTURE_PROJECT_ID,
-    voice_session_id: FIXTURE_SESSION_ID,
+    voice_session_id: sessionId,
     role: "assistant",
     content_text: "准备好了，您可以开始讲。",
     content_status: "final",
@@ -33,6 +49,7 @@ function initialAssistantMessage() {
 }
 
 function createVoiceFixtureServer() {
+  const sessionPrefix = `${FIXTURE_SESSION_ID}-${randomUUID()}`;
   const server = http.createServer();
   const webSockets = new WebSocketServer({ noServer: true });
   const clients = new Set();
@@ -42,21 +59,60 @@ function createVoiceFixtureServer() {
     gatewayClientEvents: [],
     gatewayConnections: [],
     httpRequests: [],
+    createdSessions: 0,
+    sessionId: sessionPrefix,
     sessionStatus: "created",
+    sessionConfig: {},
+    projectTitle: "E2E 回忆录",
+    projectProfile: {
+      narrator_name: "",
+      narrator_gender: "unspecified",
+      narrator_origin: "",
+      narrator_age: null,
+      default_guidance_mode: "free_narration",
+      default_interview_type: "ai_interview",
+      default_session_goal: "open_narration",
+    },
     unexpectedRequests: [],
     messages: [initialAssistantMessage()],
     utterances: [],
   };
 
+  function projectDetail() {
+    return {
+      id: FIXTURE_PROJECT_ID,
+      title: state.projectTitle,
+      type: "memoir",
+      total_word_count: 0,
+      metadata_json: { memoir_profile: { ...state.projectProfile } },
+      groups: [],
+      references: [],
+      created_at: timestamp(),
+      updated_at: timestamp(),
+    };
+  }
+
+  function identity() {
+    const project = projectDetail();
+    return {
+      id: "e2e-user",
+      display_name: "测试作者",
+      email: "fixture@example.invalid",
+      active_project_id: project.id,
+      active_project: project,
+      projects: [project],
+    };
+  }
+
   function sessionDetail() {
     return {
       session: {
-        id: FIXTURE_SESSION_ID,
+        id: state.sessionId,
         project_id: FIXTURE_PROJECT_ID,
         status: state.sessionStatus,
-        guidance_mode: "free_narration",
-        interview_type: "ai_interview",
-        session_goal: "open_narration",
+        guidance_mode: state.sessionConfig.guidance_mode || "free_narration",
+        interview_type: state.sessionConfig.interview_type || "ai_interview",
+        session_goal: state.sessionConfig.session_goal || "open_narration",
         current_completion_issue_id: null,
         anchor_framework_item_id: null,
         current_guidance_module: null,
@@ -95,29 +151,111 @@ function createVoiceFixtureServer() {
     const body = await requestBody(request);
     state.httpRequests.push({ method: request.method, path: url.pathname, body });
 
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/story-snapshot") {
+      respond(response, 200, {
+        server_revision: state.httpRequests.length,
+        identity: identity(),
+        latest_transcript: null, chapters: [], growth_events: [],
+        book_issues: { review_count: 0, supplement_count: 0 },
+        book_readable: false, book_char_count: 0, book_chapter_count: 0, updated_at: timestamp(),
+        unassigned_image_count: 0, unassigned_video_count: 0,
+        progress: state.utterances.length ? {
+          project_id: FIXTURE_PROJECT_ID, status: "processing", stage: "organizing",
+          title: "正在整理这次讲述", detail: "讲述已保存，正在归入故事", can_retry: false,
+          material_count: state.utterances.length, pending_material_count: state.utterances.length,
+          needs_user_material_count: 0, readable_chapter_count: 0, total_chapter_count: 0,
+        } : null, automation_events: { items: [], total: 0, limit: 8 },
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/me") {
+      respond(response, 200, identity());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/mobile/memoir/projects") {
+      const currentIdentity = identity();
+      respond(response, 200, {
+        active_project_id: currentIdentity.active_project_id,
+        active_project: currentIdentity.active_project,
+        projects: currentIdentity.projects,
+      });
+      return;
+    }
+    if (request.method === "PATCH" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}`) {
+      state.projectTitle = body.title || state.projectTitle;
+      state.projectProfile = {
+        ...state.projectProfile,
+        narrator_name: body.elder_name,
+        narrator_gender: body.narrator_gender,
+        narrator_origin: body.narrator_origin,
+        narrator_age: body.narrator_age,
+        default_guidance_mode: body.default_guidance_mode,
+        default_interview_type: body.default_interview_type,
+        default_session_goal: body.default_session_goal,
+      };
+      respond(response, 200, projectDetail());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/memoir/projects/${FIXTURE_PROJECT_ID}/book-completion/overview`) {
+      respond(response, 200, {
+        project_id: FIXTURE_PROJECT_ID, headline: "还没有待补问题", detail: "先讲一段回忆，再整理书稿。",
+        total_chapters: 0, completed_chapters: 0, chapters: [],
+        completion_job: {
+          job_id: null, project_id: FIXTURE_PROJECT_ID, status: "idle", total_chapter_count: 0,
+          processed_chapter_count: 0, succeeded_chapter_count: 0, failed_chapter_count: 0,
+          cancelled_chapter_count: 0, current_chapter_id: null, current_chapter_title: "",
+          requested_ai_model: null, chapters: [], can_cancel: false, can_retry: false, error_message: "",
+        },
+        book_review: null, book_review_job: null, book_issues: [], book_output_available: false, revision_job: null,
+      });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/mobile/memoir/voice-sessions") {
+      state.sessionConfig = body;
+      state.createdSessions += 1;
+      state.sessionId = `${sessionPrefix}-${state.createdSessions}`;
+      state.sessionStatus = "created";
+      state.messages = body.interview_type === "human_interview" ? [] : [initialAssistantMessage(state.sessionId)];
+      state.utterances = [];
+      respond(response, 200, sessionDetail());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/automation-events`) {
+      respond(response, 200, { items: [], total: 0, limit: 8 });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/share-video-candidate`) {
+      respond(response, 200, { candidate: null });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/share-video/jobs`) {
+      respond(response, 200, {
+        items: [], active_jobs: [], failed_jobs: [], total: 0,
+        limit: Number(url.searchParams.get("limit") || 20), offset: Number(url.searchParams.get("offset") || 0),
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/draft-progress`) {
+      respond(response, 200, { status: "idle", title: "等待讲述", detail: "", can_retry: false });
+      return;
+    }
+
     if (
       request.method === "GET"
-      && url.pathname === `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}`
+      && url.pathname === `/api/mobile/memoir/voice-sessions/${state.sessionId}`
     ) {
       respond(response, 200, sessionDetail());
       return;
     }
-    if (
-      request.method === "POST"
-      && url.pathname === "/api/mobile/memoir/voice-authorization-consent"
-    ) {
+    if (url.pathname === "/api/mobile/memoir/voice-authorization-consent" && request.method === "GET") {
       respond(response, 200, {
-        id: "e2e-consent",
-        user_id: "e2e-user",
-        consent_type: "voice_authorization",
-        version: body.version,
-        agreed: body.agreed,
-        source: body.source,
-        source_session_id: body.source_session_id || null,
-        metadata_json: body.metadata_json || {},
-        created_at: timestamp(),
-        updated_at: timestamp(),
+        has_current_consent: true,
+        consent: voiceConsentAudit({ version: url.searchParams.get("version") }),
       });
+      return;
+    }
+    if (url.pathname === "/api/mobile/memoir/voice-authorization-consent" && request.method === "POST") {
+      respond(response, 200, voiceConsentAudit(body));
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/audit/events") {
@@ -146,7 +284,7 @@ function createVoiceFixtureServer() {
     state.messages.push({
       id: FIXTURE_USER_MESSAGE_ID,
       project_id: FIXTURE_PROJECT_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       role: "user",
       content_text: FIXTURE_USER_TEXT,
       content_status: "final",
@@ -161,7 +299,7 @@ function createVoiceFixtureServer() {
     });
     state.utterances.push({
       id: FIXTURE_UTTERANCE_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       chat_message_id: FIXTURE_USER_MESSAGE_ID,
       audio_file_id: "e2e-user-audio",
       transcript_raw: FIXTURE_USER_TEXT,
@@ -182,7 +320,7 @@ function createVoiceFixtureServer() {
     state.messages.push({
       id: FIXTURE_ASSISTANT_MESSAGE_ID,
       project_id: FIXTURE_PROJECT_ID,
-      voice_session_id: FIXTURE_SESSION_ID,
+      voice_session_id: state.sessionId,
       role: "assistant",
       content_text: FIXTURE_ASSISTANT_TEXT,
       content_status: "final",
@@ -260,7 +398,7 @@ function createVoiceFixtureServer() {
       persistAssistantTurn();
       const metadata = {
         turn_id: "e2e-turn",
-        voice_session_id: FIXTURE_SESSION_ID,
+        voice_session_id: state.sessionId,
       };
       send(webSocket, {
         ...metadata,
@@ -330,8 +468,8 @@ function createVoiceFixtureServer() {
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
-    const gatewayPath = `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}/gateway`;
-    const assistantPath = `/api/mobile/memoir/voice-sessions/${FIXTURE_SESSION_ID}/assistant-turn-stream`;
+    const gatewayPath = `/api/mobile/memoir/voice-sessions/${state.sessionId}/gateway`;
+    const assistantPath = `/api/mobile/memoir/voice-sessions/${state.sessionId}/assistant-turn-stream`;
     if (url.pathname !== gatewayPath && url.pathname !== assistantPath) {
       state.unexpectedRequests.push({ method: "WS", path: url.pathname });
       socket.destroy();
@@ -356,9 +494,12 @@ function createVoiceFixtureServer() {
       state.gatewayClientEvents.length = 0;
       state.gatewayConnections.length = 0;
       state.httpRequests.length = 0;
+      state.createdSessions = 0;
+      state.sessionId = sessionPrefix;
+      state.sessionConfig = {};
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";
-      state.messages = [initialAssistantMessage()];
+      state.messages = [initialAssistantMessage(state.sessionId)];
       state.utterances = [];
     },
     async start() {
@@ -391,6 +532,7 @@ function createVoiceFixtureServer() {
 
 module.exports = {
   FIXTURE_ASSISTANT_TEXT,
+  FIXTURE_PROJECT_ID,
   FIXTURE_SESSION_ID,
   FIXTURE_USER_TEXT,
   createVoiceFixtureServer,

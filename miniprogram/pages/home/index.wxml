@@ -1,205 +1,194 @@
 <view class="ui-page-shell {{homePageClass}}">
-  <view class="header">
+  <view class="header" hidden="{{voiceEntry}}">
     <view class="header-main">
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
+        <text wx:if="{{headerSubtitleText}}" class="header-subtitle">{{headerSubtitleText}}</text>
       </view>
       <view class="header-actions">
-      <button id="home-settings" size="mini" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
-      <button size="mini" class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
-        分享
-      </button>
+        <button id="home-settings" size="mini" class="home-header-button ui-button" bindtap="openSettings"
+          aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
+        <button size="mini" class="home-header-button ui-button" open-type="share" data-share-kind="home"
+          aria-label="分享老余口述" hover-class="ui-accent-action-hover">分享</button>
       </view>
     </view>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <view id="home-narration">
-  <view wx:if="{{showLaunchPanel}}" class="launch-card">
-    <view class="project-row">
-      <text class="panel-label">{{launchEyebrow}}</text>
-      <text class="mode-tag">{{launchModeTagText}}</text>
-    </view>
-    <text class="launch-title">{{launchTitle}}</text>
-    <text class="launch-body">{{launchBody}}</text>
-    <view
-      id="launch-voice-action"
-      class="{{voiceStartButtonClass}}"
-      bindtap="startLaunchVoiceChat"
-      hover-class="{{voiceStartButtonHoverClass}}"
-      aria-role="button"
-      aria-disabled="{{creatingVoice}}"
-    >
-      <view class="voice-start-icon-shell">
-        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
-      <view class="voice-start-copy">
-        <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
-      </view>
-    </view>
-    <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
-      {{launchSecondaryText}}
-    </button>
-  </view>
+  <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}"
+    bindexit="exitVoiceSession" />
 
-  <view wx:else class="home-card">
-    <view wx:if="{{showReturnPrompt}}" class="return-prompt">
-      <view class="return-prompt-copy">
-        <text class="return-prompt-title">好久不见，今天接着讲一段？</text>
-        <text class="return-prompt-text">可以从上次停下的地方继续，也可以随便说点别的。</text>
-      </view>
-      <view class="return-prompt-close" bindtap="dismissReturnPrompt" hover-class="return-prompt-close-hover">×</view>
-    </view>
-
-    <view
-      wx:if="{{hasProject}}"
-      id="active-project-action"
-      class="active-project-link"
-      bindtap="openProjects"
-      hover-class="ui-subtle-action-hover"
-      aria-role="button"
-      aria-label="当前回忆录 {{projectHeadingText}}，点击切换"
-    >
-      <view class="active-project-copy">
-        <text class="project-title">{{projectHeadingText}}</text>
-      </view>
-      <text class="project-switch-action">切换 ›</text>
-    </view>
-    <text wx:else class="project-title">{{projectHeadingText}}</text>
-    <text class="project-meta">{{projectMetaText}}</text>
-
-    <view
-      id="primary-voice-action"
-      class="{{voiceStartButtonClass}}"
-      bindtap="startPrimaryVoiceChat"
-      hover-class="{{voiceStartButtonHoverClass}}"
-      aria-role="button"
-      aria-disabled="{{creatingVoice}}"
-    >
-      <view class="voice-start-icon-shell">
-        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      </view>
-      <view class="voice-start-copy">
-        <text class="voice-start-title">{{primaryVoiceButtonTitle}}</text>
-      </view>
-    </view>
-    <text class="voice-start-note">{{voiceStartNoteText}}</text>
-
-
-    <view wx:if="{{showResumeActions}}" class="resume-actions">
-      <view
-        class="more-actions-toggle"
-        bindtap="toggleMoreActions"
-        hover-class="ui-subtle-action-hover"
-        aria-role="button"
-        aria-expanded="{{showMoreActions}}"
-        aria-label="{{moreActionsToggleAriaLabel}}"
-      >
-        <text>{{moreActionsToggleText}}</text>
-        <text class="more-actions-chevron">{{showMoreActions ? "⌃" : "⌄"}}</text>
-      </view>
-      <view wx:if="{{showMoreActions}}" class="more-actions-panel">
-    <view
-      wx:if="{{hasProject}}"
-      class="narration-overview-link"
-      bindtap="openNarrationOverview"
-      hover-class="ui-subtle-action-hover"
-      aria-role="button"
-      aria-label="打开讲述概览"
-    >
-      <view class="narration-overview-copy">
-        <text class="narration-overview-title">讲述概览</text>
-        <text class="narration-overview-hint">回顾聊过的话题和最近讲述</text>
-      </view>
-      <text class="narration-overview-action">查看 ›</text>
-    </view>
-
-        <view
-          class="{{resumeAskButtonClass}}"
-          bindtap="startAlternateGuidance"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>{{alternateModeButtonTitle}}</text>
-          <text class="resume-action-hint">换一种讲述方式</text>
-        </view>
-        <view
-          class="{{resumeAskButtonClass}} completion"
-          bindtap="openBookWorkspace"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>整理书稿</text>
-          <text class="resume-action-hint">查看章节进度和待补内容</text>
-        </view>
-        <view
-          class="{{resumeAskButtonClass}}"
-          bindtap="startHumanInterview"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>人工访谈</text>
-          <text class="resume-action-hint">由家人分别记录问与答</text>
-        </view>
-      </view>
-    </view>
-  </view>
-
-  <view id="home-voice-authorization" wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
-    <checkbox-group bindchange="changeVoiceAuthorization">
-      <label class="voice-auth-row">
-        <checkbox
-          value="voice_authorization"
-          checked="{{voiceAuthorizationAgreed}}"
-          color="#a84f43"
-        />
-        <view class="voice-auth-copy">
-          <text>我已阅读并同意</text>
-          <text class="voice-auth-link" catchtap="openVoiceAuthorization">《声纹授权协议》</text>
-        </view>
-      </label>
-    </checkbox-group>
-    <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
-  </view>
-
-  </view>
-
-  <view id="home-story" class="home-story">
-    <text wx:if="{{narrationSaved}}" class="home-saved-notice" aria-live="polite">这次讲述已保存。看看故事，也可以接着讲。</text>
-    <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
-    <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory" loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
+  <view hidden="{{voiceEntry}}" class="home-content">
     <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
-    <view wx:if="{{reviewNoticeText}}" class="home-review-notice" aria-live="polite">
+    <button wx:if="{{!storyLoaded && error}}" class="home-story-action ui-button" bindtap="refreshStory"
+      loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
+
+    <story-tree
+      wx:if="{{storyLoaded || needsLogin}}"
+      id="story-tree"
+      story="{{story}}"
+      large-text="{{largeTextEnabled}}"
+      can-open-book="{{hasProject}}"
+      can-switch-project="{{hasProject}}"
+      can-voice-edit="{{hasProject}}"
+      show-book-hint="{{showBookHint}}"
+      bind:focusgrowth="focusStoryGrowth"
+      bind:openbook="openBook"
+      bind:openprojects="openProjects"
+      bind:openchapter="openChapter"
+      bind:opentranscripts="openTranscripts"
+      bind:voiceedit="openVoiceEdit"
+    >
+      <view slot="heroAction">
+        <view wx:if="{{showNarrationChoiceCard}}" class="narration-choice-card">
+          <view class="narration-choice-copy">
+            <text class="narration-choice-kicker">上次说到：</text>
+            <text class="narration-choice-text">{{lastStoryHint}}</text>
+          </view>
+          <view class="narration-choice-actions">
+            <view
+              id="resume-story-action"
+              class="narration-choice-action narration-choice-primary ui-pressable {{voiceStartButtonClass}}"
+              bindtap="resumeLastStory"
+              hover-class="{{voiceStartButtonHoverClass}}"
+              aria-role="button"
+              aria-label="接着上次的内容继续讲"
+              aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
+            >
+              <text>接着讲</text>
+              <text class="narration-choice-arrow" aria-hidden="true">›</text>
+            </view>
+            <view
+              id="primary-voice-action"
+              class="narration-choice-action narration-choice-secondary ui-pressable {{voiceStartButtonClass}}"
+              bindtap="startPrimaryVoiceChat"
+              hover-class="{{voiceStartButtonHoverClass}}"
+              aria-role="button"
+              aria-label="讲一个新故事"
+              aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
+            >
+              <text class="narration-choice-plus" aria-hidden="true">＋</text>
+              <text>讲个新故事</text>
+            </view>
+          </view>
+        </view>
+
+        <view
+          wx:else
+          id="primary-voice-action"
+          class="hero-voice-action {{voiceStartButtonClass}}"
+          bindtap="startPrimaryVoiceChat"
+          hover-class="{{voiceStartButtonHoverClass}}"
+          aria-role="button"
+          aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
+        >
+          <text class="hero-voice-label">{{primaryVoiceButtonTitle}}</text>
+          <text class="hero-voice-arrow" aria-hidden="true">›</text>
+        </view>
+      </view>
+
+      <view slot="afterHero" id="home-narration-end" class="after-hero">
+        <text wx:if="{{narrationSaved && !growthNoticeText}}" class="home-saved-notice" aria-live="polite">这段故事已经长进您的故事树。</text>
+
+        <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
+          <view class="home-growth-copy">
+            <text class="home-growth-title">{{growthNoticeTitle}}</text>
+            <text class="home-growth-value ui-tabular">{{growthNoticeText}}</text>
+            <text wx:if="{{growthNoticeContext}}" class="home-growth-context">{{growthNoticeContext}}</text>
+          </view>
+          <view class="home-growth-actions">
+            <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button"
+              bindtap="viewStoryGrowth">看看变化</button>
+            <button size="mini" class="home-inline-action is-secondary ui-button" bindtap="dismissGrowthNotice"
+              loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+          </view>
+        </view>
+
+        <view
+          wx:if="{{!voiceEntry && ((shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')) || shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount)}}"
+          class="home-share-candidate"
+          aria-label="我的分享视频"
+        >
+          <view class="home-share-candidate-head">
+            <text class="home-share-module-title">分享视频</text>
+            <button wx:if="{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">{{shareVideoActiveCount ? '制作中 ' + shareVideoActiveCount + ' 个' : shareVideoTotal ? '全部 ' + shareVideoTotal + ' 个' : '制作失败 ' + shareVideoFailedCount + ' 个'}} ›</button>
+          </view>
+          <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
+            <view class="home-share-candidate-content">
+              <button class="home-share-thumbnail ui-button" bindtap="openShareCandidateVideo" disabled="{{!shareCandidate.video_job_id || shareCandidateDismissing}}" aria-label="预览分享视频" hover-class="ui-subtle-action-hover">
+                <image wx:if="{{shareCandidateThumbnailPath}}" class="home-share-thumbnail-image" src="{{shareCandidateThumbnailPath}}" mode="aspectFill" />
+                <view class="home-share-thumbnail-play" aria-hidden="true">▶</view>
+              </button>
+              <view class="home-share-candidate-heading">
+                <text class="home-share-candidate-title">{{shareCandidate.status === 'ready' ? shareCandidate.selected_text : '《' + (shareCandidateJob ? shareCandidateJob.title : '讲述片段') + '》'}}</text>
+                <text class="home-share-candidate-meta ui-tabular">{{shareCandidate.status === 'ready' ? '待制作' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '刚刚生成' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '制作未完成' : '制作中'))}}{{shareCandidateDurationText ? ' · ' + shareCandidateDurationText : ''}}</text>
+                <text class="home-share-candidate-hint">来自最近的一段讲述</text>
+              </view>
+            </view>
+            <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>
+            <view class="home-share-candidate-actions">
+              <button
+                wx:if="{{shareCandidate.status === 'ready'}}"
+                class="home-share-candidate-primary ui-button"
+                bindtap="openShareCandidateEditor"
+                disabled="{{shareCandidateDismissing}}"
+                hover-class="ui-subtle-action-hover"
+              >做成视频 ›</button>
+              <button
+                wx:elif="{{shareCandidate.video_job_id}}"
+                class="home-share-candidate-primary ui-button"
+                bindtap="openShareCandidateVideo"
+                disabled="{{shareCandidateDismissing}}"
+                hover-class="ui-subtle-action-hover"
+              >{{shareCandidateJob && shareCandidateJob.status === 'failed' ? '查看详情 ›' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '预览视频 ›' : '查看进度 ›')}}</button>
+              <button
+                class="home-share-candidate-secondary ui-button"
+                bindtap="dismissShareCandidate"
+                loading="{{shareCandidateDismissing}}"
+                disabled="{{shareCandidateDismissing}}"
+                hover-class="ui-subtle-action-hover"
+              >{{shareCandidate.status === 'ready' ? '先不做' : '稍后'}}</button>
+            </view>
+          </block>
+        </view>
+
+        <view id="home-voice-authorization" wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
+          <checkbox-group bindchange="changeVoiceAuthorization">
+            <view class="voice-auth-row ui-consent-row">
+              <label class="ui-consent-choice">
+                <checkbox value="voice_authorization" checked="{{voiceAuthorizationAgreed}}" disabled="{{voiceAuthorizationSaving}}" color="#b65d49" />
+                <text class="voice-auth-copy">我已阅读并同意</text>
+              </label>
+              <view class="voice-auth-link ui-consent-link ui-pressable" catchtap="openVoiceAuthorization"
+                hover-class="ui-subtle-action-hover" aria-role="button" aria-label="查看语音采集与处理授权">《语音采集与处理授权》</view>
+            </view>
+          </checkbox-group>
+          <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别、保存原始音频和整理故事。</text>
+        </view>
+
+      </view>
+    </story-tree>
+
+    <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
+    <button wx:if="{{storyError}}" class="home-story-action ui-button" bindtap="refreshStory"
+      loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
+
+    <view wx:if="{{progress && progress.status === 'failed'}}" class="home-story-progress is-error" aria-live="polite">
       <view class="home-review-copy">
-        <text class="home-review-text">{{reviewNoticeText}}</text>
-        <text wx:if="{{reviewNoticeDetail}}" class="home-review-text">{{reviewNoticeDetail}}</text>
+        <text class="home-story-progress-title">{{progress.title}}</text>
+        <text class="home-story-progress-detail">{{progress.detail}}</text>
       </view>
-      <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
+      <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft"
+        loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
     </view>
-    <view wx:if="{{progress && progress.status !== 'idle' && progress.status !== 'needs_input'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
-      <text class="home-story-progress-title">{{progress.title}}</text>
-      <text class="home-story-progress-detail">{{progress.detail}}</text>
-      <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
-    </view>
-    <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
-      <view class="home-growth-copy">
-        <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
-        <text class="home-story-progress-detail">{{growthNoticeText}}</text>
-      </view>
-      <view class="home-growth-actions">
-        <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button" bindtap="viewStoryGrowth">看看变化</button>
-        <button size="mini" class="home-inline-action home-growth-dismiss ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
-      </view>
-    </view>
-    <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && hasStories}}"
-      bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
-      bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
+
   </view>
+
   <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
-    <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration" loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">继续讲述</button>
+    <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration"
+      loading="{{creatingVoice}}" disabled="{{creatingVoice || voiceAuthorizationSaving}}" hover-class="voice-start-button-hover">
+      <text>{{primaryVoiceButtonTitle}}</text><text class="continue-narration-arrow" aria-hidden="true">›</text>
+    </button>
   </view>
 </view>

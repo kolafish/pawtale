@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 
 from httpx import Response
+from fastapi import HTTPException
 import pytest
 from sqlalchemy import func, select
+from app.config import DEFAULT_AI_TEXT_MODEL
+from app.services.ai_base import AITextServiceBase
+from app.services.ai_references import ModelReferenceMap
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
@@ -34,10 +38,15 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.memoir import (
+    automatic_book_draft,
     book_completion_jobs,
     book_revision_generation,
+    book_revision_proposals,
     book_review_jobs,
+    book_review_answer_state,
     book_reviews,
+    completion_interviews,
+    completion_issues,
     chapter_preparation_jobs,
     chapter_digests,
     chapter_generation,
@@ -49,6 +58,7 @@ from app.services.memoir.book_reviews import (
     BookReviewContext,
     normalize_book_review,
 )
+from app.services.memoir.prompt_budget import MAX_REVIEW_PROMPT_CHARS
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
 )
@@ -64,7 +74,7 @@ from tests.memoir_helpers import (
 )
 
 
-class LayeredBookAI:
+class LayeredBookAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-layered-book"
 
@@ -77,6 +87,8 @@ class LayeredBookAI:
         book_issue: bool = False,
         book_actions: bool = False,
         book_profile_action: bool = False,
+        section_revision_title: str | None = None,
+        section_revision_content: str | None = None,
     ):
         self.section_issue = section_issue
         self.chapter_interview_issue = chapter_interview_issue
@@ -84,6 +96,8 @@ class LayeredBookAI:
         self.book_issue = book_issue
         self.book_actions = book_actions
         self.book_profile_action = book_profile_action
+        self.section_revision_title = section_revision_title
+        self.section_revision_content = section_revision_content
         self.system_prompts: list[str] = []
         self.prompts: list[str] = []
 
@@ -135,10 +149,10 @@ class LayeredBookAI:
             elif self.chapter_manual_issue:
                 candidates = [
                     {
-                        "issue_type": "privacy",
+                        "issue_type": "conflict",
                         "channel": "manual_review",
-                        "question": "这一章是否愿意保留真实学校名称？",
-                        "reason": "这是用户需要决定的隐私边界。",
+                        "question": "这一章比赛年份的两种说法，哪一种准确？",
+                        "reason": "年份冲突需要讲述者确认。",
                         "priority": "high",
                         "section_ids": section_ids[:1],
                     }
@@ -280,13 +294,28 @@ class LayeredBookAI:
         else:
             section_materials = _prompt_section_materials(user_prompt)
             is_revision = "用户修改要求：" in user_prompt
+            current_title = (
+                user_prompt.partition("当前小节标题：\n")[2].splitlines()[0]
+                if "当前小节标题：\n" in user_prompt
+                else ""
+            )
             payload = {
                 "sections": [
                     {
                         "section_id": section_id,
-                        "title": "比赛后的回想风" if is_revision else "",
-                        "content": ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
-                        + "这段经历让我一直记得，也让我第一次认真看待输赢。",
+                        "title": (
+                            self.section_revision_title or current_title
+                            if is_revision
+                            else ""
+                        ),
+                        "content": (
+                            self.section_revision_content
+                            if is_revision and self.section_revision_content is not None
+                            else (
+                                ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
+                                + "这段经历让我一直记得，也让我第一次认真看待输赢。"
+                            )
+                        ),
                         "used_material_ids": allowed_material_ids,
                     }
                     for section_id, allowed_material_ids in section_materials
@@ -295,6 +324,32 @@ class LayeredBookAI:
                 "editor_notes": [],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+def test_book_review_rejects_prompt_that_cannot_be_read_in_full():
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={},
+        chapters=(
+            BookReviewChapter(
+                chapter_id="chapter-1",
+                title="童年",
+                sort_order=0,
+                digest_id="digest-1",
+                digest_signature="digest-signature-1",
+                digest={"summary": "童年回忆"},
+                draft_version_id="version-1",
+                draft_hash="hash-1",
+                material_ids=frozenset(),
+                draft_content="回" * MAX_REVIEW_PROMPT_CHARS,
+            ),
+        ),
+        input_signature="review-signature",
+    )
+    with pytest.raises(HTTPException) as caught:
+        book_reviews.build_book_review_prompt(context)
+    assert caught.value.status_code == 422
 
 
 def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
@@ -361,6 +416,515 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
     assert "书名是否应" in review["structure_guidance"][0]
 
 
+@pytest.mark.parametrize("question", [
+    "先生和亲友的婚姻经历是否需要匿名？",
+    "完整联系方式是否适合写入书稿？",
+])
+def test_private_review_rejects_privacy_questions_at_every_level(question):
+    candidate = {
+        "issue_type": "privacy", "channel": "manual_review",
+        "resolution": "user_decision", "priority": "high",
+        "question": question, "reason": "模型按公开出版标准提出确认。",
+        "material_ids": ["M1"], "section_ids": ["S1"], "chapter_ids": ["C1"],
+    }
+    section = section_digests.normalize_section_digest_payload(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        material_references=ModelReferenceMap("M", ["material-1"]),
+    )
+    chapter = chapter_digests.normalize_chapter_digest(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        section_references=ModelReferenceMap("S", ["section-1"]),
+    )
+    context = BookReviewContext(
+        project_id="project-1", plan_id="plan-1", book_metadata={"title": "回忆"},
+        chapters=(BookReviewChapter(
+            chapter_id="chapter-1", title="亲友生活", sort_order=0,
+            digest_id="digest-1", digest_signature="digest-signature", digest={},
+            draft_version_id="version-1", draft_hash="draft-hash",
+            material_ids=frozenset(),
+        ),),
+        input_signature="private-review",
+    )
+    book = normalize_book_review(
+        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
+        context=context,
+    )
+    assert section["candidate_issues"] == chapter["candidate_issues"] == book["candidate_issues"] == []
+    assert completion_issues.book_review_candidate_fingerprints([candidate]) == []
+
+
+def test_book_review_fingerprints_follow_questions_when_order_changes():
+    common = {
+        "issue_type": "clarity",
+        "priority": "medium",
+        "channel": "manual_review",
+        "reason": "需要用户判断",
+        "chapter_ids": ["chapter-1"],
+        "material_ids": [],
+    }
+    candidates = [
+        {**common, "question": question}
+        for question in ("问题 A？", "问题 B？")
+    ]
+    for candidate in candidates:
+        candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    def fingerprints(items):
+        return {
+            candidate["question"]: fingerprint
+            for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(items)
+        }
+
+    assert fingerprints(candidates) == fingerprints(list(reversed(candidates)))
+
+
+def test_book_review_anchors_only_verified_distinct_quoted_facts():
+    quote = "某位知名企业家曾经是我的经理"
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={"title": "故事"},
+        chapters=tuple(
+            BookReviewChapter(
+                chapter_id=f"chapter-{index}",
+                title=f"第{index}章",
+                sort_order=index,
+                digest_id=f"digest-{index}",
+                digest_signature=f"signature-{index}",
+                digest={},
+                draft_version_id=f"version-{index}",
+                draft_hash=f"hash-{index}",
+                material_ids=frozenset(),
+                draft_content=content,
+            )
+            for index, content in (
+                (1, f"那时候，{quote}。"),
+                (2, "这一章只写散步。"),
+            )
+        ),
+        input_signature="book-signature",
+    )
+    def candidate(question, chapter_id, issue_type="conflict"):
+        return {
+            "issue_type": issue_type,
+            "question": question,
+            "reason": "这需要用户决定。",
+            "priority": "high",
+            "chapter_ids": [chapter_id],
+            "evidence_quote": quote,
+            "resolution": "user_decision",
+        }
+    short_quote = candidate("经理一词需要确认吗？", "C1")
+    short_quote["evidence_quote"] = "经理"
+
+    review = normalize_book_review(
+        {
+            "summary": "有待确认内容。",
+            "candidate_issues": [
+                candidate("是否匿名？", "C1"),
+                candidate("是否匿名？", "C2"),
+                candidate("这段关系准确吗？", "C1", "clarity"),
+                candidate("这段邀请准确吗？", "C1", "clarity"),
+                short_quote,
+            ],
+        },
+        context=context,
+    )
+    issues = review["candidate_issues"]
+    assert issues[0]["evidence_quote"] == quote
+    assert "evidence_quote" not in issues[1]
+    assert "evidence_quote" not in issues[2]
+    assert "evidence_quote" not in issues[3]
+    assert "evidence_quote" not in issues[4]
+    assert issues[2]["fingerprint"] != issues[3]["fingerprint"]
+
+
+async def test_book_review_reuses_quoted_conflict_issue_across_reworded_reviews(
+    client, test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    chapter_id = "chapter-1"
+    old = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="conflict",
+        channel="manual_review",
+        question="书中‘学校比赛安排在九月’与另一章十月的说法冲突，以哪一个为准？",
+        reason="请决定如何表述。",
+        priority="high",
+        fingerprint="a" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="old-review",
+    )
+    test_db.add(old)
+    test_db.add(MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="conflict",
+        channel="manual_review",
+        question="‘学校比赛安排在九月’这个日期准确吗？",
+        reason="旧轮次的问题。",
+        priority="high",
+        fingerprint="c" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="earlier-review",
+        status="closed",
+        outcome="superseded",
+    ))
+    await test_db.flush()
+    old_id = old.id
+    candidate = {
+        "issue_type": "conflict",
+        "channel": "manual_review",
+        "question": "学校比赛到底在九月还是十月？",
+        "reason": "时间冲突需要讲述者确认。",
+        "priority": "high",
+        "chapter_ids": [chapter_id],
+        "evidence_quote": "学校比赛安排在九月",
+        "resolution": "user_decision",
+    }
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    first = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="new-review",
+        candidates=[candidate],
+    )
+    assert len(first) == 1
+    assert first[0].id == old_id
+    assert first[0].status == "open"
+    assert first[0].input_signature == "new-review"
+
+    first[0].status = "closed"
+    first[0].outcome = "confirmed"
+    first[0].outcome_note = "以九月为准。"
+    await test_db.flush()
+    reworded = {**candidate, "question": "学校比赛的时间以哪一个说法为准？"}
+    reworded["fingerprint"] = completion_issues.stable_book_issue_fingerprint(reworded)
+    assert reworded["fingerprint"] == candidate["fingerprint"]
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="later-review",
+        candidates=[reworded],
+    )
+    assert len(current) == 1
+    assert current[0].id == old_id
+    assert current[0].status == "closed"
+    assert current[0].outcome_note == "以九月为准。"
+    assert current[0].input_signature == "later-review"
+
+
+@pytest.mark.ci_smoke
+async def test_legacy_privacy_does_not_block_private_book_or_repeat_decisions(
+    client, test_db,
+):
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    versions = []
+    for chapter in chapters:
+        _, version = await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT,
+        )
+        versions.append(version)
+    original_content = versions[0].content
+    candidate = {
+        "issue_type": "privacy",
+        "channel": "manual_review",
+        "question": "这段内容是否适合保留？",
+        "reason": "请由讲述者决定。",
+        "priority": "high",
+        "chapter_ids": [chapters[0].id],
+        "evidence_quote": original_content,
+        "resolution": "user_decision",
+    }
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+    issue = MemoirCompletionIssue(
+        project_id=project_id, scope="book", issue_type="privacy",
+        channel="manual_review", question=candidate["question"],
+        reason=candidate["reason"], priority="high",
+        related_chapter_ids_json=candidate["chapter_ids"],
+        fingerprint=candidate["fingerprint"], input_signature="first-review",
+        resolution="user_decision",
+    )
+    test_db.add(issue)
+    await test_db.commit()
+
+    full = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert full.omitted_chapter_ids == []
+    assert full.chapter_snapshot_json[0]["content"] == original_content
+    await test_db.commit()
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt",
+    )
+    assert exported.status_code == 200
+    assert original_content in exported.text
+    shared = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/share")
+    assert shared.status_code == 200, shared.text
+    assert (await completion_issues.collection_response(
+        test_db, project_id=project_id,
+    )).issues == []
+    history = await completion_issues.collection_response(
+        test_db, project_id=project_id, include_closed=True,
+    )
+    assert history.issues[0].id == issue.id
+    assert history.issues[0].blocks_book is False
+    assert issue.status == "open"
+    pending_review = MemoirBookReview(
+        project_id=project_id, engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="first-review", status="ready", review_json={},
+    )
+    assert (await book_review_answer_state.load_answer_context(
+        test_db, review=pending_review,
+    )).unresolved_count == 0
+
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
+        json={"outcome": "declined", "note": "用户确认不处理，保留当前书稿表述。"},
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "closed"
+    assert closed.json()["outcome"] == "declined"
+
+    full = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert full.omitted_chapter_ids == []
+    assert [chapter["chapter_id"] for chapter in full.chapter_snapshot_json] == [
+        chapter.id for chapter in chapters
+    ]
+    assert full.chapter_snapshot_json[0]["content"] == original_content
+    assert (await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )).content == original_content
+
+    reworded = {**candidate, "question": "是否要修改这段表述？"}
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="second-review",
+        candidates=[reworded],
+    )
+    assert current == []
+    await test_db.refresh(issue)
+    assert issue.status == "closed"
+    assert issue.outcome == "declined"
+    assert issue.outcome_note == "用户确认不处理，保留当前书稿表述。"
+
+    review = MemoirBookReview(
+        project_id=project_id,
+        engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="second-review",
+        status="ready",
+        review_json={},
+    )
+    answer_context = await book_review_answer_state.load_answer_context(
+        test_db, review=review,
+    )
+    assert answer_context.answers == ()
+    assert answer_context.unresolved_count == 0
+
+
+async def test_book_review_keeps_unresolved_conflict_issue_when_model_omits_it(
+    client, test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    draft = MemoirBookChapterDraft(
+        project_id=project_id, chapter_id=chapter_id, status="confirmed",
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=draft.id, project_id=project_id, chapter_id=chapter_id,
+        version=1, content="书中写到‘某位知名企业家’曾是我的经理。",
+    ))
+    old = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="conflict",
+        channel="manual_review",
+        question="书中‘某位知名企业家’曾是你的经理，这段是否适合保留？",
+        reason="请决定如何表述。",
+        priority="high",
+        fingerprint="b" * 64,
+        related_chapter_ids_json=[chapter_id],
+        input_signature="old-review",
+    )
+    test_db.add(old)
+    await test_db.flush()
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="new-review",
+        candidates=[],
+    )
+    assert [issue.id for issue in current] == [old.id]
+    assert old.status == "open"
+    assert old.input_signature == "new-review"
+
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=draft.id, project_id=project_id, chapter_id=chapter_id,
+        version=2, content="书中只写一位同事曾是我的经理。",
+    ))
+    await test_db.flush()
+    current = await completion_issues.sync_book_review_issues(
+        test_db, project_id=project_id, input_signature="later-review",
+        candidates=[],
+    )
+    assert current == []
+    assert old.status == "closed"
+    assert old.outcome == "superseded"
+
+
+def test_book_review_does_not_invent_material_provenance():
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        book_metadata={"title": "故事"},
+        chapters=(
+            BookReviewChapter(
+                chapter_id="chapter-1",
+                title="第一章",
+                sort_order=1,
+                digest_id="digest-1",
+                digest_signature="signature-1",
+                digest={},
+                draft_version_id="version-1",
+                draft_hash="hash-1",
+                material_ids=frozenset({"unrelated-material", "another-material"}),
+            ),
+        ),
+        input_signature="book-signature",
+    )
+    review = normalize_book_review(
+        {
+            "summary": "需要补充后续。",
+            "candidate_issues": [
+                {
+                    "issue_type": "impact",
+                    "question": "后来这件事带来了什么变化？",
+                    "reason": "现有正文缺少后续。",
+                    "priority": "medium",
+                    "chapter_ids": ["C1"],
+                    "resolution": "new_material",
+                }
+            ],
+        },
+        context=context,
+    )
+    candidate = review["candidate_issues"][0]
+    assert candidate["chapter_ids"] == ["chapter-1"]
+    assert candidate["material_ids"] == []
+
+
+async def test_book_review_regeneration_preserves_confirmed_answer(
+    client, test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    candidate = {
+        "issue_type": "conflict",
+        "channel": "manual_review",
+        "question": "比赛的时间以哪一个说法为准？",
+        "reason": "需要用户决定。",
+        "priority": "high",
+        "chapter_ids": ["chapter-1"],
+        "material_ids": ["arbitrary-old-material"],
+        "resolution": "user_decision",
+    }
+    old_fingerprint = completion_issues.book_review_candidate_fingerprints([candidate])[0][0]
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="conflict",
+        channel="manual_review",
+        question=candidate["question"],
+        reason=candidate["reason"],
+        priority="high",
+        fingerprint=old_fingerprint,
+        related_material_ids_json=["arbitrary-old-material"],
+        input_signature="same-review-input",
+        status="closed",
+        outcome="confirmed",
+        outcome_note="以九月为准。",
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    issue_id = issue.id
+    candidate["material_ids"] = []
+    candidate["fingerprint"] = completion_issues.stable_book_issue_fingerprint(candidate)
+
+    current = await completion_issues.sync_book_review_issues(
+        test_db,
+        project_id=project_id,
+        input_signature="same-review-input",
+        candidates=[candidate],
+    )
+    assert len(current) == 1
+    assert current[0].id == issue_id
+    assert current[0].fingerprint == candidate["fingerprint"]
+    assert current[0].outcome_note == "以九月为准。"
+    assert current[0].related_chapter_ids_json == ["chapter-1"]
+    assert current[0].related_material_ids_json == []
+    assert current[0].resolution == "user_decision"
+
+
+async def test_book_answer_reads_issue_without_review_candidate_history(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    review = MemoirBookReview(
+        project_id=project_id,
+        engine=book_reviews.BOOK_REVIEW_ENGINE,
+        input_signature="current-review",
+        status="ready",
+        review_json={},
+    )
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="privacy",
+        channel="manual_review",
+        question="是否保留真实姓名？",
+        reason="需要用户决定。",
+        priority="high",
+        fingerprint="a" * 64,
+        related_material_ids_json=[],
+        related_chapter_ids_json=["chapter-1"],
+        resolution="user_decision",
+        input_signature="current-review",
+        status="closed",
+        outcome="confirmed",
+        outcome_note="使用化名。",
+    )
+    test_db.add_all([review, issue])
+    await test_db.flush()
+
+    context = await book_review_answer_state.load_answer_context(test_db, review=review)
+    assert len(context.answers) == 1
+    assert context.answers[0].chapter_ids == ("chapter-1",)
+    assert context.answers[0].resolution == "user_decision"
+
+
+async def test_book_issue_uses_its_chapter_instead_of_unrelated_material(
+    client, test_db,
+):
+    project_id, chapters, sources = await _book(client, test_db, chapter_count=2)
+    response = await client.post(f"/api/memoir/projects/{project_id}/sections/bootstrap")
+    assert response.status_code == 200
+    target = await test_db.scalar(
+        select(MemoirSection).where(MemoirSection.chapter_id == chapters[1].id)
+    )
+    assert target is not None
+    issue = MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="clarity",
+        channel="interview",
+        question="后来发生了什么？",
+        reason="补充这章的后续",
+        priority="medium",
+        fingerprint="a" * 64,
+        related_material_ids_json=[sources[0]["utterance_id"]],
+        related_chapter_ids_json=[chapters[1].id],
+        input_signature="book-target-test",
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    assert await completion_interviews._target_section_id(test_db, issue=issue) == target.id
+
+
 def test_section_revision_keeps_whole_chapter_size_limit():
     with pytest.raises(ValueError, match="整章正文不能超过"):
         MemoirBookChapterDraftRevisionRequest(
@@ -383,6 +947,45 @@ def test_book_revision_plan_rejects_non_object_metadata_patch():
                 "book_metadata_patch": [],
             }
         )
+
+
+def test_book_revision_comparison_counts_title_only_change():
+    before = [{
+        "chapter_id": "chapter-1",
+        "chapter_title": "上学时光",
+        "sections": [{
+            "section_id": "section-1",
+            "title": "比赛后的回想峰",
+            "content": "这是已经存在的完整章节正文。",
+        }],
+    }]
+    after = [{
+        "chapter_id": "chapter-1",
+        "chapter_title": "上学时光",
+        "sections": [{
+            "section_id": "section-1",
+            "title": "赛后回想",
+            "content": "这是已经存在的完整章节正文。",
+        }],
+    }]
+
+    comparison = book_revision_proposals.build_comparison(
+        before=before,
+        after=after,
+    )
+
+    assert comparison["changed_chapter_count"] == 1
+    assert comparison["changed_section_count"] == 1
+    assert comparison["chapters"][0]["sections"][0] == {
+        "section_id": "section-1",
+        "title": "赛后回想",
+        "before_title": "比赛后的回想峰",
+        "after_title": "赛后回想",
+        "before_content": "这是已经存在的完整章节正文。",
+        "after_content": "这是已经存在的完整章节正文。",
+        "before_char_count": 14,
+        "after_char_count": 14,
+    }
 
 
 def test_editorial_profile_plan_requires_selected_metadata_fields():
@@ -654,6 +1257,80 @@ async def _create_current_draft(
     return draft, version
 
 
+@pytest.mark.parametrize("empty_sections_present", [True, False])
+async def test_completion_requires_material_before_checking_empty_chapters(
+    client, test_db, empty_sections_present,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    source = await create_test_voice_transcript(
+        client, test_db, "这是用于发布回归的虚构讲述。", project_id=project_id,
+    )
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["有讲述的章节", "尚未讲述的章节一", "尚未讲述的章节二"],
+        source_refs_by_chapter=[[memoir_source_ref(source)], [], []],
+    )
+    _, version = await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    version.prompt_snapshot = chapter_generation.CHAPTER_GENERATION_ENGINE
+    if not empty_sections_present:
+        for section in (await test_db.scalars(
+            select(MemoirSection).where(MemoirSection.chapter_id.in_([c.id for c in chapters[1:]]))
+        )).all():
+            await test_db.delete(section)
+    await test_db.commit()
+
+    overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert overview.status_code == 200
+    body = overview.json()
+    assert body["completed_chapters"] == 1
+    for item in body["chapters"][1:]:
+        assert item["state"] == "needs_input"
+        assert item["next_action"]["kind"] == "wait"
+        assert item["next_action"]["disabled"] is True
+        assert item["active_issue"] is None
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/workspace"
+    )
+    assert workspace.status_code == 200
+    assert workspace.json()["completion_summary"]["state"] == "needs_input"
+
+    old_batch = MemoirBookCompletionJob(
+        project_id=project_id,
+        status=MemoirBookCompletionJobStatus.FAILED.value,
+        target_chapters_json=[{"chapter_id": c.id, "title": c.title} for c in chapters[1:]],
+        chapter_job_ids_json={},
+        enqueue_errors_json={c.id: "章节没有可用于生成正文的素材" for c in chapters[1:]},
+    )
+    test_db.add(old_batch)
+    await test_db.commit()
+    retry = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={"retry_job_id": old_batch.id},
+    )
+    assert retry.status_code == 409
+    assert await test_db.scalar(select(func.count()).select_from(MemoirBookCompletionJob)) == 1
+    await test_db.refresh(old_batch)
+    assert old_batch.status == MemoirBookCompletionJobStatus.FAILED.value
+
+    # A real unchecked chapter still queues normally; the empty chapters do not.
+    version.prompt_snapshot = ""
+    await test_db.commit()
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs", json={},
+    )
+    assert queued.status_code == 202
+    assert queued.json()["failed_chapter_count"] == 0
+    assert [item["chapter_id"] for item in queued.json()["chapters"]] == [chapters[0].id]
+    assert queued.json()["chapters"][0]["job_id"]
+    assert await test_db.scalar(select(func.count()).select_from(MemoirSectionMaterial)) == 1
+
+
 async def test_existing_current_draft_still_requires_a_real_completion_check(
     client,
     test_db,
@@ -712,7 +1389,7 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
     assert version_count == 1
 
 
-async def test_prepare_uses_and_remembers_the_selected_ai_model(
+async def test_prepare_uses_and_remembers_the_default_ai_model(
     client,
     test_db,
     monkeypatch,
@@ -728,15 +1405,15 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
 
     assert first.status_code == 200, first.text
     assert requested_models
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
     project = await test_db.get(Project, project_id)
     assert project is not None
-    assert project.metadata_json["ai_model"] == "claude-opus-4-8"
+    assert project.metadata_json["ai_model"] == DEFAULT_AI_TEXT_MODEL
 
     requested_models.clear()
     second = await _run_chapter_preparation(
@@ -748,10 +1425,10 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
 
     assert second.status_code == 200, second.text
     assert requested_models
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
 
-async def test_chapter_preparation_job_reports_progress_and_selected_model(
+async def test_chapter_preparation_job_reports_progress_and_default_model(
     client,
     test_db,
     monkeypatch,
@@ -766,7 +1443,7 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
         f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/jobs",
         json={
             "operation": "prepare",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -775,7 +1452,7 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
     assert queued_body["status"] == "pending"
     assert queued_body["stage"] == "queued"
     assert queued_body["total_section_count"] == 1
-    assert queued_body["requested_ai_model"] == "claude-opus-4-8"
+    assert queued_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert queued_body["can_cancel"] is True
 
     overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
@@ -803,10 +1480,10 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
     assert current_body["stage"] == "completed"
     assert current_body["completed_section_count"] == 1
     assert current_body["outcome"] == "completed"
-    assert current_body["requested_ai_model"] == "claude-opus-4-8"
+    assert current_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert current_body["resolved_ai_model"] == fake.model_name
     assert current_body["can_cancel"] is False
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
 
 async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
@@ -1095,7 +1772,7 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     summary = prepared.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
-    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+    assert summary["active_issue"]["question"] == "这一章比赛年份的两种说法，哪一种准确？"
     rewritten = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/jobs",
         json={"operation": "rewrite"},
@@ -1172,7 +1849,7 @@ async def test_chapter_review_filters_section_findings_before_rewrite(
     assert any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请通读回忆录章节" in prompt)
 
 
-async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
+async def test_explicit_rewrite_refreshes_all_sections_once(
     client,
     test_db,
     monkeypatch,
@@ -1227,7 +1904,7 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
         project_id=project_id,
         chapter_id=chapter_id,
         operation="rewrite",
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
 
     assert rewritten.status_code == 200, rewritten.text
@@ -1236,19 +1913,29 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     assert len(body["sections"]) == 4
     assert len(body["draft_sections"]) == 4
     assert [item["section_id"] for item in body["draft_sections"]] == [item["id"] for item in body["sections"]]
-    assert len(fake.prompts) == 3
+    assert len(fake.prompts) == 4
     assert all("请把下面的原始讲述整理为回忆录章节" in prompt for prompt in fake.prompts)
     assert all(prompt.count("material_id: ") == 1 for prompt in fake.prompts)
-    assert body["draft_sections"][0]["content"] == "这是已经存在的完整章节正文。"
-    assert requested_models == ["claude-opus-4-8"]
+    assert body["draft_sections"][0]["content"] != "这是已经存在的完整章节正文。"
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
 
 
+@pytest.mark.parametrize("finalize_action", ["apply", "dismiss", "stale"])
 async def test_section_revision_waits_for_apply_and_preserves_other_content(
     client,
     test_db,
     monkeypatch,
+    finalize_action,
 ):
-    project_id, chapters, sources = await _book(client, test_db)
+    project_id = await ensure_mobile_memoir_project(client)
+    sources = [await create_test_voice_transcript(
+        client, test_db, "那年，我参加了学校比赛。", project_id=project_id,
+    )]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db, project_id=project_id,
+        chapter_titles=["学校里的比赛", "尚未讲述的章节一", "尚未讲述的章节二"],
+        source_refs_by_chapter=[[memoir_source_ref(sources[0])], [], []],
+    )
     chapter = chapters[0]
     added_source = await create_test_voice_transcript(
         client,
@@ -1282,7 +1969,31 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
-    fake = LayeredBookAI()
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter.id,
+    )
+    version.prompt_snapshot = chapter_generation._render_policy_tag(context)
+    version.content = "\n\n".join(item["content"] for item in version.section_snapshot_json)
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, parent.id)
+    finally:
+        clear_editing_job_handlers()
+    await test_db.refresh(parent)
+    assert parent.status == MemoirEditingJobStatus.SUCCEEDED.value
+    original_output = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert original_output is not None
+    original_output_id, original_output_version = original_output.id, original_output.version
+    original_snapshot = original_output.chapter_snapshot_json[0]
+    assert original_snapshot["draft_version_id"] == version.id
+
+    fake = LayeredBookAI(
+        section_revision_title="赛后回想",
+        section_revision_content="这是已经存在的完整章节正文。",
+    )
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
@@ -1294,8 +2005,8 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         f"{base_path}/jobs",
         json={
             "operation": "plan",
-            "ai_model": "claude-opus-4-8",
-            "feedback": "把这一小节写得更平实，但不要改变标题。",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
+            "feedback": "把标题中的错字改正，并把标题缩短为“赛后回想”。",
         },
     )
     assert queued.status_code == 202, queued.text
@@ -1324,7 +2035,7 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         json={
             "operation": "feedback",
             "proposal_id": proposal_id,
-            "feedback": "还要压缩重复表达。",
+            "feedback": "标题就用“赛后回想”。",
         },
     )
     assert feedback.status_code == 202, feedback.text
@@ -1355,15 +2066,38 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     assert body["phase"] == "draft_ready"
     assert body["can_apply"] is True
     comparison = body["comparison"]["chapters"][0]["sections"][0]
-    assert comparison["before_content"] != comparison["after_content"]
-    assert comparison["after_content"].startswith("那天刮着风")
+    assert comparison["before_title"] == "比赛后的回想峰"
+    assert comparison["after_title"] == "赛后回想"
+    assert comparison["before_content"] == comparison["after_content"]
     assert await test_db.scalar(
         select(func.count(MemoirBookChapterDraftVersion.id)).where(
             MemoirBookChapterDraftVersion.draft_id == version.draft_id
         )
     ) == 1
 
-    applied = await client.post(f"{base_path}/proposals/{proposal_id}/apply")
+    if finalize_action == "stale":
+        target_section.version += 1
+        await test_db.commit()
+        stale = await client.get(f"{base_path}/proposals/{proposal_id}")
+        assert stale.json()["status"] == "stale"
+        assert stale.json()["can_apply"] is False
+    action = "dismiss" if finalize_action == "dismiss" else "apply"
+    applied = await client.post(f"{base_path}/proposals/{proposal_id}/{action}")
+    if finalize_action != "apply":
+        assert applied.status_code == (200 if action == "dismiss" else 409), applied.text
+        if action == "dismiss":
+            assert applied.json()["status"] == "dismissed"
+        await test_db.refresh(parent)
+        assert parent.status == MemoirEditingJobStatus.SUCCEEDED.value
+        assert parent.result_json["output_version_id"] == original_output_id
+        assert await test_db.scalar(select(func.count(MemoirEditingJob.id)).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        )) == 1
+        assert await test_db.scalar(select(func.count(MemoirBookChapterDraftVersion.id)).where(
+            MemoirBookChapterDraftVersion.draft_id == version.draft_id,
+        )) == 1
+        return
     assert applied.status_code == 200, applied.text
     assert applied.json()["status"] == "applied"
     assert (await client.get(f"{base_path}/jobs/current")).json()["status"] == "idle"
@@ -1375,26 +2109,63 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
     assert latest is not None
     assert latest.version == 2
     assert latest.section_snapshot_json[0]["content"] == "这是已经存在的完整章节正文。"
-    assert latest.section_snapshot_json[1]["title"] == "比赛后的回想峰"
-    assert latest.section_snapshot_json[1]["content"].startswith("那天刮着风")
+    assert latest.section_snapshot_json[1]["title"] == "赛后回想"
+    assert latest.section_snapshot_json[1]["content"] == "这是已经存在的完整章节正文。"
     assert latest.prompt_snapshot.endswith(":section_revision_workbench")
     await test_db.refresh(target_section)
-    assert target_section.title == "比赛后的回想峰"
-    assert target_section.version == 1
+    assert target_section.title == "赛后回想"
+    assert target_section.version == 2
     draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
     assert draft is not None
-    assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"
+    assert draft.metadata_json["last_requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert draft.metadata_json["last_resolved_ai_model"] == "test-layered-book"
     assert sources[0]["utterance_id"] not in fake.prompts[-1]
     assert added_source["utterance_id"] not in fake.prompts[-1]
     assert requested_models == [
-        "claude-opus-4-8",
-        "claude-opus-4-8",
-        "claude-opus-4-8",
+        DEFAULT_AI_TEXT_MODEL,
+        DEFAULT_AI_TEXT_MODEL,
+        DEFAULT_AI_TEXT_MODEL,
     ]
 
+    await test_db.refresh(parent)
+    assert parent.status == MemoirEditingJobStatus.PENDING.value
+    assert parent.result_json["output_version_id"] == original_output_id
+    assert await test_db.scalar(select(func.count(MemoirEditingJob.id)).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+    )) == 1
+    latest_id, latest_content = latest.id, latest.content
+    assert latest.used_material_ids_json == version.used_material_ids_json
+    calls = len(fake.prompts)
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, parent.id)
+    finally:
+        clear_editing_job_handlers()
+    assert len(fake.prompts) == calls
+    await test_db.refresh(parent)
+    assert parent.result_json["chapters"][chapter.id]["draft_version_id"] == latest_id
+    assert all(parent.result_json["chapters"][empty.id]["status"] == "needs_material" for empty in chapters[1:])
+    refreshed_output = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert refreshed_output is not None
+    assert refreshed_output.version == original_output_version + 1
+    assert len(refreshed_output.chapter_snapshot_json) == 1
+    snapshot = refreshed_output.chapter_snapshot_json[0]
+    assert snapshot["draft_version_id"] == latest_id
+    assert snapshot["content"] == latest_content
+    assert snapshot["sections"][0] == original_snapshot["sections"][0]
+    assert snapshot["sections"][1]["title"] == "赛后回想"
+    assert snapshot["source_refs"] == original_snapshot["source_refs"]
+    assert await test_db.scalar(select(func.count(MemoirBookChapterDraftVersion.id)).where(
+        MemoirBookChapterDraftVersion.project_id == project_id,
+    )) == 2
+    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert output.status_code == 200, output.text
+    assert output.json()["is_stale"] is False
 
-async def test_book_overview_counts_all_unfinished_chapter_states(
+
+async def test_book_overview_counts_ready_drafts_as_complete(
     client,
     test_db,
     monkeypatch,
@@ -1429,8 +2200,9 @@ async def test_book_overview_counts_all_unfinished_chapter_states(
         project_id=project_id,
     )
 
-    assert overview.headline == "还有 3 章未完成"
-    assert overview.detail == ("1 章待检查，1 章待确认，1 章待通读。每章只显示当前最重要的一步。")
+    assert overview.completed_chapters == 1
+    assert overview.headline == "还有 2 章未完成"
+    assert overview.detail == "1 章待检查，1 章待确认。每章只显示当前最重要的一步。"
 
 
 async def test_book_completion_uses_background_chapter_preparation(
@@ -1670,10 +2442,10 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     summary = prepared.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
-    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+    assert summary["active_issue"]["question"] == "这一章比赛年份的两种说法，哪一种准确？"
 
 
-async def test_book_review_uses_chapter_digests_and_creates_book_issue(
+async def test_book_review_uses_chapter_text_and_creates_book_issue(
     client,
     test_db,
     monkeypatch,
@@ -1701,13 +2473,13 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         client,
         test_db,
         project_id=project_id,
-        ai_model="claude-opus-4-8",
+        ai_model=DEFAULT_AI_TEXT_MODEL,
     )
     assert generated.status_code == 200
     review = generated.json()
 
     assert review["status"] == "ready"
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
     book_prompt = next(prompt for prompt in fake.prompts if "请通读下面这本回忆录" in prompt)
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
@@ -1724,14 +2496,15 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert issue is not None
     issue_id = issue.id
     assert issue.channel == "manual_review"
-    assert issue.related_material_ids_json
+    assert issue.related_material_ids_json == []
+    assert issue.related_chapter_ids_json == [chapter.id for chapter in chapters]
     current = await _completion_field(client, project_id, "book_review")
     assert current["id"] == review["id"]
-    blocked = await client.post(
+    still_readable = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble",
     )
-    assert blocked.status_code == 409
-    assert "全书检查中需要确认的问题" in blocked.json()["detail"]
+    assert still_readable.status_code == 200
+    assert len(still_readable.json()["chapter_snapshot_json"]) == 2
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
         json={"outcome": "confirmed"},
@@ -1745,6 +2518,21 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         await test_db.scalar(select(MemoirBookReview.id).where(MemoirBookReview.project_id == project_id))
         == review["id"]
     )
+    first_version = await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )
+    assert first_version is not None
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=first_version.draft_id,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        version=first_version.version + 1,
+        content=first_version.content,
+    ))
+    await test_db.flush()
+    assert (await book_reviews.load_book_review_context(
+        test_db, project_id=project_id,
+    )).input_signature == review["input_signature"]
 
 
 async def test_book_review_job_persists_across_requests_and_runs_in_worker(
@@ -1773,7 +2561,7 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
         json={
             "force_regenerate": False,
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -1836,9 +2624,9 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert completed_body["processed_chapter_count"] == 2
     assert completed_body["review_id"]
     assert completed_body["can_cancel"] is False
-    assert completed_body["requested_ai_model"] == "claude-opus-4-8"
+    assert completed_body["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
     assert completed_body["resolved_ai_model"] == fake.model_name
-    assert set(requested_models) == {"claude-opus-4-8"}
+    assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
 
     snapshot = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
@@ -1865,6 +2653,62 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["can_retry"] is True
+
+
+async def test_unrelated_book_revision_can_proceed_while_conflict_chapter_is_omitted(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=3)
+    fake = LayeredBookAI(book_actions=True)
+    _install_ai(monkeypatch, fake)
+    assert (await client.post(f"/api/memoir/projects/{project_id}/sections/bootstrap")).status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+    generated = await _run_book_review(client, test_db, project_id=project_id)
+    assert generated.status_code == 200, generated.text
+    review = await test_db.get(MemoirBookReview, generated.json()["id"])
+    assert review is not None
+    test_db.add(MemoirCompletionIssue(
+        project_id=project_id,
+        scope="book",
+        issue_type="conflict",
+        channel="manual_review",
+        question="第三章这段可识别的经历是否适合入书？",
+        priority="high",
+        fingerprint="f" * 64,
+        input_signature=review.input_signature,
+        related_chapter_ids_json=[chapters[2].id],
+    ))
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200, assembled.text
+    assert assembled.json()["omitted_chapter_ids"] == [chapters[2].id]
+    assert [item["chapter_id"] for item in assembled.json()["chapter_snapshot_json"]] == [
+        chapter.id for chapter in chapters[:2]
+    ]
+
+    action = generated.json()["review"]["editorial_actions"][0]
+    assert action["chapter_ids"] == [chapter.id for chapter in chapters[:2]]
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={"include_answers": False, "action_ids": [action["id"]]},
+    )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    completed = await _completion_field(client, project_id, "revision_job")
+    assert completed["status"] == "succeeded"
+    assert completed["proposal_status"] == "ready"
 
 
 async def test_book_review_selection_plan_feedback_draft_and_apply(
@@ -1913,7 +2757,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         },
     )
     assert blocked_revision.status_code == 409
-    assert "先处理完所有需要确认的问题" in blocked_revision.json()["detail"]
+    assert "先处理所选章节需要确认的问题" in blocked_revision.json()["detail"]
     blocked_state = await _completion_field(
         client,
         project_id,
@@ -1943,7 +2787,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         json={
             "include_answers": True,
             "action_ids": [],
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert queued.status_code == 202, queued.text
@@ -1965,7 +2809,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         json={
             "include_answers": True,
             "action_ids": [action_id],
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert retried.status_code == 202, retried.text
@@ -2005,7 +2849,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert "第1小节" in completed_body["summary"]
     assert "C1" not in completed_body["summary"]
     assert "S1" not in completed_body["summary"]
-    assert set(requested_models) == {None, "claude-opus-4-8"}
+    assert set(requested_models) == {None, DEFAULT_AI_TEXT_MODEL}
 
     versions = list(
         (
@@ -2056,7 +2900,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         f"revision-proposals/{completed_body['proposal_id']}/feedback/jobs",
         json={
             "feedback": "保留两段经历，但请统一相关人物的称谓。",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert feedback_job.status_code == 202, feedback_job.text
@@ -2106,7 +2950,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
 
     draft_job = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{completed_body['proposal_id']}/draft/jobs",
-        json={"ai_model": "claude-opus-4-8"},
+        json={"ai_model": DEFAULT_AI_TEXT_MODEL},
     )
     assert draft_job.status_code == 202, draft_job.text
     clear_editing_job_handlers()
@@ -2564,7 +3408,7 @@ async def test_book_review_job_accepts_readable_chapters_without_confirmation(
     assert queued.status_code == 202
 
 
-async def test_book_review_uses_the_current_output_title(
+async def test_book_review_ignores_a_stale_output_title(
     client,
     test_db,
     monkeypatch,
@@ -2605,8 +3449,8 @@ async def test_book_review_uses_the_current_output_title(
         project_id=project_id,
     )
 
-    assert context.book_metadata["title"] == "一个人的故园与远方"
-    assert context.input_signature != reviewed.json()["input_signature"]
+    assert context.book_metadata["title"] == "测试回忆录"
+    assert context.input_signature == reviewed.json()["input_signature"]
 
 
 async def test_background_batch_recovers_after_child_dispatch_without_client_reads(client, test_db, monkeypatch):

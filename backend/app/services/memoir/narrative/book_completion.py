@@ -129,7 +129,10 @@ async def prepare_chapter(
             )
             .limit(1)
         )
-        if not chapter_generation.chapter_draft_is_current(context, latest):
+        if (
+            not chapter_generation.chapter_draft_is_current(context, latest)
+            or not chapter_generation.chapter_draft_render_policy_current(context, latest)
+        ):
             await chapter_generation.generate_and_save_chapter_draft(
                 db,
                 project_id=project_id,
@@ -208,6 +211,7 @@ async def rewrite_chapter(
         editorial_guidance=editorial_guidance,
         checkpoint=checkpoint,
         progress_callback=progress_callback,
+        force_refresh=True,
     )
     if progress_callback is not None:
         await progress_callback(
@@ -251,6 +255,16 @@ async def get_book_completion_overview(
     return MemoirBookCompletionOverviewResponse.model_validate(
         {
             **overview.model_dump(),
+            "blocking_issue_count": sum(issue.blocks_book for issue in issues.issues),
+            "chapters": [
+                chapter.model_copy(update={
+                    "blocking_issue_count": sum(
+                        issue.blocks_book and issue.chapter_id == chapter.chapter_id
+                        for issue in issues.issues
+                    ),
+                })
+                for chapter in overview.chapters
+            ],
             "completion_job": completion_job,
             "book_review": (
                 book_reviews.book_review_response(review) if review else None

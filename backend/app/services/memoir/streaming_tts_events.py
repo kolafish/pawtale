@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing
 from typing import Protocol
 
 from app.services.memoir.voice_tts_types import (
@@ -70,34 +71,51 @@ async def _stream_tts_frame_events(
     audio_bytes_seen = 0
     current_format: tuple[str, int | None, int, int] | None = None
 
-    async for chunk in tts_client.stream_input_synthesize(
+    async with aclosing(tts_client.stream_input_synthesize(
         text_chunks,
         voice=voice,
         speed_ratio=speed_ratio,
         response_format=STREAM_TTS_RESPONSE_FORMAT,
         sample_rate=STREAM_TTS_SAMPLE_RATE,
-    ):
-        if cancel_event.is_set():
-            return
-        if on_chunk is not None:
-            on_chunk(chunk)
-        if chunk.audio:
-            sequence += 1
-            frame_count += 1
-            audio_bytes_seen += len(chunk.audio)
-            next_format = (
-                chunk.mime_type,
-                chunk.sample_rate,
-                chunk.channels,
-                chunk.bits_per_sample,
-            )
-            if next_format != current_format:
-                current_format = next_format
+    )) as stream:
+        async for chunk in stream:
+            if cancel_event.is_set():
+                return
+            if on_chunk is not None:
+                on_chunk(chunk)
+            if chunk.audio:
+                sequence += 1
+                frame_count += 1
+                audio_bytes_seen += len(chunk.audio)
+                next_format = (
+                    chunk.mime_type,
+                    chunk.sample_rate,
+                    chunk.channels,
+                    chunk.bits_per_sample,
+                )
+                if next_format != current_format:
+                    current_format = next_format
+                    await client.send_json(
+                        {
+                            "type": "audio.format",
+                            **event_context,
+                            "sequence": sequence,
+                            "mime_type": chunk.mime_type,
+                            "provider": chunk.provider,
+                            "model": chunk.model,
+                            "voice": chunk.voice,
+                            "speed_ratio": chunk.speed_ratio,
+                            "sample_rate": chunk.sample_rate,
+                            "channels": chunk.channels,
+                            "bits_per_sample": chunk.bits_per_sample,
+                        }
+                    )
                 await client.send_json(
                     {
-                        "type": "audio.format",
+                        "type": "audio.frame",
                         **event_context,
                         "sequence": sequence,
+                        "audio": base64.b64encode(chunk.audio).decode("ascii"),
                         "mime_type": chunk.mime_type,
                         "provider": chunk.provider,
                         "model": chunk.model,
@@ -108,47 +126,31 @@ async def _stream_tts_frame_events(
                         "bits_per_sample": chunk.bits_per_sample,
                     }
                 )
-            await client.send_json(
-                {
-                    "type": "audio.frame",
-                    **event_context,
-                    "sequence": sequence,
-                    "audio": base64.b64encode(chunk.audio).decode("ascii"),
-                    "mime_type": chunk.mime_type,
-                    "provider": chunk.provider,
-                    "model": chunk.model,
-                    "voice": chunk.voice,
-                    "speed_ratio": chunk.speed_ratio,
-                    "sample_rate": chunk.sample_rate,
-                    "channels": chunk.channels,
-                    "bits_per_sample": chunk.bits_per_sample,
-                }
-            )
-        if chunk.is_final:
-            duration_seconds = chunk.duration_seconds
-            if duration_seconds is None:
-                duration_seconds = _pcm_duration_seconds_from_size(
-                    audio_bytes_seen,
-                    mime_type=chunk.mime_type,
-                    sample_rate=chunk.sample_rate,
-                    channels=chunk.channels,
-                    bits_per_sample=chunk.bits_per_sample,
+            if chunk.is_final:
+                duration_seconds = chunk.duration_seconds
+                if duration_seconds is None:
+                    duration_seconds = _pcm_duration_seconds_from_size(
+                        audio_bytes_seen,
+                        mime_type=chunk.mime_type,
+                        sample_rate=chunk.sample_rate,
+                        channels=chunk.channels,
+                        bits_per_sample=chunk.bits_per_sample,
+                    )
+                await client.send_json(
+                    {
+                        "type": "audio.done",
+                        **event_context,
+                        "frame_count": frame_count,
+                        "duration_seconds": duration_seconds,
+                        "provider": chunk.provider,
+                        "model": chunk.model,
+                        "voice": chunk.voice,
+                        "speed_ratio": chunk.speed_ratio,
+                        "sample_rate": chunk.sample_rate,
+                        "channels": chunk.channels,
+                        "bits_per_sample": chunk.bits_per_sample,
+                    }
                 )
-            await client.send_json(
-                {
-                    "type": "audio.done",
-                    **event_context,
-                    "frame_count": frame_count,
-                    "duration_seconds": duration_seconds,
-                    "provider": chunk.provider,
-                    "model": chunk.model,
-                    "voice": chunk.voice,
-                    "speed_ratio": chunk.speed_ratio,
-                    "sample_rate": chunk.sample_rate,
-                    "channels": chunk.channels,
-                    "bits_per_sample": chunk.bits_per_sample,
-                }
-            )
 
 
 async def queued_text_chunks(
@@ -170,7 +172,7 @@ async def chunk_text_for_tts(
     min_chars: int = TTS_INPUT_CHUNK_MIN_CHARS,
     max_chars: int = TTS_INPUT_CHUNK_MAX_CHARS,
     max_wait_seconds: float = TTS_INPUT_CHUNK_MAX_WAIT_SECONDS,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     buffer = ""
     iterator = text_chunks.__aiter__()
     pending_text: asyncio.Task[str] | None = None
@@ -205,8 +207,10 @@ async def chunk_text_for_tts(
                 if chunk:
                     yield chunk
     finally:
-        if pending_text is not None and not pending_text.done():
-            pending_text.cancel()
+        if pending_text is not None:
+            if not pending_text.done():
+                pending_text.cancel()
+            await asyncio.gather(pending_text, return_exceptions=True)
     chunk = buffer.strip()
     if chunk and not cancel_event.is_set():
         yield chunk

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import (
@@ -43,34 +43,60 @@ async def claim_transcript_mutation_guard(
     utterance: MemoirVoiceUtterance,
     expected: TranscriptMutationGuard,
 ) -> bool:
-    if transcript_mutation_guard(utterance) != expected:
+    locked_utterance = (
+        await db.execute(
+            select(
+                MemoirVoiceUtterance.transcript_raw,
+                MemoirVoiceUtterance.transcript_edited,
+                MemoirVoiceUtterance.chat_message_id,
+            )
+            .where(MemoirVoiceUtterance.id == utterance.id)
+            .with_for_update()
+        )
+    ).one_or_none()
+    if locked_utterance is None:
+        return False
+    locked_text = (locked_utterance.transcript_edited or "").strip() or (
+        locked_utterance.transcript_raw or ""
+    ).strip()
+    if source_text_hash(locked_text) != expected.source_text_hash:
+        return False
+    if locked_utterance.chat_message_id is None:
+        return False
+
+    locked_message = (
+        await db.execute(
+            select(
+                MemoirChatMessage.content_text,
+                MemoirChatMessage.transcript_version_id,
+            )
+            .where(
+                MemoirChatMessage.id == locked_utterance.chat_message_id,
+            )
+            .with_for_update()
+        )
+    ).one_or_none()
+    if locked_message is None:
+        return False
+    matches = (
+        source_text_hash(locked_message.content_text) == expected.source_text_hash
+        and locked_message.transcript_version_id == expected.transcript_version_id
+    )
+    if not matches:
         return False
     message = utterance.chat_message
     if message is None:
         return False
-    if source_text_hash(message.content_text) != expected.source_text_hash:
-        return False
-
-    version_filter = (
-        MemoirChatMessage.transcript_version_id.is_(None)
-        if expected.transcript_version_id is None
-        else MemoirChatMessage.transcript_version_id
-        == expected.transcript_version_id
+    await db.refresh(
+        message,
+        attribute_names=[
+            "content_text",
+            "content_status",
+            "transcript_version_id",
+            "metadata_json",
+        ],
     )
-    result = await db.execute(
-        update(MemoirChatMessage)
-        .where(
-            MemoirChatMessage.id == message.id,
-            MemoirChatMessage.content_text == message.content_text,
-            version_filter,
-        )
-        .values(
-            content_text=MemoirChatMessage.content_text,
-            transcript_version_id=MemoirChatMessage.transcript_version_id,
-            updated_at=MemoirChatMessage.updated_at,
-        )
-    )
-    return result.rowcount == 1
+    return True
 
 
 async def schedule_ready_utterance_background_work(

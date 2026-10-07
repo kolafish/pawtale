@@ -47,6 +47,7 @@ const FEEDBACK_POLL_INTERVAL_MS = 1500;
 const PAGE_CLASS = "revision-page ui-page-shell ui-accessible-page";
 
 interface RevisionSectionView extends MemoirBookRevisionSectionComparison {
+  display_title: string;
   display_content: string;
 }
 
@@ -200,6 +201,9 @@ export function revisionViewPatch(
       ...chapter,
       sections: chapter.sections.map((section) => ({
         ...section,
+        display_title: previewVersion === "before"
+          ? section.before_title || section.title
+          : section.after_title || section.title,
         display_content: previewVersion === "before"
           ? section.before_content
           : section.after_content,
@@ -360,8 +364,8 @@ definePage<RevisionWorkbenchData>()({
       return;
     }
     if (scope === "chapter_section" && !proposalId) {
-      this.setData({ loading: false });
       await this.refreshFeedbackJob();
+      this.setData({ loading: false });
       return;
     }
     if (await this.loadProposal()) {

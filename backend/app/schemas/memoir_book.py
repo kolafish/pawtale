@@ -13,8 +13,10 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
     MemoirOutputStatus,
 )
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_voice import (
     MemoirAutomationEventResponse as MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
@@ -64,19 +66,14 @@ class MemoirBookPlanChapterInput(BaseModel):
 
 class MemoirBookPlanGenerateRequest(BaseModel):
     ai_model: str | None = None
-    max_chapters: int = 8
-
-    @field_validator("max_chapters")
-    @classmethod
-    def _valid_max_chapters(cls, value: int) -> int:
-        if value < 1 or value > 12:
-            raise ValueError("章节数量需要在 1 到 12 之间")
-        return value
 
 
 class MemoirBookPlanConfirmRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterInput]
+    chapters: list[MemoirBookPlanChapterInput] = Field(
+        min_length=1,
+        max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
 
     @field_validator("title")
     @classmethod
@@ -105,7 +102,10 @@ class MemoirBookPlanChapterUpdateInput(MemoirBookPlanChapterInput):
 
 class MemoirBookPlanUpdateRequest(BaseModel):
     title: str | None = None
-    chapters: list[MemoirBookPlanChapterUpdateInput]
+    chapters: list[MemoirBookPlanChapterUpdateInput] = Field(
+        min_length=1,
+        max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
 
     @field_validator("title")
     @classmethod
@@ -135,12 +135,17 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     target_chapter_id: str | None = None
     direction: Literal["up", "down"] | None = None
     target_position: Literal["first", "last"] | None = None
-    target_index: int | None = Field(default=None, ge=1, le=99)
+    target_index: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
     relative_chapter_id: str | None = None
     relative_position: Literal["before", "after"] | None = None
     title: str | None = None
     include_in_book: bool | None = None
     utterance_ids: list[str] = Field(default_factory=list)
+    section_ids: list[str] = Field(default_factory=list, max_length=30)
 
     @field_validator("chapter_id", "target_chapter_id", "relative_chapter_id")
     @classmethod
@@ -166,6 +171,14 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     @classmethod
     def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(item.strip() for item in value if item.strip()))
+
+    @field_validator("section_ids")
+    @classmethod
+    def _valid_section_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned) or len(set(cleaned)) != len(cleaned):
+            raise ValueError("小节不能重复或为空")
+        return cleaned
 
 
 class MemoirBookChapterTitleUpdateRequest(BaseModel):
@@ -355,7 +368,70 @@ class MemoirBookAudioResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
-MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"]
+class MemoirBookAudioPlanRequest(MemoirBookAudioRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str = Field(min_length=1, max_length=36)
+    start_index: int = Field(default=0, ge=0)
+    profile_key: str | None = Field(default=None, min_length=64, max_length=64)
+    retry_failed: bool = False
+
+
+class MemoirBookAudioSegmentResponse(BaseModel):
+    index: int
+    text_start: int
+    text_end: int
+    status: Literal["idle", "pending", "running", "succeeded", "failed"]
+    job_id: str | None = None
+    audio_file_id: str | None = None
+    duration_seconds: float | None = None
+    alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
+    error_message: str = ""
+
+
+class MemoirBookAudioPlanResponse(BaseModel):
+    version_id: str
+    source_text_hash: str
+    profile_key: str
+    voice: str | None
+    speed_ratio: float
+    segments: list[MemoirBookAudioSegmentResponse]
+    ready_count: int
+    poll_after_ms: int
+
+
+MemoirBookCoverStyle = Literal[
+    "classic_plain",
+    "warm_gray",
+    "dark_album",
+    "moonlit_courtyard",
+    "navy_gilt",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+]
+MemoirBookManuscriptTemplate = Literal[
+    "classic_family",
+    "photo_memory",
+    "oral_archive",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
+    "custom",
+]
+MemoirBookCustomFontScale = Literal["standard", "large"]
+MemoirBookCustomFontFamily = Literal["auto", "serif", "sans"]
+MemoirBookCustomLineSpacing = Literal["compact", "standard", "relaxed"]
+MemoirBookCustomPageMargin = Literal["narrow", "standard", "wide"]
+
+
+class MemoirBookCustomLayout(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    font_family: MemoirBookCustomFontFamily = "auto"
+    font_scale: MemoirBookCustomFontScale = "standard"
+    line_spacing: MemoirBookCustomLineSpacing = "standard"
+    page_margin: MemoirBookCustomPageMargin = "standard"
 
 
 class MemoirBookOutputUpdateRequest(BaseModel):
@@ -367,6 +443,8 @@ class MemoirBookOutputUpdateRequest(BaseModel):
     afterword: str | None = None
     back_cover_quote: str | None = None
     cover_style: MemoirBookCoverStyle | None = None
+    manuscript_template: MemoirBookManuscriptTemplate | None = None
+    custom_layout: MemoirBookCustomLayout | None = None
 
     @field_validator("title")
     @classmethod
@@ -393,6 +471,20 @@ MemoirBookEditorialCopyTarget = Literal[
     "chapter_intros",
     "pull_quotes",
 ]
+
+MemoirBookLevelEditorialCopyTarget = Literal["preface", "afterword", "back_cover_quote"]
+
+
+class MemoirBookOutputEditorialCopyGenerationJobResponse(BaseModel):
+    target: MemoirBookLevelEditorialCopyTarget
+    job_id: str
+    status: MemoirEditingJobStatus
+    error_message: str
+    updated_at: datetime
+
+
+class MemoirBookOutputEditorialCopyGenerationJobListResponse(BaseModel):
+    items: list[MemoirBookOutputEditorialCopyGenerationJobResponse]
 
 
 class MemoirBookOutputEditorialCopyRegenerateRequest(BaseModel):
@@ -489,7 +581,7 @@ class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
 
 
 class MemoirBookManuscriptProfile(BaseModel):
-    template: Literal["classic_family", "photo_memory", "oral_archive"] = "classic_family"
+    template: MemoirBookManuscriptTemplate = "classic_family"
     title: str
     subtitle: str = ""
     narrator_name: str = ""
@@ -571,8 +663,10 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     show_source_appendix: bool = True
     photo_mode: Literal["none", "chapter", "appendix"] = "none"
     cover_style: MemoirBookCoverStyle = "classic_plain"
+    cover_image: MemoirBookManuscriptIllustration | None = None
     back_cover_quote: str = ""
     editorial_copy_model: str | None = None
+    custom_layout: MemoirBookCustomLayout = Field(default_factory=MemoirBookCustomLayout)
 
 
 class MemoirBookManuscriptBackMatter(BaseModel):
@@ -584,7 +678,7 @@ class MemoirBookManuscriptBackMatter(BaseModel):
 
 
 class MemoirBookManuscript(BaseModel):
-    schema_version: int = 2
+    schema_version: int = 5
     profile: MemoirBookManuscriptProfile
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
@@ -592,6 +686,14 @@ class MemoirBookManuscript(BaseModel):
     image_appendix: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
     back_matter: MemoirBookManuscriptBackMatter
     render_settings: MemoirBookManuscriptRenderSettings = Field(default_factory=MemoirBookManuscriptRenderSettings)
+
+    @model_validator(mode="after")
+    def _preserve_legacy_preset_layout(self):
+        # Before v4, only the custom template used these adjustments. Residual
+        # values on an old preset must not suddenly change its printed layout.
+        if self.schema_version in {1, 2, 3} and self.profile.template != "custom":
+            self.render_settings.custom_layout = MemoirBookCustomLayout()
+        return self
 
 
 class MemoirBookOutputVersionResponse(BaseModel):
@@ -622,3 +724,27 @@ class MemoirBookOutputResponse(BaseModel):
     versions: list[MemoirBookOutputVersionSummaryResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class MemoirBookShareStatusResponse(BaseModel):
+    active: bool
+    expires_at: datetime | None = None
+    token: str | None = None
+    stale: bool = False
+    current: bool = False
+
+
+class MemoirBookShareCreateResponse(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+class MemoirBookShareReadRequest(BaseModel):
+    token: str
+
+
+class MemoirBookOutputExportInfo(BaseModel):
+    version_id: str
+    cache_key: str
+    filename: str
+    ready: bool

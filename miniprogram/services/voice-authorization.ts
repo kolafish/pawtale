@@ -1,9 +1,11 @@
-import { ensureBackendSession } from "./auth";
+import { ensureBackendSession, getMemoirIdentity } from "./auth";
 import { request } from "./request";
 import { ensureRecorderPrivacyAuthorization } from "./wechat-privacy";
+export { isRecorderPermissionDeniedError, openRecorderPermissionSettings } from "./wechat-privacy";
+import { readMemoirStore } from "../stores/session";
 
-export const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
-export const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
+export const VOICE_AUTHORIZATION_VERSION = "2026-09-21";
+export const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent_v2";
 export const VOICE_AUTHORIZATION_PAGE_URL = "/pages/voice-authorization/index";
 
 export interface VoiceAuthorizationConsent {
@@ -25,6 +27,22 @@ export interface VoiceAuthorizationConsentAudit {
   updated_at: string;
 }
 
+interface ScopedVoiceAuthorizationConsent {
+  userId: string;
+  consent: VoiceAuthorizationConsent;
+}
+
+interface VoiceAuthorizationConsentStatus {
+  has_current_consent: boolean;
+  consent: VoiceAuthorizationConsentAudit | null;
+}
+
+export class VoiceAuthorizationRequiredError extends Error {
+  constructor() {
+    super("请先同意语音授权协议");
+  }
+}
+
 interface SyncVoiceAuthorizationConsentOptions {
   consent?: VoiceAuthorizationConsent;
   sourceSessionId?: string;
@@ -40,16 +58,39 @@ function isConsent(value: unknown): value is VoiceAuthorizationConsent {
     && typeof candidate.agreedAt === "string";
 }
 
+function activeUserId(): string {
+  if (typeof wx === "undefined" || typeof wx.getStorageSync !== "function") {
+    return "";
+  }
+  try {
+    return readMemoirStore().cache_identity?.user_id || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeScopedConsent(userId: string, consent: VoiceAuthorizationConsent): void {
+  if (userId && typeof wx !== "undefined" && typeof wx.setStorageSync === "function") {
+    try {
+      wx.setStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY, { userId, consent });
+    } catch {
+      // The backend audit record remains authoritative when local storage is unavailable.
+    }
+  }
+}
+
 export function readVoiceAuthorizationConsentRecord(): VoiceAuthorizationConsent | null {
   if (typeof wx === "undefined" || typeof wx.getStorageSync !== "function") {
     return null;
   }
   try {
-    const stored = wx.getStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY);
-    if (!isConsent(stored) || stored.version !== VOICE_AUTHORIZATION_VERSION) {
+    const userId = activeUserId();
+    const stored = wx.getStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY) as ScopedVoiceAuthorizationConsent | null;
+    if (!userId || !stored || stored.userId !== userId
+      || !isConsent(stored.consent) || stored.consent.version !== VOICE_AUTHORIZATION_VERSION) {
       return null;
     }
-    return stored;
+    return stored.consent;
   } catch {
     return null;
   }
@@ -65,42 +106,81 @@ export function saveVoiceAuthorizationConsent(agreed = true): VoiceAuthorization
     version: VOICE_AUTHORIZATION_VERSION,
     agreedAt: new Date().toISOString(),
   };
-  if (typeof wx !== "undefined" && typeof wx.setStorageSync === "function") {
-    wx.setStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY, consent);
-  }
+  writeScopedConsent(activeUserId(), consent);
   return consent;
+}
+
+export function clearVoiceAuthorizationConsentRecord(): void {
+  if (typeof wx !== "undefined" && typeof wx.removeStorageSync === "function") {
+    wx.removeStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY);
+  }
 }
 
 export async function syncVoiceAuthorizationConsent(
   options: SyncVoiceAuthorizationConsentOptions = {},
 ): Promise<VoiceAuthorizationConsentAudit> {
-  const consent = options.consent || readVoiceAuthorizationConsentRecord();
-  if (!consent || consent.version !== VOICE_AUTHORIZATION_VERSION) {
-    throw new Error("请先同意声纹授权协议");
+  const consent = options.consent;
+  if (consent && consent.version !== VOICE_AUTHORIZATION_VERSION) {
+    throw new VoiceAuthorizationRequiredError();
   }
   await ensureBackendSession();
-  return request<VoiceAuthorizationConsentAudit>("/api/mobile/memoir/voice-authorization-consent", {
-    method: "POST",
-    data: {
-      version: consent.version,
-      agreed: consent.agreed,
-      source: "miniprogram",
-      ...(options.sourceSessionId ? { source_session_id: options.sourceSessionId } : {}),
-      metadata_json: {
-        agreed_at: consent.agreedAt,
-      },
-    },
+  const userIdBeforeRequest = activeUserId();
+  const identity = await getMemoirIdentity();
+  if (userIdBeforeRequest && userIdBeforeRequest !== identity.id) {
+    throw new VoiceAuthorizationRequiredError();
+  }
+  if (consent) {
+    try {
+      const audit = await request<VoiceAuthorizationConsentAudit>("/api/mobile/memoir/voice-authorization-consent", {
+        method: "POST",
+        data: {
+          version: consent.version,
+          agreed: consent.agreed,
+          source: "miniprogram",
+          ...(options.sourceSessionId ? { source_session_id: options.sourceSessionId } : {}),
+          metadata_json: { agreed_at: consent.agreedAt },
+        },
+      });
+      writeScopedConsent(identity.id, consent);
+      return audit;
+    } catch (error) {
+      if (consent.agreed) {
+        writeScopedConsent(identity.id, { ...consent, agreed: false });
+      }
+      throw error;
+    }
+  }
+  const status = await request<VoiceAuthorizationConsentStatus>(
+    `/api/mobile/memoir/voice-authorization-consent?version=${encodeURIComponent(VOICE_AUTHORIZATION_VERSION)}`,
+  );
+  if (!status.has_current_consent || !status.consent) {
+    writeScopedConsent(identity.id, {
+      agreed: false,
+      version: VOICE_AUTHORIZATION_VERSION,
+      agreedAt: new Date().toISOString(),
+    });
+    throw new VoiceAuthorizationRequiredError();
+  }
+  writeScopedConsent(identity.id, {
+    agreed: true,
+    version: VOICE_AUTHORIZATION_VERSION,
+    agreedAt: status.consent.created_at || new Date().toISOString(),
   });
+  return status.consent;
 }
 
 export async function ensureVoiceRecordingAuthorization(
   sourceSessionId?: string,
 ): Promise<boolean> {
-  if (!readVoiceAuthorizationConsent()) {
-    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
-    return false;
+  try {
+    await syncVoiceAuthorizationConsent({ sourceSessionId });
+  } catch (error) {
+    if (error instanceof VoiceAuthorizationRequiredError) {
+      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+      return false;
+    }
+    throw error;
   }
-  await syncVoiceAuthorizationConsent({ sourceSessionId });
   await ensureRecorderPrivacyAuthorization();
   return true;
 }

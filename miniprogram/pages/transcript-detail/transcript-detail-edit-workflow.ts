@@ -18,10 +18,10 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { promptRequiredText } from "../../services/text-prompt";
+import { confirmDeleteTranscript } from "../../services/transcript-delete-confirmation";
 import {
   changedItem,
   confirmConvertQuestionToAnswer,
-  confirmDelete,
   confirmDiscardEdit,
   materialAssignmentOptions,
   materialAssignmentPatch,
@@ -44,6 +44,7 @@ export interface TranscriptDetailEditWorkflowMethods {
   beginEdit(): void;
   switchEditPreviewVersion(event: PageDatasetEvent<{ version?: string }>): void;
   toggleEditReference(): void;
+  toggleRawExpanded(): void;
   toggleQuestionExpanded(): void;
   toggleMoreActionsExpanded(): void;
   toggleMaterialAssignmentEditor(): Promise<void>;
@@ -126,6 +127,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     this.setData({ editReferenceExpanded: !this.data.editReferenceExpanded });
   },
 
+  toggleRawExpanded() {
+    if (!this.data.item?.rawCanExpand) {
+      return;
+    }
+    this.setData({ rawExpanded: !this.data.rawExpanded });
+  },
+
   toggleQuestionExpanded() {
     if (!this.data.item?.questionCanExpand) {
       return;
@@ -169,7 +177,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({
         assignmentError: error instanceof Error
           ? error.message
-          : "章节和小节加载失败",
+          : "收录位置加载失败",
       });
     } finally {
       this.setData({ assignmentLoading: false });
@@ -289,7 +297,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
         },
         { projectId: item.project_id },
       );
-      wx.showToast({ title: "章节和小节已更新", icon: "success" });
+      wx.showToast({ title: "收录位置已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -297,7 +305,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({
         assignmentError: error instanceof Error
           ? error.message
-          : "章节和小节更新失败",
+          : "收录位置更新失败",
       });
     } finally {
       this.setData({
@@ -392,9 +400,9 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
       this.setData({ item: toViewItem(recovered) });
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "已恢复转写", icon: "success" });
+      wx.showToast({ title: "录音已转成文字", icon: "success" });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "恢复转写失败" });
+      this.setData({ error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {
       this.setData({ recovering: false });
     }
@@ -512,7 +520,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
-    const confirmed = await confirmDelete(item);
+    const confirmed = await confirmDeleteTranscript(item.titleText || item.display_text || item.transcript_raw);
     if (!confirmed) {
       return;
     }

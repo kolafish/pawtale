@@ -149,6 +149,8 @@ export interface MemoirBookRevisionMetadataChange {
 export interface MemoirBookRevisionSectionComparison {
   section_id: string;
   title: string;
+  before_title: string;
+  after_title: string;
   before_content: string;
   after_content: string;
   before_char_count: number;
@@ -200,6 +202,15 @@ export interface MemoirBookRevisionProposal {
 export interface MemoirChapterPreparationJob {
   candidate_content?: string;
   candidate_base_version_id?: string | null;
+  candidate_diff_segments?: Array<{
+    kind: "equal" | "deleted" | "modified" | "added";
+    text: string;
+  }>;
+  candidate_sections?: Array<{
+    section_id: string;
+    title: string;
+    content: string;
+  }>;
   job_id: string | null;
   project_id: string;
   chapter_id: string;

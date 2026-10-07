@@ -1,21 +1,6 @@
 const HOME_SHARE_QUERY = "from=share_home";
-const BOOK_SHARE_QUERY = "from=share_book";
-
 const HOME_SHARE_TITLE = "老余口述，把家里的故事慢慢讲下来";
 const HOME_SHARE_PATH = `/pages/home/index?${HOME_SHARE_QUERY}`;
-const BOOK_SHARE_FALLBACK_PATH = `/pages/book/index?${BOOK_SHARE_QUERY}`;
-const SHARE_TITLE_LIMIT = 18;
-
-interface BookShareInput {
-  projectId?: string;
-  projectTitle?: string;
-  bookTitle?: string;
-  hasBookContent?: boolean;
-}
-
-interface ShareMenuOptions {
-  includeTimeline?: boolean;
-}
 
 interface LocalFileShareInput {
   filePath: string;
@@ -28,42 +13,17 @@ export class ShareFileMessageCancelError extends Error {
   }
 }
 
-function shortTitle(value: string | undefined, fallback: string): string {
-  const title = (value || "").trim() || fallback;
-  if (title.length <= SHARE_TITLE_LIMIT) {
-    return title;
-  }
-  return `${title.slice(0, SHARE_TITLE_LIMIT)}...`;
-}
-
-function bookTitle(input: BookShareInput): string {
-  return shortTitle(input.bookTitle || input.projectTitle, "我的回忆录");
-}
-
-function encodedProjectQuery(projectId: string): string {
-  return `projectId=${encodeURIComponent(projectId)}&${BOOK_SHARE_QUERY}`;
-}
-
-export function bookReaderSharePath(projectId: string): string {
-  return `/pages/book-reader/index?${encodedProjectQuery(projectId)}`;
-}
-
-function bookSharePath(input: BookShareInput): string {
-  return input.hasBookContent && input.projectId
-    ? bookReaderSharePath(input.projectId)
-    : BOOK_SHARE_FALLBACK_PATH;
-}
-
-export function enableMiniProgramShareMenu(options: ShareMenuOptions = {}): void {
+export function enableMiniProgramShareMenu(): void {
   if (typeof wx === "undefined" || typeof wx.showShareMenu !== "function") {
     return;
   }
-  const menus: Array<"shareAppMessage" | "shareTimeline"> = options.includeTimeline === false
-    ? ["shareAppMessage"]
-    : ["shareAppMessage", "shareTimeline"];
-  wx.showShareMenu({
-    menus,
-  });
+  wx.showShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
+}
+
+export function hideMiniProgramShareMenu(): void {
+  if (typeof wx !== "undefined" && typeof wx.hideShareMenu === "function") {
+    wx.hideShareMenu();
+  }
 }
 
 function shareFileError(error: WechatMiniprogram.GeneralCallbackResult): Error {
@@ -107,21 +67,16 @@ export function homeShareTimeline(): WechatMiniprogram.ShareTimelinePayload {
   };
 }
 
-export function bookShareAppMessage(input: BookShareInput = {}): WechatMiniprogram.ShareAppMessagePayload {
-  const title = bookTitle(input);
-  return {
-    title: input.hasBookContent ? `送你一本《${title}》` : `一起整理《${title}》的书稿`,
-    path: bookSharePath(input),
-  };
-}
+export const SHARED_VIDEO_PAGE = "/pages/share-video-player/index";
 
-export function bookShareTimeline(input: BookShareInput = {}): WechatMiniprogram.ShareTimelinePayload {
-  const title = bookTitle(input);
-  const query = input.hasBookContent && input.projectId
-    ? encodedProjectQuery(input.projectId)
-    : BOOK_SHARE_QUERY;
+export function sharedVideoShareMessage(
+  title: string,
+  shareCode: string,
+  imageUrl = "",
+): WechatMiniprogram.ShareAppMessagePayload {
   return {
-    title: input.hasBookContent ? `送你一本《${title}》` : `一起整理《${title}》的书稿`,
-    query,
+    title: title.trim() || "一段家里人的口述",
+    path: `${SHARED_VIDEO_PAGE}?code=${encodeURIComponent(shareCode)}`,
+    ...(imageUrl ? { imageUrl } : {}),
   };
 }

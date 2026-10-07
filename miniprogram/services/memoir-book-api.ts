@@ -1,6 +1,8 @@
 import type {
   MemoirBookAudioRequest,
   MemoirBookAudioResponse,
+  MemoirBookAudioPlan,
+  MemoirBookAudioPlanRequest,
   MemoirBookAssemblyResponse,
   MemoirBookChapterDraft,
   MemoirBookChapterDraftRevisionRequest,
@@ -8,16 +10,20 @@ import type {
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
   MemoirBookOutput,
+  MemoirBookShareCreated,
+  MemoirBookShareStatus,
   MemoirBookOutputEditorialCopyRegenerateRequest,
+  MemoirBookEditorialCopyJobsResponse,
+  MemoirBookOutputExportInfo,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
+  MemoirBookLayoutPreview,
   MemoirBookOutputUpdateRequest,
   MemoirBookOutputVersion,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
   MemoirBookPlanStructureCommandRequest,
-  MemoirBookPlanUpdateRequest,
   MemoirBookTitleSuggestionRequest,
   MemoirBookTitleSuggestionResponse,
   MemoirImageAsset,
@@ -31,8 +37,40 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
-import { downloadAuthenticatedFile } from "./authenticated-media";
-import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
+import { downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
+import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
+
+export function getMemoirBookShareStatus(projectId: string): Promise<MemoirBookShareStatus> {
+  return memoirRequest<MemoirBookShareStatus>(memoirProjectPath(projectId, "/book-output/share"));
+}
+
+export function createMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "POST",
+    invalidatesSnapshots: false,
+  });
+}
+
+export function updateMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "PUT",
+    invalidatesSnapshots: false,
+  });
+}
+
+export async function revokeMemoirBookShare(projectId: string): Promise<void> {
+  await memoirRequest<unknown>(memoirProjectPath(projectId, "/book-output/share"), {
+    method: "DELETE",
+    invalidatesSnapshots: false,
+  });
+}
+
+export function readMemoirBookShare(token: string): Promise<MemoirBookOutput> {
+  return request<MemoirBookOutput>("/api/mobile/memoir/book-shares/read", {
+    method: "POST",
+    data: { token },
+  });
+}
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
@@ -69,19 +107,6 @@ export function confirmMemoirBookPlan(
     bookPlanPath(projectId),
     {
       method: "PUT",
-      data,
-    },
-  );
-}
-
-export function updateMemoirBookPlan(
-  projectId: string,
-  data: MemoirBookPlanUpdateRequest,
-): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
-    bookPlanPath(projectId),
-    {
-      method: "PATCH",
       data,
     },
   );
@@ -125,6 +150,22 @@ export async function deleteMemoirImageAsset(projectId: string, assetId: string)
       method: "DELETE",
     },
   );
+}
+
+export function uploadMemoirImageAsset(projectId: string, filePath: string): Promise<MemoirImageAsset> {
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  return uploadAuthenticatedFile(`${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, "/image-assets")}`, {
+    filePath, name: "file", failureMessage: "图片上传失败", domainLabel: "图片上传",
+    parseResponse: (data) => {
+      try { return JSON.parse(data) as MemoirImageAsset; }
+      catch (error) { throw new ApiError(0, "图片上传结果解析失败", error); }
+    },
+    responseErrorMessage: (data) => {
+      try { const response = JSON.parse(data) as { detail?: unknown }; return typeof response.detail === "string" ? response.detail : "图片上传失败"; }
+      catch { return "图片上传失败"; }
+    },
+  });
 }
 
 export function createMemoirBookImagePlacement(
@@ -309,6 +350,15 @@ export function createMemoirBookOutputTTS(
   );
 }
 
+export function prepareMemoirBookAudio(
+  projectId: string,
+  data: MemoirBookAudioPlanRequest,
+): Promise<MemoirBookAudioPlan> {
+  return memoirRequest<MemoirBookAudioPlan>(memoirProjectPath(projectId, "/book-output/tts/plan"), {
+    method: "POST", data, timeoutProfile: "interactive", invalidatesSnapshots: false,
+  });
+}
+
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
 }
@@ -349,6 +399,14 @@ export function enqueueMemoirBookOutputEditorialCopyGeneration(
   );
 }
 
+export function getMemoirBookEditorialCopyJobs(
+  projectId: string,
+): Promise<MemoirBookEditorialCopyJobsResponse> {
+  return memoirRequest<MemoirBookEditorialCopyJobsResponse>(
+    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
+  );
+}
+
 export function suggestMemoirBookOutputTitles(
   projectId: string,
   data: MemoirBookTitleSuggestionRequest = {},
@@ -366,6 +424,7 @@ export function memoirBookOutputExportUrl(
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
+  preview?: MemoirBookLayoutPreview,
 ): string {
   const config = readBackendConfig();
   if (!config.httpBaseUrl) {
@@ -375,6 +434,15 @@ export function memoirBookOutputExportUrl(
   if (format === "pdf") {
     params.push(`layout=${encodeURIComponent(layout)}`);
     params.push(`show_source_appendix=${showSourceAppendix ? "true" : "false"}`);
+    if (preview) {
+      if (preview.template) params.push(`preview_template=${encodeURIComponent(preview.template)}`);
+      if (preview.custom_layout) {
+        params.push(`preview_font_family=${encodeURIComponent(preview.custom_layout.font_family)}`);
+        params.push(`preview_font_scale=${encodeURIComponent(preview.custom_layout.font_scale)}`);
+        params.push(`preview_line_spacing=${encodeURIComponent(preview.custom_layout.line_spacing)}`);
+        params.push(`preview_page_margin=${encodeURIComponent(preview.custom_layout.page_margin)}`);
+      }
+    }
   }
   if (versionId) {
     params.push(`version_id=${encodeURIComponent(versionId)}`);
@@ -382,17 +450,25 @@ export function memoirBookOutputExportUrl(
   return `${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, `/book-output/export?${params.join("&")}`)}`;
 }
 
-export function downloadMemoirBookOutputExport(
+export async function downloadMemoirBookOutputExport(
   projectId: string,
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
+  preview?: MemoirBookLayoutPreview,
+  onPhase?: (phase: FileDownloadPhase) => void,
 ): Promise<string> {
-  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix);
+  const sessionCookie = readSessionCookie();
+  onPhase?.("checking");
+  const infoUrl = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix, preview);
+  const infoPath = infoUrl.slice(cleanBaseUrl(readBackendConfig().httpBaseUrl).length).replace("/export?", "/export/info?");
+  const info = await memoirRequest<MemoirBookOutputExportInfo>(infoPath);
+  const url = `${memoirBookOutputExportUrl(projectId, format, info.version_id, layout, showSourceAppendix, preview)}&cache_key=${encodeURIComponent(info.cache_key)}`;
   return downloadAuthenticatedFile(url, {
     timeoutProfile: "export",
     failureMessage: "文件下载失败",
     domainLabel: "文件下载",
+    cache: { key: info.cache_key, filename: info.filename, ready: info.ready, sessionCookie, onPhase },
   });
 }

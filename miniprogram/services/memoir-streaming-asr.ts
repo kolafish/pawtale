@@ -18,7 +18,10 @@ import {
 } from "./memoir-streaming-asr-protocol";
 import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
-import { wechatRecorderErrorMessage } from "./wechat-privacy";
+import {
+  isRecorderPermissionDeniedMessage,
+  wechatRecorderErrorMessage,
+} from "./wechat-privacy";
 
 export {
   arrayBufferToBase64,
@@ -38,6 +41,14 @@ const RECORDER_START_TIMEOUT_MS = 4000;
 const DEFAULT_SILENCE_LEVEL_THRESHOLD = 0.015;
 const DEFAULT_MIN_AUTO_STOP_RECORDING_MS = 1200;
 const MIN_VOICE_ACTIVITY_MS = 240;
+const BARGE_IN_PREFIX_BYTES = 16000 * 2 * 2;
+const BARGE_IN_PREPARE_TIMEOUT_MS = 10000;
+const BARGE_IN_MAX_PENDING_BYTES = 16000 * 2 * 12;
+
+export interface BargeInCallbacks {
+  onBargeIn(): void;
+  onError(message: string): void;
+}
 
 let activeClient: MemoirStreamingAsrClient | null = null;
 let clientSerial = 0;
@@ -157,6 +168,14 @@ export class MemoirStreamingAsrClient {
     reject: (error: Error) => void;
   }> = [];
   private readonly recorderOwnerId: string;
+  private bargeInMode: "" | "monitoring" | "pending" = "";
+  private bargeInId = "";
+  private bargeInSerial = 0;
+  private bargeInCallbacks: BargeInCallbacks | null = null;
+  private bargeInFrames: ArrayBuffer[] = [];
+  private bargeInBytes = 0;
+  private bargeInTotalBytes = 0;
+  private bargeInPrepareTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     options: MemoirStreamingAsrOptions,
@@ -286,10 +305,69 @@ export class MemoirStreamingAsrClient {
     }
   }
 
+  isBargeInMonitoring(): boolean {
+    return Boolean(this.bargeInMode);
+  }
+
+  startBargeInMonitoring(callbacks: BargeInCallbacks): boolean {
+    if (!this.socketOpen || this.recording || this.bargeInMode || this.acceptingFrames) return false;
+    if (this.recorderResource.isBusy()) {
+      callbacks.onError("麦克风正在使用中");
+      return false;
+    }
+    this.bargeInMode = "monitoring";
+    this.bargeInId = `${this.recorderOwnerId}-${++this.bargeInSerial}`;
+    this.bargeInCallbacks = callbacks;
+    activeClient = this;
+    this.sendJson({ type: "barge_in.start", monitor_id: this.bargeInId });
+    if (!this.socketOpen) return false;
+    return this.startNativeRecorder(STREAMING_RECORDING_DURATION_MS);
+  }
+
+  async stopBargeInMonitoring(discardPending = false): Promise<void> {
+    // During the automatic interrupt, cancelling playback must keep the same
+    // recorder alive until consent sync and session.start have completed.
+    if (!this.bargeInMode) {
+      // Playback cancellation can already have requested a native stop. A
+      // subsequent manual-recording request must await that same stop.
+      if (!this.recording) await this.recorderResource.stopAndWait(this.recorderOwnerId);
+      return;
+    }
+    if (this.bargeInMode === "pending" && !discardPending) return;
+    this.sendJson({ type: "barge_in.stop", monitor_id: this.bargeInId });
+    this.resetBargeIn();
+    this.clearRecorderStartTimer();
+    await this.recorderResource.stopAndWait(this.recorderOwnerId);
+    this.recorderStarted = false;
+  }
+
+  private resetBargeIn(): void {
+    if (this.bargeInPrepareTimer) clearTimeout(this.bargeInPrepareTimer);
+    this.bargeInPrepareTimer = null;
+    this.bargeInMode = "";
+    this.bargeInId = "";
+    this.bargeInFrames = [];
+    this.bargeInBytes = 0;
+    this.bargeInTotalBytes = 0;
+    this.bargeInCallbacks = null;
+  }
+
+  private failBargeIn(message: string): void {
+    const callbacks = this.bargeInCallbacks;
+    const pending = this.bargeInMode === "pending";
+    void this.stopBargeInMonitoring(true);
+    callbacks?.onError(message);
+    if (pending) this.options.callbacks.onError(message, clientError(message, "recorder"));
+  }
+
   startRecording(recordingOptions: MemoirStartRecordingOptions = {}): boolean {
     if (!this.socketOpen || this.recording) {
       return false;
     }
+    const continuingCapture = this.bargeInMode === "pending" && this.recorderStarted;
+    if (this.bargeInMode && !continuingCapture) return false;
+    const prefix = continuingCapture ? this.bargeInFrames : [];
+    this.resetBargeIn();
     activeClient = this;
     this.recording = true;
     this.recorderStarted = false;
@@ -313,42 +391,40 @@ export class MemoirStreamingAsrClient {
     );
     this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
+    if (continuingCapture) {
+      this.handleRecorderStarted();
+      for (const frame of prefix) this.handleFrame(frame, false);
+      this.startNoVoiceActivityTimer();
+      return this.recording;
+    }
+    const started = this.startNativeRecorder(recordingOptions.maxDurationMs ?? STREAMING_RECORDING_DURATION_MS);
+    if (started) this.startNoVoiceActivityTimer();
+    return started;
+  }
+
+  private startNativeRecorder(maxDurationMs: number): boolean {
+    this.recorderStarted = false;
     try {
       const started = this.recorderResource.start(this.recorderOwnerId, {
-        duration: Math.min(
-          STREAMING_RECORDING_DURATION_MS,
-          Math.max(1000, recordingOptions.maxDurationMs ?? STREAMING_RECORDING_DURATION_MS),
-        ),
+        duration: Math.min(STREAMING_RECORDING_DURATION_MS, Math.max(1000, maxDurationMs)),
         sampleRate: 16000,
         numberOfChannels: 1,
         encodeBitRate: STREAMING_ENCODE_BIT_RATE,
         format: "PCM",
         frameSize: STREAMING_FRAME_SIZE_KB,
       }, {
-        onStart: () => {
-          this.handleRecorderStarted();
-        },
-        onFrame: (result) => {
-          this.handleFrame(result.frameBuffer, result.isLastFrame);
-        },
-        onError: (message) => {
-          this.handleRecorderError(message);
-        },
-        onStop: () => {
-          this.handleRecorderStopped();
-        },
+        onStart: () => this.handleRecorderStarted(),
+        onFrame: (result) => this.handleFrame(result.frameBuffer, result.isLastFrame),
+        onError: (message) => this.handleRecorderError(message),
+        onStop: () => this.handleRecorderStopped(),
       });
       if (!started) {
         this.handleRecorderError("麦克风正在使用中");
         return false;
       }
       this.startRecorderStartTimer();
-      this.startNoVoiceActivityTimer();
     } catch (error) {
-      this.clearRecorderStartTimer();
-      this.clearNoVoiceActivityTimer();
-      const message = error instanceof Error ? error.message : "录音启动失败";
-      this.handleRecorderError(message);
+      this.handleRecorderError(error instanceof Error ? error.message : "录音启动失败");
       return false;
     }
     return true;
@@ -379,6 +455,7 @@ export class MemoirStreamingAsrClient {
     if (this.closed) {
       return;
     }
+    if (this.bargeInMode) await this.stopBargeInMonitoring(true);
     this.options.callbacks.onStatus("stopping");
     if (this.recording) {
       this.stopRecording();
@@ -413,6 +490,24 @@ export class MemoirStreamingAsrClient {
   }
 
   handleFrame(frameBuffer: ArrayBuffer, isLastFrame: boolean): void {
+    if (this.bargeInMode && this.socketOpen) {
+      if (frameBuffer.byteLength) {
+        this.bargeInFrames.push(frameBuffer.slice(0));
+        this.bargeInBytes += frameBuffer.byteLength;
+        this.bargeInTotalBytes += frameBuffer.byteLength;
+        if (this.bargeInMode === "monitoring") {
+          while (this.bargeInBytes > BARGE_IN_PREFIX_BYTES && this.bargeInFrames.length > 1) {
+            this.bargeInBytes -= this.bargeInFrames.shift()!.byteLength;
+          }
+          this.sendJson({ type: "barge_in.frame", monitor_id: this.bargeInId,
+            audio: arrayBufferToBase64(frameBuffer) });
+        } else if (this.bargeInBytes > BARGE_IN_MAX_PENDING_BYTES) {
+          this.failBargeIn("录音准备超时，请点按钮重新录音");
+        }
+      }
+      if (isLastFrame && this.bargeInMode) this.failBargeIn("打断监听已停止，可以点按钮回答");
+      return;
+    }
     if (!this.socketOpen || !this.recording || !this.acceptingFrames) {
       return;
     }
@@ -445,6 +540,10 @@ export class MemoirStreamingAsrClient {
 
   handleRecorderStopped(): void {
     this.recorderStarted = false;
+    if (this.bargeInMode) {
+      this.failBargeIn("打断监听已停止，可以点按钮回答");
+      return;
+    }
     if (activeClient !== this || !this.acceptingFrames || this.audioEndSent) {
       if (!this.recording) {
         this.emitCaptureStats("idle");
@@ -461,6 +560,10 @@ export class MemoirStreamingAsrClient {
   }
 
   handleRecorderError(message: string): void {
+    if (this.bargeInMode) {
+      this.failBargeIn(wechatRecorderErrorMessage(message));
+      return;
+    }
     const readableMessage = wechatRecorderErrorMessage(message);
     if (message && message !== readableMessage) {
       console.warn("recorder native error", message);
@@ -480,7 +583,11 @@ export class MemoirStreamingAsrClient {
       nativeMessage: message,
       errorKind: "recorder",
     });
-    this.options.callbacks.onError(readableMessage, clientError(readableMessage, "recorder"));
+    this.options.callbacks.onError(readableMessage, clientError(
+      readableMessage,
+      "recorder",
+      isRecorderPermissionDeniedMessage(message) ? "recorder_permission_denied" : "recorder_failed",
+    ));
     this.options.callbacks.onStatus("error");
     if (activeClient === this) {
       activeClient = null;
@@ -493,6 +600,7 @@ export class MemoirStreamingAsrClient {
     }
     this.clearRecorderStartTimer();
     this.recorderStarted = true;
+    if (this.bargeInMode) return;
     if (!this.recording) {
       this.emitCaptureStats("stopping");
       this.recorderResource.stop(this.recorderOwnerId);
@@ -515,6 +623,36 @@ export class MemoirStreamingAsrClient {
   private handleSocketMessage(data: string | ArrayBuffer): void {
     const raw = typeof data === "string" ? safeJsonParse(data) : null;
     const event = normalizeVoiceGatewayEvent(raw);
+    if (event.type.startsWith("barge_in.")) {
+      if (this.bargeInMode !== "monitoring" || event.monitor_id !== this.bargeInId) return;
+      if (event.type === "barge_in.error") this.failBargeIn("打断监听暂不可用，可以点按钮回答");
+      if (event.type === "barge_in.speech") {
+        const startMs = event.start_ms;
+        const oldestByte = this.bargeInTotalBytes - this.bargeInBytes;
+        const startByte = typeof startMs === "number" ? Math.floor(startMs * 16) * 2 : -1;
+        if (!Number.isFinite(startByte) || startByte < oldestByte || startByte >= this.bargeInTotalBytes) {
+          this.failBargeIn("语音连接延迟较大，可以点按钮回答");
+          return;
+        }
+        let discardBytes = startByte - oldestByte;
+        while (discardBytes > 0 && this.bargeInFrames.length) {
+          const frame = this.bargeInFrames[0];
+          const size = Math.min(discardBytes, frame.byteLength);
+          if (size === frame.byteLength) this.bargeInFrames.shift();
+          else this.bargeInFrames[0] = frame.slice(size);
+          this.bargeInBytes -= size;
+          discardBytes -= size;
+        }
+        this.bargeInMode = "pending";
+        this.sendJson({ type: "barge_in.stop", monitor_id: this.bargeInId });
+        if (!this.socketOpen) return;
+        this.bargeInPrepareTimer = setTimeout(() => {
+          this.failBargeIn("录音准备超时，请点按钮重新录音");
+        }, BARGE_IN_PREPARE_TIMEOUT_MS);
+        this.bargeInCallbacks?.onBargeIn();
+      }
+      return;
+    }
     this.gatewayState = event.state || this.gatewayState;
     this.options.callbacks.onEvent(event);
     if (event.type === "session.ready" || event.type === "session.started") {
@@ -554,11 +692,12 @@ export class MemoirStreamingAsrClient {
   }
 
   private stopRecorderAfterGatewayEnd(captureState: MemoirCaptureState): void {
+    this.resetBargeIn();
     this.recording = false;
     this.acceptingFrames = false;
     this.clearRecorderStartTimer();
     this.clearNoVoiceActivityTimer();
-    if (this.recorderStarted) {
+    if (this.recorderStarted || this.recorderResource.isOwnedBy(this.recorderOwnerId)) {
       this.recorderResource.stop(this.recorderOwnerId);
     }
     this.recorderStarted = false;
@@ -628,6 +767,7 @@ export class MemoirStreamingAsrClient {
   }
 
   private closeSocket(): void {
+    this.resetBargeIn();
     this.closed = true;
     this.closePromise = null;
     this.rejectWaiters("语音连接已关闭");
@@ -720,7 +860,7 @@ export class MemoirStreamingAsrClient {
     this.clearRecorderStartTimer();
     this.recorderStartTimer = setTimeout(() => {
       this.recorderStartTimer = null;
-      if (!this.recording || this.recorderStarted) {
+      if ((!this.recording && !this.bargeInMode) || this.recorderStarted) {
         return;
       }
       this.recorderResource.forceRelease(this.recorderOwnerId);

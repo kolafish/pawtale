@@ -1,16 +1,17 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">资料会用于语音访谈和小余追问</text>
+    <text class="ui-page-context">资料、访谈方式和润色强度只用于这本回忆录</text>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="form-panel ui-card">
     <view class="field">
-      <text class="field-label ui-section-heading">回忆录名称</text>
+      <text class="field-label">回忆录名称</text>
+      <text class="field-hint">首页、封面和导出都会使用这个名字</text>
       <input
         id="project-title-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{title}}"
         maxlength="40"
         placeholder="例如：母亲的回忆"
@@ -19,14 +20,29 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">性别</text>
-      <view class="segmented">
+      <text class="field-label">主人公称呼</text>
+      <input
+        id="project-narrator-name-input"
+        class="text-input support-form-input"
+        value="{{narratorName}}"
+        maxlength="40"
+        placeholder="例如：爷爷"
+        bindinput="changeNarratorName"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label">性别</text>
+      <view class="segmented" aria-role="radiogroup" aria-label="主人公性别">
         <view
           wx:for="{{genderOptions}}"
           wx:key="value"
-          class="segment {{narratorGender === item.value ? 'selected' : ''}}"
+          class="segment ui-pressable {{narratorGender === item.value ? 'selected' : ''}}"
           data-gender="{{item.value}}"
           bindtap="selectGender"
+          aria-role="radio"
+          aria-checked="{{narratorGender === item.value}}"
+          aria-label="{{item.label}}"
         >
           <text>{{item.label}}</text>
         </view>
@@ -34,10 +50,10 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">籍贯</text>
+      <text class="field-label">籍贯</text>
       <input
         id="project-origin-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{narratorOrigin}}"
         maxlength="40"
         placeholder="例如：四川成都"
@@ -46,10 +62,10 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">年龄</text>
+      <text class="field-label">年龄</text>
       <input
         id="project-age-input"
-        class="text-input"
+        class="text-input support-form-input"
         value="{{narratorAgeText}}"
         type="number"
         maxlength="3"
@@ -59,25 +75,73 @@
     </view>
 
     <view class="field">
-      <text class="field-label ui-section-heading">讲述方式</text>
-      <view class="mode-list">
+      <text class="field-label">默认访谈方式</text>
+      <text class="mode-desc">以后从首页开始会使用这个方式；书稿补充会先进入待补问题列表，进行中的讲述不会改变。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="默认访谈方式">
         <view
-          wx:for="{{guidanceOptions}}"
+          wx:for="{{narrationOptions}}"
           wx:key="value"
-          class="mode-option {{defaultGuidanceMode === item.value ? 'selected' : ''}}"
+          id="default-mode-{{item.value}}"
+          class="mode-option ui-pressable {{defaultNarrationMode === item.value ? 'selected' : ''}}"
           data-mode="{{item.value}}"
-          bindtap="selectGuidanceMode"
+          bindtap="selectNarrationMode"
+          aria-role="radio"
+          aria-checked="{{defaultNarrationMode === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
         >
           <text class="mode-title">{{item.label}}</text>
-          <text class="mode-desc">{{item.value === 'guided_interview' ? '小余按人物、事件、地点和主题追问' : '讲述者按自己的节奏说'}}</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{defaultNarrationMode === item.value}}" class="option-check" aria-hidden="true">✓</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="field">
+      <text class="field-label">素材与正文润色强度</text>
+      <text class="mode-desc">用于这本回忆录之后新增或重新处理的内容，已经生成的文字不会自动改写。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="素材与正文润色强度">
+        <view
+          wx:for="{{transcriptPolishOptions}}"
+          wx:key="value"
+          id="polish-level-{{item.value}}"
+          class="mode-option ui-pressable {{transcriptPolishLevel === item.value ? 'selected' : ''}}"
+          data-polish="{{item.value}}"
+          bindtap="selectTranscriptPolishLevel"
+          aria-role="radio"
+          aria-checked="{{transcriptPolishLevel === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
+        >
+          <text class="mode-title">{{item.label}}</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{transcriptPolishLevel === item.value}}" class="option-check" aria-hidden="true">✓</text>
+        </view>
+      </view>
+    </view>
+    <view class="field">
+      <text class="field-label">默认分享视频风格</text>
+      <text class="mode-desc">用于这本回忆录之后制作的分享视频，每次制作时也可以重新选择。</text>
+      <view class="mode-list" aria-role="radiogroup" aria-label="默认分享视频风格">
+        <view
+          wx:for="{{shareVideoStyleOptions}}"
+          wx:key="value"
+          class="mode-option ui-pressable {{shareVideoStyle === item.value ? 'selected' : ''}}"
+          data-video-style="{{item.value}}"
+          bindtap="selectShareVideoStyle"
+          aria-role="radio"
+          aria-checked="{{shareVideoStyle === item.value}}"
+          aria-label="{{item.label}}，{{item.description}}"
+        >
+          <text class="mode-title">{{item.label}}</text>
+          <text class="mode-desc">{{item.description}}</text>
+          <text wx:if="{{shareVideoStyle === item.value}}" class="option-check" aria-hidden="true">✓</text>
         </view>
       </view>
     </view>
   </view>
 
   <view class="actions">
-    <button id="project-cancel-action" class="ghost-button" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
-    <button id="project-save-action" class="primary-button" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
+    <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
+    <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
       {{saving ? "保存中" : "保存"}}
     </button>
   </view>

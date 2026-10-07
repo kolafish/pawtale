@@ -1,10 +1,16 @@
 import type {
   MemoirShareVideoBackgroundMode,
-  MemoirShareVideoBackgroundSource,
   MemoirShareVideoBackgroundStyle,
+  MemoirShareVideoCandidate,
   MemoirShareVideoJob,
+  MemoirShareVideoStyle,
+  MemoirShareVideoStyleOption,
   MemoirTranscriptShareVideoContext,
   MemoirTranscriptShareVideoSegment,
+} from "../domain/memoir-transcript";
+import {
+  MEMOIR_SHARE_VIDEO_STYLES,
+  normalizeMemoirShareVideoStyle,
 } from "../domain/memoir-transcript";
 import { ApiError } from "./request";
 import { isShareFileMessageCancelError } from "./share";
@@ -47,9 +53,13 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoSelectedText: string;
   shareVideoSelectedMetaText: string;
   shareVideoSelectedCanGenerate: boolean;
+  shareVideoStyle: MemoirShareVideoStyle;
+  shareVideoStyleLabel: string;
+  shareVideoStyleOptions: MemoirShareVideoStyleOption[];
+  shareVideoUsesIllustration: boolean;
+  shareVideoStyleUnavailable: boolean;
+  shareVideoCandidate: MemoirShareVideoCandidate | null;
   shareVideoBackgroundSource: string;
-  shareVideoBackgroundSourceLabel: string;
-  shareVideoBackgroundSourceOptions: MemoirShareVideoBackgroundSource[];
   shareVideoBackgroundUsesAi: boolean;
   shareVideoBackgroundUsesCustom: boolean;
   shareVideoBackgroundStyle: string;
@@ -80,11 +90,6 @@ type ShareVideoSelectionPatch = Pick<
 
 export type ShareVideoBackgroundPatch = Pick<
   TranscriptShareVideoData,
-  | "shareVideoBackgroundSource"
-  | "shareVideoBackgroundSourceLabel"
-  | "shareVideoBackgroundSourceOptions"
-  | "shareVideoBackgroundUsesAi"
-  | "shareVideoBackgroundUsesCustom"
   | "shareVideoBackgroundStyle"
   | "shareVideoBackgroundStyleLabel"
   | "shareVideoBackgroundStyleOptions"
@@ -94,6 +99,7 @@ export type ShareVideoBackgroundPatch = Pick<
 >;
 
 export interface TranscriptShareVideoCreateOptions {
+  videoStyle?: MemoirShareVideoStyle;
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
@@ -105,6 +111,7 @@ export interface TranscriptShareVideoCreateInput {
   startChar: number;
   endChar: number;
   options: TranscriptShareVideoCreateOptions;
+  candidate?: { projectId: string; id: string };
 }
 
 type CreateShareVideoJob = (
@@ -122,6 +129,11 @@ type PollTimer = ReturnType<typeof setTimeout>;
 
 export interface TranscriptShareVideoControllerOptions {
   createJob: CreateShareVideoJob;
+  createCandidateJob?: (
+    projectId: string,
+    candidateId: string,
+    options: TranscriptShareVideoCreateOptions,
+  ) => Promise<MemoirShareVideoJob>;
   getJob: GetShareVideoJob;
   downloadJob: DownloadShareVideoJob;
   shareFile: ShareFile;
@@ -238,18 +250,40 @@ function selectedShareVideoOption<T extends { value: string }>(
     || null;
 }
 
+export function shareVideoStylePatch(
+  context: MemoirTranscriptShareVideoContext | null,
+  preferredValue?: MemoirShareVideoStyle,
+): Pick<TranscriptShareVideoData,
+  "shareVideoStyle" | "shareVideoStyleLabel" | "shareVideoStyleOptions" | "shareVideoUsesIllustration"
+  | "shareVideoStyleUnavailable" | "shareVideoBackgroundSource"
+  | "shareVideoBackgroundUsesAi" | "shareVideoBackgroundUsesCustom"
+> {
+  const options = context?.video_styles?.length ? context.video_styles : MEMOIR_SHARE_VIDEO_STYLES;
+  const selected = selectedShareVideoOption(
+    options,
+    preferredValue || "",
+    normalizeMemoirShareVideoStyle(context?.default_video_style),
+  )!;
+  const backgroundSource = selected.value === "uploaded" ? "custom"
+    : selected.value === "illustrated" ? "ai" : "";
+  return {
+    shareVideoStyle: selected.value,
+    shareVideoStyleLabel: selected.label,
+    shareVideoStyleOptions: options,
+    shareVideoUsesIllustration: selected.value === "illustrated",
+    shareVideoStyleUnavailable: selected.value === "illustrated" && context?.ai_background_enabled === false,
+    shareVideoBackgroundSource: backgroundSource,
+    shareVideoBackgroundUsesAi: selected.value === "illustrated",
+    shareVideoBackgroundUsesCustom: selected.value === "uploaded",
+  };
+}
+
 export function shareVideoBackgroundPatch(
   context: MemoirTranscriptShareVideoContext | null,
   preferred: ShareVideoBackgroundSettings = readShareVideoBackgroundSettings(),
 ): ShareVideoBackgroundPatch {
-  const sourceOptions = context?.background_sources || [];
   const styleOptions = context?.background_styles || [];
   const modeOptions = context?.background_modes || [];
-  const source = selectedShareVideoOption(
-    sourceOptions,
-    preferred.backgroundSource,
-    context?.default_background_source || "",
-  );
   const style = selectedShareVideoOption(
     styleOptions,
     preferred.backgroundStyle,
@@ -260,13 +294,7 @@ export function shareVideoBackgroundPatch(
     preferred.backgroundMode,
     context?.default_background_mode || "",
   );
-  const normalizedSource = source?.value || "";
   return {
-    shareVideoBackgroundSource: normalizedSource,
-    shareVideoBackgroundSourceLabel: source?.label || "",
-    shareVideoBackgroundSourceOptions: sourceOptions,
-    shareVideoBackgroundUsesAi: normalizedSource === "ai",
-    shareVideoBackgroundUsesCustom: normalizedSource === "custom",
     shareVideoBackgroundStyle: style?.value || "",
     shareVideoBackgroundStyleLabel: style?.label || "",
     shareVideoBackgroundStyleOptions: styleOptions,
@@ -278,7 +306,6 @@ export function shareVideoBackgroundPatch(
 
 export function saveShareVideoBackgroundSelection(patch: ShareVideoBackgroundPatch): void {
   saveShareVideoBackgroundSettings({
-    backgroundSource: patch.shareVideoBackgroundSource,
     backgroundStyle: patch.shareVideoBackgroundStyle,
     backgroundMode: patch.shareVideoBackgroundMode,
   });
@@ -304,6 +331,8 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
     shareVideoContext: null,
     ...shareVideoSelectionPatch(null, -1, -1),
     ...shareVideoBackgroundPatch(null),
+    ...shareVideoStylePatch(null),
+    shareVideoCandidate: null,
     shareVideoCustomBackgroundUploading: false,
     shareVideoCustomBackgroundAssetId: "",
     shareVideoCustomBackgroundPreviewPath: "",
@@ -312,8 +341,11 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
   };
 }
 
-function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
+export function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
+    if (job.video_style === "story_animation") {
+      return "视频已生成";
+    }
     if (job.background_source === "custom") {
       return "视频已生成，已使用自定义背景";
     }
@@ -334,6 +366,11 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
     return job.error_message || "视频生成失败";
   }
   if (job.status === "running") {
+    if (job.video_style === "story_animation") {
+      return job.background_status === "planning" || job.background_status === "pending"
+        ? "正在安排故事画面"
+        : "正在制作人物与场景动画";
+    }
     if (job.background_source === "custom" || job.background_source === "classic") {
       return "正在合成视频";
     }
@@ -373,6 +410,7 @@ function isSameShareVideoJobView(
     current &&
     current.id === next.id &&
     current.status === next.status &&
+    current.video_style === next.video_style &&
     shareVideoJobStatusText(current) === shareVideoJobStatusText(next) &&
     current.error_message === next.error_message &&
     current.output?.download_url === next.output?.download_url &&
@@ -399,6 +437,11 @@ export class TranscriptShareVideoController {
     this.invalidateOperations();
     this.fileCache = {};
     this.replaceState(initialTranscriptShareVideoTaskState());
+  }
+
+  async showJob(job: MemoirShareVideoJob): Promise<void> {
+    this.reset();
+    await this.applyJob(job, this.token);
   }
 
   clearResult(): void {
@@ -462,12 +505,15 @@ export class TranscriptShareVideoController {
       shareVideoPreviewPath: "",
     });
     try {
-      const job = await this.options.createJob(
-        input.utteranceId,
-        input.startChar,
-        input.endChar,
-        input.options,
-      );
+      let job: MemoirShareVideoJob;
+      if (input.candidate) {
+        if (!this.options.createCandidateJob) {
+          throw new Error("推荐片段制作入口暂不可用");
+        }
+        job = await this.options.createCandidateJob(input.candidate.projectId, input.candidate.id, input.options);
+      } else {
+        job = await this.options.createJob(input.utteranceId, input.startChar, input.endChar, input.options);
+      }
       if (!this.isCurrent(requestToken)) {
         return null;
       }
@@ -734,44 +780,4 @@ export class TranscriptShareVideoController {
     this.state = state;
     this.listener?.(state);
   }
-}
-
-function isChooseBackgroundCancel(error: WechatMiniprogram.GeneralCallbackResult): boolean {
-  return String(error.errMsg || "").toLowerCase().includes("cancel");
-}
-
-export function chooseShareVideoBackgroundImage(): Promise<string | null> {
-  if (typeof wx.chooseMedia === "function") {
-    return new Promise((resolve, reject) => {
-      wx.chooseMedia?.({
-        count: 1,
-        mediaType: ["image"],
-        sourceType: ["album", "camera"],
-        sizeType: ["original", "compressed"],
-        success: (result) => resolve(result.tempFiles[0]?.tempFilePath || null),
-        fail: (error) => {
-          if (isChooseBackgroundCancel(error)) {
-            resolve(null);
-            return;
-          }
-          reject(new Error(error.errMsg || "选择背景图片失败"));
-        },
-      });
-    });
-  }
-  return new Promise((resolve, reject) => {
-    wx.chooseImage({
-      count: 1,
-      sourceType: ["album", "camera"],
-      sizeType: ["original", "compressed"],
-      success: (result) => resolve(result.tempFilePaths[0] || null),
-      fail: (error) => {
-        if (isChooseBackgroundCancel(error)) {
-          resolve(null);
-          return;
-        }
-        reject(new Error(error.errMsg || "选择背景图片失败"));
-      },
-    });
-  });
 }

@@ -1,0 +1,4 @@
+{
+  "navigationBarTitleText": "语音编辑",
+  "usingComponents": { "voice-text-editor": "/components/voice-text-editor/index" }
+}

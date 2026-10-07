@@ -1,176 +1,113 @@
-<view class="ui-accessible-page {{largeText ? 'large-text' : ''}}">
-  <view class="story-toolbar">
-    <view class="timeline-label">
-      <view class="timeline-mark"></view>
-      <text>我的故事</text>
-    </view>
+<view class="story-home ui-accessible-page {{largeText ? 'large-text' : ''}}">
+  <view class="story-hero ui-card ui-card-borderless {{canOpenBook && story.overview.hasChapters && showBookHint ? 'has-book-hint' : ''}}">
     <view
-      class="transcript-list-entry ui-pressable"
-      bindtap="openTranscripts"
-      hover-class="ui-subtle-action-hover"
-      aria-role="button"
-      aria-label="查看全部讲述列表"
+      id="active-project-action"
+      class="hero-heading {{canSwitchProject ? 'ui-pressable' : ''}}"
+      bindtap="openProjects"
+      hover-class="{{canSwitchProject ? 'ui-subtle-action-hover' : 'none'}}"
+      aria-role="{{canSwitchProject ? 'button' : 'heading'}}"
+      aria-label="{{canSwitchProject ? '当前故事本，' + story.memoir.title + '，点击切换' : story.overview.title}}"
     >
-      <text>全部讲述</text>
-      <text class="transcript-list-mark" aria-hidden="true">›</text>
-    </view>
-  </view>
-
-  <view class="story-tree">
-    <view class="overview-row">
-      <view class="overview-symbol" aria-hidden="true">
-        <view class="overview-sprout"></view>
-      </view>
-      <view class="overview-card ui-card ui-card-borderless">
-        <view class="overview-heading">
-          <view class="overview-copy">
-            <text class="overview-title">{{story.overview.title}}</text>
-            <text class="overview-summary ui-tabular">{{story.overview.summaryText}}</text>
-          </view>
-          <text class="overview-outcome ui-tabular">{{story.overview.outcomeText}}</text>
-        </view>
-        <view wx:if="{{showSummary}}" class="overview-book">
-          <view class="overview-readability">
-            <text class="overview-readable ui-tabular">{{story.overview.readableText}}</text>
-            <text wx:if="{{story.overview.bookText}}" class="overview-readable ui-tabular">{{story.overview.bookText}}</text>
-          </view>
-          <button size="mini" class="story-inline-action ui-button" bindtap="openBook" aria-label="查看{{story.memoir.title}}的书稿">{{story.memoir.progressDetail}} ›</button>
-        </view>
-      </view>
+      <text class="hero-title">{{story.overview.title}}</text>
+      <text wx:if="{{canSwitchProject}}" class="hero-title-arrow" aria-hidden="true">›</text>
     </view>
 
-    <view
-      wx:for="{{story.chapters}}"
-      wx:key="id"
-      id="story-chapter-{{item.id}}"
-      class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
-    >
-      <view class="chapter-decoration" aria-hidden="true"></view>
-      <view class="chapter-branch" aria-hidden="true"></view>
-      <view class="chapter-node ui-tabular" aria-hidden="true">{{item.ordinal}}</view>
-
+    <view class="hero-visual">
       <view
-        class="chapter-card ui-card ui-card-borderless ui-pressable"
+        id="story-book-action"
+        class="hero-tree-book-action {{canOpenBook ? 'ui-pressable' : ''}}"
+        bindtap="openBook"
+        hover-class="{{canOpenBook ? 'story-tree-book-hover' : 'none'}}"
+        aria-role="{{canOpenBook ? 'button' : 'img'}}"
+        aria-label="{{canOpenBook ? '看整本书《' + story.memoir.title + '》' : '故事树成长到第 ' + story.overview.growthStage + ' 阶段'}}"
+      >
+        <image
+          class="hero-tree-image"
+          src="{{story.overview.growthImageSrc}}"
+          mode="aspectFit"
+          aria-hidden="true"
+        />
+      </view>
+      <view
+        wx:for="{{story.overview.themeTags}}"
+        wx:key="id"
+        wx:for-index="tagIndex"
+        class="theme-tag theme-tag-{{tagIndex}} theme-tone-{{item.tone}} ui-pressable"
         data-id="{{item.id}}"
-        bindtap="toggleChapter"
-        hover-class="ui-subtle-action-hover"
+        bindtap="openChapter"
+        hover-class="theme-tag-hover"
         aria-role="button"
-        aria-expanded="{{item.expanded}}"
-        aria-label="{{item.title}}，{{item.summaryText}}，{{item.outcomeText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
+        aria-label="打开主题：{{item.title}}"
       >
-        <view class="chapter-copy">
-          <text class="chapter-title">{{item.title}}</text>
-          <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
-          <text class="chapter-meta ui-tabular">
-            <text wx:if="{{item.timeRangeText}}">{{item.timeRangeText}} · </text>{{item.summaryText}}
-          </text>
-        </view>
-        <text wx:if="{{item.outcomeText}}" class="chapter-status {{item.state}}">{{item.outcomeText}}</text>
-        <view class="chapter-chevron {{item.expanded ? 'expanded' : ''}}" aria-hidden="true">⌄</view>
+        <view class="theme-tag-leaf" aria-hidden="true"></view>
+        <text class="theme-tag-text">{{item.title}}</text>
+        <text class="theme-tag-arrow" aria-hidden="true">›</text>
       </view>
-
-      <view wx:if="{{item.expanded}}" class="section-list">
-        <view class="chapter-reading-actions">
-          <button wx:if="{{item.readable}}" size="mini" class="ui-button story-inline-action" data-id="{{item.id}}" bindtap="readChapter">阅读本章 ›</button>
-          <button size="mini" class="ui-button story-inline-action {{item.readable ? 'is-secondary' : ''}}" data-id="{{item.id}}" bindtap="openChapter">{{item.detailActionText}} ›</button>
-        </view>
-        <view
-          wx:if="{{item.imageCount || item.videoCount}}"
-          class="chapter-media-row ui-pressable"
-          data-id="{{item.id}}"
-          bindtap="openMedia"
-          hover-class="ui-subtle-action-hover"
-          aria-role="button"
-          aria-label="{{item.title}}的章节素材"
-        >
-          <text class="chapter-media-title">本章素材</text>
-          <view class="section-media">
-            <text wx:if="{{item.imageCount}}" class="media-chip image-chip">{{item.imageCount}} 图</text>
-            <text wx:if="{{item.videoCount}}" class="media-chip video-chip">{{item.videoCount}} 视频</text>
-          </view>
-          <text class="section-action" aria-hidden="true">›</text>
-        </view>
-        <view
-          wx:for="{{item.sections}}"
-          wx:for-item="section"
-          wx:key="id"
-          id="story-section-{{section.id}}"
-          class="section-row ui-pressable {{section.highlighted ? 'is-new-growth' : ''}} {{section.growthAnimating ? 'growth-arriving' : ''}}"
-          data-chapter-id="{{item.id}}"
-          data-section-id="{{section.id}}"
-          bindtap="openChapter"
-          hover-class="ui-subtle-action-hover"
-          aria-role="button"
-          aria-label="{{section.title}}，{{section.materialText}}"
-        >
-          <view class="section-marker" aria-hidden="true"></view>
-          <view class="section-copy">
-            <text class="section-title">{{section.title}}</text>
-            <text wx:if="{{section.growthLabel}}" class="growth-label">{{section.growthLabel}}</text>
-            <text class="section-meta ui-tabular">{{section.materialText}}</text>
-          </view>
-          <view
-            wx:if="{{section.imageCount || section.videoCount}}"
-            class="section-media"
-          >
-            <text wx:if="{{section.imageCount}}" class="media-chip image-chip">{{section.imageCount}} 图</text>
-            <text wx:if="{{section.videoCount}}" class="media-chip video-chip">{{section.videoCount}} 视频</text>
-          </view>
-          <text class="section-action" aria-hidden="true">›</text>
-        </view>
-        <view
-          wx:if="{{!item.hasSections}}"
-          class="section-row section-empty ui-pressable"
-          data-id="{{item.id}}"
-          bindtap="openChapter"
-          hover-class="ui-subtle-action-hover"
-          aria-role="button"
-          aria-label="{{item.title}}还没有小节，进入整理"
-        >
-          <view class="section-marker" aria-hidden="true"></view>
-          <view class="section-copy">
-            <text class="section-title">还没有小节</text>
-            <text class="section-meta">{{item.state === 'attention' ? '查看本章待处理事项' : '讲述保存后会在后台整理'}} </text>
-          </view>
-          <text class="section-action" aria-hidden="true">›</text>
-        </view>
-      </view>
+      <view wx:if="{{canOpenBook && story.overview.hasChapters}}" class="hero-book-badge" aria-hidden="true">翻开整本书 ›</view>
     </view>
+    <text wx:if="{{canOpenBook && story.overview.hasChapters && showBookHint}}" class="hero-book-hint">点这棵树，可以翻看整本书</text>
 
     <view
-      class="unassigned-card ui-pressable"
-      bindtap="openTranscripts"
+      wx:if="{{story.overview.hasChapters}}"
+      id="story-summary-toggle"
+      class="story-summary-action ui-pressable {{story.overview.growthAnimating ? 'is-growing' : ''}}"
+      bindtap="toggleAllChapters"
       hover-class="ui-subtle-action-hover"
       aria-role="button"
+      aria-expanded="{{showAllChapters}}"
+      aria-label="{{story.overview.summaryText}}，{{showAllChapters ? '收起全部主题' : '查看全部主题'}}"
     >
-      <text class="unassigned-mark">＋</text>
-      <view class="unassigned-copy">
-        <text class="unassigned-title">{{story.unassignedMaterialTitle}}</text>
-        <text class="unassigned-meta">{{story.unassignedMaterialText}}</text>
-        <text class="unassigned-detail">{{story.unassignedMaterialDetail}}</text>
+      <text class="hero-summary ui-tabular">{{story.overview.summaryText}}</text>
+      <view class="story-summary-toggle">
+        <text>{{showAllChapters ? '收起' : '查看全部'}}</text>
+        <text class="story-summary-arrow {{showAllChapters ? 'is-open' : ''}}" aria-hidden="true">›</text>
       </view>
-      <view
-        wx:if="{{story.unassignedImageCount || story.unassignedVideoCount}}"
-        class="section-media section-media-entry ui-pressable"
-        catchtap="openMedia"
-        aria-role="button"
-        aria-label="查看待整理的图片和视频"
-      >
-        <text wx:if="{{story.unassignedImageCount}}" class="media-chip image-chip">{{story.unassignedImageCount}} 图</text>
-        <text wx:if="{{story.unassignedVideoCount}}" class="media-chip video-chip">{{story.unassignedVideoCount}} 视频</text>
-      </view>
-      <text class="unassigned-action">查看讲述 ›</text>
     </view>
+    <text wx:else class="hero-summary is-static ui-tabular">{{story.overview.summaryText}}</text>
+
+    <view
+      wx:if="{{story.overview.hasChapters}}"
+      class="story-list-expand {{showAllChapters ? 'is-open' : ''}}"
+      aria-hidden="{{!showAllChapters}}"
+    >
+      <view class="story-list-expand-inner">
+        <view class="story-list">
+          <block wx:for="{{story.chapters}}" wx:key="id">
+            <view
+              id="story-chapter-{{item.id}}"
+              class="story-row ui-pressable {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
+              data-id="{{item.id}}"
+              bindtap="openChapter"
+              hover-class="ui-subtle-action-hover"
+              aria-role="button"
+              aria-label="{{item.title}}，{{item.storyCountText}}"
+            >
+              <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">
+                <view class="story-leaf-shape"></view>
+              </view>
+              <view class="story-row-copy">
+                <view class="story-row-title-line">
+                  <text class="story-row-title">{{item.title}}</text>
+                  <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
+                </view>
+                <text class="story-row-meta ui-tabular">{{item.storyCountText}}</text>
+              </view>
+              <text class="story-row-arrow" aria-hidden="true">›</text>
+            </view>
+          </block>
+        </view>
+      </view>
+    </view>
+
+    <slot name="heroAction"></slot>
   </view>
 
-  <view
-    class="add-chapter-action ui-pressable"
-    bindtap="openChapterManager"
-    hover-class="ui-subtle-action-hover"
-    aria-role="button"
-    aria-label="查看书稿"
-  >
-    <text>查看书稿</text>
-    <text class="add-chapter-mark">›</text>
+  <slot name="afterHero"></slot>
+
+  <view wx:if="{{canVoiceEdit}}" class="story-utilities">
+    <view class="story-utility ui-pressable" bindtap="openTranscripts" hover-class="ui-subtle-action-hover"
+      aria-role="button" aria-label="查看全部回忆">全部回忆</view>
+    <view class="story-utility ui-pressable" bindtap="openVoiceEdit" hover-class="ui-subtle-action-hover"
+      aria-role="button" aria-label="用语音编辑故事">语音编辑</view>
   </view>
 </view>

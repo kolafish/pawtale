@@ -2,7 +2,13 @@ const PRIVACY_API_BANNED_MESSAGE = "小程序后台还没有声明录音隐私�
 const PRIVACY_AUTH_REQUIRED_MESSAGE = "请先同意微信小程序隐私保护指引后再开始录音。";
 const RECORDER_SYNC_ERROR_MESSAGE = "麦克风启动失败，请稍后重试。若刚才正在播放小余的声音，请等一秒再点开始说。";
 const RECORDER_BUSY_MESSAGE = "麦克风正在使用中，请稍后重试。";
-const RECORDER_PERMISSION_DENIED_MESSAGE = "没有麦克风权限，请在手机系统设置里允许微信使用麦克风。";
+const RECORDER_PERMISSION_DENIED_MESSAGE = "没有麦克风权限，请在小程序设置中允许录音；若已允许，请在手机系统设置里允许微信使用麦克风。";
+const RECORDER_PERMISSION_DENIED_CODE = "recorder_permission_denied";
+const RECORDER_SCOPE = "scope.record";
+
+interface RecorderPermissionError extends Error {
+  code: typeof RECORDER_PERMISSION_DENIED_CODE;
+}
 
 function normalizeMessage(value?: string): string {
   return String(value || "").toLowerCase();
@@ -24,7 +30,7 @@ export function wechatRecorderErrorMessage(errMsg?: string): string {
   if (message.includes("privacy")) {
     return wechatPrivacyErrorMessage(errMsg);
   }
-  if (message.includes("auth deny") || message.includes("permission") || message.includes("authorize")) {
+  if (isRecorderPermissionDeniedMessage(errMsg)) {
     return RECORDER_PERMISSION_DENIED_MESSAGE;
   }
   if (message.includes("is recording") || message.includes("busy") || message.includes("occupied")) {
@@ -34,6 +40,30 @@ export function wechatRecorderErrorMessage(errMsg?: string): string {
     return RECORDER_SYNC_ERROR_MESSAGE;
   }
   return errMsg || "录音启动失败，请重试";
+}
+
+export function isRecorderPermissionDeniedMessage(value?: string): boolean {
+  const message = normalizeMessage(value);
+  return !message.includes("privacy") && (message.includes("auth deny")
+    || message.includes("permission")
+    || message.includes("authorize")
+    || message.includes("没有麦克风权限")
+    || message.includes("麦克风权限仍未开启"));
+}
+
+function recorderPermissionDeniedError(): RecorderPermissionError {
+  const error = new Error(RECORDER_PERMISSION_DENIED_MESSAGE) as RecorderPermissionError;
+  error.code = RECORDER_PERMISSION_DENIED_CODE;
+  return error;
+}
+
+export function isRecorderPermissionDeniedError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as { code?: string; message?: string };
+  return candidate.code === RECORDER_PERMISSION_DENIED_CODE
+    || isRecorderPermissionDeniedMessage(candidate.message);
 }
 
 function getPrivacySetting(): Promise<boolean> {
@@ -62,10 +92,61 @@ function requirePrivacyAuthorize(): Promise<void> {
   });
 }
 
-export async function ensureRecorderPrivacyAuthorization(): Promise<void> {
-  const needAuthorization = await getPrivacySetting();
-  if (!needAuthorization) {
+function recorderAuthorizationSetting(): Promise<boolean | undefined> {
+  const getSettingApi = wx.getSetting;
+  if (typeof getSettingApi !== "function") {
+    return Promise.resolve(undefined);
+  }
+  return new Promise((resolve, reject) => {
+    getSettingApi({
+      success: (result) => resolve(result.authSetting[RECORDER_SCOPE]),
+      fail: (error) => reject(new Error(error.errMsg || "麦克风权限读取失败")),
+    });
+  });
+}
+
+async function ensureRecorderScopeAuthorization(): Promise<void> {
+  const authorized = await recorderAuthorizationSetting();
+  if (authorized === true) {
     return;
   }
-  await requirePrivacyAuthorize();
+  if (authorized === false) {
+    throw recorderPermissionDeniedError();
+  }
+  const authorizeApi = wx.authorize;
+  if (typeof authorizeApi !== "function") {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    authorizeApi({
+      scope: RECORDER_SCOPE,
+      success: () => resolve(),
+      fail: (error) => reject(
+        isRecorderPermissionDeniedMessage(error.errMsg)
+          ? recorderPermissionDeniedError()
+          : new Error(wechatRecorderErrorMessage(error.errMsg)),
+      ),
+    });
+  });
+}
+
+export async function ensureRecorderPrivacyAuthorization(): Promise<void> {
+  const needAuthorization = await getPrivacySetting();
+  if (needAuthorization) {
+    await requirePrivacyAuthorize();
+  }
+  await ensureRecorderScopeAuthorization();
+}
+
+export function openRecorderPermissionSettings(): Promise<boolean> {
+  const openSettingApi = wx.openSetting;
+  if (typeof openSettingApi !== "function") {
+    return Promise.reject(new Error("当前微信版本无法打开权限设置，请在微信或手机系统设置中允许麦克风。"));
+  }
+  return new Promise((resolve, reject) => {
+    openSettingApi({
+      success: (result) => resolve(result.authSetting[RECORDER_SCOPE] === true),
+      fail: (error) => reject(new Error(error.errMsg || "麦克风设置打开失败")),
+    });
+  });
 }

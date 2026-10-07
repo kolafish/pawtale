@@ -1,3 +1,4 @@
+import type { VoiceSessionEntry } from "../components/voice-session/events";
 import { ApiError } from "./request";
 
 export const HOME_PAGE_URL = "/pages/home/index";
@@ -13,6 +14,20 @@ export type PageNotFoundQuery = Record<string, string | undefined>;
 const LEGACY_PAGE_REDIRECTS: Record<string, string> = {
   "pages/book-chapter/index": CHAPTER_WORKSPACE_PAGE_URL,
 };
+
+export interface HomeVoiceTarget { userId: string; projectId: string; entry: VoiceSessionEntry }
+let pendingVoiceTarget: HomeVoiceTarget | null = null;
+
+export function consumeHomeVoiceTarget(): HomeVoiceTarget | null {
+  const target = pendingVoiceTarget;
+  pendingVoiceTarget = null;
+  return target;
+}
+
+export function returnToHomeVoice(target: HomeVoiceTarget): void {
+  pendingVoiceTarget = target;
+  returnToHome();
+}
 
 export interface HomeStoryTarget { projectId: string; narrationSaved: boolean }
 

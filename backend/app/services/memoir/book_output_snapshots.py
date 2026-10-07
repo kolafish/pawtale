@@ -5,11 +5,47 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirCreatedBy
 from app.models.memoir import MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlan, MemoirBookPlanChapter
 
 
 def latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
     return max(draft.versions, key=lambda version: (version.version, version.created_at, version.id)) if draft and draft.versions else None
+
+
+def legacy_chapter_version_needs_upgrade(
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    return bool(
+        version
+        and version.content.strip()
+        and not normalized_section_snapshots(version.section_snapshot_json)
+    )
+
+
+def chapter_version_is_protected(
+    draft: MemoirBookChapterDraft | None,
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    if draft is None or version is None:
+        return False
+    metadata = draft.metadata_json if isinstance(draft.metadata_json, dict) else {}
+    return bool(
+        version.created_by == MemoirCreatedBy.USER.value
+        or version.feedback
+        or draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value
+        or metadata.get("confirmed_version_id") == version.id
+    )
+
+
+def protected_legacy_chapter_version(
+    draft: MemoirBookChapterDraft | None,
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    return bool(
+        legacy_chapter_version_needs_upgrade(version)
+        and chapter_version_is_protected(draft, version)
+    )
 
 
 async def load_book_plan_drafts(db: AsyncSession, *, project_id: str) -> MemoirBookPlan:
@@ -26,10 +62,23 @@ def readable_chapter_versions(plan: MemoirBookPlan, *, allow_partial: bool = Fal
     result = []
     for chapter in chapters:
         version = latest_chapter_version(chapter.draft)
-        if version is None or not version.content.strip() or not normalized_section_snapshots(version.section_snapshot_json):
+        if version is None or not version.content.strip():
             if allow_partial:
                 continue
             raise HTTPException(status_code=409, detail=f"章节“{chapter.title}”还没有可读正文")
+        if not allow_partial and not normalized_section_snapshots(
+            version.section_snapshot_json
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=f"章节“{chapter.title}”还没有可读正文",
+            )
+        if (
+            allow_partial
+            and not normalized_section_snapshots(version.section_snapshot_json)
+            and not protected_legacy_chapter_version(chapter.draft, version)
+        ):
+            continue
         result.append((chapter, version))
     if not result and not allow_partial:
         raise HTTPException(status_code=409, detail="还没有可读的章节正文")

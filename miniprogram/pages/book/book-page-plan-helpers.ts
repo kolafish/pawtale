@@ -2,7 +2,7 @@ import type {
   MemoirBookPlanStructureCommandRequest,
 } from "../../domain/memoir-book";
 import { pageUrl } from "../../services/page-input";
-import type { BookChapterSources, BookChapterView, BookData } from "./book-view-model";
+import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
 import { chapterCollectionData, trimText } from "./book-view-model";
 
 export const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
@@ -12,7 +12,7 @@ export function bookChapterDetailUrl(projectId: string, chapterId: string): stri
   return pageUrl("/pages/chapter-workspace/index", { projectId, chapterId });
 }
 
-export function bookExportPageUrl(projectId: string, action = "preview"): string {
+export function bookExportPageUrl(projectId: string, action = "files"): string {
   return pageUrl("/pages/book-export/index", { projectId, action });
 }
 
@@ -38,10 +38,10 @@ export function chapterMoveCommand(
 }
 
 export function removeLocalChapterPatch(
-  data: Pick<BookData, "chapters" | "splitSourceSelections">,
+  data: Pick<BookHomeData, "chapters" | "splitSourceSelections">,
   chapterSources: BookChapterSources,
   chapterId: string,
-): Partial<BookData> | null {
+): Partial<BookHomeData> | null {
   const chapters = data.chapters.filter((chapter) => chapter.id !== chapterId);
   if (chapters.length === data.chapters.length) {
     return null;
@@ -53,11 +53,11 @@ export function removeLocalChapterPatch(
 }
 
 export function toggleBookSplitSourcePatch(
-  data: Pick<BookData, "chapters" | "splitSourceSelections">,
+  data: Pick<BookHomeData, "chapters" | "splitSourceSelections">,
   chapterSources: BookChapterSources,
   chapterId: string,
   utteranceId: string,
-): Partial<BookData> | null {
+): Partial<BookHomeData> | null {
   const chapter = findBookChapter(data.chapters, chapterId);
   if (!chapter || !utteranceId || chapter.sourceCount <= 1 || chapter.draftBusy) {
     return null;
@@ -84,11 +84,11 @@ export function toggleBookSplitSourcePatch(
 export interface SplitSelectedChapterSourcesPlan {
   command?: MemoirBookPlanStructureCommandRequest;
   error?: string;
-  patch?: Partial<BookData>;
+  patch?: Partial<BookHomeData>;
 }
 
 export function splitSelectedChapterSourcesPlan(
-  data: Pick<BookData, "chapters" | "splitSourceSelections">,
+  data: Pick<BookHomeData, "chapters" | "splitSourceSelections">,
   chapterId: string,
 ): SplitSelectedChapterSourcesPlan | null {
   const chapter = findBookChapter(data.chapters, chapterId);
@@ -114,10 +114,10 @@ export function splitSelectedChapterSourcesPlan(
 }
 
 export function toggleBookChapterSourcesPatch(
-  data: Pick<BookData, "chapters" | "splitSourceSelections">,
+  data: Pick<BookHomeData, "chapters" | "splitSourceSelections">,
   chapterSources: BookChapterSources,
   chapterId: string,
-): Partial<BookData> {
+): Partial<BookHomeData> {
   const chapters = data.chapters.map((chapter) => (
     chapter.id === chapterId
       ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }

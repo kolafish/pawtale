@@ -383,6 +383,7 @@ async def enqueue_book_completion_job(
             }
             for chapter in overview.chapters
             if chapter.chapter_id in retry_chapter_ids
+            and (chapter.state == "preparing" or chapter.next_action.kind == "prepare")
         ]
     else:
         targets = [

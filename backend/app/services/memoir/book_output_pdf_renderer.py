@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
@@ -43,6 +43,9 @@ PDF_EMBEDDED_IMAGE_JPEG_QUALITY = 90
 PDFColor = tuple[float, float, float]
 PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
 PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
+PDF_HERITAGE_ACCENT: PDFColor = (0.47, 0.35, 0.25)
+PDF_WARM_ACCENT: PDFColor = (0.56, 0.34, 0.25)
+PDF_MODERN_ACCENT: PDFColor = (0.19, 0.30, 0.33)
 
 
 class MemoirBookOutputExportLayout(StrEnum):
@@ -64,22 +67,28 @@ class PDFLayout:
     small_font_size: int
     max_line_units: int
     filename_suffix: str = ""
+    reading_edition: bool = False
+    mirror_body_pages: bool = False
+    inner_margin_delta: int = 0
+    manuscript_template: str = "classic_family"
+    body_font_name: str | None = None
 
 
 PDF_LAYOUTS = {
     MemoirBookOutputExportLayout.STANDARD: PDFLayout(
         page_width=420,
         page_height=595,
-        font_size=12,
-        line_height=21,
-        margin_x=46,
+        font_size=14,
+        line_height=24,
+        margin_x=44,
         margin_top=56,
         margin_bottom=56,
         title_font_size=24,
-        heading_font_size=18,
-        small_font_size=10,
-        max_line_units=26,
+        heading_font_size=19,
+        small_font_size=11,
+        max_line_units=22,
         filename_suffix="阅读版",
+        reading_edition=True,
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=420,
@@ -94,8 +103,78 @@ PDF_LAYOUTS = {
         small_font_size=11,
         max_line_units=20,
         filename_suffix="打印版",
+        mirror_body_pages=True,
+        inner_margin_delta=10,
     ),
 }
+
+
+def configured_pdf_layout(
+    base: PDFLayout,
+    *,
+    template: str,
+    custom_layout: dict[str, str] | None = None,
+) -> PDFLayout:
+    """Apply a manuscript design while retaining the reading/print page behavior."""
+    if template == "classic_family":
+        font_delta, line_delta, margin_delta = 0, 0, 0
+        title_delta, heading_delta, small_delta = 0, 0, 0
+    elif template == "photo_memory":
+        font_delta, line_delta, margin_delta = 0, 5, 10
+        title_delta, heading_delta, small_delta = 6, 3, 0
+    elif template == "oral_archive":
+        font_delta, line_delta, margin_delta = -1, -3, -6
+        title_delta, heading_delta, small_delta = -2, -1, -1
+    elif template == "heritage_classic":
+        font_delta, line_delta, margin_delta = 0, 2, 6
+        title_delta, heading_delta, small_delta = 3, 1, 0
+    elif template == "warm_journal":
+        font_delta, line_delta, margin_delta = 0, 3, 2
+        title_delta, heading_delta, small_delta = 2, 1, 0
+    elif template == "modern_minimal":
+        font_delta, line_delta, margin_delta = 0, 2, 4
+        title_delta, heading_delta, small_delta = 4, 1, 0
+    elif template == "custom":
+        font_delta, line_delta, margin_delta = 0, 0, 0
+        title_delta, heading_delta, small_delta = 2, 0, 0
+    else:
+        return base
+
+    choices = custom_layout or {}
+    font_adjustment = 2 if choices.get("font_scale") == "large" else 0
+    font_delta += font_adjustment
+    line_delta += {"compact": -3, "relaxed": 5}.get(choices.get("line_spacing"), 0) + font_adjustment
+    margin_delta += {"narrow": -10, "wide": 12}.get(choices.get("page_margin"), 0)
+    title_delta += font_adjustment
+    heading_delta += font_adjustment
+    small_delta += font_adjustment
+    body_font_name = {"serif": PDF_SERIF_FONT_NAME, "sans": PDF_SANS_FONT_NAME}.get(
+        choices.get("font_family"),
+        PDF_SANS_FONT_NAME if template == "modern_minimal" else None,
+    )
+    font_size = base.font_size + font_delta
+    margin_x = base.margin_x + margin_delta
+    max_line_units = round(
+        base.max_line_units
+        * (base.page_width - margin_x * 2)
+        / (base.page_width - base.margin_x * 2)
+        * base.font_size
+        / font_size
+    )
+    return replace(
+        base,
+        font_size=font_size,
+        line_height=max(font_size + 5, base.line_height + line_delta),
+        margin_x=margin_x,
+        margin_top=base.margin_top + margin_delta,
+        margin_bottom=base.margin_bottom + margin_delta,
+        title_font_size=base.title_font_size + title_delta,
+        heading_font_size=base.heading_font_size + heading_delta,
+        small_font_size=base.small_font_size + small_delta,
+        max_line_units=max(12, max_line_units),
+        manuscript_template=template,
+        body_font_name=body_font_name,
+    )
 
 
 @dataclass
@@ -120,6 +199,7 @@ class PDFDecorationCommand:
     color: PDFColor
     stroke_color: PDFColor | None = None
     line_width: float = 0
+    opacity: float = 1
 
 
 @dataclass
@@ -138,6 +218,7 @@ class PDFPage:
     images: list[PDFImageCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
     background_image_path: Path | None = None
+    background_image_preserve_aspect: bool = False
     text_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
@@ -266,9 +347,10 @@ def _adjust_forbidden_line_break(text: str, start: int, end: int) -> int:
 
 def _wrap_pdf_line(
     text: str,
-    max_units: int,
+    max_units: float,
     *,
     first_line_units: float | None = None,
+    avoid_single_char_last_line: bool = False,
 ) -> list[str]:
     if not text:
         return [""]
@@ -281,6 +363,19 @@ def _wrap_pdf_line(
         lines.append(text[start:end])
         start = end
         line_units = max_units
+    if avoid_single_char_last_line and len(lines) > 1 and len(lines[-1].strip()) == 1:
+        tail = lines[-2] + lines[-1]
+        original_break = len(lines[-2])
+        for candidate in range(original_break - 1, 0, -1):
+            end = _adjust_forbidden_line_break(tail, 0, candidate)
+            last_line = tail[end:]
+            if (
+                end < original_break
+                and len(last_line.strip()) > 1
+                and _text_units(last_line) <= max_units
+            ):
+                lines[-2:] = [tail[:end], last_line]
+                break
     return lines
 
 
@@ -293,10 +388,18 @@ def _estimated_text_width(text: str, font_size: int, *, char_spacing: float = 0.
     return int(_text_units(text) * font_size + spacing_width)
 
 
-def _right_aligned_x(text: str, layout: PDFLayout, font_size: int, *, char_spacing: float = 0.0) -> int:
+def _right_aligned_x(
+    text: str,
+    layout: PDFLayout,
+    font_size: int,
+    *,
+    char_spacing: float = 0.0,
+    margin_x: int | None = None,
+) -> int:
+    margin = layout.margin_x if margin_x is None else margin_x
     return max(
-        layout.margin_x,
-        layout.page_width - layout.margin_x - _estimated_text_width(text, font_size, char_spacing=char_spacing),
+        margin,
+        layout.page_width - margin - _estimated_text_width(text, font_size, char_spacing=char_spacing),
     )
 
 
@@ -319,6 +422,15 @@ class PDFBookBuilder:
         self.continuation_show_footer = True
         self.body_page_count = 0
         self.y = 0
+
+    def _content_left(self) -> int:
+        if not self.current_page or not self.layout.mirror_body_pages:
+            return self.layout.margin_x
+        if self.current_page.body_page_number is None:
+            return self.layout.margin_x
+        page_index = len(self.pages)
+        offset = self.layout.inner_margin_delta
+        return self.layout.margin_x + (offset if page_index % 2 else -offset)
 
     def new_page(
         self,
@@ -429,7 +541,9 @@ class PDFBookBuilder:
         box_height = max_height or min(220, int(self.layout.page_height * 0.34))
         self._ensure_space_height(box_height + 18)
         page = self._ensure_page()
-        x = self.layout.margin_x + int((self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2)
+        x = self._content_left() + int(
+            (self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2
+        )
         y = self.y - box_height
         page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
         self.y = y - 15
@@ -454,6 +568,8 @@ class PDFBookBuilder:
         keep_last_lines: int = 1,
         target_anchor: str | None = None,
         font_name: str | None = None,
+        color: PDFColor | None = None,
+        avoid_single_char_last_line: bool = False,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -469,25 +585,27 @@ class PDFBookBuilder:
                 stripped,
                 max_units,
                 first_line_units=first_line_units if first_line_indent else None,
+                avoid_single_char_last_line=avoid_single_char_last_line,
             )
             if len(lines) > 1 and min_start_lines > 1:
-                self._ensure_space(min(min_start_lines, len(lines)))
+                self._ensure_space_height(min(min_start_lines, len(lines)) * line_height)
             for line_index, line in enumerate(lines):
                 remaining_lines = len(lines) - line_index
                 if keep_last_lines > 1 and remaining_lines == keep_last_lines:
-                    self._ensure_space(remaining_lines)
+                    self._ensure_space_height(remaining_lines * line_height)
                 else:
-                    self._ensure_space(1)
+                    self._ensure_space_height(line_height)
                 page = self._ensure_page()
                 line_indent = indent + (first_line_indent if line_index == 0 else 0)
                 page.commands.append(
                     PDFTextCommand(
                         text=line,
-                        x=self.layout.margin_x + line_indent,
+                        x=self._content_left() + line_indent,
                         y=self.y,
                         font_size=font_size,
                         target_anchor=target_anchor,
                         font_name=font_name,
+                        color=color,
                     )
                 )
                 self.y -= line_height
@@ -504,20 +622,69 @@ class PDFBookBuilder:
             spacing_after=spacing_after,
             min_start_lines=2,
             keep_last_lines=2,
+            font_name=self.layout.body_font_name,
         )
 
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
+        template = self.layout.manuscript_template
+        first_page_index = max(0, len(self.pages) - 1)
+        first_page_command_count = len(self.current_page.commands) if self.current_page else 0
         self.add_text(
             f"“{text}”",
             font_size=max(self.layout.small_font_size + 1, self.layout.font_size - 2),
             line_height=self.layout.line_height,
             max_units=self.layout.max_line_units,
-            indent=12,
+            indent=18 if template in {"heritage_classic", "warm_journal"} else 12,
             paragraph_spacing_after=0,
             spacing_after=spacing_after,
             min_start_lines=2,
             keep_last_lines=2,
+            font_name=PDF_SANS_FONT_NAME if template == "modern_minimal" else None,
+            color={
+                "heritage_classic": PDF_HERITAGE_ACCENT,
+                "warm_journal": PDF_WARM_ACCENT,
+                "modern_minimal": PDF_MODERN_ACCENT,
+            }.get(template),
         )
+        if template not in {"heritage_classic", "warm_journal", "modern_minimal"}:
+            return
+        for page_index, page in enumerate(self.pages[first_page_index:], start=first_page_index):
+            quote_lines = page.commands[
+                first_page_command_count if page_index == first_page_index else 0 :
+            ]
+            if not quote_lines:
+                continue
+            top = max(line.y for line in quote_lines)
+            bottom = min(line.y for line in quote_lines)
+            left = min(line.x for line in quote_lines)
+            if template == "modern_minimal":
+                page.decorations.append(
+                    PDFDecorationCommand(
+                        kind="line",
+                        x=left,
+                        y=top + 16,
+                        width=min(70, self.layout.page_width - left - self.layout.margin_x),
+                        height=0,
+                        color=PDF_MODERN_ACCENT,
+                        line_width=1.1,
+                    )
+                )
+            else:
+                page.decorations.append(
+                    PDFDecorationCommand(
+                        kind="line",
+                        x=left - 10,
+                        y=bottom - 4,
+                        width=0,
+                        height=top - bottom + self.layout.font_size + 8,
+                        color=(
+                            PDF_HERITAGE_ACCENT
+                            if template == "heritage_classic"
+                            else PDF_WARM_ACCENT
+                        ),
+                        line_width=0.65 if template == "heritage_classic" else 2.2,
+                    )
+                )
 
     def add_heading(self, text: str) -> None:
         self._ensure_space(3)
@@ -525,21 +692,82 @@ class PDFBookBuilder:
             text,
             font_size=self.layout.heading_font_size,
             line_height=self.layout.line_height + 4,
-            max_units=max(12, self.layout.max_line_units - 2),
+            max_units=min(
+                self.layout.max_line_units - 2,
+                (self.layout.page_width - self.layout.margin_x * 2) // self.layout.heading_font_size,
+            ),
             spacing_after=6,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
+            avoid_single_char_last_line=True,
         )
 
     def add_section_heading(self, text: str) -> None:
-        self._ensure_space(3)
+        template = self.layout.manuscript_template
+        font_size = self.layout.font_size + 2
+        indent = 11 if template in {"warm_journal", "modern_minimal"} else 0
+        max_units = min(
+            self.layout.max_line_units - 2,
+            (
+                self.layout.page_width
+                - self.layout.margin_x * 2
+                - self.layout.inner_margin_delta
+                - indent
+            ) // font_size,
+        )
+        heading_line_height = self.layout.line_height + 2
+        spacing_after = (
+            16 if template in {"heritage_classic", "modern_minimal"}
+            else 8 if template == "warm_journal" else 5
+        )
+        heading_lines = _wrap_pdf_line(
+            text.strip(), max_units, avoid_single_char_last_line=True
+        )
+        self._ensure_space_height(
+            len(heading_lines) * heading_line_height
+            + spacing_after
+            + 2 * self.layout.line_height
+        )
+        heading_y = self.y
+        heading_x = self._content_left()
         self.add_text(
             text,
-            font_size=self.layout.font_size + 2,
-            line_height=self.layout.line_height + 2,
-            max_units=max(12, self.layout.max_line_units - 2),
-            spacing_after=5,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
+            font_size=font_size,
+            line_height=heading_line_height,
+            max_units=max_units,
+            indent=indent,
+            spacing_after=spacing_after,
+            font_name=(
+                PDF_SANS_FONT_NAME
+                if template == "modern_minimal"
+                else PDF_SERIF_BOLD_FONT_NAME
+            ),
+            color={
+                "heritage_classic": PDF_HERITAGE_ACCENT,
+                "warm_journal": PDF_WARM_ACCENT,
+                "modern_minimal": PDF_MODERN_ACCENT,
+            }.get(template),
+            avoid_single_char_last_line=True,
         )
+        if template == "heritage_classic":
+            self.add_decoration(
+                kind="line", x=heading_x, y=self.y + 17, width=74, height=0,
+                color=PDF_HERITAGE_ACCENT, line_width=0.5,
+            )
+        elif template in {"warm_journal", "modern_minimal"}:
+            self.add_decoration(
+                kind="rect",
+                x=heading_x,
+                y=heading_y - 3,
+                width=3 if template == "warm_journal" else 4,
+                height=font_size + 3,
+                color=PDF_WARM_ACCENT if template == "warm_journal" else PDF_MODERN_ACCENT,
+            )
+            if template == "modern_minimal":
+                self.add_decoration(
+                    kind="line", x=heading_x, y=self.y + 17,
+                    width=self.layout.page_width - 2 * self.layout.margin_x,
+                    height=0, color=(0.83, 0.86, 0.86), line_width=0.5,
+                )
 
     def add_centered(
         self,
@@ -554,8 +782,8 @@ class PDFBookBuilder:
     ) -> None:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         page = self._ensure_page()
-        for line in _wrap_pdf_line(text.strip(), max_units):
-            self._ensure_space(1)
+        for line in _wrap_pdf_line(text.strip(), max_units, avoid_single_char_last_line=True):
+            self._ensure_space_height(line_height)
             page = self._ensure_page()
             page.commands.append(
                 PDFTextCommand(
@@ -583,15 +811,16 @@ class PDFBookBuilder:
         color: PDFColor | None = None,
         font_name: str | None = None,
         char_spacing: float = 0.0,
+        x_offset: int = 0,
     ) -> int:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         current_y = y
-        for line in _wrap_pdf_line(text.strip(), max_units):
+        for line in _wrap_pdf_line(text.strip(), max_units, avoid_single_char_last_line=True):
             page = self._ensure_page()
             page.commands.append(
                 PDFTextCommand(
                     text=line,
-                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing),
+                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing) + x_offset,
                     y=current_y,
                     font_size=font_size,
                     color=color,
@@ -614,90 +843,159 @@ class PDFBookBuilder:
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = self.layout.line_height + 2
-        self._ensure_space(1)
-        page = self._ensure_page()
         label_x = self.layout.margin_x + indent
         page_x = (
             self.layout.page_width
             - self.layout.margin_x
             - _estimated_text_width(page_text, font_size)
         )
-        max_label_units = max(8, (page_x - label_x - 22) / max(font_size, 1))
-        fitted_label = _truncate_units(label, max_label_units)
-        page.commands.append(
-            PDFTextCommand(
-                text=fitted_label,
-                x=label_x,
-                y=self.y,
-                font_size=font_size,
-                target_anchor=target_anchor,
-                font_name=font_name,
-            )
+        hanging_indent = min(font_size * 2, max(12, (page_x - label_x) // 4))
+        continuation_x = label_x + hanging_indent
+        max_label_units = max(
+            8,
+            (page_x - continuation_x - 8) / max(font_size, 1),
         )
-        if page_text:
-            label_end_x = label_x + _estimated_text_width(fitted_label, font_size)
-            leader_x = label_end_x + 6
-            leader_units = max(0, (page_x - leader_x - 6) / max(font_size, 1))
-            leaders = "." * max(2, int(leader_units / _char_units("."))) if leader_units > 2 else ""
-            if leaders:
+        label_lines = _wrap_pdf_line(
+            label.strip(), max_label_units, avoid_single_char_last_line=True
+        )
+        self._ensure_space_height(len(label_lines) * line_height)
+        for line_index, line in enumerate(label_lines):
+            page = self._ensure_page()
+            is_last_line = line_index == len(label_lines) - 1
+            line_x = label_x if line_index == 0 else continuation_x
+            page.commands.append(
+                PDFTextCommand(
+                    text=line,
+                    x=line_x,
+                    y=self.y,
+                    font_size=font_size,
+                    target_anchor=target_anchor,
+                    font_name=font_name,
+                )
+            )
+            if is_last_line and page_text:
+                label_end_x = line_x + _estimated_text_width(line, font_size)
+                leader_x = label_end_x + 6
+                leader_units = max(0, (page_x - leader_x - 6) / max(font_size, 1))
+                leaders = (
+                    "." * max(2, int(leader_units / _char_units(".")))
+                    if leader_units > 2
+                    else ""
+                )
+                if leaders:
+                    page.commands.append(
+                        PDFTextCommand(
+                            text=leaders,
+                            x=leader_x,
+                            y=self.y,
+                            font_size=font_size,
+                            target_anchor=target_anchor,
+                        )
+                    )
                 page.commands.append(
                     PDFTextCommand(
-                        text=leaders,
-                        x=leader_x,
+                        text=page_text,
+                        x=page_x,
                         y=self.y,
                         font_size=font_size,
                         target_anchor=target_anchor,
                     )
                 )
-            page.commands.append(
-                PDFTextCommand(
-                    text=page_text,
-                    x=page_x,
-                    y=self.y,
-                    font_size=font_size,
-                    target_anchor=target_anchor,
-                )
-            )
-        self.y -= line_height
+            self.y -= line_height
 
 
 def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) -> list[PDFTextCommand]:
     commands: list[PDFTextCommand] = []
+    mirrored_body = layout.mirror_body_pages and page.body_page_number is not None
+    outer_margin = max(0, layout.margin_x - layout.inner_margin_delta)
+    accent_color = {
+        "heritage_classic": PDF_HERITAGE_ACCENT,
+        "warm_journal": PDF_WARM_ACCENT,
+        "modern_minimal": PDF_MODERN_ACCENT,
+    }.get(layout.manuscript_template, PDF_HEADER_TEXT)
+    running_font = (
+        PDF_SERIF_FONT_NAME
+        if layout.manuscript_template in {"heritage_classic", "warm_journal"}
+        else PDF_SANS_FONT_NAME
+    )
     if page.header_title:
         header_y = layout.page_height - 28
         header_font_size = max(8, layout.small_font_size - 1)
-        commands.append(
-            PDFTextCommand(
-                page.header_title[:18],
-                layout.margin_x,
-                header_y,
-                header_font_size,
-                color=PDF_HEADER_TEXT,
-                font_name=PDF_SANS_FONT_NAME,
-            )
-        )
-        if page.section_title:
+        if mirrored_body and page_number % 2 == 1:
+            if page.section_title:
+                commands.append(
+                    PDFTextCommand(
+                        page.section_title[:14],
+                        _right_aligned_x(
+                            page.section_title[:14],
+                            layout,
+                            header_font_size,
+                            margin_x=outer_margin,
+                        ),
+                        header_y,
+                        header_font_size,
+                        color=accent_color,
+                        font_name=running_font,
+                    )
+                )
+        elif mirrored_body:
             commands.append(
                 PDFTextCommand(
-                    page.section_title[:14],
-                    _right_aligned_x(page.section_title[:14], layout, header_font_size),
+                    page.header_title[:18],
+                    outer_margin,
                     header_y,
                     header_font_size,
-                    color=PDF_HEADER_TEXT,
-                    font_name=PDF_SANS_FONT_NAME,
+                    color=accent_color,
+                    font_name=running_font,
                 )
             )
+        else:
+            commands.append(
+                PDFTextCommand(
+                    page.header_title[:18],
+                    layout.margin_x,
+                    header_y,
+                    header_font_size,
+                    color=accent_color,
+                    font_name=running_font,
+                )
+            )
+            if page.section_title:
+                commands.append(
+                    PDFTextCommand(
+                        page.section_title[:14],
+                        _right_aligned_x(page.section_title[:14], layout, header_font_size),
+                        header_y,
+                        header_font_size,
+                        color=accent_color,
+                        font_name=running_font,
+                    )
+                )
     commands.extend(page.commands)
     if page.show_footer and page.body_page_number is not None:
-        footer = str(page.body_page_number)
+        footer = {
+            "heritage_classic": f"· {page.body_page_number} ·",
+            "warm_journal": f"{page.body_page_number}",
+            "modern_minimal": f"{page.body_page_number:02}",
+        }.get(layout.manuscript_template, str(page.body_page_number))
+        if layout.mirror_body_pages:
+            footer_x = (
+                outer_margin
+                if page_number % 2 == 0
+                else layout.page_width
+                - outer_margin
+                - _estimated_text_width(footer, layout.small_font_size)
+            )
+        else:
+            footer_x = _centered_x(footer, layout, layout.small_font_size)
         commands.append(
             PDFTextCommand(
                 footer,
-                _centered_x(footer, layout, layout.small_font_size),
+                footer_x,
                 24,
                 layout.small_font_size,
-                color=PDF_HEADER_TEXT,
-                font_name=PDF_SANS_FONT_NAME,
+                color=accent_color,
+                font_name=running_font,
             )
         )
     return commands
@@ -842,17 +1140,27 @@ def _render_pdf_pages(
             pdf.setFillColorRGB(*page.background_color)
             pdf.rect(0, 0, layout.page_width, layout.page_height, stroke=0, fill=1)
         if page.background_image_path:
+            background_source = (
+                _optimized_pdf_image_source(PDFImageCommand(
+                    path=page.background_image_path, x=0, y=0,
+                    width=layout.page_width, height=layout.page_height,
+                )) if page.background_image_preserve_aspect else str(page.background_image_path)
+            )
             pdf.drawImage(
-                str(page.background_image_path),
+                background_source,
                 0,
                 0,
                 width=layout.page_width,
                 height=layout.page_height,
-                preserveAspectRatio=False,
+                preserveAspectRatio=page.background_image_preserve_aspect,
+                anchor="c",
                 mask="auto",
             )
         for decoration in page.decorations:
+            pdf.saveState()
+            pdf.setFillAlpha(decoration.opacity)
             _draw_pdf_decoration(pdf, decoration)
+            pdf.restoreState()
         for image in page.images:
             image_key = (image.path, round(image.width), round(image.height))
             image_source = image_sources.get(image_key)

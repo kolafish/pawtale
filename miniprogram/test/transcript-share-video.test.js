@@ -5,8 +5,41 @@ const test = require("node:test");
 const { ApiError } = require("../services/request.ts");
 const {
   initialTranscriptShareVideoTaskState,
+  shareVideoBackgroundPatch,
+  shareVideoStylePatch,
   TranscriptShareVideoController,
 } = require("../services/transcript-share-video.ts");
+
+test("illustration subsettings preserve the selected video style", () => {
+  const context = {
+    default_background_style: "watercolor",
+    default_background_mode: "auto",
+    background_styles: [{ value: "watercolor", label: "水彩" }],
+    background_modes: [{ value: "auto", label: "自动" }],
+  };
+  const patch = shareVideoBackgroundPatch(context, {
+    backgroundStyle: "watercolor",
+    backgroundMode: "auto",
+  });
+  for (const style of ["uploaded", "illustrated", "story_animation"]) {
+    const selected = shareVideoStylePatch(context, style);
+    const state = { ...selected, ...patch };
+    assert.equal(state.shareVideoStyle, selected.shareVideoStyle);
+    assert.equal(state.shareVideoBackgroundSource, selected.shareVideoBackgroundSource);
+    assert.equal(state.shareVideoBackgroundUsesAi, selected.shareVideoBackgroundUsesAi);
+    assert.equal(state.shareVideoBackgroundUsesCustom, selected.shareVideoBackgroundUsesCustom);
+    assert.equal(state.shareVideoBackgroundStyle, "watercolor");
+    assert.equal(state.shareVideoBackgroundMode, "auto");
+  }
+});
+
+test("video style selection uses the project default and keeps unavailable illustration explicit", () => {
+  assert.equal(shareVideoStylePatch({ default_video_style: "story_animation" }).shareVideoStyle, "story_animation");
+  const patch = shareVideoStylePatch({ default_video_style: "illustrated", ai_background_enabled: false });
+  assert.equal(patch.shareVideoStyle, "illustrated");
+  assert.equal(patch.shareVideoStyleUnavailable, true);
+  assert.equal(shareVideoStylePatch(null, "uploaded").shareVideoBackgroundUsesCustom, true);
+});
 
 function shareVideoJob(overrides = {}) {
   return {

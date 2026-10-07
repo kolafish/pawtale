@@ -1,10 +1,32 @@
 .book-reader-page {
-  padding: 32rpx 28rpx 72rpx;
+  padding: 26rpx 28rpx calc(76rpx + env(safe-area-inset-bottom));
   color: var(--ui-text-primary);
 }
 
 .reader-cover {
-  padding: 44rpx 34rpx 40rpx;
+  position: relative;
+  overflow: hidden;
+  padding: 46rpx 36rpx 40rpx;
+  border-radius: 30rpx;
+  background:
+    radial-gradient(circle at 84% 82%, rgba(243, 226, 216, 0.44), rgba(243, 226, 216, 0) 42%),
+    linear-gradient(145deg, rgba(255, 253, 250, 0.99), rgba(251, 247, 241, 0.96));
+}
+
+.reader-cover-art {
+  position: absolute;
+  z-index: 0;
+  top: -26rpx;
+  right: -34rpx;
+  width: 330rpx;
+  height: 390rpx;
+  opacity: 0.34;
+  pointer-events: none;
+}
+
+.reader-cover-copy {
+  position: relative;
+  z-index: 1;
 }
 
 .reader-eyebrow,
@@ -15,13 +37,12 @@
 .section-label,
 .toc-index,
 .toc-title,
+.toc-story-count,
 .toc-section-index,
 .toc-section-title,
 .chapter-index,
 .chapter-title,
-.chapter-meta,
 .chapter-content,
-.small-section-index,
 .small-section-title,
 .small-section-content,
 .book-content,
@@ -31,64 +52,100 @@
 
 .reader-eyebrow {
   color: var(--ui-section-title);
-  font-size: 25rpx;
+  font-family: var(--ui-font-editorial);
+  font-size: var(--ui-font-meta);
+  font-weight: 700;
+  letter-spacing: 0.06em;
   line-height: 1.4;
 }
 
 .reader-title {
-  margin-top: 16rpx;
+  max-width: 540rpx;
   color: var(--ui-text-primary);
-  font-size: 52rpx;
-  font-weight: 800;
-  line-height: 1.22;
+  font-family: var(--ui-font-editorial);
+  font-size: 54rpx;
+  font-weight: 700;
+  line-height: 1.25;
   word-break: break-word;
+  text-wrap: balance;
+}
+
+.reader-eyebrow + .reader-title {
+  margin-top: 12rpx;
 }
 
 .reader-subtitle {
-  margin-top: 18rpx;
+  max-width: 520rpx;
+  margin-top: 14rpx;
   color: var(--ui-text-secondary);
-  font-size: 30rpx;
-  line-height: 1.5;
+  font-size: var(--ui-font-body);
+  line-height: 1.6;
   word-break: break-word;
+  text-wrap: pretty;
 }
 
 .reader-meta {
-  margin-top: 22rpx;
+  margin-top: 26rpx;
   color: var(--ui-text-muted);
-  font-size: 25rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .reader-notice {
-  margin-top: 22rpx;
-  padding: 18rpx 20rpx;
-  border-radius: 10rpx;
-  background: var(--ui-accent-surface);
+  max-width: 540rpx;
+  margin-top: 18rpx;
+  padding: 15rpx 18rpx;
+  border-radius: 16rpx;
+  background: rgba(250, 237, 231, 0.88);
+  color: var(--ui-accent-strong);
+  box-shadow: inset 0 0 0 1rpx rgba(182, 93, 73, 0.08);
+  font-size: var(--ui-font-body);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.reader-notice-dot {
+  margin-right: 12rpx;
   color: var(--ui-accent);
-  font-size: 25rpx;
-  line-height: 1.5;
 }
 
 .reader-notice.subtle {
-  background: var(--ui-surface-subtle);
+  background: rgba(250, 247, 242, 0.92);
   color: var(--ui-text-secondary);
+  box-shadow: inset 0 0 0 1rpx rgba(54, 42, 34, 0.05);
 }
 
 .reader-audio-action {
-  margin-top: 28rpx;
-  border-radius: 12rpx;
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
-  font-size: 29rpx;
-  font-weight: 800;
+  width: auto;
+  min-width: 224rpx;
+  min-height: 44px;
+  margin-top: 26rpx;
+  padding: 10rpx 24rpx 10rpx 20rpx;
+  display: inline-flex;
+  gap: 12rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 253, 250, 0.92);
+  color: var(--ui-accent-strong);
+  box-shadow:
+    inset 0 0 0 2rpx var(--ui-accent-border),
+    0 4rpx 12rpx rgba(63, 47, 37, 0.025);
+  font-size: var(--ui-font-action);
+  font-weight: 700;
   line-height: 1.4;
+}
+
+.reader-audio-icon {
+  width: 40rpx;
+  height: 40rpx;
+  flex: 0 0 40rpx;
 }
 
 .reader-playback-error {
   display: block;
   margin-top: 16rpx;
   color: var(--ui-danger-text);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -101,110 +158,132 @@
 }
 
 .reader-state {
-  padding: 36rpx 30rpx;
+  padding: 34rpx 30rpx;
   color: var(--ui-text-secondary);
   font-size: 30rpx;
   line-height: 1.55;
 }
 
 .reader-state.error {
-  border-color: var(--ui-danger-text);
   background: var(--ui-danger-surface);
   color: var(--ui-danger-text);
+  box-shadow: inset 0 0 0 1rpx rgba(168, 73, 63, 0.12);
 }
 
 .reader-section {
-  margin-top: 24rpx;
-  padding: 30rpx;
+  margin-top: 22rpx;
+  padding: 32rpx 30rpx 22rpx;
 }
 
 .section-label {
-  color: var(--ui-accent-strong);
-  font-size: 28rpx;
-  font-weight: 800;
-  line-height: 1.35;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: 34rpx;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  text-wrap: balance;
 }
 
 .toc-list {
   margin-top: 18rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
+  border-top: 1rpx solid var(--ui-divider);
 }
 
 .toc-group {
   min-width: 0;
+  border-bottom: 1rpx solid var(--ui-divider);
 }
 
 .toc-row {
-  display: grid;
-  grid-template-columns: 96rpx minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16rpx;
   width: 100%;
-  min-height: 44px;
+  min-height: 52px;
   margin: 0;
-  padding: 10rpx 0;
+  padding: 16rpx 2rpx;
+  display: grid;
+  grid-template-columns: 58rpx minmax(0, 1fr) 40rpx;
+  align-items: center;
+  gap: 14rpx;
   border: 0;
-  border-radius: 8rpx;
   background: transparent;
   text-align: left;
-  transition: background-color 140ms ease-out;
-}
-
-.toc-row::after,
-.reader-top-action::after {
-  border: 0;
-}
-
-.toc-row:active {
-  background: var(--ui-surface-subtle);
 }
 
 .toc-index {
+  align-self: start;
+  padding-top: 4rpx;
   color: var(--ui-section-title);
-  font-size: 25rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 
-.toc-title {
-  color: var(--ui-text-primary);
-  font-size: 30rpx;
-  font-weight: 700;
-  line-height: 1.5;
-  word-break: break-word;
+.toc-heading {
+  min-width: 0;
 }
 
-.toc-action {
-  color: var(--ui-accent);
-  font-size: 24rpx;
+.toc-title {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: var(--ui-font-section-title);
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.48;
+  word-break: break-word;
+  text-wrap: balance;
+}
+
+.toc-story-count {
+  margin-top: 3rpx;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-font-caption);
+  line-height: 1.45;
+}
+
+.toc-chevron {
+  width: 40rpx;
+  height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-accent-strong);
+  font-size: 40rpx;
+  font-weight: 300;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition-property: transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.toc-chevron.is-expanded {
+  transform: rotate(90deg);
 }
 
 .toc-section-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  margin-top: 8rpx;
-  margin-left: 36rpx;
-  padding-left: 20rpx;
-  border-left: 2rpx solid var(--ui-border);
+  margin: 0 0 18rpx 58rpx;
+  padding: 4rpx 0 4rpx 20rpx;
+  border-left: 2rpx solid var(--ui-divider);
 }
 
 .toc-section-row {
+  min-height: 44px;
   display: grid;
-  grid-template-columns: 76rpx minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: 68rpx minmax(0, 1fr);
+  align-items: center;
   gap: 12rpx;
+  padding: 9rpx 6rpx;
+  border-radius: 12rpx;
 }
 
 .toc-section-index,
 .toc-section-title {
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 1.5;
+  font-size: var(--ui-font-meta);
+  line-height: 1.55;
+}
+
+.toc-chapter-action .toc-section-title {
+  grid-column: 2;
 }
 
 .toc-section-index {
@@ -213,86 +292,91 @@
 
 .toc-section-title {
   word-break: break-word;
+  text-wrap: pretty;
 }
 
 .chapter-list {
-  margin-top: 24rpx;
+  margin-top: 28rpx;
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
+  gap: 26rpx;
 }
 
-.chapter-block {
-  padding: 36rpx 32rpx;
+.chapter-block.ui-card {
+  padding: 48rpx 34rpx 52rpx;
+  border-radius: 20rpx;
+  box-shadow:
+    0 0 0 1rpx rgba(54, 42, 34, 0.025),
+    0 8rpx 28rpx rgba(63, 47, 37, 0.032);
 }
 
-.chapter-preview-block {
-  padding-top: 40rpx;
+.chapter-preview-block.ui-card {
+  padding-top: 42rpx;
 }
 
 .chapter-index {
   color: var(--ui-section-title);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.4;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 
 .chapter-title {
   margin-top: 10rpx;
   color: var(--ui-text-primary);
-  font-size: 40rpx;
-  font-weight: 800;
-  line-height: 1.32;
+  font-family: var(--ui-font-editorial);
+  font-size: 42rpx;
+  font-weight: 700;
+  line-height: 1.42;
   word-break: break-word;
-}
-
-.chapter-meta {
-  margin-top: 12rpx;
-  color: var(--ui-text-muted);
-  font-size: 24rpx;
-  line-height: 1.5;
+  text-wrap: balance;
 }
 
 .reader-small-section-list {
-  display: flex;
-  flex-direction: column;
-  gap: 34rpx;
-  margin-top: 30rpx;
+  margin-top: 38rpx;
+}
+
+.chapter-preview-block .reader-small-section-list {
+  margin-top: 0;
 }
 
 .reader-small-section {
   min-width: 0;
+  scroll-margin-top: 24rpx;
 }
 
 .reader-small-section + .reader-small-section {
-  padding-top: 30rpx;
-  border-top: 1rpx solid var(--ui-divider);
-}
-
-.small-section-index {
-  color: var(--ui-section-title);
-  font-size: 23rpx;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
+  margin-top: 52rpx;
 }
 
 .small-section-title {
-  margin-top: 8rpx;
   color: var(--ui-text-primary);
-  font-size: 33rpx;
+  font-family: var(--ui-font-editorial);
+  font-size: 34rpx;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.5;
   word-break: break-word;
-}
-
-.small-section-content {
-  color: var(--ui-text-primary);
-  font-size: 32rpx;
-  line-height: 1.82;
-  word-break: break-word;
+  text-wrap: balance;
 }
 
 .small-section-paragraph-list {
-  margin-top: 18rpx;
+  margin-top: 24rpx;
+}
+
+.reader-small-section:first-child .small-section-paragraph-list:first-child {
+  margin-top: 0;
+}
+
+.small-section-content,
+.chapter-content,
+.book-content {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: 34rpx;
+  font-weight: 400;
+  line-height: 2;
+  word-break: break-word;
 }
 
 .small-section-paragraph-list .small-section-content {
@@ -301,7 +385,7 @@
 }
 
 .small-section-paragraph-list .small-section-content + .small-section-content {
-  margin-top: 20rpx;
+  margin-top: 24rpx;
 }
 
 .reader-sentence-highlight {
@@ -312,11 +396,7 @@
 
 .chapter-content,
 .book-content {
-  margin-top: 24rpx;
-  color: var(--ui-text-primary);
-  font-size: 32rpx;
-  line-height: 1.82;
-  word-break: break-word;
+  margin-top: 26rpx;
   white-space: pre-wrap;
 }
 
@@ -324,20 +404,66 @@
   margin-top: 18rpx;
 }
 
-.reader-top-action {
-  width: 100%;
-  min-height: 44px;
-  margin: 30rpx 0 0;
-  border: 0;
-  border-radius: 10rpx;
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent-strong);
-  font-size: 27rpx;
-  font-weight: 700;
-  line-height: 44px;
-  transition: transform 140ms ease-out;
+.reader-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 24rpx;
 }
 
-.reader-top-action:active {
-  transform: scale(0.96);
+.reader-page-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 20rpx;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-action);
+}
+
+.reader-page-action[aria-disabled="true"] {
+  opacity: 0.35;
+}
+
+.reader-page-count {
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-top-action-shell {
+  padding-top: 22rpx;
+  text-align: center;
+}
+
+.reader-top-action {
+  min-height: 44px;
+  padding: 0 24rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14rpx;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-action);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.book-reader-page.large-text .toc-title,
+.book-reader-page.large-text .small-section-title {
+  font-size: 38rpx;
+}
+
+.book-reader-page.large-text .toc-story-count,
+.book-reader-page.large-text .toc-section-index,
+.book-reader-page.large-text .toc-section-title {
+  font-size: var(--ui-font-large-meta);
+}
+
+.book-reader-page.large-text .small-section-content,
+.book-reader-page.large-text .chapter-content,
+.book-reader-page.large-text .book-content {
+  font-size: 38rpx;
+  line-height: 2;
 }

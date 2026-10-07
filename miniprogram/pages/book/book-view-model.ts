@@ -13,20 +13,14 @@ import type {
   MemoirBookPlanChapterInput,
 } from "../../domain/memoir-book";
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
+import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import {
   sourceRefKey,
 } from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
-import type { BookAutomationEventView } from "./book-automation-view-model";
 import { createdAtTime, trimText } from "./book-view-model-utils";
 
-export {
-  uniqueSourceRefs,
-} from "../../services/memoir-book-sources";
-
 export type {
-  BookAutomationEventDetailView,
-  BookAutomationEventSuggestionView,
   BookAutomationEventView,
 } from "./book-automation-view-model";
 export {
@@ -57,11 +51,11 @@ export interface BookChapterView extends Pick<
 > {
   editingTitle: string;
   titleChanged: boolean;
-  ttsTarget: string;
   sourceCount: number;
   sectionCount: number;
   sourceSummary: string;
   chapterSummaryMetaText: string;
+  chapterActivityText: string;
   sourceViews: BookChapterSourceView[];
   sourceListExpanded: boolean;
   sourceToggleText: string;
@@ -75,16 +69,11 @@ export interface BookChapterView extends Pick<
   pendingCompletionSourceCount: number;
   pendingNewSourceCount: number;
   removedSourceCount: number;
-  sourceChangeNotice: string;
   draftAvailable: boolean;
-  draftConfirmed: boolean;
   draftCharCount: number;
-  draftChanged: boolean;
-  draftStatusText: string;
-  draftStatusHintText: string;
-  draftVersionText: string;
-  draftActionText: string;
-  draftActionHintText: string;
+  chapterGuidanceText: string;
+  bookInclusionNotice: string;
+  chapterNeedsAction: boolean;
   draftBusy: boolean;
   draftError: string;
 }
@@ -159,47 +148,51 @@ export interface BookManuscriptChapterView {
   contentPreview: string;
 }
 
-export interface BookCoverStyleOptionView {
+interface BookCoverStyleOptionView {
   value: MemoirBookCoverStyle;
-  label: string;
-  detailText: string;
   previewClass: string;
+  previewImage?: string;
 }
 
-export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
+const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
   {
     value: "classic_plain",
-    label: "旧纸棕",
-    detailText: "米白纸色、深褐字和细线，适合默认成书",
     previewClass: "classic-plain",
   },
   {
     value: "warm_gray",
-    label: "暖灰书稿",
-    detailText: "暖灰底、深灰字，更像整理后的手稿",
     previewClass: "warm-gray",
   },
   {
     value: "dark_album",
-    label: "旧书封面",
-    detailText: "深灰褐底、浅色字，适合更庄重的纪念册",
     previewClass: "dark-album",
   },
   {
     value: "moonlit_courtyard",
-    label: "月下庭院",
-    detailText: "水墨庭院底图、墨褐标题，适合家庭回忆录默认封面封底",
     previewClass: "moonlit-courtyard",
   },
   {
     value: "navy_gilt",
-    label: "深蓝烫金",
-    detailText: "深蓝布面底图、金色标题和边框，适合更庄重的纪念册",
     previewClass: "navy-gilt",
+  },
+  {
+    value: "heritage_classic",
+    previewClass: "heritage-classic",
+    previewImage: "/assets/book_covers/heritage_classic.jpg",
+  },
+  {
+    value: "warm_journal",
+    previewClass: "warm-journal",
+    previewImage: "/assets/book_covers/warm_journal.jpg",
+  },
+  {
+    value: "modern_minimal",
+    previewClass: "modern-minimal",
+    previewImage: "/assets/book_covers/modern_minimal.jpg",
   },
 ];
 
-export interface BookData {
+export interface BookHomeData {
   loading: boolean;
   needsLogin: boolean;
   generatingPlan: boolean;
@@ -208,64 +201,21 @@ export interface BookData {
   error: string;
   projectId: string;
   projectTitle: string;
-  projectNarratorName: string;
-  plan: MemoirBookPlan | null;
   planTitle: string;
   stage: BookStage;
   stageText: string;
   chapters: BookChapterView[];
   chapterStructureEditing: boolean;
   splitSourceSelections: Record<string, string[]>;
-  confirmedDraftCount: number;
+  readyDraftCount: number;
   totalChapterCount: number;
   progressText: string;
   titleBusyTarget: string;
-  bookOutput: MemoirBookOutput | null;
-  bookContent: string;
   bookCharCount: number;
+  blockingIssueCount: number;
+  bookIncludedChapterCount: number;
   bookPreviewTitle: string;
-  bookPreviewTocItems: BookOutputTocView[];
-  bookPreviewChapters: BookOutputChapterPreviewView[];
-  bookPreviewChaptersExpanded: boolean;
-  bookManuscriptAvailable: boolean;
-  bookManuscriptTitle: string;
-  bookManuscriptSubtitle: string;
-  bookManuscriptTemplateLabel: string;
-  bookManuscriptSettingsText: string;
-  bookManuscriptStructureItems: BookManuscriptStructureItemView[];
-  bookManuscriptFrontMatterItems: BookManuscriptSectionView[];
-  bookManuscriptChapterItems: BookManuscriptChapterView[];
-  bookManuscriptBackMatterItems: BookManuscriptSectionView[];
-  bookVersionText: string;
-  bookVersionOptions: BookOutputVersionOptionView[];
-  bookSelectedVersionId: string;
-  bookSelectedVersionIndex: number;
-  bookViewingHistoricalVersion: boolean;
-  bookVersionNotice: string;
   bookStaleNotice: string;
-  bookExportBusyTarget: string;
-  bookExportShowSourceAppendix: boolean;
-  bookTitleInput: string;
-  bookSubtitleInput: string;
-  bookNarratorNameInput: string;
-  bookPreparedByInput: string;
-  bookPrefaceInput: string;
-  bookAfterwordInput: string;
-  bookBackCoverQuoteInput: string;
-  bookTitleChanged: boolean;
-  bookMetadataChanged: boolean;
-  bookTitleSaving: boolean;
-  bookDesignSaveStatusText: string;
-  bookTitleSuggesting: boolean;
-  bookTitleSuggestions: string[];
-  bookCoverStyle: MemoirBookCoverStyle;
-  bookCoverStylePreviewClass: string;
-  bookCoverStyleIndex: number;
-  bookCoverStyleLabel: string;
-  bookCoverStyleDetailText: string;
-  bookCoverStyleOptions: BookCoverStyleOptionView[];
-  bookCoverStyleChanged: boolean;
-  bookEditorialCopyBusyTarget: string;
   ttsBusyTarget: string;
   playingTarget: string;
   bookTTSActiveTarget: string;
@@ -276,70 +226,8 @@ export interface BookData {
   bookTTSProgressPercent: number;
   bookTTSDurationSeconds: number;
   bookTTSAlignment: TTSAlignmentSegment[];
-  automationEventItems: BookAutomationEventView[];
-  automationEventBusyTarget: string;
-  automationDismissibleCount: number;
-  automationEventClearing: boolean;
-  automationEventExpandedTargets: Record<string, boolean>;
-  automationEventLoading: boolean;
-  automationEventError: string;
-  imageAssetLoading: boolean;
-  imageAssetTotal: number;
-  imageAssetReadyCount: number;
-  imageAssetIncludedCount: number;
-  imageAssetUnusedCount: number;
-  imageAssetSummaryText: string;
-}
-
-export type BookHomeData = Omit<
-  BookData,
-  | "plan"
-  | "bookOutput"
-  | "bookContent"
-  | "bookPreviewTocItems"
-  | "bookPreviewChapters"
-  | "bookPreviewChaptersExpanded"
-  | "bookManuscriptAvailable"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookManuscriptTemplateLabel"
-  | "bookManuscriptSettingsText"
-  | "bookManuscriptStructureItems"
-  | "bookManuscriptFrontMatterItems"
-  | "bookManuscriptChapterItems"
-  | "bookManuscriptBackMatterItems"
-  | "bookVersionText"
-  | "bookVersionOptions"
-  | "bookSelectedVersionId"
-  | "bookSelectedVersionIndex"
-  | "bookViewingHistoricalVersion"
-  | "bookVersionNotice"
-  | "bookExportBusyTarget"
-  | "bookExportShowSourceAppendix"
-  | "bookTitleInput"
-  | "bookSubtitleInput"
-  | "bookNarratorNameInput"
-  | "bookPreparedByInput"
-  | "bookPrefaceInput"
-  | "bookAfterwordInput"
-  | "bookBackCoverQuoteInput"
-  | "bookTitleChanged"
-  | "bookMetadataChanged"
-  | "bookTitleSaving"
-  | "bookDesignSaveStatusText"
-  | "bookTitleSuggesting"
-  | "bookTitleSuggestions"
-  | "bookCoverStyle"
-  | "bookCoverStylePreviewClass"
-  | "bookCoverStyleIndex"
-  | "bookCoverStyleLabel"
-  | "bookCoverStyleDetailText"
-  | "bookCoverStyleOptions"
-  | "bookCoverStyleChanged"
-  | "bookEditorialCopyBusyTarget"
-> & {
   bookContentAvailable: boolean;
-};
+}
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
   const number = Number(value);
@@ -350,28 +238,22 @@ export function latestDraftContent(draft: MemoirBookChapterDraft | null): string
   return draft?.latest_version?.content || "";
 }
 
-export function draftStatusText(draft: MemoirBookChapterDraft | null): string {
-  if (!draft?.latest_version) {
-    return "未生成";
-  }
-  return draft.status === "confirmed" ? "已确认" : "待确认";
-}
-
-function draftStatusHintText(
+export function chapterGuidanceText(
   draft: MemoirBookChapterDraft | null,
+  changeNotice: string,
   pendingCount = 0,
   removedCount = 0,
+  sourceCount = 0,
 ): string {
-  if (!draft?.latest_version) {
-    return "先生成正文后再确认";
+  if (!draft?.latest_version?.content.trim()) {
+    return sourceCount
+      ? "本章还没有正文，进入章节页查看当前步骤。"
+      : "本章还没有讲述素材，请回到首页继续讲述与本章有关的回忆。";
   }
   if (pendingCount || removedCount) {
-    return "当前正文还没有包含最新素材";
+    return `${changeNotice}。相关内容待更新，当前正文仍可阅读。`;
   }
-  if (draft.status === "confirmed") {
-    return "修改后需要重新确认";
-  }
-  return "确认前可继续修改";
+  return "";
 }
 
 export function sourceChangeNotice(
@@ -380,57 +262,20 @@ export function sourceChangeNotice(
   completionCount = 0,
   newCount = 0,
 ): string {
-  if (removedCount) {
-    return `${removedCount} 条原始讲述已删除，章节稿需要更新`;
-  }
   const ordinaryCount = newCount || (
     completionCount ? Math.max(0, pendingCount - completionCount) : pendingCount
   );
-  if (completionCount && ordinaryCount) {
-    return `${completionCount} 条补充回答、${ordinaryCount} 条新增讲述待写入正文`;
+  const changes: string[] = [];
+  if (removedCount) {
+    changes.push(`${removedCount} 条讲述已删除`);
   }
   if (completionCount) {
-    return `${completionCount} 条补充回答待写入正文`;
+    changes.push(`${completionCount} 条补充回答尚未写入正文`);
   }
   if (ordinaryCount) {
-    return `${ordinaryCount} 条新增讲述待补写`;
+    changes.push(`${ordinaryCount} 条新增讲述尚未写入正文`);
   }
-  return "";
-}
-
-export function draftActionText(
-  _draft: MemoirBookChapterDraft | null,
-  pendingCount: number,
-  removedCount = 0,
-  completionCount = 0,
-): string {
-  if (pendingCount && !removedCount) {
-    return completionCount ? "更新本章正文" : "补写新增";
-  }
-  return "编辑正文";
-}
-
-function draftActionHintText(
-  _draft: MemoirBookChapterDraft | null,
-  pendingCount: number,
-  removedCount = 0,
-  completionCount = 0,
-): string {
-  if (removedCount) {
-    return "会保留剩余讲述并更新正文";
-  }
-  if (completionCount) {
-    return "用补充回答重新整理完整正文";
-  }
-  if (pendingCount) {
-    return "直接把新增讲述写入正文";
-  }
-  return "";
-}
-
-export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
-  const version = draft?.latest_version?.version;
-  return version ? `历史版本 · 已修改 ${version} 次` : "暂无正文";
+  return changes.join("，");
 }
 
 export function responseCount(value: number | null | undefined): number {
@@ -474,6 +319,15 @@ function bookOutputLatestVersionId(output: MemoirBookOutput | null): string {
   return output?.latest_version?.id || bookOutputVersions(output)[0]?.id || "";
 }
 
+function isHistoricalBookVersion(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null,
+): boolean {
+  const selectedId = selectedBookOutputVersion(output, selectedVersion)?.id;
+  const latestId = bookOutputLatestVersionId(output);
+  return Boolean(selectedId && latestId && selectedId !== latestId);
+}
+
 export function bookVersionOptions(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
@@ -503,7 +357,7 @@ export function bookVersionOptions(
     options,
     selectedId,
     selectedIndex,
-    viewingHistorical: Boolean(selectedId && latestId && selectedId !== latestId),
+    viewingHistorical: isHistoricalBookVersion(output, selectedVersion),
   };
 }
 
@@ -636,11 +490,23 @@ function manuscriptBackSectionContent(manuscript: MemoirBookManuscript | null, k
 }
 
 function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefined): string {
+  if (template === "custom") {
+    return "自定义版式";
+  }
   if (template === "photo_memory") {
     return "家庭纪念版";
   }
   if (template === "oral_archive") {
     return "口述档案版";
+  }
+  if (template === "heritage_classic") {
+    return "典藏文集版";
+  }
+  if (template === "warm_journal") {
+    return "家书手记版";
+  }
+  if (template === "modern_minimal") {
+    return "现代简约版";
   }
   return "素雅书籍版";
 }
@@ -698,39 +564,21 @@ function backMatterSections(manuscript: MemoirBookManuscript): MemoirBookManuscr
 
 function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string {
   if (!manuscript) {
-    return "按已确认章节生成基础书稿";
+    return "按已整理章节生成基础书稿";
   }
   const settings = manuscript.render_settings;
   const pageSize = settings.page_size === "a5" ? "A5" : "默认纸张";
   const layout = settings.layout === "print" ? "打印排版" : "阅读排版";
   const header = settings.show_headers ? "含页眉" : "无页眉";
-  const appendix = settings.show_source_appendix ? "附上原始讲述" : "隐藏原始讲述";
+  const appendix = settings.show_source_appendix ? "附上整理记录" : "隐藏整理记录";
   return [pageSize, layout, header, appendix].join(" · ");
-}
-
-function fallbackManuscriptStructureItems(
-  output: MemoirBookOutput | null,
-  selectedVersion: MemoirBookOutputVersion | null = null,
-): BookManuscriptStructureItemView[] {
-  const tocItems = bookOutputTocItems(output, selectedVersion);
-  const chapters = bookOutputChapterPreviews(output, selectedVersion);
-  if (!tocItems.length && !chapters.length) {
-    return [];
-  }
-  return [
-    { id: "fallback:cover", title: "封面", metaText: "基础信息", statusText: "已生成" },
-    { id: "fallback:toc", title: "目录", metaText: `${tocItems.length} 章`, statusText: "已生成" },
-    { id: "fallback:chapters", title: "正文", metaText: `${chapters.length} 章`, statusText: "已生成" },
-  ];
 }
 
 function manuscriptStructureItems(
   manuscript: MemoirBookManuscript | null,
-  output: MemoirBookOutput | null,
-  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookManuscriptStructureItemView[] {
   if (!manuscript) {
-    return fallbackManuscriptStructureItems(output, selectedVersion);
+    return [];
   }
   const frontMatter = (manuscript.front_matter || []).map((section, index) => ({
     id: `front:${section.kind}:${index}`,
@@ -764,22 +612,9 @@ function manuscriptStructureItems(
 
 function manuscriptChapterViews(
   manuscript: MemoirBookManuscript | null,
-  output: MemoirBookOutput | null,
-  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookManuscriptChapterView[] {
   if (!manuscript) {
-    return bookOutputChapterPreviews(output, selectedVersion).map((chapter) => ({
-      id: `fallback:${chapter.id}`,
-      chapterId: chapter.chapterId,
-      indexText: chapter.indexText,
-      title: chapter.title,
-      intro: "",
-      quoteText: "",
-      quoteSourceRefId: "",
-      quoteSourceText: "",
-      metaText: chapter.metaText,
-      contentPreview: previewText(chapter.content, 96),
-    }));
+    return [];
   }
   return (manuscript.chapters || []).map((chapter, index) => {
     const chapterIndex = responseCount(chapter.index) || index + 1;
@@ -815,35 +650,14 @@ function manuscriptChapterViews(
   });
 }
 
-export function bookManuscriptData(
-  output: MemoirBookOutput | null,
-  selectedVersion: MemoirBookOutputVersion | null = null,
-): Pick<
-  BookData,
-  | "bookManuscriptAvailable"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookManuscriptTemplateLabel"
-  | "bookManuscriptSettingsText"
-  | "bookManuscriptStructureItems"
-  | "bookManuscriptFrontMatterItems"
-  | "bookManuscriptChapterItems"
-  | "bookManuscriptBackMatterItems"
-> {
-  const manuscript = selectedBookManuscript(output, selectedVersion);
-  const fallbackTitle = bookOutputPreviewTitle(output, selectedVersion);
-  const structureItems = manuscriptStructureItems(manuscript, output, selectedVersion);
-  const chapterItems = manuscriptChapterViews(manuscript, output, selectedVersion);
+function bookManuscriptDesignData(manuscript: MemoirBookManuscript | null) {
+  const structureItems = manuscriptStructureItems(manuscript);
+  const chapterItems = manuscriptChapterViews(manuscript);
   return {
-    bookManuscriptAvailable: Boolean(manuscript || structureItems.length || chapterItems.length),
-    bookManuscriptTitle: trimText(manuscript?.profile.title || fallbackTitle),
-    bookManuscriptSubtitle: trimText(manuscript?.profile.subtitle || "根据已确认章节整理"),
+    bookManuscriptAvailable: Boolean(manuscript),
     bookManuscriptTemplateLabel: manuscript ? manuscriptTemplateLabel(manuscript.profile.template) : "基础成书版",
     bookManuscriptSettingsText: manuscriptSettingsText(manuscript),
     bookManuscriptStructureItems: structureItems,
-    bookManuscriptFrontMatterItems: manuscript
-      ? (manuscript.front_matter || []).map((section, index) => sectionView(section, index, "front"))
-      : [],
     bookManuscriptChapterItems: chapterItems,
     bookManuscriptBackMatterItems: manuscript
       ? backMatterSections(manuscript).map((section, index) => sectionView(section, index, "back"))
@@ -861,46 +675,24 @@ function selectedBookCoverStyle(
   return option ? option.value : "classic_plain";
 }
 
-export function bookCoverStyleData(
+function bookCoverStyleData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
-): Pick<
-  BookData,
-  | "bookCoverStyle"
-  | "bookCoverStylePreviewClass"
-  | "bookCoverStyleIndex"
-  | "bookCoverStyleLabel"
-  | "bookCoverStyleDetailText"
-  | "bookCoverStyleOptions"
-  | "bookCoverStyleChanged"
-> {
+) {
   const style = selectedBookCoverStyle(output, selectedVersion);
-  const index = Math.max(0, BOOK_COVER_STYLE_OPTIONS.findIndex((option) => option.value === style));
-  const option = BOOK_COVER_STYLE_OPTIONS[index] || BOOK_COVER_STYLE_OPTIONS[0];
+  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style)
+    || BOOK_COVER_STYLE_OPTIONS[0];
   return {
     bookCoverStyle: option.value,
     bookCoverStylePreviewClass: option.previewClass,
-    bookCoverStyleIndex: index,
-    bookCoverStyleLabel: option.label,
-    bookCoverStyleDetailText: option.detailText,
-    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
-    bookCoverStyleChanged: false,
+    bookCoverStylePreviewImage: option.previewImage || "",
   };
 }
 
 function bookMetadataInputData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
-): Pick<
-  BookData,
-  | "bookSubtitleInput"
-  | "bookNarratorNameInput"
-  | "bookPreparedByInput"
-  | "bookPrefaceInput"
-  | "bookAfterwordInput"
-  | "bookBackCoverQuoteInput"
-  | "bookMetadataChanged"
-> {
+) {
   const manuscript = selectedBookManuscript(output, selectedVersion);
   return {
     bookSubtitleInput: trimText(manuscript?.profile.subtitle || ""),
@@ -921,16 +713,28 @@ function selectedBookOutputVersionText(
   return selected ? `已修改 ${selected.version} 次` : "尚未生成全书";
 }
 
-export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
+export function bookOutputStaleNotice(
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): string {
   if (!output?.is_stale) {
     return "";
   }
   const titles = (output.stale_chapter_titles || []).filter(Boolean).slice(0, 2);
-  if (!titles.length) {
-    return "章节内容已更新，请重新整理一版。";
-  }
   const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
-  return `章节「${titles.join("、")}」${suffix}已更新，请重新整理一版。`;
+  const subject = titles.length ? `「${titles.join("、")}」${suffix}` : "章节内容";
+  if (progress?.status === "needs_input") {
+    return progress.needs_user_material_count
+      ? `${subject}有变更，部分章节还需要补充讲述。请回到首页补充相关回忆。`
+      : `${subject}有变更。请到「书稿建议」处理，全书尚未更新。`;
+  }
+  if (progress?.status === "failed") {
+    return `${subject}有变更，后台整理遇到问题。请到「书稿建议」查看原因并重试。`;
+  }
+  if (progress?.status === "processing") {
+    return `${subject}有变更，后台正在整理新版全书。`;
+  }
+  return `${subject}有变更，全书尚未更新。请到「书稿建议」查看当前步骤。`;
 }
 
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
@@ -943,97 +747,133 @@ function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: b
   return "";
 }
 
-export function bookOutputData(
+export interface BookReadingData {
+  bookContent: string;
+  bookCharCount: number;
+  bookPreviewTitle: string;
+  bookPreviewTocItems: BookOutputTocView[];
+  bookPreviewChapters: BookOutputChapterPreviewView[];
+  bookManuscriptTitle: string;
+  bookManuscriptSubtitle: string;
+  bookVersionText: string;
+  bookViewingHistoricalVersion: boolean;
+  bookVersionNotice: string;
+  bookStaleNotice: string;
+}
+
+export function bookReadingData(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
-): Pick<
-  BookData,
-  | "bookContent"
-  | "bookCharCount"
-  | "bookPreviewTitle"
-  | "bookPreviewTocItems"
-  | "bookPreviewChapters"
-  | "bookManuscriptAvailable"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookManuscriptTemplateLabel"
-  | "bookManuscriptSettingsText"
-  | "bookManuscriptStructureItems"
-  | "bookManuscriptFrontMatterItems"
-  | "bookManuscriptChapterItems"
-  | "bookManuscriptBackMatterItems"
-  | "bookVersionText"
-  | "bookVersionOptions"
-  | "bookSelectedVersionId"
-  | "bookSelectedVersionIndex"
-  | "bookViewingHistoricalVersion"
-  | "bookVersionNotice"
-  | "bookStaleNotice"
-  | "bookTitleInput"
-  | "bookSubtitleInput"
-  | "bookNarratorNameInput"
-  | "bookPreparedByInput"
-  | "bookPrefaceInput"
-  | "bookAfterwordInput"
-  | "bookBackCoverQuoteInput"
-  | "bookTitleChanged"
-  | "bookMetadataChanged"
-  | "bookDesignSaveStatusText"
-  | "bookTitleSuggestions"
-  | "bookCoverStyle"
-  | "bookCoverStylePreviewClass"
-  | "bookCoverStyleIndex"
-  | "bookCoverStyleLabel"
-  | "bookCoverStyleDetailText"
-  | "bookCoverStyleOptions"
-  | "bookCoverStyleChanged"
-> {
-  const versionState = bookVersionOptions(output, selectedVersion);
+  progress: MemoirDraftProgress | null = null,
+): BookReadingData {
   const content = selectedBookContent(output, selectedVersion);
-  const manuscriptData = bookManuscriptData(output, selectedVersion);
+  const manuscript = selectedBookManuscript(output, selectedVersion);
+  const title = bookOutputPreviewTitle(output, selectedVersion);
+  const viewingHistorical = isHistoricalBookVersion(output, selectedVersion);
   return {
     bookContent: content,
     bookCharCount: trimText(content).length,
-    bookPreviewTitle: bookOutputPreviewTitle(output, selectedVersion),
+    bookPreviewTitle: title,
     bookPreviewTocItems: bookOutputTocItems(output, selectedVersion),
     bookPreviewChapters: bookOutputChapterPreviews(output, selectedVersion),
-    ...manuscriptData,
+    bookManuscriptTitle: trimText(manuscript?.profile.title || title),
+    bookManuscriptSubtitle: trimText(manuscript?.profile.subtitle || "根据已有章节编排"),
     bookVersionText: selectedBookOutputVersionText(output, selectedVersion),
+    bookViewingHistoricalVersion: viewingHistorical,
+    bookVersionNotice: bookVersionNotice(output, viewingHistorical),
+    bookStaleNotice: bookOutputStaleNotice(output, progress),
+  };
+}
+
+export function bookOutputData(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+  progress: MemoirDraftProgress | null = null,
+) {
+  const versionState = bookVersionOptions(output, selectedVersion);
+  const readingData = bookReadingData(output, selectedVersion, progress);
+  return {
+    ...readingData,
+    ...bookManuscriptDesignData(selectedBookManuscript(output, selectedVersion)),
     bookVersionOptions: versionState.options,
     bookSelectedVersionId: versionState.selectedId,
     bookSelectedVersionIndex: versionState.selectedIndex,
-    bookViewingHistoricalVersion: versionState.viewingHistorical,
-    bookVersionNotice: bookVersionNotice(output, versionState.viewingHistorical),
-    bookStaleNotice: bookOutputStaleNotice(output),
-    bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, selectedVersion),
+    bookTitleInput: readingData.bookManuscriptTitle || readingData.bookPreviewTitle,
     ...bookMetadataInputData(output, selectedVersion),
     bookTitleChanged: false,
     bookDesignSaveStatusText: output?.latest_version
       ? (versionState.viewingHistorical ? "切回最新版后自动保存" : "已保存")
       : "生成时应用",
-    bookTitleSuggestions: [],
+    bookTitleSuggestions: [] as string[],
     ...bookCoverStyleData(output, selectedVersion),
   };
 }
 
-export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
+export type BookOutputData = ReturnType<typeof bookOutputData>;
+
+export function bookHomeOutputData(
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): Pick<
   BookHomeData,
   | "bookContentAvailable"
   | "bookCharCount"
+  | "bookIncludedChapterCount"
   | "bookPreviewTitle"
   | "bookStaleNotice"
 > {
   const content = latestBookContent(output);
+  const emptyBookContent = `${trimText(output?.title || "")}\n\n目录`;
+  const available = Boolean(content && trimText(content) !== emptyBookContent);
+  const includedIds = new Set(available ? bookOutputTocItems(output).map((item) => item.chapterId) : []);
+  const includedChapterCount = includedIds.size;
   return {
-    bookContentAvailable: Boolean(content),
-    bookCharCount: trimText(content).length,
+    bookContentAvailable: available,
+    bookCharCount: available ? trimText(content).length : 0,
+    bookIncludedChapterCount: includedChapterCount,
     bookPreviewTitle: bookOutputPreviewTitle(output),
-    bookStaleNotice: bookOutputStaleNotice(output),
+    bookStaleNotice: bookOutputStaleNotice(output, progress),
   };
 }
 
-export function buildChapterPickerOptions(chapters: BookChapterView[]): ChapterPickerOption[] {
-  return chapters.map(chapterOption);
+function bookOmissionFollowUp(
+  progress: MemoirDraftProgress | null,
+  omittedChapters: BookChapterView[],
+): string {
+  if (progress?.status === "needs_input") {
+    return progress.needs_user_material_count
+      ? "请回到首页补充与本章有关的讲述。"
+      : "请查看书稿建议，处理后书稿会继续更新。";
+  }
+  if (progress?.status === "failed") {
+    return "后台整理遇到问题，请查看书稿建议并重试。";
+  }
+  if (progress?.status === "processing") {
+    return "后台正在整理，完成后请再查看。";
+  }
+  if (omittedChapters.some((chapter) => !chapter.draftAvailable)) {
+    return omittedChapters.some((chapter) => !chapter.sourceCount)
+      ? "请回到首页继续讲述与本章有关的回忆。"
+      : "请进入对应章节查看当前步骤。";
+  }
+  return "如需将其收入书稿，请查看书稿建议。";
+}
+
+export function bookChapterInclusionData(
+  chapters: BookChapterView[],
+  output: MemoirBookOutput | null,
+  progress: MemoirDraftProgress | null = null,
+): BookChapterView[] {
+  const content = latestBookContent(output);
+  const available = Boolean(content && trimText(content) !== `${trimText(output?.title || "")}\n\n目录`);
+  const includedIds = new Set(available ? bookOutputTocItems(output).map((item) => item.chapterId) : []);
+  return chapters.map((chapter) => ({
+    ...chapter,
+    bookInclusionNotice: available && chapter.include_in_book !== false
+      && !includedIds.has(chapter.id)
+      ? `${progress?.status === "needs_input" ? "本章待确认，暂未收入当前书稿。" : "本章暂未收入当前书稿。"}${bookOmissionFollowUp(progress, [chapter])}${chapter.chapterNeedsAction ? ` ${chapter.chapterGuidanceText}` : ""}`
+      : "",
+  }));
 }
 
 function chapterOption(chapter: Pick<BookChapterView, "id" | "title" | "editingTitle">, index: number): ChapterPickerOption {
@@ -1142,20 +982,20 @@ function decorateChapterStructureOptions(
 }
 
 function chapterStateData(chapters: BookChapterView[]): Pick<
-  BookData,
-  "confirmedDraftCount" | "totalChapterCount" | "progressText"
+  BookHomeData,
+  "readyDraftCount" | "totalChapterCount" | "progressText"
 > {
   const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
-  const confirmedDraftCount = includedChapters.filter(
+  const readyDraftCount = includedChapters.filter(
     (chapter) => (
-      chapter.draftConfirmed
+      chapter.draftAvailable
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
   ).length;
   const totalChapterCount = includedChapters.length;
   return {
-    confirmedDraftCount,
+    readyDraftCount,
     totalChapterCount,
     progressText: bookProgressText(chapters),
   };
@@ -1166,9 +1006,9 @@ export function chapterCollectionData(
   chapterSources: BookChapterSources,
   splitSelections: Record<string, string[]> = {},
 ): Pick<
-  BookData,
+  BookHomeData,
   | "chapters"
-  | "confirmedDraftCount"
+  | "readyDraftCount"
   | "totalChapterCount"
   | "progressText"
 > {
@@ -1191,16 +1031,11 @@ function chapterSummaryMetaText(
     | "sourceCount"
     | "draftCharCount"
     | "draftAvailable"
-    | "draftStatusText"
   >,
 ): string {
-  const sourceText = bookOralSourceCountText(chapter.sourceCount);
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
-  const sectionText = chapter.sectionCount ? `${chapter.sectionCount} 个小节 · ` : "";
-  if (!chapter.draftAvailable) {
-    return `${inclusionText}${sectionText}${sourceText} · 尚未生成正文`;
-  }
-  return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
+  const sectionText = `${chapter.sectionCount} 个故事`;
+  return `${inclusionText}${sectionText}${chapter.draftAvailable ? ` · ${chapter.draftCharCount.toLocaleString("en-US")} 字` : ""}`;
 }
 
 export function bookOutlineNarrationText(
@@ -1243,18 +1078,18 @@ export function buildChapterViews(
         (section) => section.status === "active" && section.include_in_book !== false,
       ).length;
       const draftCharCount = trimText(content).length;
-      const statusText = (
-        assignedPendingCount || assignedRemovedCount
-          ? "需更新"
-          : draftStatusText(draft)
+      const changeNotice = sourceChangeNotice(
+        assignedPendingCount,
+        assignedRemovedCount,
+        assignedCompletionCount,
+        assignedNewCount,
       );
       const viewBase = {
         include_in_book: chapter.include_in_book !== false,
         sectionCount,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
-        draftAvailable: Boolean(draft?.latest_version),
-        draftStatusText: statusText,
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
       };
       return {
         id: chapter.id,
@@ -1263,11 +1098,11 @@ export function buildChapterViews(
         include_in_book: chapter.include_in_book !== false,
         editingTitle: chapter.title,
         titleChanged: false,
-        ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sectionCount,
         sourceSummary: bookChapterSourceSummary(chapter),
         chapterSummaryMetaText: chapterSummaryMetaText(viewBase),
+        chapterActivityText: "",
         sourceViews: [],
         sourceListExpanded: false,
         sourceToggleText: "",
@@ -1281,35 +1116,19 @@ export function buildChapterViews(
         pendingCompletionSourceCount: assignedCompletionCount,
         pendingNewSourceCount: assignedNewCount,
         removedSourceCount: assignedRemovedCount,
-        sourceChangeNotice: sourceChangeNotice(
-          assignedPendingCount,
-          assignedRemovedCount,
-          assignedCompletionCount,
-          assignedNewCount,
-        ),
-        draftAvailable: Boolean(draft?.latest_version),
-        draftConfirmed: draft?.status === "confirmed",
+        draftAvailable: Boolean(draft?.latest_version?.content?.trim()),
         draftCharCount,
-        draftChanged: false,
-        draftStatusText: statusText,
-        draftStatusHintText: draftStatusHintText(
+        chapterGuidanceText: chapterGuidanceText(
           draft,
+          changeNotice,
           assignedPendingCount,
           assignedRemovedCount,
+          chapter.source_refs.length,
         ),
-        draftVersionText: draftVersionText(draft),
-        draftActionText: draftActionText(
-          draft,
-          assignedPendingCount,
-          assignedRemovedCount,
-          assignedCompletionCount,
+        chapterNeedsAction: Boolean(
+          assignedPendingCount || assignedRemovedCount || !draft?.latest_version?.content?.trim(),
         ),
-        draftActionHintText: draftActionHintText(
-          draft,
-          assignedPendingCount,
-          assignedRemovedCount,
-          assignedCompletionCount,
-        ),
+        bookInclusionNotice: "",
         draftBusy: false,
         draftError: "",
       };
@@ -1322,15 +1141,15 @@ export function bookProgressText(chapters: BookChapterView[]): string {
   if (!includedChapters.length) {
     return "还没有章节";
   }
-  const confirmed = includedChapters.filter(
+  const ready = includedChapters.filter(
     (chapter) => (
-      chapter.draftConfirmed
+      chapter.draftAvailable
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
   ).length;
   const generated = includedChapters.filter((chapter) => chapter.draftAvailable).length;
-  return `${confirmed}/${includedChapters.length} 章已确认，${generated} 章已有正文`;
+  return `${ready}/${includedChapters.length} 章正文已更新，${generated} 章已有正文`;
 }
 
 export function planStage(plan: MemoirBookPlan | null): BookStage {
@@ -1355,19 +1174,20 @@ export function guestBookData(): Partial<BookHomeData> {
     needsLogin: true,
     projectId: "",
     projectTitle: "我的回忆录",
-    projectNarratorName: "",
     planTitle: "",
     stage: "empty",
     stageText: stageText("empty"),
     chapters: [],
     chapterStructureEditing: false,
-    confirmedDraftCount: 0,
+    readyDraftCount: 0,
     totalChapterCount: 0,
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
+    blockingIssueCount: 0,
+    bookIncludedChapterCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
     ttsBusyTarget: "",
@@ -1380,19 +1200,6 @@ export function guestBookData(): Partial<BookHomeData> {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
-    automationEventItems: [],
-    automationEventBusyTarget: "",
-    automationDismissibleCount: 0,
-    automationEventClearing: false,
-    automationEventExpandedTargets: {},
-    automationEventLoading: false,
-    automationEventError: "",
-    imageAssetLoading: false,
-    imageAssetTotal: 0,
-    imageAssetReadyCount: 0,
-    imageAssetIncludedCount: 0,
-    imageAssetUnusedCount: 0,
-    imageAssetSummaryText: "还没有图片素材",
   };
 }
 

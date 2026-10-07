@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta
+import json
 import logging
 from pathlib import Path
+import re
+import unicodedata
+from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select, update
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -15,17 +21,32 @@ from app.clock import utcnow_naive
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
-from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoOutput
+from app.models.memoir import (
+    MemoirBookOutput,
+    MemoirImageAsset,
+    MemoirMaterialShareVideo,
+    MemoirShareVideoOutput,
+    MemoirVoiceUtterance,
+)
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoJobListResponse,
     MemoirShareVideoJobResponse,
+    MemoirShareVideoListItemResponse,
     MemoirShareVideoOutputResponse,
     MemoirShareVideoCountResponse,
 )
+from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_usage_records import AIUsageContext, reset_ai_usage_context, set_ai_usage_context
+from app.services import wechat_miniprogram_code
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
 from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.book_output_manuscript import project_narrator_name
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -39,6 +60,7 @@ from app.services.memoir.share_video_backgrounds import (
     normalize_share_video_background_style,
 )
 from app.services.memoir.share_video_custom_backgrounds import (
+    SHARE_VIDEO_BACKGROUND_SOURCE_AI,
     SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
     load_custom_share_video_background_asset,
@@ -48,22 +70,237 @@ from app.services.memoir.share_video_alignment import (
     MAX_SELECT_MS,
     MIN_SELECT_MS,
     build_share_video_alignment,
+    current_share_video_text_and_hash,
     share_video_char_range_ms,
 )
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.access import load_memoir_project
+from app.services.memoir.project_ai_preferences import project_share_video_style, select_project_ai_model
+from app.services.memoir.share_video_styles import SHARE_VIDEO_STYLE_STORY_ANIMATION
+from app.services.memoir.share_video_story_plan import (
+    SHARE_VIDEO_STORY_PLAN_VERSION,
+    plan_share_video_story,
+    validate_story_plan_source,
+)
 from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
 MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
+SHARE_VIDEO_PIPELINE_VERSION = "memoir-share-video-v4"
+# Mini program page that plays a forwarded clip; the code passes share_code as its scene.
+SHARE_VIDEO_PLAYER_PAGE = "pages/share-video-player/index"
 _VIDEO_MIME_TYPE = "video/mp4"
 _COMPLETION_MARKER_SUFFIX = ".complete"
 _COMPLETION_RECOVERY_POLL_SECONDS = 1.0
+_TITLE_MAX_CHARS = 18
+_TITLE_FALLBACK = "回忆片段"
+_TITLE_UNSAFE_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+_TITLE_SENSITIVE_NUMBER = re.compile(r"(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)")
+_TITLE_CLAUSE_BREAK = re.compile(r"[。！？!?；;，,：:\n]")
 logger = logging.getLogger(__name__)
+
+_ACTIVE_SHARE_VIDEO_STATUSES = frozenset(
+    {
+        MemoirShareVideoJobStatus.PENDING.value,
+        MemoirShareVideoJobStatus.RUNNING.value,
+    }
+)
 
 
 class ShareVideoLeaseLostError(RuntimeError):
     pass
+
+
+class _ShareVideoTitleChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=2, max_length=24)
+    hook_sentence_id: int | None = None
+
+
+def _clean_share_video_title(value: str) -> str:
+    compact = " ".join(value.split())
+    safe = "".join(
+        char
+        for char in _TITLE_UNSAFE_CHARS.sub("", compact)
+        if not unicodedata.category(char).startswith("C")
+    )
+    return safe[:_TITLE_MAX_CHARS].strip(" .，。！？!?；;：:、‘’“”《》\"'")
+
+
+def _title_contains_sensitive_number(value: str) -> bool:
+    return _TITLE_SENSITIVE_NUMBER.search(re.sub(r"[\s-]", "", value)) is not None
+
+
+def fallback_share_video_title(selected_text: str) -> str:
+    first_clause = _TITLE_CLAUSE_BREAK.split(selected_text.strip(), maxsplit=1)[0]
+    source = first_clause or selected_text
+    if _title_contains_sensitive_number(source):
+        return _TITLE_FALLBACK
+    return _clean_share_video_title(source) or _TITLE_FALLBACK
+
+
+def share_video_title(metadata: ShareVideoJobMetadata, selected_text: str) -> str:
+    saved_title = _clean_share_video_title(metadata.title)
+    if saved_title and not _title_contains_sensitive_number(metadata.title):
+        return saved_title
+    return fallback_share_video_title(selected_text)
+
+
+def share_video_download_filename(title: str) -> str:
+    safe_title = _clean_share_video_title(title)
+    if _title_contains_sensitive_number(title):
+        safe_title = ""
+    return f"{safe_title or _TITLE_FALLBACK}.mp4"
+
+
+async def share_video_end_card_source(db: AsyncSession, project_id: str) -> tuple[str, str]:
+    """The book a shared clip comes from, named on the video's closing card."""
+    project = await db.get(Project, project_id)
+    book_title = await db.scalar(select(MemoirBookOutput.title).where(MemoirBookOutput.project_id == project_id))
+    if project is None:
+        return book_title or "", ""
+    return book_title or project.title, project_narrator_name(project)
+
+
+async def _share_video_mini_program_code(share_code: str) -> bytes | None:
+    """A code on the closing card that opens this clip; the video renders without it if WeChat fails."""
+    if not wechat_miniprogram_code.miniprogram_code_configured():
+        return None
+    try:
+        return await wechat_miniprogram_code.fetch_miniprogram_code(
+            scene=share_code, page=SHARE_VIDEO_PLAYER_PAGE,
+        )
+    except wechat_miniprogram_code.WeChatMiniProgramCodeError:
+        logger.warning("share video mini program code unavailable share_code=%s", share_code, exc_info=True)
+        return None
+
+
+def _hook_sentences(selected_text: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in re.findall(r"[^。！？!?；;\n]+[。！？!?；;…]*", selected_text)
+        if sentence.strip()
+    ]
+
+
+async def _suggest_share_video_title_and_hook(
+    selected_text: str, *, ai_model: str | None,
+) -> tuple[str | None, str]:
+    """Title the clip and pick one of its own sentences to open the video."""
+    sentences = _hook_sentences(selected_text)
+    policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
+    generated = await generate_structured_with_client(
+        get_ai_service(ai_model),
+        "你为家庭回忆录的分享视频拟短标题，并从原话里挑一句放在视频开头。只根据提供的实际视频片段，忠实于原话，突出具体的人、事或场景。"
+        "不要杜撰原文没有的事实，不要写营销文案，不要暴露电话号码或身份证号码。"
+        "标题用自然简洁的中文，建议 6 到 12 个字，最多 18 个字。"
+        "hook_sentence_id 填 sentences 中最能让人想听下去的一句的编号：情绪最重、或留下悬念的那一句，最好不超过 20 个字；"
+        "没有合适的句子时填 null。"
+        '只返回 JSON 对象，格式为 {"title":"...","hook_sentence_id":0}；不要 Markdown 或解释。',
+        json.dumps({
+            "text": selected_text,
+            "sentences": [{"id": index, "text": sentence} for index, sentence in enumerate(sentences)],
+        }, ensure_ascii=False),
+        output_model=_ShareVideoTitleChoice,
+        requested_model=ai_model,
+        temperature=0.2,
+        max_tokens=min(policy.max_tokens, 256),
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
+    )
+    proposed = generated.value.title
+    cleaned = "" if _title_contains_sensitive_number(proposed) else _clean_share_video_title(proposed)
+    hook_id = generated.value.hook_sentence_id
+    hook = sentences[hook_id] if hook_id is not None and 0 <= hook_id < len(sentences) else ""
+    if _title_contains_sensitive_number(hook):
+        hook = ""
+    return (cleaned if len(cleaned) >= 2 else None), rendering.usable_hook_text(hook, selected_text)
+
+
+def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
+    if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+        return (metadata.video_style, metadata.animation_version, metadata.ai_model or "")
+    return (
+        metadata.video_style,
+        metadata.ai_model or "",
+        metadata.background_source,
+        metadata.background_style,
+        metadata.background_mode,
+        metadata.custom_background_asset_id or "",
+    )
+
+
+def _completed_share_video_is_reusable(
+    job: MemoirMaterialShareVideo,
+    metadata: ShareVideoJobMetadata,
+) -> bool:
+    output = job.output
+    if output is None or metadata.pipeline_version != SHARE_VIDEO_PIPELINE_VERSION:
+        return False
+    if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+        if (
+            metadata.animation_version != SHARE_VIDEO_STORY_PLAN_VERSION
+            or metadata.animation_plan is None
+            or metadata.animation_plan.version != metadata.animation_version
+        ):
+            return False
+    elif metadata.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and metadata.background_status not in {
+        "ready",
+        "partial",
+    }:
+        return False
+    try:
+        path = share_video_file_path(job, output)
+        return path.is_file() and path.stat().st_size == output.size_bytes
+    except OSError:
+        return False
+
+
+async def _find_duplicate_or_reusable_share_video_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_id: str,
+    utterance_id: str,
+    audio_file_id: str,
+    text_hash: str,
+    start_char: int,
+    end_char: int,
+    start_ms: int,
+    end_ms: int,
+    metadata: ShareVideoJobMetadata,
+) -> MemoirMaterialShareVideo | None:
+    candidates = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                MemoirMaterialShareVideo.user_id == user_id,
+                MemoirMaterialShareVideo.utterance_id == utterance_id,
+                MemoirMaterialShareVideo.audio_file_id == audio_file_id,
+                MemoirMaterialShareVideo.text_hash == text_hash,
+                MemoirMaterialShareVideo.start_char == start_char,
+                MemoirMaterialShareVideo.end_char == end_char,
+                MemoirMaterialShareVideo.start_ms == start_ms,
+                MemoirMaterialShareVideo.end_ms == end_ms,
+                MemoirMaterialShareVideo.status.in_(
+                    (*_ACTIVE_SHARE_VIDEO_STATUSES, MemoirShareVideoJobStatus.SUCCEEDED.value)
+                ),
+            )
+            .order_by(MemoirMaterialShareVideo.created_at.desc())
+        )
+    ).all()
+    request_signature = _share_video_options_signature(metadata)
+    for candidate in candidates:
+        candidate_metadata = ShareVideoJobMetadata.from_json(candidate.metadata_json)
+        if _share_video_options_signature(candidate_metadata) != request_signature:
+            continue
+        if candidate.status in _ACTIVE_SHARE_VIDEO_STATUSES or _completed_share_video_is_reusable(
+            candidate, candidate_metadata
+        ):
+            return candidate
+    return None
 
 
 def _set_job_metadata(job: MemoirMaterialShareVideo, metadata: ShareVideoJobMetadata) -> None:
@@ -149,12 +386,14 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         utterance_id=job.utterance_id,
         audio_file_id=job.audio_file_id,
         status=MemoirShareVideoJobStatus(job.status),
+        title=share_video_title(metadata, job.selected_text),
         selected_text=job.selected_text,
         start_char=job.start_char,
         end_char=job.end_char,
         start_ms=job.start_ms,
         end_ms=job.end_ms,
         duration_ms=max(0, job.end_ms - job.start_ms),
+        video_style=metadata.video_style,
         background_source=metadata.background_source,
         background_style=metadata.background_style,
         background_mode=metadata.background_mode,
@@ -171,6 +410,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
                 mime_type=output.mime_type,
                 size_bytes=output.size_bytes,
                 download_url=f"/api/mobile/memoir/share-video/jobs/{job.id}/download",
+                share_code=job.share_code,
             )
             if output is not None
             else None
@@ -191,23 +431,55 @@ async def create_share_video_job(
     allow_admin: bool = False,
 ) -> MemoirShareVideoJobResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
+    settings = get_settings()
+    ai_background_enabled = bool(
+        settings.memoir_share_video_ai_background_enabled
+        and settings.volc_ark_api_key.strip()
+    )
     selected_ai_model = select_project_ai_model(
         utterance.voice_session.project,
         req.ai_model,
     )
+    project = utterance.voice_session.project
+    legacy_background_source = req.video_style is None and req.background_source is not None
+    legacy_default = (
+        req.video_style is None
+        and req.background_source is None
+        and "share_video_style" not in (project.metadata_json or {})
+    )
+    video_style = (
+        ("uploaded" if req.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else "illustrated")
+        if legacy_background_source
+        else req.video_style or project_share_video_style(project)
+    )
+    story_animation = video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION
     alignment = build_share_video_alignment(utterance)
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
+    if legacy_background_source:
+        selected_background_source = req.background_source
+    elif legacy_default:
+        selected_background_source = (
+            SHARE_VIDEO_BACKGROUND_SOURCE_AI if ai_background_enabled else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
+        )
+    elif story_animation:
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
+    elif video_style == "uploaded":
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM
+    else:
+        selected_background_source = SHARE_VIDEO_BACKGROUND_SOURCE_AI
     try:
-        background_source = normalize_share_video_background_source(req.background_source)
+        background_source = normalize_share_video_background_source(selected_background_source)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and not ai_background_enabled:
+        raise HTTPException(status_code=400, detail="回忆画卷当前不可用，请选择自选画面或往事小剧场")
+    try:
+        background_style = normalize_share_video_background_style(None if story_animation else req.background_style)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        background_style = normalize_share_video_background_style(req.background_style)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        background_mode = normalize_share_video_background_mode(req.background_mode)
+        background_mode = normalize_share_video_background_mode(None if story_animation else req.background_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     duration_ms = end_ms - start_ms
@@ -230,7 +502,7 @@ async def create_share_video_job(
             allow_admin=allow_admin,
         )
         custom_background_asset_id = custom_asset.id
-    elif req.custom_background_asset_id:
+    elif req.custom_background_asset_id and not story_animation:
         raise HTTPException(status_code=400, detail="只有自定义背景图模式可以选择背景图片")
 
     effective_background_mode = (
@@ -238,6 +510,50 @@ async def create_share_video_job(
         if background_source in {SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM, SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC}
         else background_orchestration.effective_background_mode(background_mode, duration_ms)
     )
+
+    metadata = ShareVideoJobMetadata(
+        pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
+        title=fallback_share_video_title(alignment.transcript_text[start_char:end_char]),
+        alignment_strategy=alignment.strategy,
+        alignment_confidence=alignment.confidence,
+        char_timings=alignment.char_timings[start_char:end_char],
+        ai_model=selected_ai_model,
+        video_style=video_style,
+        animation_version=SHARE_VIDEO_STORY_PLAN_VERSION if story_animation else "",
+        background_source=background_source,
+        background_style=background_style,
+        background_mode=background_mode,
+        background_effective_mode=effective_background_mode,
+        custom_background_asset_id=custom_background_asset_id,
+        background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
+        background_status="disabled" if story_animation else background_orchestration.initial_background_status(
+            background_source,
+            ai_background_enabled=ai_background_enabled,
+        ),
+    )
+
+    # The utterance row serializes identical requests so two quick submissions
+    # cannot both pass the active-job check and start duplicate video work.
+    await db.execute(
+        select(MemoirVoiceUtterance.id)
+        .where(MemoirVoiceUtterance.id == utterance.id)
+        .with_for_update()
+    )
+    duplicate = await _find_duplicate_or_reusable_share_video_job(
+        db,
+        project_id=utterance.voice_session.project_id,
+        user_id=user_id,
+        utterance_id=utterance.id,
+        audio_file_id=audio_file.id,
+        text_hash=alignment.text_hash,
+        start_char=start_char,
+        end_char=end_char,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        metadata=metadata,
+    )
+    if duplicate is not None:
+        return _job_response(duplicate)
 
     job = MemoirMaterialShareVideo(
         project_id=utterance.voice_session.project_id,
@@ -253,22 +569,7 @@ async def create_share_video_job(
         end_char=end_char,
         start_ms=start_ms,
         end_ms=end_ms,
-        metadata_json=ShareVideoJobMetadata(
-            alignment_strategy=alignment.strategy,
-            alignment_confidence=alignment.confidence,
-            char_timings=alignment.char_timings[start_char:end_char],
-            ai_model=selected_ai_model,
-            background_source=background_source,
-            background_style=background_style,
-            background_mode=background_mode,
-            background_effective_mode=effective_background_mode,
-            custom_background_asset_id=custom_background_asset_id,
-            background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
-            background_status=background_orchestration.initial_background_status(
-                background_source,
-                ai_background_enabled=get_settings().memoir_share_video_ai_background_enabled,
-            ),
-        ).to_json(),
+        metadata_json=metadata.to_json(),
     )
     db.add(job)
     await db.commit()
@@ -312,18 +613,129 @@ async def get_share_video_job(
     return _job_response(job)
 
 
+async def delete_share_video_job(
+    db: AsyncSession,
+    job_id: str,
+    user_id: str,
+    *,
+    allow_admin: bool = False,
+) -> None:
+    job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or not job.output:
+        raise HTTPException(status_code=409, detail="只能删除已完成的视频")
+    video_path = share_video_file_path(job, job.output)
+    # Illustrations remain reusable in the image library after deleting a video.
+    await db.execute(
+        update(MemoirImageAsset)
+        .where(MemoirImageAsset.share_video_job_id == job.id)
+        .values(share_video_job_id=None)
+    )
+    await db.delete(job)
+    await db.commit()
+    # Never remove the file before the database deletion has succeeded.
+    try:
+        video_path.unlink(missing_ok=True)
+        video_path.with_suffix(".thumbnail.jpg").unlink(missing_ok=True)
+    except OSError:
+        logger.exception("failed to remove deleted share video file job_id=%s", job_id)
+    _remove_video_completion_marker(video_path)
+
+
+async def list_share_video_jobs(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_id: str,
+    limit: int,
+    offset: int,
+    allow_admin: bool = False,
+) -> MemoirShareVideoJobListResponse:
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    filters = (
+        MemoirMaterialShareVideo.project_id == project_id,
+        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+    )
+    completed_ids = (
+        select(MemoirMaterialShareVideo.id)
+        .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
+        .where(*filters)
+        .order_by(
+            func.coalesce(
+                MemoirMaterialShareVideo.completed_at,
+                MemoirMaterialShareVideo.created_at,
+            ).desc(),
+            MemoirMaterialShareVideo.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .correlate(None)
+    )
+    completed_total = (
+        select(func.count(MemoirMaterialShareVideo.id))
+        .join(MemoirShareVideoOutput, MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id)
+        .where(*filters)
+        .correlate(None)
+    )
+    active_statuses = (
+        MemoirShareVideoJobStatus.PENDING.value,
+        MemoirShareVideoJobStatus.RUNNING.value,
+    )
+    # One snapshot prevents completion between reads from hiding a task in both lists.
+    rows = (
+        await db.execute(
+            select(MemoirMaterialShareVideo, completed_total.scalar_subquery())
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                or_(
+                    MemoirMaterialShareVideo.status.in_((*active_statuses, MemoirShareVideoJobStatus.FAILED.value)),
+                    MemoirMaterialShareVideo.id.in_(completed_ids),
+                ),
+            )
+            .order_by(
+                func.coalesce(
+                    MemoirMaterialShareVideo.completed_at,
+                    MemoirMaterialShareVideo.created_at,
+                ).desc(),
+                MemoirMaterialShareVideo.id.desc(),
+            )
+        )
+    ).all()
+    total = rows[0][1] if rows else await db.scalar(completed_total)
+    return MemoirShareVideoJobListResponse(
+        items=[
+            MemoirShareVideoListItemResponse(
+                id=job.id,
+                utterance_id=job.utterance_id,
+                title=share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text),
+                selected_text=job.selected_text,
+                duration_ms=max(0, job.end_ms - job.start_ms),
+                video_style=ShareVideoJobMetadata.from_json(job.metadata_json).video_style,
+                created_at=job.created_at,
+                completed_at=job.completed_at,
+            )
+            for job, _ in rows
+            if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
+        ],
+        active_jobs=[_job_response(job) for job, _ in rows if job.status in active_statuses],
+        failed_jobs=[
+            _job_response(job) for job, _ in rows
+            if job.status == MemoirShareVideoJobStatus.FAILED.value
+        ],
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
+
+
 async def list_completed_share_video_counts(
     db: AsyncSession,
     *,
     project_id: str,
     user_id: str,
 ) -> list[MemoirShareVideoCountResponse]:
-    rows = (
-        await db.execute(
-            select(
-                MemoirMaterialShareVideo.utterance_id,
-                MemoirMaterialShareVideo.id,
-            )
+    jobs = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo)
             .join(
                 MemoirShareVideoOutput,
                 MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id,
@@ -338,16 +750,38 @@ async def list_completed_share_video_counts(
                 MemoirMaterialShareVideo.created_at.desc(),
                 MemoirMaterialShareVideo.id,
             )
+            .options(
+                selectinload(MemoirMaterialShareVideo.utterance)
+                .selectinload(MemoirVoiceUtterance.audio_file)
+            )
         )
     ).all()
     job_ids_by_utterance: dict[str, list[str]] = {}
-    for utterance_id, job_id in rows:
-        job_ids_by_utterance.setdefault(utterance_id, []).append(job_id)
+    job_titles_by_utterance: dict[str, dict[str, str]] = {}
+    current_job_ids_by_utterance: dict[str, list[str]] = {}
+    current_text_by_utterance: dict[str, tuple[str, str] | None] = {}
+    for job in jobs:
+        job_ids_by_utterance.setdefault(job.utterance_id, []).append(job.id)
+        job_titles_by_utterance.setdefault(job.utterance_id, {})[job.id] = share_video_title(
+            ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text,
+        )
+        if job.utterance_id not in current_text_by_utterance:
+            current_text_by_utterance[job.utterance_id] = current_share_video_text_and_hash(job.utterance)
+        current = current_text_by_utterance[job.utterance_id]
+        if current is None or job.text_hash != current[1]:
+            continue
+        if job.audio_file_id != job.utterance.audio_file_id:
+            continue
+        if job.selected_text != current[0][job.start_char:job.end_char]:
+            continue
+        current_job_ids_by_utterance.setdefault(job.utterance_id, []).append(job.id)
     return [
         MemoirShareVideoCountResponse(
             utterance_id=utterance_id,
             count=len(job_ids),
             job_ids=job_ids,
+            job_titles=job_titles_by_utterance[utterance_id],
+            current_job_ids=current_job_ids_by_utterance.get(utterance_id, []),
         )
         for utterance_id, job_ids in job_ids_by_utterance.items()
     ]
@@ -359,15 +793,21 @@ async def load_completed_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
-) -> tuple[MemoirShareVideoOutput, Path]:
+) -> tuple[MemoirShareVideoOutput, Path, str]:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or job.output is None:
+        raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
+    return completed_share_video_file(job)
+
+
+def completed_share_video_file(job: MemoirMaterialShareVideo) -> tuple[MemoirShareVideoOutput, Path, str]:
     output = job.output
-    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or output is None:
+    if output is None:
         raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
     path = share_video_file_path(job, output)
     if not path.exists():
         raise HTTPException(status_code=404, detail="分享视频文件不存在")
-    return output, path
+    return output, path, share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text)
 
 
 def _claimable_share_video_job(now: datetime, max_attempts: int):
@@ -757,22 +1197,76 @@ async def run_share_video_job_with_session(
     target_path = share_video_file_path(job)
     try:
         metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+        usage_context = AIUsageContext(
+            operation_id=str(uuid4()),
+            operation="memoir.share_video_generation",
+            user_id=job.user_id,
+            project_id=job.project_id,
+        )
+
+        if not metadata.title_attempted:
+            metadata.title = share_video_title(metadata, job.selected_text)
+            context_token = set_ai_usage_context(
+                user_id=job.user_id,
+                project_id=job.project_id,
+                operation="memoir.share_video_title",
+                operation_id=usage_context.operation_id,
+            )
+            try:
+                suggested_title, metadata.hook_text = await _suggest_share_video_title_and_hook(
+                    job.selected_text, ai_model=metadata.ai_model,
+                )
+                if suggested_title:
+                    metadata.title = suggested_title
+            except Exception:
+                logger.exception("share video title generation failed job_id=%s", job.id)
+            finally:
+                reset_ai_usage_context(context_token)
+            metadata.title_attempted = True
+            _set_job_metadata(job, metadata)
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
         async def persist_background_progress(updated_metadata: ShareVideoJobMetadata) -> None:
             _set_job_metadata(job, updated_metadata)
             await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
-        prepared_background = await background_orchestration.prepare_share_video_background(
-            db,
-            job=job,
-            metadata=metadata,
-            persist_progress=persist_background_progress,
-            ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
-            volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
-        )
-        background_image_path = prepared_background.image_path
-        background_segments = prepared_background.segments
+        background_image_path = None
+        background_segments = None
+        if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION:
+            duration_ms = job.end_ms - job.start_ms
+            if metadata.animation_plan is None:
+                relative_timings = [
+                    {
+                        "start_ms": max(0, min(duration_ms, timing.start_ms - job.start_ms)),
+                        "end_ms": max(0, min(duration_ms, timing.end_ms - job.start_ms)),
+                    }
+                    for timing in metadata.char_timings
+                ]
+                metadata.animation_plan = await plan_share_video_story(
+                    job.selected_text,
+                    relative_timings,
+                    duration_ms,
+                    ai_model=metadata.ai_model,
+                    usage_context=usage_context,
+                )
+                _set_job_metadata(job, metadata)
+                await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
+            validate_story_plan_source(metadata.animation_plan, job.selected_text, duration_ms)
+        else:
+            prepared_background = await background_orchestration.prepare_share_video_background(
+                db,
+                job=job,
+                metadata=metadata,
+                persist_progress=persist_background_progress,
+                ai_background_enabled=settings.memoir_share_video_ai_background_enabled,
+                volc_ark_api_key=str(getattr(settings, "volc_ark_api_key", "") or ""),
+                usage_context=usage_context,
+            )
+            background_image_path = prepared_background.image_path
+            background_segments = prepared_background.segments
         target_path = share_video_file_path(job)
+        book_title, narrator_name = await share_video_end_card_source(db, job.project_id)
+        mini_program_code = await _share_video_mini_program_code(job.share_code)
         render_request = rendering.ShareVideoRenderRequest(
             source_audio_path=audio_file_path(job.audio_file),
             source_audio_mime_type=job.audio_file.mime_type,
@@ -783,28 +1277,26 @@ async def run_share_video_job_with_session(
             end_ms=job.end_ms,
             background_image_path=background_image_path,
             background_segments=background_segments,
+            video_style=metadata.video_style,
+            animation_plan=metadata.animation_plan,
+            hook_text=metadata.hook_text,
+            book_title=book_title,
+            narrator_name=narrator_name,
+            mini_program_code=mini_program_code,
         )
         try:
             await rendering.render_share_video_clip(render_request)
         except rendering.ShareVideoGenerationError as exc:
-            if background_image_path is None and not background_segments:
+            if metadata.video_style == SHARE_VIDEO_STYLE_STORY_ANIMATION or (
+                background_image_path is None and not background_segments
+            ):
                 raise
             metadata.background_status = "fallback"
             metadata.background_error_message = f"背景图渲染失败，已回退经典样式：{str(exc)[:400]}"
             _set_job_metadata(job, metadata)
             await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
             await rendering.render_share_video_clip(
-                rendering.ShareVideoRenderRequest(
-                    source_audio_path=render_request.source_audio_path,
-                    source_audio_mime_type=render_request.source_audio_mime_type,
-                    target_path=render_request.target_path,
-                    selected_text=render_request.selected_text,
-                    char_timings=render_request.char_timings,
-                    start_ms=render_request.start_ms,
-                    end_ms=render_request.end_ms,
-                    background_image_path=None,
-                    background_segments=None,
-                )
+                replace(render_request, background_image_path=None, background_segments=None, video_style="illustrated"),
             )
         size_bytes = _publish_completed_video(target_path)
         completed = await _complete_share_video_job(

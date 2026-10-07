@@ -5,6 +5,8 @@ const test = require("node:test");
 
 const {
   initialVoiceChatData,
+  applyVoiceChatDataPatch,
+  voiceChatInteractionPhase,
   voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
@@ -14,30 +16,90 @@ const {
   voiceConnectionStatusPatch,
   voiceGatewayEventPatch,
   voiceSessionDetailPatch,
-} = require("../pages/voice-chat/voice-chat-page-state.ts");
+} = require("../components/voice-session/voice-chat-page-state.ts");
+
+test("voice chat derives one interaction phase from overlapping runtime facts", () => {
+  const state = (patch = {}) => ({
+    ...initialVoiceChatData(),
+    ...patch,
+  });
+
+  assert.equal(voiceChatInteractionPhase(state()), "idle");
+  assert.equal(voiceChatInteractionPhase(state({ recording: true })), "recording");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    followUpLoading: true,
+    followUpTTSLoading: true,
+  })), "transcript_processing");
+  assert.equal(voiceChatInteractionPhase(state({
+    followUpLoading: true,
+    followUpTTSLoading: true,
+  })), "assistant_preparing");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    assistantPromptText: "那时候您最难忘的人是谁？",
+    followUpLoading: true,
+    followUpTTSPlaying: true,
+  })), "assistant_responding");
+  assert.equal(voiceChatInteractionPhase(state({
+    latestTranscriptText: "我刚讲完的一段话。",
+    followUpLoading: true,
+    followUpTTSPlaying: true,
+  })), "assistant_responding");
+  assert.equal(voiceChatInteractionPhase(state({
+    assistantPromptText: "那时候您最难忘的人是谁？",
+  })), "waiting_for_answer");
+  assert.equal(voiceChatInteractionPhase(state({
+    followUpError: "小余回应失败",
+    assistantPromptText: "上一轮留下的问题",
+  })), "assistant_error");
+});
+
+test("recording level updates keep long history on the page without resending it", () => {
+  const sent = [];
+  const context = {
+    data: initialVoiceChatData(),
+    setData(patch) { sent.push(patch); Object.assign(this.data, patch); },
+  };
+  const lines = Array.from({ length: 500 }, (_, id) => ({ id: String(id), role: "user", text: "合成的口述文字。".repeat(20) }));
+  applyVoiceChatDataPatch(context, { transcriptLines: lines });
+  const renderedHistory = context.data.transcriptLineViews;
+  applyVoiceChatDataPatch(context, { audioLevelPercent: 42 });
+  assert.deepEqual(sent.at(-1), { audioLevelPercent: 42 });
+  assert.equal(context.data.transcriptLineViews, renderedHistory);
+  assert.equal(context.data.transcriptLineViews.length, 500);
+
+  applyVoiceChatDataPatch(context, { interviewType: "human_interview" });
+  assert.equal(context.data.transcriptLineViews[0].roleText, "被访者");
+  applyVoiceChatDataPatch(context, { transcriptLines: [...lines, { id: "new", role: "user", text: "新讲述" }] });
+  assert.equal(context.data.transcriptLineViews.at(-1).text, "新讲述");
+});
 
 test("voice chat initial data keeps the assistant ready for opening narration", () => {
   const first = initialVoiceChatData();
   const second = initialVoiceChatData();
 
   assert.equal(first.status, "idle");
-  assert.equal(first.modeLabel, "慢慢讲");
   assert.equal(first.primaryActionText, "开始说话");
-  assert.equal(first.assistantPromptLabel, "小余想听您讲讲");
   assert.equal(first.autoStopEnabled, true);
   assert.equal(first.autoListenEnabled, true);
   assert.equal(first.largeTextEnabled, false);
   assert.equal(first.autoBargeInEnabled, true);
   assert.equal(first.voiceChatPageClass, "voice-chat-page");
   assert.equal(first.showVoiceAuthorizationPanel, true);
+  assert.equal(first.showTranscriptStage, false);
+  assert.equal(first.showAssistantActions, false);
   assert.equal(first.micButtonClass, "mic-button disabled");
   assert.equal(voiceChatViewPatch(first).micButtonClass, "mic-button disabled");
   assert.equal(first.micButtonDisabled, true);
+  assert.equal(first.micButtonProcessing, false);
   assert.equal(first.micButtonText, "同意后开始说话");
   assert.equal(first.liveScrollClass, "live-scroll");
-  assert.equal(first.liveScrollTarget, "");
   assert.equal(first.liveScrollTop, 0);
-  assert.equal(first.liveTextEndId, "live-text-end");
+  assert.equal(first.liveTranscriptFollowing, true);
+  assert.equal(first.liveReviewStartCharCount, 0);
+  assert.equal(first.showReturnToLatest, false);
+  assert.equal(first.returnToLatestText, "回到最新");
   assert.equal(first.historyCountText, "0 段 · 0 字");
   assert.equal(first.historyExpanded, false);
   assert.equal(first.showHistoryPanel, false);
@@ -72,12 +134,16 @@ test("voice chat view patch derives simple fields for first assistant turn", () 
   assert.equal(patch.voiceChatPageClass, "voice-chat-page");
   assert.equal(patch.showVoiceAuthorizationPanel, false);
   assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.showAssistantOpening, false);
+  assert.equal(patch.showTranscriptStage, false);
+  assert.equal(patch.showAssistantActions, true);
   assert.equal(patch.assistantDisplayText, "小余正在准备第一句话");
   assert.equal(patch.stageStatusText, "小余正在准备问题");
   assert.equal(patch.liveDisplayText, "小余正在准备第一句话");
-  assert.equal(patch.controlHintText, "小余先问一句，稍等一下。");
+  assert.equal(patch.controlHintText, "小余先问一句，稍等一下");
   assert.equal(patch.micButtonText, "我来讲了");
   assert.equal(patch.micButtonDisabled, false);
+  assert.equal(patch.micButtonProcessing, false);
 });
 
 test("voice chat view patch derives transcript and recording render fields", () => {
@@ -97,20 +163,21 @@ test("voice chat view patch derives transcript and recording render fields", () 
   const patch = voiceChatViewPatch(data);
 
   assert.equal(patch.voiceChatPageClass, "voice-chat-page ai-recording-focus");
+  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.showTranscriptStage, true);
+  assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusClass, "stage-status listening");
   assert.equal(patch.stageStatusText, "我在听，您慢慢说");
   assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
   assert.equal(patch.liveTextClass, "live-text");
-  assert.equal(patch.showHumanTranscriptOverlay, false);
   assert.equal(patch.captureStripClass, "capture-strip active");
   assert.equal(patch.showLiveCharCount, true);
   assert.equal(patch.showInlineHelp, true);
-  assert.equal(patch.historyCountText, "2 段 · 7 字");
+  assert.equal(patch.historyCountText, "1 段 · 6 字");
   assert.equal(patch.showHistoryPanel, true);
   assert.equal(patch.showHistoryLines, false);
   assert.equal(patch.historyToggleText, "查看");
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
-    ["transcript-line assistant", "小余"],
     ["transcript-line user", "我"],
   ]);
   assert.equal(patch.controlHintText, "说完请点这里");
@@ -141,6 +208,84 @@ test("voice chat only expands saved history when the user asks to review it", ()
   assert.equal(expanded.historyToggleText, "收起");
 });
 
+test("voice chat does not treat an assistant-only opening prompt as saved narration", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    assistantPromptText: "今天想先讲哪件小事？",
+    transcriptLines: [
+      { id: "assistant-1", role: "assistant", text: "今天想先讲哪件小事？" },
+    ],
+  });
+
+  assert.equal(patch.showHistoryPanel, false);
+  assert.equal(patch.showHistoryLines, false);
+});
+
+test("voice chat keeps the saved transcript as the only focus while the next question is prepared", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    latestTranscriptText: "那个月亮特别大，也特别圆。",
+    liveText: "那个月亮特别大，也特别圆。",
+    followUpLoading: true,
+    canRequestFollowUp: true,
+  });
+
+  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.showTranscriptStage, true);
+  assert.equal(patch.showAssistantActions, false);
+  assert.equal(patch.stageStatusText, "正在帮您整理成文字");
+  assert.equal(patch.liveDisplayText, "那个月亮特别大，也特别圆。");
+  assert.equal(patch.controlHintText, "正在帮您整理刚才的故事");
+  assert.equal(patch.micButtonClass, "mic-button processing disabled");
+  assert.equal(patch.micButtonDisabled, true);
+  assert.equal(patch.micButtonProcessing, true);
+  assert.equal(patch.micButtonText, "正在帮您整理");
+});
+
+test("voice chat switches to the assistant as soon as the next question starts playing", () => {
+  const question = "您刚才说到可乐，第一次喝到它是在什么时候？";
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    latestTranscriptText: "这是上一轮已经保存的一大段讲述。",
+    liveText: "这是上一轮已经保存的一大段讲述。",
+    assistantPromptText: question,
+    followUpLoading: true,
+    followUpTTSLoading: false,
+    followUpTTSPlaying: true,
+  });
+
+  assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.showTranscriptStage, false);
+  assert.equal(patch.assistantDisplayText, question);
+  assert.equal(patch.showAssistantTTS, true);
+  assert.equal(patch.stageStatusText, "小余正在读问题");
+  assert.equal(patch.controlHintText, "听完就可以开始说");
+  assert.equal(patch.micButtonClass, "mic-button");
+  assert.equal(patch.micButtonDisabled, false);
+  assert.equal(patch.micButtonProcessing, false);
+  assert.equal(patch.micButtonText, "我来讲了");
+});
+
+test("voice chat keeps one continuous live transcript and exposes paused follow state", () => {
+  const liveText = "小时候我们住在河边，每天放学以后都会先去找外婆。后来搬到了城里，但我一直记得院子里的桂花树，秋天的时候整个屋子都能闻到香味。";
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    recording: true,
+    liveText,
+    liveCharCount: liveText.length,
+    liveScrollClass: "live-scroll long",
+    liveTranscriptFollowing: false,
+    liveReviewStartCharCount: liveText.length - 5,
+  });
+
+  assert.equal(patch.liveCurrentText, liveText);
+  assert.match(patch.liveScrollClass, /reviewing/);
+  assert.equal(patch.showReturnToLatest, true);
+  assert.equal(patch.returnToLatestText, "回到最新 · 新增 5 字");
+});
+
 test("voice chat view patch combines human speaker choice with record actions", () => {
   const idlePatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
@@ -160,7 +305,7 @@ test("voice chat view patch combines human speaker choice with record actions", 
     interviewType: "human_interview",
     voiceAuthorizationAgreed: true,
     recordingStarting: true,
-    connecting: true,
+    status: "connecting",
   });
   const authorizationPatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
@@ -185,7 +330,6 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
   assert.equal(recordingPatch.showStageStatus, false);
-  assert.equal(recordingPatch.showHumanTranscriptOverlay, true);
   assert.equal(recordingPatch.showCaptureStrip, true);
   assert.equal(recordingPatch.controlHintText, "");
   assert.equal(recordingPatch.liveDisplayText, "等待转写...");
@@ -321,12 +465,11 @@ test("voice chat view patch adds focused large text root classes", () => {
 
   assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page large-text idle-focus");
   assert.equal(assistantPatch.voiceChatPageClass, "voice-chat-page large-text assistant-focus");
-  assert.equal(assistantPatch.liveDisplayText, "听完后，点下方“我来讲了”开始回答");
+  assert.equal(assistantPatch.liveDisplayText, "现在可以说了");
   assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page ai-recording-focus large-text capture-focus");
   assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
   assert.equal(humanCapturePatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus large-text capture-focus");
   assert.equal(humanCapturePatch.showStageStatus, false);
-  assert.equal(humanCapturePatch.showHumanTranscriptOverlay, true);
   assert.equal(humanCapturePatch.liveTextClass, "live-text");
 });
 
@@ -337,7 +480,6 @@ test("voice chat auto-listen gate snapshot keeps page and computed gate state to
         autoListenEnabled: true,
         status: "ready",
         recording: false,
-        connecting: false,
         followUpLoading: false,
       },
       {
@@ -351,7 +493,6 @@ test("voice chat auto-listen gate snapshot keeps page and computed gate state to
       autoListenEnabled: true,
       status: "ready",
       recording: false,
-      connecting: false,
       followUpLoading: false,
       pendingAfterPlayback: true,
       canStart: true,
@@ -470,9 +611,7 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
     noAnswerPromptAlreadyHandled: false,
   });
   assert.equal(capture.shouldHandleNoAnswerAutoStop, true);
-  assert.equal(capture.patch.captureKilobytes, 3);
   assert.equal(capture.patch.captureDurationText, "01:01");
-  assert.equal(capture.patch.autoStopStateText, "未听到回答，已暂停收音");
   assert.equal(capture.patch.primaryActionText, "继续说话");
 
   assert.deepEqual(
@@ -494,4 +633,21 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
   assert.equal(errorPatch.errorKindText, "连接错误");
   assert.equal(errorPatch.gatewayStateText, "连接异常");
   assert.equal(errorPatch.canReconnect, true);
+
+  const recorderPermissionPatch = voiceChatErrorPatch(
+    "没有麦克风权限",
+    { kind: "recorder", code: "recorder_permission_denied", message: "没有麦克风权限" },
+    { persistenceStateText: "等待识别", recoveryNotice: "" },
+  );
+  const recorderPermissionView = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    ...recorderPermissionPatch,
+  });
+  assert.equal(recorderPermissionView.recorderSettingsRequired, true);
+  assert.equal(recorderPermissionView.showRecoveryPanel, true);
+  assert.equal(recorderPermissionView.showRecoveryActions, true);
+  assert.equal(voiceChatViewPatch({
+    ...initialVoiceChatData(), ...recorderPermissionPatch, error: "",
+    recorderSettingsRequired: true,
+  }).recorderSettingsRequired, false);
 });

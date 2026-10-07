@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.narrative_types import (
     MemoirInterviewAction,
     MemoirInterviewPolicyFailureCode,
@@ -46,7 +47,7 @@ from app.services.memoir.narrative.interview_policy_runtime import (
 from app.services.memoir.voice_final_persistence import _assign_interview_target
 
 
-class FakePolicyAI:
+class FakePolicyAI(AITextServiceBase):
     provider_name = "fake-policy"
     model_name = "fake-policy-model"
 
@@ -79,7 +80,7 @@ class FakePolicyAI:
         )
 
 
-class FakePolicyOutcomeAI:
+class FakePolicyOutcomeAI(AITextServiceBase):
     provider_name = "fake-outcome"
     model_name = "fake-outcome-model"
 

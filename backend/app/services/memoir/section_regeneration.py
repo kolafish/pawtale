@@ -27,7 +27,7 @@ from app.models.memoir import (
     MemoirSectionMaterial,
     MemoirVoiceUtterance,
 )
-from app.schemas.memoir_sections import MemoirSectionRegenerateRequest
+from app.schemas.memoir_sections import MemoirSectionMergeRequest, MemoirSectionRegenerateRequest
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -52,7 +52,10 @@ from app.services.memoir.section_roles import (
     requires_user_assignment,
 )
 from app.services.memoir.sections import (
+    apply_section_merge_groups,
     assign_material_to_section,
+    lock_chapter_structure,
+    lock_plan_structure,
     mark_section_structure_changed,
 )
 from app.services.memoir.transcript_projection import (
@@ -69,6 +72,9 @@ class _MaterialSnapshot:
     text_hash: str
     transcript_version_id: str | None
     include_in_book: bool
+    source_section_id: str = ""
+    source_section_title: str = ""
+    source_section_order: int = 0
 
 
 @dataclass(frozen=True)
@@ -112,6 +118,20 @@ class _MaterialAssignmentsOutput(BaseModel):
     assignments: list[_MaterialAssignmentOutput] = Field(min_length=1)
 
 
+class _SectionMergeGroupOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_section_id: str
+    source_section_ids: list[str] = Field(min_length=1)
+    title: str | None = None
+
+
+class _SectionMergePlanOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    groups: list[_SectionMergeGroupOutput]
+
+
 SECTION_STRUCTURE_SOURCE_CHAR_BUDGET = 8_000
 MATERIAL_BATCH_CHAR_BUDGET = 8_000
 LLM_PROMPT_CHAR_LIMIT = 16_000
@@ -124,6 +144,13 @@ ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
 
 class SectionRegenerationConflict(HTTPException):
     """The source snapshot changed while a section rewrite was pending."""
+
+
+class SectionRegenerationNeedsMaterial(HTTPException):
+    """An empty chapter needs a new material, rather than a provider retry."""
+
+    def __init__(self) -> None:
+        super().__init__(status_code=422, detail="本章没有可用于生成小节的讲述")
 
 
 class _SectionRegenerationCancelled(RuntimeError):
@@ -181,6 +208,13 @@ def _validate_expected_sections(
         raise SectionRegenerationConflict(status_code=409, detail="本章小节已经变化，请刷新后重试")
 
 
+def _current_included_section_count(chapter: MemoirBookPlanChapter) -> int:
+    return sum(
+        section.status == "active" and section.include_in_book
+        for section in chapter.sections
+    )
+
+
 def _ordered_materials(
     chapter: MemoirBookPlanChapter,
 ) -> list[tuple[MemoirSection, MemoirSectionMaterial]]:
@@ -190,7 +224,7 @@ def _ordered_materials(
         for material in section.materials
     ]
     if not materials:
-        raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
+        raise SectionRegenerationNeedsMaterial()
     ids = [material.utterance_id for _, material in materials]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=409, detail="本章讲述存在重复归属，请先处理")
@@ -230,6 +264,11 @@ def _material_snapshots(
                     if requires_user_assignment(section.metadata_json)
                     else section.include_in_book and material.include_in_book
                 ),
+                source_section_id=(
+                    section.id if section.status == "active" and section.include_in_book else ""
+                ),
+                source_section_title=section.title,
+                source_section_order=section.sort_order,
             )
         )
     return snapshots
@@ -256,6 +295,7 @@ def _build_section_structure_prompt(
     *,
     chapter_title: str,
     materials: list[_MaterialSnapshot],
+    max_sections: int | None = None,
 ) -> str:
     excerpt_limit = max(
         120,
@@ -268,6 +308,8 @@ def _build_section_structure_prompt(
         {
             "source_index": index,
             "excerpt": _compact_excerpt(material.text, limit=excerpt_limit),
+            **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
+               if max_sections is not None else {}),
         }
         for index, material in enumerate(materials, start=1)
     ]
@@ -276,10 +318,19 @@ def _build_section_structure_prompt(
         ensure_ascii=False,
     )
     outlines_json = json.dumps(material_outlines, ensure_ascii=False)
+    if max_sections is not None:
+        task = (
+            f"任务：合并本章现有小节，最终最多 {max_sections} 个（包含待归类组）；"
+            "同一原小节的讲述必须留在同一个新小节，不要拆散。优先合并主题相近的小节，"
+            "保留每条讲述，不增加小节数量。\n"
+        )
+    else:
+        task = (
+            "任务：先从全章视角设计一组语义清晰、互不重复的小节。\n"
+            "按事件、人物、阶段或反思主题自然分组，不强制小节数量；"
+        )
     return (
-        "任务：先从全章视角设计一组语义清晰、互不重复的小节。\n"
-        "按事件、人物、阶段或反思主题自然分组，不强制小节数量；"
-        "这里只设计候选小节，不做逐条归类。\n\n"
+        task + "这里只设计候选小节，不做逐条归类。\n\n"
         f"章节：\n{chapter_json}\n\n"
         f"讲述概览：\n{outlines_json}\n\n"
         "只返回 JSON："
@@ -333,10 +384,12 @@ async def _plan_section_candidates(
     chapter_title: str,
     materials: list[_MaterialSnapshot],
     ai_client: AITextClient,
+    max_sections: int | None = None,
 ) -> list[MaterialOrganizationSectionCandidate]:
     prompt = _build_section_structure_prompt(
         chapter_title=chapter_title,
         materials=materials,
+        max_sections=max_sections,
     )
     if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
         raise HTTPException(
@@ -355,10 +408,98 @@ async def _plan_section_candidates(
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
-    return _normalize_section_candidates(
+    candidates = _normalize_section_candidates(
         generated.value.model_dump(),
         chapter_id=chapter_id,
     )
+    if max_sections is not None and len(candidates) > max_sections:
+        raise HTTPException(409, "AI 未按减少小节数量的要求规划，原小节保持不变，请重试")
+    return candidates
+
+
+async def _plan_existing_section_merges(
+    *,
+    chapter_title: str,
+    sections: list[MemoirSection],
+    materials: list[_MaterialSnapshot],
+    ai_model: str | None,
+) -> tuple[list[tuple[str, MemoirSectionMergeRequest]], str | None]:
+    """Choose whole existing sections to merge; never redistribute individual memories."""
+    ordered = sorted(sections, key=lambda section: (section.sort_order, section.id))
+    order_by_id = {section.id: index for index, section in enumerate(ordered)}
+    refs = ModelReferenceMap("S", (section.id for section in ordered))
+    texts_by_section: dict[str, list[str]] = {section.id: [] for section in ordered}
+    for material in materials:
+        if material.source_section_id in texts_by_section:
+            texts_by_section[material.source_section_id].append(material.text)
+    excerpt_limit = max(80, min(500, SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // len(ordered)))
+    outlines = [
+        {
+            "section_id": refs.encode(section.id),
+            "order": index,
+            "title": section.title,
+            "material_count": len(texts_by_section[section.id]),
+            "excerpt": _compact_excerpt(
+                "；".join(texts_by_section[section.id]), limit=excerpt_limit,
+            ),
+        }
+        for index, section in enumerate(ordered, start=1)
+    ]
+    prompt = (
+        f"章节：{chapter_title}\n当前收录 {len(ordered)} 个小节：\n"
+        f"{json.dumps(outlines, ensure_ascii=False)}\n\n"
+        "用户希望合并现有小节，让收录小节数变少。仅选择内容有关联、适合合并的整个旧小节；"
+        "每组把顺序最早的小节作为保留的 target_section_id，其他小节放进 source_section_ids。"
+        "一个旧小节最多出现在一组中；不在组内的小节保持原样。"
+        "尽量保留叙事顺序，不要拆散小节内的讲述，不要新建小节。"
+        "title 可为空以保留目标小节的标题；若改标题，只用现有事实概括合并后的内容。"
+        "至少合并一组；若确实找不到适合合并的旧小节，则返回空 groups。\n"
+        '只返回 JSON：{"groups":[{"target_section_id":"S1",'
+        '"source_section_ids":["S2"],"title":null}]}'
+    )
+    if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
+        raise HTTPException(422, "本章素材数量过多，无法安全规划小节合并")
+    client = get_ai_service(ai_model)
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    generated = await generate_structured_with_client(
+        client,
+        SECTION_REGENERATION_SYSTEM_PROMPT,
+        prompt,
+        output_model=_SectionMergePlanOutput,
+        requested_model=getattr(client, "model_name", None),
+        temperature=0.1,
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
+    )
+    groups: list[tuple[str, MemoirSectionMergeRequest]] = []
+    used: set[str] = set()
+    for item in generated.value.groups:
+        try:
+            target_id = refs.decode(item.target_section_id)
+            source_ids = [refs.decode(ref) for ref in item.source_section_ids]
+        except ValueError as exc:
+            raise HTTPException(409, "AI 引用了未知小节，原小节保持不变") from exc
+        ids = [target_id, *source_ids]
+        if len(ids) != len(set(ids)) or used.intersection(ids):
+            raise HTTPException(409, "AI 给出的小节合并组合有重复，原小节保持不变")
+        used.update(ids)
+        # Keep the earliest old section in place even if the model picked a later target.
+        target_id = min(ids, key=order_by_id.__getitem__)
+        source_ids = sorted(
+            (section_id for section_id in ids if section_id != target_id),
+            key=order_by_id.__getitem__,
+        )
+        title = re.sub(r"\s+", " ", item.title or "").strip() or None
+        if title and len(title) > 200:
+            raise HTTPException(409, "AI 给出的小节标题过长，原小节保持不变")
+        groups.append((
+            target_id,
+            MemoirSectionMergeRequest(source_section_ids=source_ids, title=title),
+        ))
+    if not groups:
+        raise HTTPException(409, "没有找到适合合并的现有小节，原小节保持不变")
+    return groups, getattr(client, "model_name", ai_model)
 
 
 def _material_batches(
@@ -390,6 +531,7 @@ def _build_material_assignment_prompt(
     materials: list[_MaterialSnapshot],
     section_refs: ModelReferenceMap,
     material_refs: ModelReferenceMap,
+    max_sections: int | None = None,
 ) -> str:
     chapter = json.dumps(
         {"title": chapter_title},
@@ -411,14 +553,18 @@ def _build_material_assignment_prompt(
             {
                 "utterance_id": material_refs.encode(material.utterance_id),
                 "text": material.text,
+                **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
+                   if max_sections is not None else {}),
             }
             for material in materials
         ],
         ensure_ascii=False,
     )
+    task = "任务：将下面多条讲述逐条归入当前章节的候选小节。"
+    if max_sections is not None:
+        task += "同一原小节的讲述必须归入同一个候选小节，不得拆散。"
     return (
-        "任务：将下面多条讲述逐条归入当前章节的候选小节。"
-        "确实无法可靠归类时才标记为 leave_unassigned；"
+        task + "确实无法可靠归类时才标记为 leave_unassigned；"
         "不得遗漏、重复或改写 utterance_id。\n\n"
         f"当前章节：\n{chapter}\n\n"
         f"候选小节：\n{candidates}\n\n"
@@ -437,6 +583,7 @@ async def _assign_material_batch(
     sections: list[MaterialOrganizationSectionCandidate],
     materials: list[_MaterialSnapshot],
     ai_client: AITextClient,
+    max_sections: int | None = None,
 ) -> list[MaterialOrganizationDecision]:
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
     material_refs = ModelReferenceMap(
@@ -449,6 +596,7 @@ async def _assign_material_batch(
         materials=materials,
         section_refs=section_refs,
         material_refs=material_refs,
+        max_sections=max_sections,
     )
     if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
         raise HTTPException(
@@ -536,6 +684,7 @@ async def _plan_section_regeneration(
     materials: list[_MaterialSnapshot],
     ai_model: str | None,
     progress_callback: ProgressCallback | None = None,
+    max_sections: int | None = None,
 ) -> tuple[
     list[_PlannedSection],
     list[_PlannedAssignment],
@@ -556,6 +705,7 @@ async def _plan_section_regeneration(
         chapter_title=chapter_title,
         materials=materials,
         ai_client=client,
+        max_sections=max_sections,
     )
     planned_by_id = {
         candidate.id: _PlannedSection(candidate=candidate)
@@ -575,6 +725,7 @@ async def _plan_section_regeneration(
             sections=candidates,
             materials=batch,
             ai_client=client,
+            max_sections=max_sections,
         )
         for material, decision in zip(batch, decisions, strict=True):
             assignment = _PlannedAssignment(
@@ -603,6 +754,22 @@ async def _plan_section_regeneration(
         for section in planned_by_id.values()
         if section.assignments
     ]
+    if max_sections is not None:
+        if any(assignment.material.include_in_book for assignment in pending_assignments):
+            raise HTTPException(409, "AI 未能保留原有收录的讲述，原小节保持不变，请重试")
+        resulting_count = len(planned_sections) + bool(pending_assignments)
+        if resulting_count > max_sections:
+            raise HTTPException(409, "AI 未减少小节数量，原小节保持不变，请重试")
+        destinations: dict[str, set[str]] = {}
+        for section in planned_sections:
+            for assignment in section.assignments:
+                if assignment.material.source_section_id:
+                    destinations.setdefault(assignment.material.source_section_id, set()).add(section.candidate.id)
+        for assignment in pending_assignments:
+            if assignment.material.source_section_id:
+                destinations.setdefault(assignment.material.source_section_id, set()).add("pending")
+        if any(len(targets) > 1 for targets in destinations.values()):
+            raise HTTPException(409, "AI 拆散了原有小节，原小节保持不变，请重试")
     await _report_progress(progress_callback, stage="saving")
     return planned_sections, pending_assignments, generated_model
 
@@ -631,14 +798,66 @@ async def regenerate_chapter_sections(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
+    current_section_count = (
+        _current_included_section_count(chapter)
+        if req.section_count_goal == "reduce" else None
+    )
+    if current_section_count is not None and current_section_count < 2:
+        raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
     materials = _material_snapshots(chapter)
-    if not materials:
-        raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
     chapter_title = chapter.title
+    included_sections = [
+        section for section in chapter.sections
+        if section.status == "active" and section.include_in_book
+    ]
 
     # LLM calls may take minutes. Release the read transaction and defer every
-    # mutation until all decisions are ready, then replace the structure atomically.
+    # mutation until all decisions are ready, then apply the structure atomically.
     await db.commit()
+    if current_section_count is not None:
+        await _report_progress(progress_callback, stage="planning_sections")
+        merge_groups, generated_model = await _plan_existing_section_merges(
+            chapter_title=chapter_title,
+            sections=included_sections,
+            materials=materials,
+            ai_model=selected_ai_model,
+        )
+        await _report_progress(
+            progress_callback, stage="saving", resolved_ai_model=generated_model,
+        )
+        plan = await lock_plan_structure(db, project_id=project_id)
+        await lock_chapter_structure(db, project_id=project_id, chapter_id=chapter_id)
+        chapter = await _load_chapter(
+            db, project_id=project_id, chapter_id=chapter_id,
+        )
+        _validate_expected_sections(chapter, req)
+        _validate_material_snapshots(_material_snapshots(chapter), materials)
+        current_ids = {
+            section.id for section in chapter.sections
+            if section.status == "active" and section.include_in_book
+        }
+        if current_ids != {section.id for section in included_sections}:
+            raise SectionRegenerationConflict(
+                status_code=409, detail="本章小节已经变化，请刷新后重试",
+            )
+        await apply_section_merge_groups(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            plan=plan,
+            groups=merge_groups,
+            assigned_by=MemoirSectionMaterialAssignedBy.AI,
+            updated_by=structure_updated_by,
+        )
+        return {
+            "material_count": len(materials),
+            "assigned_count": sum(bool(material.source_section_id) for material in materials),
+            "unassigned_count": 0,
+            "section_count": current_section_count - sum(
+                len(group.source_section_ids) for _, group in merge_groups
+            ),
+            "ai_model": generated_model,
+        }
     (
         planned_sections,
         pending_assignments,
@@ -649,6 +868,7 @@ async def regenerate_chapter_sections(
         materials=materials,
         ai_model=selected_ai_model,
         progress_callback=progress_callback,
+        max_sections=req.max_sections,
     )
     if not planned_sections:
         raise HTTPException(
@@ -661,6 +881,17 @@ async def regenerate_chapter_sections(
         pending_assignments=pending_assignments,
     )
 
+    # The expensive model work runs without a transaction. Lock only for the
+    # final revalidation and atomic structure replacement.
+    plan = await lock_plan_structure(
+        db,
+        project_id=project_id,
+    )
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     chapter = await _load_chapter(
         db,
         project_id=project_id,
@@ -751,9 +982,6 @@ async def regenerate_chapter_sections(
             material.include_in_book = assignment.material.include_in_book
             db.add(material)
 
-    plan = await db.get(MemoirBookPlan, chapter.plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="章节规划不存在")
     await mark_section_structure_changed(
         db,
         project_id=project_id,
@@ -832,6 +1060,7 @@ async def enqueue_chapter_section_regeneration(
     chapter_id: str,
     req: MemoirSectionRegenerateRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> dict[str, object]:
     project = await load_memoir_project(
         db,
@@ -845,6 +1074,11 @@ async def enqueue_chapter_section_regeneration(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
+    if (
+        req.section_count_goal == "reduce"
+        and _current_included_section_count(chapter) < 2
+    ):
+        raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
     materials = _material_snapshots(chapter)
     requested_ai_model = select_project_ai_model(project, req.ai_model)
     job = await editing_jobs.enqueue_editing_job(
@@ -863,9 +1097,19 @@ async def enqueue_chapter_section_regeneration(
                     for section in req.expected_sections
                 ],
                 "ai_model": requested_ai_model,
+                "max_sections": req.max_sections,
+                "section_count_goal": req.section_count_goal,
             },
         },
     )
+    if (
+        job.status == MemoirEditingJobStatus.RUNNING.value
+        and (
+            (job.payload_json or {}).get("request", {}).get("max_sections") != req.max_sections
+            or (job.payload_json or {}).get("request", {}).get("section_count_goal") != req.section_count_goal
+        )
+    ):
+        raise HTTPException(409, "本章已有另一项小节整理任务在运行，请等它完成后再合并")
     if job.status == MemoirEditingJobStatus.PENDING.value:
         job.result_json = {
             "stage": "queued",
@@ -877,7 +1121,10 @@ async def enqueue_chapter_section_regeneration(
             "requested_ai_model": requested_ai_model,
         }
         db.add(job)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(job)
     return _job_state(
         project_id=project_id,

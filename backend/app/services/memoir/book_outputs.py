@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
+from app.database import async_session_maker
+from app.models.projects import Project
+from app.services import content_storage
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
@@ -21,12 +26,15 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.schemas.memoir_book import (
+    MemoirBookCustomLayout,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
+    MemoirBookAudioPlanRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
+    MemoirBookManuscriptTemplate,
     MemoirBookOutputVersionResponse,
     MemoirBookOutputVersionSummaryResponse,
     MemoirBookTitleSuggestionRequest,
@@ -38,15 +46,7 @@ from app.services.memoir import (
     book_editorial_actions,
     book_review_answer_state,
     book_reviews,
-)
-from app.services.memoir.book_audio import (
-    audio_cache_payload,
-    audio_response,
-    cached_audio_response,
-    discard_staged_audio_files,
-    effective_tts_speed_ratio,
-    source_text_hash,
-    synthesize_text_audio,
+    completion_issues,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_output_manuscript import (
@@ -59,6 +59,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
+    template_cover_style as _template_cover_style,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
     updated_manuscript_payload as _updated_manuscript_payload,
@@ -69,7 +70,8 @@ from app.services.memoir.book_output_snapshots import (
     readable_chapter_versions,
     book_content_from_chapter_snapshots,
     chapter_snapshot,
-    normalized_section_snapshots,
+    legacy_chapter_version_needs_upgrade,
+    protected_legacy_chapter_version,
 )
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_output_export import (
@@ -77,14 +79,17 @@ from app.services.memoir.book_output_export import (
     MemoirBookOutputExportLayout,
     render_book_output_export,
 )
+from app.services.memoir.book_output_export_cache import PreparedBookExport, render_cached_book_export
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
     append_book_output_version,
     book_output_version_title,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
-from app.services.memoir.voice_tts_types import TTSClient
+from app.services.memoir.project_ai_preferences import (
+    resolve_project_ai_model,
+    select_project_ai_model,
+)
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
@@ -200,30 +205,119 @@ def _compose_book_content_from_snapshot(
     )
 
 
+def _replace_book_content_title(content: str, title: str) -> str:
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        stripped = line.lstrip()
+        heading = stripped[: len(stripped) - len(stripped.lstrip("#"))]
+        spacer = " " if heading and stripped[len(heading):].startswith(" ") else ""
+        indentation = line[: len(line) - len(stripped)]
+        lines[index] = f"{indentation}{heading}{spacer}{title}"
+        return "\n".join(lines)
+    return title
+
+
+async def synchronize_book_output_title(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    title: str,
+    created_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+) -> bool:
+    canonical_title = title.strip()
+    if not canonical_title:
+        raise ValueError("回忆录名称不能为空")
+    output = await _load_output(db, project_id=project_id)
+    if not output:
+        return False
+    if not output.versions:
+        if output.title != canonical_title:
+            output.title = canonical_title
+            output.updated_at = utcnow_naive()
+            db.add(output)
+        return True
+    latest = output.versions[-1]
+    snapshot = [
+        item for item in (latest.chapter_snapshot_json or [])
+        if isinstance(item, dict)
+    ]
+    content = _replace_book_content_title(latest.content, canonical_title)
+    manuscript_json = _updated_manuscript_payload(
+        title=canonical_title,
+        stored=latest.manuscript_json or {},
+        content=content,
+        snapshot=snapshot,
+        cover_style_value=_stored_cover_style(latest),
+    )
+    version_changed = content != latest.content or manuscript_json != latest.manuscript_json
+    title_changed = output.title != canonical_title
+    if version_changed:
+        await append_book_output_version(
+            db,
+            output=output,
+            content=content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript_json,
+            created_by=created_by,
+        )
+    if title_changed:
+        output.title = canonical_title
+        output.updated_at = utcnow_naive()
+    if version_changed or title_changed:
+        invalidate_book_output(output)
+        output.metadata_json = {
+            **(output.metadata_json or {}),
+            BOOK_TTS_CACHE_KEY: None,
+        }
+        db.add(output)
+    return True
+
+
 def _current_book_snapshot(
     plan: MemoirBookPlan,
     *,
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    blocked_chapter_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         return [], ["章节规划"]
     chapters = included_book_chapters(plan)
+    blocked_ids = blocked_chapter_ids or set()
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
-    for index, chapter in enumerate(chapters, start=1):
+    for chapter in chapters:
+        if chapter.id in blocked_ids:
+            continue
         version = latest_chapter_version(chapter.draft)
         if (
             not chapter.draft
             or not version
-            or not normalized_section_snapshots(version.section_snapshot_json)
+            or not version.content.strip()
+            or (
+                legacy_chapter_version_needs_upgrade(version)
+                and not protected_legacy_chapter_version(
+                    chapter.draft,
+                    version,
+                )
+            )
         ):
+            if (
+                (version is None or not version.content.strip())
+                and source_refs_by_chapter is not None
+                and not source_refs_by_chapter.get(chapter.id)
+            ):
+                # Empty planned chapters are omitted by partial book assembly.
+                # Once material arrives, the missing draft must block export.
+                continue
             unavailable_titles.append(chapter.title)
             continue
         snapshot.append(
             chapter_snapshot(
                 chapter,
                 version,
-                chapter_index=index,
+                chapter_index=len(snapshot) + 1,
                 source_refs=(source_refs_by_chapter or {}).get(chapter.id),
             )
         )
@@ -264,10 +358,12 @@ def _output_stale_chapter_titles(
     plan: MemoirBookPlan,
     *,
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    blocked_chapter_ids: set[str] | None = None,
 ) -> list[str]:
     current_snapshot, unavailable_titles = _current_book_snapshot(
         plan,
         source_refs_by_chapter=source_refs_by_chapter,
+        blocked_chapter_ids=blocked_chapter_ids,
     )
     latest_version = output.versions[-1] if output.versions else None
     return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
@@ -378,6 +474,11 @@ async def book_output_response_or_none(
                 output,
                 plan,
                 source_refs_by_chapter=refs_by_chapter,
+                blocked_chapter_ids=await completion_issues.open_blocking_book_chapter_ids(
+                    db,
+                    project_id=project_id,
+                    all_chapter_ids=(chapter.id for chapter in included_book_chapters(plan)),
+                ),
             )
         ),
     )
@@ -391,15 +492,25 @@ async def update_book_output(
     req: MemoirBookOutputUpdateRequest,
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     fields_set = getattr(req, "model_fields_set", set())
-    title = _formal_book_title(req.title if "title" in fields_set and req.title is not None else output.title)
-    cover_style = _cover_style(req.cover_style) if "cover_style" in fields_set and req.cover_style else _stored_cover_style(latest)
+    title = (
+        req.title.strip()
+        if "title" in fields_set and req.title is not None
+        else project.title.strip()
+    )
+    if project.title != title:
+        project.title = title
+        project.updated_at = utcnow_naive()
+    if "cover_style" in fields_set and req.cover_style:
+        cover_style = _cover_style(req.cover_style)
+    else:
+        cover_style = _template_cover_style(req.manuscript_template) or _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     manuscript_json = _updated_manuscript_payload(
@@ -409,8 +520,14 @@ async def update_book_output(
         snapshot=snapshot,
         cover_style_value=cover_style,
         metadata_patch=metadata_patch,
+        manuscript_template=req.manuscript_template,
+        custom_layout=req.custom_layout,
     )
-    if content != latest.content or manuscript_json != latest.manuscript_json:
+    if (req.manuscript_template is not None or req.custom_layout is not None) and not manuscript_json:
+        raise HTTPException(status_code=400, detail="请先更新书稿，再选择版式")
+    version_changed = content != latest.content or manuscript_json != latest.manuscript_json
+    title_changed = output.title != title
+    if version_changed:
         await append_book_output_version(
             db,
             output=output,
@@ -419,12 +536,14 @@ async def update_book_output(
             manuscript_json=manuscript_json,
             created_by=MemoirCreatedBy.USER,
         )
-    output.title = title
-    invalidate_book_output(output)
-    output.metadata_json = {
-        **(output.metadata_json or {}),
-        BOOK_TTS_CACHE_KEY: None,
-    }
+    if title_changed:
+        output.title = title
+    if version_changed or title_changed:
+        invalidate_book_output(output)
+        output.metadata_json = {
+            **(output.metadata_json or {}),
+            BOOK_TTS_CACHE_KEY: None,
+        }
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:
@@ -446,8 +565,13 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
+    if not snapshot:
+        raise HTTPException(
+            status_code=409,
+            detail="当前整本书没有可用章节。请在书稿页处理待确认事项，等后台更新书稿后再重写。",
+        )
     manuscript = _editable_manuscript(
-        title=output.title,
+        title=project.title,
         content=latest.content,
         snapshot=snapshot,
         stored=latest.manuscript_json,
@@ -455,11 +579,17 @@ async def regenerate_book_output_editorial_copy(
     if not manuscript:
         raise HTTPException(status_code=400, detail="全书稿结构不可用")
 
+    base_version_id = latest.id
+    output_title = project.title
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
+    # Persist a changed model preference and release all locks before the
+    # provider call. The output row is locked and the base version revalidated
+    # immediately before appending the generated version.
+    await db.commit()
     editorial_copy = await generate_manuscript_editorial_copy(
-        title=output.title,
+        title=output_title,
         snapshot=snapshot,
         ai_model=ai_model,
         targets=sorted(targets),
@@ -476,6 +606,19 @@ async def regenerate_book_output_editorial_copy(
         chapter_ids=chapter_ids,
     )
     manuscript_json = manuscript.model_dump(mode="json")
+    await db.execute(
+        select(MemoirBookOutput.id)
+        .where(MemoirBookOutput.id == output.id)
+        .with_for_update()
+    )
+    output = await _load_output(db, project_id=project_id)
+    if (
+        output is None
+        or not output.versions
+        or output.versions[-1].id != base_version_id
+    ):
+        raise HTTPException(status_code=409, detail="生成期间全书稿已更新，请重试")
+    latest = output.versions[-1]
     if manuscript_json != latest.manuscript_json:
         await append_book_output_version(
             db,
@@ -506,14 +649,14 @@ async def update_book_output_chapter_editorial_copy(
     req: MemoirBookOutputChapterEditorialCopyUpdateRequest,
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     manuscript = _editable_manuscript(
-        title=output.title,
+        title=project.title,
         content=latest.content,
         snapshot=snapshot,
         stored=latest.manuscript_json,
@@ -562,14 +705,15 @@ async def suggest_book_output_titles(
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await load_book_plan_drafts(db, project_id=project_id)
     chapters = readable_chapter_versions(plan)
-    base_title = _formal_book_title(plan.title)
+    base_title = _formal_book_title(project.title)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     _, snapshot = _compose_book_content(
         title=base_title,
         chapters=chapters,
         source_refs_by_chapter=refs_by_chapter,
     )
-    ai_model = select_project_ai_model(project, req.ai_model)
+    ai_model = resolve_project_ai_model(project, req.ai_model)
+    await db.commit()
     generated = await generate_title_suggestions(
         title=base_title,
         snapshot=snapshot,
@@ -591,20 +735,7 @@ async def suggest_book_output_titles(
     )
 
 
-def _select_output_version(
-    output: MemoirBookOutput,
-    *,
-    version_id: str | None = None,
-) -> MemoirBookOutputVersion | None:
-    versions = sorted(output.versions, key=lambda item: item.version)
-    if not versions:
-        return None
-    if version_id:
-        return next((version for version in versions if version.id == version_id), None)
-    return versions[-1]
-
-
-async def export_book_output_file(
+async def prepare_book_output_export(
     db: AsyncSession,
     *,
     user_id: str,
@@ -613,14 +744,20 @@ async def export_book_output_file(
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
     version_id: str | None = None,
     show_source_appendix: bool | None = None,
+    preview_template: MemoirBookManuscriptTemplate | None = None,
+    preview_custom_layout_patch: dict[str, str] | None = None,
     allow_admin: bool = False,
-    timeout_seconds: float | None = None,
-) -> ExportFile:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    output = await _load_output(db, project_id=project_id)
-    if not output or not output.versions:
+) -> PreparedBookExport:
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    if not output:
         raise HTTPException(status_code=404, detail="全书稿不存在")
-    version = _select_output_version(output, version_id=version_id)
+    query = select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+    if version_id:
+        query = query.where(MemoirBookOutputVersion.id == version_id)
+    else:
+        query = query.order_by(MemoirBookOutputVersion.version.desc()).limit(1)
+    version = await db.scalar(query.execution_options(populate_existing=True))
     if not version:
         raise HTTPException(status_code=404, detail="全书版本不存在")
     content = version.content.strip()
@@ -631,26 +768,80 @@ async def export_book_output_file(
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
     )
+    if (preview_template is not None or preview_custom_layout_patch) and not manuscript:
+        raise HTTPException(status_code=400, detail="请先更新书稿，再预览版式")
+    if manuscript and (preview_template is not None or preview_custom_layout_patch):
+        manuscript = manuscript.model_copy(deep=True)
+        if preview_template is not None:
+            manuscript.profile.template = preview_template
+            manuscript.render_settings.custom_layout = MemoirBookCustomLayout()
+            matching_cover = _template_cover_style(preview_template)
+            if matching_cover is not None:
+                manuscript.render_settings.cover_style = matching_cover
+        if preview_custom_layout_patch:
+            manuscript.render_settings.custom_layout = manuscript.render_settings.custom_layout.model_copy(
+                update=preview_custom_layout_patch
+            )
+        manuscript.schema_version = 5
+    return PreparedBookExport(
+        owner_id=project.user_id, project_id=project_id, version_id=version.id,
+        version=version.version, title=title, content=content, manuscript=manuscript,
+        export_format=export_format,
+        layout=layout if export_format == MemoirBookOutputExportFormat.PDF else MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=(
+            show_source_appendix if show_source_appendix is not None
+            else manuscript.render_settings.show_source_appendix if manuscript else True
+        ),
+        render_date=version.created_at.replace(tzinfo=UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat(),
+    )
+
+
+_book_export_tasks: dict[str, asyncio.Task[ExportFile]] = {}
+
+
+async def _render_project_book_export(prepared: PreparedBookExport) -> ExportFile:
+    # Reuse the project lock and directory so deletion includes cached PDFs and
+    # cannot race a render that outlives its HTTP request.
+    async with content_storage.project_content_lock(prepared.project_id):
+        async with async_session_maker() as db:
+            exists = await db.scalar(select(Project.id).where(
+                Project.id == prepared.project_id, Project.user_id == prepared.owner_id,
+            ))
+        if not exists:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        worker = asyncio.get_running_loop().run_in_executor(
+            None, lambda: render_cached_book_export(prepared, prepared.cache_key, render_book_output_export)
+        )
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await worker
+            raise
+
+
+def _finish_book_export(cache_key: str, task: asyncio.Task[ExportFile]) -> None:
+    _book_export_tasks.pop(cache_key, None)
+    if not task.cancelled():
+        task.exception()  # Retrieve failures when an HTTP waiter has already timed out.
+
+
+async def export_book_output_file(
+    prepared: PreparedBookExport, *, timeout_seconds: float | None = None,
+) -> ExportFile:
     deadline_seconds = max(
         0.01,
         timeout_seconds
         if timeout_seconds is not None
         else get_settings().memoir_book_export_deadline_seconds,
     )
+    cache_key = await asyncio.to_thread(lambda: prepared.cache_key)
+    task = _book_export_tasks.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_render_project_book_export(prepared))
+        _book_export_tasks[cache_key] = task
+        task.add_done_callback(lambda finished: _finish_book_export(cache_key, finished))
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                render_book_output_export,
-                title=title,
-                version=version.version,
-                content=content,
-                manuscript=manuscript.model_dump(mode="json") if manuscript else {},
-                show_source_appendix=show_source_appendix,
-                export_format=export_format,
-                layout=layout,
-            ),
-            timeout=deadline_seconds,
-        )
+        return await asyncio.wait_for(asyncio.shield(task), timeout=deadline_seconds)
     except TimeoutError as exc:
         minutes = max(1, round(deadline_seconds / 60))
         raise HTTPException(
@@ -665,7 +856,6 @@ async def synthesize_book_output_audio(
     user_id: str,
     project_id: str,
     req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None = None,
     allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
@@ -673,37 +863,13 @@ async def synthesize_book_output_audio(
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
-    text = latest.content.strip()
-    text_hash = source_text_hash(text)
-    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
-    cached = cached_audio_response(
-        output.metadata_json or {},
-        cache_key=BOOK_TTS_CACHE_KEY,
-        text_hash=text_hash,
-        voice=req.voice,
-        speed_ratio=speed_ratio,
-        force_regenerate=req.force_regenerate,
-    )
-    if cached:
-        return cached
+    from app.services.memoir.book_audio_jobs import complete_book_audio
 
-    synthesis = await synthesize_text_audio(
-        db,
-        user_id=user_id,
-        text=text,
-        voice=req.voice,
-        speed_ratio=req.speed_ratio,
-        tts_client=tts_client,
+    return await complete_book_audio(
+        db, user_id=user_id, project_id=project_id,
+        req=MemoirBookAudioPlanRequest(
+            version_id=latest.id, voice=req.voice, speed_ratio=req.speed_ratio,
+            force_regenerate=req.force_regenerate, retry_failed=True,
+        ),
+        allow_admin=allow_admin,
     )
-    try:
-        output.metadata_json = {
-            **(output.metadata_json or {}),
-            BOOK_TTS_CACHE_KEY: audio_cache_payload(synthesis, voice=req.voice, speed_ratio=speed_ratio),
-        }
-        db.add(output)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
-        raise
-    return audio_response(synthesis)

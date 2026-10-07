@@ -51,10 +51,10 @@ test("completion issue verification stops when the answer closes the issue", asy
       return { project_id: "project-1", issues: [current] };
     },
   });
-  clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
+  clearModule("../components/voice-session/voice-chat-completion-issue-runtime.ts");
   const {
     VoiceChatCompletionIssueRuntime,
-  } = require("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
+  } = require("../components/voice-session/voice-chat-completion-issue-runtime.ts");
   let state = runtimeState();
   const runtime = new VoiceChatCompletionIssueRuntime({
     readState: () => state,
@@ -88,10 +88,10 @@ test("not remembered closes only the current completion issue", async () => {
       return issue("closed", { outcome: data.outcome });
     },
   });
-  clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
+  clearModule("../components/voice-session/voice-chat-completion-issue-runtime.ts");
   const {
     VoiceChatCompletionIssueRuntime,
-  } = require("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
+  } = require("../components/voice-session/voice-chat-completion-issue-runtime.ts");
   let state = runtimeState();
   const runtime = new VoiceChatCompletionIssueRuntime({
     readState: () => state,

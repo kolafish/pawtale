@@ -10,6 +10,12 @@ export function memoirStoryTitle(projectTitle: string): string {
   return normalized;
 }
 
+export function memoirHomepageTitle(
+  projectTitle: string,
+): string {
+  return projectTitle.trim() || "还没有回忆录";
+}
+
 export function memoirStorySubject(projectTitle: string): string {
   const displayTitle = memoirStoryTitle(projectTitle);
   if (displayTitle.endsWith("的故事")) {

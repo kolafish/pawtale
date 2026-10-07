@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -19,8 +19,10 @@ from app.models.memoir import (
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirBookRevisionProposal,
     MemoirBookReview,
 )
+from app.models.projects import Project
 from app.schemas.memoir_book_review import (
     MemoirBookRevisionMetadataField,
     MemoirBookReviewResponse,
@@ -48,13 +50,14 @@ from app.services.memoir.book_output_manuscript import (
 )
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
 from app.services.memoir.chapter_generation import latest_chapter_draft_version
+from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v5"
+BOOK_REVIEW_ENGINE = "llm_book_review_v6"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
@@ -111,6 +114,7 @@ class _BookReviewIssueOutput(BaseModel):
     reason: str = ""
     priority: str = ""
     chapter_ids: list[str] = Field(default_factory=list)
+    evidence_quote: str = ""
     resolution: Literal[
         "new_material",
         "editorial_change",
@@ -280,9 +284,10 @@ async def load_book_review_context(
         if output is not None
         else None
     )
+    project = await db.get(Project, project_id)
     book_title = (
-        (output.title or "").strip()
-        if output is not None
+        (project.title or "").strip()
+        if project is not None
         else formal_book_title((plan.title or "").strip())
     ) or "我的回忆录"
     book_metadata = {
@@ -345,12 +350,6 @@ async def load_book_review_context(
                     "id": chapter.chapter_id,
                     "title": chapter.title,
                     "sort_order": chapter.sort_order,
-                    "digest_id": chapter.digest_id,
-                    "digest_signature": chapter.digest_signature,
-                    "digest_hash": semantic_json_signature(chapter.digest),
-                    "draft_version_id": (
-                        chapter.draft_version_id
-                    ),
                     "draft_hash": chapter.draft_hash,
                 }
                 for chapter in chapters
@@ -385,13 +384,11 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         (
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
-            f"摘要: {chapter.digest.get('summary', '')}\n"
-            f"重点: {chapter.digest.get('focus', '')}\n"
-            f"当前正文（以此为准，摘要仅辅助理解）:\n{chapter.draft_content}"
+            f"当前正文:\n{chapter.draft_content}"
         )
         for chapter in context.chapters
     )
-    return f"""请通读下面这本回忆录。
+    prompt = f"""请通读下面这本回忆录。
 
 当前成书信息：
 {book_information_text(context.book_metadata)}
@@ -415,17 +412,22 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   ],
   "candidate_issues": [
     {{
-      "issue_type": "context|sequence|relationship|impact|meaning|clarity|structure|privacy|conflict",
+      "issue_type": "context|sequence|relationship|impact|meaning|clarity|structure|conflict",
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
       "chapter_ids": ["相关 chapter_id"],
+      "evidence_quote": "事实冲突事项所依据的章节正文短原句；其他事项留空",
       "resolution": "new_material|editorial_change|user_decision"
     }}
   ]
 }}
 
 要求：
+- 这是供讲述者自己和亲友阅读的私人回忆录，不按正规出版或公开传播标准审查。
+- 普通经历、婚姻家庭、个人感受、亲友姓名或称呼、爱好默认保留，不提出隐私追问或匿名化建议。
+- 私人书稿不进行隐私确认；即使发现敏感内容，也不要产生 privacy 事项，不阻止成书。公开传播的隐私提醒应留到用户主动选择公开时。
+- 用户已决定保留的内容不得反复追问；用户明确要求不收录的内容必须尊重，不能自行恢复或改变收录范围。
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 从整体阅读感受出发，没有明显影响时可以不提修改。
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
@@ -434,21 +436,21 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 不得建议新建、删除、合并章节，不得改变小节数量或归属。
 - 书名、全书定位或出版陈述不合适时使用 revise_book_profile，不要把它拆成需要用户补讲的问题。
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
-- 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
+- 只有事实冲突、内容是否收录等确实需要用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建正文和来源中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
+- 事实冲突事项的 evidence_quote 必须逐字摘自相关章节当前正文，选能指认这件事的最短完整片段；找不到可核对原文时留空，不要编造。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
+    return checked_review_prompt(prompt, subject="全书")
 
 
 def normalize_book_review(
-    payload: Any,
+    payload: dict[str, Any],
     *,
     context: BookReviewContext,
 ) -> dict:
-    if not isinstance(payload, dict):
-        raise ValueError("book review AI did not return a JSON object")
     summary = _user_visible_text(
         payload.get("summary"),
         context=context,
@@ -469,7 +471,6 @@ def normalize_book_review(
         "meaning",
         "clarity",
         "structure",
-        "privacy",
         "conflict",
     }
     for candidate in candidates:
@@ -493,13 +494,9 @@ def normalize_book_review(
         )
         if not chapter_ids:
             continue
-        material_ids = [
-            min(chapter.material_ids)
-            for chapter in context.chapters
-            if chapter.chapter_id in chapter_ids
-            and chapter.material_ids
-        ]
         issue_type = _compact(candidate.get("issue_type"), limit=24)
+        if issue_type == "privacy":
+            continue
         priority = _compact(candidate.get("priority"), limit=12)
         resolution = _compact(candidate.get("resolution"), limit=24)
         issue_type = issue_type if issue_type in allowed_types else "clarity"
@@ -514,22 +511,42 @@ def normalize_book_review(
             normalized_channel = "manual_review"
         else:
             normalized_channel = "interview"
-        issues.append(
-            {
-                "issue_type": issue_type,
-                "channel": normalized_channel,
-                "question": question,
-                "reason": reason,
-                "priority": (
-                    priority
-                    if priority in {"high", "medium", "low"}
-                    else "medium"
-                ),
-                "chapter_ids": chapter_ids,
-                "material_ids": material_ids,
-                "resolution": resolution,
-            }
-        )
+        issue = {
+            "issue_type": issue_type,
+            "channel": normalized_channel,
+            "question": question,
+            "reason": reason,
+            "priority": (
+                priority
+                if priority in {"high", "medium", "low"}
+                else "medium"
+            ),
+            "chapter_ids": chapter_ids,
+            "material_ids": [],
+            "resolution": resolution,
+        }
+        if issue_type == "conflict":
+            evidence_quote = _compact(candidate.get("evidence_quote"), limit=160)
+            if len("".join(evidence_quote.split())) >= 7 and any(
+                evidence_quote in chapter.draft_content
+                for chapter in context.chapters
+                if chapter.chapter_id in chapter_ids
+            ):
+                issue["evidence_quote"] = evidence_quote
+        issues.append(issue)
+    anchor_counts: dict[tuple[str, tuple[str, ...], str], int] = {}
+    for issue in issues:
+        quote = issue.get("evidence_quote")
+        if isinstance(quote, str) and quote:
+            key = (issue["issue_type"], tuple(sorted(issue["chapter_ids"])), quote)
+            anchor_counts[key] = anchor_counts.get(key, 0) + 1
+    for issue in issues:
+        quote = issue.get("evidence_quote")
+        if isinstance(quote, str) and quote:
+            key = (issue["issue_type"], tuple(sorted(issue["chapter_ids"])), quote)
+            if anchor_counts[key] > 1:
+                issue.pop("evidence_quote", None)
+        issue["fingerprint"] = completion_issues.stable_book_issue_fingerprint(issue)
     model_guidance = _user_visible_string_list(
         payload.get("structure_guidance"),
         context=context,
@@ -674,30 +691,30 @@ async def generate_or_reuse_book_review(
                 "current_chapter_title": "",
             }
         )
-    previous = list(
-        (
-            await db.scalars(
-                select(MemoirBookReview).where(
-                    MemoirBookReview.project_id == project_id,
-                    MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
-                )
-            )
-        ).all()
+    old_review = (
+        MemoirBookReview.project_id == project_id,
+        MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
+        MemoirBookReview.input_signature != context.input_signature,
     )
-    for item in previous:
-        if (
-            item.input_signature != context.input_signature
-            and item.status == MemoirSemanticCacheStatus.READY.value
-        ):
-            item.status = MemoirSemanticCacheStatus.STALE.value
-            db.add(item)
-    existing = next(
-        (
-            item
-            for item in previous
-            if item.input_signature == context.input_signature
-        ),
-        None,
+    await db.execute(
+        update(MemoirBookReview)
+        .where(*old_review, MemoirBookReview.status == MemoirSemanticCacheStatus.READY.value)
+        .values(status=MemoirSemanticCacheStatus.STALE.value)
+    )
+    await db.execute(
+        delete(MemoirBookReview).where(
+            *old_review,
+            ~select(MemoirBookRevisionProposal.id)
+            .where(MemoirBookRevisionProposal.review_id == MemoirBookReview.id)
+            .exists(),
+        )
+    )
+    existing = await db.scalar(
+        select(MemoirBookReview).where(
+            MemoirBookReview.project_id == project_id,
+            MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
+            MemoirBookReview.input_signature == context.input_signature,
+        )
     )
     if (
         existing is not None
@@ -729,6 +746,9 @@ async def generate_or_reuse_book_review(
         await progress_callback({"provider_request_pending": True,
                                  "provider": getattr(client, "provider_name", None),
                                  "resolved_ai_model": getattr(client, "model_name", ai_model)})
+    # Persist stale-cache/progress updates and release the read transaction.
+    # The full input signature is checked again before the result is saved.
+    await db.commit()
     generation: dict[str, object]
     try:
         generated = await generate_structured_with_client(

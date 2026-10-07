@@ -18,7 +18,11 @@
     aria-live="polite"
   >
     <view class="voice-text-status-dot"></view>
-    <text>{{voicePhase === "connecting" ? "正在连接实时语音识别…" : (voicePhase === "listening" ? "正在听，识别文字会实时显示在上方…" : "正在确认识别文字…")}}</text>
+    <text>{{voicePhase === "connecting"
+      ? "正在连接实时语音识别…"
+      : (voicePhase === "listening"
+        ? (automaticVoiceCommand ? "正在听，请直接说修改要求；停顿后会自动处理…" : "正在听，识别文字会实时显示在上方…")
+        : (automaticVoiceCommand ? "正在确认识别文字，完成后会自动处理…" : "正在确认识别文字…"))}}</text>
   </view>
   <view class="voice-text-actions">
     <view

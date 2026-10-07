@@ -4,12 +4,24 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.models.projects import Project
+from app.services.ai_access import restrict_requested_ai_model
+from app.services.memoir.share_video_styles import ShareVideoStyle, normalize_share_video_style
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
+DISABLED_AI_MODEL_ALIASES = frozenset(
+    {
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4",
+        "claude-sonnet-4-6",
+    }
+)
 TRANSCRIPT_POLISH_LEVEL_METADATA_KEY = "transcript_polish_level"
+SHARE_VIDEO_STYLE_METADATA_KEY = "share_video_style"
 TEXT_POLISH_REQUIREMENTS = {
     MemoirTranscriptPolishLevel.LOW: (
         "- 去掉口头填充词、说话磕绊、赘词和没有信息增量的重复\n"
@@ -34,7 +46,7 @@ def project_ai_model(project: Project | None) -> str | None:
 
 def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
     model = (ai_model or "").strip()
-    if not model:
+    if not model or project_ai_model(project) == model:
         return
     project.metadata_json = {
         **(project.metadata_json or {}),
@@ -43,12 +55,18 @@ def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
     }
 
 
-def select_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
+def resolve_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
     requested = (requested_ai_model or "").strip()
-    if requested:
-        remember_project_ai_model(project, requested)
-        return requested
-    return project_ai_model(project)
+    selected = requested or project_ai_model(project)
+    if selected and selected.lower() in DISABLED_AI_MODEL_ALIASES:
+        return DEFAULT_AI_TEXT_MODEL
+    return restrict_requested_ai_model(selected) if selected else None
+
+
+def select_project_ai_model(project: Project, requested_ai_model: str | None) -> str | None:
+    selected = resolve_project_ai_model(project, requested_ai_model)
+    remember_project_ai_model(project, selected)
+    return selected
 
 
 async def load_project_ai_model(
@@ -57,7 +75,7 @@ async def load_project_ai_model(
     requested_ai_model: str | None = None,
 ) -> str | None:
     project = await db.get(Project, project_id)
-    return select_project_ai_model(project, requested_ai_model) if project else None
+    return resolve_project_ai_model(project, requested_ai_model) if project else None
 
 
 def normalize_transcript_polish_level(
@@ -66,7 +84,7 @@ def normalize_transcript_polish_level(
     try:
         return MemoirTranscriptPolishLevel(value)
     except (TypeError, ValueError):
-        return MemoirTranscriptPolishLevel.LOW
+        return MemoirTranscriptPolishLevel.MEDIUM
 
 
 def text_polish_requirements(
@@ -100,3 +118,15 @@ async def load_project_transcript_polish_level(
     if requested_level is not None:
         return normalize_transcript_polish_level(requested_level)
     return project_transcript_polish_level(await db.get(Project, project_id))
+
+
+def project_share_video_style(project: Project | None) -> ShareVideoStyle:
+    metadata = project.metadata_json if project else {}
+    return normalize_share_video_style((metadata or {}).get(SHARE_VIDEO_STYLE_METADATA_KEY))
+
+
+def remember_project_share_video_style(project: Project, style: ShareVideoStyle) -> None:
+    project.metadata_json = {
+        **(project.metadata_json or {}),
+        SHARE_VIDEO_STYLE_METADATA_KEY: style,
+    }

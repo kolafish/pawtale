@@ -1,5 +1,11 @@
+import { NARRATION_MODES, type DefaultNarrationMode } from "../domain/memoir-narration-mode";
 import type { Project } from "../domain/memoir";
-import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/memoir-voice-session";
+import type {
+  MemoirGuidanceMode,
+  MemoirGuidanceModule,
+  MemoirInterviewType,
+  MemoirSessionGoal,
+} from "../domain/memoir-voice-session";
 import type { MemoirNarratorGender } from "./memoir";
 
 export interface GuidanceOption<T extends string> {
@@ -21,6 +27,9 @@ export interface MemoirProjectProfile {
   narratorOrigin: string;
   narratorAge: number | null;
   defaultGuidanceMode: MemoirGuidanceMode;
+  defaultInterviewType: MemoirInterviewType;
+  defaultSessionGoal: MemoirSessionGoal;
+  defaultNarrationMode: DefaultNarrationMode;
 }
 
 function metadataProfile(project?: Pick<Project, "metadata_json"> | null): Record<string, unknown> {
@@ -51,19 +60,54 @@ function guidanceModeValue(value: unknown): MemoirGuidanceMode {
   return value === "guided_interview" ? "guided_interview" : "free_narration";
 }
 
+function interviewTypeValue(value: unknown): MemoirInterviewType {
+  return value === "human_interview" ? "human_interview" : "ai_interview";
+}
+
+function sessionGoalValue(value: unknown): MemoirSessionGoal {
+  return value === "book_completion" ? "book_completion" : "open_narration";
+}
+
 export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | null): MemoirProjectProfile {
   const profile = metadataProfile(project);
+  const defaultGuidanceMode = guidanceModeValue(profile.default_guidance_mode);
+  const defaultInterviewType = interviewTypeValue(profile.default_interview_type);
+  const defaultSessionGoal = sessionGoalValue(profile.default_session_goal);
   return {
     narratorName: stringValue(profile.narrator_name),
     narratorGender: genderValue(profile.narrator_gender),
     narratorOrigin: stringValue(profile.narrator_origin),
     narratorAge: ageValue(profile.narrator_age),
-    defaultGuidanceMode: guidanceModeValue(profile.default_guidance_mode),
+    defaultGuidanceMode,
+    defaultInterviewType,
+    defaultSessionGoal,
+    defaultNarrationMode: defaultSessionGoal === "book_completion"
+      ? "book_completion"
+      : defaultInterviewType === "human_interview"
+        ? "human_interview"
+        : defaultGuidanceMode,
   };
 }
 
+export function defaultNarrationSessionFields(mode: DefaultNarrationMode): {
+  guidanceMode: MemoirGuidanceMode;
+  interviewType: MemoirInterviewType;
+  sessionGoal: MemoirSessionGoal;
+} {
+  if (mode === "book_completion") {
+    return {
+      guidanceMode: "guided_interview",
+      interviewType: "ai_interview",
+      sessionGoal: "book_completion",
+    };
+  }
+  return mode === "human_interview"
+    ? { guidanceMode: "free_narration", interviewType: "human_interview", sessionGoal: "open_narration" }
+    : { guidanceMode: mode, interviewType: "ai_interview", sessionGoal: "open_narration" };
+}
+
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
+  return NARRATION_MODES[mode].label;
 }
 
 export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceModule {
@@ -75,10 +119,6 @@ export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceMo
 export function guidanceModuleLabel(module?: string | null): string {
   const normalized = normalizeGuidanceModule(module);
   return MEMOIR_GUIDANCE_MODULE_OPTIONS.find((option) => option.value === normalized)?.label || "人物";
-}
-
-export function voiceGuidanceLabel(mode: MemoirGuidanceMode, module?: string | null): string {
-  return mode === "guided_interview" ? `小余陪着问 · ${guidanceModuleLabel(module)}` : "慢慢讲";
 }
 
 export function narratorGenderLabel(gender: MemoirNarratorGender): string {
@@ -96,7 +136,7 @@ export function projectProfileSummary(project: Project): string {
     narratorGenderLabel(profile.narratorGender),
     profile.narratorOrigin,
     profile.narratorAge !== null ? `${profile.narratorAge} 岁` : "",
-    guidanceModeLabel(profile.defaultGuidanceMode),
+    NARRATION_MODES[profile.defaultNarrationMode].label,
   ].filter(Boolean);
   return parts.join(" · ");
 }

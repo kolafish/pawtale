@@ -175,6 +175,7 @@ class TestDocumentAPI:
         assert current["group_id"] == group["id"]
         assert current["sort_order"] == document["sort_order"]
 
+    @pytest.mark.db_independent
     async def test_concurrent_saves_preserve_the_committed_content(self, client, test_db):
         project = await create_project(client)
         project_id = project["id"]

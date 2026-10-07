@@ -1,12 +1,14 @@
 from sqlalchemy import select
 
+from app.config import DEFAULT_AI_TEXT_MODEL
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.projects import Project
 from tests.memoir_helpers import create_test_voice_transcript
 
 
-class CapturingCleanupAIClient:
+class CapturingCleanupAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 
@@ -106,7 +108,7 @@ async def test_memoir_transcript_cleanup_confirm_writes_corrected_versions_and_j
     response = await client.post(
         f"/api/memoir/projects/{project_id}/transcript-cleanup/confirm",
         json={
-            "ai_model": "deepseek",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
             "items": [
                 {
                     "utterance_id": created["utterance_id"],
@@ -152,7 +154,7 @@ async def test_memoir_transcript_cleanup_confirm_writes_corrected_versions_and_j
     )
     assert topic_map_job is not None
     assert topic_map_job.payload_json["material_ids"] == [created["utterance_id"]]
-    assert topic_map_job.payload_json["ai_model"] == "deepseek"
+    assert topic_map_job.payload_json["ai_model"] == DEFAULT_AI_TEXT_MODEL
 
 
 async def test_memoir_transcript_cleanup_confirm_rejects_stale_preview(client, test_db, monkeypatch):

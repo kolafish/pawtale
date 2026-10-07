@@ -1,15 +1,16 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="action-bar">
     <view
       id="create-project-action"
-      class="primary-button ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
+      class="primary-button support-action ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{busy}}"
       bindtap="createProject"
     >
-      {{busy ? "处理中" : "新建回忆录"}}
+      <text class="create-mark" aria-hidden="true">＋</text>
+      <text>{{busy ? "处理中" : "新建回忆录"}}</text>
     </view>
   </view>
 
@@ -24,7 +25,7 @@
   <view
     wx:for="{{projects}}"
     wx:key="id"
-    class="project-card ui-card {{item.active ? 'active' : ''}}"
+    class="project-card ui-card {{item.active ? 'active' : 'ui-pressable'}}"
     data-id="{{item.id}}"
     bindtap="activateProject"
     hover-class="{{item.active ? 'none' : 'project-card-hover'}}"
@@ -43,16 +44,16 @@
 
     <view class="project-actions">
       <button
-        class="ghost-button"
+        class="ghost-button support-action ui-pressable"
         data-id="{{item.id}}"
         catchtap="openProjectEdit"
         hover-class="project-action-hover"
       >
-        编辑资料
+        编辑设置
       </button>
       <button
         wx:if="{{item.canDelete}}"
-        class="more-button"
+        class="more-button support-action ui-pressable"
         data-id="{{item.id}}"
         disabled="{{busy}}"
         catchtap="openProjectMore"

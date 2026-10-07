@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from difflib import SequenceMatcher
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
+from app.domain.memoir.types import MemoirCreatedBy, MemoirEditingJobStatus, MemoirEditingJobType
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirEditingJob
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.services.memoir import chapter_digests, chapter_generation, editing_jobs
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_output_snapshots import legacy_chapter_version_needs_upgrade
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.project_ai_preferences import select_project_ai_model
@@ -24,6 +26,12 @@ _CHECKPOINT_KEYS = {
     "checkpoint_editor_notes",
     "checkpoint_model",
 }
+_PRIVATE_RESULT_KEYS = _CHECKPOINT_KEYS | {
+    "candidate_diff_segments",
+    "candidate_sections",
+}
+_DIFF_EQUAL_MERGE_MAX_CHARS = 4
+_LEGACY_SECTION_UPGRADE_REVISION = "skip-empty-sections-v1"
 
 
 def _job_dedupe_key(chapter_id: str) -> str:
@@ -31,10 +39,92 @@ def _job_dedupe_key(chapter_id: str) -> str:
 
 
 def _public_result(result_json: dict) -> dict:
-    return {
+    result = {
         key: value
         for key, value in result_json.items()
-        if key not in _CHECKPOINT_KEYS
+        if key not in _PRIVATE_RESULT_KEYS
+    }
+    if result.get("candidate_content"):
+        result["candidate_sections"] = [
+            {
+                "section_id": str(section.get("section_id") or ""),
+                "title": str(section.get("title") or ""),
+                "content": str(section.get("content") or ""),
+            }
+            for section in result_json.get("checkpoint_sections", [])
+            if isinstance(section, dict)
+            and section.get("section_id")
+            and section.get("content")
+        ]
+    return result
+
+
+def _append_diff_segment(segments: list[dict[str, str]], kind: str, text: str) -> None:
+    if not text:
+        return
+    if segments and segments[-1]["kind"] == kind:
+        segments[-1]["text"] += text
+    else:
+        segments.append({"kind": kind, "text": text})
+
+
+def _candidate_diff_segments(before: str, after: str) -> list[dict[str, str]]:
+    opcodes = SequenceMatcher(None, before, after, autojunk=False).get_opcodes()
+    segments: list[dict[str, str]] = []
+    index = 0
+    while index < len(opcodes):
+        tag, before_start, before_end, after_start, after_end = opcodes[index]
+        if tag == "equal":
+            _append_diff_segment(segments, "equal", after[after_start:after_end])
+            index += 1
+            continue
+
+        index += 1
+        while index + 1 < len(opcodes):
+            equal = opcodes[index]
+            changed = opcodes[index + 1]
+            if (
+                equal[0] != "equal"
+                or changed[0] == "equal"
+                or equal[2] - equal[1] > _DIFF_EQUAL_MERGE_MAX_CHARS
+            ):
+                break
+            before_end = changed[2]
+            after_end = changed[4]
+            index += 2
+
+        before_text = before[before_start:before_end]
+        after_text = after[after_start:after_end]
+        if before_text and after_text:
+            _append_diff_segment(segments, "deleted", before_text)
+            _append_diff_segment(segments, "modified", after_text)
+        elif before_text:
+            _append_diff_segment(segments, "deleted", before_text)
+        else:
+            _append_diff_segment(segments, "added", after_text)
+    return segments
+
+
+async def _with_candidate_diff(
+    db: AsyncSession,
+    *,
+    state: dict[str, object],
+    project_id: str,
+    chapter_id: str,
+) -> dict[str, object]:
+    candidate_content = state.get("candidate_content")
+    base_version_id = state.get("candidate_base_version_id")
+    if not isinstance(candidate_content, str) or not candidate_content or not base_version_id:
+        return state
+    base = await db.get(MemoirBookChapterDraftVersion, str(base_version_id))
+    if base is None or base.project_id != project_id or base.chapter_id != chapter_id:
+        return state
+    return {
+        **state,
+        "candidate_diff_segments": _candidate_diff_segments(
+            base.content,
+            candidate_content,
+        ),
     }
 
 
@@ -104,6 +194,17 @@ async def enqueue_chapter_preparation_job(
         db,
         context=context,
     )
+    latest = await chapter_generation.latest_chapter_draft_version(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    needs_legacy_upgrade = legacy_chapter_version_needs_upgrade(latest)
+    job_input_signature = (
+        f"{context.input_signature}:{_LEGACY_SECTION_UPGRADE_REVISION}"
+        if needs_legacy_upgrade
+        else context.input_signature
+    )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     existing = await _load_job(
         db,
@@ -122,12 +223,40 @@ async def enqueue_chapter_preparation_job(
     previous_result = dict(existing.result_json or {}) if existing else {}
     previous_payload = dict(existing.payload_json or {}) if existing else {}
     from app.services.memoir import completion_issues
-    decision_resolved = previous_result.get("outcome") == "needs_input" and not any(
-        issue.channel == "manual_review" for issue in await completion_issues.list_issues(
+    manual_review_pending = any(
+        issue.channel == "manual_review"
+        for issue in await completion_issues.list_issues(
             db, project_id=project_id, chapter_id=chapter_id,
         )
     )
-    if automatic and not retry and not decision_resolved and existing is not None and previous_payload.get("input_signature") == context.input_signature:
+    decision_resolved = previous_result.get("outcome") == "needs_input" and not manual_review_pending
+    obsolete_approval_candidate = bool(
+        previous_result.get("outcome") == "needs_review"
+        and latest is not None
+        and latest.created_by != MemoirCreatedBy.USER.value
+        and not manual_review_pending
+        and not any(
+            isinstance(section, dict) and section.get("user_edited") is True
+            for section in (latest.section_snapshot_json or [])
+        )
+    )
+    if (
+        automatic
+        and not retry
+        and not decision_resolved
+        and not obsolete_approval_candidate
+        and previous_result.get("outcome") != "stale"
+        and existing is not None
+        and (
+            previous_payload.get("input_signature") == job_input_signature
+            or (
+                needs_legacy_upgrade
+                and existing.status != MemoirEditingJobStatus.FAILED.value
+                and previous_payload.get("input_signature")
+                == context.input_signature
+            )
+        )
+    ):
         if on_enqueued is not None:
             await on_enqueued(existing)
         return _job_state(project_id=project_id, chapter_id=chapter_id, job=existing)
@@ -136,7 +265,7 @@ async def enqueue_chapter_preparation_job(
         and existing.status == MemoirEditingJobStatus.FAILED.value
         and previous_payload.get("operation") == req.operation
         and previous_payload.get("requested_ai_model") == selected_ai_model
-        and previous_payload.get("input_signature") == context.input_signature
+        and previous_payload.get("input_signature") == job_input_signature
         and previous_result.get("checkpoint_input_signature")
         == context.input_signature
     )
@@ -176,7 +305,7 @@ async def enqueue_chapter_preparation_job(
             "allow_admin": allow_admin,
             "operation": req.operation,
             "requested_ai_model": selected_ai_model,
-            "input_signature": context.input_signature,
+            "input_signature": job_input_signature,
             "automatic": automatic,
         },
     )
@@ -221,11 +350,56 @@ async def get_chapter_preparation_job(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    return _job_state(
+    return await _with_candidate_diff(
+        db,
+        state=_job_state(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            job=job,
+        ),
         project_id=project_id,
         chapter_id=chapter_id,
-        job=job,
     )
+
+
+async def current_chapter_candidates(
+    db: AsyncSession, *, project_id: str, chapter_ids: set[str],
+) -> dict[str, str]:
+    """Project actionable candidates without sending manuscript text to the home page."""
+    if not chapter_ids:
+        return {}
+    jobs = (await db.scalars(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.chapter_id.in_(chapter_ids),
+        MemoirEditingJob.job_type == MemoirEditingJobType.PREPARE_CHAPTER.value,
+        MemoirEditingJob.status == MemoirEditingJobStatus.SUCCEEDED.value,
+        MemoirEditingJob.dedupe_key.is_not(None),
+    ))).all()
+    candidates = {}
+    for job in jobs:
+        result = job.result_json or {}
+        if (
+            job.dedupe_key != _job_dedupe_key(job.chapter_id)
+            or result.get("outcome") != "needs_review" or not result.get("candidate_content")
+        ):
+            continue
+        try:
+            context = await chapter_generation.load_chapter_generation_context(
+                db, project_id=project_id, chapter_id=job.chapter_id,
+            )
+        except HTTPException as exc:
+            if exc.status_code not in {404, 409, 422}:
+                raise
+            continue  # Unconfirmed plans or removed source material cannot accept a candidate.
+        latest = await chapter_generation.latest_chapter_draft_version(
+            db, project_id=project_id, chapter_id=job.chapter_id,
+        )
+        if (
+            chapter_generation.chapter_generation_checkpoint_section_count(context, result) == len(context.sections)
+            and result.get("candidate_base_version_id") == (latest.id if latest else None)
+        ):
+            candidates[job.chapter_id] = job.id
+    return candidates
 
 
 async def cancel_chapter_preparation_job(
@@ -313,6 +487,14 @@ async def run_chapter_preparation_job(
         progress.update(ready.candidate)
         progress.update(stage="completed", outcome="needs_review")
         return EditingJobResult(result_json=progress)
+    except chapter_generation.ChapterGenerationStale:
+        # A narration or manual edit won the race with generation. Discard its
+        # checkpoint and let the existing parent job enqueue from the new base.
+        await db.rollback()
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={"stage": "cancelled", "outcome": "stale"},
+        )
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,

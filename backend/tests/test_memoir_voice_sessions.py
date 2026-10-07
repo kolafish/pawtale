@@ -12,6 +12,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirBookChapterDraftVersion,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirSectionMaterial,
@@ -20,6 +21,7 @@ from app.models.memoir import (
 )
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
+from app.services.memoir import voice_progress_notices
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.narrative import frameworks
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
@@ -476,12 +478,27 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         project_id=first["session"]["project_id"],
         source_ref=memoir_source_ref(first),
     )
-    await create_test_chapter_draft(
+    draft = await create_test_chapter_draft(
         test_db,
         project_id=first["session"]["project_id"],
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
         content="外婆家的院子里有一棵树。",
+    )
+    first_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+    )
+    assert first_version is not None
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=draft.project_id,
+            chapter_id=draft.chapter_id,
+            version=2,
+            content="外婆家院子里的树，陪我度过了整个童年。",
+            material_snapshot_json=first_version.material_snapshot_json,
+            section_snapshot_json=first_version.section_snapshot_json,
+        )
     )
     await add_test_section_materials(
         test_db,
@@ -524,7 +541,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert snapshot["session_count"] == 2
     assert snapshot["chapter_count"] == 1
     assert snapshot["confirmed_chapter_count"] == 1
-    assert snapshot["draft_word_count"] == len("外婆家的院子里有一棵树。")
+    assert snapshot["draft_word_count"] == len("外婆家院子里的树，陪我度过了整个童年。")
     assert snapshot["chapter_progress_items"] == [
         {
             "chapter_id": chapter.id,
@@ -537,7 +554,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
             "pending_new_source_count": 1,
             "removed_source_count": 1,
             "draft_status": "confirmed",
-            "draft_word_count": len("外婆家的院子里有一棵树。"),
+            "draft_word_count": len("外婆家院子里的树，陪我度过了整个童年。"),
         }
     ]
     assert snapshot["recent_automation_events"][0]["event_type"] == "chapter_draft_generated"
@@ -652,6 +669,58 @@ async def test_mobile_memoir_automation_events_prioritize_action_required_items(
         "成书内容需要确认。",
         "章节初稿正在生成。",
     ]
+
+
+async def test_voice_progress_notice_queue_consumes_after_playback(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, "我小时候住在外婆家。")
+    project_id = created["session"]["project_id"]
+    event = await voice_progress_notices.enqueue_utterance_milestone_notice(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+    )
+    await test_db.commit()
+
+    assert event is not None
+    regular = await automation_events.recent_automation_event_responses(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+    )
+    pending_voice = await automation_events.recent_automation_event_responses(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        voice_unannounced_only=True,
+    )
+
+    assert regular == []
+    assert [item.id for item in pending_voice] == [event.id]
+    assert await automation_events.acknowledge_dismissible_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+    ) == 0
+
+    updated = await automation_events.mark_automation_events_voice_played(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        event_ids=[event.id],
+        voice_session_id=created["session"]["id"],
+        message_id="assistant-message-1",
+    )
+    pending_after_playback = await automation_events.recent_automation_event_responses(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        voice_unannounced_only=True,
+    )
+
+    assert updated == 1
+    assert pending_after_playback == []
+    await test_db.refresh(event)
+    assert automation_event_metadata.VOICE_PLAYED_AT_KEY in event.metadata_json
 
 
 async def test_mobile_memoir_automation_events_acknowledge_all_dismissible_backlog(

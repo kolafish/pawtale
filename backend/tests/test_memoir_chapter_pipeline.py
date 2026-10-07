@@ -1,10 +1,13 @@
 import json
 from dataclasses import replace
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
+from app.config import DEFAULT_AI_TEXT_MODEL
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirSectionMaterialAssignedBy,
@@ -22,6 +25,7 @@ from app.models.memoir import (
 )
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
+    book_output_snapshots,
     chapter_digests,
     chapter_generation,
     section_digests,
@@ -45,7 +49,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeChapterAI:
+class FakeChapterAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-chapter"
 
@@ -314,7 +318,7 @@ def test_chapter_generation_rejects_cross_section_material():
 
 
 async def test_chapter_generation_retries_only_the_invalid_section():
-    class RetryingSectionAI:
+    class RetryingSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-section-retry"
 
@@ -394,7 +398,7 @@ async def test_chapter_generation_retries_only_the_invalid_section():
 
 
 async def test_chapter_generation_resumes_from_completed_section_checkpoint():
-    class SectionAI:
+    class SectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-section-checkpoint"
 
@@ -472,7 +476,7 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
 
 
 async def test_chapter_generation_reuses_unchanged_draft_sections():
-    class ChangedSectionAI:
+    class ChangedSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-incremental-section"
 
@@ -507,6 +511,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     context = _two_section_context()
     latest = SimpleNamespace(
         model="previous-model",
+        prompt_snapshot="llm_layered_sectioned_chapter_draft_v2",
         section_snapshot_json=[
             {
                 "section_id": "section-1",
@@ -515,9 +520,8 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
                 "section_version": 1,
                 "sort_order": 0,
                 "input_signature": (
-                    chapter_generation._section_input_signature(
-                        context,
-                        context.sections[0]
+                    chapter_generation._legacy_section_input_signature(
+                        context, context.sections[0], engine="v2"
                     )
                 ),
                 "content": "保留用户已经通读过的第一小节正文。",
@@ -533,6 +537,9 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
                 "used_material_ids": ["material-2"],
             },
         ],
+        material_snapshot_json=chapter_generation._snapshot(
+            context, used_material_ids={"material-1"}
+        ),
     )
     plan = chapter_generation.chapter_draft_generation_plan(
         context,
@@ -552,7 +559,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     assert [
         section.section_id
         for section in renamed_plan.target_context.sections
-    ] == ["section-1", "section-2"]
+    ] == ["section-2"]
     stronger_plan = chapter_generation.chapter_draft_generation_plan(
         replace(
             context,
@@ -563,7 +570,46 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     assert [
         section.section_id
         for section in stronger_plan.target_context.sections
-    ] == ["section-1", "section-2"]
+    ] == ["section-2"]
+    assert chapter_generation.chapter_draft_render_policy_current(context, latest)
+    assert not chapter_generation.chapter_draft_render_policy_current(
+        replace(context, polish_level=MemoirTranscriptPolishLevel.HIGH), latest
+    )
+    style_plan = chapter_generation.chapter_draft_generation_plan(
+        replace(context, polish_level=MemoirTranscriptPolishLevel.HIGH),
+        latest,
+        refresh_unedited=True,
+    )
+    assert [section.section_id for section in style_plan.target_context.sections] == [
+        "section-1", "section-2",
+    ]
+    reordered = replace(
+        context,
+        sections=(
+            replace(context.sections[0], section_version=2, sort_order=2),
+            context.sections[1],
+        ),
+    )
+    reordered_plan = chapter_generation.chapter_draft_generation_plan(
+        reordered, latest
+    )
+    assert [section.section_id for section in reordered_plan.target_context.sections] == [
+        "section-2"
+    ]
+    tampered = SimpleNamespace(
+        **{
+            **vars(latest),
+            "material_snapshot_json": [
+                {**latest.material_snapshot_json[0], "text_hash": "outdated"}
+            ],
+        }
+    )
+    tampered_plan = chapter_generation.chapter_draft_generation_plan(
+        replace(context, chapter_title="新的章节标题"), tampered
+    )
+    assert [section.section_id for section in tampered_plan.target_context.sections] == [
+        "section-1", "section-2",
+    ]
 
     fake = ChangedSectionAI()
     generated = await chapter_generation.generate_chapter(
@@ -587,6 +633,58 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     ]
 
 
+async def test_new_material_selects_only_evidence_backed_related_section(monkeypatch):
+    context = _two_section_context()
+    before = datetime(2026, 9, 22, 12)
+    after = datetime(2026, 9, 23, 12)
+    context = replace(
+        context,
+        materials=(
+            replace(context.materials[0], assigned_at=before),
+            replace(context.materials[1], assigned_at=after),
+        ),
+    )
+    latest = SimpleNamespace(created_at=datetime(2026, 9, 23, 10), material_snapshot_json=[])
+    changed = chapter_generation._changed_material_ids(context, latest)
+    assert changed == {"material-2"}
+    previous = chapter_generation.GeneratedChapterSection(
+        section_id="section-1",
+        title="出发",
+        content="那天我从家里出发，傍晚终于抵达了目的地。",
+        used_material_ids=("material-1",),
+    )
+    plan = chapter_generation.ChapterDraftGenerationPlan(
+        target_context=chapter_generation._single_section_context(context, context.sections[1]),
+        preserved_sections=(previous,),
+        previous_sections=(),
+        protected_target_section_ids=(),
+        has_unmapped_manual_content=False,
+        previous_model=None,
+    )
+    result = chapter_generation._RelatedSectionSelection(sections=[
+        chapter_generation._RelatedSectionTarget(
+            section_id="S1",
+            new_evidence="终于抵达",
+            existing_evidence="终于抵达",
+            reason="旧小节提前说了抵达结果，应把结果留给新增的抵达小节。",
+        ),
+    ])
+
+    async def fake_selection(*args, **kwargs):
+        return SimpleNamespace(value=result)
+
+    monkeypatch.setattr(chapter_generation, "generate_structured_with_client", fake_selection)
+    selected = await chapter_generation.select_related_sections(
+        context, plan, changed_material_ids=changed, ai_model=None, ai_client=object()
+    )
+    assert selected == {"section-1": result.sections[0].reason}
+
+    result.sections[0].existing_evidence = "没有出现的内容"
+    assert await chapter_generation.select_related_sections(
+        context, plan, changed_material_ids=changed, ai_model=None, ai_client=object()
+    ) == {}
+
+
 async def test_chapter_generation_does_not_copy_previous_section_boundary():
     repeated_boundary = (
         "就这样搞到二零零四年，不行了，已经太老了，七十几岁了。"
@@ -599,7 +697,8 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
         "二零零四年，\n你们婆病了",
     )
 
-    class BoundaryCopyingAI:
+    class BoundaryCopyingAI(AITextServiceBase):
+        provider_name = "test"
         model_name = "test-boundary-copy"
 
         def __init__(self):
@@ -801,6 +900,87 @@ def test_chapter_digest_keeps_all_independent_user_questions():
     assert normalized["summary"] == "第1小节《比赛》 的章节摘要"
 
 
+def test_chapter_digest_ignores_included_section_without_materials():
+    material = SimpleNamespace(utterance_id="material-1", include_in_book=True)
+    assert book_output_snapshots.legacy_chapter_version_needs_upgrade(
+        SimpleNamespace(content="旧正文", section_snapshot_json=[])
+    )
+
+    def section(section_id, title, order, materials):
+        return SimpleNamespace(
+            id=section_id, title=title, section_type="life_fragment",
+            sort_order=order, status="active", include_in_book=True,
+            materials=materials,
+        )
+
+    populated = section("section-1", "童年回忆", 0, [material])
+    empty = section("section-2", "待补充的小节", 1, [])
+    chapter = SimpleNamespace(
+        id="chapter-1", project_id="project-1", title="童年回忆",
+        sort_order=0, include_in_book=True, sections=[empty, populated],
+    )
+    context = chapter_digests.chapter_digest_context(
+        chapter,
+        section_digests_by_id={populated.id: SimpleNamespace(
+            id="digest-1", input_signature="signature",
+            digest_json={"summary": "童年往事。"},
+        )},
+    )
+
+    assert [section.section_id for section in context.sections] == [populated.id]
+    assert context.allowed_material_ids == frozenset({material.utterance_id})
+
+
+def test_automatic_partial_book_keeps_legacy_flat_chapter():
+    version = SimpleNamespace(
+        id="version-1",
+        draft_id="draft-1",
+        version=1,
+        created_at=datetime(2026, 9, 15),
+        created_by="ai",
+        feedback=None,
+        content="这是旧格式保存的完整章节正文。",
+        section_snapshot_json=[],
+    )
+    chapter = SimpleNamespace(
+        id="chapter-1",
+        title="童年回忆",
+        sort_order=0,
+        include_in_book=True,
+        metadata_json={},
+        draft=SimpleNamespace(
+            versions=[version],
+            status="draft",
+            metadata_json={"confirmed_version_id": version.id},
+        ),
+    )
+    plan = SimpleNamespace(chapters=[chapter])
+
+    assert book_output_snapshots.readable_chapter_versions(
+        plan,
+        allow_partial=True,
+    ) == [(chapter, version)]
+    snapshot = book_output_snapshots.chapter_snapshot(
+        chapter,
+        version,
+        chapter_index=1,
+    )
+    assert snapshot["sections"] == []
+    assert snapshot["content"] == version.content
+    assert "这是旧格式保存的完整章节正文。" in (
+        book_output_snapshots.book_content_from_chapter_snapshots(
+            title="我的回忆录",
+            snapshots=[snapshot],
+        )
+    )
+
+    chapter.draft.metadata_json = {}
+    assert book_output_snapshots.readable_chapter_versions(
+        plan,
+        allow_partial=True,
+    ) == []
+
+
 async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(
     client,
     test_db,
@@ -821,7 +1001,7 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
         f"chapters/{chapter.id}/jobs",
         json={
             "operation": "prepare",
-            "ai_model": "claude-opus-4-8",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
     assert queued.status_code == 202, queued.text
@@ -862,7 +1042,7 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     assert chapter_digest is not None
     assert chapter_digest.status == MemoirSemanticCacheStatus.FAILED.value
     generation = chapter_digest.digest_json["generation"]
-    assert generation["requested_model"] == "claude-opus-4-8"
+    assert generation["requested_model"] == DEFAULT_AI_TEXT_MODEL
     assert generation["provider"] == "test"
     assert generation["model"] == "test-chapter"
     assert generation["engine"] == chapter_digests.CHAPTER_DIGEST_ENGINE
@@ -937,7 +1117,7 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
     client,
     test_db,
 ):
-    class PerSectionAI:
+    class PerSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-incremental-save"
 

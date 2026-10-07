@@ -1,37 +1,59 @@
+"""Vertical share video: original narration, moving pictures, spoken captions.
+
+Every frame is composed here and piped to ffmpeg, so pictures, the opening hook
+sentence, captions and the closing card share one layout. The middle of the
+frame holds the picture's subject; captions sit in the calm lower band above
+WeChat's own bottom overlay.
+"""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from functools import lru_cache
+import io
+import math
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import tempfile
 
-from app.services.memoir.branding import brand_lockup_file
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+from app.services.memoir.branding import render_brand_lockup
+from app.services.memoir.share_video_story_plan import ShareVideoStoryPlan, validate_story_plan_source
+from app.services.memoir.share_video_styles import ShareVideoStyle
 
 
-_VIDEO_WIDTH = 1280
-_VIDEO_HEIGHT = 720
-_BACKGROUND_COLOR = "0xf6f1e8"
+_VIDEO_WIDTH = 720
+_VIDEO_HEIGHT = 1280
+_FPS = 30
+# Pictures are prepared slightly larger than the frame so the camera can move.
+_CANVAS_SCALE = 1.18
+_SUBJECT_CENTER_Y = 0.42
+_SUBTITLE_CENTER_Y = 0.74
+_SHOT_TARGET_SECONDS = 6.0
+_CROSSFADE_SECONDS = 0.8
+_END_CARD_SECONDS = 3.2
 _SHARE_VIDEO_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 _SHARE_VIDEO_FONT_FILE = "NotoSerifSC-Regular.ttf"
-_SHARE_VIDEO_FONT_NAME = "Memoir Noto Serif SC"
-_ASS_INK_COLOR = "&H00403A2F"
-_ASS_TEA_GOLD_COLOR = "&H003A90B9"
-_ASS_MUTED_COLOR = "&H00919FA8"
-_ASS_RULE_COLOR = "&H00BBCDD8"
-_QUOTE_PAGE_MAX_CHARS = 36
+_SHARE_VIDEO_BOLD_FONT_FILE = "NotoSerifSC-Bold.ttf"
+_QUOTE_PAGE_MAX_CHARS = 24
 _QUOTE_LINE_MAX_CHARS = 12
-_QUOTE_PHRASE_MAX_CHARS = 3
+_QUOTE_PAGE_MAX_SENTENCES = 2
 _QUOTE_MIN_FRAGMENT_CHARS = 4
 _QUOTE_STRONG_BREAK_CHARS = "。！？!?；;\n"
 _QUOTE_SOFT_BREAK_CHARS = "，,、"
-_QUOTE_PUNCTUATION_CHARS = "，,、。！？!?；;：“”‘’\"'（）()[]【】《》…—- \t\r\n"
-_BRAND_OVERLAY_WIDTH = 180
-_BRAND_MARGIN_X = 38
-_BRAND_MARGIN_Y = 34
+_HOOK_MAX_CHARS = 20
+_CAPTION_COLOR = (255, 250, 240)
+_CLASSIC_TOP = (74, 60, 46)
+_CLASSIC_BOTTOM = (34, 28, 22)
+_STORY_BACKDROP = (46, 39, 32)
+_END_PAPER = (244, 236, 222)
+_END_INK = (64, 52, 40)
+_END_MUTED = (120, 106, 88)
+_END_CODE_SIZE = 240
+_END_TAGLINE = "也为家里的长辈，留一本回忆录"
 
 
 @dataclass(frozen=True)
@@ -52,6 +74,14 @@ class ShareVideoRenderRequest:
     end_ms: int
     background_image_path: Path | None = None
     background_segments: list[ShareVideoBackgroundSegment] | None = None
+    video_style: ShareVideoStyle = "illustrated"
+    animation_plan: ShareVideoStoryPlan | None = None
+    # A sentence quoted verbatim from selected_text, shown before the narration.
+    hook_text: str = ""
+    book_title: str = ""
+    narrator_name: str = ""
+    # PNG mini program code that opens this video's playback page.
+    mini_program_code: bytes | None = None
 
 
 class ShareVideoGenerationError(RuntimeError):
@@ -72,167 +102,179 @@ def _ffmpeg_executable() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-@lru_cache(maxsize=16)
-def _ffmpeg_filter_available(ffmpeg: str, filter_name: str) -> bool:
+async def _stop_ffmpeg(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
     try:
-        result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-filters"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except Exception:
-        return False
-    if result.returncode != 0:
-        return False
-    marker = f" {filter_name} "
-    return any(marker in line for line in result.stdout.splitlines())
+        process.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(process.wait(), timeout=3)
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        await process.wait()
 
 
-async def _run_ffmpeg(args: list[str]) -> None:
+async def _run_ffmpeg(args: list[str], *, frames: Iterable[bytes] | None = None) -> None:
     process = await asyncio.create_subprocess_exec(
         *args,
+        stdin=asyncio.subprocess.PIPE if frames is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    readers = []
     try:
-        _stdout, stderr = await process.communicate()
-    except asyncio.CancelledError:
-        if process.returncode is None:
+        if frames is None:
+            _stdout, stderr = await process.communicate()
+        else:
+            # Drain encoder diagnostics while feeding frames so neither pipe
+            # can stall the worker. Yield between frames to preserve its lease.
+            readers = [asyncio.create_task(process.stdout.read()), asyncio.create_task(process.stderr.read())]
             try:
-                process.terminate()
-            except ProcessLookupError:
+                for frame in frames:
+                    process.stdin.write(frame)
+                    await process.stdin.drain()
+                    await asyncio.sleep(0)
+            except (BrokenPipeError, ConnectionResetError):
+                # A failed encoder's stderr below is the actionable error.
                 pass
-            try:
-                await asyncio.wait_for(process.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
-                await process.wait()
+            finally:
+                process.stdin.close()
+            await process.wait()
+            _stdout, stderr = await asyncio.gather(*readers)
+    except BaseException:
+        await _stop_ffmpeg(process)
+        if readers:
+            await asyncio.gather(*readers, return_exceptions=True)
         raise
     if process.returncode != 0:
         message = stderr.decode("utf-8", errors="ignore").strip().splitlines()[-1:]
         raise ShareVideoGenerationError(message[0] if message else "ffmpeg 执行失败")
 
 
-def _ass_time(ms: int) -> str:
-    centiseconds = max(0, round(ms / 10))
-    hours, remainder = divmod(centiseconds, 360000)
-    minutes, remainder = divmod(remainder, 6000)
-    seconds, centiseconds = divmod(remainder, 100)
-    return f"{hours}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+async def share_video_thumbnail(source_path: Path) -> Path:
+    thumbnail_path = source_path.with_suffix(".thumbnail.jpg")
+    if thumbnail_path.is_file() and thumbnail_path.stat().st_size:
+        return thumbnail_path
+    # Use the first story image after the short title card, then reuse this
+    # immutable job's small JPEG rather than downloading the video on home.
+    with tempfile.TemporaryDirectory(prefix="thumbnail-", dir=source_path.parent) as directory:
+        temporary_path = Path(directory) / "thumbnail.jpg"
+        await asyncio.wait_for(_run_ffmpeg([
+            _ffmpeg_executable(), "-y", "-ss", "2", "-i", str(source_path),
+            "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "5", "-an",
+            str(temporary_path),
+        ]), timeout=10)
+        if not temporary_path.is_file() or not temporary_path.stat().st_size:
+            raise ShareVideoGenerationError("视频缩略图生成失败")
+        temporary_path.replace(thumbnail_path)
+    return thumbnail_path
 
-
-def _ass_escape(text: str) -> str:
-    return text.replace("\\", "").replace("{", "").replace("}", "")
 
 
 def _subtitle_ranges(text: str, *, max_chars: int = 24) -> list[tuple[int, int]]:
-    phrase_ranges = _quote_phrase_page_ranges(text)
+    sentence_ranges = _quote_sentence_page_ranges(text)
+    fragments: list[tuple[int, int, bool]] = []
+    for sentence_start, sentence_end in sentence_ranges:
+        pieces = _split_quote_range(text, sentence_start, sentence_end, max_chars=max_chars)
+        fragments.extend((start, end, len(pieces) > 1) for start, end in pieces)
     pages: list[tuple[int, int]] = []
     page_start: int | None = None
     page_end: int | None = None
-    page_chars = 0
-    for phrase_start, phrase_end in phrase_ranges:
-        phrase_chars = _visible_range_length(text, phrase_start, phrase_end)
-        if phrase_chars > max_chars:
-            if page_start is not None and page_end is not None:
-                pages.append((page_start, page_end))
-                page_start = None
-                page_end = None
-                page_chars = 0
-            pages.extend(_split_quote_range(text, phrase_start, phrase_end, max_chars=max_chars))
-            continue
-        if (
-            page_start is not None
-            and page_end is not None
-            and page_chars + phrase_chars > max_chars
-            and page_chars >= _QUOTE_MIN_FRAGMENT_CHARS
+    page_sentences = 0
+    page_is_split_sentence = False
+    for fragment_start, fragment_end, is_split_sentence in fragments:
+        fragment_sentences = max(
+            1,
+            sum(char in _QUOTE_STRONG_BREAK_CHARS for char in text[fragment_start:fragment_end]),
+        )
+        if page_start is not None and page_end is not None and (
+            _visible_range_length(text, page_start, fragment_end) > max_chars
+            or page_sentences + fragment_sentences > _QUOTE_PAGE_MAX_SENTENCES
+            or _visible_range_length(text, page_start, page_end) > _QUOTE_LINE_MAX_CHARS
+            or _visible_range_length(text, fragment_start, fragment_end) > _QUOTE_LINE_MAX_CHARS
+            or page_is_split_sentence
+            or is_split_sentence
         ):
             pages.append((page_start, page_end))
             page_start = None
             page_end = None
-            page_chars = 0
+            page_sentences = 0
+            page_is_split_sentence = False
         if page_start is None:
-            page_start = phrase_start
-        page_end = phrase_end
-        page_chars += phrase_chars
+            page_start = fragment_start
+        page_end = fragment_end
+        page_sentences += fragment_sentences
+        page_is_split_sentence = is_split_sentence
     if page_start is not None and page_end is not None:
         pages.append((page_start, page_end))
-    return _merge_tiny_quote_ranges(text, pages)
+    return pages
 
 
 def _visible_range_length(text: str, start: int, end: int) -> int:
     return sum(1 for char in text[start:end] if not char.isspace())
 
 
-def _is_tiny_quote_range(text: str, start: int, end: int) -> bool:
-    fragment = text[start:end].strip()
-    if not fragment:
-        return True
-    return (
-        _visible_range_length(fragment, 0, len(fragment)) < _QUOTE_MIN_FRAGMENT_CHARS
-        or all(char in _QUOTE_PUNCTUATION_CHARS for char in fragment)
-    )
-
-
-def _merge_tiny_quote_ranges(text: str, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    merged: list[tuple[int, int]] = []
-    for start, end in ranges:
-        start, end = _strip_range(text, start, end)
-        if start >= end:
-            continue
-        if merged and _is_tiny_quote_range(text, start, end):
-            previous_start, _previous_end = merged[-1]
-            merged[-1] = (previous_start, end)
-        else:
-            merged.append((start, end))
-    if len(merged) > 1 and _is_tiny_quote_range(text, merged[0][0], merged[0][1]):
-        first_start, _first_end = merged.pop(0)
-        next_start, next_end = merged[0]
-        merged[0] = (first_start, next_end)
-    return merged
-
-
-def _quote_phrase_page_ranges(text: str) -> list[tuple[int, int]]:
+def _quote_sentence_page_ranges(text: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     start = 0
     for index, char in enumerate(text):
-        if char in _QUOTE_STRONG_BREAK_CHARS or char in _QUOTE_SOFT_BREAK_CHARS:
+        if char in _QUOTE_STRONG_BREAK_CHARS:
             ranges.append((start, index + 1))
             start = index + 1
     if start < len(text):
         ranges.append((start, len(text)))
-    return _merge_tiny_quote_ranges(text, ranges)
+    sentences: list[tuple[int, int]] = []
+    for start, end in ranges:
+        start, end = _strip_range(text, start, end)
+        if start < end:
+            sentences.append((start, end))
+    return sentences
 
 
 def _split_quote_range(text: str, start: int, end: int, *, max_chars: int) -> list[tuple[int, int]]:
+    visible_prefix = [0]
+    for char in text[start:end]:
+        visible_prefix.append(visible_prefix[-1] + int(not char.isspace()))
+
+    def visible_count(left: int, right: int) -> int:
+        return visible_prefix[right - start] - visible_prefix[left - start]
+
     ranges: list[tuple[int, int]] = []
     cursor = start
     while cursor < end:
-        if _visible_range_length(text, cursor, end) <= max_chars:
+        remaining = visible_count(cursor, end)
+        if remaining <= max_chars:
             ranges.append((cursor, end))
             break
-        target = min(end, cursor + max_chars)
-        candidates = [
-            index + 1
-            for index in range(cursor, min(end, target + 1))
-            if text[index] in _QUOTE_SOFT_BREAK_CHARS
-            and _visible_range_length(text, cursor, index + 1) >= _QUOTE_MIN_FRAGMENT_CHARS
-            and _visible_range_length(text, index + 1, end) >= _QUOTE_MIN_FRAGMENT_CHARS
+        target_chars = round(remaining / ((remaining + max_chars - 1) // max_chars))
+        viable = [
+            index
+            for index in range(cursor + 1, end)
+            if _QUOTE_MIN_FRAGMENT_CHARS <= visible_count(cursor, index) <= max_chars
+            and visible_count(index, end) >= _QUOTE_MIN_FRAGMENT_CHARS
+            and text[index] not in _QUOTE_SOFT_BREAK_CHARS + _QUOTE_STRONG_BREAK_CHARS
         ]
-        split = max(candidates) if candidates else target
-        while split < end and text[split] in _QUOTE_PUNCTUATION_CHARS:
-            split += 1
-        if split <= cursor:
+        if not viable:
             ranges.append((cursor, end))
             break
+        candidates = [
+            index
+            for index in viable
+            if text[index - 1] in _QUOTE_SOFT_BREAK_CHARS
+            and abs(visible_count(cursor, index) - target_chars) <= 4
+        ]
+        split = min(
+            candidates or viable,
+            key=lambda index: (abs(visible_count(cursor, index) - target_chars), index),
+        )
         ranges.append((cursor, split))
         cursor = split
-    return _merge_tiny_quote_ranges(text, ranges)
+    return ranges
 
 
 def _strip_range(text: str, start: int, end: int) -> tuple[int, int]:
@@ -262,7 +304,13 @@ def _quote_line_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]
     start, end = _strip_range(text, start, end)
     if end <= start:
         return []
-    if end - start <= 16 and "\n" not in text[start:end]:
+    visible_chars = _visible_range_length(text, start, end)
+    if visible_chars <= 8 and "\n" not in text[start:end]:
+        return [(start, end)]
+    if visible_chars <= 16 and not any(
+        char in _QUOTE_STRONG_BREAK_CHARS + _QUOTE_SOFT_BREAK_CHARS
+        for char in text[start:end]
+    ):
         compact_break = _preferred_compact_line_break(text, start, end)
         if compact_break:
             return [
@@ -273,78 +321,36 @@ def _quote_line_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]
                 )
                 if item[0] < item[1]
             ]
-
-    lines: list[tuple[int, int]] = []
-    line_start = start
-    last_soft_break: int | None = None
-    for index in range(start, end):
-        char = text[index]
-        if char in "，,、；;":
-            last_soft_break = index + 1
-        if char == "\n":
-            line_end = index
-        elif char in "。！？!?" or index - line_start + 1 >= _QUOTE_LINE_MAX_CHARS:
-            line_end = last_soft_break if last_soft_break and last_soft_break > line_start else index + 1
-        else:
+    options: list[tuple[tuple[int, int, int, int], list[tuple[int, int]]]] = []
+    for split in range(start + 1, end):
+        left = _strip_range(text, start, split)
+        right = _strip_range(text, split, end)
+        if left[0] >= left[1] or right[0] >= right[1]:
             continue
-        line_range = _strip_range(text, line_start, line_end)
-        if line_range[0] < line_range[1]:
-            lines.append(line_range)
-        line_start = index + 1 if char == "\n" else line_end
-        last_soft_break = None
-    if line_start < end:
-        line_range = _strip_range(text, line_start, end)
-        if line_range[0] < line_range[1]:
-            lines.append(line_range)
-    return _merge_awkward_quote_lines(text, lines)
-
-
-def _merge_awkward_quote_lines(text: str, lines: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    merged: list[tuple[int, int]] = []
-    for start, end in lines:
-        start, end = _strip_range(text, start, end)
-        if start >= end:
+        if text[right[0]] in "，,、。！？!?；;":
             continue
-        if merged:
-            previous_start, previous_end = merged[-1]
-            while start < end and text[start] in _QUOTE_PUNCTUATION_CHARS:
-                previous_end = start + 1
-                start += 1
-            merged[-1] = (previous_start, previous_end)
-            start, end = _strip_range(text, start, end)
-            if start >= end:
-                continue
-        if merged and _is_tiny_quote_range(text, start, end):
-            previous_start, _previous_end = merged[-1]
-            merged[-1] = (previous_start, end)
-        else:
-            merged.append((start, end))
-    if len(merged) > 1 and _is_tiny_quote_range(text, merged[0][0], merged[0][1]):
-        first_start, _first_end = merged.pop(0)
-        next_start, next_end = merged[0]
-        merged[0] = (first_start, next_end)
-    return merged
-
-
-def _karaoke_phrase_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]:
-    phrases: list[tuple[int, int]] = []
-    phrase_start = start
-    visible_chars = 0
-    for index in range(start, end):
-        char = text[index]
-        visible_chars += 0 if char.isspace() else 1
-        should_break = char in "，,、。！？!?；;" or visible_chars >= _QUOTE_PHRASE_MAX_CHARS
-        if should_break:
-            phrase_range = _strip_range(text, phrase_start, index + 1)
-            if phrase_range[0] < phrase_range[1]:
-                phrases.append(phrase_range)
-            phrase_start = index + 1
-            visible_chars = 0
-    if phrase_start < end:
-        phrase_range = _strip_range(text, phrase_start, end)
-        if phrase_range[0] < phrase_range[1]:
-            phrases.append(phrase_range)
-    return phrases
+        left_chars = _visible_range_length(text, *left)
+        right_chars = _visible_range_length(text, *right)
+        if min(left_chars, right_chars) < _QUOTE_MIN_FRAGMENT_CHARS:
+            continue
+        preceding = text[split - 1]
+        semantic_break = (
+            0 if preceding in _QUOTE_STRONG_BREAK_CHARS
+            else 1 if preceding in _QUOTE_SOFT_BREAK_CHARS
+            else 2 if text[right[0]] in "与和但而却"
+            else 3
+        )
+        score = (
+            max(0, left_chars - _QUOTE_LINE_MAX_CHARS)
+            + max(0, right_chars - _QUOTE_LINE_MAX_CHARS),
+            semantic_break,
+            abs(left_chars - right_chars),
+            split,
+        )
+        options.append((score, [left, right]))
+    if options:
+        return min(options, key=lambda option: option[0])[1]
+    return [(start, end)]
 
 
 def _linear_timings(text: str, duration_ms: int) -> list[dict[str, int]]:
@@ -358,126 +364,261 @@ def _linear_timings(text: str, duration_ms: int) -> list[dict[str, int]]:
     ]
 
 
-def _ass_text(text: str) -> str:
-    return _ass_escape(text).replace("\n", " ")
+
+def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
+    path = _SHARE_VIDEO_FONT_DIR / (_SHARE_VIDEO_BOLD_FONT_FILE if bold else _SHARE_VIDEO_FONT_FILE)
+    if not path.exists():
+        raise ShareVideoGenerationError("分享视频中文字体文件缺失")
+    return ImageFont.truetype(str(path), size)
 
 
-def _decorative_subtitle_events(duration_ms: int) -> list[str]:
-    end_time = _ass_time(duration_ms)
+def _ease(value: float) -> float:
+    p = min(1.0, max(0.0, value))
+    return p * p * (3 - 2 * p)
+
+
+def _relative_timings(request: ShareVideoRenderRequest) -> list[dict[str, int]]:
+    duration_ms = max(1, request.end_ms - request.start_ms)
+    if len(request.char_timings) != len(request.selected_text):
+        return _linear_timings(request.selected_text, duration_ms)
     return [
-        f"Dialogue: 0,0:00:00.00,{end_time},Meta,,0,0,0,,{{\\an8\\pos(640,102)\\fad(160,160)}}回忆录访谈 · 原声摘录\n",
-        f"Dialogue: 0,0:00:00.00,{end_time},Rule,,0,0,0,,{{\\an7\\pos(500,144)\\alpha&H55&\\p1}}m 0 0 l 280 0 l 280 2 l 0 2\n",
-        f"Dialogue: 0,0:00:00.00,{end_time},Mark,,0,0,0,,{{\\an7\\pos(238,226)\\alpha&H80&}}“\n",
-        f"Dialogue: 0,0:00:00.00,{end_time},Meta,,0,0,0,,{{\\an2\\pos(640,618)\\fad(160,160)}}口述片段\n",
-        f"Dialogue: 0,0:00:00.00,{end_time},Rule,,0,0,0,,{{\\an7\\pos(500,646)\\alpha&H66&\\p1}}m 0 0 l 280 0 l 280 2 l 0 2\n",
+        {
+            "start_ms": int(timing["start_ms"]) - request.start_ms,
+            "end_ms": int(timing["end_ms"]) - request.start_ms,
+        }
+        for timing in request.char_timings
     ]
 
 
-def _quote_karaoke_text(
-    text: str,
-    lines: list[tuple[int, int]],
-    char_timings: list[dict[str, int]],
-) -> str:
-    pieces: list[str] = [r"{\an5\pos(640,356)\q2\fad(180,180)}"]
-    for line_index, (line_start, line_end) in enumerate(lines):
-        if line_index:
-            pieces.append(r"\N")
-        for phrase_start, phrase_end in _karaoke_phrase_ranges(text, line_start, line_end):
-            phrase_duration = (
-                int(char_timings[phrase_end - 1]["end_ms"])
-                - int(char_timings[phrase_start]["start_ms"])
-            )
-            pieces.append(
-                r"{\kf"
-                + str(max(1, round(phrase_duration / 10)))
-                + "}"
-                + _ass_text(text[phrase_start:phrase_end])
-            )
-    return "".join(pieces)
+def _spoken_char_count(timings: list[dict[str, int]], start: int, end: int, t_ms: float) -> int:
+    """Characters of text[start:end] whose speech has begun; pauses hold the count."""
+    return sum(1 for index in range(start, end) if timings[index]["start_ms"] <= t_ms)
 
 
-def _subtitle_file_content(request: ShareVideoRenderRequest) -> str:
-    duration_ms = max(1, request.end_ms - request.start_ms)
-    char_timings = request.char_timings
-    if len(char_timings) != len(request.selected_text):
-        char_timings = _linear_timings(request.selected_text, duration_ms)
-    header = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
-ScaledBorderAndShadow: yes
-WrapStyle: 2
+def usable_hook_text(hook_text: str, selected_text: str) -> str:
+    hook = hook_text.strip()
+    if not hook or hook not in selected_text:
+        return ""
+    return hook if _visible_range_length(hook, 0, len(hook)) <= _HOOK_MAX_CHARS else ""
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Quote,{_SHARE_VIDEO_FONT_NAME},62,{_ASS_TEA_GOLD_COLOR},{_ASS_INK_COLOR},{_ASS_INK_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,120,120,80,1
-Style: Meta,{_SHARE_VIDEO_FONT_NAME},28,{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,8,80,80,80,1
-Style: Mark,{_SHARE_VIDEO_FONT_NAME},112,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
-Style: Rule,{_SHARE_VIDEO_FONT_NAME},10,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    events = [header, *_decorative_subtitle_events(duration_ms)]
-    for start, end in _subtitle_ranges(request.selected_text, max_chars=_QUOTE_PAGE_MAX_CHARS):
-        lines = _quote_line_ranges(request.selected_text, start, end)
-        if not lines:
+def _hook_seconds(hook_text: str) -> float:
+    if not hook_text:
+        return 0.0
+    return min(3.0, max(1.8, 1.2 + 0.08 * _visible_range_length(hook_text, 0, len(hook_text))))
+
+
+def _with_alpha(layer: Image.Image, alpha: float) -> Image.Image:
+    mask = layer.getchannel("A")
+    return mask if alpha >= 1 else mask.point(lambda value: round(value * max(0.0, alpha)))
+
+
+def _text_layer(
+    lines: list[str],
+    font: ImageFont.FreeTypeFont,
+    *,
+    line_height: int,
+    fill: tuple[int, int, int, int],
+    shadow: bool,
+) -> Image.Image:
+    padding = 24
+    layer = Image.new("RGBA", (_VIDEO_WIDTH, padding * 2 + line_height * len(lines)), (0, 0, 0, 0))
+    centers = [(_VIDEO_WIDTH / 2, padding + line_height * (index + 0.5)) for index in range(len(lines))]
+    if shadow:
+        draw = ImageDraw.Draw(layer)
+        for line, (x, y) in zip(lines, centers):
+            draw.text((x, y + 2), line, font=font, fill=(0, 0, 0, 170), anchor="mm")
+        layer = layer.filter(ImageFilter.GaussianBlur(5))
+    draw = ImageDraw.Draw(layer)
+    for line, (x, y) in zip(lines, centers):
+        draw.text((x, y), line, font=font, fill=fill, anchor="mm")
+    return layer
+
+
+@dataclass(frozen=True)
+class _CaptionLine:
+    start: int
+    end: int
+    top: int
+    bottom: int
+    # x of each character boundary in the line, so the spoken part can be lit.
+    boundaries: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class _CaptionPage:
+    start: int
+    end: int
+    show_ms: int
+    hide_ms: int
+    dim: Image.Image
+    bright: Image.Image
+    lines: tuple[_CaptionLine, ...]
+
+
+_CAPTION_FONT_SIZE = 40
+_CAPTION_LINE_HEIGHT = 58
+
+
+def _caption_pages(text: str, timings: list[dict[str, int]], body_ms: int) -> list[_CaptionPage]:
+    font = _font(_CAPTION_FONT_SIZE)
+    planned: list[tuple[int, int, list[tuple[int, int]], int, int]] = []
+    for start, end in _subtitle_ranges(text, max_chars=_QUOTE_PAGE_MAX_CHARS):
+        line_ranges = _quote_line_ranges(text, start, end)
+        if line_ranges:
+            show_ms = max(0, timings[start]["start_ms"] - 150)
+            planned.append((start, end, line_ranges, show_ms, timings[end - 1]["end_ms"] + 600))
+    pages: list[_CaptionPage] = []
+    for index, (start, end, line_ranges, show_ms, hide_ms) in enumerate(planned):
+        # A page leaves as the next one arrives, so captions never stack.
+        next_show = planned[index + 1][3] if index + 1 < len(planned) else body_ms
+        hide_ms = max(show_ms + 1, min(hide_ms, next_show))
+        line_texts = [text[line_start:line_end] for line_start, line_end in line_ranges]
+        dim = _text_layer(line_texts, font, line_height=_CAPTION_LINE_HEIGHT, fill=(*_CAPTION_COLOR, 150), shadow=True)
+        bright = _text_layer(line_texts, font, line_height=_CAPTION_LINE_HEIGHT, fill=(*_CAPTION_COLOR, 255), shadow=False)
+        lines = []
+        for line_index, (line_start, line_end) in enumerate(line_ranges):
+            line = text[line_start:line_end]
+            left = (_VIDEO_WIDTH - font.getlength(line)) / 2
+            top = 24 + _CAPTION_LINE_HEIGHT * line_index
+            lines.append(_CaptionLine(
+                start=line_start,
+                end=line_end,
+                top=top,
+                bottom=top + _CAPTION_LINE_HEIGHT,
+                boundaries=tuple(left + font.getlength(line[:count]) for count in range(len(line) + 1)),
+            ))
+        pages.append(_CaptionPage(start, end, show_ms, hide_ms, dim, bright, tuple(lines)))
+    return pages
+
+
+def _draw_caption(frame: Image.Image, pages: list[_CaptionPage], timings: list[dict[str, int]], t_ms: float) -> None:
+    for page in pages:
+        if not page.show_ms <= t_ms < page.hide_ms:
             continue
-        start_ms = max(0, int(char_timings[start]["start_ms"]) - request.start_ms)
-        end_ms = max(start_ms + 1, int(char_timings[end - 1]["end_ms"]) - request.start_ms)
-        events.append(
-            f"Dialogue: 1,{_ass_time(start_ms)},{_ass_time(end_ms)},Quote,,0,0,0,,"
-            f"{_quote_karaoke_text(request.selected_text, lines, char_timings)}\n"
-        )
-    return "".join(events)
+        alpha = min(1.0, (t_ms - page.show_ms) / 250, (page.hide_ms - t_ms) / 250)
+        rise = (1 - _ease((t_ms - page.show_ms) / 350)) * 12
+        top = round(_VIDEO_HEIGHT * _SUBTITLE_CENTER_Y - page.dim.height / 2 + rise)
+        frame.paste(page.dim, (0, top), _with_alpha(page.dim, alpha))
+        for line in page.lines:
+            spoken = _spoken_char_count(timings, line.start, line.end, t_ms)
+            if not spoken:
+                continue
+            box = (0, line.top, math.ceil(line.boundaries[spoken]), line.bottom)
+            lit = page.bright.crop(box)
+            frame.paste(lit, (0, top + line.top), _with_alpha(lit, alpha))
+        return
 
 
-def _escaped_subtitle_filter_path(path: Path) -> str:
-    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+_MOVES = ("push_in", "pan_right", "pull_out", "tilt_up", "pan_left")
 
 
-def _share_video_font_dir() -> Path:
-    font_path = _SHARE_VIDEO_FONT_DIR / _SHARE_VIDEO_FONT_FILE
-    if not font_path.exists():
-        raise ShareVideoGenerationError("分享视频中文字体文件缺失")
-    return _SHARE_VIDEO_FONT_DIR
+@dataclass(frozen=True)
+class _Shot:
+    canvas: Image.Image
+    start: float
+    end: float
+    move: str
 
 
-def _subtitle_filter_argument(subtitle_path: Path) -> str:
-    font_dir = _share_video_font_dir()
-    subtitle = _escaped_subtitle_filter_path(subtitle_path)
-    fonts = _escaped_subtitle_filter_path(font_dir)
-    return f"subtitles=filename='{subtitle}':fontsdir='{fonts}'"
+def _canvas_size() -> tuple[int, int]:
+    return round(_VIDEO_WIDTH * _CANVAS_SCALE), round(_VIDEO_HEIGHT * _CANVAS_SCALE)
 
 
-def _video_filter_argument(subtitle_path: Path, *, has_background_image: bool = False) -> str:
-    filters: list[str] = []
-    if has_background_image:
-        filters.append(
-            f"scale={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}"
-        )
-    filters.append(_subtitle_filter_argument(subtitle_path))
-    return ",".join(filters)
+def _picture_canvas(path: Path) -> Image.Image:
+    width, height = _canvas_size()
+    try:
+        with Image.open(path) as source:
+            picture = ImageOps.exif_transpose(source).convert("RGB")
+    except (OSError, ValueError) as exc:
+        raise ShareVideoGenerationError("背景图读取失败") from exc
+    if picture.width / picture.height <= 0.8:
+        return ImageOps.fit(picture, (width, height), Image.LANCZOS, centering=(0.5, 0.4))
+    # Landscape photos keep their whole frame over a blurred copy instead of
+    # losing faces to a portrait crop.
+    canvas = ImageOps.fit(picture, (width, height), Image.BILINEAR).filter(ImageFilter.GaussianBlur(28))
+    canvas = Image.eval(canvas, lambda value: round(value * 0.55))
+    scale = min(width / picture.width, height * 0.62 / picture.height)
+    foreground = picture.resize((round(picture.width * scale), round(picture.height * scale)), Image.LANCZOS)
+    canvas.paste(foreground, ((width - foreground.width) // 2, round(height * _SUBJECT_CENTER_Y - foreground.height / 2)))
+    return canvas
 
 
-def _brand_overlay_filter(video_label: str, *, brand_input_index: int) -> str:
-    return (
-        f"[{video_label}][{brand_input_index}:v]"
-        f"overlay=x=W-w-{_BRAND_MARGIN_X}:y=H-h-{_BRAND_MARGIN_Y}:"
-        "format=auto:shortest=1[vout]"
+def _classic_canvas() -> Image.Image:
+    width, height = _canvas_size()
+    ramp = np.linspace(0, 1, height, dtype=np.float32)[:, None, None]
+    top, bottom = np.array(_CLASSIC_TOP, np.float32), np.array(_CLASSIC_BOTTOM, np.float32)
+    pixels = np.broadcast_to(top + (bottom - top) * ramp, (height, width, 3))
+    return Image.fromarray(pixels.astype(np.uint8))
+
+
+def _picture_shots(segments: list[tuple[Path | None, float, float]]) -> list[_Shot]:
+    canvases: dict[Path | None, Image.Image] = {}
+    shots: list[_Shot] = []
+    for path, start, end in segments:
+        if path not in canvases:
+            canvases[path] = _picture_canvas(path) if path is not None else _classic_canvas()
+        # Long scenes become several gentle shots of the same picture.
+        count = max(1, round((end - start) / _SHOT_TARGET_SECONDS))
+        for index in range(count):
+            shots.append(_Shot(
+                canvas=canvases[path],
+                start=start + (end - start) * index / count,
+                end=start + (end - start) * (index + 1) / count,
+                move=_MOVES[len(shots) % len(_MOVES)],
+            ))
+    return shots
+
+
+def _shot_frame(shot: _Shot, t: float) -> Image.Image:
+    p = _ease((t - shot.start) / max(0.1, shot.end - shot.start))
+    canvas_width, canvas_height = shot.canvas.size
+    scale, cx, cy = 1.06, canvas_width / 2, canvas_height * 0.47
+    if shot.move == "push_in":
+        scale = 1.16 + (1.03 - 1.16) * p
+    elif shot.move == "pull_out":
+        scale = 1.03 + (1.16 - 1.03) * p
+    box_width, box_height = _VIDEO_WIDTH * scale, _VIDEO_HEIGHT * scale
+    x_room, y_room = (canvas_width - box_width) / 2, (canvas_height - box_height) / 2
+    if shot.move == "pan_right":
+        cx += x_room * 0.9 * (2 * p - 1)
+    elif shot.move == "pan_left":
+        cx -= x_room * 0.9 * (2 * p - 1)
+    elif shot.move == "tilt_up":
+        cy -= y_room * 0.9 * (2 * p - 1)
+    left = min(max(0.0, cx - box_width / 2), canvas_width - box_width)
+    top = min(max(0.0, cy - box_height / 2), canvas_height - box_height)
+    return shot.canvas.resize(
+        (_VIDEO_WIDTH, _VIDEO_HEIGHT), Image.BILINEAR, box=(left, top, left + box_width, top + box_height),
     )
 
 
-def _single_background_filter_complex(
-    subtitle_path: Path,
-    *,
-    has_background_image: bool,
-) -> str:
-    return ";".join((
-        f"[0:v]{_video_filter_argument(subtitle_path, has_background_image=has_background_image)}[captioned]",
-        _brand_overlay_filter("captioned", brand_input_index=2),
-    ))
+def _shots_visual(shots: list[_Shot]) -> Callable[[float], Image.Image]:
+    def visual(t: float) -> Image.Image:
+        index = max([0, *(i for i, shot in enumerate(shots) if shot.start <= t)])
+        frame = _shot_frame(shots[index], t)
+        if index + 1 < len(shots):
+            following = shots[index + 1]
+            progress = (t - (following.start - _CROSSFADE_SECONDS)) / _CROSSFADE_SECONDS
+            if progress > 0:
+                frame = Image.blend(frame, _shot_frame(following, t), min(1.0, progress))
+        return frame
+    return visual
+
+
+def _story_visual(plan: ShareVideoStoryPlan) -> Callable[[float], Image.Image]:
+    from app.services.memoir.share_video_story_animation import create_story_renderer
+
+    stage_height = round(_VIDEO_WIDTH * 9 / 16)
+    renderer = create_story_renderer(plan, _VIDEO_WIDTH, stage_height)
+    backdrop = Image.new("RGB", (_VIDEO_WIDTH, _VIDEO_HEIGHT), _STORY_BACKDROP)
+    stage_top = round(_VIDEO_HEIGHT * _SUBJECT_CENTER_Y - stage_height / 2)
+
+    def visual(t: float) -> Image.Image:
+        frame = backdrop.copy()
+        frame.paste(renderer(t), (0, stage_top))
+        return frame
+    return visual
 
 
 def _valid_background_segments(
@@ -493,200 +634,181 @@ def _valid_background_segments(
     ]
 
 
-def _multi_background_filter_complex(
-    segments: list[ShareVideoBackgroundSegment],
-    subtitle_path: Path,
-    *,
-    use_xfade: bool = True,
-) -> str:
-    transition_seconds = (
-        min(
-            0.6,
-            max(0.0, min((segment.end_ms - segment.start_ms) / 1000 for segment in segments) / 2),
-        )
-        if use_xfade
-        else 0.0
+def _body_visual(request: ShareVideoRenderRequest, body_seconds: float) -> Callable[[float], Image.Image]:
+    if request.video_style == "story_animation":
+        return _story_visual(request.animation_plan)
+    segments = _valid_background_segments(request)
+    if len(segments) > 1:
+        return _shots_visual(_picture_shots([
+            (segment.image_path, segment.start_ms / 1000, segment.end_ms / 1000) for segment in segments
+        ]))
+    image_path = request.background_image_path or (segments[0].image_path if segments else None)
+    if image_path is not None and not (image_path.exists() and image_path.stat().st_size > 0):
+        image_path = None
+    return _shots_visual(_picture_shots([(image_path, 0.0, body_seconds)]))
+
+
+def _finishing_layers() -> tuple[np.ndarray, list[np.ndarray]]:
+    """Warm grade, vignette and the darkened caption band, plus film grain."""
+    ys, xs = np.mgrid[0:_VIDEO_HEIGHT, 0:_VIDEO_WIDTH].astype(np.float32)
+    vignette = np.clip(
+        1 - 0.5 * (((xs - _VIDEO_WIDTH / 2) / (_VIDEO_WIDTH * 0.75)) ** 2 + ((ys - _VIDEO_HEIGHT / 2) / (_VIDEO_HEIGHT * 0.7)) ** 2),
+        0.4, 1,
     )
-    parts: list[str] = []
-    raw_durations = [
-        max(0.1, (segment.end_ms - segment.start_ms) / 1000)
-        for segment in segments
-    ]
-    for index, raw_duration in enumerate(raw_durations):
-        duration = raw_duration + (transition_seconds if index < len(raw_durations) - 1 else 0)
-        parts.append(
-            f"[{index}:v]"
-            f"scale={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={_VIDEO_WIDTH}:{_VIDEO_HEIGHT},setsar=1,"
-            f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
-            f"fps=30,format=yuv420p,settb=AVTB[v{index}]"
-        )
+    band_progress = np.clip((ys / _VIDEO_HEIGHT - 0.52) / 0.34, 0, 1)
+    band = 1 - 0.55 * band_progress * band_progress * (3 - 2 * band_progress)
+    shade = (vignette * band)[..., None] * np.array([1.04, 1.0, 0.9], np.float32)
+    rng = np.random.default_rng(7)
+    grain = [rng.normal(0, 3, (_VIDEO_HEIGHT, _VIDEO_WIDTH, 1)).astype(np.float32) for _ in range(4)]
+    return shade.astype(np.float32), grain
 
-    current_label = "v0"
-    if use_xfade and len(segments) > 1 and transition_seconds > 0:
-        elapsed = raw_durations[0]
-        for index in range(1, len(segments)):
-            next_label = f"x{index}"
-            parts.append(
-                f"[{current_label}][v{index}]"
-                f"xfade=transition=fade:duration={transition_seconds:.3f}:offset={elapsed:.3f}"
-                f"[{next_label}]"
-            )
-            current_label = next_label
-            elapsed += raw_durations[index]
-    elif len(segments) > 1:
-        labels = "".join(f"[v{index}]" for index in range(len(segments)))
-        parts.append(f"{labels}concat=n={len(segments)}:v=1:a=0[concatbg]")
-        current_label = "concatbg"
 
-    parts.append(f"[{current_label}]{_subtitle_filter_argument(subtitle_path)}[captioned]")
-    parts.append(_brand_overlay_filter("captioned", brand_input_index=len(segments) + 1))
-    return ";".join(parts)
+def _finish(frame: Image.Image | np.ndarray, shade: np.ndarray, grain: np.ndarray, brightness: float = 1.0) -> Image.Image:
+    pixels = np.asarray(frame, np.float32) * shade + grain
+    if brightness < 1:
+        pixels *= max(0.0, brightness)
+    return Image.fromarray(np.clip(pixels, 0, 255).astype(np.uint8))
+
+
+def _hook_layer(hook_text: str) -> Image.Image:
+    lines = [hook_text[start:end] for start, end in _quote_line_ranges(hook_text, 0, len(hook_text))]
+    return _text_layer(lines, _font(52, bold=True), line_height=78, fill=(*_CAPTION_COLOR, 255), shadow=True)
+
+
+def _fit_font(text: str, size: int, max_width: int, *, bold: bool) -> ImageFont.FreeTypeFont:
+    font = _font(size, bold=bold)
+    while size > 28 and font.getlength(text) > max_width:
+        size -= 4
+        font = _font(size, bold=bold)
+    return font
+
+
+def _end_card(book_title: str, narrator_name: str, mini_program_code: bytes | None = None) -> Image.Image:
+    ys, xs = np.mgrid[0:_VIDEO_HEIGHT, 0:_VIDEO_WIDTH].astype(np.float32)
+    falloff = np.clip(1 - 0.22 * (((xs - _VIDEO_WIDTH / 2) / _VIDEO_WIDTH) ** 2 + ((ys - _VIDEO_HEIGHT * 0.45) / _VIDEO_HEIGHT) ** 2) * 2, 0.8, 1)
+    card = Image.fromarray((falloff[..., None] * np.array(_END_PAPER, np.float32)).astype(np.uint8)).convert("RGBA")
+    draw = ImageDraw.Draw(card)
+    center = _VIDEO_WIDTH / 2
+    code = None
+    if mini_program_code:
+        try:
+            code = Image.open(io.BytesIO(mini_program_code)).convert("RGBA")
+            code.thumbnail((_END_CODE_SIZE, _END_CODE_SIZE), Image.LANCZOS)
+        except (OSError, ValueError):
+            code = None
+    # The code takes the middle of the card, so the text block moves up.
+    top = 300 if code else 380
+    clean_title = "".join(char for char in book_title.strip().strip("《》") if char.isprintable())[:18]
+    if clean_title:
+        draw.text((center, top), "这段故事，出自", font=_font(30), fill=_END_MUTED, anchor="mm")
+        title = f"《{clean_title}》"
+        draw.text((center, top + 82), title, font=_fit_font(title, 60, 640, bold=True), fill=_END_INK, anchor="mm")
+    else:
+        draw.text((center, top + 60), "一段家庭口述", font=_font(44, bold=True), fill=_END_INK, anchor="mm")
+    clean_narrator = "".join(char for char in narrator_name.strip() if char.isprintable())[:12]
+    if clean_narrator:
+        draw.text((center, top + 160), f"讲述人 · {clean_narrator}", font=_font(30), fill=_END_MUTED, anchor="mm")
+    lockup_top = 760
+    if code:
+        code_top = top + 240
+        card.alpha_composite(code, (round(center - code.width / 2), code_top))
+        draw.text((center, code_top + code.height + 36), "微信扫码，打开这段讲述", font=_font(24), fill=_END_MUTED, anchor="mm")
+        lockup_top = code_top + code.height + 100
+    lockup = render_brand_lockup(300, variant="dark")
+    card.alpha_composite(lockup, (round(center - lockup.width / 2), lockup_top))
+    draw.text((center, lockup_top + lockup.height + 48), _END_TAGLINE, font=_font(24), fill=_END_MUTED, anchor="mm")
+    return card.convert("RGB")
+
+
+def _video_frames(
+    request: ShareVideoRenderRequest,
+    *,
+    hook_text: str,
+    hook_seconds: float,
+    body_seconds: float,
+) -> Iterator[bytes]:
+    visual = _body_visual(request, body_seconds)
+    timings = _relative_timings(request)
+    pages = _caption_pages(request.selected_text, timings, round(body_seconds * 1000))
+    shade, grain = _finishing_layers()
+    watermark = render_brand_lockup(150, variant="light")
+    watermark_mask = _with_alpha(watermark, 0.6)
+    end_card = np.asarray(_end_card(request.book_title, request.narrator_name, request.mini_program_code), np.float32)
+    total_seconds = hook_seconds + body_seconds + _END_CARD_SECONDS
+    if hook_seconds:
+        opening = np.asarray(visual(0.0), np.float32)
+        hook_backdrop = np.asarray(Image.fromarray(opening.astype(np.uint8)).filter(ImageFilter.GaussianBlur(10)), np.float32) * 0.6
+        hook_layer = _hook_layer(hook_text)
+        hook_top = round(_VIDEO_HEIGHT * _SUBJECT_CENTER_Y - hook_layer.height / 2)
+    for index in range(math.ceil(total_seconds * _FPS)):
+        t = index / _FPS
+        noise = grain[index % len(grain)]
+        if t < hook_seconds:
+            # The hook settles into the first shot as its sentence fades out.
+            settle = (t - (hook_seconds - 0.4)) / 0.4
+            pixels = hook_backdrop if settle <= 0 else hook_backdrop + (opening - hook_backdrop) * min(1.0, settle)
+            frame = _finish(pixels, shade, noise, brightness=min(1.0, t / 0.3))
+            alpha = min(1.0, (t - 0.15) / 0.35, (hook_seconds - 0.1 - t) / 0.35)
+            if alpha > 0:
+                frame.paste(hook_layer, (0, hook_top), _with_alpha(hook_layer, alpha))
+        elif t < hook_seconds + body_seconds:
+            body_t = t - hook_seconds
+            fade_in = 1.0 if hook_seconds else min(1.0, body_t / 0.4)
+            frame = _finish(visual(body_t), shade, noise, brightness=min(fade_in, (body_seconds - body_t) / 0.4))
+            frame.paste(watermark, (28, 44), watermark_mask)
+            _draw_caption(frame, pages, timings, body_t * 1000)
+        else:
+            end_t = t - hook_seconds - body_seconds
+            frame = Image.fromarray(np.clip(end_card * min(1.0, end_t / 0.5) + noise, 0, 255).astype(np.uint8))
+        yield frame.tobytes()
+
+
+async def _prepare_audio(
+    ffmpeg: str,
+    request: ShareVideoRenderRequest,
+    target_path: Path,
+    *,
+    delay_seconds: float,
+    total_seconds: float,
+) -> None:
+    input_args = ["-f", "s16le", "-ar", "16000", "-ac", "1"] if request.source_audio_mime_type == "audio/pcm" else []
+    body_seconds = max(0.1, (request.end_ms - request.start_ms) / 1000)
+    await _run_ffmpeg([
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        *input_args, "-i", str(request.source_audio_path),
+        "-af", (
+            f"atrim=start={request.start_ms / 1000:.3f}:duration={body_seconds:.3f},asetpts=PTS-STARTPTS,aformat=channel_layouts=mono,"
+            # Light clean-up keeps the original voice while evening out phone recordings.
+            "highpass=f=70,afftdn,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,"
+            f"adelay={round(delay_seconds * 1000)},apad=whole_dur={total_seconds:.3f}"
+        ),
+        "-t", f"{total_seconds:.3f}", "-ac", "1", "-c:a", "pcm_s16le", str(target_path),
+    ])
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
+    if request.video_style == "story_animation":
+        if request.animation_plan is None:
+            raise ShareVideoGenerationError("往事小剧场缺少场景规划")
+        validate_story_plan_source(request.animation_plan, request.selected_text, request.end_ms-request.start_ms)
     ffmpeg = _ffmpeg_executable()
     request.target_path.parent.mkdir(parents=True, exist_ok=True)
-    duration_seconds = max(0.1, (request.end_ms - request.start_ms) / 1000)
+    body_seconds = max(0.1, (request.end_ms - request.start_ms) / 1000)
+    hook_text = usable_hook_text(request.hook_text, request.selected_text)
+    hook_seconds = _hook_seconds(hook_text)
+    total_seconds = hook_seconds + body_seconds + _END_CARD_SECONDS
+    frames = _video_frames(request, hook_text=hook_text, hook_seconds=hook_seconds, body_seconds=body_seconds)
     with tempfile.TemporaryDirectory(prefix="memoir-share-video-") as tmp:
         tmpdir = Path(tmp)
-        subtitle_path = tmpdir / "subtitles.ass"
-        clip_audio_path = tmpdir / "clip.wav"
+        audio_path = tmpdir / "audio.wav"
         temp_video_path = tmpdir / "video.mp4"
-        subtitle_path.write_text(_subtitle_file_content(request), encoding="utf-8")
-        brand_path = brand_lockup_file(
-            _BRAND_OVERLAY_WIDTH,
-            variant="light",
-            opacity=0.76,
-            contrast_outline=True,
-        )
-
-        audio_input_args = []
-        if request.source_audio_mime_type == "audio/pcm":
-            audio_input_args.extend(["-f", "s16le", "-ar", "16000", "-ac", "1"])
-        audio_input_args.extend(["-i", str(request.source_audio_path)])
+        await _prepare_audio(ffmpeg, request, audio_path, delay_seconds=hook_seconds, total_seconds=total_seconds)
         await _run_ffmpeg([
-            ffmpeg,
-            "-y",
-            *audio_input_args,
-            "-ss",
-            f"{request.start_ms / 1000:.3f}",
-            "-t",
-            f"{duration_seconds:.3f}",
-            "-c:a",
-            "pcm_s16le",
-            str(clip_audio_path),
-        ])
-
-        background_segments = _valid_background_segments(request)
-        if len(background_segments) > 1:
-            video_input_args: list[str] = []
-            for segment in background_segments:
-                duration_seconds_for_input = max(0.1, (segment.end_ms - segment.start_ms) / 1000 + 0.7)
-                video_input_args.extend([
-                    "-loop",
-                    "1",
-                    "-t",
-                    f"{duration_seconds_for_input:.3f}",
-                    "-i",
-                    str(segment.image_path),
-                ])
-            audio_input_index = len(background_segments)
-            await _run_ffmpeg([
-                ffmpeg,
-                "-y",
-                *video_input_args,
-                "-i",
-                str(clip_audio_path),
-                "-loop",
-                "1",
-                "-i",
-                str(brand_path),
-                "-filter_complex",
-                _multi_background_filter_complex(
-                    background_segments,
-                    subtitle_path,
-                    use_xfade=_ffmpeg_filter_available(ffmpeg, "xfade"),
-                ),
-                "-map",
-                "[vout]",
-                "-map",
-                f"{audio_input_index}:a",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-shortest",
-                str(temp_video_path),
-            ])
-            temp_video_path.replace(request.target_path)
-            return
-
-        single_background_image_path = request.background_image_path
-        if not single_background_image_path and len(background_segments) == 1:
-            single_background_image_path = background_segments[0].image_path
-        has_background_image = bool(
-            single_background_image_path
-            and single_background_image_path.exists()
-            and single_background_image_path.stat().st_size > 0
-        )
-        if has_background_image:
-            video_input_args = [
-                "-loop",
-                "1",
-                "-t",
-                f"{duration_seconds:.3f}",
-                "-i",
-                str(single_background_image_path),
-            ]
-        else:
-            video_input_args = [
-                "-f",
-                "lavfi",
-                "-i",
-                f"color=c={_BACKGROUND_COLOR}:s={_VIDEO_WIDTH}x{_VIDEO_HEIGHT}:d={duration_seconds:.3f}",
-            ]
-
-        await _run_ffmpeg([
-            ffmpeg,
-            "-y",
-            *video_input_args,
-            "-i",
-            str(clip_audio_path),
-            "-loop",
-            "1",
-            "-i",
-            str(brand_path),
-            "-filter_complex",
-            _single_background_filter_complex(
-                subtitle_path,
-                has_background_image=has_background_image,
-            ),
-            "-map",
-            "[vout]",
-            "-map",
-            "1:a",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-shortest",
-            str(temp_video_path),
-        ])
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{_VIDEO_WIDTH}x{_VIDEO_HEIGHT}",
+            "-r", str(_FPS), "-i", "-", "-i", str(audio_path),
+            "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast",
+            "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+            "-t", f"{total_seconds:.3f}", "-movflags", "+faststart", str(temp_video_path),
+        ], frames=frames)
         temp_video_path.replace(request.target_path)

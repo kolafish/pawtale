@@ -183,15 +183,19 @@ async def run_transcript_correction_job(
         )
 
     expected = transcript_mutation_guard(utterance)
+    cleanup_context = await load_voice_transcript_cleanup_context(
+        db,
+        utterance.voice_session,
+        exclude_message_id=utterance.chat_message_id,
+    )
+    # The provider call may take seconds. End the read phase before crossing the
+    # network; the mutation guard below re-locks and revalidates the source.
+    await db.commit()
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=ai_model,
         transcript_polish_level=polish_level,
-        context=await load_voice_transcript_cleanup_context(
-            db,
-            utterance.voice_session,
-            exclude_message_id=utterance.chat_message_id,
-        ),
+        context=cleanup_context,
         strict=False,
     )
     if not await claim_transcript_mutation_guard(db, utterance=utterance, expected=expected):
@@ -213,6 +217,9 @@ async def run_transcript_correction_job(
     await db.flush()
 
     utterance.transcript_edited = cleaned.content
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
     if message:
         message.content_text = cleaned.content
         message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -252,6 +259,14 @@ async def run_transcript_correction_job(
             source="transcript_correction_succeeded",
             ai_model=ai_model,
         )
+    from app.services.memoir.share_video_candidate_scheduling import schedule_share_video_candidate_evaluation
+
+    await db.flush()
+    await schedule_share_video_candidate_evaluation(
+        db,
+        project_id=job.project_id,
+        voice_session_id=utterance.voice_session_id,
+    )
     return EditingJobResult(
         result_json={
             "utterance_id": utterance.id,

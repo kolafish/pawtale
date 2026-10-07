@@ -50,68 +50,6 @@ export function transcriptTitleText(item: MemoirVoiceTranscriptItem): string {
   return displayText ? displayText.slice(0, 32) : "讲述记录";
 }
 
-export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
-  const assignment = item.section_assignment;
-  if (assignment) {
-    const chapter = `第 ${assignment.chapter_sort_order + 1} 章：${assignment.chapter_title.trim() || "未命名章节"}`;
-    if (assignment.requires_user_assignment) {
-      return `${chapter} · 待归类素材`;
-    }
-    const section = `小节 ${assignment.section_sort_order + 1}：${assignment.section_title.trim() || "未命名小节"}`;
-    const included = Boolean(
-      item.is_included_in_book
-      || item.included_chapters?.length,
-    );
-    return `${included ? "已放入" : "已整理到"}${chapter} · ${section}${included ? "" : "（暂不收入本书）"}`;
-  }
-  const chapters = [...(item.included_chapters || [])]
-    .sort((left, right) => left.sort_order - right.sort_order)
-    .map((chapter) => ({
-      title: chapter.title.trim() || "未命名章节",
-      chapterNumber: chapter.sort_order + 1,
-      includeInBook: chapter.include_in_book !== false,
-    }));
-  if (!chapters.length) {
-    return "尚未入章";
-  }
-  const includedChapters = chapters.filter((chapter) => chapter.includeInBook);
-  if (includedChapters.length) {
-    const first = includedChapters[0];
-    const suffix = includedChapters.length > 1 ? `等 ${includedChapters.length} 章` : "";
-    return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
-  }
-  const first = chapters[0];
-  const suffix = chapters.length > 1 ? `等 ${chapters.length} 章` : "";
-  return `已整理到第 ${first.chapterNumber} 章：${first.title}${suffix}（不收入本书）`;
-}
-
-export function transcriptMaterialChapterText(
-  item: MemoirVoiceTranscriptItem,
-): string {
-  const assignment = item.section_assignment;
-  if (assignment) {
-    return `第 ${assignment.chapter_sort_order + 1} 章：${assignment.chapter_title.trim() || "未命名章节"}`;
-  }
-  const chapter = [...(item.included_chapters || [])]
-    .sort((left, right) => left.sort_order - right.sort_order)[0];
-  return chapter
-    ? `第 ${chapter.sort_order + 1} 章：${chapter.title.trim() || "未命名章节"}`
-    : "尚未归入章节";
-}
-
-export function transcriptMaterialSectionText(
-  item: MemoirVoiceTranscriptItem,
-): string {
-  const assignment = item.section_assignment;
-  if (!assignment) {
-    return "尚未归入小节";
-  }
-  if (assignment.requires_user_assignment) {
-    return "待归类素材（请选择小节）";
-  }
-  return `小节 ${assignment.section_sort_order + 1}：${assignment.section_title.trim() || "未命名小节"}`;
-}
-
 export function plainTranscriptSegments(text: string): TranscriptTextSegment[] {
   return text ? [{ text, highlight: false }] : [];
 }

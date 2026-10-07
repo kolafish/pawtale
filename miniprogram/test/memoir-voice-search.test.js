@@ -323,7 +323,7 @@ test("voice search service stops before recording when authorization is missing"
     },
   });
 
-  await assert.rejects(recordMemoirVoiceSearchQuery(), /请先同意声纹授权协议/);
+  await assert.rejects(recordMemoirVoiceSearchQuery(), /请先同意语音授权/);
   delete global.wx;
 });
 
@@ -356,5 +356,107 @@ test("voice search service finishes a recording when native stop fails", async (
   stopMemoirVoiceSearchRecording();
 
   await assert.rejects(promise, /没有生成可识别的语音/);
+  delete global.wx;
+});
+
+test("cancelled voice search does not start recording after authorization returns", async () => {
+  let resolveAuthorization;
+  let recorderStarts = 0;
+  let cancelled = false;
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() { recorderStarts += 1; },
+        stop() {},
+        onStart() {}, onStop() {}, onFrameRecorded() {}, onError() {},
+      };
+    },
+  };
+  const { recordMemoirVoiceSearchQuery } = loadVoiceSearchService({
+    authorizationExports: {
+      ensureVoiceRecordingAuthorization: () => new Promise((resolve) => { resolveAuthorization = resolve; }),
+    },
+  });
+
+  const search = recordMemoirVoiceSearchQuery({ isCancelled: () => cancelled });
+  cancelled = true;
+  resolveAuthorization(true);
+
+  await assert.rejects(search, /语音搜索已取消/);
+  assert.equal(recorderStarts, 0);
+  delete global.wx;
+});
+
+test("cancelled voice search stops the recorder and never uploads its late stop result", async () => {
+  let onStop;
+  let stops = 0;
+  let uploads = 0;
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() {},
+        stop() { stops += 1; },
+        onStart() {},
+        onStop(callback) { onStop = callback; },
+        onFrameRecorded() {}, onError() {},
+      };
+    },
+    getFileSystemManager() {
+      return { readFile() { throw new Error("cancelled recording must not read the file"); } };
+    },
+  };
+  const {
+    recordMemoirVoiceSearchQuery,
+    cancelMemoirVoiceSearchRecording,
+  } = loadVoiceSearchService({
+    voiceApiExports: {
+      transcribeMemoirVoiceSearchAudio: async () => { uploads += 1; return { transcript: "" }; },
+    },
+  });
+
+  const search = recordMemoirVoiceSearchQuery();
+  await flushAsyncSetup();
+  cancelMemoirVoiceSearchRecording();
+  onStop({ tempFilePath: "/tmp/search.pcm", duration: 800, fileSize: 3200 });
+
+  await assert.rejects(search, /语音搜索已取消/);
+  assert.equal(stops, 1);
+  assert.equal(uploads, 0);
+  delete global.wx;
+});
+
+test("cancelled voice search never uploads after recording stopped while its file is reading", async () => {
+  let onStop;
+  let fileRead;
+  let uploads = 0;
+  let cancelled = false;
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() {}, stop() {}, onStart() {},
+        onStop(callback) { onStop = callback; },
+        onFrameRecorded() {}, onError() {},
+      };
+    },
+    getFileSystemManager() {
+      return { readFile(options) { fileRead = options; } };
+    },
+  };
+  const { recordMemoirVoiceSearchQuery } = loadVoiceSearchService({
+    voiceApiExports: {
+      transcribeMemoirVoiceSearchAudio: async () => { uploads += 1; return { transcript: "" }; },
+    },
+  });
+
+  const search = recordMemoirVoiceSearchQuery({ isCancelled: () => cancelled });
+  await flushAsyncSetup();
+  onStop({ tempFilePath: "/tmp/search.pcm", duration: 800, fileSize: 3200 });
+  await flushAsyncSetup();
+  assert.equal(typeof fileRead?.success, "function");
+  cancelled = true;
+  fileRead.success({ errMsg: "ok", data: "cGNt" });
+
+  await assert.rejects(search, /语音搜索已取消/);
+  assert.equal(uploads, 0);
   delete global.wx;
 });

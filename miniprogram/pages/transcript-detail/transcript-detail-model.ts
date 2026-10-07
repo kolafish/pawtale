@@ -11,10 +11,7 @@ import { formatPlaybackClock } from "../../services/time";
 import {
   plainTranscriptSegments,
   transcriptAudioText,
-  transcriptBookInclusionText,
   transcriptCreatedAtText,
-  transcriptMaterialChapterText,
-  transcriptMaterialSectionText,
   transcriptTitleText,
   type TranscriptTextSegment,
 } from "../../services/transcript-view-model";
@@ -35,20 +32,22 @@ export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   audioText: string;
   recordMetaText: string;
   transcriptionNoticeText: string;
+  heroStatusText: string;
+  heroStatusClass: string;
   displayCountText: string;
   rawCountText: string;
-  bookStatusClass: string;
   canRecoverTranscription: boolean;
-  bookInclusionText: string;
+  locationTitleText: string;
+  showLocationPath: boolean;
   chapterLocationText: string;
   sectionLocationText: string;
-  isIncludedInBook: boolean;
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
   canPlayQuestionAudio: boolean;
   canConvertQuestionToAnswer: boolean;
   questionTitleText: string;
   questionCanExpand: boolean;
+  rawCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
   displaySegments: TranscriptTextSegment[];
@@ -88,6 +87,7 @@ export interface TranscriptDetailData {
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
+  rawExpanded: boolean;
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
   editReferenceExpanded: boolean;
@@ -108,6 +108,7 @@ export interface TranscriptDetailData {
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+const COLLAPSIBLE_RAW_CHAR_COUNT = 72;
 export const OFFLINE_ASR_POLL_INTERVAL_MS = 2000;
 export const OFFLINE_ASR_MAX_POLL_ATTEMPTS = 150;
 export type TranscriptDetailAudioKind = "question" | "answer";
@@ -255,11 +256,12 @@ export function materialAssignmentPatch(
   };
 }
 
-export function shareVideoFileName(item: TranscriptDetailItemView | null): string {
-  const title = (item?.titleText || item?.summary_title || "回忆录片段")
-    .replace(/[\\/:*?"<>|]/g, "")
+export function shareVideoFileName(title: string | null | undefined): string {
+  const safeTitle = (title || "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
-  const shortTitle = Array.from(title).slice(0, 24).join("");
+  const shortTitle = Array.from(safeTitle).slice(0, 24).join("").trim();
   return `${shortTitle || "回忆录片段"}.mp4`;
 }
 
@@ -271,40 +273,47 @@ export function toViewItem(
     item.can_recover_transcription || item.transcription_status === "pending_transcription",
   );
   const savedText = item.transcript_edited || item.transcript_raw;
-  const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const assignment = item.section_assignment;
+  const includedChapter = [...(item.included_chapters || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)[0];
+  const hasLocation = !canRecoverTranscription && Boolean(assignment || includedChapter);
+  const chapterLocationText = assignment?.chapter_title.trim()
+    || includedChapter?.title.trim()
+    || "未命名故事";
+  const sectionLocationText = assignment
+    ? (assignment.requires_user_assignment
+      ? "还没有选择具体位置"
+      : (assignment.section_title.trim() || "未命名故事"))
+    : "";
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
   const questionText = item.question_text.trim();
-  const recoveryText = item.summary_text || "这段录音已经保存，但还没有识别成文字。";
   const offlineAsrState = item.offline_asr || DEFAULT_OFFLINE_ASR_STATE;
   const offlineAsrView = materialOfflineASRView(offlineAsrState);
   return {
     ...item,
     offline_asr: offlineAsrState,
-    titleText: transcriptTitleText(item),
+    titleText: canRecoverTranscription ? "音频已保存" : transcriptTitleText(item),
     savedText,
     editingText: previous?.isEditing ? previous.editingText : savedText,
     editingCharCount: (previous?.isEditing ? previous.editingText : savedText).trim().length,
     createdAtText,
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
-    transcriptionNoticeText: canRecoverTranscription ? "音频已保存，等待转写" : "",
-    displayCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
-    rawCountText: canRecoverTranscription ? "待转写" : `${item.raw_char_count} 字`,
-    bookStatusClass: canRecoverTranscription
-      ? "pending"
-      : (isIncludedInBook ? "included" : ""),
+    transcriptionNoticeText: canRecoverTranscription
+      ? "录音已保存。把它转成文字后，就可以继续整理。"
+      : "",
+    heroStatusText: canRecoverTranscription ? "等待生成文字" : "已整理",
+    heroStatusClass: canRecoverTranscription ? "pending" : "ready",
+    displayCountText: canRecoverTranscription ? "尚未生成" : `${item.display_char_count} 字`,
+    rawCountText: canRecoverTranscription ? "尚未转写" : `${item.raw_char_count} 字`,
     canRecoverTranscription,
-    bookInclusionText: canRecoverTranscription
-      ? "等待转写后再入章"
-      : transcriptBookInclusionText(item),
-    chapterLocationText: canRecoverTranscription
-      ? "等待转写后再归入章节"
-      : transcriptMaterialChapterText(item),
-    sectionLocationText: canRecoverTranscription
-      ? "等待转写后再归入小节"
-      : transcriptMaterialSectionText(item),
-    isIncludedInBook,
+    locationTitleText: hasLocation
+      ? "已收进故事树"
+      : (canRecoverTranscription ? "等待生成文字" : "尚未整理"),
+    showLocationPath: hasLocation,
+    chapterLocationText,
+    sectionLocationText,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
     canPlayQuestionAudio: Boolean(item.question_audio_file_id),
@@ -316,9 +325,14 @@ export function toViewItem(
     ),
     questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
+    rawCanExpand: Array.from(item.transcript_raw.trim()).length > COLLAPSIBLE_RAW_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
-    rawSegments: plainTranscriptSegments(canRecoverTranscription ? "等待恢复转写后显示原始识别文字。" : item.transcript_raw),
-    displaySegments: plainTranscriptSegments(canRecoverTranscription ? recoveryText : item.display_text),
+    rawSegments: plainTranscriptSegments(canRecoverTranscription
+      ? "这里会保留尽量忠于原话的识别文字。"
+      : item.transcript_raw),
+    displaySegments: plainTranscriptSegments(canRecoverTranscription
+      ? "小余会帮您整理成适合阅读的文字。"
+      : item.display_text),
     changed: previous?.isEditing
       ? previous.editingText.trim() !== savedText.trim()
       : false,
@@ -356,20 +370,6 @@ export function syncEditUnloadAlert(item: TranscriptDetailItemView | null): void
     return;
   }
   wx.disableAlertBeforeUnload?.();
-}
-
-export function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
-  return new Promise((resolve) => {
-    const preview = item.titleText || item.display_text || item.transcript_raw || "这条讲述记录";
-    wx.showModal({
-      title: "删除讲述记录",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
-      confirmText: "删除",
-      confirmColor: "#b64545",
-      success: (result) => resolve(Boolean(result.confirm)),
-      fail: () => resolve(false),
-    });
-  });
 }
 
 export function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise<boolean> {
@@ -412,7 +412,7 @@ export function confirmOfflineAsr(item: TranscriptDetailItemView): Promise<boole
       title: item.offline_asr.status === "succeeded" ? "再次识别这条素材？" : "离线加强识别？",
       content: `将使用火山和 StepFun 重新识别原音频，再由 AI 校对。${dialectLine}`,
       confirmText: "开始识别",
-      confirmColor: "#a84f43",
+      confirmColor: "#b65d49",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });

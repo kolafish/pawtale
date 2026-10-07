@@ -13,7 +13,7 @@
         </view>
         <switch
           checked="{{autoBargeInEnabled}}"
-          color="#a84f43"
+          color="#b65d49"
           aria-label="自动检测我说话"
           bindchange="changeAutoBargeIn"
         />
@@ -42,30 +42,6 @@
           <text class="option-desc">{{item.description}}</text>
         </view>
         <view class="selection-mark {{item.value === aiModel ? 'visible' : ''}}" aria-hidden="true">
-          <text>✓</text>
-        </view>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <text class="section-title ui-section-heading">素材与正文润色强度</text>
-    <view class="settings-list ui-card ui-card-borderless">
-      <view
-        wx:for="{{transcriptPolishOptions}}"
-        wx:key="value"
-        class="option-row {{item.value === transcriptPolishLevel ? 'selected' : ''}}"
-        aria-role="button"
-        data-polish="{{item.value}}"
-        aria-pressed="{{item.value === transcriptPolishLevel}}"
-        bindtap="selectTranscriptPolishLevel"
-        hover-class="option-row-hover"
-      >
-        <view class="option-copy">
-          <text class="option-label">{{item.label}}</text>
-          <text class="option-desc">{{item.description}}</text>
-        </view>
-        <view class="selection-mark {{item.value === transcriptPolishLevel ? 'visible' : ''}}" aria-hidden="true">
           <text>✓</text>
         </view>
       </view>

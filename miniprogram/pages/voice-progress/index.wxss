@@ -5,12 +5,14 @@
 }
 
 .refresh-button {
-  width: 128rpx;
+  width: 150rpx;
+  padding: 0;
+  white-space: nowrap;
   height: var(--ui-hit-size);
   border-radius: 18rpx;
   background: var(--ui-surface);
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
   box-shadow: var(--ui-card-shadow);
 }
@@ -19,27 +21,38 @@
   margin-top: 32rpx;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18rpx;
+  gap: 0;
+  padding: 8rpx;
+  overflow: hidden;
+  background: var(--ui-success-surface);
 }
 
 .summary-item {
-  min-height: 152rpx;
-  padding: 28rpx;
+  min-height: 128rpx;
+  padding: 24rpx;
+}
+
+.summary-item:nth-child(odd) {
+  border-right: 1rpx solid rgba(88, 112, 82, 0.14);
+}
+
+.summary-item:nth-child(-n + 2) {
+  border-bottom: 1rpx solid rgba(88, 112, 82, 0.14);
 }
 
 .summary-value {
   display: block;
-  color: var(--ui-text-primary);
-  font-size: 44rpx;
-  font-weight: 900;
+  color: var(--ui-success-text);
+  font-size: 40rpx;
+  font-weight: 800;
   line-height: 1;
 }
 
 .summary-label {
   display: block;
-  margin-top: 18rpx;
+  margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
 }
 
 .section {
@@ -71,7 +84,7 @@
 
 .section-kicker {
   color: var(--ui-accent);
-  font-size: 25rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 36rpx;
 }
@@ -85,7 +98,7 @@
 
 .topic-headline {
   margin-top: 10rpx;
-  font-size: 40rpx;
+  font-size: var(--ui-font-page-title);
   line-height: 54rpx;
   text-wrap: balance;
 }
@@ -93,14 +106,14 @@
 .topic-detail {
   margin-top: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-wrap: pretty;
 }
 
 .section-meta {
   color: var(--ui-value-text);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   line-height: 44rpx;
 }
 
@@ -114,16 +127,16 @@
 
 .map-note-title {
   color: var(--ui-accent-strong);
-  font-size: 27rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
-  line-height: 38rpx;
+  line-height: 1.4;
 }
 
 .map-note-text {
   margin-top: 8rpx;
   color: var(--ui-value-text);
-  font-size: 26rpx;
-  line-height: 40rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -140,9 +153,9 @@
 
 .module-title {
   color: var(--ui-text-secondary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-section-title);
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 1.4;
 }
 
 .topic-list {
@@ -152,9 +165,9 @@
 
 .topic-item {
   padding: 24rpx;
-  border-radius: 24rpx;
-  background: var(--ui-page-background);
-  box-shadow: 0 0 0 1rpx var(--ui-border);
+  border-radius: var(--ui-radius-inner);
+  background: var(--ui-surface-soft);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .topic-title {
@@ -173,7 +186,7 @@
   border-radius: 999rpx;
   background: var(--ui-surface-subtle);
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 32rpx;
   text-align: center;
@@ -185,8 +198,8 @@
 }
 
 .topic-item.enough_for_now .state-chip {
-  background: #edf1f5;
-  color: #53677a;
+  background: var(--ui-info-surface);
+  color: var(--ui-info-text);
 }
 
 .topic-item.not_applicable .state-chip,
@@ -198,7 +211,7 @@
 .topic-intent {
   margin-top: 14rpx;
   color: var(--ui-text-primary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-wrap: pretty;
 }
@@ -206,8 +219,8 @@
 .state-detail {
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 38rpx;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -217,8 +230,8 @@
   min-height: 88rpx;
   margin-top: 20rpx;
   padding: 0 20rpx;
-  border-radius: 18rpx;
-  font-size: 27rpx;
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 40rpx;
   transition-property: transform, background-color, box-shadow, opacity;
@@ -227,16 +240,20 @@
 }
 
 .topic-start-action {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
-  box-shadow: 0 7rpx 16rpx rgba(143, 64, 55, 0.16);
+  justify-content: space-between;
+  padding-left: 24rpx;
+  background: var(--ui-surface);
+  color: var(--ui-accent-strong);
+  box-shadow: var(--ui-control-shadow);
 }
+
+.topic-start-action::after { content: "›"; color: var(--ui-accent); font-size: 36rpx; font-weight: 400; }
 
 .topic-choice-action {
   margin-top: 14rpx;
-  background: var(--ui-accent-surface-subtle);
-  color: var(--ui-accent-strong);
-  box-shadow: 0 0 0 1rpx rgba(168, 79, 67, 0.14);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  box-shadow: 0 0 0 1rpx var(--ui-divider) inset;
 }
 
 .topic-start-action-hover,
@@ -245,8 +262,8 @@
 }
 
 .topic-start-action-hover {
-  background: var(--ui-accent-strong);
-  box-shadow: 0 4rpx 10rpx rgba(143, 64, 55, 0.12);
+  background: var(--ui-accent-surface-subtle);
+  box-shadow: 0 0 0 1rpx var(--ui-accent-border) inset;
 }
 
 .topic-choice-action-hover {
@@ -256,7 +273,8 @@
 .session-card {
   margin-top: 22rpx;
   padding: 24rpx;
-  box-shadow: none;
+  background: var(--ui-surface-soft);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .session-copy {
@@ -277,21 +295,24 @@
 .empty-state {
   display: block;
   color: var(--ui-text-secondary);
-  font-size: 25rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .session-meta {
   margin-top: 8rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .continue-button {
-  width: 120rpx;
+  width: 150rpx;
+  padding: 0;
+  white-space: nowrap;
   height: 80rpx;
   border-radius: 18rpx;
   background: var(--ui-accent-surface);
-  color: var(--ui-accent);
-  font-size: 25rpx;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-action);
   font-weight: 800;
   flex: 0 0 auto;
 }
@@ -301,6 +322,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12rpx;
+  font-variant-numeric: tabular-nums;
 }
 
 .session-stats text {
@@ -308,7 +330,7 @@
   border-radius: 999rpx;
   background: var(--ui-accent-surface-subtle);
   color: var(--ui-value-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-body);
   font-weight: 800;
 }
 
@@ -323,7 +345,7 @@
 
 .error {
   margin-top: 24rpx;
-  font-size: 26rpx;
+  font-size: var(--ui-font-body);
 }
 
 .large-text .topic-headline {
@@ -346,6 +368,6 @@
 .large-text .state-detail,
 .large-text .topic-start-action,
 .large-text .topic-choice-action {
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 48rpx;
 }

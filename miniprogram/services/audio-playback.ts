@@ -62,6 +62,7 @@ export async function playAudioFileSequence(
 
 export class AudioPlaybackController {
   private activePlayback: ActivePlayback | null = null;
+  private prefetchedFiles = new Map<string, Promise<string>>();
 
   private playToken = 0;
 
@@ -85,11 +86,21 @@ export class AudioPlaybackController {
   }
 
   async playFile(audioFileId: string, token = this.playToken, options: AudioPlaybackPlayOptions = {}): Promise<void> {
-    const tempFilePath = await this.downloadAudioFile(audioFileId);
+    if (!this.isCurrentToken(token)) return;
+    const download = this.prefetchedFiles.get(audioFileId) || this.downloadAudioFile(audioFileId);
+    const tempFilePath = await download;
+    if (this.prefetchedFiles.get(audioFileId) === download) this.prefetchedFiles.delete(audioFileId);
     if (!this.isCurrentToken(token)) {
       return;
     }
     await this.playSource(tempFilePath, options);
+  }
+
+  async prefetchFile(audioFileId: string): Promise<void> {
+    if (!this.prefetchedFiles.has(audioFileId)) {
+      this.prefetchedFiles.set(audioFileId, this.downloadAudioFile(audioFileId));
+    }
+    await this.prefetchedFiles.get(audioFileId);
   }
 
   async playTempFile(
@@ -145,6 +156,7 @@ export class AudioPlaybackController {
   stop(): void {
     this.nextToken();
     this.stopActivePlayback();
+    this.prefetchedFiles.clear();
   }
 
   destroy(): void {

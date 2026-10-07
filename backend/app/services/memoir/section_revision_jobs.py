@@ -184,8 +184,8 @@ _PLAN_FORMAT = """请输出严格 JSON：
   "book_metadata_patch": {}
 }
 
-只给修改思路，不输出修改后的正文；只修改目标小节，不改变标题、小节数量、
-顺序或素材归属；只采用当前正文、原始讲述和用户明确给出的事实，不推测或补造；
+只给修改思路，不输出修改后的正文；只修改目标小节；用户明确要求时可以修改标题，
+但不改变小节数量、顺序或素材归属；只采用当前正文、原始讲述和用户明确给出的事实，不推测或补造；
 没有事实依据时明确说明不能添加；book_metadata_patch 必须为空对象。
 """
 
@@ -251,7 +251,7 @@ async def _generate_candidate(
         digest is not None and digest.status == MemoirSemanticCacheStatus.READY.value
     ) else []
     instruction = (
-        "请严格按以下已确认的修改思路调整当前小节，不要改变小节标题：\n"
+        "请严格按以下已确认的修改思路调整当前小节：\n"
         + json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
     )
     return await chapter_generation.generate_chapter_section(
@@ -267,7 +267,7 @@ async def _generate_candidate(
         ),
         current_section_content=str(target.snapshot.get("content") or "").strip(),
         revision_instruction=instruction,
-        allow_title_revision=False,
+        allow_title_revision=True,
         ai_model=ai_model,
     )
 
@@ -404,6 +404,7 @@ async def run_section_revision_job(
                 "chapter_title": current.context.chapter_title,
                 "section_title": current.section.title,
                 "revision_plan": generated.plan.model_dump(mode="json"),
+                "candidate_title": "",
                 "candidate_content": "",
                 "summary": generated.plan.summary.strip(),
                 "requested_ai_model": ai_model,
@@ -437,6 +438,7 @@ async def run_section_revision_job(
                 patch = {
                     "proposal_phase": "plan_ready",
                     "revision_plan": generated.plan.model_dump(mode="json"),
+                    "candidate_title": "",
                     "candidate_content": "",
                     "summary": generated.plan.summary.strip(),
                     "resolved_ai_model": generated.resolved_ai_model,
@@ -447,6 +449,7 @@ async def run_section_revision_job(
                 candidate = generated.sections[0]
                 patch = {
                     "proposal_phase": "draft_ready",
+                    "candidate_title": candidate.title,
                     "candidate_content": candidate.content,
                     "summary": "修改稿已按确认思路生成，请对照修改前后内容。",
                     "resolved_ai_model": generated.model,
@@ -504,25 +507,32 @@ async def section_revision_proposal_response(
     phase = MemoirBookRevisionProposalPhase(str(values.get("proposal_phase") or "plan_ready"))
     before_content = str(before.get("content") or "").strip()
     candidate = str(values.get("candidate_content") or "").strip()
-    changed = phase == MemoirBookRevisionProposalPhase.DRAFT_READY and candidate != before_content
     chapter_title = str(values.get("chapter_title") or "")
     section_title = str(values.get("section_title") or before.get("title") or "")
+    candidate_title = str(values.get("candidate_title") or section_title).strip()
+    changed = (
+        phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+        and (candidate != before_content or candidate_title != section_title)
+    )
 
-    def snapshot(content: str) -> list[dict[str, object]]:
+    def snapshot(title: str, content: str) -> list[dict[str, object]]:
         return [{
             "chapter_id": chapter_id,
             "chapter_title": chapter_title,
             "sections": [{
                 "section_id": section_id,
-                "title": section_title,
+                "title": title,
                 "content": content,
             }],
         }]
 
     comparison = MemoirBookRevisionComparison.model_validate({
         **book_revision_proposals.build_comparison(
-            before=snapshot(before_content),
-            after=snapshot(candidate if changed else before_content),
+            before=snapshot(section_title, before_content),
+            after=snapshot(
+                candidate_title if changed else section_title,
+                candidate if changed else before_content,
+            ),
         ),
         "metadata_changes": [],
     })
@@ -602,12 +612,16 @@ async def finalize_section_revision(
             section_id=section_id,
             expected_version_id=target.version.id,
             expected_input_signature=target.context.input_signature,
+            candidate_title=str(values.get("candidate_title") or target.section.title),
             candidate_content=str(values.get("candidate_content") or ""),
             feedback=str(values.get("summary") or ""),
             requested_ai_model=requested_model,
             resolved_ai_model=resolved_model,
         )
         patch = {"proposal_status": "applied", "result_version_id": version.id}
+        from app.services.memoir.automatic_book_draft import schedule_book_draft
+
+        await schedule_book_draft(db, project_id=project_id, source="section_revision")
     proposal.result_json = {**values, **patch}
     proposal.updated_at = utcnow_naive()
     db.add(proposal)

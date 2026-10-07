@@ -1,14 +1,14 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="flow-context">
-    <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 全书进度</text>
-    <button class="flow-context-action" bindtap="openBookHome">书稿首页</button>
+    <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 书稿建议</text>
+    <button class="flow-context-action ui-pressable" bindtap="openBookHome">‹ 书稿首页</button>
   </view>
 
   <view class="page-intro">
-    <text class="page-kicker">整理成书</text>
-    <text class="page-title">{{headline}}</text>
-    <text class="page-detail">{{detail}}</text>
-    <text wx:if="{{progressText}}" class="progress-text">{{progressText}}</text>
+    <text class="page-title">书稿建议</text>
+    <text class="page-detail">核对事实，或按需要完善衔接、表述与细节。</text>
+    <text wx:if="{{bulkCheckVisible || blockingIssueCount || bookReviewProgress.visible}}" class="progress-text">{{progressText}}</text>
+    <text wx:if="{{blockingIssueCount}}" class="confirmation-notice">有 {{blockingIssueCount}} 项必须处理：涉及事实冲突，处理后相关章节才能收入全书。其余建议可按需要处理。</text>
   </view>
 
   <view wx:if="{{error}}" class="error-strip">{{error}}</view>
@@ -49,7 +49,7 @@
         </view>
 
         <view wx:if="{{bookReview.review.structure_guidance.length}}" class="review-group">
-          <text class="review-group-title">编辑建议，可自行取舍</text>
+          <text class="review-group-title">可以完善</text>
           <text
             wx:for="{{bookReview.review.structure_guidance}}"
             wx:key="*this"
@@ -111,20 +111,26 @@
           <text
             wx:if="{{requiredBookIssues.length}}"
             class="editorial-actions-warning"
-          >请先处理完需要确认的问题，再执行全书编辑建议。</text>
+          >待确认章节暂不参与修改，其他章节可继续整理。</text>
           <view
             wx:if="{{revisionJob && revisionJob.proposal_status === 'ready' && revisionJob.proposal_id}}"
             class="revision-action ui-block-action ui-pressable"
             aria-role="button"
             bindtap="openBookRevision"
-          >{{revisionJob.proposal_phase === "plan_ready" ? "查看修改思路" : "查看修改预览"}}</view>
+          >
+            <text>{{revisionJob.proposal_phase === "plan_ready" ? "查看修改思路" : "查看修改预览"}}</text>
+            <text class="row-action-mark">›</text>
+          </view>
           <view
             wx:else
-            class="revision-action ui-block-action ui-pressable {{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling || requiredBookIssues.length ? 'is-disabled' : ''}}"
+            class="revision-action ui-block-action ui-pressable {{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling || requiredBookIssues.length}}"
+            aria-disabled="{{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling}}"
             bindtap="generateBookRevision"
-          >{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</view>
+          >
+            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</text>
+            <text class="row-action-mark">›</text>
+          </view>
         </view>
 
         <text
@@ -146,6 +152,7 @@
         required-issues="{{requiredBookIssues}}"
         optional-issues="{{optionalBookIssues}}"
         allow-required-confirmation="{{true}}"
+        book-confirmation-mode="{{true}}"
         bindrefresh="loadOverview"
       />
 
@@ -154,14 +161,14 @@
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
-      >返回书稿</view>
+      ><text>返回书稿</text><text class="row-action-mark">›</text></view>
       <view
         wx:if="{{canReviewBook}}"
         class="recheck-book-action ui-block-action ui-pressable {{checkingBook || bookReviewCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{checkingBook || bookReviewCancelling}}"
         bindtap="reviewBook"
-      >{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</view>
+      ><text>{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</text><text class="row-action-mark">›</text></view>
     </view>
 
     <view wx:if="{{bulkCheckVisible}}" class="completion-notice">
@@ -186,12 +193,15 @@
         aria-role="button"
         aria-disabled="{{recheckingAll || bulkCheckCancelling}}"
         bindtap="checkPendingChapters"
-      >{{recheckingAll ? "正在检查章节…" : bulkCheckActionText}}</view>
+      ><text>{{recheckingAll ? "正在检查章节…" : bulkCheckActionText}}</text><text class="row-action-mark">›</text></view>
     </view>
 
-    <view
+    <block
       wx:for="{{chapters}}"
       wx:key="chapter_id"
+    >
+    <view
+      wx:if="{{item.needsAttention}}"
       class="{{item.chapterClass}}"
       data-chapter-id="{{item.chapter_id}}"
       bindtap="tapChapter"
@@ -203,12 +213,60 @@
         <text class="chapter-state">{{item.stateText}}</text>
       </view>
       <text class="chapter-title">{{item.title}}</text>
+      <text wx:if="{{item.blocking_issue_count}}" class="confirmation-notice">本章有 {{item.blocking_issue_count}} 项必须处理，处理后才能收入全书。</text>
       <text class="chapter-headline">{{item.headline}}</text>
       <text class="chapter-detail">{{item.detail}}</text>
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
-        {{item.actionText}}
+        <text>{{item.actionText}}</text><text class="chapter-action-mark">›</text>
       </view>
     </view>
+    </block>
+
+  <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">
+    <view class="automation-head">
+      <view>
+        <text class="automation-title">整理进度</text>
+        <text class="automation-meta">书稿整理状态会在这里汇总</text>
+      </view>
+      <view class="automation-head-actions">
+        <button
+          wx:if="{{automationDismissibleCount}}"
+          class="automation-clear"
+          loading="{{automationEventClearing}}"
+          disabled="{{automationEventClearing || automationEventBusyTarget}}"
+          bindtap="acknowledgeDismissibleAutomationEvents"
+        >
+          全部收起
+        </button>
+        <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
+      </view>
+    </view>
+    <text wx:if="{{automationEventError}}" class="automation-error">{{automationEventError}}</text>
+    <view wx:for="{{automationEventItems}}" wx:key="id" class="automation-item {{item.eventType}}">
+      <view class="automation-item-main">
+        <view class="automation-item-title-row">
+          <text class="automation-item-title">{{item.titleText}}</text>
+          <text class="automation-item-status">{{item.statusText}}</text>
+        </view>
+        <text class="automation-item-summary">{{item.summaryText}}</text>
+        <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
+        <text class="automation-item-meta">{{item.metaText}}</text>
+      </view>
+      <button
+        class="automation-ack"
+        data-id="{{item.id}}"
+        data-event-ids="{{item.eventIdsText}}"
+        data-action="{{item.actionKind}}"
+        loading="{{item.busy}}"
+        disabled="{{automationEventClearing || automationEventBusyTarget || !item.canAct}}"
+        bindtap="acknowledgeAutomationEvent"
+      >
+        {{item.actionText}}
+      </button>
+    </view>
+  </view>
+
+    <view class="book-rebuild-entry ui-pressable" aria-role="button" bindtap="openBookRegeneration">重新整理书稿 <text>›</text></view>
 
     <view wx:if="{{!chapters.length}}" class="empty-state">
       <text>这本书还没有章节。</text>
@@ -217,7 +275,7 @@
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
-      >返回书稿</view>
+      ><text>返回书稿</text><text class="row-action-mark">›</text></view>
     </view>
   </view>
 </view>

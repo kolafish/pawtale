@@ -10,12 +10,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
 from app.config import get_settings
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
+from app.domain.memoir.types import (
+    MemoirBookPlanStatus,
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookOutput,
+    MemoirBookPlanChapter,
+    MemoirCompletionIssue,
+    MemoirEditingJob,
+)
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
-from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
+from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, completion_issues, editing_jobs
+from app.services.memoir.book_output_snapshots import (
+    legacy_chapter_version_needs_upgrade,
+    load_book_plan_drafts,
+    protected_legacy_chapter_version,
+    readable_chapter_versions,
+)
+from app.services.memoir.book_output_versions import load_latest_book_output_version
+from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -55,6 +75,54 @@ async def schedule_book_draft(db: AsyncSession, *, project_id: str, source: str 
     )
 
 
+async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
+    """Requeue completed drafts that predate the nonblocking editorial policy."""
+    project_ids = (await db.scalars(
+        select(MemoirCompletionIssue.project_id)
+        .where(
+            MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+            MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+            MemoirCompletionIssue.issue_type.not_in(completion_issues.BLOCKING_BOOK_ISSUE_TYPES),
+        )
+        .distinct()
+    )).all()
+    scheduled = 0
+    for project_id in project_ids:
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+        if output is None:
+            continue
+        latest = await load_latest_book_output_version(db, output_id=output.id)
+        if latest is None:
+            continue
+        plan = await load_book_plan_drafts(db, project_id=project_id)
+        if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+            continue
+        included = included_book_chapters(plan)
+        blocked = await completion_issues.open_blocking_book_chapter_ids(
+            db, project_id=project_id, all_chapter_ids=(chapter.id for chapter in included),
+        )
+        safe_readable = {
+            chapter.id for chapter, _ in readable_chapter_versions(plan, allow_partial=True)
+            if chapter.id not in blocked
+        }
+        stored = {
+            item.get("chapter_id") for item in (latest.chapter_snapshot_json or [])
+            if isinstance(item, dict)
+        }
+        if not (safe_readable - stored or stored & blocked):
+            continue
+        job = await db.scalar(select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        ).order_by(MemoirEditingJob.updated_at.desc()).limit(1))
+        if job is None or job.status != MemoirEditingJobStatus.SUCCEEDED.value:
+            continue
+        await schedule_book_draft(db, project_id=project_id, source="assembly_policy")
+        scheduled += 1
+    await db.commit()
+    return scheduled
+
+
 async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
     project_id = job.project_id
     progress = DraftProgress.model_validate(job.result_json or {})
@@ -88,10 +156,33 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         )
     ).all()
     progress.chapters = {chapter.id: progress.chapters.get(chapter.id, ChapterProgress()) for chapter in chapters}
-    retry = (job.payload_json or {}).get("source") == "retry"
+    source = (job.payload_json or {}).get("source")
+    retry = source == "retry"
+    previous_draft_ids = {chapter_id: item.draft_version_id for chapter_id, item in progress.chapters.items()}
+    readable = set()
+    legacy_upgrade_pending = False
     for chapter in chapters:
         chapter_id = chapter.id
         state = progress.chapters[chapter_id]
+        state.draft_version_id = None
+        latest = await chapter_generation.latest_chapter_draft_version(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+        legacy_upgrade = legacy_chapter_version_needs_upgrade(latest)
+        if legacy_upgrade:
+            legacy_upgrade_pending = True
+            draft = await db.scalar(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id == chapter_id,
+                )
+            )
+            if protected_legacy_chapter_version(draft, latest):
+                # A confirmed or manually edited flat draft remains readable
+                # while its structured rewrite waits for review.
+                readable.add(chapter_id)
         try:
             context = await chapter_generation.load_chapter_generation_context(
                 db, project_id=project_id, chapter_id=chapter_id
@@ -102,8 +193,13 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             state.status, state.error_message = "needs_material", str(exc.detail)
             continue
         state.input_signature = context.input_signature
-        latest = await chapter_generation.latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
-        if chapter_generation.chapter_draft_is_current(context, latest):
+        if chapter_generation.chapter_draft_sources_still_included(context, latest):
+            readable.add(chapter_id)
+            state.draft_version_id = latest.id
+        if (
+            chapter_generation.chapter_draft_is_current(context, latest)
+            and chapter_generation.chapter_draft_render_policy_current(context, latest)
+        ):
             state.status, state.error_message = "ready", ""
             state.draft_version_id = latest.id
             continue
@@ -128,10 +224,13 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             ("needs_review" if child.get("outcome") == "needs_review" else "needs_input")
             if child["status"] == "succeeded" else child["status"]
         )
+        if child.get("outcome") == "stale":
+            # The next poll retries against the latest version and material.
+            state.status = "pending"
         state.error_message = str(child.get("error_message") or "")
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
-    readable = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
+    current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -145,25 +244,33 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
     progress.stage = "partial_ready" if readable else "needs_attention"
-    if readable and len(readable) == len(progress.chapters):
-        review_signature = semantic_json_signature({"output_version_id": progress.output_version_id,
-            "chapters": {key: item.draft_version_id for key, item in progress.chapters.items()}})
+    if current and len(current) == len(progress.chapters):
+        policy_only = source == "assembly_policy" and all(
+            previous_draft_ids.get(chapter_id) == item.draft_version_id
+            for chapter_id, item in progress.chapters.items()
+        )
+        if policy_only:
+            # Reassembling unchanged chapters must not supersede unanswered decisions.
+            progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
+        else:
+            review_signature = semantic_json_signature({"output_version_id": progress.output_version_id,
+                "chapters": {key: item.draft_version_id for key, item in progress.chapters.items()}})
 
-        async def record_review(child: MemoirEditingJob) -> None:
-            progress.review_job_id = child.id
-            job.result_json = progress.model_dump(mode="json")
-            db.add(job)
+            async def record_review(child: MemoirEditingJob) -> None:
+                progress.review_job_id = child.id
+                job.result_json = progress.model_dump(mode="json")
+                db.add(job)
 
-        review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
-            req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry,
-            on_enqueued=record_review)
-        progress.review_status = str(review["status"])
-        progress.review_error = str(review.get("error_message") or "")
-        if progress.review_status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
-            progress.stage = "reviewing_book"
-            return _waiting(job, progress)
-        progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
-    if progress.preserved_manual or progress.omitted_chapter_ids:
+            review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
+                req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry,
+                on_enqueued=record_review)
+            progress.review_status = str(review["status"])
+            progress.review_error = str(review.get("error_message") or "")
+            if progress.review_status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
+                progress.stage = "reviewing_book"
+                return _waiting(job, progress)
+            progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
+    if legacy_upgrade_pending or progress.preserved_manual or progress.omitted_chapter_ids:
         progress.stage = "needs_attention"
     return EditingJobResult(result_json=progress.model_dump(mode="json"))
 

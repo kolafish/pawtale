@@ -62,7 +62,6 @@ test("chapter completion API exposes workspace, section revision workbench, prep
     getMemoirChapterSectionRevisionJob,
     getMemoirChapterSectionRevisionProposal,
     getMemoirChapterSectionRegenerationJob,
-    moveMemoirChapterMaterial,
     placeMemoirChapterMaterial,
     regenerateMemoirChapterSections,
   } = require("../services/memoir-chapter-workspace-api.ts");
@@ -104,7 +103,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   await dismissMemoirChapterSectionRevision(
     "project/1", "chapter/1", "section/1", "proposal/1",
   );
-  await moveMemoirChapterMaterial("project/1", "utterance/1", "section/2");
+  await placeMemoirChapterMaterial("project/1", "utterance/1", { target_section_id: "section/2" });
   await placeMemoirChapterMaterial("project/1", "utterance/1", {
     target_chapter_id: "chapter/1",
     new_section_title: "新的小节",
@@ -127,7 +126,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/section-regeneration-jobs");
   assert.deepEqual(apiRequests[1].data, {
     expected_sections: [{ id: "section/1", version: 3 }],
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[1].timeout, 60000);
   assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/section-regeneration-jobs/current");
@@ -139,7 +138,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
     operation: "plan",
     proposal_id: null,
     feedback: "写得更平实一些",
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[4].timeout, 60000);
   assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/draft-sections/section%2F1/revision/jobs/current");
@@ -150,7 +149,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   assert.equal(apiRequests[7].method, "POST");
   assert.equal(apiRequests[8].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/draft-sections/section%2F1/revision/proposals/proposal%2F1/dismiss");
   assert.equal(apiRequests[8].method, "POST");
-  assert.equal(apiRequests[9].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/move");
+  assert.equal(apiRequests[9].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/place");
   assert.deepEqual(apiRequests[9].data, { target_section_id: "section/2" });
   assert.equal(apiRequests[9].timeout, 60000);
   assert.equal(apiRequests[10].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/place");
@@ -162,7 +161,7 @@ test("chapter completion API exposes workspace, section revision workbench, prep
   assert.equal(apiRequests[11].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/jobs");
   assert.deepEqual(apiRequests[11].data, {
     operation: "rewrite",
-    ai_model: "deepseek-v4-flash",
+    ai_model: "deepseek-flash",
   });
   assert.equal(apiRequests[11].timeout, 60000);
   assert.equal(apiRequests[12].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/jobs/current");

@@ -27,6 +27,7 @@ function resetMemoirApiModules() {
 
 function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao-seed-2-0-pro-260215" } = {}) {
   global.wx = {
+    ...require("./file-system-mock").fileSystemWx(),
     getStorageSync(key) {
       if (key === "pawtale_backend_config") {
         return {
@@ -56,6 +57,12 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         return;
       }
       let data = samplePlan("confirmed");
+      if (options.url.includes("/book-output/export/info?")) {
+        const params = new URL(options.url).searchParams;
+        data = { version_id: params.get("version_id"), cache_key: require("node:crypto").createHash("sha256").update(options.url).digest("hex"), filename: "写给他的话_阅读版_v28.pdf", ready: false };
+        options.success({ statusCode: 200, data, header: {} });
+        return;
+      }
       if (
         options.url.endsWith("/draft/tts")
         || (options.url.includes("/draft/sections/") && options.url.endsWith("/tts"))
@@ -80,7 +87,7 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
     },
     downloadFile(options) {
       downloads.push(options);
-      options.success({ statusCode: 200, tempFilePath: "/tmp/book.pdf", header: {}, errMsg: "downloadFile:ok" });
+      options.success({ statusCode: 200, tempFilePath: `${wx.env.USER_DATA_PATH}/download.pdf`, header: {}, errMsg: "downloadFile:ok" });
     },
   };
 }
@@ -541,19 +548,29 @@ test("share video APIs encode routes and download preview with session cookie", 
   };
   resetMemoirApiModules();
   const {
+    createMemoirShareVideoCandidateJob,
     createMemoirTranscriptShareVideoJob,
     downloadMemoirShareVideoJob,
+    downloadMemoirShareVideoThumbnail,
+    deleteMemoirShareVideoJob,
     getMemoirShareVideoJob,
     getMemoirTranscriptShareVideoContext,
   } = require("../services/memoir-transcript-api.ts");
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
   const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
+    videoStyle: "illustrated",
     backgroundStyle: "gouache",
     backgroundMode: "smart_multi",
   });
   const detail = await getMemoirShareVideoJob("job/1");
+  await createMemoirShareVideoCandidateJob("project/1", "candidate/1", {
+    videoStyle: "uploaded",
+    customBackgroundAssetId: "photo-1",
+  });
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
+  await downloadMemoirShareVideoThumbnail("job/1");
+  await deleteMemoirShareVideoJob("job/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
@@ -571,6 +588,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     start_char: 0,
     end_char: 13,
     ai_model: "deepseek-v4-pro",
+    video_style: "illustrated",
     background_style: "gouache",
     background_mode: "smart_multi",
   });
@@ -579,6 +597,15 @@ test("share video APIs encode routes and download preview with session cookie", 
     "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1",
   );
   assert.equal(apiRequests[2].method, "GET");
+  assert.equal(apiRequests[3].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/share-video-candidates/candidate%2F1/create-video");
+  assert.deepEqual(apiRequests[3].data, {
+    ai_model: "deepseek-v4-pro", video_style: "uploaded", custom_background_asset_id: "photo-1",
+  });
+  assert.equal(apiRequests[4].url,
+    "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1");
+  assert.equal(apiRequests[4].method, "DELETE");
+  assert.deepEqual(apiRequests[4].data, { confirm: true });
   assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
   assert.equal(context.background_modes[2].value, "smart_multi");
   assert.equal(created.status, "succeeded");
@@ -587,6 +614,8 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.equal(downloads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job-1/download");
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(downloads[0].timeout, 60000);
+  assert.equal(downloads[1].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1/download?variant=thumbnail");
+  assert.equal(downloads[1].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 
@@ -668,8 +697,14 @@ test("share video custom background upload and preview use backend session", asy
   });
   assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(uploads[0].timeout, 60000);
+  const { uploadMemoirImageAsset } = require("../services/memoir-book-api.ts");
+  assert.equal((await uploadMemoirImageAsset("project/1", "/tmp/cover.png")).id, "asset-1");
+  assert.equal(uploads[1].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets");
+  assert.equal(uploads[1].filePath, "/tmp/cover.png");
+  assert.equal(uploads[1].name, "file");
+  assert.equal(uploads[1].header.Cookie, "pawtale_session=abc");
   assert.equal(
-    downloads[0].url,
+    downloads[0].url.split("&cache_key=")[0],
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
@@ -696,9 +731,8 @@ test("book service APIs encode backend routes and selected AI model", async () =
   );
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },
-    { call: () => api.generateMemoirBookPlan("project/1", { max_chapters: 6 }), method: "POST", url: `${base}/book-plan/generate`, data: { max_chapters: 6, ai_model: selectedModel } },
+    { call: () => api.generateMemoirBookPlan("project/1"), method: "POST", url: `${base}/book-plan/generate`, data: { ai_model: selectedModel } },
     { call: () => api.confirmMemoirBookPlan("project/1", { title: "目录", chapters: [] }), method: "PUT", url: `${base}/book-plan`, data: { title: "目录", chapters: [] } },
-    { call: () => api.updateMemoirBookPlan("project/1", { title: "目录", chapters: [] }), method: "PATCH", url: `${base}/book-plan`, data: { title: "目录", chapters: [] } },
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },
@@ -709,6 +743,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.createMemoirBookChapterDraftSectionTTS("project/1", "chapter/1", "section/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/sections/section%2F1/tts`, timeout: 600000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 600000 },
     { call: () => api.createMemoirBookOutputTTS("project/1", {}), method: "POST", url: `${base}/book-output/tts`, timeout: 600000 },
+    { call: () => api.prepareMemoirBookAudio("project/1", { version_id: "version/1", start_index: 2 }), method: "POST", url: `${base}/book-output/tts/plan`, timeout: 30000, data: { version_id: "version/1", start_index: 2 } },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
     { call: () => api.getMemoirBookCompletionOverview("project/1"), method: "GET", url: `${narrativeBase}/book-completion/overview` },
     { call: () => api.enqueueMemoirBookReviewJob("project/1", true), method: "POST", url: `${narrativeBase}/book-review/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },
@@ -731,6 +766,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },
+    { call: () => api.getMemoirBookEditorialCopyJobs("project/1"), method: "GET", url: `${base}/book-output/editorial-copy/regenerate/jobs` },
   ];
 
   for (const apiCase of cases) {
@@ -766,18 +802,25 @@ test("book output export download encodes route and session cookie", async () =>
 
   const path = await downloadMemoirBookOutputExport("project/1", "pdf", "version/1");
   await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false);
+  await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false, {
+    custom_layout: { font_family: "sans", font_scale: "large", line_spacing: "relaxed", page_margin: "wide" },
+  });
 
   const baseExportUrl = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export";
-  assert.equal(path, "/tmp/book.pdf");
+  assert.ok(path.endsWith("/写给他的话_阅读版_v28.pdf"));
   assert.equal(
-    downloads[0].url,
+    downloads[0].url.split("&cache_key=")[0],
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=true&version_id=version%2F1`,
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(downloads[0].timeout, 300000);
   assert.equal(
-    downloads[1].url,
+    downloads[1].url.split("&cache_key=")[0],
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&version_id=version%2F1`,
+  );
+  assert.equal(
+    downloads[2].url.split("&cache_key=")[0],
+    `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&preview_font_family=sans&preview_font_scale=large&preview_line_spacing=relaxed&preview_page_margin=wide&version_id=version%2F1`,
   );
   delete global.wx;
 });

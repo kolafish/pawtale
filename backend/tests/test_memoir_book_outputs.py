@@ -1,10 +1,12 @@
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
@@ -26,16 +28,25 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirImageAsset,
+    MemoirBookImagePlacement,
     MemoirSection,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.services.memoir import book_outputs
+from app.models.users import User
+from app.services.memoir import book_outputs, book_output_export_cache
+from app.services import content_storage
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
-from app.services.memoir.book_output_manuscript import formal_book_title, manuscript_from_snapshot
+from app.services.memoir.book_output_manuscript import (
+    apply_editorial_copy,
+    formal_book_title,
+    manuscript_from_snapshot,
+    updated_manuscript_payload,
+)
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -44,7 +55,9 @@ from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
     add_test_section_materials,
     create_test_book_plan_with_chapters,
+    create_test_voice_transcript,
     ensure_mobile_memoir_project,
+    memoir_source_ref,
     run_test_editing_job,
 )
 
@@ -82,7 +95,7 @@ class FakeBookTTS:
         )
 
 
-class FakeEditorialAI:
+class FakeEditorialAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-editorial-model"
 
@@ -130,7 +143,7 @@ class FakeEditorialAI:
         """
 
 
-class FakeTitleAI:
+class FakeTitleAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-title-model"
 
@@ -150,7 +163,7 @@ class FakeTitleAI:
         return '{"suggestions": ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]}'
 
 
-class FakeTemplateCopyAI:
+class FakeTemplateCopyAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-template-copy-model"
 
@@ -319,8 +332,8 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
 
     cleaned = sanitize_manuscript_payload(title="我的小时候", manuscript=manuscript)
 
-    assert cleaned["profile"]["title"] == "回望这一生"
-    assert cleaned["profile"]["subtitle"] == "余晋口述回忆录"
+    assert cleaned["profile"]["title"] == "我的小时候"
+    assert cleaned["profile"]["subtitle"] == "回望这一生"
     assert "爷爷主题回忆录" not in cleaned["front_matter"][1]["content"]
     assert "这一章主要记录" not in cleaned["chapters"][0]["intro"]
     assert "从口述内容看" not in cleaned["chapters"][1]["intro"]
@@ -330,6 +343,143 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
     assert cleaned["back_matter"]["version_note"]["content"] == "本书正文采用适合阅读的整理版表达。原始口述材料已保留，便于家人日后继续核对、补充和修订。"
     assert cleaned["back_matter"]["source_appendix"]["title"] == "口述片段"
     assert cleaned["render_settings"]["back_cover_quote"] == "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+
+
+@pytest.fixture
+def release_quote_snapshot():
+    # Fictional narration whose exported 81/46-character quotes ended mid-sentence.
+    narration = (
+        "这是发布测试用的虚构故事。我小时候住在四川成都，7岁那年，奶奶每天早晨带我去河边散步。"
+        "有一天突然下大雨，奶奶把她的蓝色雨衣披在我身上，自己淋湿了。"
+        "回到家以后，她给我煮了一碗热汤面。从那以后，我一直记得她照顾我的样子。"
+    )
+    return [{
+        "chapter_id": "release-chapter",
+        "chapter_title": "奶奶的蓝色雨衣",
+        "content": narration,
+        "source_refs": [{"utterance_id": "release-utterance", "transcript_version_id": "release-transcript", "quote": narration}],
+    }]
+
+
+def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
+
+    assert manuscript is not None
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.text == narration[:73]
+    assert quote.source == "original_quote"
+    assert quote.source_ref_ids == ["release-utterance"]
+    assert manuscript.chapters[0].source_refs[0].transcript_version_id == "release-transcript"
+    assert manuscript.render_settings.back_cover_quote == narration[:43]
+
+    payload = manuscript.model_dump(mode="json")
+    payload["render_settings"]["back_cover_quote"] = ""
+    regenerated = sanitize_manuscript_payload(title="发布手测", manuscript=payload)
+    assert regenerated["render_settings"]["back_cover_quote"] == narration[:43]
+
+
+def test_release_quote_skips_source_without_a_complete_sentence_in_budget(release_quote_snapshot):
+    chapter = release_quote_snapshot[0]
+    chapter["source_refs"][0]["quote"] = chapter["content"].replace("。", "，")
+    chapter["source_refs"].append({"utterance_id": "short-source", "quote": "奶奶把蓝色雨衣披在我身上。"})
+    manuscript = manuscript_from_snapshot(title="发布手测", content=chapter["content"], snapshot=release_quote_snapshot)
+
+    assert manuscript is not None
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.text == "奶奶把蓝色雨衣披在我身上。"
+    assert quote.source_ref_ids == ["short-source"]
+
+
+def test_release_quote_metadata_update_preserves_manual_text(release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    old_chapter_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover_quote = narration[:45].rstrip("，。；、,. ") + "。"
+    assert len(old_chapter_quote) == 81
+    assert len(old_back_cover_quote) == 46
+    manuscript = manuscript_from_snapshot(
+        title="发布手测", content=narration, snapshot=release_quote_snapshot,
+        metadata={"back_cover_quote": old_back_cover_quote},
+    )
+    assert manuscript is not None
+    manuscript.chapters[0].pull_quotes[0].text = old_chapter_quote
+    manuscript.chapters[0].pull_quotes[0].source = "manual"
+    updated = updated_manuscript_payload(
+        title="发布手测", stored=manuscript.model_dump(mode="json"), content=narration,
+        snapshot=release_quote_snapshot, cover_style_value=None, metadata_patch={"subtitle": "自定副标题"},
+    )
+
+    assert updated["chapters"][0]["pull_quotes"][0]["text"] == old_chapter_quote
+    assert updated["chapters"][0]["pull_quotes"][0]["source"] == "manual"
+    assert updated["render_settings"]["back_cover_quote"] == old_back_cover_quote
+
+
+async def test_release_quote_regeneration_keeps_complete_sentences_and_selected_targets(release_quote_snapshot, monkeypatch):
+    narration = release_quote_snapshot[0]["content"]
+    fake_ai = FakeEditorialAI()
+
+    async def provider_response(*args, **kwargs):
+        return json.dumps({
+            "chapter_intros": [{"chapter_id": "C1", "pull_quote": narration, "pull_quote_source_ref_id": "M1"}],
+            "back_cover_quote": narration,
+        }, ensure_ascii=False)
+
+    monkeypatch.setattr(fake_ai, "_call_llm", provider_response)
+    copy = await generate_manuscript_editorial_copy(
+        title="发布手测", snapshot=release_quote_snapshot, ai_model="fake-model", ai_client=fake_ai,
+        targets=["pull_quotes", "back_cover_quote"],
+    )
+    assert copy is not None
+    assert copy.chapter_intros[0].pull_quote == narration[:90]
+    assert copy.chapter_intros[0].pull_quote_source_ref_id == "release-utterance"
+    assert copy.back_cover_quote == narration[:43]
+
+    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
+    assert manuscript is not None
+    manuscript.chapters[0].pull_quotes[0].text = "手工保留的摘录"
+    manuscript.chapters[0].pull_quotes[0].source = "manual"
+    apply_editorial_copy(manuscript, copy, targets={"back_cover_quote"}, chapter_ids=set())
+    assert manuscript.render_settings.back_cover_quote == narration[:43]
+    assert manuscript.chapters[0].pull_quotes[0].text == "手工保留的摘录"
+    apply_editorial_copy(manuscript, copy, targets={"pull_quotes"}, chapter_ids={"release-chapter"})
+    assert manuscript.chapters[0].pull_quotes[0].text == narration[:90]
+    assert manuscript.chapters[0].pull_quotes[0].source_ref_ids == ["release-utterance"]
+
+
+@pytest.mark.parametrize("has_complete_sentence", [True, False])
+def test_release_quote_cleanup_repairs_only_proven_automatic_history(release_quote_snapshot, has_complete_sentence):
+    narration = release_quote_snapshot[0]["content"]
+    if not has_complete_sentence:
+        narration = narration.replace("。", "，")
+        release_quote_snapshot[0]["source_refs"][0]["quote"] = narration
+    old_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover = narration[:45].rstrip("，。；、,. ") + "。"
+    manuscript = manuscript_from_snapshot(
+        title="发布手测", content=narration, snapshot=release_quote_snapshot,
+        metadata={"back_cover_quote": old_back_cover},
+    )
+    assert manuscript is not None
+    stored = manuscript.model_dump(mode="json")
+    chapter = stored["chapters"][0]
+    chapter["source_refs"].append({"utterance_id": "literal-source", "quote": old_quote + "这句话本来就这样说。"})
+    chapter["pull_quotes"] = [
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "manual", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "editorial_generated", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["unknown-source"]},
+        {"text": old_quote + "自定说明", "source": "original_quote", "source_ref_ids": ["release-utterance"]},
+        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["literal-source"]},
+    ]
+
+    cleaned = sanitize_manuscript_payload(title="发布手测", manuscript=stored)
+
+    assert [quote["text"] for quote in cleaned["chapters"][0]["pull_quotes"]] == (
+        [narration[:73]] if has_complete_sentence else []
+    ) + [old_quote, old_quote, old_quote, old_quote + "自定说明", old_quote]
+    if has_complete_sentence:
+        assert cleaned["chapters"][0]["pull_quotes"][0]["source_ref_ids"] == ["release-utterance"]
+    assert cleaned["render_settings"]["back_cover_quote"] == old_back_cover
+    assert stored["chapters"][0]["pull_quotes"][0]["text"] == old_quote
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -470,6 +620,45 @@ async def _seed_confirmed_book_output(test_db, *, project_id: str) -> MemoirBook
     return version
 
 
+async def test_release_quote_normal_assembly_repairs_reused_original_only(client, test_db, release_quote_snapshot):
+    narration = release_quote_snapshot[0]["content"]
+    old_quote = narration[:80].rstrip("，。；、,. ") + "。"
+    old_back_cover = narration[:45].rstrip("，。；、,. ") + "。"
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id, chapter_id=chapters[0].id,
+        utterance_id="release-utterance", quote=narration,
+    )
+    await test_db.commit()
+    previous = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    payload = json.loads(json.dumps(previous.manuscript_json))
+    payload["chapters"][0]["pull_quotes"] = [
+        {"text": old_quote, "source": source, "source_ref_ids": ["release-utterance"]}
+        for source in ("original_quote", "manual", "editorial_generated")
+    ]
+    payload["render_settings"]["back_cover_quote"] = old_back_cover
+    previous.manuscript_json = payload
+    draft_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.chapter_id == chapters[0].id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert draft_version is not None
+    draft_version.content += "正常整理发布测试说明。"
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200
+    current = await test_db.get(MemoirBookOutputVersion, assembled.json()["output_version_id"])
+    assert current is not None and current.id != previous.id
+    quotes = current.manuscript_json["chapters"][0]["pull_quotes"]
+    assert [quote["text"] for quote in quotes] == [narration[:73], old_quote, old_quote]
+    assert [quote["source"] for quote in quotes] == ["original_quote", "manual", "editorial_generated"]
+    assert current.manuscript_json["render_settings"]["back_cover_quote"] == old_back_cover
+    assert previous.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == old_quote
+
+
 async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
         "/api/memoir/projects/project-1/book-output/assemble",
@@ -477,6 +666,78 @@ async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.ci_smoke
+async def test_admin_reads_other_users_memoir_book_without_write_access(client, test_db):
+    narration = "我小时候常在外婆家的院子里晒太阳。"
+    material = await create_test_voice_transcript(client, test_db, narration)
+    project_id = material["session"]["project_id"]
+    plan, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        title="外婆的回忆录",
+        chapter_titles=["外婆家的童年"],
+        source_refs_by_chapter=[[memoir_source_ref(material)]],
+        draft_contents=[narration],
+    )
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}"
+    paths = {
+        "plan": f"{base}/book-plan",
+        "draft": f"{base}/book-plan/chapters/{chapters[0].id}/draft",
+        "output": f"{base}/book-output",
+        "version": f"{base}/book-output/versions/{version.id}",
+        "export": f"{base}/book-output/export?format=txt&version_id={version.id}",
+        "export_info": f"{base}/book-output/export/info?format=txt&version_id={version.id}",
+    }
+    owner_responses = {}
+    for key, path in paths.items():
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        owner_responses[key] = response
+
+    assert owner_responses["plan"].json()["id"] == plan.id
+    section = owner_responses["plan"].json()["chapters"][0]["sections"][0]
+    assert section["materials"][0]["utterance_id"] == material["utterance_id"]
+    draft_section = owner_responses["draft"].json()["latest_version"]["sections"][0]
+    assert draft_section["section_id"] == section["id"]
+    assert draft_section["content"] == narration
+    assert owner_responses["output"].json()["latest_version"]["id"] == version.id
+    assert owner_responses["version"].json()["id"] == version.id
+    assert narration in owner_responses["export"].text
+    assert "attachment" in owner_responses["export"].headers["content-disposition"]
+
+    registration = await client.post(
+        "/api/auth/register",
+        json={"email": "other-reader@example.com", "password": "password123"},
+    )
+    assert registration.status_code == 201
+    reader = await test_db.get(User, registration.json()["user"]["id"])
+    assert reader is not None and reader.role == "user"
+    for path in paths.values():
+        response = await client.get(path)
+        assert response.status_code == 404, response.text
+
+    reader.role = "admin"
+    await test_db.commit()
+    for key, path in paths.items():
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        assert response.content == owner_responses[key].content
+
+    for path, payload in (
+        (
+            f"{base}/book-plan",
+            {
+                "title": "管理员尝试修改",
+                "chapters": [{"id": chapters[0].id, "title": chapters[0].title}],
+            },
+        ),
+        (f"{base}/book-output", {"title": "管理员尝试修改"}),
+    ):
+        response = await client.patch(path, json=payload)
+        assert response.status_code == 404, response.text
 
 
 async def test_book_output_requires_structured_small_sections(test_db, client):
@@ -555,7 +816,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     manuscript = data["latest_version"]["manuscript"]
-    assert manuscript["schema_version"] == 2
+    assert manuscript["schema_version"] == 5
     assert manuscript["profile"]["template"] == "classic_family"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
@@ -624,9 +885,9 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
     assert response.status_code == 200
     data = response.json()
     assert len(data["suggestions"]) >= 3
-    assert "外婆的回忆录" in data["suggestions"]
-    assert "外婆口述回忆录" in data["suggestions"]
-    assert "外婆口述的回忆录" not in data["suggestions"]
+    assert "测试的回忆录" in data["suggestions"]
+    assert "测试口述回忆录" in data["suggestions"]
+    assert "测试口述的回忆录" not in data["suggestions"]
     assert all("外婆家的童年" not in title for title in data["suggestions"])
     assert all("主题" not in title for title in data["suggestions"])
 
@@ -668,6 +929,359 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert "仅供家人保存与阅读" not in latest["manuscript"]["front_matter"][1]["content"]
     assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
     assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
+    project = await test_db.get(Project, project_id)
+    assert project is not None
+    assert project.title == "外婆慢慢说"
+
+
+async def test_book_manuscript_design_saves_and_preview_does_not_change_selection(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    selected = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={
+            "manuscript_template": "warm_journal",
+            "cover_style": "navy_gilt",
+            "custom_layout": {
+                "font_family": "sans",
+                "font_scale": "large",
+                "line_spacing": "relaxed",
+                "page_margin": "wide",
+            },
+        },
+    )
+    assert selected.status_code == 200
+    version = selected.json()["latest_version"]
+    assert version["manuscript"]["schema_version"] == 5
+    assert version["manuscript"]["profile"]["template"] == "warm_journal"
+    assert version["manuscript"]["render_settings"]["custom_layout"] == {
+        "font_family": "sans",
+        "font_scale": "large",
+        "line_spacing": "relaxed",
+        "page_margin": "wide",
+    }
+
+    rendered_designs = []
+    render_export = book_outputs.render_book_output_export
+
+    def capture_rendered_design(**kwargs):
+        rendered_designs.append(kwargs["manuscript"])
+        return render_export(**kwargs)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", capture_rendered_design)
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_template=photo_memory"
+    )
+    custom_preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_font_family=serif&preview_font_scale=standard"
+        "&preview_line_spacing=compact&preview_page_margin=narrow"
+    )
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+
+    assert preview.status_code == 200
+    assert custom_preview.status_code == 200
+    assert preview.content.startswith(b"%PDF-")
+    assert custom_preview.content.startswith(b"%PDF-")
+    adjusted = rendered_designs[-1]
+    assert adjusted["profile"]["template"] == "warm_journal"
+    assert adjusted["render_settings"]["cover_style"] == "navy_gilt"
+    assert adjusted["render_settings"]["custom_layout"]["font_family"] == "serif"
+    assert adjusted["chapters"] == version["manuscript"]["chapters"]
+    assert current.status_code == 200
+    assert current.json()["latest_version"]["id"] == version["id"]
+    assert current.json()["latest_version"]["manuscript"]["profile"]["template"] == "warm_journal"
+    assert current.json()["latest_version"]["manuscript"]["render_settings"]["custom_layout"] == (
+        version["manuscript"]["render_settings"]["custom_layout"]
+    )
+
+    saved = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"custom_layout": {"font_family": "serif", "font_scale": "large"}},
+    )
+    assert saved.status_code == 200
+    saved_manuscript = saved.json()["latest_version"]["manuscript"]
+    assert saved_manuscript["profile"]["template"] == "warm_journal"
+    assert saved_manuscript["render_settings"]["cover_style"] == "navy_gilt"
+    assert saved_manuscript["render_settings"]["custom_layout"]["font_family"] == "serif"
+    assert saved_manuscript["chapters"] == version["manuscript"]["chapters"]
+
+
+async def test_new_manuscript_templates_pair_covers_without_saving_preview(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    cover = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"cover_style": "navy_gilt"},
+    )
+    assert cover.status_code == 200
+    current_version = cover.json()["latest_version"]
+    render_export = book_outputs.render_book_output_export
+    rendered_designs = []
+
+    def capture_rendered_design(**kwargs):
+        manuscript = kwargs["manuscript"]
+        rendered_designs.append(
+            (manuscript["profile"]["template"], manuscript["render_settings"]["cover_style"])
+        )
+        return render_export(**kwargs)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", capture_rendered_design)
+
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        preview = await client.get(
+            f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+            f"?format=pdf&preview_template={template}"
+        )
+        after_preview = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+        assert preview.status_code == 200
+        assert preview.content.startswith(b"%PDF-")
+        assert rendered_designs[-1] == (template, template)
+        assert after_preview.status_code == 200
+        assert after_preview.json()["latest_version"]["id"] == current_version["id"]
+        assert after_preview.json()["latest_version"]["manuscript"] == current_version["manuscript"]
+
+        selected = await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}/book-output",
+            json={"manuscript_template": template},
+        )
+        assert selected.status_code == 200
+        current_version = selected.json()["latest_version"]
+        assert current_version["manuscript"]["profile"]["template"] == template
+        assert current_version["manuscript"]["render_settings"]["cover_style"] == template
+
+    manual_cover = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"cover_style": "navy_gilt"},
+    )
+    assert manual_cover.status_code == 200
+    assert manual_cover.json()["latest_version"]["manuscript"]["profile"]["template"] == "modern_minimal"
+    assert manual_cover.json()["latest_version"]["manuscript"]["render_settings"]["cover_style"] == "navy_gilt"
+
+    reselected = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "modern_minimal"},
+    )
+    assert reselected.status_code == 200
+    assert reselected.json()["latest_version"]["manuscript"]["render_settings"]["cover_style"] == "modern_minimal"
+
+    explicit_cover = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "heritage_classic", "cover_style": "navy_gilt"},
+    )
+    assert explicit_cover.status_code == 200
+    assert explicit_cover.json()["latest_version"]["manuscript"]["profile"]["template"] == "heritage_classic"
+    assert explicit_cover.json()["latest_version"]["manuscript"]["render_settings"]["cover_style"] == "navy_gilt"
+
+    old_template = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "photo_memory"},
+    )
+    assert old_template.status_code == 200
+    assert old_template.json()["latest_version"]["manuscript"]["render_settings"]["cover_style"] == "navy_gilt"
+
+
+async def test_book_manuscript_design_rejects_unsupported_values(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "unknown"},
+    )
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?preview_template=custom&preview_page_margin=extreme"
+    )
+
+    assert update.status_code == 422
+    assert preview.status_code == 422
+
+    invalid_font = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"custom_layout": {"font_family": "kai"}},
+    )
+    invalid_preview_font = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?preview_font_family=kai"
+    )
+    assert invalid_font.status_code == 422
+    assert invalid_preview_font.status_code == 422
+
+
+async def test_book_manuscript_design_requires_structured_manuscript(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    version.content = "已有的纯文字正文"
+    version.chapter_snapshot_json = []
+    version.manuscript_json = {}
+    await test_db.commit()
+
+    update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"manuscript_template": "photo_memory"},
+    )
+    preview = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+        "?format=pdf&preview_template=photo_memory"
+    )
+
+    assert update.status_code == 400
+    assert preview.status_code == 400
+    assert update.json()["detail"] == "请先更新书稿，再选择版式"
+    assert preview.json()["detail"] == "请先更新书稿，再预览版式"
+
+
+async def test_book_manuscript_design_survives_new_book_assembly(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    project = await test_db.get(Project, project_id)
+    image = MemoirImageAsset(project_id=project_id, user_id=project.user_id,
+        status="ready", source_type="manual_upload", source_signature="uploaded-cover",
+        storage_path="projects/cover.jpg", width=600, height=800)
+    test_db.add(image)
+    await test_db.flush()
+    test_db.add(MemoirBookImagePlacement(project_id=project_id, image_asset_id=image.id, placement_type="cover", enabled=True))
+    await test_db.commit()
+    selected = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={
+            "manuscript_template": "warm_journal",
+            "custom_layout": {
+                "font_family": "sans",
+                "font_scale": "large",
+                "line_spacing": "compact",
+                "page_margin": "narrow",
+            },
+        },
+    )
+    assert selected.status_code == 200
+
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft)
+        .where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
+        .options(selectinload(MemoirBookChapterDraft.versions))
+    )
+    assert draft is not None
+    previous_draft_version = draft.versions[-1]
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapters[0].id,
+            version=previous_draft_version.version + 1,
+            content=previous_draft_version.content,
+            section_snapshot_json=previous_draft_version.section_snapshot_json,
+            material_snapshot_json=previous_draft_version.material_snapshot_json,
+            used_material_ids_json=previous_draft_version.used_material_ids_json,
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert current.status_code == 200
+    assert current.json()["latest_version"]["id"] == assembled.json()["output_version_id"]
+    manuscript = current.json()["latest_version"]["manuscript"]
+    assert manuscript["profile"]["template"] == "warm_journal"
+    assert manuscript["render_settings"]["cover_image"]["image_asset_id"] == image.id
+    assert manuscript["render_settings"]["custom_layout"] == {
+        "font_family": "sans",
+        "font_scale": "large",
+        "line_spacing": "compact",
+        "page_margin": "narrow",
+    }
+
+
+async def test_project_title_update_replaces_existing_book_output_title(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client, title="旧项目名称")
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}",
+        json={"title": "我的故事"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "我的故事"
+    output_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+    )
+    assert output_response.status_code == 200
+    output = output_response.json()
+    assert output["title"] == "我的故事"
+    assert output["latest_version"]["content"].startswith("我的故事\n\n目录")
+    assert output["latest_version"]["manuscript"]["profile"]["title"] == "我的故事"
+
+
+async def test_unchanged_titles_keep_book_audio_cache_and_version(client, test_db):
+    title = formal_book_title("外婆回忆录章节规划")
+    project_id = await ensure_mobile_memoir_project(client, title=title)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    primed = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": title}
+    )
+    assert primed.status_code == 200, primed.text
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    assert output is not None
+    latest_id = await test_db.scalar(
+        select(MemoirBookOutputVersion.id)
+        .where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+        .limit(1)
+    )
+    cache = {"cached_audio_file_id": "existing-audio"}
+    output.metadata_json = {**output.metadata_json, "book_tts": cache}
+    await test_db.commit()
+
+    project_update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}", json={"title": title}
+    )
+    assert project_update.status_code == 200, project_update.text
+    book_update = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": title}
+    )
+    assert book_update.status_code == 200, book_update.text
+    await test_db.refresh(output)
+    assert output.metadata_json["book_tts"] == cache
+    current_id = await test_db.scalar(
+        select(MemoirBookOutputVersion.id)
+        .where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+        .limit(1)
+    )
+    assert current_id == latest_id
+
+
+async def test_project_title_updates_book_output_before_first_version(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client, title="旧名称")
+    plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    output = MemoirBookOutput(
+        project_id=project_id,
+        plan_id=plan.id,
+        title="旧名称",
+        status=MemoirOutputStatus.DRAFT.value,
+    )
+    test_db.add(output)
+    await test_db.commit()
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}", json={"title": "新的名称"}
+    )
+    assert response.status_code == 200, response.text
+    await test_db.refresh(output)
+    assert output.title == "新的名称"
 
 
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
@@ -717,6 +1331,31 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     assert "本次生成目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
     assert "用户本次反馈：更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
     assert "chapter_summary: 这一章写外婆家的院子和童年生活。" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_editorial_copy_explains_empty_book_after_chapters_are_withheld(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    previous = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    test_db.add(MemoirBookOutputVersion(
+        output_id=previous.output_id,
+        project_id=project_id,
+        plan_id=plan.id,
+        version=previous.version + 1,
+        content="我的回忆录",
+        chapter_snapshot_json=[],
+        manuscript_json={},
+        created_by=MemoirCreatedBy.SYSTEM.value,
+    ))
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/editorial-copy/regenerate",
+        json={"targets": ["preface"]},
+    )
+    assert response.status_code == 409
+    assert "待确认事项" in response.json()["detail"]
+    assert "后台更新书稿后再重写" in response.json()["detail"]
 
 
 async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_background(
@@ -836,6 +1475,11 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
     assert invalid.json()["detail"] == "章首引语来源不属于当前章节"
 
 
+@pytest.fixture(autouse=True)
+def isolate_export_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(content_storage, "PROJECTS_DIR", tmp_path / "projects")
+
+
 async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -904,17 +1548,16 @@ async def test_book_output_export_deadline_returns_retryable_timeout(
         import time
 
         time.sleep(0.05)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
 
     monkeypatch.setattr(book_outputs, "render_book_output_export", slow_export)
 
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=(await test_db.get(Project, project_id)).user_id,
+        project_id=project_id, export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
     with pytest.raises(HTTPException) as exc_info:
-        await book_outputs.export_book_output_file(
-            test_db,
-            user_id=(await test_db.get(Project, project_id)).user_id,
-            project_id=project_id,
-            export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
-            timeout_seconds=0.01,
-        )
+        await book_outputs.export_book_output_file(prepared, timeout_seconds=0.01)
 
     assert exc_info.value.status_code == 504
     assert "请稍后重试" in str(exc_info.value.detail)
@@ -945,6 +1588,63 @@ async def test_mobile_memoir_book_output_exports_selected_version(client, test_d
     assert unchanged.status_code == 200
     assert unchanged.json()["content"] == first_version.content
     assert unchanged.json()["manuscript"] == first_version.manuscript_json
+
+
+async def test_partial_book_export_omits_empty_chapters_until_material_arrives(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["有讲述的章节", "尚未讲述的章节一", "尚未讲述的章节二"],
+        draft_contents=["这是用于发布回归的虚构正文。", None, None],
+    )
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="aa562d9f-393b-4272-b7f8-8f329bedc5a2",
+        quote="这是用于发布回归的虚构讲述。",
+    )
+    await test_db.commit()
+    loaded = await book_outputs.load_book_plan_drafts(test_db, project_id=project_id)
+    chapter = next(c for c in loaded.chapters if c.id == chapters[0].id)
+    refs = await plan_source_ref_dicts_by_chapter(test_db, loaded)
+    content, snapshot = book_outputs._compose_book_content(
+        title=plan.title, chapters=[(chapter, chapter.draft.versions[-1])],
+        source_refs_by_chapter=refs,
+    )
+    output = MemoirBookOutput(project_id=project_id, plan_id=plan.id, title=plan.title)
+    test_db.add(output)
+    await test_db.flush()
+    output_version = MemoirBookOutputVersion(
+        output_id=output.id, project_id=project_id, plan_id=plan.id,
+        version=1, content=content, chapter_snapshot_json=snapshot,
+    )
+    test_db.add(output_version)
+    chapters[1].title = "改名后的空章"
+    await test_db.commit()
+
+    current = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert current.status_code == 200
+    assert current.json()["is_stale"] is False
+    assert current.json()["stale_chapter_titles"] == []
+    assert current.json()["latest_version"]["content"] == content
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt"
+    )
+    assert exported.status_code == 200
+
+    await _add_output_source_link(
+        test_db, project_id=project_id, plan_id=plan.id,
+        chapter_id=chapters[1].id,
+        utterance_id="0e6a58f5-9c27-4db5-a87c-28c401a72f89",
+        quote="这是刚补进另一章的虚构讲述。",
+    )
+    await test_db.commit()
+    changed = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert changed.status_code == 200
+    assert changed.json()["is_stale"] is True
+    assert changed.json()["stale_chapter_titles"] == [chapters[1].title]
+    assert changed.json()["latest_version"]["id"] == output_version.id
 
 
 async def test_mobile_memoir_book_output_detects_stale_chapter_versions(client, test_db):
@@ -1221,6 +1921,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     tmp_path,
     monkeypatch,
 ):
+    register_memoir_editing_job_handlers()
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -1244,3 +1945,143 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     assert len(data["audio_file_durations_seconds"]) == data["chunk_count"]
     assert data["alignment_provider"] == "fake-tts"
     assert data["alignment"][0]["text_start"] == 0
+
+
+async def test_export_info_reuses_pdf_and_changes_with_effective_settings(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+    calls = []
+    original = book_outputs.render_book_output_export
+
+    def render(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    info = (await client.get(base + "/info?format=pdf")).json()
+    assert info["version_id"] == version.id
+    assert info["ready"] is False
+    assert "外婆的回忆录" in info["filename"]
+    assert info["filename"].endswith("_阅读版_v1.pdf")
+    first = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
+    again = await client.get(base + "?format=pdf")
+    assert first.status_code == again.status_code == 200
+    assert first.content == again.content
+    assert len(calls) == 1
+    assert (await client.get(base + "/info?format=pdf")).json()["ready"] is True
+    same = (await client.get(base + "/info?format=pdf&show_source_appendix=true")).json()
+    assert same["cache_key"] == info["cache_key"]
+    for query in ("layout=large_print", "show_source_appendix=false", "preview_template=modern_minimal"):
+        changed = (await client.get(base + "/info?format=pdf&" + query)).json()
+        assert changed["cache_key"] != info["cache_key"]
+        assert changed["ready"] is False
+    changed = await client.patch(f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": "新的书名"})
+    assert changed.status_code == 200
+    latest = (await client.get(base + "/info?format=pdf")).json()
+    assert latest["version_id"] != version.id
+    assert latest["cache_key"] != info["cache_key"]
+    historical = (await client.get(base + f"/info?format=pdf&version_id={version.id}")).json()
+    assert historical == {**info, "ready": True}
+    conflict = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
+    assert conflict.status_code == 409
+
+
+async def test_concurrent_export_and_timeout_retry_share_one_render(client, test_db, monkeypatch):
+    import time
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    owner = (await test_db.get(Project, project_id)).user_id
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=owner, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    calls = []
+
+    def slow_render(**kwargs):
+        calls.append(kwargs)
+        time.sleep(0.1)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", slow_render)
+    with pytest.raises(HTTPException) as error:
+        await book_outputs.export_book_output_file(prepared, timeout_seconds=0.01)
+    assert error.value.status_code == 504
+    results = await asyncio.gather(*(book_outputs.export_book_output_file(prepared) for _ in range(4)))
+    assert len(calls) == 1
+    assert all(result.content == results[0].content for result in results)
+
+
+async def test_failed_or_missing_pdf_can_be_regenerated(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    owner = (await test_db.get(Project, project_id)).user_id
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=owner, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    calls = []
+
+    def render(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("render failed")
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    with pytest.raises(RuntimeError, match="render failed"):
+        await book_outputs.export_book_output_file(prepared)
+    await book_outputs.export_book_output_file(prepared)
+    path = book_output_export_cache.export_cache_path(prepared, prepared.cache_key)
+    path.write_bytes(b"%PDF-truncated")
+    await book_outputs.export_book_output_file(prepared)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("interruption", ["timeout", "cancel"])
+async def test_project_deletion_waits_for_export_and_removes_the_pdf_cache(client, test_db, monkeypatch, interruption):
+    from threading import Event
+    from app.services.projects import core as project_core
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    project = await test_db.get(Project, project_id)
+    user = await test_db.get(User, project.user_id)
+    prepared = await book_outputs.prepare_book_output_export(
+        test_db, user_id=user.id, project_id=project_id,
+        export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+    )
+    started = Event()
+    release = Event()
+
+    def render(**kwargs):
+        started.set()
+        assert release.wait(5)
+        return book_outputs.ExportFile("book.pdf", "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", render)
+    export = asyncio.create_task(book_outputs.export_book_output_file(
+        prepared, timeout_seconds=0.02 if interruption == "timeout" else 5,
+    ))
+    assert await asyncio.to_thread(started.wait, 5)
+    if interruption == "cancel":
+        export.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await export
+    else:
+        with pytest.raises(HTTPException) as error:
+            await export
+        assert error.value.status_code == 504
+    deletion = asyncio.create_task(project_core.delete_project(test_db, project_id, user))
+    await asyncio.sleep(0.03)
+    assert not deletion.done()
+    release.set()
+    await deletion
+    assert not (content_storage.PROJECTS_DIR / project_id).exists()
+    with pytest.raises(HTTPException) as error:
+        await book_outputs.export_book_output_file(prepared)
+    assert error.value.status_code == 404
+    assert not (content_storage.PROJECTS_DIR / project_id).exists()

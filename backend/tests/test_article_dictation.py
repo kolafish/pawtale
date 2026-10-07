@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.models.users import User
+from app.routers import dictation_gateway
 from app.routers.projects import dictation as dictation_router
 from app.services.asr.gateway import VoiceGatewaySession
 from app.services.asr.streaming import StreamingASREvent
@@ -36,19 +37,28 @@ async def test_article_dictation_accepts_only_owned_article_document(
         return user
 
     class Lease:
+        released = False
+
         async def release(self):
+            if self.released:
+                return
+            self.released = True
             calls["released"] = True
+
+    lease = Lease()
 
     class CapacityManager:
         async def acquire(self, current_user_id, session_id):
             calls["capacity"] = (current_user_id, session_id)
-            return Lease()
+            return lease
 
     class GatewaySession:
         def __init__(self, **kwargs):
             calls["gateway"] = kwargs
 
         async def run(self):
+            await calls["gateway"]["on_stop"](None, "client_stop")
+            calls["released_before_stopped"] = lease.released
             calls["ran"] = True
 
     def create_asr(current_user_id, session_id):
@@ -56,9 +66,9 @@ async def test_article_dictation_accepts_only_owned_article_document(
         return object()
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
-    monkeypatch.setattr(dictation_router, "voice_gateway_capacity_manager", CapacityManager())
-    monkeypatch.setattr(dictation_router, "VoiceGatewaySession", GatewaySession)
-    monkeypatch.setattr(dictation_router, "create_realtime_volc_streaming_asr_client", create_asr)
+    monkeypatch.setattr(dictation_gateway, "voice_gateway_capacity_manager", CapacityManager())
+    monkeypatch.setattr(dictation_gateway, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(dictation_gateway, "create_realtime_volc_streaming_asr_client", create_asr)
 
     websocket = FakeWebSocket()
     await dictation_router.stream_article_dictation(
@@ -70,6 +80,7 @@ async def test_article_dictation_accepts_only_owned_article_document(
 
     assert websocket.accepted
     assert calls["ran"] and calls["released"]
+    assert calls["released_before_stopped"] is True
     assert calls["capacity"][0] == user_id
     assert calls["capacity"][1].startswith("article-dictation:")
     assert calls["gateway"]["diagnostics_context"] == {
@@ -79,6 +90,7 @@ async def test_article_dictation_accepts_only_owned_article_document(
     }
     assert "on_audio_frame" not in calls["gateway"]
     assert "on_asr_final" not in calls["gateway"]
+    assert calls["gateway"]["authorize_audio"] is None
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]
     assert not await dictation_router._article_document_is_available(

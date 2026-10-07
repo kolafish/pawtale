@@ -5,9 +5,7 @@ const test = require("node:test");
 
 const {
   assistantExpectsAnswer,
-  assistantIntentLabel,
   assistantPanelCopy,
-  assistantPrimaryIntent,
   assistantTranscriptState,
   canRequestFollowUp,
   countTextChars,
@@ -68,11 +66,8 @@ test("derives assistant panel state from transcript lines", () => {
   assert.equal(latestPersistedAssistantMessageId(lines), "message-assistant");
   assert.equal(visibleAssistantLine(lines, ""), assistantLine);
   assert.equal(visibleAssistantLine(lines, "message-assistant"), undefined);
-  assert.equal(assistantPrimaryIntent(assistantLine), "follow_up");
   assert.equal(assistantExpectsAnswer(assistantLine), true);
-  assert.equal(assistantIntentLabel("acknowledge", true), "小余帮您接着整理");
   assert.deepEqual(assistantPanelCopy(lines), {
-    assistantPromptLabel: "小余想听您讲讲",
     assistantLoadingText: "小余正在想一想",
     assistantEmptyText: "可以让小余根据刚才的内容接着问。",
   });
@@ -117,7 +112,6 @@ test("derives assistant transcript patch from lines and overrides generated assi
       transcriptLines: [userLine, assistantLine],
       latestTranscriptText: userLine.text,
       assistantPromptText: assistantLine.text,
-      assistantPromptLabel: "小余想听您讲讲",
       assistantLoadingText: "小余正在想一想",
       assistantEmptyText: "可以让小余根据刚才的内容接着问。",
       assistantExpectsAnswer: true,
@@ -169,7 +163,6 @@ test("derives assistant transcript patch from lines and overrides generated assi
 test("derives opening follow-up source before the first user line", () => {
   assert.equal(followUpSourceMessageId([]), "opening");
   assert.deepEqual(assistantPanelCopy([]), {
-    assistantPromptLabel: "小余想听您讲讲",
     assistantLoadingText: "小余正在准备第一句话",
     assistantEmptyText: "小余会先问一句，帮您开始讲。",
   });

@@ -5,9 +5,13 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
+from app.config import DEFAULT_AI_TEXT_MODEL
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
     MemoirAutomationEvent,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirSection,
@@ -16,7 +20,12 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
     MemoirTranscriptVersion,
 )
-from app.services.memoir import chapter_generation, section_regeneration, story_tree_growth
+from app.services.memoir import (
+    chapter_generation,
+    section_regeneration,
+    sections as memoir_sections,
+    story_tree_growth,
+)
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
@@ -32,7 +41,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeStoryGrowthAI:
+class FakeStoryGrowthAI(AITextServiceBase):
     provider_name = "fake"
     model_name = "fake-story-growth"
 
@@ -57,7 +66,7 @@ def test_section_structure_prompt_does_not_require_specific_titles():
     assert "避免用空泛" not in prompt
 
 
-class ReplayMaterialOrganizationAI:
+class ReplayMaterialOrganizationAI(AITextServiceBase):
     provider_name = "fake"
     model_name = "fake-section-organizer"
 
@@ -647,7 +656,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
                 "version": data["sections"][0]["version"],
             }
         ],
-        "ai_model": "deepseek-v4-flash",
+        "ai_model": DEFAULT_AI_TEXT_MODEL,
     }
 
     queued = await client.post(url, json=payload)
@@ -660,7 +669,7 @@ async def test_section_regeneration_job_reports_progress_and_deduplicates(
     assert state["status"] == "pending"
     assert state["material_count"] == 2
     assert state["batch_count"] == 1
-    assert state["requested_ai_model"] == "deepseek-v4-flash"
+    assert state["requested_ai_model"] == DEFAULT_AI_TEXT_MODEL
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -716,6 +725,35 @@ async def test_section_regeneration_job_can_be_cancelled_before_run(
     assert cancelled.json()["can_cancel"] is False
 
 
+async def test_running_regrouping_cannot_be_reported_as_a_new_consolidation(
+    client, test_db,
+):
+    project_id, chapters, _created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    url = f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/section-regeneration-jobs"
+    payload = {"expected_sections": [{
+        "id": data["sections"][0]["id"], "version": data["sections"][0]["version"],
+    }]}
+    other = MemoirSection(project_id=project_id, chapter_id=chapter_id,
+                          title="另一段回忆", sort_order=1)
+    test_db.add(other)
+    await test_db.commit()
+    payload["expected_sections"].append({"id": other.id, "version": other.version})
+    queued = await client.post(url, json=payload)
+    assert queued.status_code == 202, queued.text
+    job = await test_db.get(MemoirEditingJob, queued.json()["job_id"])
+    assert job is not None
+    job.status = "running"
+    await test_db.commit()
+
+    response = await client.post(url, json={**payload, "section_count_goal": "reduce"})
+    assert response.status_code == 409, response.text
+    assert "已有另一项小节整理任务" in response.json()["detail"]
+    await test_db.refresh(job)
+    assert job.payload_json["request"]["max_sections"] is None
+    assert job.payload_json["request"].get("section_count_goal") is None
+
+
 async def test_regenerate_chapter_sections_replays_current_material_organizer(
     client,
     test_db,
@@ -764,7 +802,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
                     "version": original_section["version"],
                 }
             ],
-            "ai_model": "deepseek-v4-flash",
+            "ai_model": DEFAULT_AI_TEXT_MODEL,
         },
     )
 
@@ -803,7 +841,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         for material in chapter_sections[0]["materials"]
     ] == [False, True]
     assert len(fake.prompts) == 2
-    assert requested_models == ["deepseek-v4-flash"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
     assert "先从全章视角设计" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert chapter_id not in fake.prompts[0]
@@ -822,6 +860,141 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     ]
     assert [section["title"] for section in untouched] == ["工作这些年"]
     assert "工作这些年" not in fake.prompts[0]
+
+
+async def test_section_consolidation_keeps_original_structure_when_ai_adds_sections(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, _created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    test_db.add(other)
+    await test_db.commit()
+    fake = FakeStoryGrowthAI({"sections": [
+        {"title": "第一组", "section_type": "event"},
+        {"title": "第二组", "section_type": "event"},
+    ]})
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+        ], "max_sections": 1},
+    )
+    assert response.status_code == 409, response.text
+    assert "原小节保持不变" in response.json()["detail"]
+    assert await test_db.get(MemoirSection, original["id"]) is not None
+    assert await test_db.get(MemoirSection, other.id) is not None
+    assert fake.calls == 1
+
+
+async def test_section_consolidation_lets_ai_choose_a_smaller_group_count(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    untouched = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="独立的旧小节", sort_order=2,
+    )
+    test_db.add_all([other, untouched])
+    await test_db.flush()
+    moved = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
+    ))
+    assert moved is not None
+    moved.section_id = other.id
+    moved.include_in_book = False
+    await test_db.commit()
+    fake = FakeStoryGrowthAI({"groups": [{
+        "target_section_id": "S2",
+        "source_section_ids": ["S1"],
+        "title": "山桃花里的相识",
+    }]})
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    url = f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/section-regeneration-jobs"
+    queued = await client.post(
+        url,
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+            {"id": untouched.id, "version": untouched.version},
+        ], "section_count_goal": "reduce"},
+    )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"]) is True
+    finally:
+        clear_editing_job_handlers()
+    response = await client.get(f"{url}/current")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "succeeded"
+    assert response.json()["section_count"] == 2
+    sections = (await client.get(f"/api/memoir/projects/{project_id}/sections")).json()["sections"]
+    current = [section for section in sections if section["chapter_id"] == chapter_id]
+    assert [section["id"] for section in current] == [original["id"], untouched.id]
+    assert current[0]["title"] == "山桃花里的相识"
+    assert {material["utterance_id"] for material in current[0]["materials"]} == {
+        created[0]["utterance_id"], created[1]["utterance_id"],
+    }
+    moved_after = next(material for material in current[0]["materials"]
+                       if material["utterance_id"] == created[1]["utterance_id"])
+    assert moved_after["id"] == moved.id
+    assert moved_after["include_in_book"] is False
+    assert (moved_after["assigned_by"], moved_after["assignment_reason"]) == (
+        "ai", "ai_section_merge",
+    )
+    assert len(fake.prompts) == 1
+    assert original["id"] not in fake.prompts[0]
+
+
+async def test_section_consolidation_preserves_original_when_no_merge_group(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(client, test_db)
+    chapter_id = chapters[0].id
+    original = data["sections"][0]
+    other = MemoirSection(
+        project_id=project_id, chapter_id=chapter_id,
+        title="另一段回忆", sort_order=1,
+    )
+    test_db.add(other)
+    await test_db.flush()
+    moved = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
+    ))
+    assert moved is not None
+    moved.section_id = other.id
+    await test_db.commit()
+    fake = FakeStoryGrowthAI({"groups": []})
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={"expected_sections": [
+            {"id": original["id"], "version": original["version"]},
+            {"id": other.id, "version": other.version},
+        ], "section_count_goal": "reduce"},
+    )
+    assert response.status_code == 409, response.text
+    assert "没有找到适合合并的现有小节" in response.json()["detail"]
+    assert await test_db.get(MemoirSection, original["id"]) is not None
+    assert await test_db.get(MemoirSection, other.id) is not None
+    assert len(fake.prompts) == 1
 
 
 async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choice(
@@ -1097,6 +1270,7 @@ async def test_section_update_rejects_stale_version(client, test_db):
     assert stale.status_code == 409
 
 
+@pytest.mark.db_independent
 @pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "chapter_existing", "delete_section"])
 async def test_story_growth_discards_decisions_changed_during_model_wait(
     client, test_db, monkeypatch, change,
@@ -1174,6 +1348,131 @@ async def _stopped_growth_job(client, test_db, project_id, text):
     return source, job
 
 
+async def test_story_growth_repairs_section_order_gap_before_creating_section(
+    client, test_db, monkeypatch,
+):
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    test_db.add(MemoirSection(
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        title="保留的旧小节",
+        sort_order=2,
+    ))
+    await test_db.commit()
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "照着教程做茄子饼失败的经历。",
+    )
+
+    async def decide(**_kwargs):
+        return [story_tree_growth.GrowthGroup(
+            utterance_ids=[source["utterance_id"]],
+            action="create_section",
+            chapter_id=chapters[0].id,
+            new_section_title="茄子饼失败的经历",
+        )]
+
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+
+    assert result.status.value == "succeeded"
+    chapter_sections = list((await test_db.scalars(
+        select(MemoirSection)
+        .where(MemoirSection.chapter_id == chapters[0].id)
+        .order_by(MemoirSection.sort_order)
+    )).all())
+    assert [section.sort_order for section in chapter_sections] == [0, 1, 2]
+    created = next(
+        section for section in chapter_sections
+        if section.title == "茄子饼失败的经历"
+    )
+    assert await test_db.scalar(select(MemoirSectionMaterial.id).where(
+        MemoirSectionMaterial.section_id == created.id,
+        MemoirSectionMaterial.utterance_id == source["utterance_id"],
+    ))
+
+
+async def test_delete_section_compacts_remaining_order(client, test_db):
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    for title in ("中间小节", "末尾小节"):
+        response = await client.post(
+            f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections",
+            json={"title": title},
+        )
+        assert response.status_code == 200, response.text
+
+    middle = await test_db.scalar(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+        MemoirSection.title == "中间小节",
+    ))
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    await memoir_sections.delete_section(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        section_id=middle.id,
+    )
+
+    remaining_orders = list((await test_db.scalars(
+        select(MemoirSection.sort_order)
+        .where(MemoirSection.chapter_id == chapters[0].id)
+        .order_by(MemoirSection.sort_order)
+    )).all())
+    assert remaining_orders == [0, 1]
+
+
+@pytest.mark.db_independent
+async def test_concurrent_section_creation_serializes_chapter_order(
+    client, test_db,
+):
+    import asyncio
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from app.schemas.memoir_sections import MemoirSectionMaterialPlacementRequest
+    from app.services.memoir.sections import place_material
+
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    sources = [
+        await create_test_voice_transcript(
+            client, test_db, text, project_id=project_id,
+        )
+        for text in ("第一次新讲述。", "第二次新讲述。")
+    ]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    session_factory = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async def create(source, title):
+        async with session_factory() as db:
+            return await place_material(
+                db,
+                user_id=user_id,
+                project_id=project_id,
+                utterance_id=source["utterance_id"],
+                req=MemoirSectionMaterialPlacementRequest(
+                    target_chapter_id=chapters[0].id,
+                    new_section_title=title,
+                ),
+            )
+
+    await asyncio.gather(
+        create(sources[0], "并发新小节一"),
+        create(sources[1], "并发新小节二"),
+    )
+
+    async with session_factory() as db:
+        created_sections = list((await db.scalars(
+            select(MemoirSection)
+            .where(MemoirSection.chapter_id == chapters[0].id)
+            .order_by(MemoirSection.sort_order)
+        )).all())
+    assert [section.sort_order for section in created_sections] == [0, 1, 2]
+    assert {section.title for section in created_sections} >= {
+        "并发新小节一", "并发新小节二",
+    }
+
+
 async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, monkeypatch):
     from app.services.memoir import book_plan_write_workflow as plans
     from app.services.memoir.book_plan_ai import GeneratedBookPlan, chapters_from_payload
@@ -1189,7 +1488,7 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
         plan_calls += 1
         title, chapters = chapters_from_payload({"title": "我的故事", "chapters": [
             {"title": "小时候", "source_indices": [1]}, {"title": "工作后", "source_indices": [2]},
-        ]}, sources=kwargs["sources"], max_chapters=8)
+        ]}, sources=kwargs["sources"])
         return GeneratedBookPlan(title=title, chapters=chapters, model="test", prompt="test")
 
     async def sections(_db, **kwargs):
@@ -1220,6 +1519,107 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
     assert plan_calls == 1
     assert section_calls == [section_calls[0], section_calls[1], section_calls[1]]
     assert len(result.result_json["growth"]["completed_initial_chapters"]) == 2
+
+
+async def test_initial_story_deduplicates_chapter_sources_before_persisting(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "河边晨步、雨衣和一碗热汤面。",
+    )
+    plan_ai = FakeStoryGrowthAI({"title": "我的故事", "chapters": [
+        {"title": "晨步", "source_indices": [1]},
+        {"title": "雨衣", "source_indices": [1]},
+        {"title": "热汤面", "source_indices": [1]},
+    ]})
+    sections_ai = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr("app.services.memoir.book_plan_ai.get_ai_service", lambda _model=None: plan_ai)
+    monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model=None: sections_ai)
+
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+
+    assert result.status.value == "succeeded"
+    chapters = list((await test_db.scalars(select(MemoirBookPlanChapter).where(
+        MemoirBookPlanChapter.project_id == project_id,
+    ))).all())
+    sections = list((await test_db.scalars(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+    ))).all())
+    materials = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == project_id,
+    ))).all())
+    assert len(chapters) == len(sections) == len(materials) == 1
+    assert materials[0].utterance_id == source["utterance_id"]
+    assert materials[0].section_id == sections[0].id
+    assert result.result_json["growth"]["completed_initial_chapters"] == [chapters[0].id]
+    assert result.result_json["growth"]["needs_material_chapters"] == []
+
+
+async def test_retry_initial_story_with_empty_chapters_preserves_existing_user_draft(client, test_db):
+    from app.schemas.memoir_sections import MemoirSectionVersionReference
+
+    project_id = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(
+        client, test_db, project_id, "河边晨步、雨衣和一碗热汤面。",
+    )
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["晨步", "用户修改过的章节", "热汤面"],
+        source_refs_by_chapter=[[], [memoir_source_ref(source)], []],
+        draft_contents=["", "用户确认后的正文必须保留。", ""],
+    )
+    sections = list((await test_db.scalars(select(MemoirSection).where(
+        MemoirSection.project_id == project_id,
+    ))).all())
+    section_ids = {section.id for section in sections}
+    saved_version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[1].id,
+    ))
+    saved_version_id = saved_version.id
+    job.result_json = {"growth": story_tree_growth.StoryGrowthProgress(
+        initial_sections={
+            chapter.id: [MemoirSectionVersionReference(id=section.id, version=section.version)
+                         for section in sections if section.chapter_id == chapter.id]
+            for chapter in chapters
+        },
+        placed_ids=[source["utterance_id"]],
+    ).model_dump(mode="json")}
+    job.status = "failed"
+    job.error_message = "本章没有可用于生成小节的讲述"
+    await test_db.commit()
+
+    retry = await client.post(f"/api/mobile/memoir/projects/{project_id}/draft-progress/retry")
+    assert retry.status_code == 202, retry.text
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, job.id) is True
+    finally:
+        clear_editing_job_handlers()
+    await test_db.refresh(job)
+
+    assert job.status == "succeeded"
+    assert not job.error_message
+    progress = story_tree_growth._progress(job)
+    assert progress.completed_initial_chapters == [chapter.id for chapter in chapters]
+    assert progress.needs_material_chapters == [chapters[0].id, chapters[2].id]
+    assert set((await test_db.scalars(select(MemoirSection.id).where(
+        MemoirSection.project_id == project_id,
+    ))).all()) == section_ids
+    versions = list((await test_db.scalars(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.project_id == project_id,
+    ))).all())
+    assert [(version.id, version.content) for version in versions] == [
+        (saved_version_id, "用户确认后的正文必须保留。"),
+    ]
+    materials = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == project_id,
+    ))).all())
+    assert len(materials) == 1
+    assert materials[0].utterance_id == source["utterance_id"]
+    assert next(section.chapter_id for section in sections if section.id == materials[0].section_id) == chapters[1].id
 
 
 @pytest.mark.parametrize("reason", ["", "需要确认讲的是哪一段经历"])
@@ -1281,7 +1681,8 @@ async def test_story_assignment_resumes_saved_group_without_repeating_model_or_s
     assert await test_db.scalar(select(func.count(MemoirSection.id)).where(MemoirSection.title == "香山往事")) == 1
 
 
-async def test_initial_story_does_not_treat_model_rejection_as_completed_structure(client, test_db, monkeypatch):
+@pytest.mark.parametrize("status_code", [409, 422])
+async def test_initial_story_does_not_treat_model_rejection_as_completed_structure(client, test_db, monkeypatch, status_code):
     from fastapi import HTTPException
     from app.schemas.memoir_sections import MemoirSectionVersionReference
 
@@ -1293,7 +1694,7 @@ async def test_initial_story_does_not_treat_model_rejection_as_completed_structu
     }).model_dump(mode="json")}
     await test_db.commit()
     async def rejected(*args, **kwargs):
-        raise HTTPException(status_code=409, detail="AI 未能为本章生成任何小节，请重试")
+        raise HTTPException(status_code=status_code, detail="AI 未能为本章生成任何小节，请重试")
     monkeypatch.setattr(story_tree_growth, "regenerate_chapter_sections", rejected)
     with pytest.raises(HTTPException):
         await story_tree_growth.run_story_tree_growth_job(test_db, job)

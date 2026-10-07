@@ -1,12 +1,13 @@
 import { definePage } from "../../services/page-definition";
-import { getMemoirIdentity } from "../../services/auth";
 import {
   AI_MODEL_OPTIONS,
+  DEFAULT_AI_MODEL,
   aiModelLabel,
   readSelectedAIModel,
   saveSelectedAIModel,
   type AIModelOption,
 } from "../../services/ai-model-settings";
+import { readMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import {
   accessibilityPageClass,
   readAccessibilitySettings,
@@ -28,15 +29,6 @@ import {
   type TTSSettingsScope,
   type TTSVoiceOption,
 } from "../../services/tts-settings";
-import { updateMemoirProject } from "../../services/memoir";
-import {
-  readSelectedTranscriptPolishLevel,
-  transcriptPolishLevel,
-  TRANSCRIPT_POLISH_LEVELS,
-  TRANSCRIPT_POLISH_OPTIONS,
-  type TranscriptPolishOption,
-} from "../../services/transcript-polish-settings";
-import type { MemoirTranscriptPolishLevel } from "../../domain/memoir";
 
 interface VoiceSettingsData {
   pageClass: string;
@@ -44,9 +36,6 @@ interface VoiceSettingsData {
   aiModel: string;
   aiModelLabel: string;
   aiModelOptions: AIModelOption[];
-  polishProjectId: string;
-  transcriptPolishLevel: MemoirTranscriptPolishLevel;
-  transcriptPolishOptions: TranscriptPolishOption[];
   chatTTSVoice: string;
   chatTTSSpeedRatio: number;
   bookTTSVoice: string;
@@ -60,7 +49,6 @@ interface VoiceSettingsDataset {
   scope?: string;
   voice?: string;
   speed?: string | number;
-  polish?: string;
 }
 
 type SettingsEvent = PageDatasetEvent<VoiceSettingsDataset>;
@@ -73,19 +61,27 @@ interface SwitchChangeEvent {
 
 const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
 
+function currentUserIsAdmin(): boolean {
+  try {
+    return readMemoirIdentitySnapshot().identity?.role === "admin";
+  } catch {
+    return false;
+  }
+}
+
 function voiceSettingsData(): VoiceSettingsData {
   const accessibility = readAccessibilitySettings();
   const profiles = readTTSSettingsProfiles();
-  const aiModel = readSelectedAIModel();
+  const isAdmin = currentUserIsAdmin();
+  const aiModel = isAdmin ? readSelectedAIModel() : DEFAULT_AI_MODEL;
   return {
     pageClass: accessibilityPageClass("voice-settings-page", accessibility.largeTextEnabled),
     autoBargeInEnabled: accessibility.autoBargeInEnabled,
     aiModel,
     aiModelLabel: aiModelLabel(aiModel),
-    aiModelOptions: AI_MODEL_OPTIONS,
-    polishProjectId: "",
-    transcriptPolishLevel: readSelectedTranscriptPolishLevel() || "low",
-    transcriptPolishOptions: TRANSCRIPT_POLISH_OPTIONS,
+    aiModelOptions: isAdmin
+      ? AI_MODEL_OPTIONS
+      : AI_MODEL_OPTIONS.filter((option) => option.value === DEFAULT_AI_MODEL),
     chatTTSVoice: profiles.chat.voice,
     chatTTSSpeedRatio: profiles.chat.speedRatio,
     bookTTSVoice: profiles.book.voice,
@@ -98,17 +94,8 @@ function voiceSettingsData(): VoiceSettingsData {
 definePage<VoiceSettingsData>()({
   data: voiceSettingsData(),
 
-  async onShow() {
+  onShow() {
     this.setData(voiceSettingsData());
-    try {
-      const identity = await getMemoirIdentity();
-      this.setData({
-        polishProjectId: identity.active_project_id,
-        transcriptPolishLevel: transcriptPolishLevel(identity.active_project),
-      });
-    } catch (error) {
-      console.warn("load transcript polish setting failed", error);
-    }
   },
 
   changeAutoBargeIn(event: SwitchChangeEvent) {
@@ -124,38 +111,15 @@ definePage<VoiceSettingsData>()({
   },
 
   selectAIModel(event: SettingsEvent) {
+    if (!currentUserIsAdmin()) {
+      return;
+    }
     const model = saveSelectedAIModel(datasetString(event, "model"));
     this.setData({
       aiModel: model,
       aiModelLabel: aiModelLabel(model),
     });
     wx.showToast({ title: "已保存", icon: "success" });
-  },
-
-  async selectTranscriptPolishLevel(event: SettingsEvent) {
-    if (!this.data.polishProjectId) {
-      wx.showToast({ title: "请先创建回忆录", icon: "none" });
-      return;
-    }
-    const level = datasetChoice(
-      event,
-      "polish",
-      TRANSCRIPT_POLISH_LEVELS,
-      "low",
-    );
-    try {
-      const project = await updateMemoirProject(this.data.polishProjectId, {
-        transcript_polish_level: level,
-      });
-      this.setData({ transcriptPolishLevel: transcriptPolishLevel(project) });
-      await getMemoirIdentity().catch((error) => {
-        console.warn("refresh transcript polish setting failed", error);
-      });
-      wx.showToast({ title: "已保存", icon: "success" });
-    } catch (error) {
-      console.warn("save transcript polish setting failed", error);
-      wx.showToast({ title: "保存失败，请重试", icon: "none" });
-    }
   },
 
   selectTTSVoice(event: SettingsEvent) {

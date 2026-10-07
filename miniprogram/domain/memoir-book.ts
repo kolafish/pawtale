@@ -136,10 +136,6 @@ export interface MemoirBookPlanChapterInput {
   source_refs: MemoirBookChapterSourceRef[];
 }
 
-export interface MemoirBookPlanChapterUpdateInput extends MemoirBookPlanChapterInput {
-  id?: string;
-}
-
 export interface MemoirBookPlanChapter {
   id: string;
   plan_id: string;
@@ -173,7 +169,6 @@ export interface MemoirBookPlan {
 
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
-  max_chapters?: number;
 }
 
 export interface MemoirBookChapterTitleUpdateRequest {
@@ -187,11 +182,6 @@ export interface MemoirBookChapterTitleGenerateRequest {
 export interface MemoirBookPlanConfirmRequest {
   title?: string;
   chapters: MemoirBookPlanChapterInput[];
-}
-
-export interface MemoirBookPlanUpdateRequest {
-  title?: string;
-  chapters: MemoirBookPlanChapterUpdateInput[];
 }
 
 export type MemoirBookPlanStructureCommandType =
@@ -292,7 +282,45 @@ export interface MemoirBookAudioResponse {
   alignment?: TTSAlignmentSegment[];
 }
 
-export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard" | "navy_gilt";
+export interface MemoirBookAudioPlanRequest extends MemoirBookAudioRequest {
+  version_id: string;
+  start_index?: number;
+  profile_key?: string;
+  retry_failed?: boolean;
+}
+
+export interface MemoirBookAudioSegment {
+  index: number;
+  text_start: number;
+  text_end: number;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed";
+  job_id?: string | null;
+  audio_file_id?: string | null;
+  duration_seconds?: number | null;
+  alignment: TTSAlignmentSegment[];
+  error_message: string;
+}
+
+export interface MemoirBookAudioPlan {
+  version_id: string;
+  source_text_hash: string;
+  profile_key: string;
+  voice: string | null;
+  speed_ratio: number;
+  segments: MemoirBookAudioSegment[];
+  ready_count: number;
+  poll_after_ms: number;
+}
+
+export type MemoirBookCoverStyle =
+  | "classic_plain"
+  | "warm_gray"
+  | "dark_album"
+  | "moonlit_courtyard"
+  | "navy_gilt"
+  | "heritage_classic"
+  | "warm_journal"
+  | "modern_minimal";
 
 export interface MemoirBookOutputUpdateRequest {
   title?: string | null;
@@ -303,6 +331,8 @@ export interface MemoirBookOutputUpdateRequest {
   afterword?: string | null;
   back_cover_quote?: string | null;
   cover_style?: MemoirBookCoverStyle | null;
+  manuscript_template?: MemoirBookManuscriptTemplate;
+  custom_layout?: MemoirBookCustomLayout;
 }
 
 export type MemoirBookEditorialCopyTarget =
@@ -319,6 +349,21 @@ export interface MemoirBookOutputEditorialCopyRegenerateRequest {
   feedback?: string | null;
 }
 
+export type MemoirBookEditorialCopyJobTarget = "preface" | "afterword" | "back_cover_quote";
+export type MemoirBookEditorialCopyJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface MemoirBookEditorialCopyJob {
+  target: MemoirBookEditorialCopyJobTarget;
+  job_id: string;
+  status: MemoirBookEditorialCopyJobStatus;
+  error_message: string;
+  updated_at: string;
+}
+
+export interface MemoirBookEditorialCopyJobsResponse {
+  items: MemoirBookEditorialCopyJob[];
+}
+
 export interface MemoirBookTitleSuggestionRequest {
   ai_model?: string | null;
   count?: number;
@@ -328,6 +373,13 @@ export interface MemoirBookTitleSuggestionResponse {
   suggestions: string[];
   provider?: string | null;
   model?: string | null;
+}
+
+export interface MemoirBookOutputExportInfo {
+  version_id: string;
+  cache_key: string;
+  filename: string;
+  ready: boolean;
 }
 
 export type MemoirBookOutputExportFormat = "pdf" | "txt";
@@ -356,7 +408,26 @@ export interface MemoirBookOutputTableOfContentsItem {
   sections: MemoirBookOutputSectionTableOfContentsItem[];
 }
 
-export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive";
+export type MemoirBookManuscriptTemplate =
+  | "classic_family"
+  | "photo_memory"
+  | "oral_archive"
+  | "heritage_classic"
+  | "warm_journal"
+  | "modern_minimal"
+  | "custom";
+
+export interface MemoirBookCustomLayout {
+  font_family: "auto" | "serif" | "sans";
+  font_scale: "standard" | "large";
+  line_spacing: "compact" | "standard" | "relaxed";
+  page_margin: "narrow" | "standard" | "wide";
+}
+
+export interface MemoirBookLayoutPreview {
+  template?: MemoirBookManuscriptTemplate;
+  custom_layout?: MemoirBookCustomLayout;
+}
 
 export interface MemoirBookManuscriptProfile {
   template: MemoirBookManuscriptTemplate;
@@ -434,10 +505,12 @@ export interface MemoirBookManuscriptRenderSettings {
   page_size: "a5";
   layout: "reading" | "print";
   font_scale: "standard" | "large";
+  custom_layout?: MemoirBookCustomLayout;
   show_headers: boolean;
   show_source_appendix: boolean;
   photo_mode: "none" | "chapter" | "appendix";
   cover_style: MemoirBookCoverStyle;
+  cover_image?: MemoirBookManuscriptIllustration | null;
   back_cover_quote: string;
   editorial_copy_model?: string | null;
 }
@@ -485,4 +558,17 @@ export interface MemoirBookOutput {
   versions: MemoirBookOutputVersionSummary[];
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoirBookShareStatus {
+  active: boolean;
+  expires_at: string | null;
+  token: string | null;
+  stale: boolean;
+  current: boolean;
+}
+
+export interface MemoirBookShareCreated {
+  token: string;
+  expires_at: string;
 }

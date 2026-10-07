@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
@@ -68,6 +69,24 @@ async def _load_plan(
     return plan
 
 
+async def lock_plan_structure(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> MemoirBookPlan:
+    """Lock the plan before a write that also locks chapters."""
+
+    plan = await db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if plan is None:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    return plan
+
+
 async def _load_chapter(
     db: AsyncSession,
     *,
@@ -79,6 +98,28 @@ async def _load_chapter(
             MemoirBookPlanChapter.project_id == project_id,
             MemoirBookPlanChapter.id == chapter_id,
         )
+    )
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return chapter
+
+
+async def lock_chapter_structure(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirBookPlanChapter:
+    """Serialize short section-structure writes within one chapter."""
+
+    chapter = await db.scalar(
+        select(MemoirBookPlanChapter)
+        .where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.id == chapter_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
@@ -109,6 +150,7 @@ async def _load_section(
             MemoirSection.id == section_id,
         )
         .options(*_section_load_options())
+        .execution_options(populate_existing=True)
     )
     if section is None:
         raise HTTPException(status_code=404, detail="小章节不存在")
@@ -404,7 +446,11 @@ async def create_section(
         user_id,
         allow_admin=allow_admin,
     )
-    await _load_chapter(db, project_id=project_id, chapter_id=chapter_id)
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     sections = await _load_sections(
         db,
         project_id=project_id,
@@ -415,7 +461,7 @@ async def create_section(
         chapter_id=chapter_id,
         title=req.title,
         section_type=req.section_type.value,
-        sort_order=len(sections),
+        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
     )
     db.add(section)
     await db.flush()
@@ -438,6 +484,7 @@ async def update_section(
     section_id: str,
     req: MemoirSectionUpdateRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirSectionCollectionResponse:
     await load_memoir_project(
         db,
@@ -474,8 +521,50 @@ async def update_section(
             project_id=project_id,
             section_ids={section.id},
         )
-        await db.commit()
+        await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
+
+
+async def delete_section(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    section_id: str,
+    commit: bool = True,
+) -> None:
+    await load_memoir_project(db, project_id, user_id)
+    section = await _load_section(db, project_id=project_id, section_id=section_id)
+    chapter = await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=section.chapter_id,
+    )
+    section = await _load_section(
+        db,
+        project_id=project_id,
+        section_id=section_id,
+    )
+    await mark_section_digests_stale(db, project_id=project_id, section_ids={section.id})
+    await db.delete(section)
+    chapter.updated_at = utcnow_naive()
+    await db.flush()
+    remaining = await _load_sections(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    await _set_section_order(db, sections=remaining)
+    draft = await db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter.id))
+    if draft:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = {**(draft.metadata_json or {}), "status_reason": "materials_deleted"}
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    if output:
+        invalidate_book_output(output)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await (db.commit() if commit else db.flush())
 
 
 async def reorder_sections(
@@ -493,7 +582,11 @@ async def reorder_sections(
         user_id,
         allow_admin=allow_admin,
     )
-    await _load_chapter(db, project_id=project_id, chapter_id=chapter_id)
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     sections = await _load_sections(
         db,
         project_id=project_id,
@@ -573,6 +666,54 @@ async def _latest_transcript_versions(
     return latest
 
 
+async def _lock_material_move_chapters(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    target_chapter_id: str | None,
+    utterance_ids: list[str],
+) -> tuple[
+    dict[str, tuple[str, str]],
+    dict[str, MemoirBookPlanChapter],
+]:
+    rows = (
+        await db.execute(
+            select(
+                MemoirSectionMaterial.utterance_id,
+                MemoirSectionMaterial.id,
+                MemoirSectionMaterial.section_id,
+                MemoirSection.chapter_id,
+            )
+            .join(
+                MemoirSection,
+                MemoirSection.id == MemoirSectionMaterial.section_id,
+            )
+            .where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSectionMaterial.utterance_id.in_(utterance_ids),
+            )
+        )
+    ).all()
+    membership_snapshot = {
+        utterance_id: (material_id, section_id)
+        for utterance_id, material_id, section_id, _chapter_id in rows
+    }
+    chapter_ids = {
+        chapter_id
+        for _utterance_id, _material_id, _section_id, chapter_id in rows
+    }
+    if target_chapter_id is not None:
+        chapter_ids.add(target_chapter_id)
+    locked_chapters: dict[str, MemoirBookPlanChapter] = {}
+    for chapter_id in sorted(chapter_ids):
+        locked_chapters[chapter_id] = await lock_chapter_structure(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+    return membership_snapshot, locked_chapters
+
+
 async def _move_materials(
     db: AsyncSession,
     *,
@@ -583,6 +724,17 @@ async def _move_materials(
     assigned_by: MemoirSectionMaterialAssignedBy,
     assignment_reason: str,
 ) -> set[str]:
+    membership_snapshot, _locked_chapters = await _lock_material_move_chapters(
+        db,
+        project_id=project_id,
+        target_chapter_id=target.chapter_id,
+        utterance_ids=utterance_ids,
+    )
+    target = await _load_section(
+        db,
+        project_id=project_id,
+        section_id=target.id,
+    )
     await _load_project_utterances(
         db,
         project_id=project_id,
@@ -591,13 +743,20 @@ async def _move_materials(
     existing = list(
         (
             await db.execute(
-                select(MemoirSectionMaterial).where(
+                select(MemoirSectionMaterial)
+                .where(
                     MemoirSectionMaterial.project_id == project_id,
                     MemoirSectionMaterial.utterance_id.in_(utterance_ids),
                 )
+                .execution_options(populate_existing=True)
             )
         ).scalars().all()
     )
+    if {
+        item.utterance_id: (item.id, item.section_id)
+        for item in existing
+    } != membership_snapshot:
+        raise HTTPException(status_code=409, detail="素材归属已变化，请刷新后重试")
     existing_by_utterance = {item.utterance_id: item for item in existing}
     affected_section_ids = {
         target.id,
@@ -847,6 +1006,11 @@ async def _create_section_for_placement(
     chapter_id: str,
     title: str,
 ) -> MemoirSection:
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     sections = await _load_sections(
         db,
         project_id=project_id,
@@ -857,7 +1021,7 @@ async def _create_section_for_placement(
         chapter_id=chapter_id,
         title=title,
         section_type=MemoirSectionType.EVENT.value,
-        sort_order=len(sections),
+        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
     )
     db.add(section)
     await db.flush()
@@ -943,7 +1107,34 @@ async def place_material(
         user_id,
         allow_admin=allow_admin,
     )
-    plan = await _load_plan(db, project_id=project_id)
+    plan = await lock_plan_structure(db, project_id=project_id)
+    target: MemoirSection | None = None
+    target_chapter_id: str | None = None
+    if req.target_section_id:
+        target = await _load_section(
+            db,
+            project_id=project_id,
+            section_id=req.target_section_id,
+        )
+        target_chapter_id = target.chapter_id
+    elif req.target_chapter_id:
+        target_chapter_id = req.target_chapter_id
+    membership_snapshot, locked_chapters = await _lock_material_move_chapters(
+        db,
+        project_id=project_id,
+        target_chapter_id=target_chapter_id,
+        utterance_ids=[utterance_id],
+    )
+    locked_target_chapter = locked_chapters.get(target_chapter_id or "")
+    if req.target_section_id:
+        target = await _load_section(
+            db,
+            project_id=project_id,
+            section_id=req.target_section_id,
+        )
+
+    # Structural writers use one lock order: plan, chapters, then utterances.
+    # Merge and regeneration use the same order, avoiding circular waits.
     utterances = await _load_project_utterances(
         db,
         project_id=project_id,
@@ -955,6 +1146,13 @@ async def place_material(
             MemoirSectionMaterial.utterance_id == utterance_id,
         ).execution_options(populate_existing=True)
     )
+    current_membership = (
+        (current_material.id, current_material.section_id)
+        if current_material is not None
+        else None
+    )
+    if current_membership != membership_snapshot.get(utterance_id):
+        raise HTTPException(status_code=409, detail="素材归属已变化，请刷新后重试")
     if expected_source is not None:
         utterance = utterances[utterance_id]
         source = (source_text_hash(current_utterance_text(utterance)), current_transcript_version_id(utterance))
@@ -970,35 +1168,15 @@ async def place_material(
         else None
     )
 
-    target: MemoirSection | None = None
-    target_chapter_id: str | None = None
-    if req.target_section_id:
-        target = await _load_section(
-            db,
-            project_id=project_id,
-            section_id=req.target_section_id,
-        )
-        target_chapter_id = target.chapter_id
-    elif req.target_chapter_id:
-        await _load_chapter(
-            db,
-            project_id=project_id,
-            chapter_id=req.target_chapter_id,
-        )
-        target_chapter_id = req.target_chapter_id
-
     if expected_section_version is not None and target is not None:
         await db.refresh(target, with_for_update=True)
         if target.version != expected_section_version:
             raise HTTPException(status_code=409, detail="目标小节已变化，已放弃过时的自动归类")
     if expected_chapter_updated_at is not None and target_chapter_id is not None:
-        chapter = await db.scalar(
-            select(MemoirBookPlanChapter).where(
-                MemoirBookPlanChapter.id == target_chapter_id,
-                MemoirBookPlanChapter.project_id == project_id,
-            ).with_for_update().execution_options(populate_existing=True)
-        )
-        if chapter is None or chapter.updated_at != expected_chapter_updated_at:
+        if (
+            locked_target_chapter is None
+            or locked_target_chapter.updated_at != expected_chapter_updated_at
+        ):
             raise HTTPException(status_code=409, detail="目标章节已变化，已放弃过时的自动归类")
 
     moves_included_source = bool(
@@ -1044,6 +1222,17 @@ async def place_material(
         )
         created_section = True
     elif target is None:
+        chapter_count = await db.scalar(
+            select(func.count(MemoirBookPlanChapter.id)).where(
+                MemoirBookPlanChapter.project_id == project_id,
+                MemoirBookPlanChapter.plan_id == plan.id,
+            )
+        )
+        if (chapter_count or 0) >= MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
+            )
         chapters = list(
             (
                 await db.scalars(
@@ -1129,6 +1318,83 @@ async def place_material(
     )
 
 
+async def apply_section_merge_groups(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    plan: MemoirBookPlan,
+    groups: list[tuple[str, MemoirSectionMergeRequest]],
+    assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
+    updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+) -> None:
+    """Apply validated groups under the caller's plan/chapter locks, without committing."""
+    all_ids = [
+        section_id
+        for target_id, req in groups
+        for section_id in (target_id, *req.source_section_ids)
+    ]
+    if any(target_id in req.source_section_ids for target_id, req in groups):
+        raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
+    if len(all_ids) != len(set(all_ids)):
+        raise HTTPException(status_code=400, detail="同一个小章节不能重复合并")
+    sections_by_id = {
+        section_id: await _load_section(db, project_id=project_id, section_id=section_id)
+        for section_id in all_ids
+    }
+    if any(sections_by_id[target_id].chapter_id != chapter_id for target_id, _ in groups):
+        raise HTTPException(status_code=400, detail="目标小节不在目标章节中")
+    affected_chapter_ids = {section.chapter_id for section in sections_by_id.values()}
+    for affected_chapter_id in sorted(affected_chapter_ids):
+        await lock_chapter_structure(db, project_id=project_id, chapter_id=affected_chapter_id)
+
+    for target_id, req in groups:
+        target = sections_by_id[target_id]
+        source_sections = [sections_by_id[section_id] for section_id in req.source_section_ids]
+        utterance_ids = [
+            material.utterance_id
+            for section in sorted(source_sections, key=lambda item: (item.sort_order, item.id))
+            for material in sorted(section.materials, key=lambda item: (item.sort_order, item.id))
+        ]
+        if utterance_ids:
+            await _move_materials(
+                db,
+                project_id=project_id,
+                target=target,
+                utterance_ids=utterance_ids,
+                assigned_by=assigned_by,
+                assignment_reason=(
+                    "ai_section_merge"
+                    if assigned_by == MemoirSectionMaterialAssignedBy.AI
+                    else "section_merge"
+                ),
+            )
+        if req.title is not None:
+            target.title = req.title
+            target.version += 1
+            target.updated_at = utcnow_naive()
+            db.add(target)
+        await db.execute(
+            delete(MemoirSection).where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.id.in_(req.source_section_ids),
+            )
+        )
+        await db.flush()
+
+    for affected_chapter_id in sorted(affected_chapter_ids):
+        remaining = await _load_sections(db, project_id=project_id, chapter_id=affected_chapter_id)
+        await _set_section_order(db, sections=remaining)
+    await mark_section_structure_changed(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter_ids=affected_chapter_ids,
+        operation="merge_sections",
+        updated_by=updated_by,
+    )
+
+
 async def merge_sections(
     db: AsyncSession,
     *,
@@ -1137,73 +1403,19 @@ async def merge_sections(
     target_section_id: str,
     req: MemoirSectionMergeRequest,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirSectionCollectionResponse:
-    await load_memoir_project(
-        db,
-        project_id,
-        user_id,
-        allow_admin=allow_admin,
-    )
-    plan = await _load_plan(db, project_id=project_id)
-    if target_section_id in req.source_section_ids:
-        raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
-    target = await _load_section(
-        db,
-        project_id=project_id,
-        section_id=target_section_id,
-    )
-    source_sections = [
-        await _load_section(db, project_id=project_id, section_id=section_id)
-        for section_id in req.source_section_ids
-    ]
-    if any(section.chapter_id != target.chapter_id for section in source_sections):
-        raise HTTPException(status_code=400, detail="只能合并同一章内的小章节")
-    utterance_ids = [
-        material.utterance_id
-        for section in sorted(
-            source_sections,
-            key=lambda item: (item.sort_order, item.id),
-        )
-        for material in sorted(
-            section.materials,
-            key=lambda item: (item.sort_order, item.id),
-        )
-    ]
-    if utterance_ids:
-        await _move_materials(
-            db,
-            project_id=project_id,
-            target=target,
-            utterance_ids=utterance_ids,
-            assigned_by=MemoirSectionMaterialAssignedBy.USER,
-            assignment_reason="section_merge",
-        )
-    if req.title is not None:
-        target.title = req.title
-        target.version += 1
-        target.updated_at = utcnow_naive()
-        db.add(target)
-    await db.execute(
-        delete(MemoirSection).where(
-            MemoirSection.project_id == project_id,
-            MemoirSection.id.in_(req.source_section_ids),
-        )
-    )
-    await db.flush()
-    remaining = await _load_sections(
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    plan = await lock_plan_structure(db, project_id=project_id)
+    target = await _load_section(db, project_id=project_id, section_id=target_section_id)
+    await apply_section_merge_groups(
         db,
         project_id=project_id,
         chapter_id=target.chapter_id,
-    )
-    await _set_section_order(db, sections=remaining)
-    await mark_section_structure_changed(
-        db,
-        project_id=project_id,
         plan=plan,
-        chapter_ids={target.chapter_id},
-        operation="merge_sections",
+        groups=[(target_section_id, req)],
     )
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
 
 
@@ -1227,6 +1439,16 @@ async def split_section(
         project_id=project_id,
         section_id=source_section_id,
     )
+    await lock_chapter_structure(
+        db,
+        project_id=project_id,
+        chapter_id=source.chapter_id,
+    )
+    source = await _load_section(
+        db,
+        project_id=project_id,
+        section_id=source_section_id,
+    )
     current_ids = {material.utterance_id for material in source.materials}
     requested_ids = set(req.utterance_ids)
     if not requested_ids.issubset(current_ids):
@@ -1244,7 +1466,7 @@ async def split_section(
         chapter_id=source.chapter_id,
         title=req.title,
         section_type=req.section_type.value,
-        sort_order=len(sections),
+        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
     )
     db.add(new_section)
     await db.flush()
@@ -1294,6 +1516,12 @@ async def bootstrap_sections(
             )
         ).scalars().all()
     )
+    for chapter in sorted(chapters, key=lambda item: item.id):
+        await lock_chapter_structure(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
     existing_sections = await _load_sections(db, project_id=project_id)
     first_section_by_chapter = {
         chapter_id: sorted(items, key=lambda item: (item.sort_order, item.id))[0]
@@ -1332,6 +1560,12 @@ async def sync_materials_to_chapters(
     assignment_reason: str,
 ) -> set[str]:
     """Apply a chapter plan to the single SectionMaterial ownership table."""
+    seen_utterances: set[str] = set()
+    for utterance_ids in utterance_ids_by_chapter.values():
+        chapter_utterances = set(utterance_ids)
+        if seen_utterances & chapter_utterances:
+            raise HTTPException(status_code=400, detail="同一条讲述记录不能重复归入多个章节")
+        seen_utterances.update(chapter_utterances)
     chapter_ids = set(utterance_ids_by_chapter)
     chapters = list(
         (
@@ -1341,10 +1575,8 @@ async def sync_materials_to_chapters(
                     MemoirBookPlanChapter.project_id == project_id,
                     MemoirBookPlanChapter.id.in_(chapter_ids),
                 )
-                .order_by(
-                    MemoirBookPlanChapter.sort_order,
-                    MemoirBookPlanChapter.id,
-                )
+                .order_by(MemoirBookPlanChapter.id)
+                .with_for_update()
             )
         ).all()
     )

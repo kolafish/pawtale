@@ -44,6 +44,7 @@ from app.services.memoir import (
     section_digests,
     sections,
 )
+from app.services.memoir.project_revisions import project_data_revision
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
 )
@@ -57,6 +58,7 @@ class _ChapterSummarySnapshot:
     draft: MemoirBookChapterDraft | None
     version: MemoirBookChapterDraftVersion | None
     context: chapter_generation.ChapterGenerationContext | None
+    needs_material: bool
     digest: MemoirChapterDigest | None
 
 
@@ -126,6 +128,26 @@ async def _latest_version(
     return draft, version
 
 
+def _needs_material_summary(
+    chapter: MemoirBookPlanChapter,
+) -> MemoirChapterCompletionSummary:
+    return MemoirChapterCompletionSummary(
+        chapter_id=chapter.id,
+        title=chapter.title,
+        sort_order=chapter.sort_order,
+        state="needs_input",
+        next_action=MemoirChapterCompletionNextAction(
+            kind="wait",
+            title="本章还需要讲述素材",
+            detail="请先补充相关讲述，再检查并整理本章。",
+            action_text="先补充讲述",
+            disabled=True,
+        ),
+        headline="本章还没有讲述素材",
+        detail="已有书稿会保留，本章补充讲述后再整理。",
+    )
+
+
 async def chapter_summary(
     db: AsyncSession,
     *,
@@ -169,6 +191,8 @@ async def chapter_summary(
             headline="正在检查并整理本章",
             detail="每个小节完成后都会保存进度。",
         )
+    if snapshot is not None and snapshot.needs_material:
+        return _needs_material_summary(chapter)
     section_exists = (
         snapshot.section_exists
         if snapshot is not None
@@ -221,7 +245,7 @@ async def chapter_summary(
         )
     )
     draft_current = False
-    if section_exists:
+    if section_exists or snapshot is None:
         try:
             context = (
                 snapshot.context
@@ -237,6 +261,8 @@ async def chapter_summary(
                     context,
                     version,
                 )
+        except chapter_generation.ChapterGenerationNeedsMaterial:
+            return _needs_material_summary(chapter)
         except HTTPException:
             draft_current = False
     digest = (
@@ -257,8 +283,9 @@ async def chapter_summary(
         or (
             draft_current
             and version is not None
-            and version.prompt_snapshot
-            == chapter_generation.CHAPTER_GENERATION_ENGINE
+            and version.prompt_snapshot.startswith(
+                chapter_generation.CHAPTER_GENERATION_ENGINE
+            )
         )
     )
     if not review_ready:
@@ -347,12 +374,12 @@ async def chapter_summary(
             sort_order=chapter.sort_order,
             state="draft_ready",
             next_action=MemoirChapterCompletionNextAction(
-                kind="review_draft",
-                title="正文已经整理好",
-                detail="请通读、修改并确认本章。",
-                action_text="通读并确认",
+                kind="complete",
+                title="正文已更新",
+                detail="可以随时阅读或修改。",
+                action_text="查看正文",
             ),
-            headline="正文可以通读",
+            headline="正文已更新",
             detail=f"现有素材已经整理成完整章节。{optional_note}",
         )
     return MemoirChapterCompletionSummary(
@@ -536,12 +563,15 @@ async def _chapter_summary_snapshots(
     for chapter in chapters:
         issues = issues_by_chapter.get(chapter.id, [])
         context = None
+        needs_material = False
         if chapter.id not in active_chapter_ids:
             try:
                 context = chapter_generation.chapter_generation_context(
                     chapter,
                     polish_level=polish_level,
                 )
+            except chapter_generation.ChapterGenerationNeedsMaterial:
+                needs_material = True
             except HTTPException:
                 pass
         snapshots[chapter.id] = _ChapterSummarySnapshot(
@@ -551,6 +581,7 @@ async def _chapter_summary_snapshots(
             draft=drafts.get(chapter.id),
             version=versions.get(chapter.id),
             context=context,
+            needs_material=needs_material,
             digest=current_digests.get(chapter.id),
         )
     return snapshots
@@ -587,12 +618,15 @@ async def book_overview(
         )
         for chapter in chapters
     ]
-    completed = sum(item.state == "confirmed" for item in items)
-    needs_input = sum(item.state == "needs_input" for item in items)
+    completed = sum(item.state in {"confirmed", "draft_ready"} for item in items)
+    needs_material = sum(
+        item.state == "needs_input" and item.next_action.kind == "wait"
+        for item in items
+    )
+    needs_input = sum(item.state == "needs_input" for item in items) - needs_material
     needs_check = sum(
         item.state in {"not_started", "failed"} for item in items
     )
-    ready_to_review = sum(item.state == "draft_ready" for item in items)
     unfinished = len(items) - completed
     if unfinished:
         progress = []
@@ -600,12 +634,12 @@ async def book_overview(
             progress.append(f"{needs_check} 章待检查")
         if needs_input:
             progress.append(f"{needs_input} 章待确认")
-        if ready_to_review:
-            progress.append(f"{ready_to_review} 章待通读")
+        if needs_material:
+            progress.append(f"{needs_material} 章待补充讲述")
         headline = f"还有 {unfinished} 章未完成"
         detail = "，".join(progress) + "。每章只显示当前最重要的一步。"
     else:
-        headline = "全书正文已经确认"
+        headline = "全书正文已整理完成"
         detail = "需要时仍可按当前素材重新检查。"
     return MemoirBookCompletionOverviewResponse(
         project_id=project_id,
@@ -623,9 +657,8 @@ async def chapter_workspace(
     project_id: str,
     chapter_id: str,
 ) -> MemoirChapterWorkspaceResponse:
-    server_revision = await db.scalar(
-        select(Project.memoir_data_revision).where(Project.id == project_id)
-    )
+    project = await db.get(Project, project_id)
+    server_revision = await project_data_revision(db, project) if project else 0
     chapter = await db.scalar(
         select(MemoirBookPlanChapter).where(
             MemoirBookPlanChapter.project_id == project_id,

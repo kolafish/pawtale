@@ -1,9 +1,12 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const {
   componentContext,
+  flushAsyncWork,
   loadComponentModule,
   mockModule,
 } = require("./page-harness");
@@ -47,6 +50,41 @@ function loadIssueList({ closeIssue } = {}) {
 function issueEvent() {
   return { currentTarget: { dataset: { issueId: "issue-1" } } };
 }
+
+test("book confirmations group assembly blockers ahead of optional manual adjustments", () => {
+  const component = loadIssueList();
+  const privacy = requiredIssue({ id: "privacy", issue_type: "privacy", blocks_book: true });
+  const conflict = requiredIssue({ id: "conflict", issue_type: "conflict", blocks_book: true });
+  const clarity = requiredIssue({ id: "clarity", issue_type: "clarity", blocks_book: false });
+  const excluded = requiredIssue({ id: "excluded", issue_type: "privacy", blocks_book: false });
+  const context = componentContext(component, {
+    requiredIssues: [clarity, privacy, excluded, conflict], bookConfirmationMode: true,
+    allowRequiredConfirmation: true, projectId: "project-1",
+  });
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.deepEqual(context.data.requiredIssueGroups.map((group) => [
+    group.id, group.issues.map((item) => item.id),
+  ]), [["blocking", ["privacy", "conflict"]], ["optional", ["clarity", "excluded"]]]);
+
+  context.beginRequiredAnswer({ currentTarget: { dataset: { issueId: "clarity" } } });
+  assert.equal(context.data.answeringIssueId, "clarity");
+  context.properties.requiredIssues = [clarity, excluded];
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.deepEqual(context.data.requiredIssueGroups.map((group) => group.id), ["optional"]);
+  assert.equal(context.data.answeringIssueId, "clarity");
+});
+
+test("chapter confirmations retain their existing grouping and answer flow", () => {
+  const component = loadIssueList();
+  const context = componentContext(component, { requiredIssues: [requiredIssue()] });
+  component.observers["requiredIssues,bookConfirmationMode"].call(context);
+  assert.equal(context.data.requiredIssueGroups.length, 1);
+  assert.equal(context.data.requiredIssueGroups[0].id, "required");
+  assert.equal(context.data.requiredIssueGroups[0].issues[0].id, "issue-1");
+  const template = fs.readFileSync(path.join(__dirname, "../components/completion-issue-list/index.wxml"), "utf8");
+  assert.match(template, /wx:for="\{\{requiredIssueGroups\}\}"/);
+  assert.match(template, /wx:for="\{\{group.issues\}\}"/);
+});
 
 test("required book issue opens a real answer editor instead of a confirm modal", () => {
   let modalOpened = false;
@@ -205,4 +243,64 @@ test("required book issue keeps the explanation available after a save failure",
   assert.equal(context.data.requiredAnswerReady, true);
   assert.equal(context.data.busyIssueId, "");
   assert.equal(toasts.at(-1).title, "网络不可用");
+});
+
+test("book issues can be left unchanged one at a time after an explicit confirmation", async () => {
+  const calls = [];
+  const toasts = [];
+  let modal;
+  global.wx = {
+    showModal(options) {
+      modal = options;
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const component = loadIssueList({
+    closeIssue: async (...args) => calls.push(args),
+  });
+  const context = componentContext(component, {
+    projectId: "project-1",
+    requiredIssues: [
+      requiredIssue({ issue_type: "privacy" }),
+      requiredIssue({ id: "issue-2", issue_type: "clarity" }),
+    ],
+    allowRequiredConfirmation: true,
+  });
+  const template = fs.readFileSync(
+    path.join(__dirname, "../components/completion-issue-list/index.wxml"),
+    "utf8",
+  );
+  assert.match(template, /bindtap="leaveBookIssueUnchanged"\s*>不处理<\/view>/);
+
+  context.leaveBookIssueUnchanged.call(context, issueEvent());
+  assert.match(modal.content, /不做匿名化/);
+  assert.match(modal.content, /家人阅读、分享和导出/);
+  modal.success({ confirm: false });
+  assert.deepEqual(calls, []);
+
+  context.leaveBookIssueUnchanged.call(context, issueEvent());
+  modal.success({ confirm: true });
+  await flushAsyncWork();
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "issue-1",
+    {
+      outcome: "declined",
+      note: "用户确认不处理此项，保留当前书稿表述，不进行匿名化。",
+    },
+  ]]);
+  assert.deepEqual(context.events, [{ name: "refresh", detail: undefined }]);
+
+  context.leaveBookIssueUnchanged.call(context, {
+    currentTarget: { dataset: { issueId: "issue-2" } },
+  });
+  assert.match(modal.content, /保留当前书稿的相关表述/);
+  modal.success({ confirm: true });
+  await flushAsyncWork();
+  assert.equal(calls[1][1], "issue-2");
+  assert.equal(calls[1][2].outcome, "declined");
+  assert.equal(toasts.at(-1).title, "已跳过");
 });

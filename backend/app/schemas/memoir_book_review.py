@@ -220,6 +220,8 @@ class MemoirBookRevisionPreviewVersion(BaseModel):
 class MemoirBookRevisionSectionComparison(BaseModel):
     section_id: str
     title: str
+    before_title: str
+    after_title: str
     before_content: str
     after_content: str
     before_char_count: int

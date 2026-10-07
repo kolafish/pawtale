@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{projectTitle ? (projectTitle + " · 讲述概览") : "当前回忆录的讲述概览"}}</text>
     <button class="refresh-button ui-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadOverview">刷新</button>
@@ -6,20 +6,20 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <view class="summary-grid">
-    <view class="summary-item ui-card ui-card-raised">
+  <view class="summary-grid ui-card ui-card-raised">
+    <view class="summary-item">
       <text class="summary-value ui-tabular">{{progress.session_count || 0}}</text>
       <text class="summary-label">讲述次数</text>
     </view>
-    <view class="summary-item ui-card ui-card-raised">
+    <view class="summary-item">
       <text class="summary-value ui-tabular">{{progress.utterance_count || 0}}</text>
       <text class="summary-label">讲述记录</text>
     </view>
-    <view class="summary-item ui-card ui-card-raised">
+    <view class="summary-item">
       <text class="summary-value ui-tabular">{{progress.total_user_char_count || 0}}</text>
       <text class="summary-label">文字</text>
     </view>
-    <view class="summary-item ui-card ui-card-raised">
+    <view class="summary-item">
       <text class="summary-value ui-tabular">{{progress.assistant_message_count || 0}}</text>
       <text class="summary-label">小余追问</text>
     </view>

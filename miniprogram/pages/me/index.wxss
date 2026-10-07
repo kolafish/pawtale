@@ -1,83 +1,90 @@
+@import "../../styles/support-forms.wxss";
+
 .me-page {
   padding: 24rpx 36rpx 120rpx;
 }
 
+.delete-account-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 220rpx;
+  min-height: 80rpx;
+  margin: 28rpx auto 0;
+  padding: 12rpx 24rpx;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  text-decoration: underline;
+}
+
+.delete-account-button::after {
+  border: 0;
+}
+
 .guest-login-panel {
-  padding: 52rpx 36rpx 38rpx;
+  padding: 48rpx 36rpx 34rpx;
   text-align: center;
 }
 
 .guest-login-mark {
-  width: 96rpx;
-  height: 96rpx;
-  margin: 0 auto 26rpx;
+  width: 88rpx;
+  height: 88rpx;
+  margin: 0 auto 24rpx;
   border-radius: 999rpx;
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent);
-  font-size: 42rpx;
+  background: var(--ui-success-surface);
+  color: var(--ui-accent-strong);
+  font-family: var(--ui-font-editorial);
+  font-size: 40rpx;
   font-weight: 800;
-  line-height: 96rpx;
+  line-height: 88rpx;
   text-align: center;
 }
 
-.panel-title {
+.panel-title,
+.profile-name,
+.action-title {
   display: block;
   color: var(--ui-text-primary);
-  font-size: 38rpx;
   font-weight: 800;
-  line-height: 1.28;
   text-wrap: balance;
 }
 
-.panel-copy {
+.panel-title {
+  font-family: var(--ui-font-editorial);
+  font-size: var(--ui-font-page-title);
+  line-height: 1.3;
+}
+
+.panel-copy,
+.action-meta {
   display: block;
-  margin-top: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 1.5;
   text-wrap: pretty;
 }
 
-.guest-login-panel .panel-copy {
+.panel-copy {
   max-width: 520rpx;
-  margin-right: auto;
-  margin-left: auto;
-}
-
-.primary-button,
-.mini-button,
-.edit-name-button,
-.logout-button {
-  max-width: none;
-  margin-right: 0;
-  margin-left: 0;
-  border: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-}
-
-.primary-button::after,
-.mini-button::after,
-.edit-name-button::after,
-.logout-button::after {
-  border: 0;
+  margin: 12rpx auto 0;
+  font-size: var(--ui-font-body);
+  line-height: 1.5;
 }
 
 .primary-button {
   width: 100%;
-  height: 96rpx;
-  min-height: 48px;
+  min-height: 92rpx;
   margin-top: 28rpx;
-  border-radius: 18rpx;
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
-  font-size: 30rpx;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface);
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-action);
+  box-shadow: var(--ui-control-shadow);
 }
 
-.primary-button[disabled] {
-  color: var(--ui-on-accent);
+.mini-button[disabled],
+.edit-name-button[disabled],
+.profile-avatar-picker[disabled] {
   opacity: 0.64;
 }
 
@@ -107,14 +114,6 @@
   transition-timing-function: ease-out;
 }
 
-.profile-avatar-picker::after {
-  border: 0;
-}
-
-.profile-avatar-picker[disabled] {
-  opacity: 0.68;
-}
-
 .avatar,
 .avatar-image {
   width: 92rpx;
@@ -124,90 +123,73 @@
 }
 
 .avatar {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
+  background: var(--ui-success-surface);
+  color: var(--ui-accent-strong);
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--ui-font-editorial);
   font-size: 36rpx;
   font-weight: 800;
-}
-
-.avatar-image {
-  background: var(--ui-border);
 }
 
 .avatar-edit-badge {
   position: absolute;
   right: -6rpx;
   bottom: -6rpx;
-  width: 38rpx;
-  height: 38rpx;
+  width: 40rpx;
+  height: 40rpx;
   border-radius: 999rpx;
   background: var(--ui-surface);
   color: var(--ui-accent-strong);
   font-size: 18rpx;
   font-weight: 800;
-  line-height: 38rpx;
+  line-height: 40rpx;
   text-align: center;
-  box-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.08),
-    0 4rpx 10rpx rgba(0, 0, 0, 0.10);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .profile-main,
 .name-edit-row,
 .project-overview-main,
 .settings-row-copy,
-.settings-disclosure-copy,
 .switch-copy {
   min-width: 0;
 }
 
 .profile-main,
 .settings-row-copy,
-.settings-disclosure-copy,
 .switch-copy {
   flex: 1;
 }
 
 .profile-name {
-  display: block;
-  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
   font-size: 34rpx;
-  font-weight: 800;
   line-height: 1.3;
-  text-wrap: balance;
+}
+
+.profile-email,
+.profile-avatar-hint {
+  display: block;
+  line-height: 1.4;
 }
 
 .profile-email {
-  display: block;
   margin-top: 6rpx;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  line-height: 1.4;
+  font-size: var(--ui-font-meta);
   overflow-wrap: anywhere;
 }
 
 .profile-avatar-hint {
-  display: block;
   margin-top: 5rpx;
   color: var(--ui-accent);
-  font-size: 21rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
-  line-height: 1.4;
 }
 
 .name-input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 88rpx;
-  min-height: 44px;
-  padding: 0 18rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 16rpx;
-  background: var(--ui-page-background);
-  color: var(--ui-text-primary);
   font-size: 30rpx;
   font-weight: 800;
 }
@@ -216,7 +198,7 @@
   width: 144rpx;
   min-width: 0;
   display: grid;
-  gap: 10rpx;
+  gap: 8rpx;
 }
 
 .profile-actions > button {
@@ -224,38 +206,29 @@
   min-width: 0;
 }
 
-.mini-button {
-  width: 100%;
-  height: 88rpx;
-  min-height: 44px;
+.mini-button,
+.edit-name-button {
+  min-height: 88rpx;
+  padding: 0;
   border-radius: 16rpx;
-  font-size: 24rpx;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-action);
 }
 
 .mini-button.ghost {
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent-strong);
+  color: var(--ui-text-secondary);
 }
 
 .mini-button.primary,
 .edit-name-button {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
+  background: var(--ui-accent-surface-subtle);
+  box-shadow: inset 0 0 0 1rpx var(--ui-accent-border);
 }
 
 .edit-name-button {
   flex: 0 0 96rpx;
   width: 96rpx;
-  height: 88rpx;
-  min-height: 44px;
-  padding: 0;
-  border-radius: 16rpx;
-  font-size: 24rpx;
-}
-
-.mini-button[disabled],
-.edit-name-button[disabled] {
-  opacity: 0.64;
 }
 
 .section {
@@ -264,6 +237,7 @@
 
 .section-title {
   margin-bottom: 14rpx;
+  font-size: var(--ui-font-section-title);
 }
 
 .setting-header {
@@ -281,7 +255,7 @@
 .setting-current {
   flex: 0 0 auto;
   color: var(--ui-value-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.3;
 }
@@ -292,54 +266,222 @@
 }
 
 .action-title {
-  display: block;
-  color: var(--ui-text-primary);
   font-size: 30rpx;
-  font-weight: 800;
   line-height: 1.35;
-  text-wrap: balance;
 }
 
 .action-meta {
-  display: block;
   margin-top: 7rpx;
-  color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.45;
   overflow-wrap: anywhere;
-  text-wrap: pretty;
 }
 
 .project-overview {
   padding: 28rpx;
+  background: var(--ui-success-surface);
+  box-shadow: none;
 }
 
-.project-overview-head {
+.credit-card {
+  padding: 28rpx;
+}
+
+.credit-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 24rpx;
+  gap: 20rpx;
+}
+
+.credit-percent {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.credit-progress-track {
+  height: 16rpx;
+  margin-top: 24rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: var(--ui-accent-surface-subtle);
+}
+
+.credit-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ui-accent);
+  transition: width 180ms ease-out;
+}
+
+.credit-hint {
+  display: block;
+  margin-top: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+  line-height: 1.45;
+}
+
+.credit-recharge-button,
+.credit-retry-button {
+  min-height: 76rpx;
+  margin: 22rpx 0 0;
+  padding: 0 24rpx;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-accent-surface-subtle);
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  font-weight: 800;
+  line-height: 76rpx;
+}
+
+.credit-card-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.credit-card-error .credit-retry-button {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.credit-usage-toggle,
+.credit-usage-more {
+  min-height: 72rpx;
+  margin: 12rpx 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  line-height: 72rpx;
+}
+
+.credit-usage-toggle {
+  text-align: left;
+}
+
+.credit-usage-toggle::after,
+.credit-usage-more::after {
+  border: 0;
+}
+
+.credit-usage-day-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+}
+
+.credit-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 18rpx 0;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.credit-usage-copy {
+  min-width: 0;
+}
+
+.credit-usage-copy .action-title,
+.credit-usage-amount {
+  font-size: var(--ui-font-meta);
+}
+
+.credit-usage-copy .action-meta,
+.credit-usage-message {
+  font-size: var(--ui-font-caption);
+}
+
+.credit-usage-amount {
+  flex: 0 0 auto;
+  color: var(--ui-text-primary);
+  font-weight: 700;
+}
+
+.credit-usage-message {
+  display: block;
+  padding: 18rpx 0;
+  color: var(--ui-text-secondary);
+}
+
+.recharge-qr-mask {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36rpx;
+  background: rgba(34, 29, 25, 0.56);
+}
+
+.recharge-qr-sheet {
+  width: 100%;
+  max-width: 620rpx;
+  padding: 34rpx 30rpx 28rpx;
+  border-radius: 28rpx;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow);
+}
+
+.recharge-qr-title {
+  display: block;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.recharge-qr-copy {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.recharge-qr-image {
+  display: block;
+  width: min(100%, 520rpx);
+  margin: 24rpx auto 0;
+  border-radius: 12rpx;
 }
 
 .overview-stats {
-  margin-top: 22rpx;
+  margin-top: 24rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid rgba(88, 112, 82, 0.14);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10rpx;
 }
 
 .overview-stat {
   min-width: 0;
-  min-height: 98rpx;
-  padding: 18rpx 10rpx;
-  border-radius: 18rpx;
-  background: var(--ui-page-background);
+  padding: 2rpx 10rpx;
   text-align: center;
+}
+
+.overview-stat + .overview-stat {
+  border-left: 1rpx solid rgba(88, 112, 82, 0.14);
 }
 
 .overview-stat-value {
   display: block;
   color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
   font-size: 34rpx;
   font-weight: 800;
   line-height: 1.15;
@@ -347,35 +489,44 @@
 }
 
 .overview-stat-value.small {
-  font-size: 26rpx;
+  font-family: inherit;
+  font-size: var(--ui-font-meta);
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .overview-stat-label {
   display: block;
   margin-top: 10rpx;
-  color: var(--ui-section-title);
-  font-size: 21rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.3;
 }
 
+.overview-stats-hint {
+  display: block;
+  margin-top: 22rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
 .settings-list {
-  width: 100%;
   overflow: hidden;
 }
 
-.settings-nav-row,
-.settings-disclosure {
+.settings-nav-row {
   width: 100%;
-  min-height: 116rpx;
-  padding: 24rpx 26rpx;
+  min-height: 112rpx;
+  padding: 22rpx 26rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 22rpx;
   color: inherit;
-  transition-property: background-color, opacity;
+  transition-property: background-color, opacity, transform;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
 }
@@ -386,6 +537,7 @@
 
 .settings-nav-row-hover {
   background: var(--ui-accent-surface-subtle);
+  transform: scale(0.96);
 }
 
 .settings-row-tail {
@@ -398,13 +550,16 @@
 }
 
 .row-value {
-  max-width: 220rpx;
+  display: block;
+  max-width: 240rpx;
+  overflow: hidden;
   color: var(--ui-value-text);
-  font-size: 23rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.35;
   text-align: right;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-chevron {
@@ -419,7 +574,7 @@
 .status-pill {
   padding: 7rpx 13rpx;
   border-radius: 999rpx;
-  font-size: 22rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 800;
   line-height: 1.25;
   white-space: nowrap;
@@ -431,82 +586,36 @@
 }
 
 .status-pill.warn {
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
+  background: var(--ui-warning-surface);
+  color: var(--ui-warning-text);
 }
 
 .settings-card {
-  padding: 8rpx 26rpx;
+  padding: 6rpx 26rpx;
 }
 
 .switch-row {
-  min-height: 118rpx;
+  min-height: 112rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24rpx;
 }
 
-.settings-disclosure {
-  box-sizing: border-box;
-}
-
-.settings-disclosure-action {
-  min-width: 72rpx;
-  flex: 0 0 auto;
-  color: var(--ui-accent);
-  font-size: 24rpx;
-  font-weight: 800;
-  line-height: 1.3;
-  text-align: right;
-}
-
-.credential-panel {
-  margin-top: 14rpx;
-  padding: 28rpx;
-}
-
-.field + .field {
-  margin-top: 24rpx;
-}
-
-.field-label {
-  display: block;
-  color: var(--ui-section-title);
-  font-size: 25rpx;
-  font-weight: 800;
-  line-height: 1.3;
-}
-
-.field-input {
-  height: 92rpx;
-  margin-top: 12rpx;
-  padding: 0 22rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 16rpx;
-  background: var(--ui-page-background);
-  color: var(--ui-text-primary);
-  font-size: 29rpx;
-}
-
 .logout-button {
   width: 100%;
-  height: 92rpx;
-  min-height: 46px;
+  min-height: 88rpx;
   margin-top: 38rpx;
-  border-radius: 22rpx;
-  background: var(--ui-danger-surface);
+  border-radius: var(--ui-radius-control);
+  background: transparent;
   color: var(--ui-danger-text);
-  font-size: 29rpx;
-}
-
-.logout-button[disabled] {
-  opacity: 0.64;
+  font-size: var(--ui-font-action);
+  box-shadow: inset 0 0 0 1rpx rgba(168, 73, 63, 0.18);
 }
 
 .error {
   margin-bottom: 24rpx;
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
 }
 
 .me-page.large-text {
@@ -518,38 +627,31 @@
 .me-page.large-text .action-meta,
 .me-page.large-text .profile-email,
 .me-page.large-text .setting-current,
-.me-page.large-text .settings-disclosure-action,
 .me-page.large-text .row-value {
-  font-size: 28rpx;
+  font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }
 
-.me-page.large-text .field-label,
+.me-page.large-text .credit-hint,
+.me-page.large-text .credit-recharge-button,
+.me-page.large-text .credit-retry-button,
+.me-page.large-text .recharge-qr-copy {
+  font-size: var(--ui-font-large-meta);
+}
+
 .me-page.large-text .overview-stat-label {
-  font-size: 30rpx;
+  font-size: var(--ui-font-large-body);
   line-height: 1.4;
 }
 
-.me-page.large-text .panel-title,
+.me-page.large-text .overview-stats-hint {
+  font-size: var(--ui-font-large-meta);
+}
+
 .me-page.large-text .action-title,
 .me-page.large-text .profile-name {
   font-size: 36rpx;
   line-height: 1.4;
-}
-
-.me-page.large-text .field-input,
-.me-page.large-text .name-input {
-  min-height: 48px;
-  font-size: 32rpx;
-}
-
-.me-page.large-text .primary-button,
-.me-page.large-text .logout-button,
-.me-page.large-text .mini-button,
-.me-page.large-text .edit-name-button {
-  min-height: 48px;
-  font-size: 30rpx;
-  line-height: 1.35;
 }
 
 .me-page.large-text .edit-name-button {
@@ -559,12 +661,11 @@
 
 .me-page.large-text .overview-stats {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
+  row-gap: 22rpx;
 }
 
-.me-page.large-text .overview-stat {
-  min-height: 114rpx;
-  padding: 20rpx 14rpx;
+.me-page.large-text .overview-stat:nth-child(3) {
+  border-left: 0;
 }
 
 .me-page.large-text .overview-stat-value {
@@ -576,8 +677,7 @@
 }
 
 .me-page.large-text .settings-nav-row,
-.me-page.large-text .switch-row,
-.me-page.large-text .settings-disclosure {
+.me-page.large-text .switch-row {
   min-height: 132rpx;
 }
 
@@ -586,5 +686,5 @@
 }
 
 .me-page.large-text .status-pill {
-  font-size: 26rpx;
+  font-size: var(--ui-font-large-caption);
 }

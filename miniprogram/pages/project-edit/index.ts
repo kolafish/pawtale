@@ -1,10 +1,20 @@
-import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
+import {
+  DEFAULT_NARRATION_MODE_OPTIONS,
+  type DefaultNarrationMode,
+} from "../../domain/memoir-narration-mode";
 import {
   accessibilityPageClass,
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
-import type { MemoirNarratorGender } from "../../services/memoir";
+import type { MemoirTranscriptPolishLevel } from "../../domain/memoir";
+import {
+  MEMOIR_SHARE_VIDEO_STYLES,
+  normalizeMemoirShareVideoStyle,
+  type MemoirShareVideoStyle,
+  type MemoirShareVideoStyleOption,
+} from "../../domain/memoir-transcript";
+import type { MemoirNarratorGender, MemoirProjectInput } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -14,7 +24,10 @@ import {
   updateMemoirProject,
 } from "../../services/memoir";
 import { markHomeLaunchProjectCreated } from "../../services/home-launch-state";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import {
+  defaultNarrationSessionFields,
+  memoirProjectProfile,
+} from "../../services/memoir-project-profile";
 import {
   datasetChoice,
   queryParam,
@@ -23,10 +36,18 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import {
+  transcriptPolishLevel,
+  TRANSCRIPT_POLISH_LEVELS,
+  TRANSCRIPT_POLISH_OPTIONS,
+  type TranscriptPolishOption,
+} from "../../services/transcript-polish-settings";
 
 interface ProjectEditDataset {
   gender?: string;
   mode?: string;
+  polish?: string;
+  videoStyle?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<ProjectEditDataset>;
@@ -45,16 +66,26 @@ interface ProjectEditData {
   projectId: string;
   pageTitle: string;
   title: string;
+  narratorName: string;
   narratorGender: MemoirNarratorGender;
   narratorOrigin: string;
   narratorAgeText: string;
-  defaultGuidanceMode: MemoirGuidanceMode;
+  defaultNarrationMode: DefaultNarrationMode;
+  transcriptPolishLevel: MemoirTranscriptPolishLevel;
+  shareVideoStyle: MemoirShareVideoStyle;
   genderOptions: Array<Option<MemoirNarratorGender>>;
-  guidanceOptions: Array<Option<MemoirGuidanceMode>>;
+  narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
+  transcriptPolishOptions: TranscriptPolishOption[];
+  shareVideoStyleOptions: MemoirShareVideoStyleOption[];
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
-const GUIDANCE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+const NARRATION_VALUES: readonly DefaultNarrationMode[] = [
+  "free_narration",
+  "guided_interview",
+  "book_completion",
+  "human_interview",
+];
 const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page";
 
 function ageFromText(value: string): number | null {
@@ -70,6 +101,7 @@ function ageFromText(value: string): number | null {
 }
 
 definePage<ProjectEditData>()({
+  pendingCreatedProject: null as { id: string; title: string; input: MemoirProjectInput } | null,
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
@@ -78,19 +110,21 @@ definePage<ProjectEditData>()({
     projectId: "",
     pageTitle: "新建回忆录",
     title: "",
+    narratorName: "",
     narratorGender: "unspecified",
     narratorOrigin: "",
     narratorAgeText: "",
-    defaultGuidanceMode: "free_narration",
+    defaultNarrationMode: "free_narration",
+    transcriptPolishLevel: "medium",
+    shareVideoStyle: "illustrated",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
       { value: "unspecified", label: "未填写" },
     ],
-    guidanceOptions: [
-      { value: "free_narration", label: "自己慢慢讲" },
-      { value: "guided_interview", label: "小余陪着问" },
-    ],
+    narrationOptions: DEFAULT_NARRATION_MODE_OPTIONS,
+    transcriptPolishOptions: TRANSCRIPT_POLISH_OPTIONS,
+    shareVideoStyleOptions: MEMOIR_SHARE_VIDEO_STYLES,
   },
 
   onShow() {
@@ -98,6 +132,7 @@ definePage<ProjectEditData>()({
   },
 
   async onLoad(query?: PageQuery) {
+    this.pendingCreatedProject = null;
     const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
@@ -109,10 +144,13 @@ definePage<ProjectEditData>()({
       projectId: "",
       pageTitle: "新建回忆录",
       title: "",
+      narratorName: "",
       narratorGender: "unspecified",
       narratorOrigin: "",
       narratorAgeText: "",
-      defaultGuidanceMode: "free_narration",
+      defaultNarrationMode: "free_narration",
+      transcriptPolishLevel: "medium",
+      shareVideoStyle: "illustrated",
     });
     setPageNavigationTitle("新建回忆录");
   },
@@ -129,10 +167,13 @@ definePage<ProjectEditData>()({
       const profile = memoirProjectProfile(project);
       this.setData({
         title: project.title,
+        narratorName: profile.narratorName,
         narratorGender: profile.narratorGender,
         narratorOrigin: profile.narratorOrigin,
         narratorAgeText: profile.narratorAge === null ? "" : String(profile.narratorAge),
-        defaultGuidanceMode: profile.defaultGuidanceMode,
+        defaultNarrationMode: profile.defaultNarrationMode,
+        transcriptPolishLevel: transcriptPolishLevel(project),
+        shareVideoStyle: normalizeMemoirShareVideoStyle(project.metadata_json?.share_video_style),
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
@@ -143,6 +184,10 @@ definePage<ProjectEditData>()({
 
   changeTitle(event: InputEvent) {
     this.setData({ title: event.detail.value, error: "" });
+  },
+
+  changeNarratorName(event: InputEvent) {
+    this.setData({ narratorName: event.detail.value, error: "" });
   },
 
   changeOrigin(event: InputEvent) {
@@ -160,10 +205,34 @@ definePage<ProjectEditData>()({
     }
   },
 
-  selectGuidanceMode(event: DatasetEvent) {
-    const mode = datasetChoice(event, "mode", GUIDANCE_VALUES, this.data.defaultGuidanceMode);
+  selectNarrationMode(event: DatasetEvent) {
+    const mode = datasetChoice(event, "mode", NARRATION_VALUES, this.data.defaultNarrationMode);
     if (mode) {
-      this.setData({ defaultGuidanceMode: mode, error: "" });
+      this.setData({ defaultNarrationMode: mode, error: "" });
+    }
+  },
+
+  selectTranscriptPolishLevel(event: DatasetEvent) {
+    const level = datasetChoice(
+      event,
+      "polish",
+      TRANSCRIPT_POLISH_LEVELS,
+      this.data.transcriptPolishLevel,
+    );
+    if (level) {
+      this.setData({ transcriptPolishLevel: level, error: "" });
+    }
+  },
+
+  selectShareVideoStyle(event: DatasetEvent) {
+    const style = datasetChoice(
+      event,
+      "videoStyle",
+      MEMOIR_SHARE_VIDEO_STYLES.map((option) => option.value),
+      this.data.shareVideoStyle,
+    );
+    if (style) {
+      this.setData({ shareVideoStyle: style, error: "" });
     }
   },
 
@@ -183,26 +252,41 @@ definePage<ProjectEditData>()({
       this.setData({ error: error instanceof Error ? error.message : "年龄格式不正确" });
       return;
     }
+    const narrationFields = defaultNarrationSessionFields(this.data.defaultNarrationMode);
     this.setData({ saving: true, error: "" });
-    const payload = {
+    const payload: MemoirProjectInput = {
       title,
+      elder_name: this.data.narratorName.trim(),
       narrator_gender: this.data.narratorGender,
       narrator_origin: this.data.narratorOrigin.trim(),
       narrator_age: narratorAge,
-      default_guidance_mode: this.data.defaultGuidanceMode,
+      default_guidance_mode: narrationFields.guidanceMode,
+      default_interview_type: narrationFields.interviewType,
+      default_session_goal: narrationFields.sessionGoal,
+      transcript_polish_level: this.data.transcriptPolishLevel,
+      share_video_style: this.data.shareVideoStyle,
     };
     try {
-      let createdProject: { id: string; title: string } | null = null;
+      let createdProject = this.pendingCreatedProject;
       if (this.data.projectId) {
         await updateMemoirProject(this.data.projectId, payload);
         trackAuditAction("project.update", {}, { projectId: this.data.projectId });
       } else {
-        const project = await createMemoirProject(payload);
-        createdProject = { id: project.id, title: project.title };
-        await activateMemoirProject(project.id);
-        trackAuditAction("project.create", {
-          default_guidance_mode: this.data.defaultGuidanceMode,
-        }, { projectId: project.id });
+        if (createdProject) {
+          if (JSON.stringify(createdProject.input) !== JSON.stringify(payload)) {
+            const updated = await updateMemoirProject(createdProject.id, payload);
+            createdProject = { id: updated.id, title: updated.title, input: payload };
+            this.pendingCreatedProject = createdProject;
+          }
+        } else {
+          const project = await createMemoirProject(payload);
+          createdProject = { id: project.id, title: project.title, input: payload };
+          this.pendingCreatedProject = createdProject;
+          trackAuditAction("project.create", {
+            default_narration_mode: this.data.defaultNarrationMode,
+          }, { projectId: project.id });
+        }
+        await activateMemoirProject(createdProject.id);
       }
       const identity = await getMemoirIdentity();
       if (createdProject) {
@@ -212,10 +296,14 @@ definePage<ProjectEditData>()({
           projectTitle: createdProject.title,
         });
       }
+      this.pendingCreatedProject = null;
       wx.showToast({ title: "已保存", icon: "success" });
       wx.navigateBack({ delta: 1 });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存失败" });
+      const message = error instanceof Error ? error.message : "保存失败";
+      this.setData({ error: this.pendingCreatedProject && !this.data.projectId
+        ? `回忆录已创建，${message}；请重试完成设置`
+        : message });
     } finally {
       this.setData({ saving: false });
     }

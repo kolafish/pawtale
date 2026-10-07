@@ -18,7 +18,6 @@ import {
 } from "../../services/memoir-chapter-workspace-api";
 import {
   redirectToBook,
-  returnToBook,
   routeAuthError,
 } from "../../services/navigation";
 import {
@@ -32,12 +31,24 @@ import {
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { LOADING_NEXT_ACTION } from "./chapter-next-action";
-import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
+import {
+  chapterCandidateViewPatch,
+  chapterWorkspaceViewPatch,
+} from "./chapter-workspace-view";
 import {
   readCachedMemoirChapterWorkspace,
   writeCachedMemoirChapterWorkspace,
 } from "../../stores/memoir-read-cache";
 import { promptRequiredText } from "../../services/text-prompt";
+import { trackAuditAction } from "../../services/audit-tracker";
+import {
+  applyMemoirBookPlanStructureCommand,
+  createMemoirBookChapterDraftTTS,
+  generateMemoirBookChapterTitle,
+  getMemoirBookPlan,
+  updateMemoirBookChapterTitle,
+} from "../../services/memoir-book-api";
+import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   CLOSED_DRAFT_SECTION_EDITOR,
   PREPARATION_POLL_INTERVAL_MS,
@@ -85,8 +96,15 @@ definePage<ChapterWorkspacePageData>()({
     chapterId: "",
     focusedSectionId: "",
     focusedSectionTitle: "",
+    focusedSection: null,
+    focusedStoryExpanded: false,
     workspace: null,
     nextAction: LOADING_NEXT_ACTION,
+    chapterHeroKicker: "这一章正在慢慢长大",
+    chapterStoryCountText: "故事正在生长",
+    chapterStoryDetail: "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+    chapterHasReadableDraft: false,
+    chapterEditingHint: "",
     readinessTitle: "正在读取本章",
     readinessDetail: "",
     rewriteNoticeTitle: "",
@@ -98,16 +116,15 @@ definePage<ChapterWorkspacePageData>()({
     draftRecoveryActionDisabled: true,
     narrativeSectionCount: 0,
     sectionStructureSummary: "",
-    rewriteDraftActionText: "更新有变化的小节正文",
-    rewriteDraftBusyText: "正在更新小节正文…",
+    rewriteDraftActionText: "更新有变化的故事",
+    rewriteDraftBusyText: "正在更新故事…",
     rewriteDraftScopeDetail: "",
-    suggestionsExpanded: false,
+    editingToolsExpanded: false,
     requiredIssues: [],
     optionalIssues: [],
     sectionViews: [],
     retainedDraftSectionCount: 0,
     expandedSectionIds: {},
-    canConfirmChapter: false,
     operationKind: "",
     operationTargetId: "",
     chapterPreparationJob: null,
@@ -115,6 +132,12 @@ definePage<ChapterWorkspacePageData>()({
     chapterPreparationDetail: "",
     chapterPreparationProgress: 0,
     chapterPreparationProgressMode: "hidden",
+    candidateMode: "changes",
+    candidatePreviewVersion: "after",
+    candidateComparisonAvailable: false,
+    candidateSummaryText: "",
+    candidateDiffSegments: [],
+    candidateWholeContent: "",
     sectionRegenerationJob: null,
     sectionRegenerationTitle: "",
     sectionRegenerationDetail: "",
@@ -132,7 +155,6 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       projectId,
       chapterId,
-      suggestionsExpanded: Boolean(this.sectionFocusId),
     });
     if (!projectId || !chapterId) {
       this.setData({ loading: false, error: "缺少章节信息" });
@@ -171,6 +193,8 @@ definePage<ChapterWorkspacePageData>()({
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
+    wx.disableAlertBeforeUnload?.();
+    this.draftSectionUnloadAlertEnabled = false;
   },
 
   async onPullDownRefresh() {
@@ -238,6 +262,20 @@ definePage<ChapterWorkspacePageData>()({
     );
   },
 
+  draftSectionUnloadAlertEnabled: false,
+
+  syncDraftSectionUnloadAlert() {
+    if (typeof wx === "undefined" || typeof wx.enableAlertBeforeUnload !== "function") return;
+    const enabled = this.hasUnsavedSectionChanges();
+    if (enabled === this.draftSectionUnloadAlertEnabled) return;
+    this.draftSectionUnloadAlertEnabled = enabled;
+    if (enabled) {
+      wx.enableAlertBeforeUnload({ message: "尚未保存的故事正文会丢失，确定离开吗？" });
+    } else {
+      wx.disableAlertBeforeUnload?.();
+    }
+  },
+
   leaveAfterEditConfirmation(navigate: () => void) {
     if (!this.hasUnsavedSectionChanges()) {
       navigate();
@@ -245,20 +283,16 @@ definePage<ChapterWorkspacePageData>()({
     }
     wx.showModal({
       title: "放弃当前修改？",
-      content: "当前小节的修改还没有完成，离开后这些内容会丢失。",
+      content: "当前故事的修改还没有完成，离开后这些内容会丢失。",
       confirmText: "放弃修改",
       cancelText: "继续编辑",
       success: (result) => {
         if (result.confirm) {
+          wx.disableAlertBeforeUnload?.();
+          this.draftSectionUnloadAlertEnabled = false;
           navigate();
         }
       },
-    });
-  },
-
-  openBookHome() {
-    this.leaveAfterEditConfirmation(() => {
-      returnToBook();
     });
   },
 
@@ -387,11 +421,15 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       workspace: viewWorkspace,
       ...viewPatch,
+      ...chapterCandidateViewPatch(
+        viewWorkspace,
+        this.data.chapterPreparationJob,
+        this.data.candidateMode,
+        this.data.candidatePreviewVersion,
+      ),
       focusedSectionId: focusedSection?.id || "",
       focusedSectionTitle: focusedSection?.title || "",
-      suggestionsExpanded: focusedSectionId && !hasFocusedSection
-        ? false
-        : this.data.suggestionsExpanded,
+      focusedSection: focusedSection || null,
       sectionViews: focusedSection
         ? [{ ...focusedSection, expanded: true }]
         : viewPatch.sectionViews,
@@ -400,6 +438,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
+    this.syncDraftSectionUnloadAlert();
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }
@@ -428,7 +467,7 @@ definePage<ChapterWorkspacePageData>()({
     if (!sectionId || !expectedVersion || this.data.operationKind) {
       return;
     }
-    const title = await promptRequiredText("小节改名", currentTitle || "请输入小节名称");
+    const title = await promptRequiredText("编辑故事标题", currentTitle || "请输入故事标题");
     if (!title || title === currentTitle || !this.beginOperation("rename_section", sectionId)) {
       return;
     }
@@ -440,13 +479,13 @@ definePage<ChapterWorkspacePageData>()({
         expectedVersion,
       );
       await this.loadPageData(true);
-      wx.showToast({ title: "小节名称已更新", icon: "success" });
+      wx.showToast({ title: "故事标题已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "小节改名失败",
+        error: error instanceof Error ? error.message : "故事标题更新失败",
       });
     } finally {
       this.finishOperation("rename_section", sectionId);
@@ -471,6 +510,13 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
+  toggleFocusedStory() {
+    if (!this.data.focusedSection?.draftCanExpand) {
+      return;
+    }
+    this.setData({ focusedStoryExpanded: !this.data.focusedStoryExpanded });
+  },
+
   openChapterPreview() {
     if (
       !this.data.workspace?.draft_version_id
@@ -485,6 +531,155 @@ definePage<ChapterWorkspacePageData>()({
       url: pageUrl("/pages/book-reader/index", {
         projectId: this.data.projectId,
         chapterId: this.data.chapterId,
+      }),
+    });
+  },
+
+  async openChapterMoreActions() {
+    if (!this.data.workspace || this.data.operationKind || this.data.editingSectionId) {
+      return;
+    }
+    this.setData({ operationKind: "chapter_settings", operationTargetId: "menu", error: "" });
+    try {
+      const plan = await getMemoirBookPlan(this.data.projectId);
+      if (!this.pageVisible) {
+        return;
+      }
+      const chapter = plan.chapters.find((item) => item.id === this.data.chapterId);
+      if (!chapter) {
+        throw new Error("没有找到这一章，请返回书稿刷新。");
+      }
+      const actions = [
+        { label: "修改章名", run: () => this.editChapterTitle(false) },
+        { label: "AI 重新起名", run: () => this.editChapterTitle(true) },
+      ];
+      if (this.data.chapterHasReadableDraft) {
+        actions.push({
+          label: this.data.audioTarget === "chapter" && this.data.audioPhase !== "idle"
+            ? "停止朗读" : "朗读整章",
+          run: () => this.playChapterAudio(),
+        });
+      }
+      const includeInBook = chapter.include_in_book === false;
+      actions.push({
+        label: includeInBook ? "恢复收入本书" : "不收入本书",
+        run: () => this.setChapterBookInclusion(includeInBook),
+      });
+      this.finishOperation("chapter_settings", "menu");
+      wx.showActionSheet({
+        itemList: actions.map((action) => action.label),
+        success: (result) => { void actions[result.tapIndex]?.run(); },
+      });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "本章操作加载失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings", "menu");
+    }
+  },
+
+  async editChapterTitle(useAI: boolean) {
+    if (!this.data.workspace || !this.beginOperation("chapter_settings")) {
+      return;
+    }
+    try {
+      if (useAI) {
+        await generateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, {});
+      } else {
+        const title = await promptRequiredText("修改章名", this.data.workspace.chapter_title);
+        if (!title || title === this.data.workspace.chapter_title) {
+          return;
+        }
+        if (title.length > 80) {
+          wx.showToast({ title: "章名不能超过 80 字", icon: "none" });
+          return;
+        }
+        await updateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, { title });
+      }
+      await this.loadPageData(true);
+      trackAuditAction(
+        useAI ? "book.chapter_title_generate" : "book.chapter_title_update",
+        {},
+        { projectId: this.data.projectId },
+      );
+      wx.showToast({ title: useAI ? "已重新起名" : "章名已修改", icon: "success" });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "章名更新失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings");
+    }
+  },
+
+  async setChapterBookInclusion(includeInBook: boolean) {
+    if (!this.data.workspace || !this.beginOperation("chapter_settings")) {
+      return;
+    }
+    try {
+      await applyMemoirBookPlanStructureCommand(this.data.projectId, {
+        type: "set_chapter_book_inclusion",
+        chapter_id: this.data.chapterId,
+        include_in_book: includeInBook,
+      });
+      await this.loadPageData(true);
+      wx.showToast({ title: includeInBook ? "已恢复收入本书" : "已设为不收入本书", icon: "success" });
+    } catch (error) {
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "收录设置更新失败" });
+      }
+    } finally {
+      this.finishOperation("chapter_settings");
+    }
+  },
+
+  async playChapterAudio() {
+    if (!this.data.chapterHasReadableDraft) {
+      return;
+    }
+    await this.playDraftAudio(
+      "chapter",
+      () => createMemoirBookChapterDraftTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        readBookTTSRequest(),
+      ),
+      "章节朗读失败",
+    );
+  },
+
+  showDraftUpdate() {
+    if (
+      !this.data.workspace?.draft_needs_rewrite
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    this.setData({ editingToolsExpanded: true }, () => {
+      scrollToSection("#chapter-sections");
+    });
+  },
+
+  openStorySection(
+    event: PageDatasetEvent<{ id?: string }>,
+  ) {
+    const sectionId = datasetString(event, "id");
+    if (
+      !sectionId
+      || !this.data.projectId
+      || !this.data.chapterId
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/chapter-workspace/index", {
+        projectId: this.data.projectId,
+        chapterId: this.data.chapterId,
+        sectionId,
       }),
     });
   },
@@ -511,7 +706,9 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
-      scrollToSection("#chapter-draft");
+      this.setData({ editingToolsExpanded: true }, () => {
+        scrollToSection("#chapter-sections");
+      });
     }
   },
 
@@ -537,8 +734,8 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "确认素材归属",
-      content: `把这条讲述移到“${target.title}”？`,
+      title: "确认回忆归属",
+      content: `把这段回忆移到“${target.title}”？`,
       confirmText: "确认移动",
       cancelText: "再想想",
       success: (result) => {
@@ -546,7 +743,7 @@ definePage<ChapterWorkspacePageData>()({
           void this.performMaterialPlacement(
             utteranceId,
             { target_section_id: target.id },
-            "已选择小节",
+            "已选择故事",
           );
         }
       },
@@ -554,7 +751,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async createSectionForMaterial(utteranceId: string) {
-    const title = await promptRequiredText("新建小节", "请输入小节名称");
+    const title = await promptRequiredText("新建故事", "请输入故事标题");
     if (!title) {
       return;
     }
@@ -564,7 +761,7 @@ definePage<ChapterWorkspacePageData>()({
         target_chapter_id: this.data.chapterId,
         new_section_title: title,
       },
-      "已新建小节",
+      "已新建故事",
     );
   },
 
@@ -594,7 +791,7 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         error: error instanceof Error
           ? error.message
-          : "素材位置更新失败",
+          : "回忆位置更新失败",
       });
     } finally {
       this.finishOperation("move_material", utteranceId);

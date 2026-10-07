@@ -1,0 +1,23 @@
+.support-action {
+  box-sizing: border-box;
+  max-width: none;
+  margin-right: 0;
+  margin-left: 0;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.support-form-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  padding: 0 22rpx;
+  border: 2rpx solid var(--ui-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-soft);
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-action);
+}

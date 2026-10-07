@@ -37,7 +37,7 @@ type ComponentInstance<
   properties: {
     [TKey in keyof TProperties]: ComponentPropertyValue<TProperties[TKey]>;
   };
-  setData(data: Partial<TData>): void;
+  setData(data: Partial<TData>, callback?: () => void): void;
   triggerEvent(name: string, detail?: unknown): void;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
 };
@@ -48,6 +48,9 @@ declare function Component<
   TMethods extends object = object,
 >(
   options: {
+    options?: {
+      multipleSlots?: boolean;
+    };
     properties: TProperties;
     data?: TData;
     methods: TMethods & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
@@ -58,6 +61,7 @@ declare function Component<
       detached?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
     pageLifetimes?: {
+      show?(): void;
       hide?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
   },
@@ -149,6 +153,12 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface EditImageOption {
+    src: string;
+    success?(result: GeneralCallbackResult & { tempFilePath: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+  }
+
   interface ChooseMediaFile {
     tempFilePath: string;
     size: number;
@@ -233,6 +243,14 @@ declare namespace WechatMiniprogram {
   }
 
   interface FileSystemManager {
+    accessSync(path: string): void;
+    mkdirSync(dirPath: string, recursive?: boolean): void;
+    copyFileSync(srcPath: string, destPath: string): void;
+    renameSync(oldPath: string, newPath: string): void;
+    readdirSync(dirPath: string): string[];
+    statSync(path: string): { size: number; lastModifiedTime: number };
+    unlinkSync(filePath: string): void;
+    rmdirSync(dirPath: string, recursive?: boolean): void;
     readFile(option: FileSystemReadFileOption): void;
     writeFile(option: FileSystemWriteFileOption): void;
     unlink?(option: FileSystemUnlinkOption): void;
@@ -340,6 +358,7 @@ declare namespace WechatMiniprogram {
 
   interface NavigateOption {
     url: string;
+    success?: (result: GeneralCallbackResult) => void;
   }
 
   interface NavigateBackOption {
@@ -391,6 +410,30 @@ declare namespace WechatMiniprogram {
 
   interface PrivacyAuthorizeOption {
     success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface AuthorizationSetting {
+    "scope.record"?: boolean;
+    [scope: string]: boolean | undefined;
+  }
+
+  interface GetSettingOption {
+    success?(result: { authSetting: AuthorizationSetting; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface AuthorizeOption {
+    scope: "scope.record";
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface OpenSettingOption {
+    success?(result: { authSetting: AuthorizationSetting; errMsg?: string }): void;
     fail?(result: GeneralCallbackResult): void;
     complete?(result: GeneralCallbackResult): void;
   }
@@ -453,6 +496,7 @@ declare namespace WechatMiniprogram {
     uploadFile(option: UploadFileOption): void;
     chooseImage(option: ChooseImageOption): void;
     chooseMedia?(option: ChooseMediaOption): void;
+    editImage?(option: EditImageOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;
@@ -460,7 +504,11 @@ declare namespace WechatMiniprogram {
     createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
+    getSetting?(option: GetSettingOption): void;
+    authorize?(option: AuthorizeOption): void;
+    openSetting?(option: OpenSettingOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
+    hideShareMenu?(): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
     previewImage(option: PreviewImageOption): void;
     enableAlertBeforeUnload?(option: { message: string }): void;

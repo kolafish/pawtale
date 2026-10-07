@@ -19,29 +19,6 @@ TEMPLATE_COPY_FORBIDDEN_TERMS = (
     "AI 生成",
 )
 
-NARROW_TITLE_HINTS = (
-    "小时候",
-    "童年",
-    "儿时",
-    "少年",
-    "校园",
-    "上学",
-    "职场",
-    "工作",
-    "朋友",
-    "院子",
-)
-BROAD_TITLE_HINTS = (
-    "一生",
-    "人生",
-    "这些年",
-    "来路",
-    "岁月",
-    "回望",
-    "慢慢说",
-    "往事",
-    "回忆录",
-)
 BACK_COVER_QUOTE_HINTS = (
     "一想起",
     "想起来",
@@ -70,21 +47,49 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _brief_text(text: str, *, max_chars: int) -> str:
+def brief_text(text: str, *, max_chars: int) -> str:
     normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
     if len(normalized) <= max_chars:
         return normalized
-    return normalized[:max_chars].rstrip("，。；、,. ") + "。"
+    # Keep the source sentence ending instead of inventing one after a hard cut.
+    last_end = max(normalized.rfind(mark, 0, max_chars) for mark in "。！？!?")
+    return normalized[: last_end + 1] if last_end >= 0 else ""
 
 
-def _first_sentence(text: str, *, max_chars: int) -> str:
+def first_sentence(text: str, *, max_chars: int) -> str:
     normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
     if not normalized:
         return ""
     for index, char in enumerate(normalized):
         if char in "。！？!?":
-            return _brief_text(normalized[: index + 1], max_chars=max_chars)
-    return _brief_text(normalized, max_chars=max_chars)
+            return brief_text(normalized[: index + 1], max_chars=max_chars)
+    return brief_text(normalized, max_chars=max_chars)
+
+
+def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
+    quotes = deepcopy(_list(chapter.get("pull_quotes")))
+    source_quotes = {
+        _safe_str(_dict(ref).get("utterance_id")): " ".join(_safe_str(_dict(ref).get("quote")).split())
+        for ref in _list(chapter.get("source_refs"))
+    }
+    for raw_quote in list(quotes):
+        quote = _dict(raw_quote)
+        if quote.get("source") != "original_quote":
+            continue
+        text = _safe_str(quote.get("text"))
+        for source_id in _list(quote.get("source_ref_ids")):
+            source = source_quotes.get(_safe_str(source_id), "")
+            if len(source) <= 80 or text in source:
+                continue
+            if text != source[:80].rstrip("，。；、,. ") + "。":
+                continue
+            replacement = brief_text(source, max_chars=80)
+            if replacement:
+                quote["text"] = replacement
+            else:
+                quotes.remove(raw_quote)
+            break
+    return quotes
 
 
 def _strip_title_wrappers(title: str) -> str:
@@ -118,54 +123,6 @@ def short_topic(title: str) -> str:
 def contains_template_language(text: object) -> bool:
     value = _safe_str(text)
     return any(term in value for term in TEMPLATE_COPY_FORBIDDEN_TERMS)
-
-
-def _is_broad_title(text: str) -> bool:
-    return bool(text and any(hint in text for hint in BROAD_TITLE_HINTS))
-
-
-def _matches_single_chapter(title: str, chapter_titles: list[str]) -> bool:
-    normalized = _strip_title_wrappers(title)
-    if not normalized:
-        return False
-    for chapter_title in chapter_titles:
-        chapter = _strip_title_wrappers(chapter_title)
-        if chapter and (normalized == chapter or normalized in chapter or chapter in normalized):
-            return True
-    return False
-
-
-def _is_narrow_title(title: str, chapter_titles: list[str]) -> bool:
-    if len(chapter_titles) < 2 or _is_broad_title(title):
-        return False
-    if _matches_single_chapter(title, chapter_titles):
-        return True
-    return any(hint in title for hint in NARROW_TITLE_HINTS)
-
-
-def _narrator_subtitle(narrator_name: str) -> str:
-    narrator = _safe_str(narrator_name)
-    return f"{narrator}口述回忆录" if narrator else "口述回忆录"
-
-
-def normalize_book_identity(
-    *,
-    title: str,
-    subtitle: str,
-    narrator_name: str,
-    chapter_titles: list[str],
-) -> tuple[str, str]:
-    formal_title = formal_book_title(title)
-    clean_subtitle = _safe_str(subtitle)
-    if not _is_narrow_title(formal_title, chapter_titles):
-        return formal_title, clean_subtitle
-    if _is_broad_title(clean_subtitle):
-        return formal_book_title(clean_subtitle), _narrator_subtitle(narrator_name)
-    narrator = _safe_str(narrator_name)
-    if narrator:
-        fallback_title = f"{narrator}的回忆录"
-        return fallback_title, "" if clean_subtitle == fallback_title else clean_subtitle
-    return formal_title, clean_subtitle
 
 
 def fallback_preface(chapter_titles: list[str]) -> str:
@@ -204,7 +161,7 @@ def expanded_afterword() -> str:
 
 def fallback_chapter_intro(title: str, content: str) -> str:
     topic = short_topic(title)
-    excerpt = _first_sentence(content, max_chars=70)
+    excerpt = first_sentence(content, max_chars=70)
     if topic and excerpt:
         return f"记忆先回到{topic}。{excerpt}"
     if excerpt:
@@ -217,14 +174,14 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
     for raw_chapter in chapters:
         chapter = _dict(raw_chapter)
         for raw_quote in _list(chapter.get("pull_quotes")):
-            quote = _brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
+            quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
             if quote:
                 candidates.append(quote)
         for raw_ref in _list(chapter.get("source_refs")):
-            quote = _brief_text(_safe_str(_dict(raw_ref).get("quote")), max_chars=45)
+            quote = brief_text(_safe_str(_dict(raw_ref).get("quote")), max_chars=45)
             if quote:
                 candidates.append(quote)
-        excerpt = _first_sentence(_safe_str(chapter.get("content")), max_chars=45)
+        excerpt = first_sentence(_safe_str(chapter.get("content")), max_chars=45)
         if excerpt:
             candidates.append(excerpt)
     result: list[str] = []
@@ -292,12 +249,8 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
         for chapter in chapters
         if _safe_str(_dict(chapter).get("title"))
     ]
-    normalized_title, normalized_subtitle = normalize_book_identity(
-        title=_safe_str(profile.get("title")) or title,
-        subtitle=_safe_str(profile.get("subtitle")),
-        narrator_name=_safe_str(profile.get("narrator_name")),
-        chapter_titles=chapter_titles,
-    )
+    normalized_title = _safe_str(title) or _safe_str(profile.get("title")) or "家庭回忆录"
+    normalized_subtitle = _safe_str(profile.get("subtitle"))
     if profile:
         profile["title"] = normalized_title
         profile["subtitle"] = normalized_subtitle
@@ -339,7 +292,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
             )
         chapter["pull_quotes"] = [
             quote
-            for quote in _list(chapter.get("pull_quotes"))
+            for quote in repair_original_pull_quotes(chapter)
             if not contains_template_language(_safe_str(_dict(quote).get("text")))
         ]
 

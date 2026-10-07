@@ -6,6 +6,8 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   mockMemoirApiModules,
+  pageContext,
+  flushAsyncWork,
   loadPageModule,
   mockModule,
   clearModule,
@@ -13,6 +15,7 @@ const {
 } = require("./page-harness");
 const {
   memoirHomePrompt,
+  memoirHomepageTitle,
   memoirStoryTitle,
 } = require("../services/memoir-display-copy.ts");
 const { userDisplayName } = require("../services/user-display-name.ts");
@@ -45,6 +48,9 @@ function loadHomePage({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
+    getMemoirShareVideoCandidate: async () => ({ candidate: null }),
+    listMemoirShareVideos: async () => ({ items: [], active_jobs: [], failed_jobs: [], total: 0, limit: 1, offset: 0 }),
+    downloadMemoirShareVideoThumbnail: async () => "/tmp/share-video-thumbnail.jpg",
     getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
       const latest = identity.active_project_id
@@ -56,7 +62,9 @@ function loadHomePage({
       return {
         server_revision: 1,
         chapters: [], progress: null, growth_events: [], automation_events: { items: [], total: 0, limit: 8 },
-        book_readable: false, book_char_count: 0, updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
+        book_readable: false, book_char_count: 0, book_chapter_count: 0,
+        book_issues: { review_count: 0, supplement_count: 0 }, book_manual_edit_preserved: false,
+        updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
         identity,
         latest_transcript: latest.items[0] || null,
       };
@@ -83,6 +91,8 @@ function loadHomePage({
   });
   mockModule("../services/home-launch-state.ts", {
     dismissHomeLaunch: () => {},
+    homeBookOpened: () => false,
+    markHomeBookOpened: () => {},
     resolveHomeLaunch: () => "none",
     ...launchStateExports,
   });
@@ -92,10 +102,73 @@ function loadHomePage({
   });
 
   clearModule("../services/story-growth-notice.ts");
-  return loadPageModule("../pages/home/index.ts");
+  const loaded = loadPageModule("../pages/home/index.ts");
+  loaded.page.homeVisible = true;
+  return loaded;
 }
 
-test("mini program opens on the browseable home tab", () => {
+test("home starts once and defers mounting a session created while hidden", async () => {
+  const creation = deferred();
+  let creates = 0;
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: () => { creates += 1; return creation.promise; },
+  } });
+  global.wx = { pageScrollTo() {} };
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true, voiceAuthorizationAgreed: true });
+  const pending = context.startPrimaryVoiceChat();
+  await flushAsyncWork();
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+  context.onHide();
+  creation.resolve({ session: { id: "s1" } });
+  await pending;
+  assert.equal(context.data.voiceEntry, null);
+  context.homeVisible = true;
+  context.openPendingVoiceSession();
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s1");
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+});
+
+test("home ignores consent and session responses for an account or project that changed", async () => {
+  for (const duringCreation of [false, true]) {
+    const pending = deferred();
+    let creates = 0;
+    const { page } = loadHomePage({
+      voiceAuthorizationExports: { syncVoiceAuthorizationConsent: () => duringCreation ? Promise.resolve() : pending.promise },
+      voiceApiExports: { createMemoirVoiceSession: () => { creates += 1; return pending.promise; } },
+    });
+    const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true, voiceAuthorizationAgreed: true });
+    const starting = context.startPrimaryVoiceChat();
+    await flushAsyncWork();
+    context.setData({ userId: "u2", projectId: "p2" });
+    pending.resolve({ session: { id: "old-session" } });
+    await starting;
+    assert.equal(creates, duringCreation ? 1 : 0);
+    assert.equal(context.data.voiceEntry, null);
+    assert.equal(context.voiceNavigationTarget, null);
+  }
+});
+
+test("home closes only the current confirmed session, then refreshes the story in place", async () => {
+  const { page } = loadHomePage();
+  const context = pageContext(page, { userId: "u1", projectId: "p1", voiceEntry: { voiceSessionId: "s2" } });
+  let refreshes = 0, storyViews = 0;
+  context.measureNarration = () => {};
+  context.loadHome = async () => { refreshes += 1; };
+  context.openStoryProgress = () => { storyViews += 1; };
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s1", narrationSaved: true, finished: true } });
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s2");
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s2", narrationSaved: false } });
+  assert.equal(storyViews, 1);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s2");
+  await context.exitVoiceSession({ detail: { destination: "story", projectId: "p1", voiceSessionId: "s2", narrationSaved: false, finished: true } });
+  assert.equal(context.data.voiceEntry, null, "an empty but confirmed session can also close");
+  assert.equal(refreshes, 1);
+  assert.deepEqual(context.storyNavigationTarget, { projectId: "p1", narrationSaved: false });
+});
+
+test("mini program opens on the home page without a tab bar", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
 
   assert.equal(appJson.pages[0], "pages/home/index");
@@ -116,6 +189,260 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
+test("home recommendation opens the editor immediately without creating or accepting a video", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", voice_session_id: "session-1",
+    utterance_id: "utterance-1", selected_text: "父亲把围巾围在我脖子上。",
+    duration_ms: 30000, status: "ready", video_job_id: null,
+  };
+  const created = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    createMemoirShareVideoCandidateJob: async (...args) => {
+      created.push(args);
+      return new Promise(() => {});
+    },
+    dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidate.id, "candidate-1");
+  assert.equal(context.data.shareCandidateDurationText, "30 秒");
+  context.openShareCandidateEditor();
+  assert.deepEqual(created, []);
+  assert.equal(context.data.shareCandidate.status, "ready");
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+
+  context.setData({ shareCandidate: { ...candidate, status: "accepted", video_job_id: "video-1" } });
+  context.openShareCandidateVideo();
+  assert.equal(navigations.length, 2);
+  assert.equal(navigations[1], "/pages/transcript-media/index?id=utterance-1&jobId=video-1");
+  await context.dismissShareCandidate();
+  assert.equal(context.data.shareCandidate, null);
+});
+
+test("home replaces a cached failed recommendation job with the latest remake and refreshes it", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "accepted", video_job_id: "remade-video",
+  };
+  let status = "running";
+  const calls = [];
+  const navigations = [];
+  const thumbnails = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoJob: async (id) => {
+      calls.push(id);
+      return { id, status, title: "重制的往事" };
+    },
+    downloadMemoirShareVideoThumbnail: async (id) => {
+      thumbnails.push(id);
+      return "/tmp/remade-thumbnail.jpg";
+    },
+  } });
+  const context = pageContext(page, {
+    projectId: "p1", hasProject: true,
+    shareCandidate: { ...candidate, video_job_id: "old-failed-video" },
+    shareCandidateJob: { id: "old-failed-video", status: "failed" },
+  });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.id, "remade-video");
+  assert.equal(context.data.shareCandidateJob.status, "running");
+  context.openShareCandidateVideo();
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=remade-video"]);
+  status = "succeeded";
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.status, "succeeded");
+  assert.equal(context.data.shareCandidateThumbnailPath, "/tmp/remade-thumbnail.jpg");
+  await context.refreshShareCandidate("p1");
+  assert.deepEqual(calls, ["remade-video", "remade-video"]);
+  assert.deepEqual(thumbnails, ["remade-video"]);
+});
+
+test("home editor entry keeps voice and dismiss guards", () => {
+  const created = [];
+  const navigations = [];
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "ready", start_char: 0, end_char: 13,
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirShareVideoCandidateJob: async (...args) => { created.push(args); },
+  } });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  const context = pageContext(page, { projectId: "p1", hasProject: true, shareCandidate: candidate });
+  context.openShareCandidateEditor();
+  assert.equal(context.data.shareCandidate.status, "ready");
+  context.setData({ voiceEntry: { voiceSessionId: "session-1" } });
+  context.openShareCandidateEditor();
+  context.setData({ voiceEntry: null, shareCandidateDismissing: true });
+  context.openShareCandidateEditor();
+  assert.deepEqual(created, []);
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+});
+
+test("home keeps completed videos in the library after handling the latest suggestion", async () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const latest = {
+    id: "video-2", utterance_id: "utterance-2", title: "外婆家的夏天",
+    selected_text: "每年夏天，我都会去外婆家。", duration_ms: 28000,
+    created_at: "2026-09-24T08:00:00", completed_at: "2026-09-24T08:01:00",
+  };
+  const calls = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async (...args) => {
+      calls.push(args);
+      return { items: [latest], active_jobs: [], failed_jobs: [], total: 5, limit: 1, offset: 0 };
+    },
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareVideos("p1");
+  assert.deepEqual(calls, [["p1", { limit: 1, offset: 0 }]]);
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 5);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, [
+    "/pages/share-videos/index?projectId=p1",
+  ]);
+  assert.match(pageWxml, /bindtap="openShareVideoLibrary"/);
+});
+
+test("home exposes the video progress library while the first manually selected story is still generating", async () => {
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async () => ({
+      items: [], active_jobs: [{ id: "first-video", status: "running" }], failed_jobs: [], total: 0, limit: 1, offset: 0,
+    }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareVideos("p1");
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 0);
+  assert.equal(context.data.shareVideoActiveCount, 1);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
+});
+
+test("home keeps the video library reachable when all manually selected video tasks have failed", async () => {
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async () => ({
+      items: [], active_jobs: [], failed_jobs: [{ id: "first-video", status: "failed" }],
+      total: 0, limit: 1, offset: 0,
+    }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareVideos("p1");
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 0);
+  assert.equal(context.data.shareVideoActiveCount, 0);
+  assert.equal(context.data.shareVideoFailedCount, 1);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
+});
+
+test("only a successful completed-video preview dismisses the latest suggestion", async () => {
+  for (const [status, navigateSuccessfully] of [["succeeded", true], ["succeeded", false], ["running", true]]) {
+    const candidate = { id: "candidate-1", project_id: "p1", utterance_id: "utterance-1", status: "accepted", video_job_id: "video-1" };
+    const dismissals = [];
+    const { page } = loadHomePage({ voiceApiExports: {
+      dismissMemoirShareVideoCandidate: async (...args) => { dismissals.push(args); },
+    } });
+    const context = pageContext(page, {
+      projectId: "p1", shareCandidate: candidate,
+      shareCandidateJob: { id: "video-1", status }, shareVideoTotal: 6,
+      shareCandidateThumbnailPath: "/tmp/video-1.jpg",
+    });
+    global.wx = { navigateTo({ url, success }) {
+      assert.equal(url, "/pages/transcript-media/index?id=utterance-1&jobId=video-1");
+      if (navigateSuccessfully) success();
+    } };
+    context.openShareCandidateVideo();
+    await flushAsyncWork();
+    assert.equal(dismissals.length, status === "succeeded" && navigateSuccessfully ? 1 : 0);
+    if (dismissals.length) {
+      assert.deepEqual(dismissals[0], ["p1", "candidate-1"]);
+      assert.equal(context.data.shareCandidate, null);
+      assert.equal(context.data.shareCandidateThumbnailPath, "");
+    } else assert.equal(context.data.shareCandidate.id, "candidate-1");
+  }
+});
+
+test("home discards a thumbnail downloaded after switching projects", async () => {
+  const thumbnail = deferred();
+  const candidate = { id: "candidate-1", status: "accepted", video_job_id: "video-1" };
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoJob: async () => ({ id: "video-1", status: "succeeded" }),
+    downloadMemoirShareVideoThumbnail: () => thumbnail.promise,
+  } });
+  const context = pageContext(page, { projectId: "p1" });
+  const refresh = context.refreshShareCandidate("p1");
+  await flushAsyncWork();
+  context.setData({ projectId: "p2" });
+  thumbnail.resolve("/tmp/old-project.jpg");
+  await refresh;
+  assert.equal(context.data.shareCandidateThumbnailPath, "");
+});
+
+test("home ignores a recommendation returned after the project changes", async () => {
+  const pending = deferred();
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: () => pending.promise,
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  const loading = context.refreshShareCandidate("p1");
+  context.setData({ projectId: "p2" });
+  pending.resolve({ candidate: { id: "old-candidate", status: "ready" } });
+  await loading;
+  assert.equal(context.data.shareCandidate, null);
+});
+
+test("home combines new-story and resume actions without mixing their routes", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
+  assert.match(pageWxml, /id="resume-story-action"[\s\S]*?bindtap="resumeLastStory"/);
+  assert.match(pageWxml, /wx:if="\{\{showNarrationChoiceCard\}\}"/);
+  assert.match(pageWxml, /wx:if="\{\{narrationSaved && !growthNoticeText\}\}"/);
+  assert.doesNotMatch(pageWxml, /resume-card|接着上次说/);
+  assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
+  assert.match(pageWxml, /<voice-session[\s\S]*?bindexit="exitVoiceSession"/);
+  assert.doesNotMatch(pageWxml, /bindreturnhome|voiceSessionMinimized/);
+});
+
+test("home keeps interview-engine notices out of the story overview", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /<story-tree/);
+  assert.match(pageWxml, /can-open-book="\{\{hasProject\}\}"/);
+  assert.match(pageWxml, /bind:openbook="openBook"/);
+  assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
+});
+
+test("home only surfaces failed draft progress that the reader can act on", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /wx:if="\{\{progress && progress\.status === 'failed'\}\}"/);
+  assert.match(pageWxml, /bindtap="retryDraft"/);
+});
+
 test("home supports a local large text mode without changing the default class", () => {
   const loaded = loadHomePage({
     accessibilityExports: {
@@ -127,8 +454,9 @@ test("home supports a local large text mode without changing the default class",
   const context = {
     ...page,
     data: { ...page.data },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
@@ -141,6 +469,10 @@ test("home supports a local large text mode without changing the default class",
 test("home presents internal project titles as natural story copy", () => {
   assert.equal(memoirStoryTitle("爷爷主题"), "爷爷的故事");
   assert.equal(memoirStoryTitle("外婆回忆录"), "外婆回忆录");
+  assert.equal(memoirHomepageTitle("外婆回忆录"), "外婆回忆录");
+  assert.equal(memoirHomepageTitle("我的回忆录"), "我的回忆录");
+  assert.equal(memoirHomepageTitle("爷爷主题"), "爷爷主题");
+  assert.equal(memoirHomepageTitle(""), "还没有回忆录");
   assert.equal(memoirHomePrompt("爷爷主题"), "不用讲完整，可以先说一件和爷爷有关的小事。");
 });
 
@@ -171,92 +503,76 @@ test("home creates concise resume hints from the latest transcript", () => {
 });
 
 test("home view patch keeps first-screen template state simple", () => {
-  const { homeViewPatch } = loadHomePage().mod;
+  const loaded = loadHomePage();
+  const { homeViewPatch } = loaded.mod;
   const baseData = {
-    loading: false,
-    creatingVoice: false,
+    ...loaded.page.data,
     needsLogin: false,
-    error: "",
     userId: "user-1",
     displayName: "余主任",
     projectId: "project-1",
     projectTitle: "爷爷主题",
     projectDisplayTitle: "爷爷的故事",
-    projectPromptText: "不用讲完整，可以先说一件和爷爷有关的小事。",
     lastStoryHint: "爷爷退休后还在忙公司的事",
-    lastStoryText: "上次您说到：爷爷退休后还在忙公司的事。",
     hasLastStoryHint: true,
     launchVariant: "new_project",
-    showLaunchPanel: true,
-    showReturnPrompt: false,
-    launchEyebrow: "新的故事本",
-    launchTitle: "爷爷的故事，慢慢讲",
-    launchBody: "",
-    launchPrimaryText: "今天先聊一段",
-    launchSecondaryText: "先看看首页",
     hasProject: true,
+    hasStories: true,
     selectedMode: "free_narration",
-    guidanceLabel: "慢慢讲",
     voiceAuthorizationAgreed: true,
+    voiceAuthorizationRequested: false,
   };
 
   assert.deepEqual(
     {
       greetingText: homeViewPatch(baseData).greetingText,
-      launchModeTagText: homeViewPatch(baseData).launchModeTagText,
-      projectHeadingText: homeViewPatch(baseData).projectHeadingText,
-      projectMetaText: homeViewPatch(baseData).projectMetaText,
+      headerSubtitleText: homeViewPatch(baseData).headerSubtitleText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
+      showNarrationChoiceCard: homeViewPatch(baseData).showNarrationChoiceCard,
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
       voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
-      showResumeActions: homeViewPatch(baseData).showResumeActions,
-      moreActionsToggleText: homeViewPatch(baseData).moreActionsToggleText,
-      alternateModeButtonTitle: homeViewPatch(baseData).alternateModeButtonTitle,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
       greetingText: "你好，余主任",
-      launchModeTagText: "新故事本",
-      projectHeadingText: "爷爷的故事",
-      projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
-      primaryVoiceButtonTitle: "随便讲一段",
-      voiceStartButtonClass: "voice-start-button button-blocked",
+      headerSubtitleText: "",
+      primaryVoiceButtonTitle: "讲个新故事",
+      showNarrationChoiceCard: true,
+      voiceStartButtonClass: "button-blocked",
       voiceStartButtonHoverClass: "none",
-      showResumeActions: true,
-      moreActionsToggleText: "其他讲述与整理方式",
-      alternateModeButtonTitle: "让小余陪着问",
       showVoiceAuthorizationPanel: false,
     },
   );
 });
 
-test("home primary CTA and alternate action follow the current project's guidance mode", () => {
+test("home start action follows account, project, story and completion states", () => {
   const { homeViewPatch } = loadHomePage().mod;
   const baseData = {
     ...loadHomePage().page.data,
     hasProject: true,
     needsLogin: false,
     voiceAuthorizationAgreed: true,
+    hasStories: false,
   };
 
   const guided = homeViewPatch({
     ...baseData,
     selectedMode: "guided_interview",
-    guidanceLabel: "小余陪着问",
   });
-  assert.equal(guided.primaryVoiceButtonTitle, "让小余陪着问");
-  assert.equal(guided.voiceStartNoteText, "小余会从一件具体的事开始问起。");
-  assert.equal(guided.alternateModeButtonTitle, "我想自己讲");
+  assert.equal(guided.primaryVoiceButtonTitle, "讲第一个故事");
 
-  const expanded = homeViewPatch({
-    ...baseData,
-    showMoreActions: true,
-  });
-  assert.equal(expanded.moreActionsToggleText, "收起其他方式");
-  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述与整理方式");
+  const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
+  assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
+  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, true);
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
 });
 
-test("home only shows project actions and voice consent after a usable project has loaded", () => {
+test("home reveals voice consent only after a usable project requests it", () => {
   const loaded = loadHomePage();
   const { homeViewPatch } = loaded.mod;
   const baseData = {
@@ -265,47 +581,62 @@ test("home only shows project actions and voice consent after a usable project h
     needsLogin: false,
     hasProject: true,
     voiceAuthorizationAgreed: false,
+    voiceAuthorizationRequested: false,
   };
 
-  assert.equal(homeViewPatch(baseData).showResumeActions, true);
-  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, true);
-  assert.equal(homeViewPatch({ ...baseData, loading: true }).showResumeActions, false);
+  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, voiceAuthorizationRequested: true }).showVoiceAuthorizationPanel, true);
   assert.equal(homeViewPatch({ ...baseData, loading: true }).showVoiceAuthorizationPanel, false);
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).showVoiceAuthorizationPanel, false);
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
 });
 
-test("home primary and alternate CTAs create sessions with their displayed guidance modes", async () => {
-  const createdModes = [];
+test("home starts all three regular modes from the saved project default", async () => {
+  const created = [];
+  global.wx = { pageScrollTo() {} };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: async input => { created.push(input); return { session: { id: `s${created.length}` } }; },
+  } });
+  const context = pageContext(page, { projectId: "p1", userId: "u1", hasProject: true, voiceAuthorizationAgreed: true });
+  context.measureNarration = () => {};
+  for (const mode of ["guided_interview", "free_narration", "human_interview"]) {
+    context.data.selectedMode = mode;
+    await context.startPrimaryVoiceChat();
+    assert.equal(created.at(-1).guidance_mode, mode === "human_interview" ? "free_narration" : mode);
+    assert.equal(created.at(-1).interview_type, mode === "human_interview" ? "human_interview" : "ai_interview");
+    assert.equal(created.at(-1).session_goal, "open_narration");
+    context.data.voiceEntry = null;
+  }
+});
+
+test("home routes the book-completion default to the scoped issue list", async () => {
+  const navigations = [];
+  let creates = 0;
   global.wx = {
-    navigateTo() {},
-  };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      createMemoirVoiceSession: async (input) => {
-        createdModes.push(input.guidance_mode);
-        return { session: { id: `voice-${createdModes.length}` } };
-      },
+    navigateTo(options) {
+      navigations.push(options.url);
     },
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirVoiceSession: async () => { creates += 1; },
+  } });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "爷爷的故事",
+    projectDisplayTitle: "爷爷的故事",
+    hasProject: true,
+    selectedMode: "book_completion",
+    voiceAuthorizationAgreed: false,
   });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      selectedMode: "guided_interview",
-      projectId: "project-1",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
 
-  await page.startPrimaryVoiceChat.call(context);
-  await page.startAlternateGuidance.call(context);
+  await context.startPrimaryVoiceChat();
 
-  assert.deepEqual(createdModes, ["guided_interview", "free_narration"]);
+  assert.equal(creates, 0);
+  assert.equal(context.data.voiceAuthorizationRequested, false);
+  assert.equal(navigations.length, 1);
+  const url = new URL(navigations[0], "https://miniprogram.test");
+  assert.equal(url.pathname, "/pages/book-completion/index");
+  assert.equal(url.searchParams.get("projectId"), "project/1");
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -404,13 +735,11 @@ test("home refreshes guidance mode from current project on load", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.guidanceLabel, "小余陪着问");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
   assert.deepEqual(transcriptCalls, [{ projectId: "project-1", limit: 1 }]);
   assert.equal(context.data.lastStoryHint, "爷爷退休后还在忙公司的事");
-  assert.equal(context.data.lastStoryText, "上次您说到：爷爷退休后还在忙公司的事。");
   assert.equal(context.data.hasLastStoryHint, true);
 });
 
@@ -510,7 +839,7 @@ test("home shows explicit project creation state for logged-in users without pro
   assert.equal(context.data.hasProject, false);
 });
 
-test("home shows first-visit launch copy from launch state", async () => {
+test("home keeps first-visit context while presenting the seed state", async () => {
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -539,9 +868,8 @@ test("home shows first-visit launch copy from launch state", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.launchVariant, "first_visit");
-  assert.equal(context.data.showLaunchPanel, true);
-  assert.equal(context.data.launchEyebrow, "聊出一本书");
-  assert.equal(context.data.launchTitle, "我的故事，慢慢讲");
+  assert.equal(context.data.primaryVoiceButtonTitle, "种下我的故事");
+  assert.equal(context.data.headerSubtitleText, "每一个故事，都从一颗种子开始。");
 });
 
 test("home dismisses one-time new-project launch markers", () => {
@@ -558,18 +886,16 @@ test("home dismisses one-time new-project launch markers", () => {
       userId: "user-1",
       projectId: "project-1",
       launchVariant: "new_project",
-      showLaunchPanel: true,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
   };
 
-  page.dismissLaunchPanel.call(context);
+  page.dismissLaunchExperience.call(context);
 
   assert.deepEqual(dismissals, [["user-1", "new_project", "project-1"]]);
   assert.equal(context.data.launchVariant, "none");
-  assert.equal(context.data.showLaunchPanel, false);
 });
 
 test("home creates voice sessions with the project-bound guidance mode", async () => {
@@ -614,7 +940,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
   assert.equal(syncedConsents.length, 1);
@@ -623,7 +949,8 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
+  assert.deepEqual(navigations, []);
+  assert.deepEqual(context.data.voiceEntry, { voiceSessionId: "voice/1", projectId: "project/1", mode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration", projectTitle: "爷爷的故事" });
   assert.equal(context.data.creatingVoice, false);
 });
 
@@ -662,16 +989,18 @@ test("home creates free narration voice sessions without a guidance module", asy
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
+  assert.deepEqual(navigations, []);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "voice/free");
+  assert.equal(context.data.voiceEntry.mode, "free_narration");
 });
 
-test("home daily actions create free narration and human interview sessions", async () => {
+test("home keeps new-story and resume actions distinct across narration modes", async () => {
   const createdSessions = [];
   const navigations = [];
   global.wx = {
@@ -708,75 +1037,25 @@ test("home daily actions create free narration and human interview sessions", as
     },
   };
 
-  await page.startFreeNarration.call(context);
-  await page.startHumanInterview.call(context);
+  await page.startPrimaryVoiceChat.call(context);
+  context.data.voiceEntry = null; // The prior component has completed and unmounted.
+  await context.resumeLastStory();
+  context.data.voiceEntry = null;
+  context.data.selectedMode = "human_interview";
+  await context.startPrimaryVoiceChat();
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
-  assert.equal(createdSessions[0].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
-  assert.equal(createdSessions[1].input.guidance_mode, "free_narration");
-  assert.equal(createdSessions[1].input.interview_type, "human_interview");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[0].input.metadata_json.resume_hint, undefined);
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
-  assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
-  assert.equal(navigations.length, 2);
-});
-
-test("home routes book organization through the book workspace without requiring microphone consent", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      projectTitle: "爷爷的故事",
-      projectDisplayTitle: "爷爷的故事",
-      hasProject: true,
-      voiceAuthorizationAgreed: false,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.openBookWorkspace.call(context);
-
-  const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
-  assert.deepEqual(navigations, ["/pages/book/index"]);
-  assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
-  assert.equal(context.data.error, "");
-});
-
-test("home opens narration overview without requiring microphone consent", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
-      voiceAuthorizationAgreed: false,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.openNarrationOverview.call(context);
-
-  assert.equal(navigations[0], "/pages/voice-progress/index");
-  assert.equal(context.data.error, "");
+  assert.equal(createdSessions[1].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
+  assert.equal(createdSessions[2].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[2].input.interview_type, "human_interview");
+  assert.equal(createdSessions[2].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[2].input.metadata_json.resume_hint, undefined);
+  assert.equal(createdSessions[2].input.metadata_json.interview_type, "human_interview");
+  assert.equal(navigations.length, 0);
+  assert.equal(context.data.voiceEntry.interviewType, "human_interview");
 });
 
 test("home does not create voice sessions when consent audit sync fails", async () => {
@@ -802,12 +1081,13 @@ test("home does not create voice sessions when consent audit sync fails", async 
       hasProject: true,
       voiceAuthorizationAgreed: true,
     },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.equal(context.data.error, "授权同步失败");
@@ -844,7 +1124,7 @@ test("home sends voice starts without a project to project creation", async () =
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.deepEqual(navigations, ["/pages/project-edit/index"]);
@@ -870,7 +1150,7 @@ test("home sends login-required voice starts to the dedicated login page", async
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
 });
@@ -903,11 +1183,9 @@ test("home opens the project switcher from the current memoir", () => {
 
 test("home blocks voice session creation before voice authorization consent", async () => {
   let createCalls = 0;
-  const toasts = [];
+  const scrolls = [];
   global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
+    pageScrollTo(options) { scrolls.push(options); },
   };
   const { page } = loadHomePage({
     voiceApiExports: {
@@ -926,16 +1204,19 @@ test("home blocks voice session creation before voice authorization consent", as
       hasProject: true,
       voiceAuthorizationAgreed: false,
     },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
-  assert.match(context.data.error, /声纹授权协议/);
-  assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.voiceAuthorizationRequested, true);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.deepEqual(scrolls, [{ selector: "#home-voice-authorization", duration: 250 }]);
 });
 
 test("home refreshes voice authorization consent from storage", () => {
@@ -960,32 +1241,112 @@ test("home refreshes voice authorization consent from storage", () => {
   assert.equal(context.data.voiceAuthorizationAgreed, true);
 });
 
-test("home persists voice authorization checkbox changes", () => {
-  let savedValue = null;
+test("home waits for voice authorization to be saved before starting a session", async () => {
+  const consentWrite = deferred();
+  let storedConsent = false;
+  let creates = 0;
   const { page } = loadHomePage({
     voiceAuthorizationExports: {
-      saveVoiceAuthorizationConsent: (agreed = true) => {
-        savedValue = agreed;
-        return {
-          agreed,
-          version: "test",
-          agreedAt: "2026-06-18T00:00:00.000Z",
-        };
+      readVoiceAuthorizationConsent: () => storedConsent,
+      syncVoiceAuthorizationConsent: async ({ consent } = {}) => {
+        if (consent) {
+          await consentWrite.promise;
+          storedConsent = consent.agreed;
+        } else if (!storedConsent) {
+          throw new Error("授权还没有写入服务端");
+        }
+        return { id: "consent-1" };
+      },
+    },
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        creates += 1;
+        return { session: { id: "s1" } };
       },
     },
   });
-  const context = {
-    data: { ...page.data, error: "旧错误" },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  global.wx = { pageScrollTo() {} };
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
 
-  page.changeVoiceAuthorization.call(context, {
+  const saving = context.changeVoiceAuthorization({
     detail: { value: ["voice_authorization"] },
   });
-
-  assert.equal(savedValue, true);
+  assert.equal(context.data.voiceAuthorizationSaving, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
-  assert.equal(context.data.error, "");
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 0);
+  consentWrite.resolve();
+  await saving;
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(storedConsent, true);
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+  delete global.wx;
+});
+
+test("home keeps consent available for retry when saving fails", async () => {
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => false,
+      syncVoiceAuthorizationConsent: async () => { throw new Error("授权保存失败"); },
+    },
+  });
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
+
+  await context.changeVoiceAuthorization({ detail: { value: ["voice_authorization"] } });
+
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(context.data.voiceAuthorizationAgreed, false);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.equal(context.data.error, "授权保存失败");
+});
+
+test("home refreshes the saved project default for the current account and project", async () => {
+  let identity = { id: "u1", display_name: "作者", email: "author@test.invalid", active_project_id: "p1",
+    active_project: { id: "p1", title: "回忆录", metadata_json: { memoir_profile: {
+      default_guidance_mode: "free_narration", default_interview_type: "ai_interview", default_session_goal: "open_narration",
+    } } } };
+  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => identity },
+    cacheExports: { readCachedMemoirHome: () => ({ payload: { identity, latest_transcript: null, server_revision: 1 } }) },
+  });
+  const context = pageContext(page);
+  context.measureNarration = () => {};
+  await context.onShow();
+  assert.equal(context.data.selectedMode, "free_narration");
+  identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
+    default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "open_narration",
+  } } } };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "guided_interview");
+  identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
+    default_guidance_mode: "free_narration", default_interview_type: "human_interview", default_session_goal: "open_narration",
+  } } } };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "human_interview");
+  identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
+    default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "book_completion",
+  } } } };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "book_completion");
+  identity = { ...identity, id: "u2" };
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "book_completion");
+  identity = { ...identity, active_project_id: "p2", active_project: { ...identity.active_project, id: "p2",
+    metadata_json: { memoir_profile: {
+      default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "open_narration",
+    } } } };
+  context.data.voiceEntry = { voiceSessionId: "old-session" };
+  context.data.selectedMode = "human_interview";
+  await context.loadHome(true);
+  assert.equal(context.data.selectedMode, "guided_interview");
+  assert.equal(context.data.voiceEntry, null);
+  context.onUnload();
 });

@@ -27,7 +27,6 @@ DIRECT_PROJECT_TABLES = (
     "memoir_chapter_digests",
     "memoir_chat_messages",
     "memoir_completion_issues",
-    "memoir_editing_jobs",
     "memoir_image_assets",
     "memoir_material_share_videos",
     "memoir_project_frameworks",
@@ -89,6 +88,10 @@ POSTGRES_RUNTIME_TRIGGERS = {
 POSTGRES_RUNTIME_INDEXES = {
     *POSTGRES_TRANSCRIPT_INDEXES,
     *POSTGRES_RETRIEVAL_INDEXES,
+    "ix_memoir_project_revision_events_project_id",
+}
+POSTGRES_FORBIDDEN_TRIGGERS = {
+    "trg_memoir_revision_memoir_editing_jobs",
 }
 
 
@@ -205,6 +208,11 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
     missing_triggers = POSTGRES_RUNTIME_TRIGGERS - triggers
     if missing_triggers:
         details.append("missing triggers: " + ", ".join(sorted(missing_triggers)))
+    forbidden_triggers = POSTGRES_FORBIDDEN_TRIGGERS & triggers
+    if forbidden_triggers:
+        details.append(
+            "forbidden triggers: " + ", ".join(sorted(forbidden_triggers))
+        )
     if details:
         raise RuntimeError(
             "PostgreSQL runtime schema mismatch; "

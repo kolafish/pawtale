@@ -5,6 +5,7 @@ import {
   getMemoirVoiceTranscript,
 } from "../../services/memoir-transcript-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
+import { ApiError } from "../../services/request";
 import {
   isAuthError,
   navigateToLogin,
@@ -62,6 +63,7 @@ definePage<TranscriptDetailData>()({
     error: "",
     utteranceId: "",
     item: null,
+    rawExpanded: false,
     questionExpanded: false,
     moreActionsExpanded: false,
     editReferenceExpanded: false,
@@ -85,6 +87,7 @@ definePage<TranscriptDetailData>()({
     const utteranceId = queryParam(options, "id");
     this.setData({
       utteranceId,
+      rawExpanded: false,
       questionExpanded: false,
       moreActionsExpanded: false,
       editReferenceExpanded: false,
@@ -127,6 +130,10 @@ definePage<TranscriptDetailData>()({
         this.setData({ needsLogin: true, item: null, error: "" });
         return;
       }
+      if (error instanceof ApiError && error.statusCode === 404) {
+        this.setData({ item: null, error: "" });
+        return;
+      }
       this.setData({ error: error instanceof Error ? error.message : "讲述记录加载失败" });
     } finally {
       if (requestToken === this.loadToken) {
@@ -160,6 +167,7 @@ definePage<TranscriptDetailData>()({
   onHide() {
     this.invalidateVoiceEditRequest();
     this.stopOfflineAsrPolling();
+    this.stopPlayback();
   },
 
   onUnload() {

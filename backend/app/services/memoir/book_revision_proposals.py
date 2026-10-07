@@ -39,6 +39,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_from_snapshot,
     manuscript_response,
     stored_cover_style,
+    stored_manuscript_design,
 )
 from app.services.memoir.book_output_snapshots import (
     book_content_from_chapter_snapshots,
@@ -87,14 +88,10 @@ def _revision_metadata_patch(proposal: MemoirBookRevisionProposal) -> dict[str, 
 def _book_information(
     *,
     project: Project,
-    output: MemoirBookOutput,
     baseline: MemoirBookOutputVersion,
 ) -> dict[str, str]:
     return {
-        "title": book_output_versions.book_output_version_title(
-            baseline,
-            fallback=output.title,
-        ),
+        "title": project.title.strip(),
         **effective_book_metadata(
             project=project,
             stored=baseline.manuscript_json,
@@ -178,12 +175,16 @@ def build_comparison(
                 continue
             before_content = _text(before_section.get("content"))
             after_content = _text(after_section.get("content"))
-            if before_content == after_content:
+            before_title = _text(before_section.get("title"))
+            after_title = _text(after_section.get("title")) or before_title
+            if before_content == after_content and before_title == after_title:
                 continue
             changed_sections.append(
                 {
                     "section_id": section_id,
-                    "title": (_text(after_section.get("title")) or _text(before_section.get("title"))),
+                    "title": after_title,
+                    "before_title": before_title,
+                    "after_title": after_title,
                     "before_content": before_content,
                     "after_content": after_content,
                     "before_char_count": len(before_content),
@@ -322,11 +323,14 @@ def _candidate_manuscript(
     metadata_patch: dict[str, str],
 ) -> dict[str, Any]:
     illustrations, image_appendix = _stored_illustrations(baseline.manuscript_json)
+    template, custom_layout = stored_manuscript_design(baseline.manuscript_json)
     manuscript = manuscript_from_snapshot(
         title=title,
         content=content,
         snapshot=snapshots,
         cover_style_value=stored_cover_style(baseline),
+        template=template,
+        custom_layout=custom_layout,
         metadata=effective_book_metadata(
             project=project,
             stored=baseline.manuscript_json,
@@ -436,7 +440,6 @@ async def proposal_response(
     )
     before_information = _book_information(
         project=project,
-        output=output,
         baseline=baseline,
     )
     metadata_patch = _revision_metadata_patch(proposal)
@@ -555,7 +558,6 @@ async def apply_proposal(
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
     before_information = _book_information(
         project=project,
-        output=output,
         baseline=baseline,
     )
     metadata_patch = _revision_metadata_patch(proposal)
@@ -621,12 +623,15 @@ async def apply_proposal(
         }
     output.status = MemoirOutputStatus.DRAFT.value
     output.title = after_information["title"]
+    project.title = after_information["title"]
+    project.updated_at = utcnow_naive()
     output.metadata_json = metadata
     output.updated_at = utcnow_naive()
     proposal.status = MemoirBookRevisionProposalStatus.APPLIED.value
     proposal.result_output_version_id = applied_version.id
     proposal.updated_at = utcnow_naive()
     db.add(output)
+    db.add(project)
     db.add(proposal)
     await db.flush()
     return await proposal_response(db, proposal=proposal, preview=preview)

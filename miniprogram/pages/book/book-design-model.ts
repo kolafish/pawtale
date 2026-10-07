@@ -1,10 +1,5 @@
-import type {
-  MemoirBookCoverStyle,
-  MemoirBookEditorialCopyTarget,
-  MemoirBookOutput,
-} from "../../domain/memoir-book";
+import type { MemoirBookEditorialCopyJobTarget, MemoirBookOutput } from "../../domain/memoir-book";
 import {
-  BOOK_COVER_STYLE_OPTIONS,
   trimText,
 } from "./book-view-model";
 
@@ -14,7 +9,6 @@ export interface BookDesignState {
   bookTitleSaving: boolean;
   bookTitleChanged: boolean;
   bookMetadataChanged: boolean;
-  bookCoverStyleChanged: boolean;
   bookSubtitleInput: string;
   bookNarratorNameInput: string;
   bookPreparedByInput: string;
@@ -25,12 +19,6 @@ export interface BookDesignState {
 
 export function latestBookTitle(output: MemoirBookOutput | null): string {
   return trimText(output?.latest_version?.manuscript?.profile?.title || output?.title || "");
-}
-
-export function latestBookCoverStyle(output: MemoirBookOutput | null): MemoirBookCoverStyle {
-  const style = output?.latest_version?.manuscript?.render_settings?.cover_style;
-  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
-  return option ? option.value : "classic_plain";
 }
 
 function latestBookMetadata(output: MemoirBookOutput | null): Record<string, string> {
@@ -83,7 +71,7 @@ export function currentBookMetadataPayload(data: BookDesignState, includeEmpty: 
 }
 
 export function bookDesignHasChanges(data: BookDesignState): boolean {
-  return data.bookTitleChanged || data.bookMetadataChanged || data.bookCoverStyleChanged;
+  return data.bookTitleChanged || data.bookMetadataChanged;
 }
 
 export function bookEditorialCopyBlockedMessage(
@@ -99,7 +87,7 @@ export function bookEditorialCopyBlockedMessage(
   return "";
 }
 
-export function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
+export function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyJobTarget {
   return target === "preface" || target === "afterword" || target === "back_cover_quote";
 }
 

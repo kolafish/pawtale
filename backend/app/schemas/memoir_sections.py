@@ -129,6 +129,9 @@ class MemoirSectionVersionReference(BaseModel):
 class MemoirSectionRegenerateRequest(BaseModel):
     expected_sections: list[MemoirSectionVersionReference] = Field(min_length=1)
     ai_model: str | None = Field(default=None, max_length=120)
+    section_count_goal: Literal["reduce"] | None = None
+    # Keep limits already stored in pending jobs from older releases.
+    max_sections: int | None = Field(default=None, ge=1, le=30)
 
     @field_validator("expected_sections")
     @classmethod

@@ -2,13 +2,18 @@ import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-sess
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirIdentity,
-  isValidEmail,
+  deleteAccountWithWeChat,
   logoutBackendSession,
-  setAccountCredentials,
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import {
+  getAICreditSummary,
+  getAIUsageDetails,
+  type AICreditSummary,
+  type AIUsageDetail,
+} from "../../services/billing";
+import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
   aiModelLabel,
@@ -20,6 +25,7 @@ import {
   saveLargeTextEnabled,
 } from "../../services/accessibility-settings";
 import {
+  clearVoiceAuthorizationConsentRecord,
   readVoiceAuthorizationConsentRecord,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
@@ -34,15 +40,41 @@ import {
   userDisplayName,
 } from "../../services/user-display-name";
 
+interface CreditUsagePurposeGroup {
+  purpose: string;
+  count: number;
+  amountText: string;
+}
+
+interface CreditUsageDayGroup {
+  dateText: string;
+  amountText: string;
+  purposes: CreditUsagePurposeGroup[];
+}
+
 interface MeData {
   pageClass: string;
   loading: boolean;
+  deletingAccount: boolean;
   loggedIn: boolean;
   savingName: boolean;
   avatarSaving: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
-  credentialsLoading: boolean;
+  creditLoading: boolean;
+  creditAvailable: boolean;
+  creditError: string;
+  creditTotalText: string;
+  creditUsedText: string;
+  creditRemainingText: string;
+  creditProgressPercent: string;
+  creditUsageExpanded: boolean;
+  creditUsageLoading: boolean;
+  creditUsageError: string;
+  creditUsageItems: AIUsageDetail[];
+  creditUsageDays: CreditUsageDayGroup[];
+  creditUsageHasMore: boolean;
+  rechargeQrVisible: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -50,9 +82,6 @@ interface MeData {
   avatarUrl: string;
   email: string;
   accountEmailText: string;
-  passwordLoginEnabled: boolean;
-  credentialEmail: string;
-  credentialPassword: string;
   projectTitle: string;
   projectCount: number;
   voiceStatsProjectId: string;
@@ -64,7 +93,6 @@ interface MeData {
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationStatusText: string;
   largeTextEnabled: boolean;
-  showAccountSettings: boolean;
 }
 
 type InputEvent = PageTextInputEvent;
@@ -93,9 +121,9 @@ function formatAudioDuration(totalSeconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const restSeconds = seconds % 60;
   if (!minutes) {
-    return `${restSeconds} 秒`;
+    return `${restSeconds}秒`;
   }
-  return `${minutes} 分 ${restSeconds} 秒`;
+  return `${minutes}分${restSeconds}秒`;
 }
 
 function voiceStatsData(progress: MemoirVoiceProgressResponse) {
@@ -105,6 +133,71 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
     utteranceCount: snapshot?.valid_utterance_count ?? progress.utterance_count,
     totalUserCharCount: snapshot?.source_char_count ?? progress.total_user_char_count,
     totalAudioText: formatAudioDuration(snapshot?.total_audio_seconds ?? progress.total_audio_seconds),
+  };
+}
+
+function creditAmount(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+}
+
+function formatCreditAmount(value: unknown): string {
+  return creditAmount(value).toFixed(2);
+}
+
+function formatUsageAmount(micros: number): string {
+  return (micros / 1_000_000).toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1");
+}
+
+function creditUsageDayGroups(items: AIUsageDetail[]): CreditUsageDayGroup[] {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const days = new Map<string, {
+    amountMicros: number;
+    purposes: Map<string, { count: number; amountMicros: number }>;
+  }>();
+  for (const item of items) {
+    const date = new Date(item.created_at);
+    const dateText = Number.isNaN(date.getTime())
+      ? "日期未知"
+      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const amountMicros = Math.round(creditAmount(item.cost_rmb) * 1_000_000);
+    const day = days.get(dateText) || { amountMicros: 0, purposes: new Map() };
+    const purpose = day.purposes.get(item.purpose) || { count: 0, amountMicros: 0 };
+    purpose.count += 1;
+    purpose.amountMicros += amountMicros;
+    day.amountMicros += amountMicros;
+    day.purposes.set(item.purpose, purpose);
+    days.set(dateText, day);
+  }
+  return Array.from(days, ([dateText, day]) => ({
+    dateText,
+    amountText: formatUsageAmount(day.amountMicros),
+    purposes: Array.from(day.purposes, ([purpose, group]) => ({
+      purpose,
+      count: group.count,
+      amountText: formatUsageAmount(group.amountMicros),
+    })),
+  }));
+}
+
+function creditData(summary: AICreditSummary): Pick<
+  MeData,
+  | "creditAvailable"
+  | "creditError"
+  | "creditTotalText"
+  | "creditUsedText"
+  | "creditRemainingText"
+  | "creditProgressPercent"
+> {
+  const total = creditAmount(summary.total_credit_rmb);
+  const used = creditAmount(summary.used_rmb);
+  return {
+    creditAvailable: true,
+    creditError: "",
+    creditTotalText: formatCreditAmount(total),
+    creditUsedText: formatCreditAmount(used),
+    creditRemainingText: formatCreditAmount(summary.remaining_rmb),
+    creditProgressPercent: (total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0).toFixed(1),
   };
 }
 
@@ -143,8 +236,23 @@ function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabl
 function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
+    deletingAccount: false,
     editingName: false,
     voiceStatsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: "0.0",
+    creditUsageExpanded: false,
+    creditUsageLoading: false,
+    creditUsageError: "",
+    creditUsageItems: [],
+    creditUsageDays: [],
+    creditUsageHasMore: false,
+    rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
     avatarText: "作",
@@ -152,11 +260,6 @@ function loggedOutData(): Partial<MeData> {
     avatarSaving: false,
     email: "",
     accountEmailText: "",
-    passwordLoginEnabled: false,
-    credentialEmail: "",
-    credentialPassword: "",
-    credentialsLoading: false,
-    showAccountSettings: false,
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -174,12 +277,26 @@ definePage<MeData>()({
   data: {
     pageClass: "me-page",
     loading: false,
+    deletingAccount: false,
     loggedIn: false,
     savingName: false,
     avatarSaving: false,
     editingName: false,
     voiceStatsLoading: false,
-    credentialsLoading: false,
+    creditLoading: false,
+    creditAvailable: false,
+    creditError: "",
+    creditTotalText: "0.00",
+    creditUsedText: "0.00",
+    creditRemainingText: "0.00",
+    creditProgressPercent: "0.0",
+    creditUsageExpanded: false,
+    creditUsageLoading: false,
+    creditUsageError: "",
+    creditUsageItems: [],
+    creditUsageDays: [],
+    creditUsageHasMore: false,
+    rechargeQrVisible: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -187,9 +304,6 @@ definePage<MeData>()({
     avatarUrl: "",
     email: "",
     accountEmailText: "",
-    passwordLoginEnabled: false,
-    credentialEmail: "",
-    credentialPassword: "",
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -200,7 +314,6 @@ definePage<MeData>()({
     ...aiModelSettingsData(),
     ...voiceAuthorizationSettingsData(),
     largeTextEnabled: false,
-    showAccountSettings: false,
   },
 
   async onShow() {
@@ -228,8 +341,6 @@ definePage<MeData>()({
       const keepVoiceStats = Boolean(activeProjectId && this.data.voiceStatsProjectId === activeProjectId);
       this.setData({
         loggedIn: true,
-        credentialEmail: "",
-        credentialPassword: "",
         displayName,
         nameDraft: displayName,
         editingName: false,
@@ -237,9 +348,14 @@ definePage<MeData>()({
         avatarUrl: resolveBackendAvatarUrl(identity.avatar_url),
         email: identity.email,
         accountEmailText: accountEmailText(identity.email, identity.password_login_enabled),
-        passwordLoginEnabled: identity.password_login_enabled,
         projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
+        creditUsageExpanded: false,
+        creditUsageLoading: false,
+        creditUsageError: "",
+        creditUsageItems: [],
+        creditUsageDays: [],
+        creditUsageHasMore: false,
         ...(keepVoiceStats ? {} : {
           voiceStatsProjectId: activeProjectId,
           sessionCount: 0,
@@ -251,7 +367,9 @@ definePage<MeData>()({
         ...accessibilitySettingsData(),
       });
       if (activeProjectId) {
-        await this.loadVoiceStats(activeProjectId);
+        await Promise.all([this.loadVoiceStats(activeProjectId), this.loadAICreditSummary()]);
+      } else {
+        await this.loadAICreditSummary();
       }
     } catch (error) {
       if (isAuthError(error)) {
@@ -264,55 +382,6 @@ definePage<MeData>()({
       });
     } finally {
       this.setData({ loading: false });
-    }
-  },
-
-  changeCredentialEmail(event: InputEvent) {
-    this.setData({ credentialEmail: event.detail.value, error: "" });
-  },
-
-  changeCredentialPassword(event: InputEvent) {
-    this.setData({ credentialPassword: event.detail.value, error: "" });
-  },
-
-  async submitCredentials() {
-    if (this.data.loading || this.data.credentialsLoading) {
-      return;
-    }
-    const email = this.data.credentialEmail.trim();
-    const password = this.data.credentialPassword;
-    if (!email || !password) {
-      this.setData({ error: "请输入邮箱和密码" });
-      return;
-    }
-    if (!isValidEmail(email)) {
-      this.setData({ error: "请输入正确的邮箱地址" });
-      return;
-    }
-    if (password.length < 8) {
-      this.setData({ error: "密码至少需要 8 位" });
-      return;
-    }
-    this.setData({ credentialsLoading: true, error: "" });
-    try {
-      const response = await setAccountCredentials({
-        email,
-        password,
-      });
-      if (response.needs_credentials) {
-        this.setData({ error: "账号还没有设置完成，请重新提交" });
-        return;
-      }
-      await this.loadMe();
-      if (this.data.loggedIn) {
-        wx.showToast({ title: "已登录", icon: "success" });
-      }
-    } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "保存账号失败",
-      });
-    } finally {
-      this.setData({ credentialsLoading: false });
     }
   },
 
@@ -379,7 +448,6 @@ definePage<MeData>()({
         avatarText: Array.from(normalizedName)[0] || "作",
         email: user.email,
         accountEmailText: accountEmailText(user.email, user.password_login_enabled),
-        passwordLoginEnabled: user.password_login_enabled,
         editingName: false,
       });
       wx.showToast({ title: "已保存", icon: "success" });
@@ -408,6 +476,80 @@ definePage<MeData>()({
     }
   },
 
+  async loadAICreditSummary() {
+    this.setData({ creditLoading: true, creditError: "" });
+    try {
+      const summary = await getAICreditSummary();
+      this.setData(creditData(summary));
+    } catch (error) {
+      console.warn("load AI credit summary failed", error);
+      this.setData({
+        creditAvailable: false,
+        creditError: error instanceof Error ? error.message : "额度暂时无法加载",
+      });
+    } finally {
+      this.setData({ creditLoading: false });
+    }
+  },
+
+  async toggleCreditUsageDetails() {
+    if (this.data.creditUsageExpanded) {
+      this.setData({ creditUsageExpanded: false });
+      return;
+    }
+    this.setData({ creditUsageExpanded: true });
+    await this.loadCreditUsageDetails(true);
+  },
+
+  async loadMoreCreditUsageDetails() {
+    await this.loadCreditUsageDetails();
+  },
+
+  async loadCreditUsageDetails(reset = false) {
+    if (this.data.creditUsageLoading) {
+      return;
+    }
+    const email = this.data.email;
+    const offset = reset ? 0 : this.data.creditUsageItems.length;
+    this.setData({
+      creditUsageLoading: true,
+      creditUsageError: "",
+      ...(reset ? { creditUsageItems: [], creditUsageDays: [], creditUsageHasMore: false } : {}),
+    });
+    try {
+      const page = await getAIUsageDetails(offset);
+      if (this.data.email !== email || !this.data.creditUsageExpanded) {
+        return;
+      }
+      const items = reset ? page.items : [...this.data.creditUsageItems, ...page.items];
+      this.setData({
+        creditUsageItems: items,
+        creditUsageDays: creditUsageDayGroups(items),
+        creditUsageHasMore: page.has_more,
+      });
+    } catch (error) {
+      if (this.data.email === email && this.data.creditUsageExpanded) {
+        this.setData({
+          creditUsageError: error instanceof Error ? error.message : "使用明细暂时无法加载",
+        });
+      }
+    } finally {
+      if (this.data.email === email) {
+        this.setData({ creditUsageLoading: false });
+      }
+    }
+  },
+
+  openRechargeQr() {
+    this.setData({ rechargeQrVisible: true });
+  },
+
+  closeRechargeQr() {
+    this.setData({ rechargeQrVisible: false });
+  },
+
+  stopRechargeQrTap() {},
+
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
     this.setData({
@@ -415,10 +557,6 @@ definePage<MeData>()({
       largeTextEnabled: settings.largeTextEnabled,
     });
     wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
-  },
-
-  toggleAccountSettings() {
-    this.setData({ showAccountSettings: !this.data.showAccountSettings });
   },
 
   openVoiceAuthorization() {
@@ -444,17 +582,44 @@ definePage<MeData>()({
     this.setData({ loading: true, error: "" });
     try {
       await logoutBackendSession();
-    } catch (error) {
-      console.warn("backend logout failed", error);
-    } finally {
       clearCurrentUserMemoirSnapshots();
       replaceMemoirStore({});
-      this.setData({
-        ...loggedOutData(),
-        loading: false,
-        error: "",
-      });
+      this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "已退出", icon: "success" });
+      relaunchLogin();
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  async deleteAccount() {
+    if (this.data.loading) return;
+    const confirmation = await new Promise<{ confirm: boolean }>((resolve) => {
+      wx.showModal({
+        title: "注销账号",
+        content: "注销后，账号、回忆录及录音资料将从在线服务中删除，无法在小程序恢复。请确认是否继续。",
+        confirmText: "确认注销",
+        confirmColor: "#b0473d",
+        success: resolve,
+        fail: () => resolve({ confirm: false }),
+      });
+    });
+    if (!confirmation.confirm) return;
+    this.setData({ loading: true, deletingAccount: true, error: "" });
+    try {
+      await deleteAccountWithWeChat();
+      clearCurrentUserMemoirSnapshots();
+      clearVoiceAuthorizationConsentRecord();
+      replaceMemoirStore({});
+      this.setData({ ...loggedOutData(), error: "" });
+      wx.showToast({ title: "账号已注销", icon: "success" });
+      relaunchLogin();
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "注销失败，请稍后重试" });
+    } finally {
+      this.setData({ loading: false, deletingAccount: false });
     }
   },
 });

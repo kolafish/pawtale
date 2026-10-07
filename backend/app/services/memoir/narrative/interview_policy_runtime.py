@@ -272,7 +272,7 @@ async def _completion_context(
         str(value).strip()
         for value in issue.related_material_ids_json
         if str(value).strip()
-    ]
+    ] if issue.scope == "chapter" else []
     materials = (
         list(
             (

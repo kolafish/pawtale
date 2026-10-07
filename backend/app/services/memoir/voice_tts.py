@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 import contextlib
 from dataclasses import dataclass, field
 import json
@@ -16,6 +16,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import Settings, get_settings
+from app.services.ai_credits import assert_current_ai_credit_available
 from app.services.memoir.tts_alignment import (
     TTSAlignmentSegment,
     alignment_segments_from_volc_words,
@@ -137,6 +138,7 @@ class VolcTTSClient:
         )
 
         async def request() -> httpx.Response:
+            await assert_current_ai_credit_available()
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     self.endpoint,
@@ -203,6 +205,7 @@ class VolcTTSClient:
 
         try:
             async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+                await assert_current_ai_credit_available()
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     async with client.stream(
                         "POST",
@@ -284,7 +287,7 @@ class VolcTTSClient:
         speed_ratio: float | None = None,
         response_format: str | None = None,
         sample_rate: int | None = None,
-    ) -> AsyncIterator[StreamingTTSChunk]:
+    ) -> AsyncGenerator[StreamingTTSChunk, None]:
         effective_voice, effective_speed_ratio, output_format, output_sample_rate, headers, timeout = (
             self._bidirectional_context(
                 voice=voice,
@@ -300,8 +303,11 @@ class VolcTTSClient:
         audio_bytes_seen = 0
         session_id = str(uuid.uuid4())
 
-        try:
-            async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+        async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+            await assert_current_ai_credit_available()
+            try:
+                started_at = asyncio.get_running_loop().time()
+                deadline = started_at + timeout
                 connection = await websockets.connect(
                     self.bidirectional_endpoint,
                     additional_headers=headers,
@@ -313,8 +319,9 @@ class VolcTTSClient:
                     connection,
                     _VOLC_BIDI_START_CONNECTION,
                     {"event": _VOLC_BIDI_START_CONNECTION},
+                    deadline=deadline,
                 )
-                connection_started = _volc_bidi_parse_packet(await connection.recv())
+                connection_started = await _volc_bidi_receive(connection, deadline=deadline)
                 if connection_started.event != _VOLC_BIDI_CONNECTION_STARTED:
                     raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
 
@@ -328,16 +335,20 @@ class VolcTTSClient:
                         speed_ratio=effective_speed_ratio,
                     ),
                     session_id=session_id,
+                    deadline=deadline,
                 )
-                session_started = _volc_bidi_parse_packet(await connection.recv())
+                session_started = await _volc_bidi_receive(connection, deadline=deadline)
                 if session_started.event != _VOLC_BIDI_SESSION_STARTED:
                     raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
 
                 producer_task = asyncio.create_task(
-                    _volc_bidi_send_text_chunks(connection, text_chunks, session_id=session_id)
+                    asyncio.wait_for(
+                        _volc_bidi_send_text_chunks(connection, text_chunks, session_id=session_id),
+                        _remaining_tts_seconds(deadline),
+                    )
                 )
                 while True:
-                    packet = _volc_bidi_parse_packet(await connection.recv())
+                    packet = await _volc_bidi_receive(connection, deadline=deadline, producer=producer_task)
                     if packet.error_code is not None:
                         raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
                     if packet.event in {_VOLC_BIDI_CONNECTION_FAILED, _VOLC_BIDI_SESSION_FAILED}:
@@ -363,9 +374,15 @@ class VolcTTSClient:
                         break
 
                 if producer_task is not None:
-                    await producer_task
+                    await asyncio.wait_for(producer_task, _remaining_tts_seconds(deadline))
                 if not audio_seen:
                     raise HTTPException(status_code=502, detail="TTS 未返回可用音频")
+                await _volc_bidi_send_packet(
+                    connection,
+                    _VOLC_BIDI_FINISH_CONNECTION,
+                    {"event": _VOLC_BIDI_FINISH_CONNECTION},
+                    deadline=deadline,
+                )
                 yield StreamingTTSChunk(
                     audio=b"",
                     mime_type=output_format.mime_type,
@@ -384,24 +401,27 @@ class VolcTTSClient:
                     bits_per_sample=DEFAULT_STREAM_TTS_BITS_PER_SAMPLE,
                     is_final=True,
                 )
-                await _volc_bidi_send_packet(
-                    connection,
-                    _VOLC_BIDI_FINISH_CONNECTION,
-                    {"event": _VOLC_BIDI_FINISH_CONNECTION},
+            except HTTPException:
+                raise
+            except TimeoutError as exc:
+                logger.warning(
+                    "Volc bidirectional TTS timeout provider=%s requested_model=%s resolved_model=%s "
+                    "timeout=%s elapsed=%.3f error_type=%s",
+                    self.provider_name, self.model_name, self.model_name, timeout,
+                    asyncio.get_running_loop().time() - started_at, type(exc).__name__,
                 )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("Volc bidirectional TTS request failed")
-            raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
-        finally:
-            if producer_task is not None and not producer_task.done():
-                producer_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await producer_task
-            if connection is not None:
-                with contextlib.suppress(Exception):
-                    await connection.close()
+                raise HTTPException(status_code=504, detail="语音合成超时") from exc
+            except Exception as exc:
+                logger.exception("Volc bidirectional TTS request failed")
+                raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
+            finally:
+                if producer_task is not None:
+                    if not producer_task.done():
+                        producer_task.cancel()
+                    await asyncio.gather(producer_task, return_exceptions=True)
+                if connection is not None:
+                    with contextlib.suppress(Exception):
+                        await connection.close()
 
     def _bidirectional_context(
         self,
@@ -518,8 +538,41 @@ async def _volc_bidi_send_packet(
     payload: dict[str, object],
     *,
     session_id: str = "",
+    deadline: float | None = None,
 ) -> None:
-    await connection.send(_volc_bidi_client_packet(event, payload, session_id=session_id))
+    send = connection.send(_volc_bidi_client_packet(event, payload, session_id=session_id))
+    if deadline is None:
+        await send
+    else:
+        await asyncio.wait_for(send, _remaining_tts_seconds(deadline))
+
+
+def _remaining_tts_seconds(deadline: float) -> float:
+    return max(0.0, deadline - asyncio.get_running_loop().time())
+
+
+async def _volc_bidi_receive(
+    connection: Any,
+    *,
+    deadline: float,
+    producer: asyncio.Task[None] | None = None,
+) -> _VolcBidirectionalPacket:
+    receiver = asyncio.create_task(connection.recv())
+    try:
+        if producer is not None:
+            await asyncio.wait(
+                (receiver, producer),
+                timeout=_remaining_tts_seconds(deadline),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if producer.done():
+                producer.result()
+        message = await asyncio.wait_for(receiver, _remaining_tts_seconds(deadline))
+        return _volc_bidi_parse_packet(message)
+    finally:
+        if not receiver.done():
+            receiver.cancel()
+        await asyncio.gather(receiver, return_exceptions=True)
 
 
 def _volc_bidi_client_packet(

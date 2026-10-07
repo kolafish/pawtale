@@ -2,6 +2,7 @@ import json
 
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirSemanticCacheStatus
 from app.models.memoir import MemoirSectionDigest, MemoirSectionMaterial
 from app.services.ai_timeouts import AIProviderTimeoutError
@@ -14,7 +15,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeDigestAI:
+class FakeDigestAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-section-digest"
 
@@ -144,7 +145,7 @@ async def test_section_digest_signature_reuses_same_material_input(client, test_
     assert response.json()["digest"]["focus"] == "一段疏远的关系如何重新搭上线。"
 
 
-async def test_section_change_marks_previous_digest_stale(client, test_db):
+async def test_section_change_removes_previous_digest(client, test_db):
     project_id, section, created = await _bootstrapped_section(client, test_db)
     fake = FakeDigestAI(_valid_digest_payload("M1"))
     digest = await section_digests.generate_or_reuse_section_digest(
@@ -164,9 +165,7 @@ async def test_section_change_marks_previous_digest_stale(client, test_db):
     )
     assert update.status_code == 200
 
-    stale = await test_db.get(MemoirSectionDigest, digest.id)
-    assert stale is not None
-    assert stale.status == MemoirSemanticCacheStatus.STALE.value
+    assert await test_db.get(MemoirSectionDigest, digest.id) is None
     current = await client.get(
         f"/api/memoir/projects/{project_id}/sections/{section['id']}/digest"
     )

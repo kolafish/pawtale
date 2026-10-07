@@ -10,6 +10,7 @@ import aiofiles
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from PIL import Image, ImageOps
 from sqlalchemy.orm import selectinload
 
 from app.config import DATA_DIR
@@ -38,14 +39,13 @@ _BACKGROUND_SOURCE_OPTIONS: tuple[dict[str, str], ...] = (
     {
         "value": SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
         "label": "经典背景",
-        "description": "使用米白纸张质感背景，不生成也不上传图片",
+        "description": "使用素雅的暖色底，不生成也不上传图片",
     },
 )
 _BACKGROUND_SOURCE_VALUES = {option["value"] for option in _BACKGROUND_SOURCE_OPTIONS}
-SHARE_VIDEO_CUSTOM_BACKGROUND_VERSION = "memoir-share-video-custom-background-v1"
+SHARE_VIDEO_CUSTOM_BACKGROUND_VERSION = "memoir-share-video-custom-background-v2"
 SHARE_VIDEO_CUSTOM_BACKGROUND_PRESET = "memoir_soft"
-SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH = 1280
-SHARE_VIDEO_CUSTOM_BACKGROUND_HEIGHT = 720
+SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_SIDE = 1920
 SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_BYTES = 10 * 1024 * 1024
 SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_PIXELS = 20_000_000
 _PROCESSED_MIME_TYPE = "image/jpeg"
@@ -56,20 +56,18 @@ _SUPPORTED_EXTENSIONS = {
     "image/webp": "webp",
 }
 _PROCESSING_JSON = {
-    "target_width": SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH,
-    "target_height": SHARE_VIDEO_CUSTOM_BACKGROUND_HEIGHT,
-    "fit": "cover",
-    "saturation": 0.55,
-    "contrast": 0.82,
-    "brightness": 0.04,
-    "blur": "boxblur=1:1",
-    "warm_overlay": "#F6F1E8",
-    "warm_overlay_opacity": 0.24,
+    # The renderer frames the whole photo; it is only resized and re-encoded.
+    "max_side": SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_SIDE,
+    "fit": "keep_aspect",
 }
 
 
-def share_video_background_source_options() -> list[dict[str, str]]:
-    return [dict(option) for option in _BACKGROUND_SOURCE_OPTIONS]
+def share_video_background_source_options(*, include_ai: bool = True) -> list[dict[str, str]]:
+    return [
+        dict(option)
+        for option in _BACKGROUND_SOURCE_OPTIONS
+        if include_ai or option["value"] != SHARE_VIDEO_BACKGROUND_SOURCE_AI
+    ]
 
 
 def normalize_share_video_background_source(value: str | None) -> str:
@@ -218,51 +216,20 @@ def _sniff_image(content: bytes) -> _ImageInfo:
     return _ImageInfo(mime_type=mime_type, extension=_SUPPORTED_EXTENSIONS[mime_type], width=width, height=height)
 
 
-def _ffmpeg_executable() -> str:
+def _process_background_image_sync(source_path: Path, target_path: Path) -> tuple[int, int]:
     try:
-        import imageio_ffmpeg
-    except Exception:
-        return "ffmpeg"
-    return imageio_ffmpeg.get_ffmpeg_exe()
-
-
-async def _process_background_image(source_path: Path, target_path: Path) -> None:
+        with Image.open(source_path) as source:
+            picture = ImageOps.exif_transpose(source).convert("RGB")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="背景图片处理失败") from exc
+    picture.thumbnail((SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_SIDE, SHARE_VIDEO_CUSTOM_BACKGROUND_MAX_SIDE), Image.LANCZOS)
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    video_filter = ",".join(
-        (
-            f"scale={SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH}:{SHARE_VIDEO_CUSTOM_BACKGROUND_HEIGHT}:"
-            "force_original_aspect_ratio=increase",
-            f"crop={SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH}:{SHARE_VIDEO_CUSTOM_BACKGROUND_HEIGHT}",
-            "setsar=1",
-            "eq=saturation=0.55:contrast=0.82:brightness=0.04",
-            "boxblur=1:1",
-            "format=rgba",
-            "drawbox=x=0:y=0:w=iw:h=ih:color=0xF6F1E8@0.24:t=fill",
-            "format=yuvj420p",
-        )
-    )
-    process = await asyncio.create_subprocess_exec(
-        _ffmpeg_executable(),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(source_path),
-        "-vf",
-        video_filter,
-        "-frames:v",
-        "1",
-        "-q:v",
-        "3",
-        str(target_path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _stdout, stderr = await process.communicate()
-    if process.returncode != 0 or not target_path.exists() or target_path.stat().st_size <= 0:
-        message = stderr.decode("utf-8", errors="ignore").strip().splitlines()[-1:]
-        raise HTTPException(status_code=400, detail=message[0] if message else "背景图片处理失败")
+    picture.save(target_path, format="JPEG", quality=90)
+    return picture.width, picture.height
+
+
+async def _process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
+    return await asyncio.to_thread(_process_background_image_sync, source_path, target_path)
 
 
 def _response(asset: MemoirImageAsset) -> MemoirShareVideoCustomBackgroundAssetResponse:
@@ -307,6 +274,7 @@ async def create_custom_share_video_background_asset(
         "custom_upload",
         content_hash,
         normalized_preset,
+        SHARE_VIDEO_CUSTOM_BACKGROUND_VERSION,
     )
     existing = await db.scalar(
         select(MemoirImageAsset)
@@ -324,14 +292,14 @@ async def create_custom_share_video_background_asset(
         _custom_background_root()
         / _safe_path_part(user_id)
         / content_hash[:16]
-        / _safe_path_part(normalized_preset)
+        / _safe_path_part(f"{normalized_preset}-{SHARE_VIDEO_CUSTOM_BACKGROUND_VERSION}")
     )
     original_path = folder / f"original.{image_info.extension}"
     processed_path = folder / f"processed.{_PROCESSED_EXTENSION}"
     folder.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(original_path, "wb") as file:
         await file.write(content)
-    await _process_background_image(original_path, processed_path)
+    width, height = await _process_background_image(original_path, processed_path)
 
     metadata = {
         "share_video_background_source": "custom_upload",
@@ -355,8 +323,8 @@ async def create_custom_share_video_background_asset(
         thumbnail_storage_path=_relative_storage_path(processed_path),
         mime_type=_PROCESSED_MIME_TYPE,
         size_bytes=processed_path.stat().st_size,
-        width=SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH,
-        height=SHARE_VIDEO_CUSTOM_BACKGROUND_HEIGHT,
+        width=width,
+        height=height,
         title="自定义分享背景",
         caption="用户上传并自动处理为分享视频背景。",
         alt_text="自定义分享视频背景",

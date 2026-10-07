@@ -1,60 +1,64 @@
 import { datasetString, type PageDatasetEvent } from "../../services/page-input";
-import type { StoryTreeChapterEvent, StoryTreeMediaEvent } from "./events";
+import type { StoryTreeChapterEvent } from "./events";
 import { emptyStoryViewData } from "./story-view-data";
 
-type TreeTapEvent = PageDatasetEvent<{
-  id?: string;
-  chapterId?: string;
-  sectionId?: string;
-}>;
+type TreeTapEvent = PageDatasetEvent<{ id?: string }>;
 
 Component({
+  options: { multipleSlots: true },
+
   properties: {
     story: { type: Object, value: emptyStoryViewData() },
     largeText: { type: Boolean, value: false },
-    showSummary: { type: Boolean, value: true },
+    canOpenBook: { type: Boolean, value: false },
+    canSwitchProject: { type: Boolean, value: false },
+    canVoiceEdit: { type: Boolean, value: false },
+    showBookHint: { type: Boolean, value: false },
   },
 
+  data: { showAllChapters: false },
+
   methods: {
-    focusGrowth(chapterId: string, sectionId?: string) {
-      const selector = sectionId ? `#story-section-${sectionId}` : `#story-chapter-${chapterId}`;
-      this.createSelectorQuery().select(selector).boundingClientRect(rect => {
-        if (rect) this.triggerEvent("focusgrowth", { top: rect.top });
-      }).exec();
+    focusGrowth(chapterId: string) {
+      const measure = () => {
+        this.createSelectorQuery().select(`#story-chapter-${chapterId}`).boundingClientRect(rect => {
+          if (rect) this.triggerEvent("focusgrowth", { top: rect.top });
+        }).exec();
+      };
+      const chapters = Object.values(
+        (this.properties.story as ReturnType<typeof emptyStoryViewData>).chapters || {},
+      );
+      const targetExists = chapters.some(chapter => chapter.id === chapterId);
+      if (targetExists && !this.data.showAllChapters) {
+        this.setData({ showAllChapters: true }, measure);
+        return;
+      }
+      measure();
     },
 
-    toggleChapter(event: TreeTapEvent) {
-      const chapterId = datasetString(event, "id");
-      if (chapterId) this.triggerEvent("togglechapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
+    toggleAllChapters() {
+      this.setData({ showAllChapters: !this.data.showAllChapters });
     },
 
-    readChapter(event: TreeTapEvent) {
-      const chapterId = datasetString(event, "id");
-      if (chapterId) this.triggerEvent("readchapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
+    openProjects() {
+      if (this.properties.canSwitchProject) this.triggerEvent("openprojects");
     },
 
     openChapter(event: TreeTapEvent) {
-      const chapterId = datasetString(event, "chapterId") || datasetString(event, "id");
-      if (!chapterId) return;
-      const sectionId = datasetString(event, "sectionId");
-      this.triggerEvent("openchapter", { chapterId, sectionId } satisfies StoryTreeChapterEvent["detail"]);
-    },
-
-    openMedia(event: TreeTapEvent) {
-      const chapterId = datasetString(event, "chapterId") || datasetString(event, "id");
-      this.triggerEvent("openmedia", { chapterId } satisfies StoryTreeMediaEvent["detail"]);
+      const chapterId = datasetString(event, "id");
+      if (chapterId) this.triggerEvent("openchapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
     },
 
     openBook() {
-      this.triggerEvent("openbook");
+      if (this.properties.canOpenBook) this.triggerEvent("openbook");
     },
 
     openTranscripts() {
       this.triggerEvent("opentranscripts");
     },
 
-    openChapterManager() {
-      this.triggerEvent("managechapters");
+    openVoiceEdit() {
+      this.triggerEvent("voiceedit");
     },
   },
 });

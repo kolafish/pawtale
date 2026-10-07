@@ -17,3 +17,5 @@ websockets==16.0
 reportlab==4.5.1
 Pillow==12.2.0
 imageio-ffmpeg==0.5.1
+numpy==2.5.3
+onnxruntime==1.30.0

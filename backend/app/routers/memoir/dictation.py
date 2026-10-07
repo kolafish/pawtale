@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,15 +7,11 @@ from app.application_errors import ApplicationError
 from app.auth import is_admin_user
 from app.database import get_db
 from app.models.users import User
+from app.routers.dictation_gateway import run_dictation_gateway
 from app.routers.websocket_auth import authenticate_websocket, reject_websocket
-from app.services.asr.capacity import (
-    VoiceGatewayCapacityError,
-    voice_gateway_capacity_manager,
-)
-from app.services.asr.factory import create_realtime_volc_streaming_asr_client
-from app.services.asr.gateway import VoiceGatewaySession
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.voice_authorization import audio_authorizer, has_current_voice_authorization_consent
 
 
 router = APIRouter(tags=["memoir-dictation"])
@@ -33,6 +27,9 @@ async def stream_memoir_project_dictation(
     if current_user is None:
         await reject_websocket(websocket, "voice_gateway_auth_failed")
         return
+    if not await has_current_voice_authorization_consent(db, current_user.id):
+        await reject_websocket(websocket, "voice_authorization_required")
+        return
     if not await _memoir_project_dictation_is_available(
         db,
         project_id=project_id,
@@ -41,35 +38,17 @@ async def stream_memoir_project_dictation(
         await reject_websocket(websocket, "memoir_project_dictation_unavailable")
         return
 
-    connection_id = str(uuid.uuid4())
-    capacity_session_id = f"memoir-project-dictation:{connection_id}"
-    try:
-        capacity_lease = await voice_gateway_capacity_manager.acquire(
-            current_user.id,
-            capacity_session_id,
-        )
-    except VoiceGatewayCapacityError as exc:
-        await reject_websocket(websocket, exc.code)
-        return
-
-    try:
-        await websocket.accept()
-        session = VoiceGatewaySession(
-            client=websocket,
-            asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
-                current_user.id,
-                capacity_session_id,
-            ),
-            text_normalizer=normalize_memoir_asr_text,
-            connection_id=connection_id,
-            diagnostics_context={
-                "gateway": "memoir_project_dictation",
-                "project_id": project_id,
-            },
-        )
-        await session.run()
-    finally:
-        await capacity_lease.release()
+    await run_dictation_gateway(
+        websocket,
+        user_id=current_user.id,
+        capacity_prefix="memoir-project-dictation",
+        diagnostics_context={
+            "gateway": "memoir_project_dictation",
+            "project_id": project_id,
+        },
+        text_normalizer=normalize_memoir_asr_text,
+        authorize_audio=audio_authorizer(db, current_user.id),
+    )
 
 
 async def _memoir_project_dictation_is_available(

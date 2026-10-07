@@ -10,13 +10,16 @@ from app.schemas.memoir_snapshots import (
 from app.schemas.memoir_voice import MemoirAutomationEventListResponse
 from app.services.memoir import automation_events
 from app.services.memoir import book_drafts
+from app.services.memoir import draft_progress
 from app.services.memoir import book_outputs
 from app.services.memoir import book_plan_sources
+from app.services.memoir import completion_issues
 from app.services.memoir import image_assets
 from app.services.memoir import projects
 from app.services.memoir import share_video_jobs
 from app.services.memoir import voice_transcripts
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.project_revisions import project_data_revision
 
 
 def _empty_automation_events() -> MemoirAutomationEventListResponse:
@@ -55,7 +58,7 @@ async def home_snapshot(
         limit=1,
     )
     return MemoirHomeSnapshotResponse(
-        server_revision=project.memoir_data_revision,
+        server_revision=await project_data_revision(db, project),
         identity=identity,
         latest_transcript=transcripts.items[0] if transcripts.items else None,
     )
@@ -96,6 +99,7 @@ async def book_snapshot(
         user_id=user.id,
         project_id=project.id,
     )
+    progress = await draft_progress.read_draft_progress(db, project_id=project.id)
     recent_events = await automation_events.list_automation_events(
         db,
         user_id=user.id,
@@ -112,12 +116,20 @@ async def book_snapshot(
         user_id=user.id,
         project_id=project.id,
     )
+    issues = await completion_issues.list_issues(db, project_id=project.id)
+    blocking_issues = completion_issues.blocking_book_issues(
+        issues,
+        (chapter.id for chapter in plan_model.chapters if chapter.include_in_book)
+        if plan_model else [],
+    )
     return MemoirBookSnapshotResponse(
-        server_revision=project.memoir_data_revision,
+        server_revision=await project_data_revision(db, project),
         identity=identity,
         plan=plan,
         drafts_by_chapter_id=drafts_by_chapter_id,
         output=output,
+        progress=progress,
+        blocking_issue_count=len(blocking_issues),
         automation_events=recent_events,
         image_assets=assets,
         share_video_counts=share_video_counts,

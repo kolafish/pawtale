@@ -30,6 +30,8 @@ from app.schemas.memoir_voice import (
     MemoirTranscriptShareVideoSegmentResponse,
 )
 from app.services.memoir import voice_transcripts
+from app.services.memoir.project_ai_preferences import project_share_video_style
+from app.services.memoir.share_video_styles import share_video_style_options
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -37,7 +39,8 @@ from app.services.memoir.share_video_backgrounds import (
     share_video_background_style_options,
 )
 from app.services.memoir.share_video_custom_backgrounds import (
-    DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
+    SHARE_VIDEO_BACKGROUND_SOURCE_AI,
+    SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     share_video_background_source_options,
 )
 from app.services.memoir.transcript_projection import (
@@ -93,6 +96,13 @@ def _alignment_hash(utterance: MemoirVoiceUtterance, transcript_text: str, text_
         "text": transcript_text,
     }
     return _stable_json_hash(payload)
+
+
+def current_share_video_text_and_hash(utterance: MemoirVoiceUtterance) -> tuple[str, str] | None:
+    transcript_text, text_source = current_utterance_text_and_source(utterance)
+    if not transcript_text or not utterance.audio_file_id or not utterance.audio_file:
+        return None
+    return transcript_text, _alignment_hash(utterance, transcript_text, text_source)
 
 
 def _as_dict(value: object) -> dict[str, Any]:
@@ -163,13 +173,13 @@ def _provider_timed_chars(utterance: MemoirVoiceUtterance) -> tuple[list[TimedCh
     timed_chars: list[TimedChar] = []
     used_words = False
     for item in utterances:
-        utterance_start = _int_ms(item.get("start_time") or item.get("start_ms"))
-        utterance_end = _int_ms(item.get("end_time") or item.get("end_ms"))
+        utterance_start = _provider_timestamp_ms(item, "start_time", "start_ms")
+        utterance_end = _provider_timestamp_ms(item, "end_time", "end_ms")
         words = [word for word in _as_list(item.get("words")) if isinstance(word, dict)]
         for word in words:
             text = str(word.get("text") or "")
-            start_ms = _int_ms(word.get("start_time") or word.get("start_ms"))
-            end_ms = _int_ms(word.get("end_time") or word.get("end_ms"))
+            start_ms = _provider_timestamp_ms(word, "start_time", "start_ms")
+            end_ms = _provider_timestamp_ms(word, "end_time", "end_ms")
             if text and start_ms is not None and end_ms is not None:
                 timed_chars.extend(_timed_chars_for_text(text, start_ms, end_ms))
                 used_words = True
@@ -179,6 +189,11 @@ def _provider_timed_chars(utterance: MemoirVoiceUtterance) -> tuple[list[TimedCh
         strategy = ALIGNMENT_STRATEGY_PROVIDER_WORDS if used_words else ALIGNMENT_STRATEGY_PROVIDER_UTTERANCES
         return timed_chars, strategy
     return [], ALIGNMENT_STRATEGY_LINEAR
+
+
+def _provider_timestamp_ms(item: dict[str, Any], primary: str, fallback: str) -> int | None:
+    value = item.get(primary)
+    return _int_ms(item.get(fallback) if value is None else value)
 
 
 def _duration_ms(utterance: MemoirVoiceUtterance, timed_chars: list[TimedChar]) -> int:
@@ -412,6 +427,10 @@ def _response(
     result: AlignmentBuildResult,
 ) -> MemoirTranscriptShareVideoContextResponse:
     settings = get_settings()
+    ai_background_enabled = bool(
+        settings.memoir_share_video_ai_background_enabled
+        and settings.volc_ark_api_key.strip()
+    )
     return MemoirTranscriptShareVideoContextResponse(
         utterance_id=utterance.id,
         audio_file_id=utterance.audio_file_id or "",
@@ -423,11 +442,17 @@ def _response(
         alignment_confidence=result.confidence,
         min_select_ms=MIN_SELECT_MS,
         max_select_ms=MAX_SELECT_MS,
-        ai_background_enabled=bool(settings.memoir_share_video_ai_background_enabled),
-        default_background_source=DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
+        ai_background_enabled=ai_background_enabled,
+        default_video_style=project_share_video_style(utterance.voice_session.project),
+        video_styles=share_video_style_options(),
+        default_background_source=(
+            SHARE_VIDEO_BACKGROUND_SOURCE_AI
+            if ai_background_enabled
+            else SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC
+        ),
         default_background_style=DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
         default_background_mode=DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
-        background_sources=share_video_background_source_options(),
+        background_sources=share_video_background_source_options(include_ai=ai_background_enabled),
         background_styles=share_video_background_style_options(),
         background_modes=share_video_background_mode_options(),
         segments=[

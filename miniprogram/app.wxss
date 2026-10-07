@@ -1,41 +1,69 @@
 page {
-  --ui-page-background: #f7f3ec;
-  --ui-surface: #fffdfc;
-  --ui-surface-subtle: #f4f0eb;
-  --ui-text-primary: #2e2724;
-  --ui-text-secondary: #6f6864;
-  --ui-text-muted: #8a827d;
+  --ui-page-background: #f5f1ea;
+  --ui-page-background-deep: #eee7dd;
+  --ui-surface: #fffdfa;
+  --ui-surface-soft: #faf7f2;
+  --ui-surface-subtle: #f2ece4;
+  --ui-text-primary: #302925;
+  --ui-text-secondary: #625953;
+  --ui-text-muted: #6a6059;
   --ui-on-accent: #ffffff;
-  --ui-section-title: #77473f;
-  --ui-value-text: #5d514d;
-  --ui-accent: #a84f43;
-  --ui-accent-strong: #8f4037;
-  --ui-accent-surface: #f6e9e6;
-  --ui-accent-surface-subtle: #fbf4f2;
-  --ui-accent-border: #dfc0ba;
-  --ui-border: #e9e2da;
-  --ui-divider: #ece6df;
-  --ui-switch-off: #d8d6d2;
-  --ui-danger-surface: #fff1f1;
-  --ui-danger-text: #b64545;
-  --ui-success-surface: #edf3ea;
-  --ui-success-text: #5a7454;
-  --ui-warning-surface: #fff5de;
-  --ui-warning-text: #7d5c25;
+  --ui-section-title: #8d4d40;
+  --ui-value-text: #5f5550;
+  --ui-accent: #b65d49;
+  --ui-accent-strong: #944535;
+  --ui-accent-surface: #f5e6e0;
+  --ui-accent-surface-subtle: #fbf3ef;
+  --ui-accent-border: #e7c6bc;
+  --ui-border: #e9e1d7;
+  --ui-divider: #eee7df;
+  --ui-switch-off: #d8d3cc;
+  --ui-danger-surface: #fff0ed;
+  --ui-danger-text: #a8493f;
+  --ui-success-surface: #eaf1e6;
+  --ui-success-text: #587052;
+  --ui-warning-surface: #fbf0dc;
+  --ui-warning-text: #866231;
+  --ui-info-surface: #edf1f5;
+  --ui-info-text: #53677a;
+  --ui-radius-card: 28rpx;
+  --ui-radius-inner: 20rpx;
+  --ui-radius-control: 18rpx;
+  --ui-page-inline: 32rpx;
+  --ui-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --ui-font-editorial: "Songti SC", STSong, "Noto Serif CJK SC", serif;
+  /* Shared reading scale. Keep page display titles and decorative cover lettering local. */
+  --ui-font-caption: 29rpx;
+  --ui-font-meta: 30rpx;
+  --ui-font-body: 32rpx;
+  --ui-font-action: 33rpx;
+  --ui-font-list-title: 34rpx;
+  --ui-font-section-title: 37rpx;
+  --ui-font-page-title: 44rpx;
+  --ui-font-large-caption: 32rpx;
+  --ui-font-large-meta: 34rpx;
+  --ui-font-large-body: 36rpx;
+  --ui-font-large-list-title: 38rpx;
+  --ui-line-meta: 1.45;
+  --ui-line-body: 1.5;
+  --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx);
   --ui-card-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.04),
-    0 2rpx 6rpx rgba(0, 0, 0, 0.03),
-    0 12rpx 28rpx rgba(0, 0, 0, 0.04);
+    0 0 0 1rpx rgba(54, 42, 34, 0.035),
+    0 4rpx 12rpx rgba(63, 47, 37, 0.035),
+    0 18rpx 42rpx rgba(63, 47, 37, 0.045);
   --ui-card-shadow-raised:
-    0 0 0 1rpx rgba(0, 0, 0, 0.05),
-    0 4rpx 10rpx rgba(0, 0, 0, 0.04),
-    0 18rpx 42rpx rgba(0, 0, 0, 0.06);
-  --ui-control-shadow: 0 0 0 1rpx rgba(0, 0, 0, 0.06);
+    0 0 0 1rpx rgba(54, 42, 34, 0.045),
+    0 8rpx 20rpx rgba(63, 47, 37, 0.05),
+    0 24rpx 52rpx rgba(63, 47, 37, 0.065);
+  --ui-control-shadow:
+    0 0 0 1rpx rgba(54, 42, 34, 0.055),
+    0 4rpx 12rpx rgba(63, 47, 37, 0.035);
   --ui-hit-size: 88rpx;
   min-height: 100vh;
   background: var(--ui-page-background);
   color: var(--ui-text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--ui-font-sans);
+  line-height: var(--ui-line-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -43,19 +71,28 @@ view,
 text,
 button,
 textarea,
+input,
 image {
   box-sizing: border-box;
 }
 
+button,
+input,
+textarea {
+  font-family: var(--ui-font-sans);
+}
+
 .ui-page-shell {
   min-height: 100vh;
-  background: var(--ui-page-background);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 250, 0.72) 0, rgba(245, 241, 234, 0) 320rpx),
+    var(--ui-page-background);
 }
 
 .ui-card {
   box-sizing: border-box;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 24rpx;
+  border: 0;
+  border-radius: var(--ui-radius-card);
   background: var(--ui-surface);
   box-shadow: var(--ui-card-shadow);
 }
@@ -71,9 +108,11 @@ image {
 .ui-section-heading {
   display: block;
   color: var(--ui-section-title);
-  font-size: 28rpx;
+  font-size: var(--ui-font-section-title);
   font-weight: 800;
   line-height: 1.35;
+  font-family: var(--ui-font-editorial);
+  letter-spacing: 0.02em;
   text-wrap: balance;
 }
 
@@ -91,8 +130,7 @@ image {
     var(--ui-fixed-action-top, 24rpx)
     var(--ui-fixed-action-inline, 32rpx)
     calc(var(--ui-fixed-action-bottom, 24rpx) + env(safe-area-inset-bottom));
-  background: var(--ui-fixed-action-background, rgba(247, 243, 236, 0.96));
-  box-shadow: 0 -1rpx 0 rgba(0, 0, 0, 0.06);
+  background: var(--ui-fixed-action-background);
 }
 
 .ui-button {
@@ -106,7 +144,7 @@ image {
   transition-timing-function: ease-out;
 }
 
-.ui-button::after {
+button::after {
   border: 0;
 }
 
@@ -121,10 +159,10 @@ image {
 
 .ui-error-banner {
   padding: 22rpx 26rpx;
-  border-radius: 18rpx;
+  border-radius: var(--ui-radius-inner);
   background: var(--ui-danger-surface);
   color: var(--ui-danger-text);
-  font-size: 28rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.45;
   word-break: break-word;
 }
@@ -133,7 +171,7 @@ image {
   background: var(--ui-accent-surface-subtle);
   transform: scale(0.96);
   box-shadow:
-    0 0 0 1rpx rgba(168, 79, 67, 0.20),
+    0 0 0 1rpx rgba(182, 93, 73, 0.20),
     0 4rpx 10rpx rgba(0, 0, 0, 0.05);
 }
 
@@ -142,13 +180,34 @@ image {
   transform: scale(0.96);
 }
 
-.ui-avatar-action-hover {
-  transform: scale(0.96);
-  box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.10);
+.ui-consent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 8rpx;
 }
 
-.tap-hover {
-  opacity: 0.82;
+.ui-consent-choice,
+.ui-consent-link {
+  min-height: var(--ui-hit-size);
+  display: inline-flex;
+  align-items: center;
+}
+
+.ui-consent-choice {
+  gap: 16rpx;
+}
+
+.ui-consent-link {
+  padding: 0 8rpx;
+  border-radius: 12rpx;
+  color: var(--ui-accent);
+  font-weight: 700;
+}
+
+.ui-avatar-action-hover {
+  transform: scale(0.96);
+  box-shadow: 0 0 0 8rpx rgba(182, 93, 73, 0.10);
 }
 
 .ui-page-context-row {
@@ -164,14 +223,14 @@ image {
   min-width: 0;
   display: block;
   color: var(--ui-text-secondary);
-  font-size: 26rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-meta);
+  line-height: var(--ui-line-meta);
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
 
 .large-text .ui-page-context {
-  font-size: 30rpx;
+  font-size: var(--ui-font-large-body);
   line-height: 1.5;
 }
 
@@ -222,7 +281,7 @@ image {
 .ui-accessible-page.large-text .revision-summary,
 .ui-accessible-page.large-text .section-detail,
 .ui-accessible-page.large-text .status-detail {
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 1.6;
 }
 
@@ -248,7 +307,7 @@ image {
 .ui-accessible-page.large-text .section-meta,
 .ui-accessible-page.large-text .session-meta,
 .ui-accessible-page.large-text .summary-label {
-  font-size: 28rpx;
+  font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }
 
@@ -266,7 +325,7 @@ image {
 .ui-accessible-page.large-text .ui-version-option,
 .ui-accessible-page.large-text .ui-block-action {
   min-height: 48px;
-  font-size: 32rpx;
+  font-size: var(--ui-font-large-list-title);
   line-height: 1.4;
 }
 
@@ -286,7 +345,7 @@ image {
   gap: 8rpx;
   margin-top: 24rpx;
   padding: 8rpx;
-  border-radius: 16rpx;
+  border-radius: var(--ui-radius-inner);
   background: var(--ui-surface-subtle);
 }
 
@@ -295,9 +354,9 @@ image {
   min-height: 88rpx;
   align-items: center;
   justify-content: center;
-  border-radius: 8rpx;
+  border-radius: 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 27rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
 }
 

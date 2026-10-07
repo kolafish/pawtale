@@ -4,6 +4,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 import json
 
+from app.services.ai_costs import (
+    AICostEstimate,
+    NormalizedAIUsage,
+    estimate_ai_cost,
+    normalize_ai_usage,
+)
+
 
 @dataclass(frozen=True)
 class AITextStreamChunk:
@@ -22,6 +29,18 @@ class AITextStreamChunk:
             self.resolved_model
             and self.response_model
             and self.resolved_model != self.response_model
+        )
+
+    @property
+    def normalized_usage(self) -> NormalizedAIUsage:
+        return normalize_ai_usage(self.usage)
+
+    @property
+    def cost_estimate(self) -> AICostEstimate:
+        return estimate_ai_cost(
+            provider=self.provider,
+            model=self.response_model or self.resolved_model,
+            usage=self.normalized_usage,
         )
 
 

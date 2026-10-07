@@ -1,20 +1,22 @@
 import logging
 
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_access import restrict_requested_ai_model
 from app.services.ai_text import DeepSeekTextService
-from app.services.ai_claude import (
-    CLAUDE_FABLE_MODEL,
-    CLAUDE_OPUS_4_8_MODEL,
-    ClaudeTextService,
-)
 from app.services.ai_volc import VolcArkTextService
 from app.config import DEFAULT_AI_TEXT_MODEL, VALID_AI_TEXT_MODELS, get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+DEEPSEEK_FLASH_MODEL = "deepseek-flash"
 DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_V4_PRO_MODEL = "deepseek-v4-pro"
+DEEPSEEK_FLASH_ALIASES = frozenset({
+    "deepseek",
+    DEEPSEEK_FLASH_MODEL,
+    DEEPSEEK_V4_FLASH_MODEL,
+})
 VOLC_DOUBAO_PRO_MODEL = "doubao-seed-2-0-pro-260215"
 
 
@@ -34,18 +36,12 @@ class AIServiceFactory:
 
     @staticmethod
     def _service_for_model(model: str) -> AITextServiceBase:
-        if model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
-            return DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
+        if model in DEEPSEEK_FLASH_ALIASES:
+            return DeepSeekTextService(model=DEEPSEEK_FLASH_MODEL)
         if model == DEEPSEEK_V4_PRO_MODEL:
             return DeepSeekTextService(model=DEEPSEEK_V4_PRO_MODEL)
         if model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
             return VolcArkTextService()
-        if model == CLAUDE_OPUS_4_8_MODEL:
-            return ClaudeTextService(model=CLAUDE_OPUS_4_8_MODEL)
-        if model in {"claude-sonnet-4", "claude-sonnet-4-6"}:
-            return ClaudeTextService(model="claude-sonnet-4")
-        if model == CLAUDE_FABLE_MODEL:
-            return ClaudeTextService(model=CLAUDE_FABLE_MODEL)
         raise UnsupportedAIModelError(f"不支持的 AI 模型：{model}")
 
     @staticmethod
@@ -54,9 +50,9 @@ class AIServiceFactory:
         根据模型名称返回对应的AI服务实例
 
         Args:
-            model: 模型名称 (deepseek / deepseek-v4-flash / deepseek-v4-pro /
-                  doubao-seed-2-0-pro-260215 / claude-fable-5 /
-                  claude-opus-4-8 / claude-sonnet-4)
+            model: 模型名称 (deepseek / deepseek-flash / deepseek-v4-flash /
+                  deepseek-v4-pro /
+                  doubao-seed-2-0-pro-260215)
                   如果为None，使用默认模型
 
         Returns:
@@ -68,6 +64,7 @@ class AIServiceFactory:
             or settings.default_ai_model
             or DEFAULT_AI_TEXT_MODEL
         )
+        normalized_model = restrict_requested_ai_model(normalized_model)
         service = AIServiceFactory._service_for_model(normalized_model)
         AIServiceFactory._log_resolution(requested_model, service)
         return service

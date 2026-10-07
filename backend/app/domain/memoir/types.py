@@ -110,7 +110,9 @@ class MemoirSectionMaterialAssignedBy(str, Enum):
 
 
 class MemoirEditingJobType(str, Enum):
+    GENERATE_BOOK_AUDIO_CHUNK = "generate_book_audio_chunk"
     CORRECT_TRANSCRIPT = "correct_transcript"
+    EVALUATE_SHARE_VIDEO_CANDIDATE = "evaluate_share_video_candidate"
     INDEX_RETRIEVAL_SOURCE = "index_retrieval_source"
     INDEX_RETRIEVAL_SEMANTICS = "index_retrieval_semantics"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
@@ -155,6 +157,14 @@ class MemoirShareVideoJobStatus(str, Enum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class MemoirShareVideoCandidateStatus(str, Enum):
+    NONE = "none"
+    READY = "ready"
+    ACCEPTED = "accepted"
+    DISMISSED = "dismissed"
+    STALE = "stale"
 
 
 class MemoirImageAssetStatus(str, Enum):

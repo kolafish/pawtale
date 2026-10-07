@@ -115,7 +115,7 @@ async function prepareE2ERuntime(session) {
 }
 
 async function launchE2ESession(options = {}) {
-  const configured = readE2EConfig();
+  const configured = readE2EConfig({ requireAccount: options.requireAccount !== false });
   const config = {
     ...configured,
     automationPort: configured.automationPort || await findAvailablePort(),
@@ -137,6 +137,7 @@ async function launchE2ESession(options = {}) {
     artifacts.attach(miniProgram);
     await waitForCurrentPageReady(miniProgram);
     artifacts.mark("setup:first-page-ready");
+    if (options.initialPage) await miniProgram.reLaunch(options.initialPage);
     session = {
       artifacts,
       config,

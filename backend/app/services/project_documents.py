@@ -1,5 +1,6 @@
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -21,6 +22,9 @@ import app.services.content_storage as storage
 
 class ContentRevisionConflict(Exception):
     pass
+
+
+PostCommitCleanup = Callable[[], Awaitable[None]]
 
 
 def count_words(text: str) -> int:
@@ -146,7 +150,7 @@ async def commit_created_document(db: AsyncSession, project_id: str, doc: Docume
         await storage.write_content(project_id, doc.id, content)
         file_written = True
         await db.commit()
-    except Exception:
+    except BaseException:
         await db.rollback()
         if file_written:
             await storage.delete_content(project_id, doc.id)
@@ -182,7 +186,7 @@ async def commit_document_update(
                 await storage.write_content(project_id, document_id, content)
                 doc.word_count = count_words(content)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             if snapshot is not None:
                 await _restore_content(project_id, document_id, snapshot)
@@ -197,7 +201,7 @@ async def delete_document(db: AsyncSession, project_id: str, doc: Document) -> N
             await storage.delete_content(project_id, document_id)
             await db.delete(doc)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             await _restore_content(project_id, document_id, snapshot)
             raise
@@ -214,14 +218,31 @@ async def delete_group(db: AsyncSession, project_id: str, group: DocumentGroup) 
                 await storage.delete_content(project_id, doc_id)
             await db.delete(group)
             await db.commit()
-        except Exception:
+        except BaseException:
             await db.rollback()
             for doc_id, snapshot in snapshots.items():
                 await _restore_content(project_id, doc_id, snapshot)
             raise
 
 
-async def delete_project(db: AsyncSession, project: Project) -> None:
+async def delete_project(
+    db: AsyncSession,
+    project: Project,
+    *,
+    post_commit_cleanups: list[PostCommitCleanup] | None = None,
+) -> None:
+    if post_commit_cleanups is not None:
+        # Account deletion holds the project lock until its one final commit.
+        await db.delete(project)
+        await db.flush()
+        project_id = project.id
+
+        async def cleanup_project_dir() -> None:
+            await storage.delete_project_dir(project_id)
+
+        post_commit_cleanups.append(cleanup_project_dir)
+        return
+
     async with storage.project_content_lock(project.id):
         source = storage.PROJECTS_DIR / project.id
         backup = source.parent / f".{project.id}.{uuid4().hex}.delete-backup"

@@ -48,7 +48,7 @@ async function createArtifactRecorder(config) {
   const runPath = path.join(config.artifactsPath, `foundation-${safeTimestamp()}`);
   const events = [];
   let failureCount = 0;
-  const secrets = [config.account.email, config.account.password];
+  const secrets = [config.account?.email, config.account?.password];
   await fs.mkdir(runPath, { recursive: true });
 
   return {

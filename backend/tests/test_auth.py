@@ -1,15 +1,125 @@
+import asyncio
+from datetime import timedelta
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from app.models.users import AuthIdentity, User
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from app.auth import SESSION_COOKIE_NAME, session_token_hash
+from app.clock import utcnow_naive
+from app.database import get_db
+from app.main import app
+from app.models.projects import Project
+from app.models.users import AuthIdentity, AuthSession, User
+from app.routers.websocket_auth import authenticate_websocket
 from app.config import Settings
 from app.services.wechat_auth import WeChatAuthError, WeChatSession
 
 
 class TestAuthAPI:
+    async def test_logout_revokes_only_the_presented_session(self, anonymous_client, test_db):
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "sessions@example.com", "password": "password123"},
+        )
+        assert register.status_code == 201
+        first_token = anonymous_client.cookies[SESSION_COOKIE_NAME]
+        assert register.json()["user"]["id"] not in first_token
+        stored = await test_db.get(AuthSession, session_token_hash(first_token))
+        assert stored is not None
+        assert stored.token_hash != first_token
+
+        login = await anonymous_client.post(
+            "/api/auth/login",
+            json={"email": "sessions@example.com", "password": "password123"},
+        )
+        assert login.status_code == 200
+        second_token = anonymous_client.cookies[SESSION_COOKIE_NAME]
+        assert second_token != first_token
+        assert (await anonymous_client.post("/api/auth/logout")).status_code == 204
+
+        anonymous_client.cookies.set(SESSION_COOKIE_NAME, second_token)
+        assert (await anonymous_client.get("/api/auth/me")).status_code == 401
+        anonymous_client.cookies.set(SESSION_COOKIE_NAME, first_token)
+        assert (await anonymous_client.get("/api/auth/me")).status_code == 200
+
+    async def test_expired_session_is_rejected(self, anonymous_client, test_db):
+        assert (await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "expired@example.com", "password": "password123"},
+        )).status_code == 201
+        token = anonymous_client.cookies[SESSION_COOKIE_NAME]
+        session = await test_db.get(AuthSession, session_token_hash(token))
+        session.expires_at = utcnow_naive() - timedelta(seconds=1)
+        await test_db.commit()
+        assert (await anonymous_client.get("/api/auth/me")).status_code == 401
+
+    @pytest.mark.db_independent
+    async def test_websocket_auth_rejects_revoked_session(self, anonymous_client, test_db):
+        assert (await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "socket@example.com", "password": "password123"},
+        )).status_code == 201
+        token = anonymous_client.cookies[SESSION_COOKIE_NAME]
+        socket = SimpleNamespace(
+            cookies={SESSION_COOKIE_NAME: token},
+            url=SimpleNamespace(path="/api/auth/test-websocket"),
+            path_params={},
+        )
+        independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+        async with independent_sessions() as db:
+            assert await authenticate_websocket(socket, db) is not None
+        await anonymous_client.post("/api/auth/logout")
+        async with independent_sessions() as db:
+            assert await authenticate_websocket(socket, db) is None
+
+    async def test_wechat_login_attempt_limit(self, anonymous_client, monkeypatch):
+        monkeypatch.setattr("app.auth.WECHAT_LOGIN_ATTEMPT_LIMIT", 2)
+
+        async def exchange(code, _miniprogram):
+            return WeChatSession(openid=f"limited-{code}")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
+        assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "one"})).status_code == 200
+        assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "two"})).status_code == 200
+        assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "three"})).status_code == 429
+
+    @pytest.mark.db_independent
+    async def test_concurrent_first_wechat_login_uses_one_identity(
+        self, anonymous_client, test_db, monkeypatch,
+    ):
+        async def exchange(_code, _miniprogram):
+            await asyncio.sleep(0.02)
+            return WeChatSession(openid="concurrent-first-login")
+
+        independent_sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
+        async def independent_db():
+            async with independent_sessions() as db:
+                yield db
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
+        app.dependency_overrides[get_db] = independent_db
+        try:
+            first, second = await asyncio.gather(
+                anonymous_client.post("/api/auth/wechat-login", json={"code": "first"}),
+                anonymous_client.post("/api/auth/wechat-login", json={"code": "second"}),
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        assert first.status_code == second.status_code == 200
+        assert first.json()["user"]["id"] == second.json()["user"]["id"]
+        identities = (
+            await test_db.scalars(
+                select(AuthIdentity).where(AuthIdentity.provider_user_id == "concurrent-first-login")
+            )
+        ).all()
+        assert len(identities) == 1
+
+    @pytest.mark.ci_smoke
     async def test_register_me_and_logout(self, anonymous_client, test_db):
         register = await anonymous_client.post(
             "/api/auth/register",
@@ -46,6 +156,89 @@ class TestAuthAPI:
         )
         assert register.status_code == 400
         assert register.json()["detail"] == "邮箱格式不正确"
+
+    async def test_production_closes_email_account_routes(self, anonymous_client, monkeypatch):
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        response = await anonymous_client.post(
+            "/api/auth/register", json={"email": "author@example.com", "password": "password123"},
+        )
+        assert response.status_code == 404
+
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: False)
+
+        async def exchange(_code, _miniprogram):
+            return WeChatSession(openid="wechat-only-production-test")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
+        assert (await anonymous_client.post("/api/auth/wechat-login", json={"code": "valid"})).status_code == 200
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        for route, payload in (
+            ("/set-credentials", {"email": "author@example.com", "password": "password123"}),
+            ("/wechat-bind", {"code": "valid"}),
+        ):
+            response = await anonymous_client.post(f"/api/auth{route}", json=payload)
+            assert response.status_code == 404
+
+    async def test_production_admin_password_login_restores_project_access(
+        self, anonymous_client, test_db, test_user_password_hash, monkeypatch,
+    ):
+        admin = User(
+            email="admin@example.com", password_hash=test_user_password_hash,
+            display_name="管理员", role="admin",
+        )
+        owner = User(
+            email="owner@example.com", password_hash=test_user_password_hash,
+            display_name="作者",
+        )
+        test_db.add_all([admin, owner])
+        await test_db.flush()
+        project = Project(user_id=owner.id, type="memoir", title="作者的回忆录")
+        test_db.add(project)
+        await test_db.commit()
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+        monkeypatch.setattr("app.auth.is_production_environment", lambda _settings: True)
+        anonymous_client.base_url = "https://test"
+
+        login = await anonymous_client.post(
+            "/api/auth/login", json={"email": " ADMIN@example.com ", "password": "password123"},
+        )
+        assert login.status_code == 200
+        assert login.json()["user"]["role"] == "admin"
+        assert "Secure" in login.headers["set-cookie"]
+        assert "HttpOnly" in login.headers["set-cookie"]
+        me = await anonymous_client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["id"] == admin.id
+        listing = await anonymous_client.get("/api/projects")
+        assert listing.status_code == 200
+        assert [item["id"] for item in listing.json()] == [project.id]
+        assert (await anonymous_client.get(f"/api/projects/{project.id}")).status_code == 200
+
+    @pytest.mark.parametrize("role,password_enabled,password", [
+        ("user", True, "password123"),
+        ("admin", True, "wrong-password"),
+        ("admin", False, "password123"),
+        (None, True, "password123"),
+    ])
+    async def test_production_password_login_rejects_ineligible_credentials(
+        self, anonymous_client, test_db, test_user_password_hash, monkeypatch,
+        role, password_enabled, password,
+    ):
+        if role is not None:
+            test_db.add(User(
+                email="account@example.com", password_hash=test_user_password_hash,
+                display_name="账号", role=role, password_login_enabled=password_enabled,
+            ))
+            await test_db.commit()
+        monkeypatch.setattr("app.routers.auth.is_production_environment", lambda: True)
+
+        login = await anonymous_client.post(
+            "/api/auth/login", json={"email": "account@example.com", "password": password},
+        )
+        assert login.status_code == 401
+        assert login.json()["detail"] == "邮箱或密码不正确"
+        assert SESSION_COOKIE_NAME not in anonymous_client.cookies
+        assert (await anonymous_client.get("/api/auth/me")).status_code == 401
 
     async def test_project_routes_require_login(self, anonymous_client):
         response = await anonymous_client.get("/api/projects")

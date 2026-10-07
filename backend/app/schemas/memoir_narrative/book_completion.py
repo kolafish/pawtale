@@ -77,6 +77,17 @@ class MemoirChapterPreparationJobRequest(MemoirChapterAIRequest):
     operation: Literal["prepare", "rewrite"] = "prepare"
 
 
+class MemoirChapterCandidateSection(BaseModel):
+    section_id: str
+    title: str
+    content: str
+
+
+class MemoirChapterCandidateDiffSegment(BaseModel):
+    kind: Literal["equal", "deleted", "modified", "added"]
+    text: str
+
+
 class MemoirChapterPreparationJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
@@ -100,6 +111,12 @@ class MemoirChapterPreparationJobResponse(BaseModel):
     outcome: str = ""
     candidate_content: str | None = None
     candidate_base_version_id: str | None = None
+    candidate_sections: list[MemoirChapterCandidateSection] = Field(
+        default_factory=list
+    )
+    candidate_diff_segments: list[MemoirChapterCandidateDiffSegment] = Field(
+        default_factory=list
+    )
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     can_cancel: bool = False
@@ -171,6 +188,7 @@ class MemoirChapterCompletionSummary(BaseModel):
     state: MemoirBookCompletionState
     next_action: MemoirChapterCompletionNextAction
     active_issue: MemoirChapterCompletionIssue | None = None
+    blocking_issue_count: int = Field(default=0, ge=0)
     headline: str
     detail: str
 
@@ -182,6 +200,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
     total_chapters: int
     completed_chapters: int
     chapters: list[MemoirChapterCompletionSummary]
+    blocking_issue_count: int = Field(default=0, ge=0)
     completion_job: MemoirBookCompletionJobResponse | None = None
     book_review: MemoirBookReviewResponse | None = None
     book_review_job: MemoirBookReviewJobResponse | None = None

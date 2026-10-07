@@ -25,7 +25,7 @@ Pawtale 是单仓库、单后端的多产品系统。认证、用户、项目、
 | 后端 | Python 3.12、FastAPI、async SQLAlchemy、Pydantic、PostgreSQL/asyncpg、Alembic、pytest |
 | Web | React 19、TypeScript 5.9、Vite 7、TailwindCSS 4、Zustand、TanStack Query、Vitest |
 | 小程序 | 微信原生小程序、TypeScript、Node test runner |
-| 文本 AI | Claude Fable 5 / Opus 4.8 / Sonnet 4.6 兼容代理、DeepSeek V4、火山方舟 Doubao Seed 2.0 |
+| 文本 AI | Claude Fable 5 / Opus 4.8 / Sonnet 4.6 兼容代理、DeepSeek V4.1 Flash / V4 Pro、火山方舟 Doubao Seed 2.0 |
 | 语音 | 火山流式 ASR、火山双向/单向 TTS、StepFun 批量 ASR |
 | 导出 | TXT/Markdown/ZIP 项目导出，回忆录 TXT/PDF，分享视频后台渲染 |
 

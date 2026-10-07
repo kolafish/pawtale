@@ -1,6 +1,4 @@
 {
-  "navigationBarTitleText": "声纹授权协议",
-  "navigationBarBackgroundColor": "#a84f43",
-  "navigationBarTextStyle": "white",
-  "backgroundColor": "#f7f3ec"
+  "navigationBarTitleText": "语音采集与处理授权",
+  "backgroundColor": "#f5f1ea"
 }

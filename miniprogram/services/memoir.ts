@@ -3,7 +3,12 @@ import type {
   MemoirProjectListResponse,
   Project,
 } from "../domain/memoir";
-import type { MemoirGuidanceMode } from "../domain/memoir-voice-session";
+import type {
+  MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSessionGoal,
+} from "../domain/memoir-voice-session";
+import type { MemoirShareVideoStyle } from "../domain/memoir-transcript";
 import {
   memoirProjectPath,
   memoirRequest,
@@ -19,7 +24,10 @@ export interface MemoirProjectInput {
   narrator_origin?: string;
   narrator_age?: number | null;
   default_guidance_mode?: MemoirGuidanceMode;
+  default_interview_type?: MemoirInterviewType;
+  default_session_goal?: MemoirSessionGoal;
   transcript_polish_level?: MemoirTranscriptPolishLevel;
+  share_video_style?: MemoirShareVideoStyle;
 }
 
 export function listMemoirProjects(): Promise<MemoirProjectListResponse> {

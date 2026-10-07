@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
   finishSessionSavedPatch,
   finishSessionStartPatch,
+  liveTranscriptScrollTop,
   noAnswerPromptFailedPatch,
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
@@ -14,7 +15,9 @@ const {
   voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
   voiceRecordingUnavailablePatch,
-} = require("../pages/voice-chat/voice-chat-recording-flow.ts");
+  voiceTranscriptFollowLatestPatch,
+  voiceTranscriptReviewStartedPatch,
+} = require("../components/voice-session/voice-chat-recording-flow.ts");
 
 test("voice recording flow detects when recorder must reconnect first", () => {
   assert.equal(voiceClientUnavailableForRecording(false, "ready"), true);
@@ -27,7 +30,6 @@ test("voice recording flow derives recording start and unavailable patches", () 
   assert.deepEqual(voiceRecordingStartRequestedPatch(), {
     recordingStarting: true,
     error: "",
-    captureStateText: "正在打开麦克风",
   });
   assert.deepEqual(voiceRecordingStartedPatch(true), {
     recording: true,
@@ -35,6 +37,10 @@ test("voice recording flow derives recording start and unavailable patches", () 
     error: "",
     liveText: "",
     liveCharCount: 0,
+    liveScrollClass: "live-scroll",
+    liveScrollTop: 0,
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
     selectedOpeningTopicText: "",
     primaryActionText: "暂停收音",
     autoListenStateText: "小余说完，正在听您说",
@@ -50,21 +56,44 @@ test("voice recording flow derives recording start and unavailable patches", () 
   });
 });
 
-test("voice recording flow derives live transcript patches", () => {
+test("voice recording flow derives live transcript content without guessing its scroll position", () => {
   const longPartial = "这是一段很长的正常访谈实时识别文字，".repeat(6);
 
-  const firstPatch = voiceLiveTranscriptPatch(longPartial, 0);
+  const firstPatch = voiceLiveTranscriptPatch(longPartial);
   assert.equal(firstPatch.liveText, longPartial);
   assert.equal(firstPatch.liveCharCount, longPartial.length);
   assert.equal(firstPatch.liveScrollClass, "live-scroll long");
-  assert.equal(firstPatch.liveScrollTop, 10000);
-  assert.equal(firstPatch.liveScrollTarget, "live-text-end-10000");
-  assert.equal(firstPatch.liveTextEndId, "live-text-end-10000");
+  assert.equal(firstPatch.liveScrollTop, undefined);
   assert.equal(firstPatch.persistenceStateText, "识别中");
 
-  const secondPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。`, firstPatch.liveScrollTop);
-  assert.equal(secondPatch.liveScrollTop, 20000);
-  assert.equal(secondPatch.liveScrollTarget, "live-text-end-20000");
+  const emptyPatch = voiceLiveTranscriptPatch("");
+  assert.equal(emptyPatch.liveScrollClass, "live-scroll");
+  assert.equal(emptyPatch.liveScrollTop, 0);
+  assert.equal(emptyPatch.liveTranscriptFollowing, true);
+});
+
+test("live transcript scroll follows rendered line height and handles ASR rewrites", () => {
+  assert.equal(liveTranscriptScrollTop(390, 390), 0);
+  assert.equal(liveTranscriptScrollTop(467.2, 390), 78);
+  assert.equal(liveTranscriptScrollTop(545, 390), 155);
+  assert.equal(liveTranscriptScrollTop(467, 390), 77);
+  assert.equal(liveTranscriptScrollTop(300, 390), 0);
+  assert.equal(liveTranscriptScrollTop(Number.NaN, 390), 0);
+  assert.equal(liveTranscriptScrollTop(500, 0), 0);
+});
+
+test("voice recording flow pauses review and explicitly returns to the newest caption", () => {
+  assert.deepEqual(voiceTranscriptReviewStartedPatch({
+    liveCharCount: 88,
+    liveTranscriptFollowing: true,
+  }), {
+    liveTranscriptFollowing: false,
+    liveReviewStartCharCount: 88,
+  });
+  assert.deepEqual(voiceTranscriptFollowLatestPatch(), {
+    liveTranscriptFollowing: true,
+    liveReviewStartCharCount: 0,
+  });
 });
 
 test("voice recording flow derives final transcript result", () => {
@@ -91,8 +120,9 @@ test("voice recording flow derives final transcript result", () => {
   assert.equal(result.patch.liveText, "");
   assert.equal(result.patch.liveCharCount, 0);
   assert.equal(result.patch.liveScrollClass, "live-scroll");
-  assert.equal(result.patch.liveScrollTarget, "");
   assert.equal(result.patch.liveScrollTop, 0);
+  assert.equal(result.patch.liveTranscriptFollowing, true);
+  assert.equal(result.patch.liveReviewStartCharCount, 0);
   assert.equal(result.patch.persistenceStateText, "已保存");
   assert.equal(result.patch.followUpLoading, false);
 });

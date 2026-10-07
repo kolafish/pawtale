@@ -1,0 +1,59 @@
+.voice-edit-page { padding: 22rpx 32rpx 72rpx; }
+
+.edit-intro {
+  margin: 18rpx 0 30rpx;
+  padding: 6rpx 8rpx 6rpx 24rpx;
+  border-left: 3rpx solid var(--ui-accent-border);
+}
+
+.edit-book, .edit-title, .edit-hint, .edit-reply, .edit-detail { display: block; }
+.edit-book { margin-bottom: 10rpx; color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: var(--ui-font-action); font-weight: 700; letter-spacing: 0.03em; }
+.edit-title { margin-bottom: 10rpx; color: var(--ui-text-primary); font-family: var(--ui-font-editorial); font-size: var(--ui-font-page-title); font-weight: 700; line-height: 1.35; text-wrap: balance; }
+.edit-hint, .edit-detail { color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.65; text-wrap: pretty; }
+.voice-edit-page .ui-error-banner { margin-top: 20rpx; }
+.edit-result { margin-top: 28rpx; padding: 28rpx; }
+.edit-reply, .edit-question { font-size: var(--ui-font-action); line-height: 1.72; white-space: pre-wrap; text-wrap: pretty; }
+.edit-reply { color: var(--ui-text-primary); }
+.edit-question { margin-top: 16rpx; padding-left: 18rpx; border-left: 3rpx solid var(--ui-accent-border); color: var(--ui-section-title); }
+.edit-operation { min-height: 96rpx; padding: 22rpx 0; display: flex; align-items: flex-start; gap: 16rpx; }
+.edit-operation + .edit-operation { border-top: 1rpx solid var(--ui-divider); }
+.edit-operation checkbox { margin-top: 4rpx; }
+.edit-operation-copy { min-width: 0; flex: 1; }
+.edit-operation-title { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
+.edit-detail { margin-top: 8rpx; white-space: pre-wrap; }
+
+.edit-split-summary, .edit-split-caption, .edit-split-title { display: block; }
+.edit-split-summary { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.6; white-space: pre-wrap; text-wrap: pretty; }
+.edit-split-title-block { margin-top: 24rpx; padding: 20rpx 24rpx; border-radius: var(--ui-radius-inner); background: var(--ui-surface-soft); }
+.edit-split-caption { color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.5; }
+.edit-split-title { margin-top: 6rpx; color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+
+.edit-apply {
+  margin-top: 20rpx;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.18);
+  font-size: var(--ui-font-action);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.edit-message { display: block; background: var(--ui-success-surface); color: var(--ui-success-text); box-shadow: none; font-size: var(--ui-font-body); line-height: 1.55; }
+.edit-message.has-section-tasks { background: var(--ui-surface-soft); color: var(--ui-text-primary); }
+.edit-task-list { margin-top: 16rpx; display: flex; flex-direction: column; gap: 16rpx; }
+.edit-task { padding: 24rpx 28rpx; }
+.edit-task-label, .edit-task-status, .edit-task-detail { display: block; }
+.edit-task-label { color: var(--ui-text-primary); font-size: var(--ui-font-action); font-weight: 700; line-height: 1.55; overflow-wrap: anywhere; }
+.edit-task-status { margin-top: 12rpx; color: var(--ui-section-title); font-size: var(--ui-font-body); font-weight: 700; }
+.edit-task-status.is-succeeded { color: var(--ui-success-text); }
+.edit-task-status.is-failed { color: var(--ui-accent-strong); }
+.edit-task-detail { margin-top: 6rpx; color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.edit-task-open { min-height: 88rpx; margin-top: 18rpx; border-radius: var(--ui-radius-control); background: var(--ui-surface-soft); color: var(--ui-section-title); font-size: var(--ui-font-body); font-weight: 700; }
+.edit-restart { min-height: 88rpx; margin-top: 10rpx; background: transparent; color: var(--ui-text-secondary); font-size: var(--ui-font-body); }
+.edit-back { min-height: 88rpx; margin-top: 22rpx; background: transparent; color: var(--ui-section-title); font-size: var(--ui-font-action); font-weight: 700; }
+.large-text .edit-title { font-size: 48rpx; }
+.large-text .edit-book, .large-text .edit-hint, .large-text .edit-detail { font-size: var(--ui-font-large-list-title); }
+.large-text .edit-operation-title, .large-text .edit-reply, .large-text .edit-question { font-size: 36rpx; }
+.large-text .edit-split-summary, .large-text .edit-split-title { font-size: 36rpx; }
+.large-text .edit-task-label, .large-text .edit-task-status, .large-text .edit-task-detail, .large-text .edit-task-open { font-size: var(--ui-font-large-list-title); }

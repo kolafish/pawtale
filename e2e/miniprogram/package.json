@@ -13,7 +13,9 @@
     "ios:tunnel": "node bin/start-ios-tunnel.js",
     "test:ios": "node bin/run-ios-ui-test.js",
     "test:ios:node": "node --test --test-concurrency=1 device-specs/ios-ui.test.js",
-    "test:voice": "node --test --test-concurrency=1 specs/voice.test.js"
+    "test:voice": "node --test --test-concurrency=1 specs/voice.test.js",
+    "test:home-visual": "node --test --test-concurrency=1 specs/home-visual.test.js",
+    "test:chapter-visual": "node --test --test-concurrency=1 specs/chapter-visual.test.js"
   },
   "devDependencies": {
     "appium": "3.7.0",

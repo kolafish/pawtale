@@ -132,9 +132,7 @@ function loadOverviewPage({
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
     ...authorizationExports,
   });
-  mockModule("../services/navigation.ts", {
-    routeAuthError: () => false,
-  });
+
 
   return loadPageModule("../pages/voice-progress/index.ts");
 }
@@ -196,13 +194,13 @@ test("narration overview gives each session one clear title", () => {
     guidance_mode: "free_narration",
     current_guidance_module: "free_narration",
   })), "自由讲述");
-  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "小余访谈 · 人物");
+  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "引导访谈 · 人物");
   assert.equal(sessionTitle(sampleSession("human", "stopped", {
     interview_type: "human_interview",
-  })), "面对面采访");
+  })), "真人访谈");
   assert.equal(sessionTitle(sampleSession("completion", "stopped", {
     session_goal: "book_completion",
-  })), "补充成书内容");
+  })), "书稿补充");
 });
 
 test("narration overview scopes all data to the active project", async () => {
@@ -321,6 +319,7 @@ test("narration overview only resumes active sessions", () => {
   const { page } = loadOverviewPage();
   const navigations = [];
   global.wx = {
+    reLaunch(options) { navigations.push(options.url); },
     navigateTo(options) {
       navigations.push(options.url);
     },
@@ -349,7 +348,8 @@ test("narration overview only resumes active sessions", () => {
   page.continueSession.call(context, { currentTarget: { dataset: { id: "voice-listening" } } });
 
   assert.equal(context.data.error, "这次讲述已保存");
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice-listening&mode=guided_interview&module=person");
+  assert.equal(navigations[0], "/pages/home/index");
+  assert.equal(require("../services/navigation.ts").consumeHomeVoiceTarget().entry.voiceSessionId, "voice-listening");
 });
 
 test("narration overview keeps evidence and user decisions as separate topic states", () => {
@@ -388,6 +388,7 @@ test("narration overview starts an explicitly anchored guided session", async ()
   });
   const navigations = [];
   global.wx = {
+    reLaunch(options) { navigations.push(options.url); },
     navigateTo(options) {
       navigations.push(options.url);
     },
@@ -414,8 +415,10 @@ test("narration overview starts an explicitly anchored guided session", async ()
   assert.equal(created[0].input.anchor_framework_item_id, "item-1");
   assert.equal(created[0].input.metadata_json.entry, "miniprogram_voice_overview");
   assert.equal(created[0].options.projectId, "project-1");
-  assert.match(navigations[0], /voiceSessionId=voice-1/);
-  assert.match(navigations[0], /mode=guided_interview/);
+  assert.equal(navigations[0], "/pages/home/index");
+  const target = require("../services/navigation.ts").consumeHomeVoiceTarget();
+  assert.equal(target.entry.voiceSessionId, "voice-1");
+  assert.equal(target.entry.mode, "guided_interview");
 });
 
 test("narration overview waits for voice authorization before starting a topic", async () => {
@@ -432,6 +435,7 @@ test("narration overview waits for voice authorization before starting a topic",
   });
   const navigations = [];
   global.wx = {
+    reLaunch(options) { navigations.push(options.url); },
     navigateTo(options) {
       navigations.push(options.url);
     },

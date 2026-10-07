@@ -10,17 +10,14 @@ DEFAULT_APP_SECRET_KEY = "dev-secret-key-change-in-production"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale"
 MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
-DEFAULT_AI_TEXT_MODEL = "claude-opus-4-8"
+DEFAULT_AI_TEXT_MODEL = "deepseek-flash"
 VALID_AI_TEXT_MODELS = {
     "deepseek",
+    "deepseek-flash",
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "volc-doubao-pro",
     "doubao-seed-2-0-pro-260215",
-    "claude-fable-5",
-    "claude-opus-4-8",
-    "claude-sonnet-4",
-    "claude-sonnet-4-6",
 }
 
 
@@ -37,9 +34,6 @@ class Settings(BaseSettings):
     database_max_overflow: int = 10
     database_pool_timeout_seconds: float = 30.0
     database_pool_recycle_seconds: int = 1800
-    local_default_user_email: str = "local@pawtale.local"
-    local_default_user_password: str = "pawtale-local"
-    local_default_user_display_name: str = "本地作者"
 
     # WeChat Mini Program auth
     wechat_miniprogram_appid: str = ""
@@ -47,11 +41,13 @@ class Settings(BaseSettings):
     wechat_xiaoyu_miniprogram_appid: str = ""
     wechat_xiaoyu_miniprogram_secret: str = ""
     wechat_jscode2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+    # Mini program codes printed in share videos open this version: release, trial or develop.
+    wechat_miniprogram_code_env_version: str = "release"
 
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     deepseek_thinking_type: str = "disabled"
 
     # VolcEngine Ark API Keys
@@ -89,12 +85,10 @@ class Settings(BaseSettings):
     # StepFun batch ASR for user-triggered material reprocessing and offline tools.
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com"
-    stepfun_asr_model: str = "stepaudio-2.5-asr"
+    stepfun_asr_model: str = "stepaudio-3-asr-max"
     stepfun_asr_timeout_seconds: float = 120.0
 
     # Memoir editing worker
-    memoir_chapter_revision_delay_seconds: int = 300
-    memoir_quality_audit_delay_seconds: int = 120
     memoir_editing_worker_enabled: bool = True
     memoir_editing_poll_seconds: int = 1
     memoir_story_settle_seconds: int = 30
@@ -108,8 +102,6 @@ class Settings(BaseSettings):
     memoir_interview_policy_active_rollout_percent: int = 0
     memoir_interview_policy_active_model: str = ""
     memoir_interview_policy_outcome_model: str = ""
-    memoir_topic_map_shadow_enabled: bool = False
-    memoir_topic_map_shadow_model: str = ""
     memoir_share_video_worker_enabled: bool = True
     memoir_share_video_poll_seconds: int = 2
     memoir_share_video_batch_size: int = 1
@@ -143,6 +135,8 @@ class Settings(BaseSettings):
     tts_provider: str = "disabled"
     tts_timeout_seconds: float = 30.0
     tts_max_concurrent_requests: int = 3
+    book_audio_prefetch_chunks: int = 2
+    book_audio_poll_seconds: float = 1.5
     volc_tts_app_id: str = ""
     volc_tts_access_token: str = ""
     volc_tts_api_key: str = ""

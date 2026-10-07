@@ -1,9 +1,15 @@
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
+  AUTO_LISTEN_NO_ANSWER_MS,
+  AUTO_STOP_SILENCE_MS,
+  AUTO_STOP_MIN_RECORDING_MS,
+} from "../../services/voice-activity-detector";
+import {
   ensureVoiceRecordingAuthorization,
 } from "../../services/voice-authorization";
 
 type VoicePhase = "idle" | "connecting" | "listening" | "stopping";
+type AutomaticStartState = "detached" | "available" | "used";
 const VOICE_MAX_DURATION_MS = 30000;
 
 interface VoiceRuntime {
@@ -12,6 +18,7 @@ interface VoiceRuntime {
   text: string;
   baseText: string;
   transcript: string;
+  automaticStartState: AutomaticStartState;
 }
 
 const voiceRuntimes = new WeakMap<object, VoiceRuntime>();
@@ -25,6 +32,7 @@ function voiceRuntime(owner: object): VoiceRuntime {
       text: "",
       baseText: "",
       transcript: "",
+      automaticStartState: "detached",
     };
     voiceRuntimes.set(owner, runtime);
   }
@@ -45,6 +53,7 @@ Component({
     maxlength: { type: Number, value: 1000 },
     disabled: { type: Boolean, value: false },
     busy: { type: Boolean, value: false },
+    automaticVoiceCommand: { type: Boolean, value: false },
   },
 
   data: {
@@ -57,20 +66,32 @@ Component({
     value(value: unknown) {
       this.syncText(value);
     },
+    "automaticVoiceCommand,gatewayUrl,disabled,busy"() {
+      this.tryAutoStart();
+    },
   },
 
   lifetimes: {
     attached() {
+      voiceRuntime(this).automaticStartState = "available";
       this.syncText(this.properties.value);
+      this.tryAutoStart();
     },
     detached() {
+      voiceRuntime(this).automaticStartState = "detached";
       this.cancelVoice();
       voiceRuntimes.delete(this);
     },
   },
 
   pageLifetimes: {
+    show() {
+      this.tryAutoStart();
+    },
     hide() {
+      if (this.properties.automaticVoiceCommand) {
+        voiceRuntime(this).automaticStartState = "available";
+      }
       this.cancelVoice();
     },
   },
@@ -114,12 +135,31 @@ Component({
       this.setData({ voicePhase: "idle" });
     },
 
+    tryAutoStart() {
+      const runtime = voiceRuntime(this);
+      if (
+        runtime.automaticStartState !== "available"
+        || !this.properties.automaticVoiceCommand
+        || !this.properties.gatewayUrl
+        || !this.canEdit()
+      ) {
+        return;
+      }
+      runtime.automaticStartState = "used";
+      void this.startVoice(true);
+    },
+
     async toggleVoice() {
       const runtime = voiceRuntime(this);
       if (this.data.voicePhase === "listening") {
         runtime.streaming.stopRecording();
         return;
       }
+      await this.startVoice(false);
+    },
+
+    async startVoice(autoTriggered: boolean = false) {
+      const runtime = voiceRuntime(this);
       if (!this.canEdit()) {
         return;
       }
@@ -132,6 +172,9 @@ Component({
       this.setData({ voicePhase: "connecting", error: "" });
       try {
         if (!(await ensureVoiceRecordingAuthorization())) {
+          if (autoTriggered) {
+            runtime.automaticStartState = "available";
+          }
           this.setData({ voicePhase: "idle" });
           return;
         }
@@ -144,7 +187,8 @@ Component({
           voiceSessionId: this.properties.voiceSessionId || `dictation-${token}`,
           gatewayUrl: this.properties.gatewayUrl,
           guidanceMode: "free_narration",
-          autoStopSilenceMs: 0,
+          autoStopSilenceMs: AUTO_STOP_SILENCE_MS,
+          minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
           noVoiceActivityTimeoutMs: 0,
           callbacks: {
             onStatus: (status) => {
@@ -166,6 +210,9 @@ Component({
             onFinal: (event) => this.updateVoiceTranscript(token, event.text || ""),
             onError: (message) => {
               if (token === runtime.token) {
+                if (autoTriggered) {
+                  runtime.automaticStartState = "available";
+                }
                 this.setData({
                   voicePhase: "idle",
                   error: message || "语音输入失败",
@@ -178,12 +225,21 @@ Component({
           runtime.streaming.close({ force: true });
           return;
         }
-        if (!runtime.streaming.startRecording({ maxDurationMs: VOICE_MAX_DURATION_MS })) {
+        const recordingOptions = autoTriggered
+          ? {
+              maxDurationMs: VOICE_MAX_DURATION_MS,
+              noVoiceActivityTimeoutMs: AUTO_LISTEN_NO_ANSWER_MS,
+            }
+          : { maxDurationMs: VOICE_MAX_DURATION_MS };
+        if (!runtime.streaming.startRecording(recordingOptions)) {
           throw new Error("录音启动失败，请重试");
         }
       } catch (error) {
         if (token !== runtime.token) {
           return;
+        }
+        if (autoTriggered) {
+          runtime.automaticStartState = "available";
         }
         runtime.streaming.close({ force: true });
         this.setData({
@@ -222,6 +278,10 @@ Component({
         return;
       }
       const transcript = runtime.transcript.trim();
+      const shouldSubmit = Boolean(
+        transcript
+        && this.properties.automaticVoiceCommand,
+      );
       runtime.baseText = "";
       runtime.transcript = "";
       this.setData({
@@ -229,7 +289,13 @@ Component({
         ...(transcript ? {} : { error: "没有识别到内容，请再说一次" }),
       });
       if (transcript) {
-        wx.showToast({ title: "语音已转成文字", icon: "none" });
+        wx.showToast({
+          title: shouldSubmit ? "已听完，正在理解" : "语音已转成文字",
+          icon: "none",
+        });
+      }
+      if (shouldSubmit) {
+        this.submit();
       }
     },
 

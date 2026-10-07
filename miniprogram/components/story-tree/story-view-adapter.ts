@@ -1,64 +1,70 @@
 import type { MemoirStorySnapshot } from "../../domain/memoir-snapshots";
-import type { StoryViewData } from "./story-view-data";
+import { memoirHomepageTitle } from "../../services/memoir-display-copy";
+import { resolveStoryTreeGrowthStage, STORY_TREE_STAGE_IMAGES } from "./story-growth-stage";
+import type { StoryTone, StoryViewData } from "./story-view-data";
+
+const STORY_TONES: StoryTone[] = ["clay", "sun", "leaf"];
+
+function formatBookChars(count: number): string {
+  if (count >= 10_000) {
+    const value = (count / 10_000).toFixed(1).replace(/\.0$/, "");
+    return `约 ${value} 万字`;
+  }
+  return count ? `${count} 字` : "";
+}
 
 export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
   const project = snapshot.identity.active_project;
-  const progress = snapshot.progress;
-  const chapters = snapshot.chapters.map((chapter, index) => ({
-    id: chapter.id,
-    ordinal: index + 1,
-    hasSections: chapter.sections.length > 0,
-    title: chapter.title || "未命名章节",
-    timeRangeText: "",
-    summaryText: `${chapter.sections.length} 小节 · ${chapter.material_count} 段讲述`,
-    outcomeText: chapter.state === "settled" ? "" : chapter.state_text,
-    detailActionText: chapter.issues?.review_count
-      ? `${chapter.issues.review_count} 项待确认`
-      : chapter.issues?.supplement_count
-        ? `${chapter.issues.supplement_count} 项待补充`
-        : chapter.readable ? "查看详情" : "查看本章",
-    readable: chapter.readable,
-    imageCount: chapter.image_count,
-    videoCount: chapter.video_count,
-    state: chapter.state,
-    expanded: index === 0,
-    highlighted: false,
-    growthLabel: "",
-    growthAnimating: false,
-    sections: chapter.sections.map((section) => ({
-      id: section.id,
-      title: section.title || "未命名小节",
-      materialText: `${section.material_count} 段讲述`,
-      imageCount: section.image_count,
-      videoCount: section.video_count,
+  const chapters = snapshot.chapters.map((chapter, index) => {
+    return {
+      id: chapter.id,
+      hasSections: chapter.sections.length > 0,
+      title: chapter.title || "未命名故事",
+      storyCountText: chapter.sections.length ? `${chapter.sections.length} 个故事` : "正在长成故事",
+      readable: chapter.readable,
+      state: chapter.state,
+      tone: STORY_TONES[index % STORY_TONES.length],
       highlighted: false,
       growthLabel: "",
       growthAnimating: false,
-    })),
-  }));
+      sections: chapter.sections.map((section) => ({
+        id: section.id,
+        title: section.title || "未命名故事",
+        highlighted: false,
+        growthLabel: "",
+        growthAnimating: false,
+      })),
+    };
+  });
   const readableCount = chapters.filter(chapter => chapter.readable).length;
-  const count = snapshot.book_char_count || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);
-  const pending = progress?.pending_material_count || 0;
-  const needsUser = progress?.needs_user_material_count || 0;
-  const materialCount = progress?.material_count || 0;
+  const chapterCount = snapshot.book_chapter_count || readableCount;
+  const bookChars = snapshot.book_char_count
+    || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);
+  const bookCharText = formatBookChars(bookChars);
+  const storyCount = chapters.reduce((total, chapter) => total + chapter.sections.length, 0);
+  const materialCount = snapshot.progress?.material_count
+    || snapshot.chapters.reduce((total, chapter) => total + chapter.material_count, 0);
+  const growthStage = resolveStoryTreeGrowthStage(snapshot);
   return {
     memoir: {
       title: project?.title || "我的故事",
-      progressDetail: snapshot.book_readable ? "阅读草稿" : "查看书稿",
+      bookMetaText: [chapterCount ? `${chapterCount} 章` : "", bookCharText].filter(Boolean).join(" · ") || "正在整理",
     },
     overview: {
-      bookText: snapshot.book_readable && snapshot.book_chapter_count
-        ? `${snapshot.book_chapter_count} 章已入书稿` : "",
-      readableText: readableCount ? `${readableCount} 章可读` : "还没有正文",
-      title: "人生总览",
-      summaryText: `${chapters.length} 章 · ${chapters.reduce((total, chapter) => total + chapter.sections.length, 0)} 小节 · ${materialCount} 段讲述`,
-      outcomeText: count >= 10_000 ? `约 ${(count / 10_000).toFixed(1)} 万字` : count ? `${count} 字` : "还没有正文",
+      title: memoirHomepageTitle(project?.title || ""),
+      summaryText: chapters.length
+        ? `${chapters.length} 个主题 · ${storyCount} 个故事`
+        : materialCount ? "回忆正在整理成故事" : "故事树还在等待第一段回忆",
+      growthStage,
+      growthImageSrc: STORY_TREE_STAGE_IMAGES[growthStage],
+      themeTags: chapters.slice(0, 3).map((chapter) => ({
+        id: chapter.id,
+        title: chapter.title,
+        tone: chapter.tone,
+      })),
+      hasChapters: chapters.length > 0,
+      growthAnimating: false,
     },
     chapters,
-    unassignedMaterialTitle: pending ? "待归入故事的讲述" : materialCount ? "全部讲述" : "从一段讲述开始",
-    unassignedMaterialText: pending ? `还有 ${pending} 段讲述未归入故事` : materialCount ? "所有讲述都已归入故事" : "还没有讲述",
-    unassignedMaterialDetail: needsUser ? `其中 ${needsUser} 段需要您补充或确认，查看讲述后可以修改` : pending ? "后台会继续整理；无法自动归入的内容会提示您处理" : "讲下新的回忆后，它会从这里长成故事",
-    unassignedImageCount: snapshot.unassigned_image_count,
-    unassignedVideoCount: snapshot.unassigned_video_count,
   };
 }

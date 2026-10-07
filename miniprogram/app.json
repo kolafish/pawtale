@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/home/index",
+    "pages/story-voice-edit/index",
     "pages/login/index",
     "pages/voice-authorization/index",
     "pages/voice-chat/index",
@@ -9,6 +10,8 @@
     "pages/transcripts/index",
     "pages/transcript-detail/index",
     "pages/transcript-media/index",
+    "pages/share-videos/index",
+    "pages/share-video-player/index",
     "pages/book/index",
     "pages/image-assets/index",
     "pages/chapter-workspace/index",
@@ -22,19 +25,14 @@
   ],
   "window": {
     "navigationBarTitleText": "老余口述",
-    "navigationBarBackgroundColor": "#A84F43",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#F7F3EC"
+    "navigationBarBackgroundColor": "#F8F4EE",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#F5F1EA"
   },
   "networkTimeout": {
     "request": 60000,
     "downloadFile": 60000,
     "connectSocket": 60000
-  },
-  "permission": {
-    "scope.record": {
-      "desc": "用于语音访谈录音、实时识别文字和留存音频"
-    }
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

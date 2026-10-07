@@ -18,6 +18,8 @@ export interface MemoirShareVideoCount {
   utterance_id: string;
   count: number;
   job_ids: string[];
+  current_job_ids?: string[];
+  job_titles?: Record<string, string>;
 }
 
 export interface MemoirBookSnapshot {
@@ -26,6 +28,8 @@ export interface MemoirBookSnapshot {
   plan?: MemoirBookPlan | null;
   drafts_by_chapter_id: Record<string, MemoirBookChapterDraft | null>;
   output?: MemoirBookOutput | null;
+  progress?: MemoirDraftProgress | null;
+  blocking_issue_count: number;
   automation_events: MemoirAutomationEventListResponse;
   image_assets: MemoirImageAssetListResponse;
   share_video_counts: MemoirShareVideoCount[];
@@ -62,6 +66,7 @@ export interface MemoirStoryChapter {
   video_count: number;
   char_count: number;
   readable: boolean;
+  candidate_job_id: string | null;
   state: "settled" | "attention" | "draft" | "muted";
   state_text: string;
   sections: Array<{ id: string; title: string; material_count: number; image_count: number; video_count: number }>;
@@ -76,6 +81,7 @@ export interface MemoirStoryGrowthEvent {
   event_id: string;
   summary_text: string;
   created_at: string;
+  book_char_count_delta: number;
   changes: MemoirStoryChange[];
 }
 

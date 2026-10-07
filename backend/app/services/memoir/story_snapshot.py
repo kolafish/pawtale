@@ -26,6 +26,7 @@ from app.schemas.memoir_snapshots import (
 from app.services.memoir import (
     automation_events,
     book_reviews,
+    chapter_preparation_jobs,
     draft_progress,
     projects,
     share_video_jobs,
@@ -33,6 +34,7 @@ from app.services.memoir import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automatic_book_draft import DraftProgress
+from app.services.memoir.project_revisions import project_data_revision
 from app.services.memoir.read_snapshots import _empty_automation_events
 from app.services.memoir.story_growth_projection import story_growth_events
 
@@ -45,7 +47,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     if not identity.active_project_id:
         return result
     project = await load_memoir_project(db, identity.active_project_id, user.id)
-    result.server_revision = project.memoir_data_revision
+    result.server_revision = await project_data_revision(db, project)
     result.updated_at = project.updated_at.isoformat()
     transcripts = await voice_transcripts.list_voice_transcripts(db, user.id, project_id=project.id, limit=1)
     result.latest_transcript = transcripts.items[0] if transcripts.items else None
@@ -92,7 +94,9 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     # The book workspace only offers optional questions from the current ready
     # review. Manual decisions stay active across regenerated reviews.
     if issue_counts[None].supplement_count:
-        review = await book_reviews.get_current_book_review(db, project_id=project.id)
+        review = await book_reviews.get_current_book_review(db, project_id=project.id) if any(
+            chapter.include_in_book for chapter in chapters
+        ) else None
         issue_counts[None].supplement_count = (
             (
                 await db.scalar(
@@ -112,10 +116,15 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         )
     result.book_issues = issue_counts[None]
     result.book_manual_edit_preserved = progress.preserved_manual
+    candidates = await chapter_preparation_jobs.current_chapter_candidates(
+        db, project_id=project.id,
+        chapter_ids={chapter.id for chapter in chapters if chapter.include_in_book},
+    )
     chapter_views = {}
     for chapter in chapters:
         view = MemoirStoryChapterResponse(**chapter._asdict() | {"char_count": chapter.char_count or 0})
         view.readable = view.char_count > 0
+        view.candidate_job_id = candidates.get(chapter.id)
         view.issues = issue_counts[chapter.id]
         state = progress.chapters.get(chapter.id)
         if not chapter.include_in_book:
@@ -124,6 +133,8 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
             view.state, view.state_text = "attention", "整理未完成"
         elif view.issues.review_count:
             view.state, view.state_text = "attention", f"{view.issues.review_count} 项待确认"
+        elif view.candidate_job_id:
+            view.state, view.state_text = "attention", "新稿待采纳"
         elif view.issues.supplement_count:
             view.state, view.state_text = "attention", f"{view.issues.supplement_count} 项待补充"
         elif state and state.status in {"pending", "running"}:
@@ -148,18 +159,49 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         section_views[section.id] = view
         section_chapters[section.id] = section.chapter_id
         chapter_views[section.chapter_id].sections.append(view)
-    section_by_utterance = {}
-    for material in (
+    for section_id, count in (
         await db.execute(
-            select(MemoirSectionMaterial.utterance_id, MemoirSectionMaterial.section_id).where(
-                MemoirSectionMaterial.project_id == project.id
-            )
+            select(MemoirSectionMaterial.section_id, func.count())
+            .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+            .where(MemoirSectionMaterial.project_id == project.id, MemoirSection.status == "active")
+            .group_by(MemoirSectionMaterial.section_id)
         )
     ).all():
-        if material.section_id in section_views:
-            section_by_utterance[material.utterance_id] = material.section_id
-            section_views[material.section_id].material_count += 1
-            chapter_views[section_chapters[material.section_id]].material_count += 1
+        section_views[section_id].material_count = count
+        chapter_views[section_chapters[section_id]].material_count += count
+    result.automation_events = await automation_events.list_automation_events(
+        db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
+    )
+    assets = (
+        await db.execute(
+            select(MemoirImageAsset.id, MemoirImageAsset.source_utterance_id, MemoirImageAsset.source_chapter_id)
+            .where(MemoirImageAsset.project_id == project.id, MemoirImageAsset.status == "ready")
+        )
+    ).all()
+    videos = await share_video_jobs.list_completed_share_video_counts(db, user_id=user.id, project_id=project.id)
+    linked_utterance_ids = (
+        {asset.source_utterance_id for asset in assets if asset.source_utterance_id}
+        | {video.utterance_id for video in videos}
+        | {
+            utterance_id
+            for event in result.automation_events.items
+            for utterance_id in event.utterance_ids
+        }
+    )
+    section_by_utterance = {}
+    if linked_utterance_ids:
+        for utterance_id, section_id in (
+            await db.execute(
+                select(MemoirSectionMaterial.utterance_id, MemoirSectionMaterial.section_id)
+                .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+                .where(
+                    MemoirSectionMaterial.project_id == project.id,
+                    MemoirSection.status == "active",
+                    MemoirSectionMaterial.utterance_id.in_(linked_utterance_ids),
+                )
+            )
+        ).all():
+            section_by_utterance[utterance_id] = section_id
     placements = defaultdict(set)
     for placement in (
         await db.execute(
@@ -170,13 +212,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     ).all():
         if placement.chapter_id in chapter_views:
             placements[placement.image_asset_id].add(placement.chapter_id)
-    for asset in (
-        await db.execute(
-            select(MemoirImageAsset.id, MemoirImageAsset.source_utterance_id, MemoirImageAsset.source_chapter_id).where(
-                MemoirImageAsset.project_id == project.id, MemoirImageAsset.status == "ready"
-            )
-        )
-    ).all():
+    for asset in assets:
         section_id = section_by_utterance.get(asset.source_utterance_id)
         if section_id:
             section_views[section_id].image_count += 1
@@ -187,7 +223,6 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
                 chapter_views[chapter_id].image_count += 1
         else:
             result.unassigned_image_count += 1
-    videos = await share_video_jobs.list_completed_share_video_counts(db, user_id=user.id, project_id=project.id)
     for video in videos:
         section_id = section_by_utterance.get(video.utterance_id)
         if section_id:
@@ -212,9 +247,6 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         result.updated_at = max(project.updated_at, book[2]).isoformat()
     result.book_readable = result.book_char_count > 0
     result.book_chapter_count = book[1] if book and result.book_readable else 0
-    result.automation_events = await automation_events.list_automation_events(
-        db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
-    )
     result.growth_events = story_growth_events(
         result.automation_events.items,
         chapter_ids=set(chapter_views),

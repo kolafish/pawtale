@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,6 +38,7 @@ from app.services.ai_workloads import (
     AITextWorkload,
     ai_text_workload_policy,
 )
+from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -45,7 +46,7 @@ from app.services.memoir.semantic_state import (
 from app.services.memoir.transcript_projection import current_material_text
 
 
-SECTION_DIGEST_ENGINE = "llm_section_digest_v2"
+SECTION_DIGEST_ENGINE = "llm_section_digest_v3"
 SECTION_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制、敏锐的中文回忆录编辑。"
     "你只根据给定小章节和原始讲述判断读者是否容易理解，不补写事实。"
@@ -244,7 +245,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
         context.section_type,
         "根据这段内容本身的叙事意图判断，不套固定模板。",
     )
-    return f"""请审阅下面这个回忆录小章节。
+    prompt = f"""请审阅下面这个回忆录小章节。
 
 标题：{context.title}
 类型：{context.section_type}
@@ -271,6 +272,8 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 }}
 
 要求：
+- 这是私人回忆录，普通经历、婚姻家庭、个人感受、人物称呼和爱好默认保留，不提出隐私追问或匿名化建议。
+- 不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求。
 - 先理解这一段真正想表达什么，不要逐条检查时间、地点、人物、起因和结果。
 - 能通过编辑现有素材解决的问题写入 editorial_guidance，不要向用户提问。
 - 只提出会明显改善读者理解的问题；内容已经自然成立时 candidate_issues 可以为空。
@@ -279,15 +282,14 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 - material_ids 只能使用输入中出现的本次请求短编号 material_id。
 - 输入中只包含当前允许收录的素材。
 """
+    return checked_review_prompt(prompt, subject="小章节")
 
 
 def normalize_section_digest_payload(
-    payload: Any,
+    payload: dict[str, Any],
     *,
     material_references: ModelReferenceMap,
 ) -> dict:
-    if not isinstance(payload, dict):
-        raise ValueError("section digest AI did not return a JSON object")
     summary = _trim_text(payload.get("summary"), limit=600)
     focus = _trim_text(payload.get("focus"), limit=300)
     if not summary:
@@ -318,6 +320,8 @@ def normalize_section_digest_payload(
             limit=8,
         )
         issue_type = _trim_text(item.get("issue_type"), limit=30)
+        if issue_type == "privacy":
+            continue
         priority = _trim_text(item.get("priority"), limit=20)
         issues.append(
             {
@@ -386,26 +390,14 @@ async def _mark_previous_digests_stale(
     engine: str,
     current_signature: str,
 ) -> None:
-    digests = list(
-        (
-            await db.execute(
-                select(MemoirSectionDigest).where(
-                    MemoirSectionDigest.project_id == project_id,
-                    MemoirSectionDigest.section_id == section_id,
-                    MemoirSectionDigest.engine == engine,
-                    MemoirSectionDigest.input_signature != current_signature,
-                    MemoirSectionDigest.status
-                    == MemoirSemanticCacheStatus.READY.value,
-                )
-            )
-        ).scalars().all()
+    await db.execute(
+        delete(MemoirSectionDigest).where(
+            MemoirSectionDigest.project_id == project_id,
+            MemoirSectionDigest.section_id == section_id,
+            MemoirSectionDigest.engine == engine,
+            MemoirSectionDigest.input_signature != current_signature,
+        )
     )
-    for digest in digests:
-        digest.status = MemoirSemanticCacheStatus.STALE.value
-        digest.updated_at = datetime.now(UTC).replace(tzinfo=None)
-        db.add(digest)
-    if digests:
-        await db.flush()
 
 
 async def mark_section_digests_stale(
@@ -418,26 +410,14 @@ async def mark_section_digests_stale(
         return 0
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id)
-    digests = list(
-        (
-            await db.execute(
-                select(MemoirSectionDigest).where(
-                    MemoirSectionDigest.project_id == project_id,
-                    MemoirSectionDigest.section_id.in_(section_ids),
-                    MemoirSectionDigest.status
-                    == MemoirSemanticCacheStatus.READY.value,
-                )
-            )
-        ).scalars().all()
+    result = await db.execute(
+        delete(MemoirSectionDigest).where(
+            MemoirSectionDigest.project_id == project_id,
+            MemoirSectionDigest.section_id.in_(section_ids),
+        )
     )
-    now = datetime.now(UTC).replace(tzinfo=None)
-    for digest in digests:
-        digest.status = MemoirSemanticCacheStatus.STALE.value
-        digest.updated_at = now
-        db.add(digest)
-    if digests:
-        await db.flush()
-    return len(digests)
+    return result.rowcount
+
 
 
 async def _upsert_digest(
@@ -531,6 +511,8 @@ async def generate_or_reuse_section_digest(
             ai_model=ai_model,
             ai_client=client,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "memoir section digest generation failed section_id=%s",
