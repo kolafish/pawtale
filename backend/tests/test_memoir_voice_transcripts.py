@@ -8,6 +8,7 @@ from urllib.parse import unquote
 from unittest.mock import AsyncMock
 
 from PIL import Image
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -730,7 +731,7 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v7"
+    assert prompt.template_version == "memoir-share-video-background-v8"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
@@ -785,7 +786,7 @@ def test_share_video_scene_background_prompt_carries_story_context():
     assert "那年冬天父亲送我去县城读书。" in prompt
     assert "父亲四十来岁，穿旧棉袄" in prompt
     assert "整段口述" not in single
-    assert "讲述者信息：" not in single
+    assert "讲述者资料" not in single
     narrated = share_video_backgrounds.build_share_video_background_prompt(
         "我们去河边洗衣服。",
         "watercolor",
@@ -793,55 +794,59 @@ def test_share_video_scene_background_prompt_carries_story_context():
             {"narrator_gender": "female", "narrator_origin": "湖南"}
         ),
     ).prompt
-    assert "讲述者信息：讲述者“我”是女性；家乡在湖南。" in narrated
+    assert "（人物性别、年龄先从口述内容推断，内容里看不出来时再参考）：讲述者“我”是女性；家乡在湖南。" in narrated
+    assert "不要默认画成男性" not in narrated
     assert share_video_backgrounds.share_video_narrator_context({"narrator_gender": "unspecified"}) == ""
 
 
-async def test_share_video_background_retries_without_rejected_reference_image(tmp_path, monkeypatch):
+async def test_share_video_background_set_requests_one_group_and_keeps_missing_images_empty(tmp_path, monkeypatch):
     settings = SimpleNamespace(
         memoir_share_video_ai_background_enabled=True,
-        memoir_share_video_reference_image_enabled=True,
         volc_ark_api_key="test-key",
+        volc_ark_base_url="https://ark.cn-beijing.volces.com/api/v3",
         volc_ark_image_model="doubao-seedream-5-0-lite-260128",
+        volc_ark_image_size="2K",
         volc_ark_image_output_format="png",
+        volc_ark_image_response_format="b64_json",
+        volc_ark_image_timeout_seconds=1,
+        volc_ark_image_max_concurrent_requests=1,
     )
-    reference_path = tmp_path / "first.png"
-    Image.new("RGB", (2048, 3640), "white").save(reference_path)
-    references: list[str] = []
+    payloads: list[dict] = []
 
-    async def fake_generate(self, prompt, *, reference_image=""):
-        references.append(reference_image)
-        if reference_image:
-            raise share_video_backgrounds.ShareVideoBackgroundGenerationError("rejected", status_code=400)
-        return share_video_backgrounds.VolcArkGeneratedImage(
-            content=b"fake image bytes",
-            mime_type="image/png",
-            model=settings.volc_ark_image_model,
-            usage={},
+    def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads(request.content))
+        image = base64.b64encode(b"fake image bytes").decode()
+        return httpx.Response(
+            200,
+            json={
+                "model": settings.volc_ark_image_model,
+                "data": [{"b64_json": image}, {"error": {"code": "OutputImageSensitiveContentDetected"}}],
+            },
         )
 
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        share_video_backgrounds.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
     monkeypatch.setattr(share_video_backgrounds, "get_settings", lambda: settings)
     monkeypatch.setattr(share_video_backgrounds, "MEMOIR_SHARE_VIDEO_BACKGROUND_DIR", tmp_path / "cache")
-    monkeypatch.setattr(share_video_backgrounds.VolcArkImageGenerationService, "__init__", lambda self: None)
-    monkeypatch.setattr(share_video_backgrounds.VolcArkImageGenerationService, "generate", fake_generate)
 
-    asset = await share_video_backgrounds.get_or_generate_share_video_background(
-        "后来去县城读书。",
+    assets = await share_video_backgrounds.get_or_generate_share_video_background_set(
+        ["小时候住在老房子里。", "后来去县城读书。", "再后来大家各自成家。"],
         "watercolor",
-        story_text="小时候住在老房子里。后来去县城读书。",
-        reference_image_path=reference_path,
+        story_text="小时候住在老房子里。后来去县城读书。再后来大家各自成家。",
     )
 
-    assert asset is not None
-    assert references[0].startswith("data:image/jpeg;base64,")
-    assert references[1:] == [""]
-    reference_prompt = share_video_backgrounds.build_share_video_background_prompt(
-        "后来去县城读书。",
-        "watercolor",
-        reference_image=references[0],
-    ).prompt
-    assert reference_prompt.startswith("参考图只用来确定人物长什么样")
-    assert "不要在参考图上修改" in reference_prompt
+    assert len(payloads) == 1
+    assert payloads[0]["sequential_image_generation"] == "auto"
+    assert payloads[0]["sequential_image_generation_options"] == {"max_images": 3}
+    assert "image" not in payloads[0]
+    assert "第 2 张：后来去县城读书。" in payloads[0]["prompt"]
+    assert assets is not None
+    assert assets[0] is not None and assets[0].path.read_bytes() == b"fake image bytes"
+    assert assets[1:] == [None, None]
 
 
 def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
@@ -1013,7 +1018,7 @@ async def test_share_video_background_generation_caches_provider_result(tmp_path
     )
     calls: list[str] = []
 
-    async def fake_generate(self, prompt, *, reference_image=""):
+    async def fake_generate(self, prompt):
         calls.append(prompt)
         return share_video_backgrounds.VolcArkGeneratedImage(
             content=b"fake image bytes",
@@ -1875,7 +1880,24 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_dir.mkdir()
 
     image_contexts: list[tuple[str, str]] = []
-    image_references: dict[str, object] = {}
+    set_calls: list[list[str]] = []
+
+    async def fake_background_set(
+        scene_texts,
+        style_id,
+        *,
+        story_text,
+        visual_context="",
+        narrator_context="",
+        usage_context=None,
+    ):
+        # The group returns only the first image; the rest are drawn one by one.
+        set_calls.append(list(scene_texts))
+        assert (story_text, visual_context, narrator_context) == (text, "父亲四十来岁，老县城", narrator)
+        first = await fake_background(
+            scene_texts[0], style_id, story_text=story_text, visual_context=visual_context, narrator_context=narrator_context
+        )
+        return [first] + [None] * (len(scene_texts) - 1)
 
     async def fake_background(
         selected_text,
@@ -1884,13 +1906,11 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         story_text="",
         visual_context="",
         narrator_context="",
-        reference_image_path=None,
         usage_context=None,
     ):
         assert narrator_context == narrator
         image_calls.append((selected_text, style_id))
         image_contexts.append((story_text, visual_context))
-        image_references[selected_text] = reference_image_path
         image_path = image_dir / f"scene-{len(image_calls)}.png"
         image_path.write_bytes(b"fake image")
         return share_video_backgrounds.ShareVideoBackgroundAsset(
@@ -1918,6 +1938,10 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     monkeypatch.setattr(
         "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background",
         fake_background,
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background_set",
+        fake_background_set,
     )
     monkeypatch.setattr(
         "app.services.memoir.share_video_rendering.render_share_video_clip",
@@ -1958,11 +1982,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         "再后来大家各自成家。",
     ]
     assert image_contexts == [(text, "父亲四十来岁，老县城")] * 3
-    assert image_references == {
-        "小时候一家人住在老房子里。": None,
-        "后来去县城读书。": image_dir / "scene-1.png",
-        "再后来大家各自成家。": image_dir / "scene-1.png",
-    }
+    assert set_calls == [["小时候一家人住在老房子里。", "后来去县城读书。", "再后来大家各自成家。"]]
     assert len(render_requests) == 1
     render_request = render_requests[0]
     assert render_request.background_image_path is None
