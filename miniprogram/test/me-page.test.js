@@ -158,21 +158,28 @@ test("me shows AI credit usage percentage to one decimal place", async () => {
   assert.equal(context.data.creditRemainingText, "9.97");
 });
 
-test("me groups charged AI usage by date and purpose across pages", async () => {
+test("me shows server day totals and credit additions across pages", async () => {
   const offsets = [];
   const { page } = loadMePage({
     billingExports: {
       getAIUsageDetails: async (offset) => {
         offsets.push(offset);
         return offset === 0
-          ? { items: [
-            { id: "usage-1", purpose: "语音朗读", cost_rmb: "0.003000", created_at: "2026-09-23T12:00:00Z" },
-            { id: "usage-2", purpose: "语音访谈", cost_rmb: "0.020000", created_at: "2026-09-23T11:00:00Z" },
-          ], has_more: true }
-          : { items: [
-            { id: "usage-3", purpose: "语音朗读", cost_rmb: "0.000001", created_at: "2026-09-23T10:00:00Z" },
-            { id: "usage-4", purpose: "语音朗读", cost_rmb: "0.200000", created_at: "2026-09-22T12:00:00Z" },
-          ], has_more: false };
+          ? { days: [{
+            day: "2026-09-23",
+            cost_rmb: "0.023001",
+            purposes: [
+              { purpose: "语音访谈", count: 1, cost_rmb: "0.020000" },
+              { purpose: "语音朗读", count: 2, cost_rmb: "0.003001" },
+            ],
+            credits: [{ id: "credit-1", kind: "recharge", label: "充值", amount_rmb: "20.000000", note: "微信转账", created_at: "2026-09-23T02:00:00Z" }],
+          }], has_more: true }
+          : { days: [{
+            day: "2026-09-22",
+            cost_rmb: "0.200000",
+            purposes: [{ purpose: "语音朗读", count: 1, cost_rmb: "0.200000" }],
+            credits: [],
+          }], has_more: false };
       },
     },
   });
@@ -181,22 +188,40 @@ test("me groups charged AI usage by date and purpose across pages", async () => 
   await page.toggleCreditUsageDetails.call(context);
   assert.equal(context.data.creditUsageExpanded, true);
   assert.equal(context.data.creditUsageDays.length, 1);
-  assert.equal(context.data.creditUsageDays[0].amountText, "0.023");
+  assert.equal(context.data.creditUsageDays[0].amountText, "0.023001");
   assert.deepEqual(context.data.creditUsageDays[0].purposes.map(({ purpose, count, amountText }) => [purpose, count, amountText]), [
-    ["语音朗读", 1, "0.003"],
     ["语音访谈", 1, "0.02"],
+    ["语音朗读", 2, "0.003001"],
+  ]);
+  assert.deepEqual(context.data.creditUsageDays[0].credits.map(({ label, note, amountText }) => [label, note, amountText]), [
+    ["充值", "微信转账", "+¥20.00"],
   ]);
   assert.equal(context.data.creditUsageHasMore, true);
 
   await page.loadMoreCreditUsageDetails.call(context);
-  assert.deepEqual(offsets, [0, 2]);
-  assert.equal(context.data.creditUsageDays.length, 2);
-  assert.equal(context.data.creditUsageDays[0].amountText, "0.023001");
-  assert.deepEqual(context.data.creditUsageDays[0].purposes[0], {
-    purpose: "语音朗读", count: 2, amountText: "0.003001",
-  });
+  assert.deepEqual(offsets, [0, 1]);
+  assert.deepEqual(context.data.creditUsageDays.map(({ dateText }) => dateText), ["2026-09-23", "2026-09-22"]);
   assert.equal(context.data.creditUsageDays[1].purposes[0].amountText, "0.20");
   assert.equal(context.data.creditUsageHasMore, false);
+});
+
+test("me shows how far an overdrawn balance went past the credit", async () => {
+  const { page } = loadMePage({
+    billingExports: {
+      getAICreditSummary: async () => ({
+        total_credit_rmb: 10,
+        used_rmb: 12.5,
+        remaining_rmb: -2.5,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadAICreditSummary.call(context);
+
+  assert.equal(context.data.creditOverdrawn, true);
+  assert.equal(context.data.creditRemainingText, "2.50");
+  assert.equal(context.data.creditProgressPercent, "100.0");
 });
 
 test("me shows the single guest login entry when the session is missing", async () => {

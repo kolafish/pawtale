@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { auditApi } from '../../api';
+import { AdminCreditPanel } from './AdminCreditPanel';
 import type {
   AuditDashboardFilters,
   AuditDailyFeatureUsage,
@@ -642,6 +643,8 @@ export function UserAuditDashboard() {
                 关闭
               </button>
             </div>
+
+            <AdminCreditPanel userId={selectedDay.userId} />
 
             {dayQuery.isLoading ? (
               <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-gray-500">

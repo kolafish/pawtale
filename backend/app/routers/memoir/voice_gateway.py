@@ -170,6 +170,8 @@ async def mobile_memoir_voice_gateway(
                 audio_duration_seconds=audio_duration_seconds,
                 status="failed" if terminal_error else "succeeded",
                 error_type=terminal_error,
+                # The audio was streamed to the provider either way.
+                billable=True,
             )
         try:
             if persistence is not None and discard_pending_audio:

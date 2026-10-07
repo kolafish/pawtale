@@ -76,5 +76,7 @@ async def run_dictation_gateway(
                 audio_duration_seconds=audio_duration_seconds,
                 status="failed" if terminal_error else "succeeded",
                 error_type=terminal_error,
+                # The audio was streamed to the provider either way.
+                billable=True,
             )
         await capacity_lease.release()

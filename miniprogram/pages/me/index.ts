@@ -11,7 +11,7 @@ import {
   getAICreditSummary,
   getAIUsageDetails,
   type AICreditSummary,
-  type AIUsageDetail,
+  type AIUsageDay,
 } from "../../services/billing";
 import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
@@ -46,10 +46,18 @@ interface CreditUsagePurposeGroup {
   amountText: string;
 }
 
+interface CreditUsageCreditEntry {
+  id: string;
+  label: string;
+  note: string;
+  amountText: string;
+}
+
 interface CreditUsageDayGroup {
   dateText: string;
   amountText: string;
   purposes: CreditUsagePurposeGroup[];
+  credits: CreditUsageCreditEntry[];
 }
 
 interface MeData {
@@ -67,11 +75,11 @@ interface MeData {
   creditTotalText: string;
   creditUsedText: string;
   creditRemainingText: string;
+  creditOverdrawn: boolean;
   creditProgressPercent: string;
   creditUsageExpanded: boolean;
   creditUsageLoading: boolean;
   creditUsageError: string;
-  creditUsageItems: AIUsageDetail[];
   creditUsageDays: CreditUsageDayGroup[];
   creditUsageHasMore: boolean;
   rechargeQrVisible: boolean;
@@ -145,39 +153,28 @@ function formatCreditAmount(value: unknown): string {
   return creditAmount(value).toFixed(2);
 }
 
-function formatUsageAmount(micros: number): string {
-  return (micros / 1_000_000).toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1");
+function formatUsageAmount(value: unknown): string {
+  const amount = Number(value);
+  const safe = Number.isFinite(amount) ? Math.abs(amount) : 0;
+  return safe.toFixed(6).replace(/(\.\d{2}\d*?)0+$/, "$1");
 }
 
-function creditUsageDayGroups(items: AIUsageDetail[]): CreditUsageDayGroup[] {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const days = new Map<string, {
-    amountMicros: number;
-    purposes: Map<string, { count: number; amountMicros: number }>;
-  }>();
-  for (const item of items) {
-    const date = new Date(item.created_at);
-    const dateText = Number.isNaN(date.getTime())
-      ? "日期未知"
-      : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-    const amountMicros = Math.round(creditAmount(item.cost_rmb) * 1_000_000);
-    const day = days.get(dateText) || { amountMicros: 0, purposes: new Map() };
-    const purpose = day.purposes.get(item.purpose) || { count: 0, amountMicros: 0 };
-    purpose.count += 1;
-    purpose.amountMicros += amountMicros;
-    day.amountMicros += amountMicros;
-    day.purposes.set(item.purpose, purpose);
-    days.set(dateText, day);
-  }
-  return Array.from(days, ([dateText, day]) => ({
-    dateText,
-    amountText: formatUsageAmount(day.amountMicros),
-    purposes: Array.from(day.purposes, ([purpose, group]) => ({
-      purpose,
+function creditUsageDayGroup(day: AIUsageDay): CreditUsageDayGroup {
+  return {
+    dateText: day.day,
+    amountText: formatUsageAmount(day.cost_rmb),
+    purposes: day.purposes.map((group) => ({
+      purpose: group.purpose,
       count: group.count,
-      amountText: formatUsageAmount(group.amountMicros),
+      amountText: formatUsageAmount(group.cost_rmb),
     })),
-  }));
+    credits: day.credits.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      note: entry.note,
+      amountText: `${Number(entry.amount_rmb) < 0 ? "-" : "+"}¥${formatUsageAmount(entry.amount_rmb)}`,
+    })),
+  };
 }
 
 function creditData(summary: AICreditSummary): Pick<
@@ -187,6 +184,7 @@ function creditData(summary: AICreditSummary): Pick<
   | "creditTotalText"
   | "creditUsedText"
   | "creditRemainingText"
+  | "creditOverdrawn"
   | "creditProgressPercent"
 > {
   const total = creditAmount(summary.total_credit_rmb);
@@ -196,7 +194,8 @@ function creditData(summary: AICreditSummary): Pick<
     creditError: "",
     creditTotalText: formatCreditAmount(total),
     creditUsedText: formatCreditAmount(used),
-    creditRemainingText: formatCreditAmount(summary.remaining_rmb),
+    creditRemainingText: Math.abs(Number(summary.remaining_rmb) || 0).toFixed(2),
+    creditOverdrawn: Number(summary.remaining_rmb) < 0,
     creditProgressPercent: (total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0).toFixed(1),
   };
 }
@@ -245,11 +244,11 @@ function loggedOutData(): Partial<MeData> {
     creditTotalText: "0.00",
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
+    creditOverdrawn: false,
     creditProgressPercent: "0.0",
     creditUsageExpanded: false,
     creditUsageLoading: false,
     creditUsageError: "",
-    creditUsageItems: [],
     creditUsageDays: [],
     creditUsageHasMore: false,
     rechargeQrVisible: false,
@@ -289,11 +288,11 @@ definePage<MeData>()({
     creditTotalText: "0.00",
     creditUsedText: "0.00",
     creditRemainingText: "0.00",
+    creditOverdrawn: false,
     creditProgressPercent: "0.0",
     creditUsageExpanded: false,
     creditUsageLoading: false,
     creditUsageError: "",
-    creditUsageItems: [],
     creditUsageDays: [],
     creditUsageHasMore: false,
     rechargeQrVisible: false,
@@ -353,8 +352,7 @@ definePage<MeData>()({
         creditUsageExpanded: false,
         creditUsageLoading: false,
         creditUsageError: "",
-        creditUsageItems: [],
-        creditUsageDays: [],
+          creditUsageDays: [],
         creditUsageHasMore: false,
         ...(keepVoiceStats ? {} : {
           voiceStatsProjectId: activeProjectId,
@@ -510,21 +508,20 @@ definePage<MeData>()({
       return;
     }
     const email = this.data.email;
-    const offset = reset ? 0 : this.data.creditUsageItems.length;
+    const offset = reset ? 0 : this.data.creditUsageDays.length;
     this.setData({
       creditUsageLoading: true,
       creditUsageError: "",
-      ...(reset ? { creditUsageItems: [], creditUsageDays: [], creditUsageHasMore: false } : {}),
+      ...(reset ? { creditUsageDays: [], creditUsageHasMore: false } : {}),
     });
     try {
       const page = await getAIUsageDetails(offset);
       if (this.data.email !== email || !this.data.creditUsageExpanded) {
         return;
       }
-      const items = reset ? page.items : [...this.data.creditUsageItems, ...page.items];
+      const days = page.days.map(creditUsageDayGroup);
       this.setData({
-        creditUsageItems: items,
-        creditUsageDays: creditUsageDayGroups(items),
+        creditUsageDays: reset ? days : [...this.data.creditUsageDays, ...days],
         creditUsageHasMore: page.has_more,
       });
     } catch (error) {

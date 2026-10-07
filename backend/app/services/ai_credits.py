@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Literal
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -20,7 +21,12 @@ from app.schemas.billing import AICreditSummaryResponse
 MONEY_QUANTUM = Decimal("0.000001")
 USAGE_DEBIT = "usage_debit"
 USAGE_REFUND = "usage_refund"
+# Historical admin edits of the total credit; new additions use the two types below.
 MANUAL_ADJUSTMENT = "manual_adjustment"
+RECHARGE = "recharge"
+MANUAL_GRANT = "manual_grant"
+CREDIT_TRANSACTION_TYPES = (MANUAL_ADJUSTMENT, RECHARGE, MANUAL_GRANT)
+CreditKind = Literal["recharge", "grant"]
 
 
 def _money(value: Decimal | int | float | None) -> Decimal:
@@ -92,7 +98,7 @@ async def get_ai_credit_summary(
         recharged_credit_rmb=recharged_credit_rmb,
         total_credit_rmb=total_credit_rmb,
         used_rmb=used,
-        remaining_rmb=_money(max(Decimal("0"), total_credit_rmb - used)),
+        remaining_rmb=_money(total_credit_rmb - used),
         unpriced_success_count=int(unpriced_success_count or 0),
     )
 
@@ -114,17 +120,19 @@ async def assert_current_ai_credit_available() -> None:
         await assert_ai_credit_available(context.user_id)
 
 
-async def set_manual_credit_total(
+async def add_ai_credit(
     db: AsyncSession,
     *,
     user_id: str,
-    total_credit_rmb: Decimal,
+    amount_rmb: Decimal,
+    kind: CreditKind,
     actor_user_id: str,
     note: str = "",
-) -> AICreditSummaryResponse:
-    total = _money(total_credit_rmb)
-    if total < DEFAULT_FREE_CREDIT_RMB:
-        raise ValueError("total_credit_rmb must be at least the default free credit")
+) -> None:
+    """Add (or, with a negative amount, correct) paid recharge or free grant credit."""
+    amount = _money(amount_rmb)
+    if not amount:
+        raise ValueError("amount_rmb must not be zero")
 
     await ensure_ai_credit_account(db, user_id, commit=False)
     account = await db.scalar(
@@ -134,28 +142,40 @@ async def set_manual_credit_total(
     )
     if account is None:
         raise RuntimeError("AI credit account could not be initialized")
-    previous_total = _money(
-        account.free_credit_rmb
-        + account.manual_grant_rmb
-        + account.recharged_credit_rmb
-    )
-    minimum_total = _money(account.free_credit_rmb) + _money(account.recharged_credit_rmb)
-    if total < minimum_total:
-        raise ValueError("total_credit_rmb cannot be below existing non-manual credit")
-    new_manual_grant = _money(
-        total - _money(account.free_credit_rmb) - _money(account.recharged_credit_rmb)
-    )
-    delta = _money(total - previous_total)
-    account.manual_grant_rmb = new_manual_grant
-    if delta:
-        db.add(
-            AICreditTransaction(
-                user_id=user_id,
-                actor_user_id=actor_user_id,
-                transaction_type=MANUAL_ADJUSTMENT,
-                amount_rmb=delta,
-                note=note.strip(),
-            )
+    if kind == "recharge":
+        new_balance = _money(account.recharged_credit_rmb) + amount
+        if new_balance < 0:
+            raise ValueError("recharged credit cannot become negative")
+        account.recharged_credit_rmb = new_balance
+    else:
+        new_balance = _money(account.manual_grant_rmb) + amount
+        if new_balance < 0:
+            raise ValueError("granted credit cannot become negative")
+        account.manual_grant_rmb = new_balance
+    db.add(
+        AICreditTransaction(
+            user_id=user_id,
+            actor_user_id=actor_user_id,
+            transaction_type=RECHARGE if kind == "recharge" else MANUAL_GRANT,
+            amount_rmb=amount,
+            note=note.strip(),
         )
+    )
     await db.commit()
-    return await get_ai_credit_summary(db, user_id=user_id)
+
+
+async def list_credit_transactions(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    limit: int = 50,
+) -> list[AICreditTransaction]:
+    return list((await db.scalars(
+        select(AICreditTransaction)
+        .where(
+            AICreditTransaction.user_id == user_id,
+            AICreditTransaction.transaction_type.in_(CREDIT_TRANSACTION_TYPES),
+        )
+        .order_by(AICreditTransaction.created_at.desc(), AICreditTransaction.id.desc())
+        .limit(limit)
+    )).all())

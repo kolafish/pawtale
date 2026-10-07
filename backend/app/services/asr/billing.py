@@ -14,6 +14,7 @@ async def record_volc_streaming_asr_usage(
     status: str,
     error_type: str | None = None,
     provider: str = VOLC_STREAMING_ASR_PROVIDER,
+    billable: bool | None = None,
 ) -> None:
     if audio_duration_seconds <= 0:
         return
@@ -28,4 +29,5 @@ async def record_volc_streaming_asr_usage(
         ),
         audio_duration_seconds=audio_duration_seconds,
         error_type=error_type,
+        billable=billable,
     )

@@ -24,6 +24,8 @@ import type {
   AuditDashboardFilters,
   AuditDashboardResponse,
   AuditUserDayResponse,
+  AdminAICreditResponse,
+  AICreditKind,
   MemoirBookPlan,
   MemoirBookChapterDraft,
   MemoirBookExportDownload,
@@ -63,6 +65,14 @@ export const auditApi = {
     api.get<AuditDashboardResponse>('/audit/dashboard', { params: filters }).then(r => r.data),
   userDay: (userId: string, day: string) =>
     api.get<AuditUserDayResponse>(`/audit/users/${encodeURIComponent(userId)}/days/${day}`).then(r => r.data),
+};
+
+// AI credit administration API
+export const billingAdminApi = {
+  userCredit: (userId: string) =>
+    api.get<AdminAICreditResponse>(`/billing/admin/users/${encodeURIComponent(userId)}/ai-credit`).then(r => r.data),
+  addCredit: (userId: string, data: { amount_rmb: string; kind: AICreditKind; note: string }) =>
+    api.post<AdminAICreditResponse>(`/billing/admin/users/${encodeURIComponent(userId)}/ai-credit`, data).then(r => r.data),
 };
 
 // Projects API

@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,20 +29,43 @@ class AICreditSummaryResponse(BaseModel):
     })
 
 
-class AIUsageDetailItem(BaseModel):
-    id: str
+class AIUsagePurposeTotal(BaseModel):
     purpose: str
+    count: int
     cost_rmb: Decimal
+
+
+class AICreditEntry(BaseModel):
+    id: str
+    kind: str
+    label: str
+    amount_rmb: Decimal
+    note: str
     created_at: datetime
 
 
+class AIUsageDay(BaseModel):
+    """One Beijing-time calendar day of charges and credit additions."""
+
+    day: date
+    cost_rmb: Decimal
+    purposes: list[AIUsagePurposeTotal]
+    credits: list[AICreditEntry]
+
+
 class AIUsageDetailResponse(BaseModel):
-    items: list[AIUsageDetailItem]
+    days: list[AIUsageDay]
     has_more: bool
 
 
 class AICreditGrantRequest(BaseModel):
-    """Set a user's total available credit for the current manual-grant phase."""
+    """Add paid recharge or free grant credit; a negative amount corrects a mistake."""
 
-    total_credit_rmb: Decimal = Field(..., ge=10, max_digits=14, decimal_places=6)
+    amount_rmb: Decimal = Field(..., max_digits=14, decimal_places=6)
+    kind: Literal["recharge", "grant"]
     note: str = Field(default="", max_length=255)
+
+
+class AdminAICreditResponse(BaseModel):
+    summary: AICreditSummaryResponse
+    credits: list[AICreditEntry]

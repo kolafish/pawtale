@@ -796,3 +796,31 @@ export interface MemoirBatchTranscriptCleanupConfirmResponse {
   updated_count: number;
   items: MemoirVoiceTranscriptItem[];
 }
+
+// AI credit administration
+export interface AICreditSummary {
+  currency: string;
+  free_credit_rmb: string;
+  manual_grant_rmb: string;
+  recharged_credit_rmb: string;
+  total_credit_rmb: string;
+  used_rmb: string;
+  remaining_rmb: string;
+  unpriced_success_count: number;
+}
+
+export interface AICreditEntry {
+  id: string;
+  kind: string;
+  label: string;
+  amount_rmb: string;
+  note: string;
+  created_at: string;
+}
+
+export interface AdminAICreditResponse {
+  summary: AICreditSummary;
+  credits: AICreditEntry[];
+}
+
+export type AICreditKind = 'recharge' | 'grant';
