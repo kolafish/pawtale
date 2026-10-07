@@ -1140,28 +1140,57 @@ def test_illustration_file_content_changes_export_signature(tmp_path, monkeypatc
     assert replace(prepared).cache_key != original
 
 
-def test_uploaded_cover_keeps_preset_title_metadata_and_only_replaces_front_background(tmp_path, monkeypatch):
+@pytest.mark.parametrize("display_size", ["cover_frame", "full_width", "cover_full_bleed"])
+def test_uploaded_cover_photo_never_sits_under_cover_text(tmp_path, monkeypatch, display_size):
     monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
     photo = tmp_path / "photo.jpg"
-    Image.new("RGB", (800, 600), "red").save(photo)
+    Image.new("RGB", (480, 640), "red").save(photo)
+    long_title = "风雨六十年——一个老码头工人的口述人生记忆"
     designs = [(style, style if style in {"heritage_classic", "warm_journal", "modern_minimal"} else "classic_family") for style in PDF_COVER_STYLES]
     designs.append(("warm_journal", "custom"))
-    for cover_style, template in designs:
+    for (cover_style, template), title in [(design, title) for design in designs for title in ("外婆回忆录", long_title)]:
         manuscript = _sample_manuscript("正文保持原样。", cover_style=cover_style)
-        manuscript["profile"].update(template=template, narrator_name="外婆")
+        manuscript["profile"].update(title=title, template=template, narrator_name="外婆")
         layout = configured_pdf_layout(PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template)
-        original = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=layout)
-        manuscript["render_settings"]["cover_image"] = {"image_asset_id": "photo", "storage_path": "photo.jpg"}
-        pages = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=layout)
+        original = _build_manuscript_pdf_pages(title=title, content="", manuscript=manuscript, layout=layout)
+        manuscript["render_settings"]["cover_image"] = {
+            "image_asset_id": "photo", "storage_path": "photo.jpg", "display_size": display_size,
+        }
+        pages = _build_manuscript_pdf_pages(title=title, content="", manuscript=manuscript, layout=layout)
         cover = pages[0]
-        assert cover.commands == original[0].commands
         texts = [command.text for command in cover.commands]
-        assert "外婆回忆录" in texts
+        assert title.replace("——", "") in "".join(texts).replace("——", "")
         assert "根据口述访谈整理" in texts
-        assert "口述：外婆" in texts
-        assert "整理：家人整理" in texts
-        assert cover.background_image_path == photo
-        assert cover.background_image_preserve_aspect is True
-        assert any(decoration.opacity < 1 for decoration in cover.decorations)
-        assert pages[-1] == original[-1]
-        assert any(command.text == "正文保持原样。" for page in pages for command in page.commands)
+        assert any("口述：外婆" in text for text in texts)
+        assert any("整理：家人整理" in text for text in texts)
+        if display_size == "cover_full_bleed":
+            assert cover.background_image_path == photo
+            assert cover.background_image_crop_to_fill is True
+            shade_top = cover.background_image_bottom_shade * layout.page_height
+            assert all(command.y + command.font_size <= shade_top for command in cover.commands)
+        else:
+            assert cover.background_image_path == original[0].background_image_path
+            [image] = cover.images
+            assert image.path == photo
+            assert image.height >= 120
+            assert abs(image.width / image.height - 480 / 640) < 0.01
+            assert all(
+                command.y >= image.y + image.height or command.y + command.font_size <= image.y
+                for command in cover.commands
+            )
+        assert pages[1:] == original[1:]
+
+
+def test_pdf_image_crop_to_fill_matches_box_and_shades_bottom(tmp_path):
+    image_path = tmp_path / "landscape.jpg"
+    Image.new("RGB", (1600, 1200), (240, 240, 240)).save(image_path)
+
+    source = _optimized_pdf_image_source(PDFImageCommand(
+        path=image_path, x=0, y=0, width=420, height=595, crop_to_fill=True, bottom_shade=0.5,
+    ))
+
+    width, height = source.getSize()
+    assert abs(width / height - 420 / 595) < 0.01
+    pixels = source.getRGBData()
+    top, bottom = pixels[0], pixels[-3]
+    assert top > 200 and bottom < 80

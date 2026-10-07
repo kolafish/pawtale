@@ -9,6 +9,7 @@ import type {
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
+  MemoirBookImagePlacementUpdateRequest,
   MemoirBookOutput,
   MemoirBookShareCreated,
   MemoirBookShareStatus,
@@ -177,6 +178,21 @@ export function createMemoirBookImagePlacement(
     imageAssetPath(projectId, assetId, "/placements"),
     {
       method: "POST",
+      data,
+    },
+  );
+}
+
+export function updateMemoirBookImagePlacement(
+  projectId: string,
+  assetId: string,
+  placementId: string,
+  data: MemoirBookImagePlacementUpdateRequest,
+): Promise<MemoirImageAsset> {
+  return memoirRequest<MemoirImageAsset>(
+    imageAssetPath(projectId, assetId, `/placements/${encodeURIComponent(placementId)}`),
+    {
+      method: "PATCH",
       data,
     },
   );

@@ -1194,8 +1194,14 @@ test("upload, cancel, replace failure and restore a cover without changing body 
   let choice = "image";
   let failUpload = false;
   let editChoice = "done";
+  let cropChoice = "done";
   const calls = [];
   global.wx = {
+    cropImage(options) {
+      calls.push(["crop", options.src, options.cropScale]);
+      if (cropChoice === "cancel") options.fail({ errMsg: "cropImage:fail cancel" });
+      else options.success({ tempFilePath: "/tmp/framed-cover.jpg" });
+    },
     editImage(options) {
       calls.push(["edit", options.src]);
       if (editChoice === "cancel") options.fail({ errMsg: "editImage:fail cancel" });
@@ -1216,7 +1222,11 @@ test("upload, cancel, replace failure and restore a cover without changing body 
     },
     createMemoirBookImagePlacement: async (projectId, id, payload) => {
       calls.push(["place", projectId, id, payload]);
-      output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "photo" };
+      output.latest_version.manuscript.render_settings.cover_image = { image_asset_id: "photo", display_size: payload.display_size };
+    },
+    updateMemoirBookImagePlacement: async (projectId, id, placementId, payload) => {
+      calls.push(["layout", projectId, id, placementId, payload]);
+      output.latest_version.manuscript.render_settings.cover_image.display_size = payload.display_size;
     },
     downloadMemoirImageAssetFile: async (projectId, assetId, thumbnail) => {
       calls.push(["download", projectId, assetId, thumbnail]);
@@ -1241,6 +1251,7 @@ test("upload, cancel, replace failure and restore a cover without changing body 
     assert.equal(context.data.bookLayoutTemplate, template);
     assert.deepEqual(context.data.bookCustomLayout, controls);
     assert.equal(context.data.bookLayoutBusyTarget, "");
+    assert.equal(context.data.bookCoverImageLayout, "cover_frame");
     await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "edit" } } });
     assert.ok(calls.some((call) => call[0] === "edit" && call[1] === "/tmp/full-cover.jpg"));
     assert.ok(calls.some((call) => call[0] === "upload" && call[2] === "/tmp/cropped-cover.jpg"));
@@ -1269,12 +1280,29 @@ test("upload, cancel, replace failure and restore a cover without changing body 
     assert.equal(context.data.bookUploadedCoverAssetId, "photo");
     assert.equal(context.data.bookLayoutFeedbackText, "网络断开");
     failUpload = false;
+    await page.changeBookCoverImageLayout.call(context, { currentTarget: { dataset: { layout: "cover_full_bleed" } } });
+    assert.deepEqual(calls.at(-1), ["layout", "project/1", "photo", "cover-place", { display_size: "cover_full_bleed" }]);
+    assert.equal(context.data.bookCoverImageLayout, "cover_full_bleed");
+    assert.equal(context.data.bookUploadedCoverAssetId, "photo");
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "edit" } } });
+    assert.deepEqual(calls.filter((call) => call[0] === "crop").at(-1), ["crop", "/tmp/full-cover.jpg", "3:4"]);
+    assert.deepEqual(calls.filter((call) => call[0] === "upload").at(-1), ["upload", "project/1", "/tmp/framed-cover.jpg"]);
+    cropChoice = "cancel";
+    await page.changeBookCoverImage.call(context, { currentTarget: { dataset: {} } });
+    // Cancelling the crop page still uses the photo the user just picked.
+    assert.deepEqual(calls.filter((call) => call[0] === "upload").at(-1), ["upload", "project/1", "/tmp/family.jpg"]);
+    assert.deepEqual(calls.filter((call) => call[0] === "place").at(-1)[3], { placement_type: "cover", display_size: "cover_full_bleed" });
+    assert.equal(context.data.bookCoverImageLayout, "cover_full_bleed");
+    cropChoice = "done";
+    await page.changeBookCoverImageLayout.call(context, { currentTarget: { dataset: { layout: "cover_frame" } } });
+    assert.equal(context.data.bookCoverImageLayout, "cover_frame");
     await page.changeBookCoverImage.call(context, { currentTarget: { dataset: { action: "restore" } } });
     assert.equal(context.data.bookUploadedCoverAssetId, "");
     assert.deepEqual(context.data.bookCustomLayout, controls);
     assert.equal(context.data.bookLayoutTemplate, template);
   }
-  assert.deepEqual(calls.find((call) => call[0] === "upload"), ["upload", "project/1", "/tmp/cropped-cover.jpg"]);
-  assert.deepEqual(calls.find((call) => call[0] === "place"), ["place", "project/1", "photo", { placement_type: "cover" }]);
+  // A new photo in the default frame layout is uploaded as picked, with no forced editor.
+  assert.deepEqual(calls.find((call) => call[0] === "upload"), ["upload", "project/1", "/tmp/family.jpg"]);
+  assert.deepEqual(calls.find((call) => call[0] === "place"), ["place", "project/1", "photo", { placement_type: "cover", display_size: "cover_frame" }]);
   assert.ok(calls.some((call) => call[0] === "restore" && call[3] === "cover-place"));
 });

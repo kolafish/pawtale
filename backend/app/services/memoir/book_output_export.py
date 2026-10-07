@@ -7,6 +7,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from app.config import DATA_DIR
 from app.services.file_exports import ExportFile, safe_filename
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
@@ -22,14 +24,12 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFColor,
     PDFLayout,
     PDFImageCommand,
-    PDFDecorationCommand,
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
     configured_pdf_layout,
     _render_pdf_pages,
     _text_units,
-    _estimated_text_width,
     _wrap_pdf_line,
 )
 from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
@@ -591,6 +591,20 @@ def _add_artwork_cover_page(
                 x_offset=-12 if long_warm_title else 0,
             )
 
+    _add_cover_credits(builder, style=style, font_name=typography.font_name,
+        narrator_name=narrator_name, prepared_by=prepared_by)
+
+
+def _add_cover_credits(
+    builder: PDFBookBuilder,
+    *,
+    style: PDFCoverStyle,
+    font_name: str,
+    narrator_name: str,
+    prepared_by: str,
+) -> None:
+    layout = builder.layout
+    credit_y = layout.margin_bottom + 72
     builder.add_decoration(
         kind="line",
         x=layout.page_width / 2 - 35,
@@ -607,7 +621,7 @@ def _add_artwork_cover_page(
             font_size=layout.small_font_size + 1,
             line_height=layout.line_height,
             color=style.text,
-            font_name=typography.font_name,
+            font_name=font_name,
         )
     builder.add_centered_at(
         f"整理：{prepared_by or '家人'}",
@@ -615,7 +629,7 @@ def _add_artwork_cover_page(
         font_size=layout.small_font_size + 1,
         line_height=layout.line_height,
         color=style.text,
-        font_name=typography.font_name,
+        font_name=font_name,
     )
     builder.add_centered_at(
         _today_date_text()[:4],
@@ -623,7 +637,7 @@ def _add_artwork_cover_page(
         font_size=layout.small_font_size,
         line_height=layout.line_height,
         color=style.text,
-        font_name=typography.font_name,
+        font_name=font_name,
         char_spacing=1.8,
     )
 
@@ -638,26 +652,235 @@ def _add_cover_page(
     cover_style: str,
     cover_image: dict[str, Any] | None = None,
 ) -> None:
-    cover_page_index = len(builder.pages)
-    _add_preset_cover_page(builder, title=title, subtitle=subtitle,
-        narrator_name=narrator_name, prepared_by=prepared_by, cover_style=cover_style)
     if not cover_image:
+        _add_preset_cover_page(builder, title=title, subtitle=subtitle,
+            narrator_name=narrator_name, prepared_by=prepared_by, cover_style=cover_style)
         return
     path = _illustration_file_path(cover_image)
     if path is None:
         raise ValueError("封面图片已不可用，请重新上传或恢复版式封面")
-    page = builder.pages[cover_page_index]
-    page.background_image_path = path
-    page.background_image_preserve_aspect = True
-    # Keep the preset's actual typography. Small backing panels make it readable
-    # over both light and dark user photos without fading the whole photograph.
-    for command in page.commands:
-        width = _estimated_text_width(command.text, command.font_size, char_spacing=command.char_spacing)
-        page.decorations.append(PDFDecorationCommand(
-            kind="rect", x=command.x - 8, y=command.y - 5,
-            width=width + 16, height=command.font_size + 12,
-            color=page.background_color or (1, 1, 1), opacity=0.9,
-        ))
+    add_photo_cover = (
+        _add_full_bleed_photo_cover_page
+        if _str(cover_image.get("display_size")) == "cover_full_bleed"
+        else _add_framed_photo_cover_page
+    )
+    add_photo_cover(builder, photo_path=path, title=title, subtitle=subtitle,
+        narrator_name=narrator_name, prepared_by=prepared_by, cover_style=cover_style)
+
+
+@dataclass(frozen=True)
+class _CoverTitleBlock:
+    title_lines: list[str]
+    title_size: int
+    subtitle_lines: list[str]
+    subtitle_size: int
+
+    @property
+    def title_line_height(self) -> int:
+        return self.title_size + 10
+
+    @property
+    def subtitle_line_height(self) -> int:
+        return self.subtitle_size + 8
+
+    @property
+    def height(self) -> int:
+        subtitle_height = (
+            8 + len(self.subtitle_lines) * self.subtitle_line_height if self.subtitle_lines else 0
+        )
+        return len(self.title_lines) * self.title_line_height + subtitle_height
+
+
+def _cover_title_block(
+    title: str,
+    subtitle: str,
+    *,
+    text_width: float,
+    max_title_size: int,
+    max_title_height: int,
+    subtitle_size: int,
+    char_spacing: float,
+) -> _CoverTitleBlock:
+    title_size = max_title_size
+    while True:
+        title_units = max(4, int(text_width / (title_size + char_spacing)))
+        title_lines = _wrap_pdf_line(title, title_units, avoid_single_char_last_line=True)
+        if len(title_lines) * (title_size + 10) <= max_title_height or title_size <= 18:
+            break
+        title_size -= 2
+    subtitle_lines = (
+        _wrap_pdf_line(subtitle, max(8, int(text_width / (subtitle_size + 1))), avoid_single_char_last_line=True)
+        if subtitle else []
+    )
+    if len(subtitle_lines) > 2:
+        subtitle_lines = [subtitle_lines[0], subtitle_lines[1].rstrip("，。、 ")[:-1] + "…"]
+    return _CoverTitleBlock(title_lines, title_size, subtitle_lines, subtitle_size)
+
+
+def _draw_cover_title_block(
+    builder: PDFBookBuilder,
+    block: _CoverTitleBlock,
+    *,
+    top: float,
+    color: PDFColor,
+    font_name: str,
+    char_spacing: float,
+    x_offset: int = 0,
+) -> None:
+    y = int(top - block.title_size)
+    for line in block.title_lines:
+        builder.add_centered_at(
+            line, y=y, font_size=block.title_size, line_height=block.title_line_height,
+            max_units=len(line) + 1, color=color, font_name=font_name, char_spacing=char_spacing,
+            x_offset=x_offset,
+        )
+        y -= block.title_line_height
+    y = int(top - len(block.title_lines) * block.title_line_height - 8 - block.subtitle_size)
+    for line in block.subtitle_lines:
+        builder.add_centered_at(
+            line, y=y, font_size=block.subtitle_size, line_height=block.subtitle_line_height,
+            max_units=len(line) + 1, color=color, font_name=font_name, char_spacing=0.8,
+            x_offset=x_offset,
+        )
+        y -= block.subtitle_line_height
+
+
+def _photo_size(path: Path) -> tuple[int, int]:
+    with Image.open(path) as original:
+        width, height = original.size
+        orientation = original.getexif().get(0x0112)
+    return (height, width) if orientation in {5, 6, 7, 8} else (width, height)
+
+
+def _cover_typography(cover_style: str) -> tuple[str, float]:
+    typography = PDF_ARTWORK_COVER_TYPOGRAPHY.get(cover_style)
+    if typography is None:
+        return PDF_SERIF_BOLD_FONT_NAME, 1.0
+    return typography.font_name, typography.title_char_spacing
+
+
+def _add_framed_photo_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    photo_path: Path,
+    title: str,
+    subtitle: str,
+    narrator_name: str,
+    prepared_by: str,
+    cover_style: str,
+) -> None:
+    """Set the photo into the layout's own cover artwork, above the title."""
+    style = _cover_style(cover_style)
+    font_name, char_spacing = _cover_typography(cover_style)
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.cover_background_image,
+        text_color=style.text,
+    )
+    page = builder.current_page
+    assert page is not None
+    layout = builder.layout
+    kicker_y = layout.page_height - 112
+    builder.add_centered_at(
+        "家庭回忆录", y=kicker_y, font_size=layout.small_font_size + 2,
+        line_height=layout.line_height, color=style.text, font_name=font_name, char_spacing=2.1,
+    )
+    credit_y = layout.margin_bottom + 72
+    region_top = kicker_y - 16
+    region_bottom = credit_y + 54 + 16
+    mat = 7
+    gap = 22
+    available = region_top - region_bottom - gap - 2 * mat
+    # Shrink the title before the photo: the photo must stay recognisable.
+    for title_size in range(layout.title_font_size + 8, 17, -2):
+        block = _cover_title_block(
+            title, subtitle,
+            text_width=layout.page_width - 2 * 76,
+            max_title_size=title_size,
+            max_title_height=3 * (title_size + 10),
+            subtitle_size=layout.font_size - 1,
+            char_spacing=char_spacing,
+        )
+        if available - block.height >= 125:
+            break
+    photo_width, photo_height = _photo_size(photo_path)
+    max_box_height = min(230, available - block.height)
+    max_box_width = layout.page_width - 2 * 64
+    scale = min(max_box_width / photo_width, max_box_height / photo_height)
+    box_width, box_height = photo_width * scale, photo_height * scale
+    group_height = box_height + 2 * mat + gap + block.height
+    group_top = region_top - max(0, (region_top - region_bottom - group_height) / 2)
+    box_x = (layout.page_width - box_width) / 2
+    box_y = group_top - mat - box_height
+    builder.add_decoration(
+        kind="rect", x=box_x - mat, y=box_y - mat, width=box_width + 2 * mat,
+        height=box_height + 2 * mat, color=(0.99, 0.98, 0.95),
+        stroke_color=style.line, line_width=0.6,
+    )
+    page.images.append(PDFImageCommand(path=photo_path, x=box_x, y=box_y, width=box_width, height=box_height))
+    _draw_cover_title_block(
+        builder, block, top=box_y - mat - gap, color=style.text,
+        font_name=font_name, char_spacing=char_spacing,
+        # Keep text clear of the osmanthus artwork on the right edge.
+        x_offset=-14 if cover_style == "warm_journal" else 0,
+    )
+    _add_cover_credits(builder, style=style, font_name=font_name,
+        narrator_name=narrator_name, prepared_by=prepared_by)
+
+
+PDF_PHOTO_COVER_TEXT: PDFColor = (0.99, 0.97, 0.93)
+
+
+def _add_full_bleed_photo_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    photo_path: Path,
+    title: str,
+    subtitle: str,
+    narrator_name: str,
+    prepared_by: str,
+    cover_style: str,
+) -> None:
+    """Fill the front cover with the photo and keep all text on a dark lower band."""
+    font_name, char_spacing = _cover_typography(cover_style)
+    builder.new_page(show_header=False, show_footer=False, background_image_path=photo_path)
+    page = builder.current_page
+    assert page is not None
+    page.background_image_crop_to_fill = True
+    layout = builder.layout
+    block = _cover_title_block(
+        title, subtitle,
+        text_width=layout.page_width - 2 * 56,
+        max_title_size=layout.title_font_size + 10,
+        max_title_height=130,
+        subtitle_size=layout.font_size,
+        char_spacing=char_spacing,
+    )
+    credit_size = layout.small_font_size + 1
+    credit_parts = [part for part in (f"口述：{narrator_name}" if narrator_name else "", f"整理：{prepared_by or '家人'}") if part]
+    one_line = "　".join(credit_parts)
+    fits_one_line = _text_units(one_line) * credit_size <= layout.page_width - 2 * 48
+    credit_lines = [one_line] if fits_one_line else credit_parts
+    footer_y = layout.margin_bottom - 18
+    credits_y = footer_y + 26 + (len(credit_lines) - 1) * (credit_size + 8)
+    block_top = credits_y + layout.small_font_size + 30 + block.height
+    page.background_image_bottom_shade = min(0.72, (block_top + 90) / layout.page_height)
+    _draw_cover_title_block(
+        builder, block, top=block_top, color=PDF_PHOTO_COVER_TEXT,
+        font_name=font_name, char_spacing=char_spacing,
+    )
+    for index, line in enumerate(credit_lines):
+        builder.add_centered_at(
+            line, y=credits_y - index * (credit_size + 8), font_size=credit_size,
+            line_height=credit_size + 8, max_units=int(_text_units(line)) + 1,
+            color=PDF_PHOTO_COVER_TEXT, font_name=font_name,
+        )
+    builder.add_centered_at(
+        f"家庭回忆录 · {_today_date_text()[:4]}", y=footer_y, font_size=layout.small_font_size,
+        line_height=layout.line_height, color=PDF_PHOTO_COVER_TEXT, font_name=font_name, char_spacing=1.2,
+    )
 
 
 def _add_preset_cover_page(

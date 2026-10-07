@@ -159,6 +159,13 @@ declare namespace WechatMiniprogram {
     fail?(result: GeneralCallbackResult): void;
   }
 
+  interface CropImageOption {
+    src: string;
+    cropScale: "16:9" | "9:16" | "4:3" | "3:4" | "5:4" | "4:5" | "1:1";
+    success?(result: GeneralCallbackResult & { tempFilePath: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+  }
+
   interface ChooseMediaFile {
     tempFilePath: string;
     size: number;
@@ -503,6 +510,7 @@ declare namespace WechatMiniprogram {
     chooseImage(option: ChooseImageOption): void;
     chooseMedia?(option: ChooseMediaOption): void;
     editImage?(option: EditImageOption): void;
+    cropImage?(option: CropImageOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;

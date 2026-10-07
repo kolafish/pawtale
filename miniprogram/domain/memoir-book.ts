@@ -81,11 +81,21 @@ export interface MemoirImageAssetUpdateRequest {
   alt_text?: string | null;
 }
 
+export type MemoirImageDisplaySize = "full_width" | "half_width" | "inline";
+// How an uploaded cover photo sits on the front cover.
+export type MemoirCoverImageLayout = "cover_frame" | "cover_full_bleed";
+
 export interface MemoirBookImagePlacementCreateRequest {
   placement_type?: MemoirBookImagePlacementType;
   chapter_id?: string | null;
   caption_override?: string | null;
-  display_size?: "full_width" | "half_width" | "inline";
+  display_size?: MemoirImageDisplaySize | MemoirCoverImageLayout;
+}
+
+export interface MemoirBookImagePlacementUpdateRequest {
+  caption_override?: string | null;
+  display_size?: MemoirImageDisplaySize | MemoirCoverImageLayout;
+  enabled?: boolean;
 }
 
 export interface MemoirBookChapterSourceRef {

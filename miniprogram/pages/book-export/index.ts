@@ -1,6 +1,7 @@
 import type {
   MemoirBookCustomLayout,
   MemoirBookCoverStyle,
+  MemoirCoverImageLayout,
   MemoirBookManuscriptTemplate,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
@@ -28,6 +29,7 @@ import {
   uploadMemoirImageAsset,
   createMemoirBookImagePlacement,
   deleteMemoirBookImagePlacement,
+  updateMemoirBookImagePlacement,
   listMemoirImageAssets,
   downloadMemoirImageAssetFile,
   suggestMemoirBookOutputTitles,
@@ -63,7 +65,7 @@ import {
   isBookLevelEditorialCopyTarget,
   latestBookTitle,
 } from "../book/book-design-model";
-import { chooseImageFile, editImageFile } from "../../services/authenticated-media";
+import { chooseImageFile, cropImageFile, editImageFile } from "../../services/authenticated-media";
 import { PollingTimer } from "../../services/polling-timer";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 
@@ -213,6 +215,14 @@ const CUSTOM_PAGE_MARGIN_OPTIONS: { value: MemoirBookCustomLayout["page_margin"]
   { value: "standard", label: "标准" },
   { value: "wide", label: "宽" },
 ];
+const COVER_IMAGE_LAYOUT_OPTIONS: { value: MemoirCoverImageLayout; label: string; description: string }[] = [
+  { value: "cover_frame", label: "放进相框", description: "保留版式底纹，照片完整不裁切" },
+  { value: "cover_full_bleed", label: "铺满封面", description: "适合竖版照片，文字在下方" },
+];
+const COVER_IMAGE_LAYOUTS = COVER_IMAGE_LAYOUT_OPTIONS.map((option) => option.value);
+// Full-bleed photos fill the A5 cover, so they are framed close to its ratio.
+const FULL_BLEED_COVER_CROP_SCALE = "3:4";
+
 const DEFAULT_CUSTOM_LAYOUT: MemoirBookCustomLayout = {
   font_family: "auto",
   font_scale: "standard",
@@ -278,6 +288,8 @@ type BookExportData = BookOutputData & {
   bookLayoutFontFamilyIndex: number;
   bookUploadedCoverAssetId: string;
   bookUploadedCoverPath: string;
+  bookCoverImageLayout: MemoirCoverImageLayout;
+  bookCoverImageLayoutOptions: typeof COVER_IMAGE_LAYOUT_OPTIONS;
   bookLayoutFontScaleOptions: typeof CUSTOM_FONT_SCALE_OPTIONS;
   bookLayoutLineSpacingOptions: typeof CUSTOM_LINE_SPACING_OPTIONS;
   bookLayoutPageMarginOptions: typeof CUSTOM_PAGE_MARGIN_OPTIONS;
@@ -361,6 +373,8 @@ definePage<BookExportData>()({
     bookLayoutFontFamilyIndex: 0,
     bookUploadedCoverAssetId: "",
     bookUploadedCoverPath: "",
+    bookCoverImageLayout: "cover_frame",
+    bookCoverImageLayoutOptions: COVER_IMAGE_LAYOUT_OPTIONS,
     bookLayoutFontScaleOptions: CUSTOM_FONT_SCALE_OPTIONS,
     bookLayoutLineSpacingOptions: CUSTOM_LINE_SPACING_OPTIONS,
     bookLayoutPageMarginOptions: CUSTOM_PAGE_MARGIN_OPTIONS,
@@ -1060,9 +1074,14 @@ definePage<BookExportData>()({
   },
 
   applyUploadedCoverPreview(version: MemoirBookOutputVersion | null) {
-    const assetId = version?.manuscript?.render_settings.cover_image?.image_asset_id || "";
+    const coverImage = version?.manuscript?.render_settings.cover_image;
+    const assetId = coverImage?.image_asset_id || "";
     const path = assetId === this.data.bookUploadedCoverAssetId ? this.data.bookUploadedCoverPath : "";
-    this.setData({ bookUploadedCoverAssetId: assetId, bookUploadedCoverPath: path });
+    this.setData({
+      bookUploadedCoverAssetId: assetId,
+      bookUploadedCoverPath: path,
+      bookCoverImageLayout: coverImage?.display_size === "cover_full_bleed" ? "cover_full_bleed" : "cover_frame",
+    });
     if (assetId && !path) void this.loadUploadedCoverPreview();
   },
 
@@ -1081,38 +1100,38 @@ definePage<BookExportData>()({
   },
 
   async changeBookCoverImage(event: DatasetEvent) {
-    if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget
-      || this.data.bookTitleSaving || this.data.bookViewingHistoricalVersion || !this.data.bookManuscriptAvailable) return;
+    if (!this.coverChangeAllowed()) return;
     const action = datasetString(event, "action");
     const restoring = action === "restore";
     const editing = action === "edit";
     if ((restoring || editing) && !this.data.bookUploadedCoverAssetId) return;
+    const layout = this.data.bookCoverImageLayout;
     this.setData({ bookLayoutBusyTarget: "save:cover", bookLayoutFeedbackTarget: "cover", bookLayoutFeedbackText: "", bookLayoutFeedbackError: false });
     try {
       let filePath: string | null = null;
       if (editing) {
-        this.setData({ bookLayoutFeedbackText: "正在打开照片编辑…" });
+        this.setData({ bookLayoutFeedbackText: "正在打开照片…" });
         const source = await downloadMemoirImageAssetFile(this.data.projectId, this.data.bookUploadedCoverAssetId, false);
-        filePath = await editImageFile(source);
+        filePath = layout === "cover_full_bleed"
+          ? await cropImageFile(source, FULL_BLEED_COVER_CROP_SCALE)
+          : await editImageFile(source);
+        this.setData({ bookLayoutFeedbackText: "" });
       } else if (!restoring) {
-        filePath = await chooseImageFile();
-        if (filePath && typeof wx.editImage === "function") {
-          filePath = await editImageFile(filePath);
-        }
+        const chosen = await chooseImageFile();
+        // Cancelling the crop page keeps the chosen photo instead of dropping it.
+        filePath = chosen && layout === "cover_full_bleed"
+          ? (await cropImageFile(chosen, FULL_BLEED_COVER_CROP_SCALE)) || chosen
+          : chosen;
       }
       if (!restoring && !filePath) return;
       if (!(await this.ensureBookDesignSavedForEditorialCopy())) throw new Error(this.data.error || "请先保存书的信息");
       this.setData({ bookLayoutFeedbackText: restoring ? "正在恢复版式封面…" : "正在上传封面…" });
       if (restoring) {
-        const assets = await listMemoirImageAssets(this.data.projectId);
-        const asset = assets.items.find((item) => item.id === this.data.bookUploadedCoverAssetId);
-        if (!asset) throw new Error("封面图片信息已变化，请重新打开页面后再试");
-        for (const placement of asset.placements.filter((item) => item.enabled && item.placement_type === "cover")) {
-          await deleteMemoirBookImagePlacement(this.data.projectId, asset.id, placement.id);
-        }
+        const { asset, placement } = await this.currentCoverPlacement();
+        await deleteMemoirBookImagePlacement(this.data.projectId, asset.id, placement.id);
       } else {
         const asset = await uploadMemoirImageAsset(this.data.projectId, filePath!);
-        await createMemoirBookImagePlacement(this.data.projectId, asset.id, { placement_type: "cover" });
+        await createMemoirBookImagePlacement(this.data.projectId, asset.id, { placement_type: "cover", display_size: layout });
       }
       const output = await getMemoirBookOutput(this.data.projectId);
       this.applyBookExportData(this.bookPlan, output, true);
@@ -1122,6 +1141,36 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) return;
       this.setData({ bookLayoutFeedbackText: error instanceof Error ? error.message : "保存封面失败", bookLayoutFeedbackError: true });
     } finally { this.setData({ bookLayoutBusyTarget: "" }); }
+  },
+
+  async changeBookCoverImageLayout(event: DatasetEvent) {
+    const layout = datasetChoice(event, "layout", COVER_IMAGE_LAYOUTS, "cover_frame");
+    if (!this.coverChangeAllowed() || !this.data.bookUploadedCoverAssetId || layout === this.data.bookCoverImageLayout) return;
+    this.setData({ bookLayoutBusyTarget: "save:cover", bookLayoutFeedbackTarget: "cover", bookLayoutFeedbackText: "", bookLayoutFeedbackError: false });
+    try {
+      if (!(await this.ensureBookDesignSavedForEditorialCopy())) throw new Error(this.data.error || "请先保存书的信息");
+      const { asset, placement } = await this.currentCoverPlacement();
+      await updateMemoirBookImagePlacement(this.data.projectId, asset.id, placement.id, { display_size: layout });
+      const output = await getMemoirBookOutput(this.data.projectId);
+      this.applyBookExportData(this.bookPlan, output, true);
+      this.setData({ bookLayoutFeedbackText: layout === "cover_full_bleed" ? "已改为照片铺满封面，可点调整取景" : "已改为照片放进相框" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) return;
+      this.setData({ bookLayoutFeedbackText: error instanceof Error ? error.message : "保存封面失败", bookLayoutFeedbackError: true });
+    } finally { this.setData({ bookLayoutBusyTarget: "" }); }
+  },
+
+  coverChangeAllowed(): boolean {
+    return Boolean(this.data.projectId) && !this.data.bookLayoutBusyTarget && !this.data.bookExportBusyTarget
+      && !this.data.bookTitleSaving && !this.data.bookViewingHistoricalVersion && this.data.bookManuscriptAvailable;
+  },
+
+  async currentCoverPlacement() {
+    const assets = await listMemoirImageAssets(this.data.projectId);
+    const asset = assets.items.find((item) => item.id === this.data.bookUploadedCoverAssetId);
+    const placement = asset?.placements.find((item) => item.enabled && item.placement_type === "cover");
+    if (!asset || !placement) throw new Error("封面图片信息已变化，请重新打开页面后再试");
+    return { asset, placement };
   },
 
   openBookReader() {
