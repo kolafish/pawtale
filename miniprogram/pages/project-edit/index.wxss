@@ -22,7 +22,12 @@
 }
 
 .field-label {
+  display: block;
   margin-bottom: 14rpx;
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-list-title);
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .field-hint {
@@ -35,7 +40,7 @@
 }
 
 .text-input {
-  font-size: 30rpx;
+  font-size: var(--ui-font-action);
 }
 
 .segmented {
@@ -151,3 +156,6 @@
 .primary-button[disabled] {
   opacity: 0.66;
 }
+
+.large-text .field-label { font-size: var(--ui-font-large-list-title); }
+.large-text .field-hint { font-size: var(--ui-font-large-body); }

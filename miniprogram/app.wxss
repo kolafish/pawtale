@@ -33,17 +33,17 @@ page {
   --ui-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --ui-font-editorial: "Songti SC", STSong, "Noto Serif CJK SC", serif;
   /* Shared reading scale. Keep page display titles and decorative cover lettering local. */
-  --ui-font-caption: 26rpx;
-  --ui-font-meta: 28rpx;
-  --ui-font-body: 29rpx;
-  --ui-font-action: 30rpx;
-  --ui-font-list-title: 31rpx;
-  --ui-font-section-title: 35rpx;
-  --ui-font-page-title: 42rpx;
-  --ui-font-large-caption: 30rpx;
-  --ui-font-large-meta: 32rpx;
-  --ui-font-large-body: 34rpx;
-  --ui-font-large-list-title: 36rpx;
+  --ui-font-caption: 29rpx;
+  --ui-font-meta: 30rpx;
+  --ui-font-body: 32rpx;
+  --ui-font-action: 33rpx;
+  --ui-font-list-title: 34rpx;
+  --ui-font-section-title: 37rpx;
+  --ui-font-page-title: 44rpx;
+  --ui-font-large-caption: 32rpx;
+  --ui-font-large-meta: 34rpx;
+  --ui-font-large-body: 36rpx;
+  --ui-font-large-list-title: 38rpx;
   --ui-line-meta: 1.45;
   --ui-line-body: 1.5;
   --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, 0.94) 28rpx, #f5f1ea 64rpx);
@@ -162,7 +162,7 @@ button::after {
   border-radius: var(--ui-radius-inner);
   background: var(--ui-danger-surface);
   color: var(--ui-danger-text);
-  font-size: 28rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.45;
   word-break: break-word;
 }

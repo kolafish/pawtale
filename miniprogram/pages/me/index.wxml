@@ -164,6 +164,9 @@
         <text class="action-meta">{{creditError}}</text>
         <button class="credit-retry-button support-action ui-pressable" bindtap="loadAICreditSummary">重新加载</button>
       </view>
+      <view wx:else class="credit-card ui-card ui-card-borderless">
+        <text class="action-meta">{{creditLoading ? "正在读取额度…" : "暂无额度信息"}}</text>
+      </view>
     </view>
 
     <view class="section">

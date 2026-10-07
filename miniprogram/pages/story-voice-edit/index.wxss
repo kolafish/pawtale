@@ -31,9 +31,9 @@
 .edit-apply {
   margin-top: 20rpx;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-soft);
-  color: var(--ui-accent-strong);
-  box-shadow: inset 5rpx 0 var(--ui-accent), var(--ui-control-shadow);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.18);
   font-size: var(--ui-font-action);
   font-weight: 700;
   font-variant-numeric: tabular-nums;

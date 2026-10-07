@@ -263,6 +263,7 @@
 }
 
 .action-button {
+  width: auto;
   min-width: 150rpx;
   min-height: 44px;
   margin: 0;

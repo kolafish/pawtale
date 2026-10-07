@@ -818,7 +818,7 @@
 }
 .chapter-directory-notice, .chapter-directory-error {
   margin-top: 10rpx;
-  color: var(--ui-warning-text);
+  color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
   line-height: 1.5;
   overflow-wrap: anywhere;

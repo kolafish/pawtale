@@ -28,7 +28,10 @@
 
 .ghost-button,
 .primary-button {
+  width: 100%;
   height: 92rpx;
+  padding: 0;
+  white-space: nowrap;
   border-radius: var(--ui-radius-control);
   font-size: 30rpx;
   font-weight: 700;

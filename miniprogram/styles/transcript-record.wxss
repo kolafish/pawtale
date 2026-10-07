@@ -191,6 +191,7 @@
 }
 
 .text-action-button {
+  width: auto;
   min-width: 88rpx;
   padding: 0 18rpx;
   border-radius: 999rpx;
