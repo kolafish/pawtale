@@ -28,6 +28,16 @@ PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 按已核实的用户 ID 显式设置。升级前若曾依赖邮箱名单，需先核实并设置已有管理员
 的持久化角色，不能把新注册的同名邮箱自动作为管理员。
 
+## GitHub 用户授权
+
+GitHub 用户授权迁移后，已有安装和备份配置保留，但必须重新连接 GitHub 才能继续同步。
+配置 `GITHUB_APP_SLUG`、`GITHUB_APP_CLIENT_ID`、`GITHUB_APP_CLIENT_SECRET` 和
+`GITHUB_APP_CALLBACK_URL`；将 GitHub App 的 Callback URL 与 Setup URL 都设为该回调地址
+（生产环境为 `https://pawtale-api.spaceflows.cn/api/github/setup`）。安装完成后会进入用户
+OAuth 授权，服务器通过用户令牌检查安装和仓库访问权限，提交也使用同一权限范围的令牌。
+Client Secret 与访问/刷新令牌均不可进入前端；数据库令牌使用 `APP_SECRET_KEY` 派生密钥加密，
+轮换该密钥后用户需重新连接。用户令牌过期时使用刷新令牌更新，撤销或刷新过期时明确提示重新授权。
+
 ## 数据库迁移
 
 Alembic 必须连接独立的开发数据库，不能使用生产数据库生成 migration 或执行测试。

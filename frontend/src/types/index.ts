@@ -295,6 +295,7 @@ export interface ProjectGitSyncConfig {
 }
 
 export interface GitSyncStatus {
+  authorization_error?: string | null;
   configured: boolean;
   install_url?: string | null;
   installations: GitSyncInstallation[];
