@@ -53,6 +53,7 @@ class ShareVideoScenePlanMetadata(_ShareVideoMetadataModel):
     model: str = ""
     strategy: str = ""
     plan_hash: str = ""
+    visual_context: str = ""
     scenes: list[ShareVideoPlannedSceneMetadata] = Field(default_factory=list)
 
 

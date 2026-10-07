@@ -52,7 +52,7 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 logger = logging.getLogger(__name__)
 
-MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v3"
+MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v4"
 MATERIAL_IMAGE_CONTENT_MAX_CHARS = 500
 MATERIAL_IMAGE_DIR = Path("memoir") / "material-images"
 
@@ -91,7 +91,7 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
 - 不制作多格漫画、时间轴或蒙太奇。
 
 生成边界：
-- 这是基于记忆的意象创作，不冒充真实历史照片；人物避免清晰正脸特写和可识别肖像。
+- 这是基于记忆的意象创作，不冒充真实历史照片。
 - 不要添加口述中没有依据的重大人物、事件或时代符号。
 - 不要出现任何文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和、夸张电影光效和泛泛的 AI 插画感。""".strip()

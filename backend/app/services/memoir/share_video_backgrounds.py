@@ -20,7 +20,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v4"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v5"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -69,7 +69,7 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
 _VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
-
+{story_context}
 画面内容：
 - 从原文中选择一个具体、可见的回忆瞬间，不把不同时间或地点的事件拼贴在一起。
 - 优先呈现原文明确提到的时间、地点、人物关系、动作和关键物件，让这些细节成为画面主体；不要用泛泛的漂亮风景代替讲述的场景。
@@ -87,8 +87,18 @@ _VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16
 生成边界：
 - 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。
 - 不出现文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
-- 人物避免清晰正脸特写和可识别肖像。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和和夸张电影光效。"""
+
+_VIDEO_BACKGROUND_STORY_CONTEXT = """
+这张画面是同一段视频里的其中一张，上面只是其中一部分。整段口述如下，用来理解“我”“他”等称呼指的是谁、事情发生在哪里和什么年代；画面只表现上面那部分内容：
+
+{story_text}
+{visual_context}"""
+
+_VIDEO_BACKGROUND_VISUAL_CONTEXT = """
+各画面共用的人物和场景设定，人物的年龄、外貌、穿着和环境要与同一视频的其他画面保持一致：
+{visual_context}
+"""
 
 _SELECTABLE_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
     ShareVideoBackgroundStyle(
@@ -160,7 +170,7 @@ _BACKGROUND_MODES: tuple[dict[str, str], ...] = (
     {
         "value": DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
         "label": "自动",
-        "description": "20 秒以上自动使用智能多图，短片段使用单张背景",
+        "description": "根据内容里场景的变化决定用几张图",
     },
     {
         "value": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
@@ -222,11 +232,29 @@ def _prompt_content(text: str) -> str:
     return "".join(characters[:SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS]).rstrip() + "..."
 
 
-def build_share_video_background_prompt(selected_text: str, style_id: str | None) -> ShareVideoBackgroundPrompt:
+def _story_context(story_text: str, visual_context: str) -> str:
+    story = re.sub(r"\s+", " ", (story_text or "").strip())
+    if not story:
+        return ""
+    visual = re.sub(r"\s+", " ", (visual_context or "").strip())
+    return _VIDEO_BACKGROUND_STORY_CONTEXT.format(
+        story_text=_prompt_content(story),
+        visual_context=_VIDEO_BACKGROUND_VISUAL_CONTEXT.format(visual_context=visual) if visual else "",
+    )
+
+
+def build_share_video_background_prompt(
+    selected_text: str,
+    style_id: str | None,
+    *,
+    story_text: str = "",
+    visual_context: str = "",
+) -> ShareVideoBackgroundPrompt:
     style = share_video_background_style(style_id)
     content = _prompt_content(selected_text)
     prompt = _VIDEO_BACKGROUND_PROMPT.format(
         content=content,
+        story_context=_story_context(story_text, visual_context),
         drawing_instruction=style.drawing_instruction,
     ).strip()
     prompt_hash = hashlib.sha256(
@@ -368,6 +396,8 @@ async def get_or_generate_share_video_background(
     selected_text: str,
     style_id: str | None,
     *,
+    story_text: str = "",
+    visual_context: str = "",
     usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
@@ -377,7 +407,12 @@ async def get_or_generate_share_video_background(
     if not settings.volc_ark_api_key.strip():
         return None
 
-    prompt = build_share_video_background_prompt(selected_text, normalized_style)
+    prompt = build_share_video_background_prompt(
+        selected_text,
+        normalized_style,
+        story_text=story_text,
+        visual_context=visual_context,
+    )
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()
     storage_path = _background_storage_path(prompt.style.value, model, prompt.prompt_hash, extension)

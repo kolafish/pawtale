@@ -730,7 +730,7 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v4"
+    assert prompt.template_version == "memoir-share-video-background-v5"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
@@ -765,6 +765,26 @@ def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation()
     assert len(metadata["scenes"]) == 3
     assert metadata["scenes"][0]["sentence_ids"] == [0]
     assert metadata["scenes"][0]["evidence_quote"]
+
+
+def test_share_video_scene_count_follows_content_not_duration_buckets():
+    assert share_video_scene_planner._scene_count_range(60_000, 1, None) == (1, 1)
+    assert share_video_scene_planner._scene_count_range(60_000, 20, None) == (1, 5)
+    assert share_video_scene_planner._scene_count_range(14_000, 20, None) == (1, 2)
+
+
+def test_share_video_scene_background_prompt_carries_story_context():
+    prompt = share_video_backgrounds.build_share_video_background_prompt(
+        "他把围巾围在我脖子上。",
+        "watercolor",
+        story_text="那年冬天父亲送我去县城读书。他把围巾围在我脖子上。",
+        visual_context="父亲四十来岁，穿旧棉袄",
+    ).prompt
+    single = share_video_backgrounds.build_share_video_background_prompt("他把围巾围在我脖子上。", "watercolor").prompt
+
+    assert "那年冬天父亲送我去县城读书。" in prompt
+    assert "父亲四十来岁，穿旧棉袄" in prompt
+    assert "整段口述" not in single
 
 
 def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
@@ -1758,6 +1778,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
             model="fake-scene-planner",
             strategy="llm",
             plan_hash="plan-hash",
+            visual_context="父亲四十来岁，老县城",
             scenes=[
                 share_video_scene_planner.ShareVideoScene(
                     index=0,
@@ -1790,8 +1811,11 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_dir = tmp_path / "backgrounds"
     image_dir.mkdir()
 
-    async def fake_background(selected_text, style_id, *, usage_context=None):
+    image_contexts: list[tuple[str, str]] = []
+
+    async def fake_background(selected_text, style_id, *, story_text="", visual_context="", usage_context=None):
         image_calls.append((selected_text, style_id))
+        image_contexts.append((story_text, visual_context))
         image_path = image_dir / f"scene-{len(image_calls)}.png"
         image_path.write_bytes(b"fake image")
         return share_video_backgrounds.ShareVideoBackgroundAsset(
@@ -1858,6 +1882,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         "后来去县城读书。",
         "再后来大家各自成家。",
     ]
+    assert image_contexts == [(text, "父亲四十来岁，老县城")] * 3
     assert len(render_requests) == 1
     render_request = render_requests[0]
     assert render_request.background_image_path is None
