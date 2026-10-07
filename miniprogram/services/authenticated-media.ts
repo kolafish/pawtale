@@ -153,11 +153,6 @@ export async function downloadAuthenticatedFile(
   return downloadFile(url, options);
 }
 
-// For links anyone may open, such as a forwarded share video; no login is attempted.
-export function downloadPublicFile(url: string, options: AuthenticatedDownloadOptions): Promise<string> {
-  return downloadFile(url, options);
-}
-
 function downloadFile(url: string, options: AuthenticatedDownloadOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     wx.downloadFile({

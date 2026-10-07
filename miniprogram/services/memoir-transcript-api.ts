@@ -25,7 +25,6 @@ import {
 } from "./memoir-api-client";
 import {
   downloadAuthenticatedFile,
-  downloadPublicFile,
   uploadAuthenticatedFile,
 } from "./authenticated-media";
 import {
@@ -299,14 +298,6 @@ export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> 
   return request<MemoirSharedVideo>("/api/mobile/memoir/share-video/shares/read", {
     method: "POST",
     data: { code },
-  });
-}
-
-// The backend serves whole files, so the clip plays from a local copy like the owner's preview.
-export function downloadMemoirSharedVideo(video: MemoirSharedVideo): Promise<string> {
-  return downloadPublicFile(memoirShareVideoDownloadUrl(video.video_url), {
-    failureMessage: "视频下载失败",
-    domainLabel: "视频下载",
   });
 }
 

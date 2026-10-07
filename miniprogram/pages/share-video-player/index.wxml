@@ -17,6 +17,7 @@
       src="{{videoUrl}}"
       poster="{{posterUrl}}"
       bindloadedmetadata="markVideoShape"
+      binderror="markVideoError"
       controls
       autoplay
       show-center-play-btn
