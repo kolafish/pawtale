@@ -188,6 +188,7 @@ export interface MemoirShareVideoCandidate {
   duration_ms: number | null;
   status: "ready" | "accepted" | "dismissed" | "stale" | "none";
   reason: string;
+  hook_text: string;
   video_job_id: string | null;
   created_at: string;
   updated_at: string;
@@ -255,6 +256,7 @@ export interface MemoirShareVideoListItem {
   video_style: MemoirShareVideoStyle;
   created_at: string;
   completed_at: string | null;
+  share_code: string;
 }
 
 export interface MemoirShareVideoListResponse {

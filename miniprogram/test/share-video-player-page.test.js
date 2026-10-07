@@ -7,7 +7,6 @@ const { loadPageModule, mockMemoirApiModules, pageContext } = require("./page-ha
 function loadPlayer(readMemoirSharedVideo) {
   mockMemoirApiModules({
     readMemoirSharedVideo,
-    downloadMemoirSharedVideo: async (video) => `wxfile://tmp${video.video_url}`,
     memoirShareVideoDownloadUrl: (url) => `https://api.example.com${url}`,
   });
   return loadPageModule("../pages/share-video-player/index.ts");
@@ -37,7 +36,7 @@ test("a scanned mini program code opens the clip and forwards the same card", as
     await page.onLoad.call(context, { scene: "0123456789abcdef0123" });
 
     assert.deepEqual(codes, ["0123456789abcdef0123"]);
-    assert.equal(context.data.videoUrl, "wxfile://tmp/api/mobile/memoir/share-video/shares/abc/video");
+    assert.equal(context.data.videoUrl, "https://api.example.com/api/mobile/memoir/share-video/shares/abc/video");
     assert.equal(context.data.error, "");
     assert.deepEqual(page.onShareAppMessage.call(context), {
       title: "外婆家的冬天",

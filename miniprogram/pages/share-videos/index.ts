@@ -3,8 +3,12 @@ import { MEMOIR_SHARE_VIDEO_STYLES, normalizeMemoirShareVideoStyle } from "../..
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { getMemoirIdentity } from "../../services/auth";
 import { definePage, pageRuntime } from "../../services/page-definition";
-import { getMemoirShareVideoJob, listMemoirShareVideos } from "../../services/memoir-transcript-api";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import {
+  getMemoirShareVideoJob,
+  listMemoirShareVideos,
+  memoirSharedVideoUrl,
+} from "../../services/memoir-transcript-api";
+import { isAuthError, navigateToLogin, navigateToVideoClipPicker } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -23,6 +27,7 @@ interface ShareVideoItemView extends MemoirShareVideoListItem {
   styleLabel: string;
   durationText: string;
   completedAtText: string;
+  thumbnailUrl: string;
 }
 
 interface ShareVideoTaskView extends ShareVideoItemView {
@@ -52,12 +57,13 @@ function toViewItem(item: MemoirShareVideoListItem): ShareVideoItemView {
     )!.label,
     durationText: formatTranscriptDurationSeconds(item.duration_ms / 1000),
     completedAtText: formatBeijingDateTimeShort(item.completed_at || item.created_at),
+    thumbnailUrl: item.share_code ? memoirSharedVideoUrl(item.share_code, "thumbnail") : "",
   };
 }
 
 function toTaskView(job: MemoirShareVideoJob): ShareVideoTaskView {
   return {
-    ...toViewItem({ ...job, completed_at: job.completed_at || null }),
+    ...toViewItem({ ...job, completed_at: job.completed_at || null, share_code: "" }),
     status: job.status,
     statusText: shareVideoJobStatusText(job),
   };
@@ -172,7 +178,11 @@ definePage<ShareVideosData>()({
         .filter((job) => job.status === "succeeded" && !this.data.items.some((item) => item.id === job.id))
         .sort((left, right) => Date.parse(right.completed_at || right.created_at) - Date.parse(left.completed_at || left.created_at)
           || right.id.localeCompare(left.id))
-        .map((job) => toViewItem({ ...job, completed_at: job.completed_at || null }));
+        .map((job) => toViewItem({
+          ...job,
+          completed_at: job.completed_at || null,
+          share_code: job.output?.share_code || "",
+        }));
       const total = completed.length
         ? (await listMemoirShareVideos(this.data.projectId, { limit: 1, offset: 0 })).total
         : this.data.total;
@@ -217,6 +227,10 @@ definePage<ShareVideosData>()({
     wx.navigateTo({
       url: pageUrl("/pages/transcript-media/index", { id: utteranceId, jobId: id }),
     });
+  },
+
+  pickClip() {
+    navigateToVideoClipPicker();
   },
 
   openLogin() {

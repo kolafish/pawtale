@@ -54,8 +54,9 @@ import {
   navigateToMe,
   navigateToTranscripts,
   navigateToLogin,
+  navigateToVideoClipPicker,
 } from "../../services/navigation";
-import { pageUrl } from "../../services/page-input";
+import { datasetString, pageUrl, type PageDatasetEvent } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -551,16 +552,19 @@ definePage<HomeData>()({
     }
   },
 
-  openShareCandidateEditor() {
+  // The primary action starts the video with default settings; "调整" opens the same page to edit first.
+  openShareCandidateEditor(event?: PageDatasetEvent<{ create?: string }>) {
     const candidate = this.data.shareCandidate;
     if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
       || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    const create = event ? datasetString(event, "create") === "1" : false;
     this.setData({ shareCandidateError: "" });
     wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
       id: candidate.utterance_id,
       candidateId: candidate.id,
+      ...(create ? { create: "1" } : {}),
     }) });
-    trackAuditAction("home.share_video_candidate_edit", {}, {
+    trackAuditAction(create ? "home.share_video_candidate_create" : "home.share_video_candidate_edit", {}, {
       projectId: this.data.projectId, voiceSessionId: candidate.voice_session_id,
     });
   },
@@ -579,6 +583,11 @@ definePage<HomeData>()({
         void this.dismissShareCandidate();
       }
     } });
+  },
+
+  pickShareVideoClip() {
+    if (!this.data.projectId || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    navigateToVideoClipPicker();
   },
 
   openShareVideoLibrary() {

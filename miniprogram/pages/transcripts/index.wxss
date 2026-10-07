@@ -439,3 +439,11 @@
   min-height: 96rpx;
   font-size: var(--ui-font-large-body);
 }
+
+.pick-video-hint {
+  display: block;
+  margin-bottom: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-body);
+  line-height: 1.6;
+}

@@ -203,6 +203,7 @@ function sampleShareVideoJob(overrides = {}) {
       mime_type: "video/mp4",
       size_bytes: 65536,
       download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+      share_code: "0123456789abcdef0123",
     },
     error_message: "",
     created_at: "2026-07-01T08:00:00.000Z",
@@ -249,6 +250,7 @@ function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
       "downloadMemoirShareVideoCustomBackgroundPreview",
     ),
     downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
+    memoirSharedVideoUrl: (code, variant = "video") => `https://api.example.com/shares/${code}/${variant}`,
     getMemoirMaterialImageGenerationJob: unmockedAsync("getMemoirMaterialImageGenerationJob"),
     getMemoirShareVideoJob: unmockedAsync("getMemoirShareVideoJob"),
     getMemoirTranscriptShareVideoContext: unmockedAsync("getMemoirTranscriptShareVideoContext"),
@@ -1092,10 +1094,11 @@ test("transcript media page creates share video from selected corrected segments
   await context.shareVideoController.refresh("job-1");
 
   assert.deepEqual(pollCalls, ["job-1"]);
-  assert.deepEqual(downloads, ["job-1"]);
+  // The finished clip streams; it is downloaded only when sent as a file.
+  assert.deepEqual(downloads, []);
   assert.equal(context.data.shareVideoJob.status, "succeeded");
   assert.equal(context.data.shareVideoStatusText, "视频已生成，可以预览");
-  assert.equal(context.data.shareVideoPreviewPath, "/tmp/share-video.mp4");
+  assert.equal(context.data.shareVideoStreamUrl, "https://api.example.com/shares/0123456789abcdef0123/video");
 
   const shareCalls = [];
   global.wx = {
@@ -1334,8 +1337,8 @@ test("transcript media page reopens a completed video and loads creation tools o
 
   assert.equal(context.data.viewMode, "video");
   assert.equal(context.data.shareVideoJob.title, "爷爷继续工作的日子");
-  assert.equal(context.data.shareVideoPreviewPath, "/tmp/completed-video.mp4");
-  assert.deepEqual(downloads, [job.id]);
+  assert.equal(context.data.shareVideoStreamUrl, "https://api.example.com/shares/0123456789abcdef0123/video");
+  assert.deepEqual(downloads, []);
   assert.deepEqual(contextCalls, []);
   assert.deepEqual(imageJobCalls, []);
 
@@ -1450,7 +1453,7 @@ test("remake shows progress while submitting and follows the new job through com
     output: sampleShareVideoJob().output });
   await page.refreshShareVideoJob.call(context);
   assert.equal(context.data.shareVideoPolling, false);
-  assert.equal(context.data.shareVideoPreviewPath, "/tmp/new-version.mp4");
+  assert.equal(context.data.shareVideoStreamUrl, "https://api.example.com/shares/0123456789abcdef0123/video");
   context.shareVideoController.cancel();
 });
 
@@ -1520,7 +1523,7 @@ test("video deletion cancels safely, deletes only the confirmed version, and pre
       assert.equal(context.data.shareVideoJob, null);
     } else {
       assert.equal(context.data.shareVideoJob.id, "job-1");
-      assert.equal(context.data.shareVideoPreviewPath, "/tmp/original.mp4");
+      assert.equal(context.data.shareVideoStreamUrl, "https://api.example.com/shares/0123456789abcdef0123/video");
     }
     if (outcome === "failure") assert.match(context.data.shareVideoError, /删除失败/);
     context.shareVideoController.dispose();
@@ -1530,7 +1533,7 @@ test("video deletion cancels safely, deletes only the confirmed version, and pre
 test("transcript media recommendation opens with editable range and styles, and creates only on confirmation", async () => {
   const candidate = {
     id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
-    status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13,
+    status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "",
   };
   for (const style of ["uploaded", "illustrated", "story_animation"]) {
     const calls = [];
@@ -1579,6 +1582,41 @@ test("transcript media recommendation opens with editable range and styles, and 
       : [["project-1", "candidate-1", options]]);
     context.shareVideoController.cancel();
   }
+});
+
+test("the home card's primary action starts the recommended clip with its opening line", async () => {
+  const calls = [];
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { default_video_style: "illustrated" }),
+    getMemoirShareVideoCandidate: async () => ({ candidate: {
+      id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
+      status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "爷爷退休后还在帮公司做事。",
+    } }),
+    createMemoirShareVideoCandidateJob: async (...args) => {
+      calls.push(args);
+      return sampleShareVideoJob({ utterance_id: "utterance-share", status: "pending", output: null });
+    },
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1", create: "1" });
+  assert.equal(context.data.viewMode, "video");
+  assert.deepEqual(calls.map((call) => call[1]), ["candidate-1"]);
+  assert.equal(context.data.shareVideoHookText, "爷爷退休后还在帮公司做事。");
+
+  // Choosing "automatic" instead is sent explicitly, since the default here is the recommendation's line.
+  global.wx = { showActionSheet: ({ success }) => success({ tapIndex: 0 }) };
+  try {
+    page.chooseShareVideoHook.call(context);
+  } finally {
+    delete global.wx;
+  }
+  assert.equal(context.data.shareVideoHookText, "");
+  context.shareVideoController.cancel();
+  context.setData({ viewMode: "create" });
+  await page.createShareVideo.call(context);
+  assert.equal(calls.at(-1)[2].hookText, "");
+  context.shareVideoController.cancel();
 });
 
 test("transcript media does not restore stale or foreign candidate selections", async () => {

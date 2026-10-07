@@ -78,6 +78,7 @@ export interface TranscriptMediaWorkflowMethods {
   createMaterialImage(): Promise<void>;
   openImageAssets(): void;
   createShareVideo(): Promise<void>;
+  chooseShareVideoHook(): void;
   shareGeneratedVideo(): Promise<void>;
 }
 
@@ -503,6 +504,14 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       });
       return;
     }
+    const candidate = this.data.shareVideoCandidate?.status === "ready"
+      && this.data.shareVideoCandidate.start_char === this.data.shareVideoSelectedStartChar
+      && this.data.shareVideoCandidate.end_char === this.data.shareVideoSelectedEndChar
+      ? this.data.shareVideoCandidate
+      : null;
+    // Send the opening line only when the author changed it from the default.
+    const hookText = this.data.shareVideoHookText;
+    const changedHook = hookText !== (candidate?.hook_text || "");
     this.setData({ viewMode: "video" });
     setPageNavigationTitle("分享视频");
     const job = await this.shareVideoController.create({
@@ -511,6 +520,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       endChar: this.data.shareVideoSelectedEndChar,
       options: {
         videoStyle: this.data.shareVideoStyle,
+        ...(changedHook ? { hookText } : {}),
         ...(this.data.shareVideoStyle !== "story_animation" ? {
           backgroundSource: this.data.shareVideoBackgroundSource,
           ...(this.data.shareVideoBackgroundSource === "ai" ? {
@@ -522,11 +532,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
           } : {}),
         } : {}),
       },
-      ...(this.data.shareVideoCandidate?.status === "ready"
-        && this.data.shareVideoCandidate.start_char === this.data.shareVideoSelectedStartChar
-        && this.data.shareVideoCandidate.end_char === this.data.shareVideoSelectedEndChar ? {
-        candidate: { projectId: item.project_id, id: this.data.shareVideoCandidate.id },
-      } : {}),
+      ...(candidate ? { candidate: { projectId: item.project_id, id: candidate.id } } : {}),
     });
     if (job) {
       trackAuditAction(
@@ -538,6 +544,20 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.setData({ viewMode: "create" });
       setPageNavigationTitle("做成图片或视频");
     }
+  },
+
+  chooseShareVideoHook() {
+    // An action sheet holds six rows: automatic plus up to five sentences.
+    const choices = this.data.shareVideoHookChoices.slice(0, 5);
+    if (!choices.length || this.data.shareVideoCreating) {
+      return;
+    }
+    wx.showActionSheet({
+      itemList: ["自动挑选", ...choices],
+      success: ({ tapIndex }) => {
+        this.setData({ shareVideoHookText: tapIndex > 0 ? choices[tapIndex - 1] : "" });
+      },
+    });
   },
 
   async shareGeneratedVideo() {

@@ -103,6 +103,15 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     assert animated.json()["id"] != created_job.json()["id"]
     assert (await client.get(url)).json()["candidate"]["status"] == "accepted"
 
+    # The author can open with another short line from the clip, but not with words it never says.
+    rejected = await client.post(create_url, json={"background_source": "classic", "hook_text": "我从没说过这句"})
+    assert rejected.status_code == 422
+    chosen = await client.post(create_url, json={"background_source": "classic", "hook_text": "鞋都湿透了"})
+    assert chosen.status_code == 201, chosen.text
+    assert chosen.json()["id"] != created_job.json()["id"]
+    chosen_job = await test_db.get(MemoirMaterialShareVideo, chosen.json()["id"])
+    assert chosen_job.metadata_json["hook_text"] == "鞋都湿透了"
+
 
 @pytest.mark.parametrize("accept_original", [True, False])
 async def test_recommendation_follows_latest_manual_video_for_its_source_range(

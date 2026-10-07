@@ -328,6 +328,13 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         assert shared.json()["video_url"] == f"/api/mobile/memoir/share-video/shares/{share_code}/video"
         assert shared.json()["book_share_token"] is None
         assert (await guest.get(shared.json()["video_url"])).content == chosen.id.encode()
+        # The player streams by byte ranges instead of downloading the whole clip first.
+        ranged = await guest.get(shared.json()["video_url"], headers={"Range": "bytes=2-5"})
+        assert ranged.status_code == 206
+        assert ranged.content == chosen.id.encode()[2:6]
+        assert ranged.headers["content-range"] == f"bytes 2-5/{len(chosen.id)}"
+        unsatisfiable = await guest.get(shared.json()["video_url"], headers={"Range": "bytes=999-"})
+        assert unsatisfiable.status_code == 416
         assert (await guest.post(shared_read, json={"code": "0" * 20})).status_code == 404
     url = f"/api/mobile/memoir/share-video/jobs/{chosen.id}"
     for body in (None, {}, {"confirm": False}):

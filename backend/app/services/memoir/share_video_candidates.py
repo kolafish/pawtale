@@ -329,6 +329,7 @@ def _response(candidate: MemoirShareVideoCandidate) -> MemoirShareVideoCandidate
         duration_ms=(candidate.end_ms - candidate.start_ms) if candidate.end_ms is not None and candidate.start_ms is not None else None,
         status=candidate.status,
         reason=candidate.reason,
+        hook_text=candidate.hook_text,
         video_job_id=candidate.video_job_id,
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
@@ -565,8 +566,8 @@ async def create_candidate_share_video(
             background_style=req.background_style,
             background_mode=req.background_mode,
             custom_background_asset_id=req.custom_background_asset_id,
+            hook_text=candidate.hook_text if req.hook_text is None else req.hook_text,
         ),
-        hook_text=candidate.hook_text,
     )
     candidate.status = MemoirShareVideoCandidateStatus.ACCEPTED.value
     candidate.video_job_id = job.id

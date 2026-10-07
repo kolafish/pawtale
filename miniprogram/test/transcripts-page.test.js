@@ -371,6 +371,13 @@ test("transcripts page opens transcript detail from a record card", () => {
     { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
   ]);
 
+  // Opened to pick a video clip, the same tap goes straight to sentence selection.
+  global.wx.setNavigationBarTitle = () => {};
+  page.onLoad.call(context, { purpose: "video" });
+  page.openTranscriptDetail.call(context, {
+    currentTarget: { dataset: { id: "utterance-video" } },
+  });
+  assert.deepEqual(navigations.at(-1), { url: "/pages/transcript-media/index?id=utterance-video" });
 });
 
 test("transcripts card swipes left to reveal deletion without opening detail, and right to close", () => {

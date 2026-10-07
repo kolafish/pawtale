@@ -25,7 +25,6 @@ import {
 } from "./memoir-api-client";
 import {
   downloadAuthenticatedFile,
-  downloadPublicFile,
   uploadAuthenticatedFile,
 } from "./authenticated-media";
 import {
@@ -52,6 +51,8 @@ interface ShareVideoJobOptions {
   backgroundStyle?: string;
   backgroundMode?: string;
   customBackgroundAssetId?: string;
+  // Undefined keeps the default opening line; "" asks for an automatic one.
+  hookText?: string;
 }
 
 interface ShareVideoJobRequest {
@@ -63,6 +64,7 @@ interface ShareVideoJobRequest {
   background_style?: string;
   background_mode?: string;
   custom_background_asset_id?: string;
+  hook_text?: string;
 }
 
 interface ShareVideoCandidateJobRequest {
@@ -72,6 +74,7 @@ interface ShareVideoCandidateJobRequest {
   background_style?: string;
   background_mode?: string;
   custom_background_asset_id?: string;
+  hook_text?: string;
 }
 
 interface MaterialImageGenerationJobRequest {
@@ -149,6 +152,7 @@ export function createMemoirTranscriptShareVideoJob(
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.hookText ? { hook_text: options.hookText } : {}),
     },
     { timeoutProfile: "mutation" },
   );
@@ -198,6 +202,7 @@ export function createMemoirShareVideoCandidateJob(
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.hookText !== undefined ? { hook_text: options.hookText } : {}),
     },
     { timeoutProfile: "mutation" },
   );
@@ -295,18 +300,16 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
   return `${cleanBaseUrl(config.httpBaseUrl)}${downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`}`;
 }
 
+// Share-code links need no login, so the player can stream them directly.
+export function memoirSharedVideoUrl(shareCode: string, variant: "video" | "thumbnail" = "video"): string {
+  const path = `/api/mobile/memoir/share-video/shares/${encodeURIComponent(shareCode)}/video`;
+  return memoirShareVideoDownloadUrl(variant === "thumbnail" ? `${path}?variant=thumbnail` : path);
+}
+
 export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> {
   return request<MemoirSharedVideo>("/api/mobile/memoir/share-video/shares/read", {
     method: "POST",
     data: { code },
-  });
-}
-
-// The backend serves whole files, so the clip plays from a local copy like the owner's preview.
-export function downloadMemoirSharedVideo(video: MemoirSharedVideo): Promise<string> {
-  return downloadPublicFile(memoirShareVideoDownloadUrl(video.video_url), {
-    failureMessage: "视频下载失败",
-    domainLabel: "视频下载",
   });
 }
 

@@ -1,10 +1,6 @@
 import type { MemoirSharedVideo } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import {
-  downloadMemoirSharedVideo,
-  memoirShareVideoDownloadUrl,
-  readMemoirSharedVideo,
-} from "../../services/memoir-transcript-api";
+import { memoirShareVideoDownloadUrl, readMemoirSharedVideo } from "../../services/memoir-transcript-api";
 import { definePage } from "../../services/page-definition";
 import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
@@ -54,17 +50,25 @@ definePage<SharedVideoPlayerData>()({
       this.setData({ loading: false, error: "这个链接不完整，请让家人重新转发" });
       return;
     }
-    this.setData({ loading: true, error: "" });
+    this.setData({ loading: true, error: "", videoUrl: "" });
     try {
       const video = await readMemoirSharedVideo(this.shareCode);
-      this.setData({ video, posterUrl: memoirShareVideoDownloadUrl(video.poster_url) });
+      // The backend answers byte ranges, so the player streams instead of waiting for the whole file.
+      this.setData({
+        video,
+        videoUrl: memoirShareVideoDownloadUrl(video.video_url),
+        posterUrl: memoirShareVideoDownloadUrl(video.poster_url),
+      });
       enableMiniProgramShareMenu();
-      this.setData({ videoUrl: await downloadMemoirSharedVideo(video) });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "这段视频暂时打不开" });
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  markVideoError() {
+    this.setData({ error: "视频没有加载出来，请检查网络后重新加载" });
   },
 
   markVideoShape(event: { detail: { width: number; height: number } }) {

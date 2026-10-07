@@ -9,9 +9,7 @@
 }
 
 .shared-video.is-portrait {
-  width: 560rpx;
-  height: 996rpx;
-  margin: 0 auto;
+  height: 72vh;
 }
 
 .shared-video-info {

@@ -343,10 +343,7 @@
 
 .share-video-preview.is-portrait {
   display: block;
-  width: 480rpx;
-  height: 853rpx;
-  margin-left: auto;
-  margin-right: auto;
+  height: 64vh;
 }
 
 .share-video-result-card .share-video-preview,
@@ -354,12 +351,19 @@
   margin-top: 0;
 }
 
-.share-video-result-label {
+.share-video-forward {
+  width: 100%;
+  margin-top: 22rpx;
+}
+
+.share-video-forward-hint {
   display: block;
-  margin-bottom: 14rpx;
-  color: var(--ui-success-text);
-  font-size: var(--ui-font-meta);
-  font-weight: 700;
+  margin-top: 10rpx;
+}
+
+.share-video-more {
+  display: block;
+  margin: 18rpx auto 0;
 }
 
 .share-video-result-actions {
@@ -393,8 +397,28 @@
 .detail-page.large-text .share-video-background-current,
 .detail-page.large-text .share-video-background-desc,
 .detail-page.large-text .share-video-background-help,
-.detail-page.large-text .share-video-result-label,
 .detail-page.large-text .share-video-job-meta {
   font-size: var(--ui-font-large-meta);
+  line-height: 1.5;
+}
+
+.share-video-hook {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 18rpx;
+}
+
+.share-video-hook-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.share-video-hook-text {
+  display: block;
+  margin-top: 6rpx;
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-body);
   line-height: 1.5;
 }
