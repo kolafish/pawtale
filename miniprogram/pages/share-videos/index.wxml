@@ -19,6 +19,7 @@
   </view>
 
   <block wx:else>
+    <button class="primary-button video-library-action video-library-pick" bindtap="pickClip">挑一段做视频</button>
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button video-library-action" bindtap="retryLoad">重新加载</button>
 
@@ -42,7 +43,7 @@
     </view>
     <view wx:elif="{{!items.length && !taskItems.length && !error}}" class="empty-panel">
       <text class="empty-title">还没有分享视频</text>
-      <text class="empty-copy">讲述完成后，适合分享的片段可以做成带原声、插图和字幕的视频。</text>
+      <text class="empty-copy">挑一段讲述，配上原声、插图和字幕，做成可以转发给家人的视频。</text>
     </view>
 
     <view wx:if="{{items.length}}" class="video-library-list">

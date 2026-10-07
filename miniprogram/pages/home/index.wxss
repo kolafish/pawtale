@@ -398,6 +398,25 @@
 }
 .home-share-candidate-actions button:active { transform: scale(0.96); }
 
+.home-share-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.home-share-pick-copy {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  line-height: 1.5;
+}
+
+.home-share-pick .home-share-candidate-primary {
+  flex: 0 0 auto;
+}
+
 .home-share-all {
   flex: 0 0 auto;
   min-height: 40px;

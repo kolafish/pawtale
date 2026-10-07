@@ -3,6 +3,8 @@
     <text class="ui-page-context">{{pageMetaText}}</text>
   </view>
 
+  <text wx:if="{{pickForVideo && activeProjectId}}" class="pick-video-hint">选一段讲述，再从里面挑出想做成视频的几句话。</text>
+
   <view wx:if="{{activeProjectId}}" class="search-panel">
     <view class="search-box">
       <text class="search-mark">⌕</text>

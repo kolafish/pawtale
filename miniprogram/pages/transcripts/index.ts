@@ -38,8 +38,11 @@ import { confirmDeleteTranscript } from "../../services/transcript-delete-confir
 import {
   datasetString,
   pageUrl,
+  queryParam,
   type PageDatasetEvent,
+  type PageQuery,
 } from "../../services/page-input";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 
 interface TranscriptDataset {
   id?: string;
@@ -86,6 +89,8 @@ interface TranscriptItemView {
 
 interface TranscriptsData {
   pageClass: string;
+  // Opened from a share video entry: a tap goes straight to picking sentences.
+  pickForVideo: boolean;
   loading: boolean;
   needsLogin: boolean;
   recoveringId: string;
@@ -436,6 +441,7 @@ definePage<TranscriptsData>()({
 
   data: {
     pageClass: "transcripts-page",
+    pickForVideo: false,
     loading: false,
     needsLogin: false,
     recoveringId: "",
@@ -471,6 +477,13 @@ definePage<TranscriptsData>()({
     showSearchEmpty: false,
     showGenericEmpty: false,
     showLoadMore: false,
+  },
+
+  onLoad(options?: PageQuery) {
+    if (queryParam(options, "purpose") === "video") {
+      this.setData({ pickForVideo: true });
+      setPageNavigationTitle("挑一段做视频");
+    }
   },
 
   async onShow() {
@@ -592,7 +605,9 @@ definePage<TranscriptsData>()({
       this.setData({ openSwipeId: "" });
       return;
     }
-    wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
+    wx.navigateTo({
+      url: pageUrl(this.data.pickForVideo ? "/pages/transcript-media/index" : "/pages/transcript-detail/index", { id }),
+    });
   },
 
   onCardTouchStart(event: TranscriptTouchEvent) {

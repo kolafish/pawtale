@@ -118,6 +118,10 @@ export function navigateToTranscripts(): void {
   wx.navigateTo({ url: TRANSCRIPTS_PAGE_URL });
 }
 
+export function navigateToVideoClipPicker(): void {
+  wx.navigateTo({ url: `${TRANSCRIPTS_PAGE_URL}?purpose=video` });
+}
+
 export function redirectToTranscripts(): void {
   wx.redirectTo({ url: TRANSCRIPTS_PAGE_URL });
 }

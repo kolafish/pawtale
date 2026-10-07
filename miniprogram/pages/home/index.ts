@@ -54,6 +54,7 @@ import {
   navigateToMe,
   navigateToTranscripts,
   navigateToLogin,
+  navigateToVideoClipPicker,
 } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
 import {
@@ -579,6 +580,11 @@ definePage<HomeData>()({
         void this.dismissShareCandidate();
       }
     } });
+  },
+
+  pickShareVideoClip() {
+    if (!this.data.projectId || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    navigateToVideoClipPicker();
   },
 
   openShareVideoLibrary() {

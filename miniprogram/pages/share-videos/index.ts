@@ -8,7 +8,7 @@ import {
   listMemoirShareVideos,
   memoirSharedVideoUrl,
 } from "../../services/memoir-transcript-api";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import { isAuthError, navigateToLogin, navigateToVideoClipPicker } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -227,6 +227,10 @@ definePage<ShareVideosData>()({
     wx.navigateTo({
       url: pageUrl("/pages/transcript-media/index", { id: utteranceId, jobId: id }),
     });
+  },
+
+  pickClip() {
+    navigateToVideoClipPicker();
   },
 
   openLogin() {
