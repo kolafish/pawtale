@@ -715,6 +715,7 @@ async def list_share_video_jobs(
                 video_style=ShareVideoJobMetadata.from_json(job.metadata_json).video_style,
                 created_at=job.created_at,
                 completed_at=job.completed_at,
+                share_code=job.share_code,
             )
             for job, _ in rows
             if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value

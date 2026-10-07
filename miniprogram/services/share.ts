@@ -53,6 +53,29 @@ export function shareLocalFileMessage(input: LocalFileShareInput): Promise<void>
   });
 }
 
+export function saveVideoToAlbum(filePath: string): Promise<void> {
+  const saveVideo = typeof wx === "undefined" ? undefined : wx.saveVideoToPhotosAlbum;
+  if (typeof saveVideo !== "function") {
+    return Promise.reject(new Error("当前微信版本不支持保存视频，请更新微信后重试"));
+  }
+  return new Promise((resolve, reject) => {
+    saveVideo({
+      filePath,
+      success: () => resolve(),
+      fail: (error) => {
+        const message = (error.errMsg || "").toLowerCase();
+        if (message.includes("cancel")) {
+          reject(new ShareFileMessageCancelError());
+        } else if (message.includes("auth") || message.includes("privacy")) {
+          reject(new Error("没有相册权限，请在小程序设置里允许保存到相册后重试"));
+        } else {
+          reject(new Error(error.errMsg || "保存到相册失败"));
+        }
+      },
+    });
+  });
+}
+
 export function homeShareAppMessage(): WechatMiniprogram.ShareAppMessagePayload {
   return {
     title: HOME_SHARE_TITLE,

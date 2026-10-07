@@ -39,6 +39,8 @@ export interface TranscriptShareVideoTaskState {
   shareVideoStatusText: string;
   shareVideoStatusClass: string;
   shareVideoJob: MemoirShareVideoJob | null;
+  // Streams the finished clip; the local copy below exists only for sending or saving it.
+  shareVideoStreamUrl: string;
   shareVideoPreviewPath: string;
 }
 
@@ -124,6 +126,7 @@ type CreateShareVideoJob = (
 type GetShareVideoJob = (jobId: string) => Promise<MemoirShareVideoJob>;
 type DownloadShareVideoJob = (job: MemoirShareVideoJob) => Promise<string>;
 type ShareFile = (input: { filePath: string; fileName?: string }) => Promise<void>;
+type SaveVideo = (filePath: string) => Promise<void>;
 type ShareVideoStateListener = (patch: Partial<TranscriptShareVideoTaskState>) => void;
 type PollTimer = ReturnType<typeof setTimeout>;
 
@@ -136,7 +139,9 @@ export interface TranscriptShareVideoControllerOptions {
   ) => Promise<MemoirShareVideoJob>;
   getJob: GetShareVideoJob;
   downloadJob: DownloadShareVideoJob;
+  streamUrl: (job: MemoirShareVideoJob) => string;
   shareFile: ShareFile;
+  saveVideo: SaveVideo;
   pollIntervalMs?: number;
   maxPollFailures?: number;
   schedule?: (callback: () => void, delayMs: number) => PollTimer;
@@ -321,6 +326,7 @@ export function initialTranscriptShareVideoTaskState(): TranscriptShareVideoTask
     shareVideoStatusText: "",
     shareVideoStatusClass: "",
     shareVideoJob: null,
+    shareVideoStreamUrl: "",
     shareVideoPreviewPath: "",
   };
 }
@@ -454,6 +460,7 @@ export class TranscriptShareVideoController {
       shareVideoSharing: false,
       shareVideoError: "",
       shareVideoJob: null,
+      shareVideoStreamUrl: "",
       shareVideoPreviewPath: "",
     });
   }
@@ -502,6 +509,7 @@ export class TranscriptShareVideoController {
       shareVideoStatusText: "正在创建视频任务",
       shareVideoStatusClass: "running",
       shareVideoJob: null,
+      shareVideoStreamUrl: "",
       shareVideoPreviewPath: "",
     });
     try {
@@ -580,7 +588,24 @@ export class TranscriptShareVideoController {
     }
   }
 
-  async share(fileName: string): Promise<boolean> {
+  share(fileName: string): Promise<boolean> {
+    return this.withLocalFile(
+      { busyText: "正在准备分享", doneText: "已打开微信分享", failText: "视频分享失败" },
+      (filePath) => this.options.shareFile({ filePath, fileName }),
+    );
+  }
+
+  saveToAlbum(): Promise<boolean> {
+    return this.withLocalFile(
+      { busyText: "正在保存到相册", doneText: "已保存到相册", failText: "保存到相册失败" },
+      (filePath) => this.options.saveVideo(filePath),
+    );
+  }
+
+  private async withLocalFile(
+    texts: { busyText: string; doneText: string; failText: string },
+    deliver: (filePath: string) => Promise<void>,
+  ): Promise<boolean> {
     const job = this.state.shareVideoJob;
     if (!job || job.status !== "succeeded") {
       this.patchState({
@@ -602,20 +627,20 @@ export class TranscriptShareVideoController {
     this.patchState({
       shareVideoSharing: true,
       shareVideoError: "",
-      shareVideoStatusText: "正在准备分享",
+      shareVideoStatusText: texts.busyText,
       shareVideoStatusClass: "running",
     });
     try {
-      const filePath = await this.ensurePreviewPath(job, requestToken, "正在准备分享");
+      const filePath = await this.ensurePreviewPath(job, requestToken, texts.busyText);
       if (!filePath || !this.isCurrent(requestToken)) {
         return false;
       }
-      await this.options.shareFile({ filePath, fileName });
+      await deliver(filePath);
       if (!this.isCurrent(requestToken)) {
         return false;
       }
       this.patchState({
-        shareVideoStatusText: "已打开微信分享",
+        shareVideoStatusText: texts.doneText,
         shareVideoStatusClass: "succeeded",
       });
       return true;
@@ -631,8 +656,8 @@ export class TranscriptShareVideoController {
         return false;
       }
       this.patchState({
-        shareVideoError: error instanceof Error ? error.message : "视频分享失败",
-        shareVideoStatusText: "视频分享失败",
+        shareVideoError: error instanceof Error ? error.message : texts.failText,
+        shareVideoStatusText: texts.failText,
         shareVideoStatusClass: "failed",
       });
       return false;
@@ -665,14 +690,17 @@ export class TranscriptShareVideoController {
     }
     this.clearPollTimer();
     if (job.status === "succeeded") {
-      await this.loadPreview(job, requestToken);
+      this.patchState({
+        shareVideoStreamUrl: this.options.streamUrl(job),
+        shareVideoStatusText: "视频已生成，可以预览",
+      });
     }
   }
 
   private async ensurePreviewPath(
     job: MemoirShareVideoJob,
     requestToken: number,
-    statusText = "正在准备预览",
+    statusText: string,
   ): Promise<string> {
     if (!job.output?.download_url) {
       throw new Error("视频还没有生成完成");
@@ -713,21 +741,6 @@ export class TranscriptShareVideoController {
       if (this.isCurrent(requestToken)) {
         this.patchState({ shareVideoDownloadingPreview: false });
       }
-    }
-  }
-
-  private async loadPreview(job: MemoirShareVideoJob, requestToken: number): Promise<void> {
-    try {
-      await this.ensurePreviewPath(job, requestToken);
-    } catch (error) {
-      if (!this.isCurrent(requestToken)) {
-        return;
-      }
-      this.patchState({
-        shareVideoError: error instanceof Error ? error.message : "视频预览下载失败",
-        shareVideoStatusText: "视频已生成，预览下载失败",
-        shareVideoStatusClass: "failed",
-      });
     }
   }
 

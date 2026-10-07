@@ -7,7 +7,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后制作图片和视频</text>
-    <text class="empty-copy">登录后可以从成书文字中选择片段，生成插图或带字幕的分享视频。</text>
+    <text class="empty-copy">登录后可以从讲述中选择片段，生成插图或带字幕的分享视频。</text>
     <view class="primary-button login-entry-action ui-block-action ui-pressable" aria-role="button" bindtap="openLogin">
       前往登录
     </view>
@@ -46,41 +46,43 @@
           mode="indeterminate"
         />
         <block wx:elif="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}">
-          <text class="share-video-result-label">视频已生成</text>
           <video
-            wx:if="{{shareVideoPreviewPath}}"
+            wx:if="{{shareVideoStreamUrl}}"
             class="share-video-preview {{shareVideoPreviewPortrait ? 'is-portrait' : ''}}"
-            src="{{shareVideoPreviewPath}}"
+            src="{{shareVideoStreamUrl}}"
             bindloadedmetadata="markShareVideoPreviewShape"
+            binderror="markShareVideoStreamError"
             controls
             show-center-play-btn
             enable-progress-gesture
             object-fit="contain"
           />
-          <ai-task-progress
-            wx:elif="{{shareVideoDownloadingPreview}}"
-            class="share-video-task-progress"
-            title="正在准备视频预览"
-            mode="indeterminate"
-          />
-          <button wx:elif="{{shareVideoError}}" class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重试预览</button>
+          <button
+            class="primary-button share-video-forward"
+            open-type="share"
+            disabled="{{shareVideoSharing || shareVideoDeleting}}"
+          >转发给好友</button>
+          <text class="record-meta share-video-forward-hint">好友点开小程序卡片就能看，删除视频后卡片也会失效。</text>
           <view class="actions-row share-video-actions share-video-result-actions">
             <button
-              class="primary-button"
-              open-type="share"
+              class="ghost-button"
+              bindtap="saveShareVideoToAlbum"
+              loading="{{shareVideoSharing && shareVideoStatusText === '正在保存到相册'}}"
               disabled="{{shareVideoSharing || shareVideoDeleting}}"
-            >转发给好友</button>
+            >保存到相册</button>
             <button
               class="ghost-button"
               bindtap="shareGeneratedVideo"
-              loading="{{shareVideoSharing}}"
-              disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}"
-            >{{shareVideoSharing ? "发送中" : "发送视频文件"}}</button>
+              loading="{{shareVideoSharing && shareVideoStatusText === '正在准备分享'}}"
+              disabled="{{shareVideoSharing || shareVideoDeleting}}"
+            >发送视频文件</button>
           </view>
-          <text class="record-meta">转发的是小程序卡片，好友点开就能看。删除这版视频后，转发出去的卡片也会打不开。</text>
-          <button class="ghost-button share-video-retry" bindtap="remakeShareVideo" disabled="{{shareVideoSharing || shareVideoDeleting}}">重新制作</button>
-          <text class="record-meta">重新制作时可以换一种风格，已有视频会保留。</text>
-          <button class="ghost-button share-video-retry" bindtap="deleteShareVideo" loading="{{shareVideoDeleting}}" disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}">删除这版视频</button>
+          <button
+            class="text-action-button share-video-more"
+            bindtap="openShareVideoMoreActions"
+            loading="{{shareVideoDeleting}}"
+            disabled="{{shareVideoSharing || shareVideoDeleting}}"
+          >重新制作或删除 ›</button>
         </block>
 
         <block wx:elif="{{shareVideoJob && (shareVideoJob.status === 'pending' || shareVideoJob.status === 'running')}}">
@@ -104,14 +106,14 @@
 
     <view wx:if="{{viewMode === 'create'}}" class="hero-panel">
       <text class="record-title">做成图片或视频</text>
-      <text class="record-meta">从“{{item.titleText}}”的成书文字中选择片段，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
+      <text class="record-meta">从“{{item.titleText}}”中选一段话，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
     </view>
 
     <view wx:if="{{viewMode === 'create'}}" class="section-card share-video-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">选择文字片段</text>
-          <text class="section-hint">连续点选需要制作的校正文片段</text>
+          <text class="section-hint">点选开头和结尾的句子，中间会自动选上</text>
         </view>
         <text class="section-count share-video-count {{(materialImageCreating || materialImagePolling) ? materialImageStatusClass : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? shareVideoStatusClass : (materialImageStatusClass || shareVideoStatusClass))}}">
           {{(materialImageCreating || materialImagePolling) ? (materialImageStatusText || "图片生成中") : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? (shareVideoStatusText || "视频生成中") : (materialImageStatusText || shareVideoStatusText || "未生成"))}}
@@ -119,7 +121,7 @@
       </view>
 
       <view wx:if="{{shareVideoLoadingContext}}" class="share-video-state">
-        <text>正在加载校正文片段</text>
+        <text>正在加载讲述文字</text>
       </view>
       <block wx:else>
         <view wx:if="{{shareVideoError}}" class="share-video-error">
@@ -188,7 +190,7 @@
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
-          <text class="share-video-background-help">直接图片使用完整构图；回忆画卷会另行为字幕保留留白。</text>
+          <text class="share-video-background-help">选一种画风，AI 会按这段讲述画插图。</text>
           <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
@@ -244,7 +246,7 @@
             <image class="custom-background-preview" src="{{shareVideoCustomBackgroundPreviewPath}}" mode="aspectFill" />
           </view>
           <text wx:if="{{shareVideoCustomBackgroundStatusText}}" class="custom-background-status">{{shareVideoCustomBackgroundStatusText}}</text>
-          <text wx:else class="custom-background-status muted">选择家庭照片、旧物或地点图片，系统会处理成适合叠加文字的横版背景。</text>
+          <text wx:else class="custom-background-status muted">选择家庭照片、旧物或地点图片，照片会完整放进竖版视频画面里。</text>
         </view>
 
         <view class="actions-row share-video-actions">

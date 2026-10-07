@@ -584,6 +584,7 @@ class MemoirShareVideoListItemResponse(BaseModel):
     video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
     created_at: datetime
     completed_at: datetime | None
+    share_code: str
 
 
 class MemoirShareVideoDeleteRequest(BaseModel):

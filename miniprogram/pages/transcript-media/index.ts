@@ -11,7 +11,7 @@ import {
   getMemoirShareVideoJob,
   getMemoirShareVideoCandidate,
   getMemoirVoiceTranscript,
-  memoirShareVideoDownloadUrl,
+  memoirSharedVideoUrl,
 } from "../../services/memoir-transcript-api";
 import {
   isAuthError,
@@ -21,7 +21,12 @@ import {
   queryParam,
   type PageQuery,
 } from "../../services/page-input";
-import { homeShareAppMessage, shareLocalFileMessage, sharedVideoShareMessage } from "../../services/share";
+import {
+  homeShareAppMessage,
+  saveVideoToAlbum,
+  shareLocalFileMessage,
+  sharedVideoShareMessage,
+} from "../../services/share";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
   initialTranscriptMaterialImageTaskState,
@@ -46,7 +51,9 @@ definePage<TranscriptMediaData>()({
     createCandidateJob: createMemoirShareVideoCandidateJob,
     getJob: getMemoirShareVideoJob,
     downloadJob: downloadMemoirShareVideoJob,
+    streamUrl: (job) => memoirSharedVideoUrl(job.output?.share_code || ""),
     shareFile: shareLocalFileMessage,
+    saveVideo: saveVideoToAlbum,
   })),
   materialImageController: pageRuntime(() => new TranscriptMaterialImageController({
     createJob: createMemoirMaterialImageGenerationJob,
@@ -92,11 +99,7 @@ definePage<TranscriptMediaData>()({
       return homeShareAppMessage();
     }
     trackAuditAction("transcript.detail_share_video_card", { job_id: job.id }, { projectId: job.project_id });
-    return sharedVideoShareMessage(
-      job.title,
-      shareCode,
-      memoirShareVideoDownloadUrl(`/api/mobile/memoir/share-video/shares/${shareCode}/video?variant=thumbnail`),
-    );
+    return sharedVideoShareMessage(job.title, shareCode, memoirSharedVideoUrl(shareCode, "thumbnail"));
   },
 
   markShareVideoPreviewShape(event: { detail: { width: number; height: number } }) {
@@ -168,6 +171,38 @@ definePage<TranscriptMediaData>()({
   },
 
   ...transcriptMediaWorkflowMethods,
+
+  async saveShareVideoToAlbum() {
+    const job = this.data.shareVideoJob;
+    if (!job || this.data.shareVideoDeleting) {
+      return;
+    }
+    if (await this.shareVideoController.saveToAlbum()) {
+      wx.showToast({ title: "已保存到相册", icon: "success" });
+      trackAuditAction("transcript.detail_share_video_save", { job_id: job.id }, { projectId: job.project_id });
+    }
+  },
+
+  // Remaking and deleting are rarer than sending, so they live behind one menu.
+  openShareVideoMoreActions() {
+    if (this.data.shareVideoSharing || this.data.shareVideoDeleting) {
+      return;
+    }
+    wx.showActionSheet({
+      itemList: ["重新制作", "删除这版视频"],
+      success: ({ tapIndex }) => {
+        if (tapIndex === 0) {
+          void this.remakeShareVideo();
+        } else if (tapIndex === 1) {
+          void this.deleteShareVideo();
+        }
+      },
+    });
+  },
+
+  markShareVideoStreamError() {
+    this.setData({ shareVideoError: "视频没有加载出来，请检查网络后重试" });
+  },
 
   async deleteShareVideo() {
     const job = this.data.shareVideoJob;

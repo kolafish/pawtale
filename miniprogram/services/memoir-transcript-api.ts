@@ -294,6 +294,12 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
   return `${cleanBaseUrl(config.httpBaseUrl)}${downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`}`;
 }
 
+// Share-code links need no login, so the player can stream them directly.
+export function memoirSharedVideoUrl(shareCode: string, variant: "video" | "thumbnail" = "video"): string {
+  const path = `/api/mobile/memoir/share-video/shares/${encodeURIComponent(shareCode)}/video`;
+  return memoirShareVideoDownloadUrl(variant === "thumbnail" ? `${path}?variant=thumbnail` : path);
+}
+
 export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> {
   return request<MemoirSharedVideo>("/api/mobile/memoir/share-video/shares/read", {
     method: "POST",

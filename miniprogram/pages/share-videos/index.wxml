@@ -46,15 +46,24 @@
     </view>
 
     <view wx:if="{{items.length}}" class="video-library-list">
-      <view wx:for="{{items}}" wx:key="id" class="section-card video-library-card">
-        <view class="video-library-card-head">
-          <text class="video-library-title">《{{item.title}}》</text>
+      <view
+        wx:for="{{items}}"
+        wx:key="id"
+        class="section-card video-library-card video-library-item ui-pressable"
+        data-id="{{item.id}}"
+        data-utterance-id="{{item.utterance_id}}"
+        bindtap="openVideo"
+        aria-role="button"
+        aria-label="查看视频《{{item.title}}》"
+      >
+        <view class="video-library-thumb">
+          <image wx:if="{{item.thumbnailUrl}}" class="video-library-thumb-image" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load />
           <text class="video-library-duration ui-tabular">{{item.durationText}}</text>
         </view>
-        <text class="video-library-quote">“{{item.selected_text}}”</text>
-        <view class="video-library-card-foot">
+        <view class="video-library-body">
+          <text class="video-library-title">《{{item.title}}》</text>
+          <text class="video-library-quote">“{{item.selected_text}}”</text>
           <text class="video-library-date">{{item.styleLabel}} · {{item.completedAtText}}</text>
-          <button class="video-library-open ui-button" data-id="{{item.id}}" data-utterance-id="{{item.utterance_id}}" bindtap="openVideo">查看视频 ›</button>
         </view>
       </view>
     </view>

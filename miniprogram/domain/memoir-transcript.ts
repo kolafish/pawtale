@@ -255,6 +255,7 @@ export interface MemoirShareVideoListItem {
   video_style: MemoirShareVideoStyle;
   created_at: string;
   completed_at: string | null;
+  share_code: string;
 }
 
 export interface MemoirShareVideoListResponse {

@@ -68,7 +68,9 @@ function controllerFixture(overrides = {}) {
     createJob: async () => shareVideoJob(),
     getJob: async () => shareVideoJob(),
     downloadJob: async () => "/tmp/share-video.mp4",
+    streamUrl: (job) => `https://api.example.com/shares/${job.id}/video`,
     shareFile: async () => {},
+    saveVideo: async () => {},
     schedule(callback) {
       scheduled.push(callback);
       return scheduled.length;
@@ -174,9 +176,10 @@ test("share video controller presents background work as forward-only stages", a
   controller.dispose();
 });
 
-test("share video controller retries transient polling and downloads the completed preview", async () => {
+test("share video controller streams the finished clip and downloads it only to save or send", async () => {
   const pollCalls = [];
   const downloads = [];
+  const saved = [];
   const { controller, state } = controllerFixture({
     getJob: async (jobId) => {
       pollCalls.push(jobId);
@@ -188,6 +191,9 @@ test("share video controller retries transient polling and downloads the complet
     downloadJob: async (job) => {
       downloads.push(job.id);
       return "/tmp/share-video.mp4";
+    },
+    saveVideo: async (filePath) => {
+      saved.push(filePath);
     },
   });
 
@@ -201,10 +207,14 @@ test("share video controller retries transient polling and downloads the complet
   await controller.refresh("job-1");
 
   assert.deepEqual(pollCalls, ["job-1", "job-1"]);
-  assert.deepEqual(downloads, ["job-1"]);
   assert.equal(state().shareVideoJob.status, "succeeded");
-  assert.equal(state().shareVideoStatusText, "视频已生成，可以预览");
-  assert.equal(state().shareVideoPreviewPath, "/tmp/share-video.mp4");
+  assert.equal(state().shareVideoStreamUrl, "https://api.example.com/shares/job-1/video");
+  assert.deepEqual(downloads, []);
+
+  assert.equal(await controller.saveToAlbum(), true);
+  assert.deepEqual(downloads, ["job-1"]);
+  assert.deepEqual(saved, ["/tmp/share-video.mp4"]);
+  assert.equal(state().shareVideoStatusText, "已保存到相册");
   controller.dispose();
 });
 
