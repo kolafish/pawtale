@@ -13,7 +13,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v5"
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v6"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
@@ -362,7 +362,9 @@ def _user_prompt(
     duration_ms: int,
     min_scene_count: int,
     max_scene_count: int,
+    narrator_context: str = "",
 ) -> str:
+    narrator_line = f"讲述者信息：{narrator_context}\n" if narrator_context else ""
     sentence_lines = "\n".join(
         f"{sentence.index}. [{round(sentence.start_ms / 1000, 1)}s-"
         f"{round(sentence.end_ms / 1000, 1)}s] {sentence.text}"
@@ -377,11 +379,11 @@ def _user_prompt(
 4. 每个 scene 只包含 sentence_ids。
 5. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
 6. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
-7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文里的称呼）、大致年龄和穿着，以及地点、年代和季节。只写原文明确说过的内容，不知道的不写。性别只在原文用了“她”“妈妈”“爷爷”“姐姐”这类明确表示性别的词时才写；讲述者“我”的性别原文一般没有说，不要猜。不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
+7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文里的称呼）、大致年龄和穿着，以及地点、年代和季节。只写原文明确说过的内容，不知道的不写。性别只在原文用了“她”“妈妈”“爷爷”“姐姐”这类明确表示性别的词时才写；讲述者“我”的性别以下面的讲述者信息为准，没有讲述者信息就不写，不要猜。不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
 
 音频时长：{round(duration_ms / 1000, 1)} 秒
 原文字符数：{len(selected_text)}
-
+{narrator_line}
 口述内容：
 {selected_text}
 
@@ -493,6 +495,7 @@ async def plan_share_video_background_scenes(
     *,
     max_scene_count: int | None = None,
     ai_model: str | None = None,
+    narrator_context: str = "",
 ) -> ShareVideoScenePlan:
     settings = get_settings()
     sentences = share_video_sentence_units(selected_text, char_timings, duration_ms)
@@ -512,7 +515,7 @@ async def plan_share_video_background_scenes(
         generated = await generate_structured_with_client(
             client,
             _system_prompt(),
-            _user_prompt(selected_text, sentences, duration_ms, min_count, max_count),
+            _user_prompt(selected_text, sentences, duration_ms, min_count, max_count, narrator_context),
             output_model=_ShareVideoScenePlanOutput,
             requested_model=model,
             temperature=0.2,

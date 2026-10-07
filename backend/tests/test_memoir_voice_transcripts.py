@@ -730,7 +730,7 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v6"
+    assert prompt.template_version == "memoir-share-video-background-v7"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
@@ -785,6 +785,16 @@ def test_share_video_scene_background_prompt_carries_story_context():
     assert "那年冬天父亲送我去县城读书。" in prompt
     assert "父亲四十来岁，穿旧棉袄" in prompt
     assert "整段口述" not in single
+    assert "讲述者信息：" not in single
+    narrated = share_video_backgrounds.build_share_video_background_prompt(
+        "我们去河边洗衣服。",
+        "watercolor",
+        narrator_context=share_video_backgrounds.share_video_narrator_context(
+            {"narrator_gender": "female", "narrator_origin": "湖南"}
+        ),
+    ).prompt
+    assert "讲述者信息：讲述者“我”是女性；家乡在湖南。" in narrated
+    assert share_video_backgrounds.share_video_narrator_context({"narrator_gender": "unspecified"}) == ""
 
 
 async def test_share_video_background_retries_without_rejected_reference_image(tmp_path, monkeypatch):
@@ -1063,7 +1073,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
         ),
     )
 
-    async def fail_background_generation(_selected_text, _style_id, *, usage_context=None):
+    async def fail_background_generation(_selected_text, _style_id, *, narrator_context="", usage_context=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -1801,7 +1811,10 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     project = await test_db.get(Project, created["session"]["project_id"])
-    project.metadata_json = {"ai_model": DEFAULT_AI_TEXT_MODEL}
+    project.metadata_json = {
+        "ai_model": DEFAULT_AI_TEXT_MODEL,
+        "memoir_profile": {"narrator_gender": "female", "narrator_age": 82},
+    }
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
     )
@@ -1815,7 +1828,10 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     first_end = text.index("。") + 1
     second_end = text.index("。", first_end) + 1
 
-    async def fake_plan(selected_text, char_timings, duration_ms, *, ai_model=None):
+    narrator = "讲述者“我”是女性；现在约 82 岁，回忆里的年纪按故事发生的时间推算。"
+
+    async def fake_plan(selected_text, char_timings, duration_ms, *, ai_model=None, narrator_context=""):
+        assert narrator_context == narrator
         assert selected_text == text
         assert duration_ms == 36_000
         assert len(char_timings) == len(text)
@@ -1867,9 +1883,11 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         *,
         story_text="",
         visual_context="",
+        narrator_context="",
         reference_image_path=None,
         usage_context=None,
     ):
+        assert narrator_context == narrator
         image_calls.append((selected_text, style_id))
         image_contexts.append((story_text, visual_context))
         image_references[selected_text] = reference_image_path

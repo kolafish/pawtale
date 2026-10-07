@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirMaterialShareVideo
+from app.models.projects import Project
 from app.services.memoir import share_video_rendering as rendering
 from app.services.memoir.image_assets import (
     RegisteredShareVideoBackground,
@@ -19,6 +20,7 @@ from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
+    share_video_narrator_context,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
 )
@@ -150,6 +152,9 @@ async def prepare_share_video_background(
     metadata.background_effective_mode = effective_mode
     background_image_path: Path | None = None
     background_segments: list[rendering.ShareVideoBackgroundSegment] = []
+    project = await db.get(Project, job.project_id)
+    project_metadata = project.metadata_json if project is not None and isinstance(project.metadata_json, dict) else {}
+    narrator_context = share_video_narrator_context(project_metadata.get("memoir_profile"))
 
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
         custom_background_asset_id = metadata.custom_background_asset_id
@@ -194,6 +199,7 @@ async def prepare_share_video_background(
             char_timings,
             duration_ms,
             ai_model=metadata.ai_model,
+            narrator_context=narrator_context,
         )
         metadata.background_status = "generating"
         metadata.background_scene_plan = ShareVideoScenePlanMetadata.model_validate(
@@ -222,6 +228,7 @@ async def prepare_share_video_background(
                     background_style,
                     story_text=story_text,
                     visual_context=visual_context,
+                    narrator_context=narrator_context,
                     reference_image_path=reference_image_path,
                     usage_context=usage_context,
                 )
@@ -330,6 +337,7 @@ async def prepare_share_video_background(
             background = await get_or_generate_share_video_background(
                 job.selected_text,
                 background_style,
+                narrator_context=narrator_context,
                 usage_context=usage_context,
             )
         except ShareVideoBackgroundGenerationError as exc:
