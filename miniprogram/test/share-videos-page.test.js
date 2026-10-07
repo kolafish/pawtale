@@ -26,11 +26,15 @@ function video(id, utteranceId) {
   };
 }
 
-function loadLibraryPage(listMemoirShareVideos, getMemoirShareVideoJob = unmockedAsync("getMemoirShareVideoJob")) {
+function loadLibraryPage(
+  listMemoirShareVideos,
+  getMemoirShareVideoJob = unmockedAsync("getMemoirShareVideoJob"),
+  deleteMemoirShareVideoJob = unmockedAsync("deleteMemoirShareVideoJob"),
+) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
   });
-  mockMemoirApiModules({ listMemoirShareVideos, getMemoirShareVideoJob });
+  mockMemoirApiModules({ listMemoirShareVideos, getMemoirShareVideoJob, deleteMemoirShareVideoJob });
   return loadPageModule("../pages/share-videos/index.ts");
 }
 
@@ -176,6 +180,28 @@ test("video progress leaves a failed task visible with its real error and stops 
   assert.equal(polling.context.data.taskItems[0].status, "failed");
   assert.equal(polling.context.data.taskItems[0].statusText, "配图服务暂时不可用");
   assert.equal(polling.hasPoll(), false);
+});
+
+test("a failed attempt can be deleted from the library after confirming", async () => {
+  const deleted = [];
+  const { page } = loadLibraryPage(async () => ({
+    items: [], active_jobs: [], failed_jobs: [job("failed", { id: "broken" })], total: 0, limit: 20, offset: 0,
+  }), undefined, async (id) => { deleted.push(id); });
+  const context = pageContext(page);
+  context.onLoad({ projectId: "project-1" });
+  await context.loadVideos(true);
+  let answer = false;
+  global.wx = { showModal: ({ success }) => success({ confirm: answer }) };
+  try {
+    await context.deleteFailedVideo({ currentTarget: { dataset: { id: "broken" } } });
+    assert.deepEqual(deleted, []);
+    answer = true;
+    await context.deleteFailedVideo({ currentTarget: { dataset: { id: "broken" } } });
+  } finally {
+    delete global.wx;
+  }
+  assert.deepEqual(deleted, ["broken"]);
+  assert.deepEqual(context.data.taskItems, []);
 });
 
 test("reopening the library after starting another video restores the earlier failure and polls only active tasks", async () => {

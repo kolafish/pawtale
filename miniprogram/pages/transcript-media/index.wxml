@@ -99,6 +99,7 @@
         <view wx:elif="{{shareVideoJob && shareVideoJob.status === 'failed'}}" class="share-video-result-failed">
           <text class="share-video-job-title">{{shareVideoStatusText || '视频生成失败'}}</text>
           <button class="primary-button" bindtap="remakeShareVideo">重新制作</button>
+          <button class="ghost-button share-video-retry" bindtap="deleteShareVideo" loading="{{shareVideoDeleting}}" disabled="{{shareVideoDeleting}}">删除这次失败的记录</button>
         </view>
         <view wx:elif="{{!loading}}" class="share-video-state">暂时无法查看这段视频</view>
       </view>

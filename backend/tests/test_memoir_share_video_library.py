@@ -378,6 +378,15 @@ async def test_video_delete_rejects_foreign_owner_and_unfinished_job(client, tes
     url = f"/api/mobile/memoir/share-video/jobs/{job.id}"
     assert (await client.request("DELETE", url, json={"confirm": True})).status_code == 409
     assert (await client.get(f"{url}/download?variant=thumbnail")).status_code == 409
+    # A failed attempt can be cleared from the library.
+    failed = await _add_video_job(
+        test_db, created, job_id="failed", status=MemoirShareVideoJobStatus.FAILED,
+        created_at=utcnow_naive(), with_output=False,
+    )
+    await test_db.commit()
+    failed_url = f"/api/mobile/memoir/share-video/jobs/{failed.id}"
+    assert (await client.request("DELETE", failed_url, json={"confirm": True})).status_code == 204
+    assert (await client.get(failed_url)).status_code == 404
     other = User(email="other-video-owner@example.com", password_hash="unused", display_name="其他人")
     test_db.add(other)
     await test_db.flush()

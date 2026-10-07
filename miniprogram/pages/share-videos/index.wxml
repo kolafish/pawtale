@@ -32,7 +32,10 @@
           <text class="video-library-quote">“{{item.selected_text}}”</text>
           <view class="video-library-card-foot">
             <text class="video-library-date">{{item.styleLabel}}</text>
-            <button class="video-library-open ui-button" data-id="{{item.id}}" data-utterance-id="{{item.utterance_id}}" bindtap="openVideo">{{item.status === 'failed' ? '查看详情' : '查看进度'}} ›</button>
+            <view class="video-library-task-actions">
+              <button wx:if="{{item.status === 'failed'}}" class="video-library-delete ui-button" data-id="{{item.id}}" bindtap="deleteFailedVideo" loading="{{deletingId === item.id}}" disabled="{{!!deletingId}}">删除</button>
+              <button class="video-library-open ui-button" data-id="{{item.id}}" data-utterance-id="{{item.utterance_id}}" bindtap="openVideo">{{item.status === 'failed' ? '查看详情' : '查看进度'}} ›</button>
+            </view>
           </view>
         </view>
       </view>

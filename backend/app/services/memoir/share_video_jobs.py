@@ -629,8 +629,10 @@ async def delete_share_video_job(
     allow_admin: bool = False,
 ) -> None:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
-    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or not job.output:
-        raise HTTPException(status_code=409, detail="只能删除已完成的视频")
+    # Failed jobs can be cleared too; only work still in progress is kept.
+    finished = job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.output is not None
+    if not finished and job.status != MemoirShareVideoJobStatus.FAILED.value:
+        raise HTTPException(status_code=409, detail="视频还在制作中，完成后才能删除")
     video_path = share_video_file_path(job, job.output)
     # Illustrations remain reusable in the image library after deleting a video.
     await db.execute(

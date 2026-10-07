@@ -28,6 +28,7 @@ import {
   sharedVideoShareMessage,
 } from "../../services/share";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import { shareVideoDeleteConfirmation } from "../../services/share-video-delete";
 import {
   initialTranscriptMaterialImageTaskState,
   TranscriptMaterialImageController,
@@ -218,7 +219,7 @@ definePage<TranscriptMediaData>()({
 
   async deleteShareVideo() {
     const job = this.data.shareVideoJob;
-    if (!job || job.status !== "succeeded" || this.data.shareVideoDeleting
+    if (!job || (job.status !== "succeeded" && job.status !== "failed") || this.data.shareVideoDeleting
       || this.data.shareVideoSharing || this.data.shareVideoDownloadingPreview) {
       return;
     }
@@ -227,9 +228,7 @@ definePage<TranscriptMediaData>()({
     try {
       const confirmed = await new Promise<boolean>((resolve) => {
         wx.showModal({
-          title: "删除这版视频？",
-          content: `《${job.title}》删除后需要重新制作。其他版本、原始讲述和图片素材会保留。`,
-          confirmText: "删除视频",
+          ...shareVideoDeleteConfirmation(job),
           confirmColor: "#b64545",
           success: (result) => resolve(Boolean(result.confirm)),
           fail: () => resolve(false),
@@ -243,7 +242,7 @@ definePage<TranscriptMediaData>()({
         return;
       }
       this.shareVideoController.reset();
-      wx.showToast({ title: "视频已删除", icon: "success" });
+      wx.showToast({ title: job.status === "failed" ? "已删除" : "视频已删除", icon: "success" });
       wx.navigateBack();
     } catch (error) {
       if (requestToken === this.loadToken) {
