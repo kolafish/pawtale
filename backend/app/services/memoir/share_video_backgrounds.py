@@ -22,7 +22,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v6"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v7"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 SHARE_VIDEO_REFERENCE_IMAGE_MAX_EDGE = 1024
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
@@ -74,7 +74,7 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
 _VIDEO_BACKGROUND_PROMPT = """{reference}根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
-{story_context}
+{narrator}{story_context}
 画面内容：
 - 从原文中选择一个具体、可见的回忆瞬间，不把不同时间或地点的事件拼贴在一起。
 - 优先呈现原文明确提到的时间、地点、人物关系、动作和关键物件，让这些细节成为画面主体；不要用泛泛的漂亮风景代替讲述的场景。
@@ -91,6 +91,7 @@ _VIDEO_BACKGROUND_PROMPT = """{reference}根据以下口述内容，创作一张
 
 生成边界：
 - 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。
+- 原文和讲述者信息都没有说明性别的人物，不要默认画成男性。
 - 不出现文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和和夸张电影光效。"""
 
@@ -266,12 +267,32 @@ def reference_image_data_uri(path: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+_NARRATOR_GENDER_LABELS = {"male": "男性", "female": "女性"}
+
+
+def share_video_narrator_context(profile: dict[str, object] | None) -> str:
+    """Who "我" is, from the project's narrator profile, for image and scene prompts."""
+    profile = profile if isinstance(profile, dict) else {}
+    parts: list[str] = []
+    gender = _NARRATOR_GENDER_LABELS.get(str(profile.get("narrator_gender") or ""))
+    if gender:
+        parts.append(f"讲述者“我”是{gender}")
+    age = profile.get("narrator_age")
+    if isinstance(age, int) and age > 0:
+        parts.append(f"现在约 {age} 岁，回忆里的年纪按故事发生的时间推算")
+    origin = str(profile.get("narrator_origin") or "").strip()
+    if origin:
+        parts.append(f"家乡在{origin}")
+    return "；".join(parts) + "。" if parts else ""
+
+
 def build_share_video_background_prompt(
     selected_text: str,
     style_id: str | None,
     *,
     story_text: str = "",
     visual_context: str = "",
+    narrator_context: str = "",
     reference_image: str = "",
 ) -> ShareVideoBackgroundPrompt:
     style = share_video_background_style(style_id)
@@ -279,6 +300,7 @@ def build_share_video_background_prompt(
     prompt = _VIDEO_BACKGROUND_PROMPT.format(
         reference=_VIDEO_BACKGROUND_REFERENCE if reference_image else "",
         content=content,
+        narrator=f"\n讲述者信息：{narrator_context.strip()}\n" if narrator_context.strip() else "",
         story_context=_story_context(story_text, visual_context),
         drawing_instruction=style.drawing_instruction,
     ).strip()
@@ -427,6 +449,7 @@ async def get_or_generate_share_video_background(
     *,
     story_text: str = "",
     visual_context: str = "",
+    narrator_context: str = "",
     reference_image_path: Path | None = None,
     usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
@@ -448,6 +471,7 @@ async def get_or_generate_share_video_background(
             normalized_style,
             story_text=story_text,
             visual_context=visual_context,
+            narrator_context=narrator_context,
             reference_image=reference_image,
             usage_context=usage_context,
         )
@@ -460,6 +484,7 @@ async def get_or_generate_share_video_background(
         normalized_style,
         story_text=story_text,
         visual_context=visual_context,
+        narrator_context=narrator_context,
         reference_image="",
         usage_context=usage_context,
     )
@@ -471,6 +496,7 @@ async def _get_or_generate_background(
     *,
     story_text: str,
     visual_context: str,
+    narrator_context: str,
     reference_image: str,
     usage_context: AIUsageContext | None,
 ) -> ShareVideoBackgroundAsset:
@@ -480,6 +506,7 @@ async def _get_or_generate_background(
         normalized_style,
         story_text=story_text,
         visual_context=visual_context,
+        narrator_context=narrator_context,
         reference_image=reference_image,
     )
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
