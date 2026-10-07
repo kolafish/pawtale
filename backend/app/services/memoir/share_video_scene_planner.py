@@ -13,12 +13,14 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v3"
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v4"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
 SHARE_VIDEO_SENTENCE_MAX_CHARS = 58
 SHARE_VIDEO_SENTENCE_MIN_CHARS = 6
+SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS = 120
+SHARE_VIDEO_FALLBACK_SCENE_DURATION_MS = 15_000
 _STRONG_BREAK_CHARS = "。！？!?；;\n"
 _SOFT_BREAK_CHARS = "，,、"
 _PUNCTUATION_CHARS = "，,、。！？!?；;：“”‘’\"'（）()[]【】《》…—- \t\r\n"
@@ -53,6 +55,7 @@ class ShareVideoScenePlan:
     model: str
     strategy: str
     plan_hash: str
+    visual_context: str = ""
     version: str = SHARE_VIDEO_SCENE_PLAN_VERSION
 
 
@@ -69,19 +72,12 @@ class _ShareVideoSceneOutput(BaseModel):
 class _ShareVideoScenePlanOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    visual_context: str = ""
     scenes: list[_ShareVideoSceneOutput] = Field(min_length=1)
 
 
-def desired_share_video_scene_count(duration_ms: int) -> int:
-    if duration_ms <= 10_000:
-        return 1
-    if duration_ms <= 25_000:
-        return 2
-    if duration_ms <= 45_000:
-        return 3
-    if duration_ms <= 75_000:
-        return 4
-    return SHARE_VIDEO_SCENE_MAX_COUNT
+def max_share_video_scene_count(duration_ms: int) -> int:
+    return max(1, min(SHARE_VIDEO_SCENE_MAX_COUNT, duration_ms // SHARE_VIDEO_SCENE_MIN_DURATION_MS))
 
 
 def _compact_text(text: str, *, limit: int = SHARE_VIDEO_SCENE_TEXT_MAX_CHARS) -> str:
@@ -251,14 +247,10 @@ def _scene_count_range(
 ) -> tuple[int, int]:
     if sentence_count <= 0:
         return 1, 1
-    upper = min(SHARE_VIDEO_SCENE_MAX_COUNT, sentence_count, desired_share_video_scene_count(duration_ms))
+    upper = min(sentence_count, max_share_video_scene_count(duration_ms))
     if max_scene_count is not None:
         upper = min(upper, max_scene_count)
-    if duration_ms < SHARE_VIDEO_SCENE_MIN_DURATION_MS * upper:
-        upper = max(1, duration_ms // SHARE_VIDEO_SCENE_MIN_DURATION_MS)
-    upper = max(1, upper)
-    lower = 1 if upper == 1 else 2
-    return lower, upper
+    return 1, max(1, upper)
 
 
 def _group_sentence_units(
@@ -310,7 +302,9 @@ def fallback_share_video_scene_plan(
     text = selected_text or ""
     sentences = share_video_sentence_units(text, char_timings, duration_ms)
     _min_count, upper_count = _scene_count_range(duration_ms, len(sentences), max_scene_count)
-    desired_count = min(upper_count, max_scene_count or desired_share_video_scene_count(duration_ms))
+    # Without the planner we cannot tell where the story changes scene, so
+    # fall back to roughly one image per 15 seconds.
+    desired_count = min(upper_count, max(1, round(duration_ms / SHARE_VIDEO_FALLBACK_SCENE_DURATION_MS)))
     scenes: list[ShareVideoScene] = []
     for index, group in enumerate(_group_sentence_units(sentences, max(1, desired_count))):
         if not group:
@@ -357,7 +351,8 @@ def _system_prompt() -> str:
     return (
         "你是回忆录访谈视频的分镜切分助手。"
         "你只输出严格 JSON，不要 Markdown，不要解释。"
-        "你的任务只是在不改写原文的前提下，把连续句子分成少量画面组。"
+        "你的任务是在不改写原文的前提下，把连续句子分成少量画面组，"
+        "并概括各画面共用的人物和场景设定。"
     )
 
 
@@ -373,15 +368,16 @@ def _user_prompt(
         f"{round(sentence.end_ms / 1000, 1)}s] {sentence.text}"
         for sentence in sentences
     )
-    return f"""请把以下完整口述内容规划为 {min_scene_count} 到 {max_scene_count} 个视频背景画面，由你根据内容自然决定具体数量。
+    return f"""请为以下完整口述内容规划视频背景画面，画面数量由内容决定，最少 {min_scene_count} 个，最多 {max_scene_count} 个。
 
 要求：
-1. 输出 JSON 对象，格式为 {{"scenes":[...]}}。
-2. scenes 长度必须在 {min_scene_count} 到 {max_scene_count} 之间；不要为了平均切分而机械用满上限。
-3. 每个 scene 只包含 sentence_ids。
-4. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
-5. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
-6. 根据原文中场景、人物、时间或叙述重点的自然变化决定分组边界。
+1. 输出 JSON 对象，格式为 {{"visual_context":"...","scenes":[...]}}。
+2. 只有当原文里的地点、时间或主要人物真正发生变化，眼睛能看到的画面需要换掉时，才开始一个新画面。一直在讲同一个场景、同一件事，就只用 1 个画面；不要为了平均切分或用满上限而拆分。
+3. 每个画面最好能停留 6 秒以上；画面太碎时合并到相邻画面。
+4. 每个 scene 只包含 sentence_ids。
+5. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
+6. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
+7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文的称呼，例如“我”“父亲”），能看出的性别、大致年龄和穿着，以及地点、年代和季节。只写原文明确说过或能直接推断的内容，不知道的不写，不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
 
 音频时长：{round(duration_ms / 1000, 1)} 秒
 原文字符数：{len(selected_text)}
@@ -435,6 +431,12 @@ def _parse_sentence_ids(value: object) -> list[int] | None:
         except (TypeError, ValueError):
             return None
     return sentence_ids
+
+
+def _normalize_visual_context(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return _compact_text(value, limit=SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS)
 
 
 def _normalize_llm_sentence_scenes(
@@ -535,6 +537,7 @@ async def plan_share_video_background_scenes(
             model=client.model_name,
             strategy="llm_sentence_units",
             plan_hash=_text_hash(selected_text, duration_ms, len(scenes)),
+            visual_context=_normalize_visual_context(generated.value.visual_context),
         )
     except Exception:
         return fallback_share_video_scene_plan(
@@ -552,6 +555,7 @@ def scene_plan_to_metadata(plan: ShareVideoScenePlan) -> dict[str, object]:
         "model": plan.model,
         "strategy": plan.strategy,
         "plan_hash": plan.plan_hash,
+        "visual_context": plan.visual_context,
         "scenes": [
             {
                 "index": scene.index,

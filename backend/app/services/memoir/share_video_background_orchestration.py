@@ -27,6 +27,7 @@ from app.services.memoir.share_video_custom_backgrounds import (
     normalize_share_video_background_source,
 )
 from app.services.memoir.share_video_scene_planner import (
+    SHARE_VIDEO_SCENE_MIN_DURATION_MS,
     ShareVideoScene,
     plan_share_video_background_scenes,
     scene_plan_to_metadata,
@@ -54,9 +55,11 @@ def effective_background_mode(background_mode: str, duration_ms: int) -> str:
         return SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI
     if background_mode == SHARE_VIDEO_BACKGROUND_MODE_SINGLE:
         return SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+    # Auto lets the scene planner decide how many images the content needs;
+    # only clips too short for two scenes skip planning.
     return (
         SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI
-        if duration_ms >= 20_000
+        if duration_ms >= 2 * SHARE_VIDEO_SCENE_MIN_DURATION_MS
         else SHARE_VIDEO_BACKGROUND_MODE_SINGLE
     )
 
@@ -208,6 +211,7 @@ async def prepare_share_video_background(
         first_asset_model: str | None = None
         generated_count = 0
         errors: list[str] = []
+        story_text = job.selected_text if len(plan.scenes) > 1 else ""
         for scene in plan.scenes:
             scene_info = ShareVideoSceneAssetMetadata.model_validate(_scene_metadata(scene))
             scene_source_text = _scene_source_text(job.selected_text, scene)
@@ -215,6 +219,8 @@ async def prepare_share_video_background(
                 asset = await get_or_generate_share_video_background(
                     scene_source_text,
                     background_style,
+                    story_text=story_text,
+                    visual_context=plan.visual_context if story_text else "",
                     usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError as exc:
