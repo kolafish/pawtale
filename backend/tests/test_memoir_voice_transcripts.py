@@ -1056,7 +1056,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
     assert "output" in response_schema["required"]
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
-    assert render_requests[0].title == expected_title
+    assert render_requests[0].hook_text == ""
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
@@ -1538,10 +1538,11 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         tmp_path / "share-videos",
     )
 
-    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
         assert source_path.read_bytes() == PNG_1X1
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(b"processed background jpg")
+        return 1080, 1440
 
     async def fail_ai_background_generation(_selected_text, _style_id):
         raise AssertionError("custom background should not call AI background generation")

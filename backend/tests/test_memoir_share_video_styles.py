@@ -119,6 +119,7 @@ async def test_uploaded_style_keeps_asset_identity_and_separate_ai_jobs(client, 
     async def process(source_path, target_path):
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(source_path.read_bytes())
+        return 8, 8
 
     monkeypatch.setattr(share_video_custom_backgrounds, "_process_background_image", process)
     text = "后来我们约起一起走。"

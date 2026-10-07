@@ -758,10 +758,10 @@ async def _prepare_audio(
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
         *input_args, "-i", str(request.source_audio_path),
         "-af", (
-            f"atrim=start={request.start_ms / 1000:.3f}:duration={body_seconds:.3f},asetpts=PTS-STARTPTS,"
+            f"atrim=start={request.start_ms / 1000:.3f}:duration={body_seconds:.3f},asetpts=PTS-STARTPTS,aformat=channel_layouts=mono,"
             # Light clean-up keeps the original voice while evening out phone recordings.
             "highpass=f=70,afftdn,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,"
-            f"adelay={round(delay_seconds * 1000)}:all=1,apad=whole_dur={total_seconds:.3f}"
+            f"adelay={round(delay_seconds * 1000)},apad=whole_dur={total_seconds:.3f}"
         ),
         "-t", f"{total_seconds:.3f}", "-ac", "1", "-c:a", "pcm_s16le", str(target_path),
     ])
