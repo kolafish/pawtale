@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "老余口述",
+  "navigationBarTitleText": "",
   "usingComponents": {
     "voice-session": "/components/voice-session/index",
     "story-tree": "/components/story-tree/index"
