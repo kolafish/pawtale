@@ -12,7 +12,6 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
 if POSTGRES_DATABASE_URL:
@@ -96,29 +95,35 @@ async def verified_postgres_schema(postgres_schema):
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_engine(verified_postgres_schema):
-    """Share a loop-safe engine across API requests and background sessions."""
-    # NullPool avoids reusing asyncpg connections across pytest-asyncio's per-test loops.
+    """Share one pooled engine across API requests and background sessions."""
+    # Tests run on the session event loop (pytest.ini), so pooled asyncpg
+    # connections stay on the loop that opened them.
     engine = create_async_engine(
         POSTGRES_DATABASE_URL,
-        poolclass=NullPool,
+        pool_size=5,
+        max_overflow=20,
+        # A cancelled request can return a closed connection to the pool;
+        # replace it on checkout instead of failing the next test's cleanup.
         pool_pre_ping=True,
     )
-    # Services that open their own sessions must use the same test database and
-    # cannot reuse pooled asyncpg connections from a previous test event loop.
+    # Services that open their own sessions must use the same test database.
     async_session_maker.configure(bind=engine)
     try:
-        await _truncate_postgres_tables(engine)
+        await _clear_postgres_tables(engine)
         yield engine
     finally:
         async_session_maker.configure(bind=app_engine)
         await engine.dispose()
 
 
-async def _truncate_postgres_tables(engine) -> None:
+async def _clear_postgres_tables(engine) -> None:
     register_models()
-    table_names = ", ".join(f'"{name}"' for name in Base.metadata.tables)
+    # DELETE with foreign-key triggers off is far cheaper than TRUNCATE on the
+    # nearly empty tables a test leaves behind.
     async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
+        await conn.execute(text("SET LOCAL session_replication_role = replica"))
+        raw = await conn.get_raw_connection()
+        await raw.driver_connection.execute("; ".join(f'DELETE FROM "{name}"' for name in Base.metadata.tables))
 
 
 @pytest_asyncio.fixture
@@ -133,7 +138,7 @@ async def test_db(test_engine):
         async with async_session() as session:
             yield session
     finally:
-        await _truncate_postgres_tables(test_engine)
+        await _clear_postgres_tables(test_engine)
 
 
 @pytest_asyncio.fixture
