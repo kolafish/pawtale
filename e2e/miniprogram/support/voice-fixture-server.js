@@ -14,6 +14,21 @@ function timestamp() {
   return "2026-08-25T00:00:00Z";
 }
 
+function voiceConsentAudit({ version, agreed = true, source = "miniprogram", source_session_id = null, metadata_json = {} }) {
+  return {
+    id: "e2e-consent",
+    user_id: "e2e-user",
+    consent_type: "voice_authorization",
+    version,
+    agreed,
+    source,
+    source_session_id,
+    metadata_json,
+    created_at: timestamp(),
+    updated_at: timestamp(),
+  };
+}
+
 function initialAssistantMessage(sessionId = FIXTURE_SESSION_ID) {
   return {
     id: "e2e-opening-message",
@@ -221,22 +236,15 @@ function createVoiceFixtureServer() {
       respond(response, 200, sessionDetail());
       return;
     }
-    if (
-      request.method === "POST"
-      && url.pathname === "/api/mobile/memoir/voice-authorization-consent"
-    ) {
+    if (url.pathname === "/api/mobile/memoir/voice-authorization-consent" && request.method === "GET") {
       respond(response, 200, {
-        id: "e2e-consent",
-        user_id: "e2e-user",
-        consent_type: "voice_authorization",
-        version: body.version,
-        agreed: body.agreed,
-        source: body.source,
-        source_session_id: body.source_session_id || null,
-        metadata_json: body.metadata_json || {},
-        created_at: timestamp(),
-        updated_at: timestamp(),
+        has_current_consent: true,
+        consent: voiceConsentAudit({ version: url.searchParams.get("version") }),
       });
+      return;
+    }
+    if (url.pathname === "/api/mobile/memoir/voice-authorization-consent" && request.method === "POST") {
+      respond(response, 200, voiceConsentAudit(body));
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/audit/events") {

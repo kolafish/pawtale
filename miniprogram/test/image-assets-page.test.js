@@ -123,6 +123,8 @@ test("image assets page reuses its cards for one story section and its videos", 
         utterance_id: "utterance-1",
         count: 2,
         job_ids: ["video-2", "video-1"],
+        current_job_ids: ["video-2"],
+        job_titles: { "video-2": "外婆家的夏天", "video-1": "院子里的蝉鸣" },
       }],
     }),
     getMemoirShareVideoJob: async (id) => {
@@ -136,6 +138,7 @@ test("image assets page reuses its cards for one story section and its videos", 
   });
   global.wx = {
     setNavigationBarTitle({ title }) { navigationTitles.push(title); },
+    navigateTo({ url }) { navigationTitles.push(url); },
   };
   const context = pageContext(page);
 
@@ -151,7 +154,12 @@ test("image assets page reuses its cards for one story section and its videos", 
   assert.equal(context.data.isStoryMaterialView, true);
   assert.deepEqual(context.data.items.map((item) => item.id), ["asset-section"]);
   assert.deepEqual(context.data.videos.map((item) => item.id), ["video-2", "video-1"]);
+  assert.deepEqual(context.data.videos.map((item) => item.title), ["外婆家的夏天", "院子里的蝉鸣"]);
+  assert.deepEqual(context.data.videos.map((item) => item.isCurrent), [true, false]);
   assert.deepEqual(navigationTitles, ["外婆家的夏天"]);
+
+  page.remakeVideo.call(context, { currentTarget: { dataset: { id: "video-1" } } });
+  assert.equal(navigationTitles[1], "/pages/transcript-media/index?id=utterance-1");
 
   await page.previewVideo.call(context, {
     currentTarget: { dataset: { id: "video-2" } },
@@ -159,9 +167,33 @@ test("image assets page reuses its cards for one story section and its videos", 
   assert.deepEqual(videoJobs, ["video-2"]);
   assert.deepEqual(videoDownloads, ["video-2"]);
   assert.equal(context.data.videoPreviewPath, "/tmp/video-2.mp4");
+  assert.equal(context.data.videoPreviewTitle, "外婆家的夏天");
 
   page.closeVideoPreview.call(context);
   assert.equal(context.data.videoPreviewPath, "");
+});
+
+test("story video list keeps a numbered title for older snapshots", async () => {
+  const { page } = loadImageAssetsPage({
+    getMemoirBookSnapshot: async () => ({
+      identity: { active_project: { id: "project-1", title: "我的故事" } },
+      plan: { chapters: [] },
+      image_assets: { items: [] },
+      share_video_counts: [{
+        utterance_id: "utterance-1",
+        count: 1,
+        job_ids: ["video-1"],
+        current_job_ids: ["video-1"],
+      }],
+    }),
+  });
+  global.wx = { setNavigationBarTitle() {} };
+  const context = pageContext(page);
+
+  page.onLoad.call(context, { projectId: "project-1", scope: "unassigned" });
+  await page.onShow.call(context);
+
+  assert.deepEqual(context.data.videos.map((item) => item.title), ["分享视频 1"]);
 });
 
 test("image assets page batches real thumbnails and previews the cached thumbnail", async () => {
@@ -346,6 +378,29 @@ test("image assets page reveals secondary editing on demand and tracks caption c
     currentTarget: { dataset: { id: "asset-1" } },
     detail: { value: " 原说明 " },
   });
+  assert.equal(context.data.items[0].captionChanged, false);
+});
+
+test("image assets page keeps an unsaved caption through placement and clears it after saving", async () => {
+  const asset = imageAsset("asset-1", { caption: "原说明" });
+  const { page } = loadImageAssetsPage({
+    createMemoirBookImagePlacement: async () => ({ ...asset, include_in_book: true }),
+    updateMemoirImageAsset: async (_projectId, _assetId, input) => ({ ...asset, caption: input.caption }),
+  });
+  global.wx = { showToast() {} };
+  const context = pageContext(page, {
+    projectId: "project-1",
+    items: [imageAssetView(asset)],
+  });
+  const event = { currentTarget: { dataset: { id: "asset-1" } } };
+
+  context.onCaptionInput({ ...event, detail: { value: "新说明" } });
+  await context.placeNearSource(event);
+  assert.equal(context.data.items[0].captionDraft, "新说明");
+  assert.equal(context.data.items[0].captionChanged, true);
+
+  await context.saveCaption(event);
+  assert.equal(context.data.items[0].captionDraft, "新说明");
   assert.equal(context.data.items[0].captionChanged, false);
 });
 

@@ -1,16 +1,19 @@
 import base64
 import asyncio
 import json
-import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
+from unittest.mock import AsyncMock
 
+from PIL import Image
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.services.ai_base import AITextServiceBase
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -39,6 +42,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
+from app.services.memoir import share_video_alignment
 from app.services.memoir import share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs
 from app.services.memoir import share_video_rendering
@@ -66,6 +70,14 @@ PNG_1X1 = base64.b64decode(
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_optional_video_title_ai(monkeypatch):
+    async def no_suggested_title(selected_text, *, ai_model):
+        return None, ""
+
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", no_suggested_title)
+
+
 async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
     lease = await share_video_jobs.claim_share_video_job(
         test_db,
@@ -74,13 +86,16 @@ async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
         max_attempts=3,
     )
     assert lease is not None
-    return await share_video_jobs.run_share_video_job_with_session(
+    completed = await share_video_jobs.run_share_video_job_with_session(
         test_db,
         lease,
         lease_seconds=60,
         max_attempts=3,
         retry_seconds=1,
     )
+    # The test client reuses this session across requests; production requests use fresh sessions.
+    test_db.expire_all()
+    return completed
 
 
 class FakeAIClient(AITextServiceBase):
@@ -415,7 +430,17 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
 
 
-async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_text(client, test_db):
+async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_text(
+    client, test_db, monkeypatch
+):
+    monkeypatch.setattr(
+        share_video_alignment,
+        "get_settings",
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
+    )
     raw_text = "是我们心不平的吧。我就带你回去。"
     edited_text = "说我们的心不平的嘛。我就带你回去。"
     created = await create_test_voice_transcript(client, test_db, text=raw_text)
@@ -477,6 +502,7 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert data["duration_ms"] == 12000
     assert data["alignment_strategy"] == "provider_words"
     assert data["alignment_confidence"] >= 0.7
+    assert data["ai_background_enabled"] is True
     assert data["default_background_source"] == "ai"
     assert [source["value"] for source in data["background_sources"]] == ["ai", "custom", "classic"]
     assert data["default_background_mode"] == "auto"
@@ -496,6 +522,41 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment is not None
     assert alignment.text_hash == data["text_hash"]
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
+
+
+@pytest.mark.parametrize(
+    ("enabled", "api_key"),
+    [(False, "test-key"), (True, "")],
+)
+async def test_share_video_context_hides_unavailable_ai_and_creation_rejects_it(
+    client, test_db, monkeypatch, enabled, api_key
+):
+    settings = SimpleNamespace(
+        memoir_share_video_ai_background_enabled=enabled,
+        volc_ark_api_key=api_key,
+    )
+    monkeypatch.setattr(share_video_alignment, "get_settings", lambda: settings)
+    monkeypatch.setattr(share_video_jobs, "get_settings", lambda: settings)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video"
+
+    context = (await client.get(f"{url}/context")).json()
+    assert context["ai_background_enabled"] is False
+    assert context["default_background_source"] == "classic"
+    assert [source["value"] for source in context["background_sources"]] == ["custom", "classic"]
+
+    rejected = await client.post(
+        f"{url}/jobs",
+        json={"start_char": 0, "end_char": end_char, "background_source": "ai"},
+    )
+    assert rejected.status_code == 400
+    created_job = await client.post(
+        f"{url}/jobs", json={"start_char": 0, "end_char": end_char}
+    )
+    assert created_job.status_code == 201
+    assert created_job.json()["background_source"] == "classic"
 
 
 async def test_share_video_context_returns_latest_job_only_for_current_text(client, test_db):
@@ -541,49 +602,17 @@ async def test_share_video_context_returns_latest_job_only_for_current_text(clie
     assert changed_context.json()["latest_job_id"] is None
 
 
-def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path):
+def test_share_video_captions_use_memoir_page_layout_and_packaged_font():
     text = "对孙女的偏爱与心平之辩"
-    request = share_video_rendering.ShareVideoRenderRequest(
-        source_audio_path=tmp_path / "source.wav",
-        source_audio_mime_type="audio/wav",
-        target_path=tmp_path / "share.mp4",
-        selected_text=text,
-        char_timings=[
-            {"start_ms": index * 100, "end_ms": (index + 1) * 100}
-            for index, _char in enumerate(text)
-        ],
-        start_ms=0,
-        end_ms=len(text) * 100,
-    )
+    timings = [{"start_ms": index * 100, "end_ms": (index + 1) * 100} for index, _char in enumerate(text)]
 
-    subtitle_content = share_video_rendering._subtitle_file_content(request)
-    subtitle_plain_text = re.sub(r"\{\\kf\d+\}", "", subtitle_content)
-    font_dir = share_video_rendering._share_video_font_dir()
-    filter_argument = share_video_rendering._subtitle_filter_argument(tmp_path / "subtitles.ass")
-    video_filter_argument = share_video_rendering._video_filter_argument(tmp_path / "subtitles.ass")
+    pages = share_video_rendering._caption_pages(text, timings, len(text) * 100)
 
-    assert f"Style: Quote,{share_video_rendering._SHARE_VIDEO_FONT_NAME}," in subtitle_content
-    assert "回忆录访谈 · 原声摘录" in subtitle_content
-    assert "口述片段" in subtitle_content
-    assert r"对孙女的偏爱\N与心平之辩" in subtitle_plain_text
-    assert subtitle_content.count(r"{\kf") < len(text)
-    assert (font_dir / share_video_rendering._SHARE_VIDEO_FONT_FILE).is_file()
-    assert ":fontsdir='" in filter_argument
-    assert str(font_dir) in filter_argument
-    assert video_filter_argument == filter_argument
-    image_video_filter = share_video_rendering._video_filter_argument(
-        tmp_path / "subtitles.ass",
-        has_background_image=True,
-    )
-    assert "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720" in image_video_filter
-    assert ":fontsdir='" in image_video_filter
-    branded_filter = share_video_rendering._single_background_filter_complex(
-        tmp_path / "subtitles.ass",
-        has_background_image=True,
-    )
-    assert "[0:v]scale=1280:720" in branded_filter
-    assert "[captioned][2:v]overlay=x=W-w-38:y=H-h-34" in branded_filter
-    assert branded_filter.endswith("[vout]")
+    assert len(pages) == 1
+    assert [text[line.start:line.end] for line in pages[0].lines] == ["对孙女的偏爱", "与心平之辩"]
+    assert (
+        share_video_rendering._SHARE_VIDEO_FONT_DIR / share_video_rendering._SHARE_VIDEO_FONT_FILE
+    ).is_file()
 
 
 def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
@@ -614,31 +643,18 @@ def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
     assert all(fragment[0] not in "，,、。！？!?；;" for fragment in line_texts)
 
 
-def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
-    segments = [
-        share_video_rendering.ShareVideoBackgroundSegment(
-            image_path=tmp_path / "scene-1.png",
-            start_ms=0,
-            end_ms=12_000,
-        ),
-        share_video_rendering.ShareVideoBackgroundSegment(
-            image_path=tmp_path / "scene-2.png",
-            start_ms=12_000,
-            end_ms=24_000,
-        ),
-    ]
+def test_share_video_long_scenes_become_several_moving_shots(tmp_path):
+    first, second = tmp_path / "scene-1.png", tmp_path / "scene-2.png"
+    for path in (first, second):
+        Image.new("RGB", (900, 1600), (120, 110, 90)).save(path)
 
-    filter_argument = share_video_rendering._multi_background_filter_complex(
-        segments,
-        tmp_path / "subtitles.ass",
-        use_xfade=False,
-    )
+    shots = share_video_rendering._picture_shots([(first, 0.0, 12.0), (second, 12.0, 15.0)])
 
-    assert "xfade=" not in filter_argument
-    assert "concat=n=2:v=1:a=0" in filter_argument
-    assert "[concatbg]" in filter_argument
-    assert "[captioned][3:v]overlay=x=W-w-38:y=H-h-34" in filter_argument
-    assert "[vout]" in filter_argument
+    assert [(shot.start, shot.end) for shot in shots] == [(0.0, 6.0), (6.0, 12.0), (12.0, 15.0)]
+    assert len({shot.move for shot in shots}) == 3
+    assert shots[0].canvas is shots[1].canvas
+    frame = share_video_rendering._shots_visual(shots)(11.9)
+    assert frame.size == (share_video_rendering._VIDEO_WIDTH, share_video_rendering._VIDEO_HEIGHT)
 
 
 def test_share_video_background_prompts_cover_default_styles():
@@ -695,10 +711,10 @@ def test_share_video_background_prompts_cover_default_styles():
     assert "二十世纪中国老连环画" in storybook.prompt
     assert "storybook" not in [option["value"] for option in options]
     for prompt in (watercolor, pencil, ink_paper, gouache, old_album, storybook):
-        assert "画面主体主要安排在左侧" in prompt.prompt
-        assert "画面中部和右侧保留大面积" in prompt.prompt
+        assert "画面上方约六成" in prompt.prompt
+        assert "下方约三分之一" in prompt.prompt
         assert "不出现文字" in prompt.prompt
-        assert "横版 16:9" in prompt.prompt
+        assert "竖版 9:16" in prompt.prompt
         assert "不要因为这是回忆录内容" not in prompt.prompt
 
     long_prompt = share_video_backgrounds.build_share_video_background_prompt(
@@ -707,6 +723,20 @@ def test_share_video_background_prompts_cover_default_styles():
     )
     assert len(long_prompt.content) == share_video_backgrounds.SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS + 3
     assert long_prompt.content.endswith("...")
+
+
+def test_share_video_background_prompt_prioritizes_spoken_scene_details():
+    spoken_text = "小时候在老房子的院子里，爷爷摘了一朵栀子花送给我。"
+
+    prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
+
+    assert prompt.template_version == "memoir-share-video-background-v4"
+    assert spoken_text in prompt.prompt
+    assert "一个具体、可见的回忆瞬间" in prompt.prompt
+    assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
+    assert "不要用泛泛的漂亮风景代替讲述的场景" in prompt.prompt
+    assert "原文没有说明的年代、地点、人物身份或生活细节不要猜测" in prompt.prompt
+    assert "下方约三分之一" in prompt.prompt
 
 
 def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation():
@@ -821,11 +851,12 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     process_calls: list[tuple[Path, Path]] = []
 
-    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
         process_calls.append((source_path, target_path))
         assert source_path.read_bytes() == PNG_1X1
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(b"processed background jpg")
+        return 1080, 1440
 
     monkeypatch.setattr(
         share_video_custom_backgrounds,
@@ -854,8 +885,8 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     assert payload["status"] == "ready"
     assert payload["preview_url"] == f"/api/mobile/memoir/projects/{project_id}/image-assets/{payload['id']}/file"
     assert payload["mime_type"] == "image/jpeg"
-    assert payload["width"] == 1280
-    assert payload["height"] == 720
+    assert payload["width"] == 1080
+    assert payload["height"] == 1440
     assert payload["processing_preset"] == "memoir_soft"
     assert payload["original_mime_type"] == "image/png"
     assert payload["original_size_bytes"] == len(PNG_1X1)
@@ -869,7 +900,7 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     assert asset.provider == "user_upload"
     assert asset.metadata_json["share_video_background_source"] == "custom_upload"
     assert asset.metadata_json["original_storage_path"].endswith("/original.png")
-    assert asset.metadata_json["processing_json"]["target_width"] == 1280
+    assert asset.metadata_json["processing_json"]["fit"] == "keep_aspect"
 
     preview_response = await client.get(payload["preview_url"])
 
@@ -936,7 +967,10 @@ async def test_share_video_background_generation_caches_provider_result(tmp_path
     assert len(calls) == 1
 
 
-async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("suggested_title", ["外婆家的冬天", None])
+async def test_mobile_memoir_creates_and_downloads_share_video_job(
+    client, test_db, tmp_path, monkeypatch, suggested_title,
+):
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
         tmp_path / "share-videos",
@@ -962,7 +996,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         ),
     )
 
-    async def fail_background_generation(_selected_text, _style_id):
+    async def fail_background_generation(_selected_text, _style_id, *, usage_context=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -973,6 +1007,16 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     text = "我小时候住在外婆家。后来我去县城读书。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     end_char = text.index("。") + 1
+    fallback_title = "我小时候住在外婆家"
+    expected_title = suggested_title or fallback_title
+
+    async def suggest_title(selected_text, *, ai_model):
+        assert selected_text == text[:end_char]
+        if suggested_title is None:
+            raise RuntimeError("title provider unavailable")
+        return suggested_title, ""
+
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", suggest_title)
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
@@ -982,6 +1026,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert response.status_code == 201
     created_job = response.json()
     assert created_job["status"] == "pending"
+    assert created_job["title"] == fallback_title
     assert created_job["output"] is None
     job_id = created_job["id"]
     assert await _claim_and_run_share_video_job(test_db, job_id) is True
@@ -990,6 +1035,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     detail = detail_response.json()
     assert detail is not None
     assert detail["status"] == "succeeded"
+    assert detail["title"] == expected_title
     assert detail["selected_text"] == "我小时候住在外婆家。"
     assert detail["duration_ms"] >= 3000
     assert detail["background_style"] == "ink_paper"
@@ -1010,18 +1056,176 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert "output" in response_schema["required"]
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
+    assert render_requests[0].hook_text == ""
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
     assert stored_job is not None
     assert stored_job.output is not None
     assert stored_job.output.storage_path
+    project_id, user_id = stored_job.project_id, stored_job.user_id
+    counts = await share_video_jobs.list_completed_share_video_counts(
+        test_db,
+        project_id=project_id,
+        user_id=user_id,
+    )
+    assert counts[0].job_titles[job_id] == expected_title
 
     download_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
 
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
+    assert unquote(download_response.headers["content-disposition"]).endswith(f"{expected_title}.mp4")
     assert download_response.content == b"fake mp4"
+
+    if suggested_title is not None:
+        # Videos created before titles were stored still have a usable name.
+        stored_job.metadata_json = {
+            key: value for key, value in stored_job.metadata_json.items()
+            if key not in {"title", "title_attempted"}
+        }
+        await test_db.commit()
+        test_db.expire_all()
+        old_job = (await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")).json()
+        assert old_job["title"] == fallback_title
+        old_counts = await share_video_jobs.list_completed_share_video_counts(
+            test_db, project_id=project_id, user_id=user_id,
+        )
+        assert old_counts[0].job_titles[job_id] == fallback_title
+        old_download = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
+        assert unquote(old_download.headers["content-disposition"]).endswith(f"{fallback_title}.mp4")
+
+    retry_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": end_char, "background_style": "ink_paper"},
+    )
+    assert retry_response.status_code == 201
+    assert retry_response.json()["id"] != job_id
+
+
+async def test_share_video_dedupes_running_job_after_background_progress(
+    client, test_db, monkeypatch
+):
+    monkeypatch.setattr(
+        share_video_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
+    )
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    request = {
+        "start_char": 0,
+        "end_char": end_char,
+        "background_source": "ai",
+    }
+    first = await client.post(url, json=request)
+    assert first.status_code == 201
+    job_id = first.json()["id"]
+    assert first.json()["background_status"] == "pending"
+    assert await share_video_jobs.claim_share_video_job(
+        test_db, job_id, lease_seconds=60, max_attempts=3
+    ) is not None
+    job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    assert job is not None
+    job.metadata_json = {
+        **job.metadata_json,
+        "background_status": "planning",
+        "background_effective_mode": "smart_multi",
+    }
+    await test_db.commit()
+
+    duplicate = await client.post(url, json=request)
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == job_id
+    assert duplicate.json()["status"] == "running"
+
+    different_style = await client.post(url, json={**request, "background_style": "ink_paper"})
+    assert different_style.status_code == 201
+    assert different_style.json()["id"] != job_id
+
+
+async def test_share_video_reuses_completed_file_but_regenerates_missing_file(
+    client, test_db, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "share-videos")
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"complete mp4")
+
+    monkeypatch.setattr(share_video_rendering, "render_share_video_clip", fake_render_share_video_clip)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    request = {
+        "start_char": 0,
+        "end_char": text.index("。") + 1,
+        "background_source": "classic",
+    }
+    first = await client.post(url, json=request)
+    assert first.status_code == 201
+    job_id = first.json()["id"]
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
+
+    reused = await client.post(url, json=request)
+    assert reused.status_code == 201
+    assert reused.json()["id"] == job_id
+    assert reused.json()["status"] == "succeeded"
+
+    job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    assert job is not None
+    share_video_jobs.share_video_file_path(job).unlink()
+    regenerated = await client.post(url, json=request)
+    assert regenerated.status_code == 201
+    assert regenerated.json()["id"] != job_id
+    assert regenerated.json()["status"] == "pending"
+
+
+async def test_share_video_snapshot_marks_old_transcript_and_alignment(
+    client, test_db, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "share-videos")
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"complete mp4")
+
+    monkeypatch.setattr(share_video_rendering, "render_share_video_clip", fake_render_share_video_clip)
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": text.index("。") + 1,
+            "background_source": "classic",
+        },
+    )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
+
+    async def current_job_ids():
+        snapshot = (await client.get("/api/mobile/memoir/book-snapshot")).json()
+        return snapshot["share_video_counts"][0]["current_job_ids"]
+
+    assert await current_job_ids() == [job_id]
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    assert utterance is not None
+    original_edited_text = utterance.transcript_edited
+    utterance.transcript_edited = f"{text}我还记得那棵树。"
+    await test_db.commit()
+    assert await current_job_ids() == []
+
+    utterance.transcript_edited = original_edited_text
+    utterance.provider_payload_json = {"revised_alignment": True}
+    await test_db.commit()
+    assert await current_job_ids() == []
 
 
 async def test_share_video_worker_retries_and_removes_partial_output(client, test_db, tmp_path, monkeypatch):
@@ -1113,6 +1317,7 @@ async def test_share_video_worker_retries_and_removes_partial_output(client, tes
     assert target_path.read_bytes() == b"final mp4"
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_deadline_fails_without_retry(
     client,
     test_db,
@@ -1187,6 +1392,7 @@ async def test_share_video_worker_deadline_fails_without_retry(
     assert not target_path.exists()
 
 
+@pytest.mark.db_independent
 async def test_share_video_worker_recovers_when_completion_write_stalls(
     client,
     test_db,
@@ -1332,10 +1538,11 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         tmp_path / "share-videos",
     )
 
-    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
         assert source_path.read_bytes() == PNG_1X1
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(b"processed background jpg")
+        return 1080, 1440
 
     async def fail_ai_background_generation(_selected_text, _style_id):
         raise AssertionError("custom background should not call AI background generation")
@@ -1527,7 +1734,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     project = await test_db.get(Project, created["session"]["project_id"])
-    project.metadata_json = {"ai_model": "claude-opus-4-8"}
+    project.metadata_json = {"ai_model": DEFAULT_AI_TEXT_MODEL}
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
     )
@@ -1545,7 +1752,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         assert selected_text == text
         assert duration_ms == 36_000
         assert len(char_timings) == len(text)
-        assert ai_model == "claude-opus-4-8"
+        assert ai_model == DEFAULT_AI_TEXT_MODEL
         return share_video_scene_planner.ShareVideoScenePlan(
             provider="fake_llm",
             model="fake-scene-planner",
@@ -1583,7 +1790,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_dir = tmp_path / "backgrounds"
     image_dir.mkdir()
 
-    async def fake_background(selected_text, style_id):
+    async def fake_background(selected_text, style_id, *, usage_context=None):
         image_calls.append((selected_text, style_id))
         image_path = image_dir / f"scene-{len(image_calls)}.png"
         image_path.write_bytes(b"fake image")
@@ -1726,6 +1933,7 @@ async def test_share_video_worker_reclaims_expired_lease_without_get_side_effect
     assert stored_job.lease_token == reclaimed.token
 
 
+@pytest.mark.db_independent
 async def test_postgres_share_video_claim_skips_locked_queue_head(client, test_db):
     if test_db.get_bind().dialect.name != "postgresql":
         pytest.skip("requires PostgreSQL row-level locking")
@@ -1829,6 +2037,14 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(
         client,
@@ -1910,6 +2126,14 @@ async def test_mobile_memoir_recovers_long_unfinalized_audio_in_segments(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.assert_ai_credit_available",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage",
+        AsyncMock(),
+    )
     monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.ASR_RECOVERY_PCM_SEGMENT_BYTES", 32000)
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(
@@ -2463,7 +2687,7 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup",
-        json={"ai_model": "deepseek", "transcript_polish_level": "high"},
+        json={"ai_model": DEFAULT_AI_TEXT_MODEL, "transcript_polish_level": "high"},
     )
 
     assert response.status_code == 200
@@ -2494,7 +2718,7 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     )
     assert topic_map_job is not None
     assert topic_map_job.payload_json["material_ids"] == [created["utterance_id"]]
-    assert topic_map_job.payload_json["ai_model"] == "deepseek"
+    assert topic_map_job.payload_json["ai_model"] == DEFAULT_AI_TEXT_MODEL
 
 
 async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, test_db, monkeypatch):
@@ -2504,7 +2728,7 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
         text="他是我的儿子，名字叫刘凯峰，今年10岁。",
     )
     project = await test_db.get(Project, created["session"]["project_id"])
-    project.metadata_json = {"ai_model": "claude-opus-4-8"}
+    project.metadata_json = {"ai_model": DEFAULT_AI_TEXT_MODEL}
     await test_db.commit()
     ai_client = CapturingAIClient(
         json.dumps(
@@ -2565,7 +2789,7 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     assert data["requires_confirmation"] is True
     assert data["provider"] == "fake-ai"
     assert data["model"] == "fake-cleaner"
-    assert requested_models == ["claude-opus-4-8"]
+    assert requested_models == [DEFAULT_AI_TEXT_MODEL]
     assert ai_client.call_kwargs["timeout"] == 180.0
     assert "只能改用户修正指令明确指出" in ai_client.prompt
     assert "passage 表示指定片段改写" in ai_client.prompt

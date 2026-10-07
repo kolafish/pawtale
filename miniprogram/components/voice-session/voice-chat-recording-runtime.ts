@@ -19,10 +19,7 @@ import {
   type MemoirStreamingAsrClientEvent,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
-import {
-  createMemoirVoiceNoAnswerPrompt,
-  stopMemoirVoiceSession,
-} from "../../services/memoir-voice-session-api";
+import { createMemoirVoiceNoAnswerPrompt, stopMemoirVoiceSession } from "../../services/memoir-voice-session-api";
 import {
   canRequestFollowUp,
   latestPersistedAssistantMessageId,
@@ -94,6 +91,7 @@ export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   runtime(): VoiceSessionRuntime;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
   exitSession(detail: VoiceSessionExit): void;
+  exitFailedSession(): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
@@ -401,12 +399,21 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     this.cancelFollowUpTTS();
     applyVoiceChatDataPatch(this, finishSessionStartPatch(this.data.recording));
     try {
+      let saved: MemoirVoiceSessionDetail | null;
       if (this.runtime().voiceStreaming.hasClient()) {
         await this.runtime().voiceStreaming.finishSession();
+        saved = await this.refreshVoiceSessionSnapshot();
       } else {
-        await stopMemoirVoiceSession(this.data.voiceSessionId);
+        saved = await this.refreshVoiceSessionSnapshot();
+        if (saved?.session.status === "created") {
+          await stopMemoirVoiceSession(this.data.voiceSessionId);
+          saved = await this.refreshVoiceSessionSnapshot();
+        }
       }
-      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");
         return;
@@ -416,9 +423,20 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
       this.exitSession(this.data.sessionGoal === "book_completion"
         ? { destination: "completion", explainSaved: true }
-        : { destination: "story", projectId: this.data.projectId, narrationSaved: saved.utterances.length > 0, finished: true });
+        : {
+          destination: "story",
+          projectId: this.data.projectId,
+          narrationSaved: saved.utterances.some((utterance) => Boolean(
+            utterance.transcript_edited.trim() || utterance.transcript_raw.trim(),
+          )),
+          finished: true,
+        });
     } catch (error) {
-      await this.refreshVoiceSessionSnapshot();
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
       applyVoiceChatDataPatch(this, { finishingSession: false });

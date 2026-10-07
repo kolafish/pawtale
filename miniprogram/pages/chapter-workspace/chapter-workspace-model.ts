@@ -59,10 +59,10 @@ export type ChapterWorkspaceOperationKind =
   | "regenerate_sections"
   | "merge_sections"
   | "rename_section"
+  | "chapter_settings"
   | "move_material"
   | "confirm_issue"
   | "save_draft_section"
-  | "confirm_chapter"
   | "rewrite_chapter";
 
 export type ChapterWorkspaceAudioPhase = "idle" | "preparing" | "playing";
@@ -134,7 +134,7 @@ export function chapterPreparationView(
       : "";
     return {
       title: job.operation === "rewrite"
-        ? "正在更新有变化的故事"
+        ? "正在更新相关故事"
         : "正在逐个故事生成正文",
       detail: `${job.operation === "rewrite" ? "已更新" : "已完成"} ${job.completed_section_count}/${job.total_section_count} 个故事${job.current_section_title ? ` · ${job.current_section_title}` : ""}${resumed}${modelDetail}`,
       progress,
@@ -201,7 +201,7 @@ export function sectionRegenerationView(
   if (job.stage === "saving") {
     return {
       title: "正在保存新的故事结构",
-      detail: `全部回忆已归类，正在进行一致性检查${modelDetail}`,
+      detail: `正在检查并保存新的故事结构${modelDetail}`,
       progress: 0,
       progressMode: "indeterminate",
     };
@@ -268,7 +268,6 @@ export interface ChapterWorkspacePageData {
   sectionViews: ChapterSectionView[];
   retainedDraftSectionCount: number;
   expandedSectionIds: Record<string, boolean>;
-  canConfirmChapter: boolean;
   operationKind: ChapterWorkspaceOperationKind;
   operationTargetId: string;
   chapterPreparationJob: MemoirChapterPreparationJob | null;

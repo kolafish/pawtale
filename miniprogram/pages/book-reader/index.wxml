@@ -27,6 +27,7 @@
         </text>
         <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
         <view
+          wx:if="{{!readerShared}}"
           class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookViewingHistoricalVersion}}"
@@ -46,6 +47,7 @@
       <book-tts-player
         title="{{readerMode === 'chapter' ? '整章朗读' : '全书朗读'}}"
         phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
+        preparing-text="{{bookTTSPreparingText || ''}}"
         progress="{{bookTTSProgressPercent}}"
         spoken-text="{{readerMode === 'chapter' ? '' : bookTTSSpokenText}}"
         current-text="{{readerMode === 'chapter' ? '' : bookTTSCurrentText}}"
@@ -74,14 +76,17 @@
             <text class="toc-chevron {{chapter.expanded ? 'is-expanded' : ''}}">›</text>
           </view>
           <view wx:if="{{chapter.expanded && chapter.sections.length}}" class="toc-section-list">
+            <view class="toc-section-row toc-chapter-action ui-pressable" data-chapter-id="{{chapter.chapterId}}" aria-role="button" bindtap="openReaderChapter">
+              <text class="toc-section-title">阅读本章</text>
+            </view>
             <view
               wx:for="{{chapter.sections}}"
               wx:key="id"
               wx:for-item="section"
               wx:for-index="sectionIndex"
               class="toc-section-row ui-pressable"
-              data-chapter-index="{{chapterIndex}}"
-              data-section-index="{{sectionIndex}}"
+              data-chapter-id="{{chapter.chapterId}}"
+              data-section-id="{{section.id}}"
               aria-role="button"
               aria-label="跳到 {{section.title}}"
               bindtap="openReaderSection"
@@ -94,13 +99,12 @@
       </view>
     </view>
 
-    <view wx:if="{{bookPreviewChapters.length}}" class="chapter-list">
+    <view wx:if="{{bookPreviewChapters.length}}" id="reader-body" class="chapter-list">
       <view
         wx:for="{{bookPreviewChapters}}"
         wx:key="id"
         wx:for-item="chapter"
         wx:for-index="chapterIndex"
-        id="reader-chapter-{{chapterIndex}}"
         class="chapter-block ui-card {{readerMode === 'chapter' ? 'chapter-preview-block' : ''}}"
       >
         <block wx:if="{{readerMode === 'book'}}">
@@ -113,7 +117,7 @@
             wx:key="id"
             wx:for-item="section"
             wx:for-index="sectionIndex"
-            id="reader-section-{{chapterIndex}}-{{sectionIndex}}"
+            id="reader-section-{{sectionIndex}}"
             class="reader-small-section"
           >
             <text wx:if="{{section.title !== chapter.title}}" class="small-section-title">{{section.title}}</text>
@@ -139,9 +143,15 @@
       </view>
     </view>
 
-    <view wx:else class="reader-section ui-card">
+    <view wx:else id="reader-body" class="reader-section ui-card">
       <text class="section-label">正文</text>
       <text class="book-content" selectable>{{bookContent}}</text>
+    </view>
+
+    <view wx:if="{{readerMode === 'book' && readerChapterTotal > 1}}" class="reader-pagination">
+      <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === 0}}" bindtap="previousReaderChapter">上一{{bookPreviewChapters.length ? '章' : '页'}}</view>
+      <text class="reader-page-count">{{readerChapterIndex + 1}} / {{readerChapterTotal}}</text>
+      <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === readerChapterTotal - 1}}" bindtap="nextReaderChapter">下一{{bookPreviewChapters.length ? '章' : '页'}}</view>
     </view>
 
     <view class="reader-top-action-shell">

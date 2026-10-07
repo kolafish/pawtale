@@ -94,7 +94,11 @@ def completion_issue_brief(
         existing_material=tuple(
             sorted(
                 set(
-                    issue.related_material_ids_json
+                    (
+                        issue.related_material_ids_json
+                        if issue.scope == "chapter"
+                        else []
+                    )
                     if related_material_refs is None
                     else related_material_refs
                 )

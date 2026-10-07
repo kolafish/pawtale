@@ -47,21 +47,49 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _brief_text(text: str, *, max_chars: int) -> str:
+def brief_text(text: str, *, max_chars: int) -> str:
     normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
     if len(normalized) <= max_chars:
         return normalized
-    return normalized[:max_chars].rstrip("，。；、,. ") + "。"
+    # Keep the source sentence ending instead of inventing one after a hard cut.
+    last_end = max(normalized.rfind(mark, 0, max_chars) for mark in "。！？!?")
+    return normalized[: last_end + 1] if last_end >= 0 else ""
 
 
-def _first_sentence(text: str, *, max_chars: int) -> str:
+def first_sentence(text: str, *, max_chars: int) -> str:
     normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
     if not normalized:
         return ""
     for index, char in enumerate(normalized):
         if char in "。！？!?":
-            return _brief_text(normalized[: index + 1], max_chars=max_chars)
-    return _brief_text(normalized, max_chars=max_chars)
+            return brief_text(normalized[: index + 1], max_chars=max_chars)
+    return brief_text(normalized, max_chars=max_chars)
+
+
+def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
+    quotes = deepcopy(_list(chapter.get("pull_quotes")))
+    source_quotes = {
+        _safe_str(_dict(ref).get("utterance_id")): " ".join(_safe_str(_dict(ref).get("quote")).split())
+        for ref in _list(chapter.get("source_refs"))
+    }
+    for raw_quote in list(quotes):
+        quote = _dict(raw_quote)
+        if quote.get("source") != "original_quote":
+            continue
+        text = _safe_str(quote.get("text"))
+        for source_id in _list(quote.get("source_ref_ids")):
+            source = source_quotes.get(_safe_str(source_id), "")
+            if len(source) <= 80 or text in source:
+                continue
+            if text != source[:80].rstrip("，。；、,. ") + "。":
+                continue
+            replacement = brief_text(source, max_chars=80)
+            if replacement:
+                quote["text"] = replacement
+            else:
+                quotes.remove(raw_quote)
+            break
+    return quotes
 
 
 def _strip_title_wrappers(title: str) -> str:
@@ -133,7 +161,7 @@ def expanded_afterword() -> str:
 
 def fallback_chapter_intro(title: str, content: str) -> str:
     topic = short_topic(title)
-    excerpt = _first_sentence(content, max_chars=70)
+    excerpt = first_sentence(content, max_chars=70)
     if topic and excerpt:
         return f"记忆先回到{topic}。{excerpt}"
     if excerpt:
@@ -146,14 +174,14 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
     for raw_chapter in chapters:
         chapter = _dict(raw_chapter)
         for raw_quote in _list(chapter.get("pull_quotes")):
-            quote = _brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
+            quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
             if quote:
                 candidates.append(quote)
         for raw_ref in _list(chapter.get("source_refs")):
-            quote = _brief_text(_safe_str(_dict(raw_ref).get("quote")), max_chars=45)
+            quote = brief_text(_safe_str(_dict(raw_ref).get("quote")), max_chars=45)
             if quote:
                 candidates.append(quote)
-        excerpt = _first_sentence(_safe_str(chapter.get("content")), max_chars=45)
+        excerpt = first_sentence(_safe_str(chapter.get("content")), max_chars=45)
         if excerpt:
             candidates.append(excerpt)
     result: list[str] = []
@@ -264,7 +292,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
             )
         chapter["pull_quotes"] = [
             quote
-            for quote in _list(chapter.get("pull_quotes"))
+            for quote in repair_original_pull_quotes(chapter)
             if not contains_template_language(_safe_str(_dict(quote).get("text")))
         ]
 

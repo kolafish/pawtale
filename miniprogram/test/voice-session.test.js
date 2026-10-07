@@ -161,6 +161,7 @@ function loadVoiceChatPage({
   });
   mockModule("../services/wechat-privacy.ts", {
     ensureRecorderPrivacyAuthorization: async () => {},
+    isRecorderPermissionDeniedMessage: (message = "") => message.includes("麦克风权限"),
     wechatPrivacyErrorMessage: (message) => message || "微信隐私授权失败",
     ...wechatPrivacyExports,
   });
@@ -221,6 +222,51 @@ function installAutoEndingAudioContext() {
   };
 }
 
+test("microphone settings recovers authorization without replacing a healthy connection", async () => {
+  let authorized = true;
+  let settingsError = null;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      openRecorderPermissionSettings: async () => {
+        if (settingsError) throw settingsError;
+        return authorized;
+      },
+    },
+  });
+  for (const hasClient of [true, false]) {
+    let connectCalls = 0;
+    const context = {
+      ...page,
+      data: { ...page.data, status: "error", error: "没有麦克风权限" },
+      voiceStreaming: { hasClient: () => hasClient },
+      async connectGateway() { connectCalls += 1; },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+    };
+    await page.openRecorderSettings.call(context);
+    assert.equal(connectCalls, hasClient ? 0 : 1);
+    assert.equal(context.data.error, "");
+    assert.equal(context.data.recorderSettingsRequired, false);
+    assert.equal(context.data.status, hasClient ? "ready" : "idle");
+
+    context.data.error = "没有麦克风权限";
+    authorized = false;
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data.recorderSettingsRequired, true);
+    assert.equal(connectCalls, hasClient ? 0 : 1);
+
+    settingsError = new Error("openSetting:fail");
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data.recorderSettingsRequired, true, "设置打开失败仍允许重试");
+    assert.equal(context.data.recoveryNotice, "openSetting:fail");
+    settingsError = null;
+    authorized = true;
+    context.disposed = true;
+    const before = context.data;
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data, before, "已离开的页面不更新或重连");
+  }
+});
+
 test("voice chat blocks recording before voice authorization consent", () => {
   const toasts = [];
   global.wx = {
@@ -250,9 +296,9 @@ test("voice chat blocks recording before voice authorization consent", () => {
 
   assert.equal(started, false);
   assert.equal(connectCalls, 0);
-  assert.match(context.data.error, /声纹授权协议/);
-  assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待声纹授权");
-  assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  assert.match(context.data.error, /语音采集与处理授权/);
+  assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待语音授权");
+  assert.equal(toasts[0].title, "请先同意语音授权");
 });
 
 test("voice chat ignores the microphone while the saved narration is being organized", () => {
@@ -1233,81 +1279,6 @@ test("embedded voice chat finishes the session before returning home", async () 
   assert.deepEqual(context.events, []);
 });
 
-test("voice chat reconnects after microphone permission is enabled in settings", async () => {
-  let settingsCalls = 0;
-  let connectCalls = 0;
-  const page = loadVoiceChatPage({
-    voiceAuthorizationExports: {
-      openRecorderPermissionSettings: async () => {
-        settingsCalls += 1;
-        return true;
-      },
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      voiceSessionId: "voice-1",
-      voiceAuthorizationAgreed: true,
-      status: "error",
-      error: "没有麦克风权限",
-      recorderSettingsRequired: true,
-    },
-    async connectGateway() {
-      connectCalls += 1;
-      return true;
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  await page.openRecorderSettings.call(context);
-
-  assert.equal(settingsCalls, 1);
-  assert.equal(connectCalls, 1);
-  assert.equal(context.data.recorderSettingsRequired, false);
-  assert.equal(context.data.error, "");
-  assert.match(context.data.recoveryNotice, /小程序录音权限已开启/);
-});
-
-test("voice chat keeps its healthy gateway after microphone permission is enabled", async () => {
-  let connectCalls = 0;
-  const page = loadVoiceChatPage({
-    voiceAuthorizationExports: {
-      openRecorderPermissionSettings: async () => true,
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      voiceSessionId: "voice-1",
-      voiceAuthorizationAgreed: true,
-      status: "error",
-      error: "没有麦克风权限",
-      recorderSettingsRequired: true,
-    },
-    voiceStreaming: {
-      hasClient: () => true,
-    },
-    async connectGateway() {
-      connectCalls += 1;
-      return true;
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  await page.openRecorderSettings.call(context);
-
-  assert.equal(connectCalls, 0);
-  assert.equal(context.data.status, "ready");
-  assert.equal(context.data.recorderSettingsRequired, false);
-});
-
 test("voice chat stops active AI speech when the page is hidden", () => {
   const cancelReasons = [];
   const pendingWrites = [];
@@ -1730,6 +1701,27 @@ test("voice chat syncs authorization consent before reconnecting", async () => {
   assert.deepEqual(syncedOptions, [{ sourceSessionId: "voice-1" }]);
   assert.equal(connectCalls, 1);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
+});
+
+test("voice chat records an explicit agreement before opening the recorder gateway", async () => {
+  const actions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      syncVoiceAuthorizationConsent: async (options) => { actions.push(options); return { id: "consent-1" }; },
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data, voiceSessionId: "voice-1", status: "idle" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    async syncVoiceAuthorizationAndConnect() { actions.push("connect"); },
+  };
+
+  await page.changeVoiceAuthorization.call(context, { detail: { value: ["voice_authorization"] } });
+
+  assert.equal(actions[0].consent.agreed, true);
+  assert.equal(actions[0].sourceSessionId, "voice-1");
+  assert.equal(actions[1], "connect");
 });
 
 test("voice chat uses conservative silence thresholds for automatic turn ending", async () => {
@@ -3468,18 +3460,14 @@ test("failed saving and finishing in the background never navigate away or claim
 });
 
 
-test("a closed voice client returns home only when the persisted session confirms it stopped", async () => {
-  for (const status of [null, "active", "stopped"]) {
-    const routes = [], errors = [], stoppedSessions = [];
-    global.wx = { reLaunch: options => routes.push(options.url) };
-    const page = loadVoiceChatPage({
-      voiceApiExports: {
-        stopMemoirVoiceSession: async (voiceSessionId) => {
-          stoppedSessions.push(voiceSessionId);
-          return { session: { id: voiceSessionId, status: "stopped" } };
-        },
-      },
-    });
+test("a closed voice client exits only after the persisted session reaches a terminal state", async () => {
+  for (const status of [null, "active", "stopped", "failed"]) {
+    const routes = [], errors = [], toasts = [];
+    global.wx = {
+      reLaunch: options => routes.push(options.url),
+      showToast: options => toasts.push(options.title),
+    };
+    const page = loadVoiceChatPage();
     const context = { ...page, pageSuspended: false,
       data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
       setData(patch) { this.data = {...this.data, ...patch}; },
@@ -3492,16 +3480,146 @@ test("a closed voice client returns home only when the persisted session confirm
       handleError: message => errors.push(message),
     };
     await context.finishSession();
-    assert.deepEqual(stoppedSessions, ["voice-1"]);
     assert.equal(context.data.finishingSession, false);
     if (status === "stopped") {
       assert.deepEqual(routes, []);
       assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "story", projectId: "project-1", narrationSaved: false, finished: true, voiceSessionId: "voice-1" } }]);
       assert.equal(context.data.persistenceStateText, "已保存");
+    } else if (status === "failed") {
+      assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "transcripts", voiceSessionId: "voice-1" } }]);
+      assert.deepEqual(toasts, ["本次保存异常，请核对记录"]);
+      assert.deepEqual(errors, []);
     } else {
       assert.deepEqual(routes, []);
       assert.notEqual(context.data.persistenceStateText, "已保存");
       assert.equal(errors.length, 1);
+    }
+  }
+});
+
+test("finished audio-only pending utterances preserve saved audio without claiming narration growth", async () => {
+  for (const [raw, edited, narrationSaved] of [
+    ["", "", false],
+    [" \n", "\t", false],
+    ["", "校正后的讲述", true],
+    ["已识别的讲述", " ", true],
+  ]) {
+    const utterance = {
+      id: "pending-utterance",
+      audio_file_id: "original-audio",
+      transcript_raw: raw,
+      transcript_edited: edited,
+      provider_payload_json: { status: "pending" },
+    };
+    global.wx = {};
+    const page = loadVoiceChatPage();
+    const context = {
+      ...page,
+      data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      voiceStreaming: {
+        isBargeInMonitoring: () => false,
+        startBargeInMonitoring: () => false,
+        async stopBargeInMonitoring() {},
+        hasClient: () => false,
+      },
+      refreshVoiceSessionSnapshot: async () => ({ session: { status: "stopped" }, utterances: [utterance] }),
+      stopCompletionIssueRefresh() {},
+      cancelFollowUpTTS() {},
+    };
+
+    await context.finishSession();
+
+    assert.equal(context.events[0].detail.narrationSaved, narrationSaved);
+    assert.equal(context.events[0].detail.finished, true);
+    assert.equal(context.data.persistenceStateText, "已保存");
+    assert.equal(utterance.audio_file_id, "original-audio");
+  }
+});
+
+test("ASR failure during finish exits to saved records when server confirms failed", async () => {
+  const toasts = [];
+  global.wx = { showToast: options => toasts.push(options.title) };
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
+      hasClient: () => true,
+      finishSession: async () => { throw Error("ASR 超时"); },
+    },
+    refreshVoiceSessionSnapshot: async () => ({ session: { status: "failed" }, utterances: [{ audio_file_id: "audio-1" }] }),
+    stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
+  };
+
+  await context.finishSession();
+
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "transcripts", voiceSessionId: "voice-1" } }]);
+  assert.deepEqual(toasts, ["本次保存异常，请核对记录"]);
+  assert.equal(context.data.finishingSession, false);
+  assert.notEqual(context.data.persistenceStateText, "已保存");
+});
+
+test("a created voice session stops through REST when the first WebSocket never connected", async () => {
+  const stops = [];
+  let refreshes = 0;
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      stopMemoirVoiceSession: async (sessionId) => stops.push(sessionId),
+    },
+  });
+  const context = { ...page, pageSuspended: false,
+    data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    voiceStreaming: {
+      isBargeInMonitoring: () => false,
+      startBargeInMonitoring: () => false,
+      async stopBargeInMonitoring() {},
+      hasClient: () => false,
+    },
+    refreshVoiceSessionSnapshot: async () => ({
+      session: { status: ++refreshes === 1 ? "created" : "stopped" },
+      utterances: [],
+    }),
+    stopCompletionIssueRefresh() {},
+    cancelFollowUpTTS() {},
+  };
+
+  await context.finishSession();
+
+  assert.deepEqual(stops, ["voice-1"]);
+  assert.equal(refreshes, 2);
+  assert.equal(context.data.persistenceStateText, "已保存");
+  assert.equal(context.events[0]?.detail.destination, "story");
+});
+
+test("viewing records after disconnect exits only after the server confirms the session stopped", async () => {
+  for (const status of [null, "active", "stopped"]) {
+    const page = loadVoiceChatPage();
+    const context = { ...page, pageSuspended: false,
+      data: { ...page.data, voiceSessionId: "voice-1", canFinishAfterDisconnect: true,
+        persistenceStateText: "已保存", recording: true },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      voiceStreaming: { close() {} },
+      refreshVoiceSessionSnapshot: async () => status ? { session: { status }, utterances: [] } : null,
+    };
+
+    await context.finishAfterDisconnect();
+
+    assert.equal(context.data.finishingSession, false);
+    assert.equal(context.data.recording, false);
+    if (status === "stopped") {
+      assert.equal(context.events[0]?.detail.destination, "transcripts");
+      assert.equal(context.data.canFinishAfterDisconnect, false);
+    } else {
+      assert.deepEqual(context.events, []);
+      assert.equal(context.data.canFinishAfterDisconnect, true);
+      assert.match(context.data.error, /保存状态|尚未确认/);
+      assert.equal(context.data.persistenceStateText, "保存状态待确认");
     }
   }
 });

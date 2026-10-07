@@ -48,6 +48,9 @@ function loadHomePage({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
+    getMemoirShareVideoCandidate: async () => ({ candidate: null }),
+    listMemoirShareVideos: async () => ({ items: [], active_jobs: [], failed_jobs: [], total: 0, limit: 1, offset: 0 }),
+    downloadMemoirShareVideoThumbnail: async () => "/tmp/share-video-thumbnail.jpg",
     getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
       const latest = identity.active_project_id
@@ -182,6 +185,231 @@ test("home exposes mini program share entry points", () => {
     title: "老余口述，把家里的故事慢慢讲下来",
     query: "from=share_home",
   });
+});
+
+test("home recommendation opens the editor immediately without creating or accepting a video", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", voice_session_id: "session-1",
+    utterance_id: "utterance-1", selected_text: "父亲把围巾围在我脖子上。",
+    duration_ms: 30000, status: "ready", video_job_id: null,
+  };
+  const created = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    createMemoirShareVideoCandidateJob: async (...args) => {
+      created.push(args);
+      return new Promise(() => {});
+    },
+    dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidate.id, "candidate-1");
+  assert.equal(context.data.shareCandidateDurationText, "30 秒");
+  context.openShareCandidateEditor();
+  assert.deepEqual(created, []);
+  assert.equal(context.data.shareCandidate.status, "ready");
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+
+  context.setData({ shareCandidate: { ...candidate, status: "accepted", video_job_id: "video-1" } });
+  context.openShareCandidateVideo();
+  assert.equal(navigations.length, 2);
+  assert.equal(navigations[1], "/pages/transcript-media/index?id=utterance-1&jobId=video-1");
+  await context.dismissShareCandidate();
+  assert.equal(context.data.shareCandidate, null);
+});
+
+test("home replaces a cached failed recommendation job with the latest remake and refreshes it", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "accepted", video_job_id: "remade-video",
+  };
+  let status = "running";
+  const calls = [];
+  const navigations = [];
+  const thumbnails = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoJob: async (id) => {
+      calls.push(id);
+      return { id, status, title: "重制的往事" };
+    },
+    downloadMemoirShareVideoThumbnail: async (id) => {
+      thumbnails.push(id);
+      return "/tmp/remade-thumbnail.jpg";
+    },
+  } });
+  const context = pageContext(page, {
+    projectId: "p1", hasProject: true,
+    shareCandidate: { ...candidate, video_job_id: "old-failed-video" },
+    shareCandidateJob: { id: "old-failed-video", status: "failed" },
+  });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.id, "remade-video");
+  assert.equal(context.data.shareCandidateJob.status, "running");
+  context.openShareCandidateVideo();
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&jobId=remade-video"]);
+  status = "succeeded";
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidateJob.status, "succeeded");
+  assert.equal(context.data.shareCandidateThumbnailPath, "/tmp/remade-thumbnail.jpg");
+  await context.refreshShareCandidate("p1");
+  assert.deepEqual(calls, ["remade-video", "remade-video"]);
+  assert.deepEqual(thumbnails, ["remade-video"]);
+});
+
+test("home editor entry keeps voice and dismiss guards", () => {
+  const created = [];
+  const navigations = [];
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1",
+    status: "ready", start_char: 0, end_char: 13,
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    createMemoirShareVideoCandidateJob: async (...args) => { created.push(args); },
+  } });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  const context = pageContext(page, { projectId: "p1", hasProject: true, shareCandidate: candidate });
+  context.openShareCandidateEditor();
+  assert.equal(context.data.shareCandidate.status, "ready");
+  context.setData({ voiceEntry: { voiceSessionId: "session-1" } });
+  context.openShareCandidateEditor();
+  context.setData({ voiceEntry: null, shareCandidateDismissing: true });
+  context.openShareCandidateEditor();
+  assert.deepEqual(created, []);
+  assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+});
+
+test("home keeps completed videos in the library after handling the latest suggestion", async () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const latest = {
+    id: "video-2", utterance_id: "utterance-2", title: "外婆家的夏天",
+    selected_text: "每年夏天，我都会去外婆家。", duration_ms: 28000,
+    created_at: "2026-09-24T08:00:00", completed_at: "2026-09-24T08:01:00",
+  };
+  const calls = [];
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async (...args) => {
+      calls.push(args);
+      return { items: [latest], active_jobs: [], failed_jobs: [], total: 5, limit: 1, offset: 0 };
+    },
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+
+  await context.refreshShareVideos("p1");
+  assert.deepEqual(calls, [["p1", { limit: 1, offset: 0 }]]);
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 5);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, [
+    "/pages/share-videos/index?projectId=p1",
+  ]);
+  assert.match(pageWxml, /bindtap="openShareVideoLibrary"/);
+});
+
+test("home exposes the video progress library while the first manually selected story is still generating", async () => {
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async () => ({
+      items: [], active_jobs: [{ id: "first-video", status: "running" }], failed_jobs: [], total: 0, limit: 1, offset: 0,
+    }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareVideos("p1");
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 0);
+  assert.equal(context.data.shareVideoActiveCount, 1);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
+});
+
+test("home keeps the video library reachable when all manually selected video tasks have failed", async () => {
+  const navigations = [];
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirShareVideos: async () => ({
+      items: [], active_jobs: [], failed_jobs: [{ id: "first-video", status: "failed" }],
+      total: 0, limit: 1, offset: 0,
+    }),
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  await context.refreshShareVideos("p1");
+  assert.equal(context.data.shareCandidate, null);
+  assert.equal(context.data.shareVideoTotal, 0);
+  assert.equal(context.data.shareVideoActiveCount, 0);
+  assert.equal(context.data.shareVideoFailedCount, 1);
+  context.openShareVideoLibrary();
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
+});
+
+test("only a successful completed-video preview dismisses the latest suggestion", async () => {
+  for (const [status, navigateSuccessfully] of [["succeeded", true], ["succeeded", false], ["running", true]]) {
+    const candidate = { id: "candidate-1", project_id: "p1", utterance_id: "utterance-1", status: "accepted", video_job_id: "video-1" };
+    const dismissals = [];
+    const { page } = loadHomePage({ voiceApiExports: {
+      dismissMemoirShareVideoCandidate: async (...args) => { dismissals.push(args); },
+    } });
+    const context = pageContext(page, {
+      projectId: "p1", shareCandidate: candidate,
+      shareCandidateJob: { id: "video-1", status }, shareVideoTotal: 6,
+      shareCandidateThumbnailPath: "/tmp/video-1.jpg",
+    });
+    global.wx = { navigateTo({ url, success }) {
+      assert.equal(url, "/pages/transcript-media/index?id=utterance-1&jobId=video-1");
+      if (navigateSuccessfully) success();
+    } };
+    context.openShareCandidateVideo();
+    await flushAsyncWork();
+    assert.equal(dismissals.length, status === "succeeded" && navigateSuccessfully ? 1 : 0);
+    if (dismissals.length) {
+      assert.deepEqual(dismissals[0], ["p1", "candidate-1"]);
+      assert.equal(context.data.shareCandidate, null);
+      assert.equal(context.data.shareCandidateThumbnailPath, "");
+    } else assert.equal(context.data.shareCandidate.id, "candidate-1");
+  }
+});
+
+test("home discards a thumbnail downloaded after switching projects", async () => {
+  const thumbnail = deferred();
+  const candidate = { id: "candidate-1", status: "accepted", video_job_id: "video-1" };
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoJob: async () => ({ id: "video-1", status: "succeeded" }),
+    downloadMemoirShareVideoThumbnail: () => thumbnail.promise,
+  } });
+  const context = pageContext(page, { projectId: "p1" });
+  const refresh = context.refreshShareCandidate("p1");
+  await flushAsyncWork();
+  context.setData({ projectId: "p2" });
+  thumbnail.resolve("/tmp/old-project.jpg");
+  await refresh;
+  assert.equal(context.data.shareCandidateThumbnailPath, "");
+});
+
+test("home ignores a recommendation returned after the project changes", async () => {
+  const pending = deferred();
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirShareVideoCandidate: () => pending.promise,
+  } });
+  const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
+  const loading = context.refreshShareCandidate("p1");
+  context.setData({ projectId: "p2" });
+  pending.resolve({ candidate: { id: "old-candidate", status: "ready" } });
+  await loading;
+  assert.equal(context.data.shareCandidate, null);
 });
 
 test("home combines new-story and resume actions without mixing their routes", () => {
@@ -1011,34 +1239,72 @@ test("home refreshes voice authorization consent from storage", () => {
   assert.equal(context.data.voiceAuthorizationAgreed, true);
 });
 
-test("home persists voice authorization checkbox changes", () => {
-  let savedValue = null;
+test("home waits for voice authorization to be saved before starting a session", async () => {
+  const consentWrite = deferred();
+  let storedConsent = false;
+  let creates = 0;
   const { page } = loadHomePage({
     voiceAuthorizationExports: {
-      saveVoiceAuthorizationConsent: (agreed = true) => {
-        savedValue = agreed;
-        return {
-          agreed,
-          version: "test",
-          agreedAt: "2026-06-18T00:00:00.000Z",
-        };
+      readVoiceAuthorizationConsent: () => storedConsent,
+      syncVoiceAuthorizationConsent: async ({ consent } = {}) => {
+        if (consent) {
+          await consentWrite.promise;
+          storedConsent = consent.agreed;
+        } else if (!storedConsent) {
+          throw new Error("授权还没有写入服务端");
+        }
+        return { id: "consent-1" };
+      },
+    },
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        creates += 1;
+        return { session: { id: "s1" } };
       },
     },
   });
-  const context = {
-    data: { ...page.data, error: "旧错误" },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  global.wx = { pageScrollTo() {} };
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
 
-  page.changeVoiceAuthorization.call(context, {
+  const saving = context.changeVoiceAuthorization({
     detail: { value: ["voice_authorization"] },
   });
-
-  assert.equal(savedValue, true);
+  assert.equal(context.data.voiceAuthorizationSaving, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
-  assert.equal(context.data.error, "");
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 0);
+  consentWrite.resolve();
+  await saving;
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(storedConsent, true);
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 1);
+  delete global.wx;
+});
+
+test("home keeps consent available for retry when saving fails", async () => {
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => false,
+      syncVoiceAuthorizationConsent: async () => { throw new Error("授权保存失败"); },
+    },
+  });
+  const context = pageContext(page, {
+    userId: "u1", projectId: "p1", hasProject: true,
+    voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true,
+  });
+  context.measureNarration = () => {};
+
+  await context.changeVoiceAuthorization({ detail: { value: ["voice_authorization"] } });
+
+  assert.equal(context.data.voiceAuthorizationSaving, false);
+  assert.equal(context.data.voiceAuthorizationAgreed, false);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+  assert.equal(context.data.error, "授权保存失败");
 });
 
 test("home refreshes the saved project default for the current account and project", async () => {

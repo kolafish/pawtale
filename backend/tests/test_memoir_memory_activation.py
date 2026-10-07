@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
 from app.models.memoir_retrieval import (
     MemoirMemoryActivationTrace,
@@ -257,6 +258,7 @@ async def test_same_session_early_memory_is_retrieved_but_recent_context_is_excl
     assert [item["utterance_id"] for item in trace.trace_json["activation"]["packages"]] == [created["utterance_id"]]
 
 
+@pytest.mark.db_independent
 async def test_changed_source_invalidates_cached_excerpt(client, test_db):
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession

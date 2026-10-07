@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from hashlib import sha256
 import json
+import re
+import unicodedata
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -19,6 +22,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookPlanChapter,
     MemoirCompletionIssue,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -27,11 +31,62 @@ from app.schemas.memoir_completion_issues import (
     MemoirCompletionIssueCollectionResponse,
     MemoirCompletionIssueResponse,
 )
+from app.services.memoir.chapter_generation import latest_chapter_draft_version
 _PRIORITY_ORDER = {
     MemoirCompletionIssuePriority.HIGH.value: 0,
     MemoirCompletionIssuePriority.MEDIUM.value: 1,
     MemoirCompletionIssuePriority.LOW.value: 2,
 }
+
+
+BLOCKING_BOOK_ISSUE_TYPES = frozenset({
+    MemoirCompletionIssueType.CONFLICT.value,
+})
+
+
+def blocking_book_issues(
+    issues: Iterable[MemoirCompletionIssue],
+    all_chapter_ids: Iterable[str],
+) -> list[MemoirCompletionIssue]:
+    chapter_ids = set(all_chapter_ids)
+    return [
+        issue for issue in issues
+        if issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+        and issue.status != MemoirCompletionIssueStatus.CLOSED.value
+        and blocking_book_chapter_ids([issue], chapter_ids) & chapter_ids
+    ]
+
+
+def blocking_book_chapter_ids(
+    issues: Iterable[MemoirCompletionIssue],
+    all_chapter_ids: Iterable[str],
+) -> set[str]:
+    blocked: set[str] = set()
+    for issue in issues:
+        if issue.issue_type not in BLOCKING_BOOK_ISSUE_TYPES:
+            continue
+        if issue.chapter_id:
+            blocked.add(issue.chapter_id)
+        elif issue.scope == MemoirCompletionIssueScope.BOOK.value:
+            if not issue.related_chapter_ids_json:
+                return set(all_chapter_ids)
+            blocked.update(issue.related_chapter_ids_json)
+    return blocked
+
+
+async def open_blocking_book_chapter_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    all_chapter_ids: Iterable[str],
+) -> set[str]:
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+        MemoirCompletionIssue.issue_type.in_(BLOCKING_BOOK_ISSUE_TYPES),
+    ))).all()
+    return blocking_book_chapter_ids(issues, all_chapter_ids)
 
 
 def _issue_fingerprint(
@@ -84,6 +139,85 @@ def _disambiguate_issue_values(values: list[dict]) -> list[dict]:
     return result
 
 
+def stable_book_issue_fingerprint(candidate: dict) -> str:
+    """Identify a book question without depending on model output order."""
+    base = _issue_fingerprint(
+        scope=MemoirCompletionIssueScope.BOOK,
+        chapter_id=None,
+        issue_type=MemoirCompletionIssueType(candidate["issue_type"]),
+        related_material_ids=[],
+        related_scope_ids=candidate["chapter_ids"],
+    )
+    # A fact decision concerns a passage in the manuscript, not the wording
+    # chosen by a later review of that passage. The quote is checked against
+    # the cited chapter when a review is normalized.
+    evidence = (
+        _normalized_evidence(candidate.get("evidence_quote"))
+        if candidate["issue_type"] in BLOCKING_BOOK_ISSUE_TYPES
+        else ""
+    )
+    identity = f"evidence:{evidence}" if len(evidence) >= 7 else (
+        " ".join(candidate["question"].split())
+    )
+    return sha256(f"{base}:{identity}".encode("utf-8")).hexdigest()
+
+
+def _normalized_evidence(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return "".join(unicodedata.normalize("NFKC", value).split()).strip(
+        "“”‘’\"'，。！？；：,.!?;:"
+    )
+
+
+def _quoted_evidence(text: str) -> set[str]:
+    return {
+        quote
+        for raw in re.findall(r"[‘“'\"]([^‘’“”'\"]+)[’”'\"]", text)
+        if (quote := _normalized_evidence(raw)) and len(quote) >= 7
+    }
+
+
+def _same_cited_fact(issue: MemoirCompletionIssue, value: dict) -> bool:
+    """Migrate an old question only when both sides cite the same specific text."""
+    if (
+        issue.issue_type != value["issue_type"]
+        or issue.channel != MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+        or sorted(issue.related_chapter_ids_json or [])
+        != sorted(value["related_chapter_ids_json"])
+    ):
+        return False
+    evidence = _normalized_evidence(value.get("evidence_quote"))
+    if not evidence:
+        return False
+    return any(
+        quote in evidence or evidence in quote
+        for quote in _quoted_evidence(issue.question)
+    )
+
+
+async def _cited_fact_removed(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    issue: MemoirCompletionIssue,
+) -> bool:
+    """Only retire a decision when its explicit quote is gone from every cited chapter."""
+    quotes = {quote for quote in _quoted_evidence(issue.question) if len(quote) >= 7}
+    if not quotes or not issue.related_chapter_ids_json:
+        return False
+    for chapter_id in issue.related_chapter_ids_json:
+        latest = await latest_chapter_draft_version(
+            db, project_id=project_id, chapter_id=chapter_id,
+        )
+        if latest is None:
+            return False
+        content = _normalized_evidence(latest.content)
+        if any(quote in content for quote in quotes):
+            return False
+    return True
+
+
 def book_review_candidate_fingerprints(
     candidates: list[dict],
 ) -> list[tuple[str, dict]]:
@@ -97,6 +231,8 @@ def book_review_candidate_fingerprints(
             MemoirCompletionIssuePriority(candidate.get("priority"))
             MemoirCompletionIssueChannel(candidate.get("channel"))
         except ValueError:
+            continue
+        if issue_type == MemoirCompletionIssueType.PRIVACY:
             continue
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
@@ -140,21 +276,46 @@ def book_review_candidate_fingerprints(
         if candidate_key in seen_candidates:
             continue
         seen_candidates.add(candidate_key)
-        occurrence = occurrences.get(base_fingerprint, 0)
-        occurrences[base_fingerprint] = occurrence + 1
-        fingerprint = (
-            sha256(f"{base_fingerprint}:{occurrence}".encode("utf-8")).hexdigest()
-            if occurrence
-            else base_fingerprint
-        )
+        stored_fingerprint = candidate.get("fingerprint")
+        if (
+            isinstance(stored_fingerprint, str)
+            and len(stored_fingerprint) == 64
+            and all(char in "0123456789abcdef" for char in stored_fingerprint)
+        ):
+            fingerprint = stored_fingerprint
+        else:
+            # Reviews persisted before stable fingerprints retain their existing
+            # issue identities until they are regenerated.
+            occurrence = occurrences.get(base_fingerprint, 0)
+            occurrences[base_fingerprint] = occurrence + 1
+            fingerprint = (
+                sha256(f"{base_fingerprint}:{occurrence}".encode("utf-8")).hexdigest()
+                if occurrence
+                else base_fingerprint
+            )
         result.append((fingerprint, candidate))
-    return result
+    # Two independent questions must not collide just because the model cited
+    # the same passage. Disambiguate them by question, independent of order.
+    counts: dict[str, int] = {}
+    for fingerprint, _ in result:
+        counts[fingerprint] = counts.get(fingerprint, 0) + 1
+    return [
+        (
+            sha256(
+                f"{fingerprint}:{' '.join(candidate['question'].split())}".encode("utf-8")
+            ).hexdigest(),
+            candidate,
+        )
+        if counts[fingerprint] > 1 else (fingerprint, candidate)
+        for fingerprint, candidate in result
+    ]
 
 
 def _response(
     issue: MemoirCompletionIssue,
     *,
     active_session_id: str | None = None,
+    blocks_book: bool = False,
 ) -> MemoirCompletionIssueResponse:
     return MemoirCompletionIssueResponse(
         id=issue.id,
@@ -166,9 +327,14 @@ def _response(
         question=issue.question,
         reason=issue.reason,
         priority=issue.priority,
-        related_material_ids=list(issue.related_material_ids_json),
+        related_material_ids=(
+            [] if issue.scope == MemoirCompletionIssueScope.BOOK.value
+            else list(issue.related_material_ids_json)
+        ),
+        related_chapter_ids=list(issue.related_chapter_ids_json),
         input_signature=issue.input_signature,
         status=issue.status,
+        blocks_book=blocks_book,
         active_session_id=active_session_id,
         outcome=issue.outcome or None,
         outcome_note=issue.outcome_note,
@@ -205,6 +371,8 @@ async def sync_chapter_digest_issues(
             priority = MemoirCompletionIssuePriority(candidate.get("priority"))
             channel = MemoirCompletionIssueChannel(candidate.get("channel"))
         except ValueError:
+            continue
+        if issue_type == MemoirCompletionIssueType.PRIVACY:
             continue
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
@@ -297,9 +465,9 @@ async def sync_book_review_issues(
         channel = MemoirCompletionIssueChannel(candidate.get("channel"))
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
-        material_ids = [
+        chapter_ids = [
             str(value).strip()
-            for value in candidate.get("material_ids", [])
+            for value in candidate.get("chapter_ids", [])
             if str(value).strip()
         ]
         values.append(
@@ -313,8 +481,11 @@ async def sync_book_review_issues(
                 "reason": reason,
                 "priority": priority.value,
                 "fingerprint": fingerprint,
-                "related_material_ids_json": material_ids,
+                "related_material_ids_json": [],
+                "related_chapter_ids_json": chapter_ids,
+                "resolution": str(candidate.get("resolution") or "").strip(),
                 "input_signature": input_signature,
+                "evidence_quote": str(candidate.get("evidence_quote") or "").strip(),
             }
         )
     existing = list(
@@ -331,23 +502,102 @@ async def sync_book_review_issues(
     by_fingerprint = {item.fingerprint: item for item in existing}
     fingerprints = {value["fingerprint"] for value in values}
     current: list[MemoirCompletionIssue] = []
+    migrated_ids: set[str] = set()
+    available = [
+        item for item in existing
+        if item.fingerprint not in fingerprints
+    ]
+    fact_matches: dict[str, list[MemoirCompletionIssue]] = {}
+    for value in values:
+        if value["issue_type"] not in BLOCKING_BOOK_ISSUE_TYPES:
+            continue
+        matching = [item for item in available if _same_cited_fact(item, value)]
+        active = [
+            item for item in matching
+            if item.status != MemoirCompletionIssueStatus.CLOSED.value
+        ]
+        decided = [
+            item for item in matching
+            if item.status == MemoirCompletionIssueStatus.CLOSED.value
+            and item.outcome != MemoirCompletionIssueOutcome.SUPERSEDED.value
+        ]
+        fact_matches[value["fingerprint"]] = active or decided or matching
+    match_counts: dict[str, int] = {}
+    for matches in fact_matches.values():
+        for item in matches:
+            match_counts[item.id] = match_counts.get(item.id, 0) + 1
     for value in values:
         issue = by_fingerprint.get(value["fingerprint"])
         if issue is None:
-            issue = MemoirCompletionIssue(**value)
+            legacy_matches = [
+                item for item in existing
+                if item.id not in migrated_ids
+                and item.input_signature == input_signature
+                and item.issue_type == value["issue_type"]
+                and " ".join(item.question.split()) == " ".join(value["question"].split())
+                and item.fingerprint not in fingerprints
+                and (
+                    not item.related_chapter_ids_json
+                    or sorted(item.related_chapter_ids_json)
+                    == sorted(value["related_chapter_ids_json"])
+                )
+            ]
+            issue = legacy_matches[0] if len(legacy_matches) == 1 else None
+            if issue is None:
+                matches = fact_matches.get(value["fingerprint"], [])
+                if len(matches) == 1 and match_counts[matches[0].id] == 1:
+                    issue = matches[0]
+            if issue is not None:
+                issue.fingerprint = value["fingerprint"]
+                migrated_ids.add(issue.id)
+        if issue is None:
+            issue = MemoirCompletionIssue(**{
+                key: field_value for key, field_value in value.items()
+                if key != "evidence_quote"
+            })
             db.add(issue)
-        elif issue.status != MemoirCompletionIssueStatus.CLOSED.value:
+        elif (
+            issue.status != MemoirCompletionIssueStatus.CLOSED.value
+            or issue.outcome == MemoirCompletionIssueOutcome.SUPERSEDED.value
+        ):
+            if issue.outcome == MemoirCompletionIssueOutcome.SUPERSEDED.value:
+                issue.status = MemoirCompletionIssueStatus.OPEN.value
+                issue.outcome = ""
+                issue.outcome_note = ""
+                issue.closed_at = None
+                issue.started_at = None
             for field, field_value in value.items():
-                if field not in {"project_id", "fingerprint"}:
+                if field not in {"project_id", "fingerprint", "evidence_quote"}:
                     setattr(issue, field, field_value)
+            db.add(issue)
+        else:
+            issue.related_chapter_ids_json = value["related_chapter_ids_json"]
+            issue.related_material_ids_json = []
+            issue.resolution = value["resolution"]
+            issue.input_signature = input_signature
             db.add(issue)
         current.append(issue)
     now = utcnow_naive()
     for issue in existing:
         if (
             issue.fingerprint not in fingerprints
+            and issue.id not in migrated_ids
             and issue.status != MemoirCompletionIssueStatus.CLOSED.value
         ):
+            if (
+                issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+                and issue.issue_type in BLOCKING_BOOK_ISSUE_TYPES
+            ):
+                # Model omission alone does not settle a fact conflict.
+                # Only the deterministic disappearance of its quoted source
+                # from the current chapter draft can retire it automatically.
+                if not await _cited_fact_removed(
+                    db, project_id=project_id, issue=issue,
+                ):
+                    issue.input_signature = input_signature
+                    db.add(issue)
+                    current.append(issue)
+                    continue
             issue.status = MemoirCompletionIssueStatus.CLOSED.value
             issue.outcome = MemoirCompletionIssueOutcome.SUPERSEDED.value
             issue.outcome_note = "全书内容变化后，该问题已不再是当前问题"
@@ -371,6 +621,11 @@ async def list_issues(
         filters.append(
             MemoirCompletionIssue.status
             != MemoirCompletionIssueStatus.CLOSED.value
+        )
+        # Legacy privacy questions stay in history, outside the private book's
+        # active queue. Reading must not rewrite the user's recorded decision.
+        filters.append(
+            MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value
         )
     issues = list(
         (
@@ -401,7 +656,13 @@ async def collection_response(
         )
     )
     active_sessions: dict[str, str] = {}
+    blocking_ids: set[str] = set()
     if issue_rows:
+        chapter_ids = (await db.scalars(select(MemoirBookPlanChapter.id).where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.include_in_book.is_(True),
+        ))).all()
+        blocking_ids = {issue.id for issue in blocking_book_issues(issue_rows, chapter_ids)}
         rows = await db.execute(
             select(
                 MemoirVoiceSession.current_completion_issue_id,
@@ -432,6 +693,7 @@ async def collection_response(
             _response(
                 issue,
                 active_session_id=active_sessions.get(issue.id),
+                blocks_book=issue.id in blocking_ids,
             )
             for issue in issue_rows
         ],

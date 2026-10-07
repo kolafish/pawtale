@@ -22,20 +22,6 @@ class MemoirHomeSnapshotResponse(BaseModel):
     latest_transcript: MemoirVoiceTranscriptItemResponse | None = None
 
 
-class MemoirBookSnapshotResponse(BaseModel):
-    server_revision: int = Field(ge=0)
-    identity: MemoirIdentityResponse
-    plan: MemoirBookPlanResponse | None = None
-    drafts_by_chapter_id: dict[
-        str,
-        MemoirBookChapterDraftResponse | None,
-    ] = Field(default_factory=dict)
-    output: MemoirBookOutputResponse | None = None
-    automation_events: MemoirAutomationEventListResponse
-    image_assets: MemoirImageAssetListResponse
-    share_video_counts: list[MemoirShareVideoCountResponse] = Field(default_factory=list)
-
-
 class MemoirDraftProgressResponse(BaseModel):
     project_id: str
     status: Literal["idle", "processing", "ready", "partial_ready", "needs_input", "no_change", "failed"] = "idle"
@@ -50,6 +36,22 @@ class MemoirDraftProgressResponse(BaseModel):
     needs_user_material_count: int = 0
     review_status: str = "not_started"
     review_error: str = ""
+
+
+class MemoirBookSnapshotResponse(BaseModel):
+    server_revision: int = Field(ge=0)
+    identity: MemoirIdentityResponse
+    plan: MemoirBookPlanResponse | None = None
+    drafts_by_chapter_id: dict[
+        str,
+        MemoirBookChapterDraftResponse | None,
+    ] = Field(default_factory=dict)
+    output: MemoirBookOutputResponse | None = None
+    progress: MemoirDraftProgressResponse | None = None
+    blocking_issue_count: int = Field(default=0, ge=0)
+    automation_events: MemoirAutomationEventListResponse
+    image_assets: MemoirImageAssetListResponse
+    share_video_counts: list[MemoirShareVideoCountResponse] = Field(default_factory=list)
 
 
 class MemoirStorySectionResponse(BaseModel):

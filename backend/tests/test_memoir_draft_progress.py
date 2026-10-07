@@ -1,11 +1,14 @@
 import copy
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select, update
 
+from app.clock import utcnow_naive
 from app.models.memoir import MemoirEditingJob, MemoirImageAsset, MemoirBookImagePlacement
 from app.services.memoir import automatic_book_draft
-from tests.memoir_helpers import run_test_editing_job
+from app.services.memoir.transcript_projection import source_text_hash
+from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_job
 from tests.test_memoir_automatic_book_draft import _setup
 
 
@@ -114,3 +117,44 @@ async def test_progress_and_retry_enforce_project_ownership(client, test_db):
     assert (await client.get(path)).status_code == 404
     assert (await client.post(path + "/retry")).status_code == 404
     assert await test_db.scalar(select(func.count()).select_from(MemoirEditingJob)) == 0
+
+
+async def test_draft_progress_preserves_deferred_need_from_older_growth_job(client, test_db):
+    text = "我小时候住在外婆家。"
+    created = await create_test_voice_transcript(client, test_db, text)
+    project_id = created["session"]["project_id"]
+    old_job = MemoirEditingJob(
+        project_id=project_id,
+        job_type="organize_material",
+        status="succeeded",
+        run_after=utcnow_naive() - timedelta(days=1),
+        dedupe_key="old-growth",
+        result_json={
+            "growth": {
+                "deferred": {
+                    created["utterance_id"]: {
+                        "status": "needs_user",
+                        "text_hash": source_text_hash(text),
+                        "reason": "需要确认",
+                    }
+                }
+            }
+        },
+    )
+    new_job = MemoirEditingJob(
+        project_id=project_id,
+        job_type="organize_material",
+        status="succeeded",
+        run_after=utcnow_naive(),
+        dedupe_key="new-growth",
+        result_json={},
+    )
+    test_db.add_all([old_job, new_job])
+    await test_db.commit()
+
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/draft-progress")
+    assert response.status_code == 200, response.text
+    assert response.json()["material_count"] == 1
+    assert response.json()["pending_material_count"] == 1
+    assert response.json()["needs_user_material_count"] == 1
+    assert response.json()["status"] == "needs_input"

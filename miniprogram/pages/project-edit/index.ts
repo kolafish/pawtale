@@ -8,7 +8,13 @@ import {
 } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import type { MemoirTranscriptPolishLevel } from "../../domain/memoir";
-import type { MemoirNarratorGender } from "../../services/memoir";
+import {
+  MEMOIR_SHARE_VIDEO_STYLES,
+  normalizeMemoirShareVideoStyle,
+  type MemoirShareVideoStyle,
+  type MemoirShareVideoStyleOption,
+} from "../../domain/memoir-transcript";
+import type { MemoirNarratorGender, MemoirProjectInput } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -41,6 +47,7 @@ interface ProjectEditDataset {
   gender?: string;
   mode?: string;
   polish?: string;
+  videoStyle?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<ProjectEditDataset>;
@@ -65,9 +72,11 @@ interface ProjectEditData {
   narratorAgeText: string;
   defaultNarrationMode: DefaultNarrationMode;
   transcriptPolishLevel: MemoirTranscriptPolishLevel;
+  shareVideoStyle: MemoirShareVideoStyle;
   genderOptions: Array<Option<MemoirNarratorGender>>;
   narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
   transcriptPolishOptions: TranscriptPolishOption[];
+  shareVideoStyleOptions: MemoirShareVideoStyleOption[];
 }
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
@@ -92,6 +101,7 @@ function ageFromText(value: string): number | null {
 }
 
 definePage<ProjectEditData>()({
+  pendingCreatedProject: null as { id: string; title: string; input: MemoirProjectInput } | null,
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
@@ -105,7 +115,8 @@ definePage<ProjectEditData>()({
     narratorOrigin: "",
     narratorAgeText: "",
     defaultNarrationMode: "free_narration",
-    transcriptPolishLevel: "low",
+    transcriptPolishLevel: "medium",
+    shareVideoStyle: "illustrated",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
@@ -113,6 +124,7 @@ definePage<ProjectEditData>()({
     ],
     narrationOptions: DEFAULT_NARRATION_MODE_OPTIONS,
     transcriptPolishOptions: TRANSCRIPT_POLISH_OPTIONS,
+    shareVideoStyleOptions: MEMOIR_SHARE_VIDEO_STYLES,
   },
 
   onShow() {
@@ -120,6 +132,7 @@ definePage<ProjectEditData>()({
   },
 
   async onLoad(query?: PageQuery) {
+    this.pendingCreatedProject = null;
     const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
@@ -136,7 +149,8 @@ definePage<ProjectEditData>()({
       narratorOrigin: "",
       narratorAgeText: "",
       defaultNarrationMode: "free_narration",
-      transcriptPolishLevel: "low",
+      transcriptPolishLevel: "medium",
+      shareVideoStyle: "illustrated",
     });
     setPageNavigationTitle("新建回忆录");
   },
@@ -159,6 +173,7 @@ definePage<ProjectEditData>()({
         narratorAgeText: profile.narratorAge === null ? "" : String(profile.narratorAge),
         defaultNarrationMode: profile.defaultNarrationMode,
         transcriptPolishLevel: transcriptPolishLevel(project),
+        shareVideoStyle: normalizeMemoirShareVideoStyle(project.metadata_json?.share_video_style),
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
@@ -209,6 +224,18 @@ definePage<ProjectEditData>()({
     }
   },
 
+  selectShareVideoStyle(event: DatasetEvent) {
+    const style = datasetChoice(
+      event,
+      "videoStyle",
+      MEMOIR_SHARE_VIDEO_STYLES.map((option) => option.value),
+      this.data.shareVideoStyle,
+    );
+    if (style) {
+      this.setData({ shareVideoStyle: style, error: "" });
+    }
+  },
+
   async saveProject() {
     if (this.data.saving || this.data.loading) {
       return;
@@ -227,7 +254,7 @@ definePage<ProjectEditData>()({
     }
     const narrationFields = defaultNarrationSessionFields(this.data.defaultNarrationMode);
     this.setData({ saving: true, error: "" });
-    const payload = {
+    const payload: MemoirProjectInput = {
       title,
       elder_name: this.data.narratorName.trim(),
       narrator_gender: this.data.narratorGender,
@@ -237,19 +264,29 @@ definePage<ProjectEditData>()({
       default_interview_type: narrationFields.interviewType,
       default_session_goal: narrationFields.sessionGoal,
       transcript_polish_level: this.data.transcriptPolishLevel,
+      share_video_style: this.data.shareVideoStyle,
     };
     try {
-      let createdProject: { id: string; title: string } | null = null;
+      let createdProject = this.pendingCreatedProject;
       if (this.data.projectId) {
         await updateMemoirProject(this.data.projectId, payload);
         trackAuditAction("project.update", {}, { projectId: this.data.projectId });
       } else {
-        const project = await createMemoirProject(payload);
-        createdProject = { id: project.id, title: project.title };
-        await activateMemoirProject(project.id);
-        trackAuditAction("project.create", {
-          default_narration_mode: this.data.defaultNarrationMode,
-        }, { projectId: project.id });
+        if (createdProject) {
+          if (JSON.stringify(createdProject.input) !== JSON.stringify(payload)) {
+            const updated = await updateMemoirProject(createdProject.id, payload);
+            createdProject = { id: updated.id, title: updated.title, input: payload };
+            this.pendingCreatedProject = createdProject;
+          }
+        } else {
+          const project = await createMemoirProject(payload);
+          createdProject = { id: project.id, title: project.title, input: payload };
+          this.pendingCreatedProject = createdProject;
+          trackAuditAction("project.create", {
+            default_narration_mode: this.data.defaultNarrationMode,
+          }, { projectId: project.id });
+        }
+        await activateMemoirProject(createdProject.id);
       }
       const identity = await getMemoirIdentity();
       if (createdProject) {
@@ -259,10 +296,14 @@ definePage<ProjectEditData>()({
           projectTitle: createdProject.title,
         });
       }
+      this.pendingCreatedProject = null;
       wx.showToast({ title: "已保存", icon: "success" });
       wx.navigateBack({ delta: 1 });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存失败" });
+      const message = error instanceof Error ? error.message : "保存失败";
+      this.setData({ error: this.pendingCreatedProject && !this.data.projectId
+        ? `回忆录已创建，${message}；请重试完成设置`
+        : message });
     } finally {
       this.setData({ saving: false });
     }

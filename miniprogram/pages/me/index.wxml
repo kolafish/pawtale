@@ -89,7 +89,7 @@
           <view class="project-overview-main">
             <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
             <text class="action-meta">
-              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条讲述记录") : "还没有讲述记录")) : "创建第一本回忆录并设置讲述资料"}}
+              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 段文字讲述") : "还没有文字讲述")) : "创建第一本回忆录并设置讲述资料"}}
             </text>
           </view>
         </view>
@@ -101,7 +101,7 @@
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{utteranceCount}}</text>
-            <text class="overview-stat-label">讲述记录</text>
+            <text class="overview-stat-label">文字讲述</text>
           </view>
           <view class="overview-stat">
             <text class="overview-stat-value ui-tabular">{{totalUserCharCount}}</text>
@@ -112,7 +112,60 @@
             <text class="overview-stat-label">录音</text>
           </view>
         </view>
+        <text class="overview-stats-hint">这里统计已转成文字的讲述；尚未生成文字的录音也会显示在讲述记录列表中。</text>
 
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="setting-header">
+        <text class="section-title ui-section-heading">AI 使用额度</text>
+        <text class="setting-current stats-refresh">{{creditLoading ? "更新中" : " "}}</text>
+      </view>
+      <view wx:if="{{creditAvailable}}" class="credit-card ui-card ui-card-borderless">
+        <view class="credit-card-head">
+          <view>
+            <text class="action-title">当前可用 ¥{{creditRemainingText}}</text>
+            <text class="action-meta">已使用 ¥{{creditUsedText}} / ¥{{creditTotalText}}</text>
+          </view>
+          <text class="credit-percent ui-tabular">{{creditProgressPercent}}%</text>
+        </view>
+        <view class="credit-progress-track" aria-label="AI 额度已使用 {{creditProgressPercent}}%">
+          <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
+        </view>
+        <text class="credit-hint">额度按 AI 实际调用成本计算。余额用尽后，可添加微信联系管理员。</text>
+        <button class="credit-recharge-button support-action ui-pressable" bindtap="openRechargeQr">添加微信充值</button>
+        <button class="credit-usage-toggle ui-pressable" bindtap="toggleCreditUsageDetails">
+          {{creditUsageExpanded ? "收起使用明细" : "查看使用明细"}}
+        </button>
+        <view wx:if="{{creditUsageExpanded}}" class="credit-usage-list">
+          <view wx:for="{{creditUsageDays}}" wx:for-item="day" wx:key="dateText" class="credit-usage-day">
+            <view class="credit-usage-day-head">
+              <text>{{day.dateText}}</text>
+              <text class="ui-tabular">当日合计 -¥{{day.amountText}}</text>
+            </view>
+            <view wx:for="{{day.purposes}}" wx:for-item="group" wx:key="purpose" class="credit-usage-row">
+              <view class="credit-usage-copy">
+                <text class="action-title">{{group.purpose}}</text>
+                <text class="action-meta">{{group.count}} 次</text>
+              </view>
+              <text class="credit-usage-amount ui-tabular">-¥{{group.amountText}}</text>
+            </view>
+          </view>
+          <text wx:if="{{creditUsageLoading}}" class="credit-usage-message">正在加载…</text>
+          <text wx:if="{{creditUsageError}}" class="credit-usage-message">{{creditUsageError}}</text>
+          <text wx:if="{{!creditUsageLoading && !creditUsageError && !creditUsageItems.length}}" class="credit-usage-message">暂无扣费记录</text>
+          <button wx:if="{{creditUsageError || (creditUsageHasMore && !creditUsageLoading)}}" class="credit-usage-more ui-pressable" bindtap="loadMoreCreditUsageDetails">
+            {{creditUsageError ? "重新加载" : "加载更早记录"}}
+          </button>
+        </view>
+      </view>
+      <view wx:elif="{{creditError}}" class="credit-card ui-card ui-card-borderless credit-card-error">
+        <text class="action-meta">{{creditError}}</text>
+        <button class="credit-retry-button support-action ui-pressable" bindtap="loadAICreditSummary">重新加载</button>
+      </view>
+      <view wx:else class="credit-card ui-card ui-card-borderless">
+        <text class="action-meta">{{creditLoading ? "正在读取额度…" : "暂无额度信息"}}</text>
       </view>
     </view>
 
@@ -143,12 +196,12 @@
         <view
           class="settings-nav-row"
           aria-role="button"
-          aria-label="查看声纹授权"
+          aria-label="查看语音授权"
           bindtap="openVoiceAuthorization"
           hover-class="settings-nav-row-hover"
         >
           <view class="settings-row-copy">
-            <text class="action-title">声纹授权</text>
+            <text class="action-title">语音授权</text>
             <text class="action-meta">{{voiceAuthorizationAgreed ? "已完成授权，点击查看协议详情。" : "开始语音前需要阅读并同意协议。"}}</text>
           </view>
           <view class="settings-row-tail">
@@ -194,60 +247,32 @@
       </view>
     </view>
 
-    <view wx:if="{{!passwordLoginEnabled}}" class="section">
-      <text class="section-title ui-section-heading">账号与安全</text>
-      <view
-        class="settings-disclosure ui-card ui-card-borderless"
-        aria-role="button"
-        aria-expanded="{{showAccountSettings}}"
-        bindtap="toggleAccountSettings"
-        hover-class="settings-nav-row-hover"
-      >
-        <view class="settings-disclosure-copy">
-          <text class="action-title">补充邮箱登录</text>
-          <text class="action-meta">也可以在 Web 端使用邮箱和密码登录。</text>
-        </view>
-        <text class="settings-disclosure-action">{{showAccountSettings ? "收起" : "设置"}}</text>
-      </view>
-      <view wx:if="{{showAccountSettings}}" class="credential-panel disclosure-content ui-card ui-card-borderless">
-        <view class="field">
-          <text class="field-label">邮箱</text>
-          <input
-            class="field-input support-form-input"
-            type="text"
-            value="{{credentialEmail}}"
-            placeholder="name@example.com"
-            bindinput="changeCredentialEmail"
-          />
-        </view>
-
-        <view class="field">
-          <text class="field-label">密码</text>
-          <input
-            class="field-input support-form-input"
-            password
-            value="{{credentialPassword}}"
-            placeholder="至少 8 位"
-            bindinput="changeCredentialPassword"
-          />
-        </view>
-
-        <view
-          class="primary-button support-action ui-block-action ui-pressable {{loading || credentialsLoading ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{loading || credentialsLoading}}"
-          bindtap="submitCredentials"
-        >
-          {{credentialsLoading ? "保存中" : "设置邮箱密码"}}
-        </view>
-      </view>
-    </view>
-
     <view
       class="logout-button support-action ui-block-action ui-pressable {{loading ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{loading}}"
       bindtap="logout"
-    >{{loading ? "正在退出…" : "退出登录"}}</view>
+    >{{loading ? (deletingAccount ? "正在注销…" : "正在退出…") : "退出登录"}}</view>
+    <button
+      class="delete-account-button"
+      hover-class="ui-subtle-action-hover"
+      disabled="{{loading}}"
+      bindtap="deleteAccount"
+    >注销账号</button>
   </block>
+
+  <view wx:if="{{rechargeQrVisible}}" class="recharge-qr-mask" catchtap="closeRechargeQr">
+    <view class="recharge-qr-sheet" catchtap="stopRechargeQrTap">
+      <text class="recharge-qr-title">添加微信充值</text>
+      <text class="recharge-qr-copy">长按二维码识别并添加微信，提供你在小程序中的账号信息。</text>
+      <image
+        class="recharge-qr-image"
+        src="/assets/recharge-wechat-qr.jpg"
+        mode="widthFix"
+        show-menu-by-longpress
+        aria-label="微信二维码"
+      />
+      <button class="credit-retry-button support-action ui-pressable" bindtap="closeRechargeQr">关闭</button>
+    </view>
+  </view>
 </view>

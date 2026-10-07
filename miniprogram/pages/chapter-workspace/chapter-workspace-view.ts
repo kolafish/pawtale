@@ -54,7 +54,6 @@ export interface ChapterWorkspaceViewPatch {
   rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
   retainedDraftSectionCount: number;
-  canConfirmChapter: boolean;
 }
 
 export type ChapterCandidateMode = "changes" | "whole";
@@ -114,7 +113,7 @@ export function chapterCandidateViewPatch(
       candidateMode: "whole",
       candidatePreviewVersion: "after",
       candidateComparisonAvailable: false,
-      candidateSummaryText: "当前稿仍在使用；采用后，新稿会成为新的章节版本。",
+      candidateSummaryText: "当前稿仍在使用。请核对这次更新后再决定是否采用。",
       candidateDiffSegments: [],
       candidateWholeContent: candidateContent,
     };
@@ -416,15 +415,11 @@ export function chapterWorkspaceViewPatch(
     (section) => !section.requires_user_assignment,
   ).length;
   const affectedSectionCount = changedDraftSectionCount(workspace);
-  const rewriteDraftActionText = affectedSectionCount
-    ? `更新 ${affectedSectionCount} 个有变化的故事`
-    : "按当前故事更新正文";
-  const rewriteDraftBusyText = affectedSectionCount
-    ? `正在更新 ${affectedSectionCount} 个故事…`
-    : "正在更新本章正文…";
+  const rewriteDraftActionText = "更新相关故事";
+  const rewriteDraftBusyText = "正在更新相关故事…";
   const rewriteDraftScopeDetail = affectedSectionCount
-    ? `只重新生成当前 ${affectedSectionCount} 个内容发生变化的故事，其他故事沿用现有正文；完成后保存一个新的整章版本，旧正文仍保留在历史版本中。`
-    : "沿用没有变化的故事正文，按当前故事结构保存一个新的整章版本；旧正文仍保留在历史版本中。";
+    ? `本章有 ${affectedSectionCount} 个故事的素材或结构发生变化。会重点更新相关内容，并按需要调整有联系的故事衔接；旧正文保留在历史版本中。`
+    : "会根据当前故事整理相关内容，并按需要调整衔接；旧正文保留在历史版本中。";
   const includedMaterialCount = sectionViews.reduce(
     (total, section) => (
       section.requires_user_assignment
@@ -438,25 +433,36 @@ export function chapterWorkspaceViewPatch(
     workspace.draft_version_id
     && workspace.draft_content.trim(),
   );
+  const needsMaterial = !chapterHasReadableDraft && !includedMaterialCount && !pendingAssignmentCount;
+  const emptyDraftTitle = summary.state === "failed" || summary.state === "preparing"
+    ? summary.headline
+    : needsMaterial ? "本章还需要讲述素材" : summary.headline;
+  const emptyDraftDetail = summary.state === "failed" || summary.state === "preparing"
+    ? summary.detail
+    : needsMaterial ? "请回到首页继续讲述与本章有关的回忆，补充后再查看本章当前步骤。" : summary.detail;
   return {
     nextAction,
     chapterHeroKicker: chapterHasReadableDraft
       ? "这一章已经整理成"
-      : "这一章正在慢慢长大",
+      : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
     chapterStoryCountText: narrativeSectionCount
       ? `${narrativeSectionCount} 个故事`
-      : "故事正在生长",
-    chapterStoryDetail: chapterHasReadableDraft
-      ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
-      : "讲过的回忆都在这里，整理好后就可以慢慢读了。",
+      : "暂无故事",
+    chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
+      ? "本章有新变化，当前正文仍可阅读，相关内容待更新。"
+      : summary.state === "draft_ready"
+        ? "本章正文已整理好，可以随时阅读或修改。"
+        : chapterHasReadableDraft
+          ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
+          : emptyDraftDetail,
     chapterHasReadableDraft,
     chapterEditingHint: pendingAssignmentCount
       ? `${pendingAssignmentCount} 段回忆待整理`
       : workspace.draft_needs_rewrite
         ? "有新回忆等待写进故事"
         : "",
-    readinessTitle: summary.headline,
-    readinessDetail: summary.detail,
+    readinessTitle: chapterHasReadableDraft ? summary.headline : emptyDraftTitle,
+    readinessDetail: chapterHasReadableDraft ? summary.detail : emptyDraftDetail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace, structureChanged),
     rewriteNoticeDetail: structureChanged
       ? (
@@ -488,13 +494,5 @@ export function chapterWorkspaceViewPatch(
     rewriteDraftScopeDetail,
     sectionViews,
     retainedDraftSectionCount: retainedDraftSectionCount(workspace),
-    canConfirmChapter:
-      summary.state === "draft_ready"
-      && !workspace.draft_needs_rewrite
-      && Boolean(workspace.draft_version_id)
-      && workspace.draft_sections.length > 0
-      && workspace.draft_sections.every(
-        (section) => Boolean(section.content.trim()),
-      ),
   };
 }

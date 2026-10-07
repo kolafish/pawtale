@@ -20,6 +20,8 @@ from app.domain.memoir.types import (
     MemoirEditingJobType,
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.projects import Project
+from app.services.ai_usage_records import reset_ai_usage_context, set_ai_usage_context
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -361,6 +363,7 @@ async def claim_due_editing_jobs(
         statement = statement.where(MemoirEditingJob.project_id == project_id)
     statement = statement.order_by(
         case(
+            (MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK.value, -1),
             (
                 MemoirEditingJob.job_type.in_(
                     (
@@ -580,6 +583,14 @@ async def run_editing_job(
                 error_message="后台任务暂不支持此操作，请联系管理员",
             )
             return False
+        project_user_id = await db.scalar(
+            select(Project.user_id).where(Project.id == job.project_id)
+        )
+        usage_token = set_ai_usage_context(
+            user_id=project_user_id,
+            project_id=job.project_id,
+            operation=f"memoir.job.{job.job_type}",
+        )
         handler_task = asyncio.create_task(handler(db, job))
         try:
             done, _pending = await asyncio.wait(
@@ -593,6 +604,7 @@ async def run_editing_job(
             if not handler_task.done():
                 handler_task.cancel()
                 await asyncio.gather(handler_task, return_exceptions=True)
+            reset_ai_usage_context(usage_token)
         marked = await _mark_job(
             db,
             job,
@@ -752,9 +764,15 @@ async def run_available_editing_jobs(
 async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     settings = get_settings()
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
+    book_policy_reconciled = False
     while not stop_event.is_set():
         try:
             from app.services.memoir.book_completion_jobs import advance_book_completion_jobs
+            if not book_policy_reconciled:
+                from app.services.memoir.automatic_book_draft import reconcile_books_omitted_by_editorial_review
+                async with async_session_maker() as db:
+                    await reconcile_books_omitted_by_editorial_review(db)
+                book_policy_reconciled = True
             async with async_session_maker() as db:
                 await advance_book_completion_jobs(db)
             await run_available_editing_jobs(should_stop=stop_event.is_set)

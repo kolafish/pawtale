@@ -229,6 +229,7 @@ function loadWorkspacePage({
     createMemoirBookChapterDraftTTS: async () => ({
       audio_file_ids: [],
     }),
+    getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: true }] }),
     createMemoirBookChapterDraftSectionTTS: async () => ({
       audio_file_ids: [],
     }),
@@ -322,7 +323,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(context.data.sectionViews[0].expanded, false);
   assert.equal(context.data.sectionViews[0].metaText, "1 段回忆");
   assert.equal(context.data.sectionViews[0].draftContent, "十八岁那年，我第一次离开家。");
-  assert.equal(context.data.canConfirmChapter, true);
+  assert.equal("canConfirmChapter" in context.data, false);
   assert.equal(context.data.editingToolsExpanded, false);
   assert.deepEqual(navigationTitles, ["第一次离家"]);
   assert.doesNotMatch(
@@ -340,6 +341,37 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
     navigations.at(-1),
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
   );
+});
+
+test("chapter workspace guides empty chapters to narration and retains authoritative failure or processing state", () => {
+  const { mod } = loadWorkspacePage();
+  const emptyWorkspace = workspace({
+    sections: [],
+    draft_id: null,
+    draft_version_id: null,
+    draft_content: "",
+    draft_sections: [],
+    completion_summary: summary({ state: "not_started" }),
+  });
+  const empty = mod.chapterWorkspaceViewPatch(emptyWorkspace);
+
+  assert.equal(empty.chapterHasReadableDraft, false);
+  assert.match(empty.readinessTitle, /需要讲述素材/);
+  assert.match(empty.readinessDetail, /继续讲述.*当前步骤/);
+  assert.doesNotMatch(empty.chapterStoryDetail, /正在|自动/);
+
+  for (const state of ["failed", "preparing"]) {
+    const authoritativeSummary = summary({
+      state,
+      headline: state === "failed" ? "上次检查没有完成" : "正在检查本章",
+      detail: state === "failed" ? "原始素材保留，请重新检查。" : "检查任务正在处理。",
+    });
+    const view = mod.chapterWorkspaceViewPatch({ ...emptyWorkspace, completion_summary: authoritativeSummary });
+    assert.equal(view.readinessTitle, authoritativeSummary.headline);
+    assert.equal(view.readinessDetail, authoritativeSummary.detail);
+    assert.equal(view.chapterStoryDetail, authoritativeSummary.detail);
+    assert.equal(view.nextAction.kind, authoritativeSummary.next_action.kind);
+  }
 });
 
 test("chapter workspace opens a focused section selected from the story tree", async () => {
@@ -528,8 +560,7 @@ test("chapter workspace routes browse and editing story entries to one detail st
   assert.match(editingSectionTemplate, /bindtap="openStorySection"/);
   assert.match(editingSectionTemplate, />查看与编辑故事</);
   assert.doesNotMatch(editingSectionTemplate, /class="draft-section-(?:actions|body)/);
-  assert.doesNotMatch(editingSectionTemplate, /bindtap="startDraftSectionEdit"/);
-  assert.match(template, />已收入书稿</);
+  assert.match(template, />本章正文已更新</);
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {
@@ -684,7 +715,7 @@ test("chapter workspace blocks row actions while another operation is active", a
     currentTarget: { dataset: { id: "section-1" } },
   };
 
-  page.startDraftSectionEdit.call(context, sectionEvent);
+  page.openDraftSectionEditor.call(context, sectionEvent);
   await page.playDraftSection.call(context, sectionEvent);
 
   assert.equal(context.data.editingSectionId, "");
@@ -721,6 +752,24 @@ test("chapter workspace protects unsaved edits before returning to the book flow
 
   page.returnToBookFlow.call(context);
   assert.deepEqual(redirects, ["/pages/book/index"]);
+});
+
+test("chapter workspace warns on native back while a section edit is unsaved", () => {
+  const alerts = [];
+  global.wx = {
+    enableAlertBeforeUnload(options) { alerts.push(options.message); },
+    disableAlertBeforeUnload() { alerts.push("disabled"); },
+  };
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page, { workspace: workspace() });
+  const event = { currentTarget: { dataset: { id: "section-1" } } };
+
+  context.openDraftSectionEditor(event);
+  context.changeDraftSectionContent({ detail: { value: "未保存的新正文" } });
+  assert.match(alerts[0], /尚未保存/);
+
+  context.cancelDraftSectionEdit();
+  assert.equal(alerts.at(-1), "disabled");
 });
 
 test("chapter workspace expands materials under their section", async () => {
@@ -1022,7 +1071,7 @@ test("chapter workspace keeps pending materials optional and opens their editor"
     "1 个故事 · 1 段回忆 · 1 段待整理",
   );
   assert.equal(context.data.chapterEditingHint, "1 段回忆待整理");
-  assert.equal(context.data.canConfirmChapter, true);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 
   page.openMaterialEditor.call(context, {
     currentTarget: {
@@ -1200,13 +1249,13 @@ test("chapter workspace edits one small section with optimistic version control"
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  page.startDraftSectionEdit.call(context, {
+  page.openDraftSectionEditor.call(context, {
     currentTarget: { dataset: { id: "section-1" } },
   });
   page.changeDraftSectionContent.call(context, {
     detail: { value: "修改后的第一小节正文" },
   });
-  page.startDraftSectionEdit.call(context, {
+  page.openDraftSectionEditor.call(context, {
     currentTarget: { dataset: { id: "section-2" } },
   });
   assert.equal(context.data.editingSectionId, "section-1");
@@ -1321,7 +1370,7 @@ test("chapter workspace opens the full chapter reading preview", async () => {
   ]);
 });
 
-test("chapter workspace does not confirm a legacy flat draft without section boundaries", async () => {
+test("chapter workspace keeps a legacy flat draft readable without section boundaries", async () => {
   installWx();
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({ draft_sections: [] }),
@@ -1333,7 +1382,7 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
     chapterId: "chapter-1",
   });
 
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 });
 
 test("legacy flat draft exposes direct section draft regeneration when ready", async () => {
@@ -1367,11 +1416,11 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.equal(
     context.data.draftRecoveryTitle,
-    "现在可以更新 1 个有变化的故事",
+    "现在可以更新相关故事",
   );
   assert.equal(
     context.data.draftRecoveryActionText,
-    "更新 1 个有变化的故事",
+    "更新相关故事",
   );
   assert.equal(context.data.draftRecoveryActionKind, "rewrite");
 
@@ -1414,7 +1463,7 @@ test("chapter rewrite reports persisted section progress at its action surface",
   });
 
   assert.equal(context.data.operationKind, "rewrite_chapter");
-  assert.equal(context.data.chapterPreparationTitle, "正在更新有变化的故事");
+  assert.equal(context.data.chapterPreparationTitle, "正在更新相关故事");
   assert.match(context.data.chapterPreparationDetail, /已更新 3\/9 个故事/);
   assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
   assert.equal(context.data.chapterPreparationProgress, 33);
@@ -1437,7 +1486,7 @@ test("chapter workspace does not confirm a draft after its section structure cha
     chapterId: "chapter-1",
   });
 
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.chapterHasReadableDraft, true);
 });
 
 test("chapter workspace explains that an old draft is preserved after regrouping", async () => {
@@ -1465,28 +1514,47 @@ test("chapter workspace explains that an old draft is preserved after regrouping
   assert.match(context.data.rewriteNoticeDetail, /旧正文没有丢失/);
   assert.match(
     context.data.rewriteNoticeDetail,
-    /当前 1 个内容发生变化的故事/,
+    /1 个故事的素材或结构发生变化/,
   );
 });
 
-test("chapter workspace confirms the current structured draft without an assembly step", async () => {
-  const { toasts } = installWx();
-  const calls = [];
+test("chapter workspace reads the current structured draft without a confirmation step", async () => {
+  const { navigations } = installWx();
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+  page.openChapterPreview.call(context);
+  assert.match(navigations.at(-1), /\/pages\/book-reader\/index/);
+  assert.equal(typeof page.confirmChapter, "undefined");
+});
+
+test("chapter workspace exposes current draft and update paths from the chapter summary", async () => {
+  const { scrolls } = installWx();
   const { page } = loadWorkspacePage({
-    voiceApiExports: {
-      confirmMemoirBookChapterDraft: async (...args) => calls.push(args),
-    },
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+      completion_summary: summary({ state: "not_started" }),
+    }),
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  await page.confirmChapter.call(context);
+  page.showDraftUpdate.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-sections");
 
-  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
-  assert.equal(toasts[0].title, "本章正文已确认");
+  context.setData({ editingToolsExpanded: false, nextAction: { ...context.data.nextAction, kind: "review_draft" } });
+  await page.runNextAction.call(context);
+  assert.equal(context.data.editingToolsExpanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-sections");
+
+  const template = fs.readFileSync(path.join(__dirname, "../pages/chapter-workspace/index.wxml"), "utf8");
+  assert.match(template, /bindtap="showDraftUpdate"/);
+  assert.doesNotMatch(template, /bindtap="confirmChapter"/);
 });
 
-test("required review keeps an existing draft from being confirmed", async () => {
+test("required review keeps its decision visible alongside an existing draft", async () => {
   installWx();
   const reviewSummary = summary({
     state: "needs_input",
@@ -1512,7 +1580,7 @@ test("required review keeps an existing draft from being confirmed", async () =>
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.nextAction.kind, "confirm");
 });
 
 test("chapter workspace derives readable review text without mutating the API response", () => {
@@ -1606,14 +1674,14 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   assert.equal(context.data.narrativeSectionCount, 4);
   assert.equal(
     context.data.rewriteDraftActionText,
-    "更新 1 个有变化的故事",
+    "更新相关故事",
   );
   assert.equal(
     context.data.rewriteDraftBusyText,
-    "正在更新 1 个故事…",
+    "正在更新相关故事…",
   );
-  assert.match(context.data.rewriteNoticeDetail, /只重新生成当前 1 个/);
-  assert.match(context.data.rewriteNoticeDetail, /其他故事沿用现有正文/);
+  assert.match(context.data.rewriteNoticeDetail, /重点更新相关内容/);
+  assert.match(context.data.rewriteNoticeDetail, /有联系的故事衔接/);
   context.data.operationKind = "prepare";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
@@ -1623,8 +1691,8 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
-  assert.equal(modals.at(-1).title, "更新 1 个有变化的故事");
-  assert.match(modals.at(-1).content, /只重新生成当前 1 个/);
+  assert.equal(modals.at(-1).title, "更新相关故事");
+  assert.match(modals.at(-1).content, /有联系的故事衔接/);
   assert.equal(modals.at(-1).confirmText, "更新正文");
   assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
@@ -1694,5 +1762,101 @@ test("stale candidate acceptance preserves original and surfaces conflict", asyn
   assert.match(context.data.error, /正文已更新/);
   assert.equal(context.data.chapterPreparationJob, candidate);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.operationKind, "");
+});
+
+test("chapter workspace offers the migrated chapter actions and preserves narration settings", async () => {
+  installWx();
+  const sheets = [];
+  const calls = [];
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftTTS: async (projectId, chapterId, payload) => {
+        calls.push({ projectId, chapterId, payload });
+        return { audio_file_ids: [] };
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "不收入本书"]);
+  assert.equal(context.data.operationKind, "");
+  await page.playChapterAudio.call(context);
+  assert.deepEqual(calls, [{ projectId: "project-1", chapterId: "chapter-1", payload: { voice: "zh_female_xiaohe_uranus_bigtts", speed_ratio: 1.5 } }]);
+  assert.equal(context.data.audioPhase, "idle");
+  context.setData({ chapterHasReadableDraft: false });
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.deepEqual(sheets[1].itemList, ["修改章名", "AI 重新起名", "不收入本书"]);
+});
+
+test("chapter workspace renames manually or with AI through the existing APIs", async () => {
+  installWx({ editableContent: "  院子里的童年  " });
+  const calls = [];
+  let currentTitle = "第一次离家";
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => { calls.push({ projectId, chapterId, data }); currentTitle = data.title; },
+      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => { calls.push({ projectId, chapterId, data }); currentTitle = "外婆院中的日子"; },
+      getMemoirChapterWorkspace: async () => workspace({ chapter_title: currentTitle }),
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  await page.editChapterTitle.call(context, false);
+  assert.equal(context.data.workspace.chapter_title, "院子里的童年");
+  await page.editChapterTitle.call(context, true);
+  assert.equal(context.data.workspace.chapter_title, "外婆院中的日子");
+  assert.deepEqual(calls, [
+    { projectId: "project-1", chapterId: "chapter-1", data: { title: "院子里的童年" } },
+    { projectId: "project-1", chapterId: "chapter-1", data: {} },
+  ]);
+  assert.equal(context.data.operationKind, "");
+});
+
+test("chapter workspace toggles book inclusion without deleting the chapter's draft", async () => {
+  installWx();
+  let includeInBook = true;
+  const commands = [];
+  const sheets = [];
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: includeInBook }] }),
+      applyMemoirBookPlanStructureCommand: async (_projectId, command) => { commands.push(command); includeInBook = command.include_in_book; },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  await page.setChapterBookInclusion.call(context, false);
+  assert.equal(context.data.workspace.draft_content, workspace().draft_content);
+  context.pageVisible = true;
+  await page.openChapterMoreActions.call(context);
+  assert.ok(sheets[0].itemList.includes("恢复收入本书"));
+  await page.setChapterBookInclusion.call(context, true);
+  assert.equal(context.data.workspace.draft_content, workspace().draft_content);
+  assert.deepEqual(commands, [
+    { type: "set_chapter_book_inclusion", chapter_id: "chapter-1", include_in_book: false },
+    { type: "set_chapter_book_inclusion", chapter_id: "chapter-1", include_in_book: true },
+  ]);
+  context.setData({ editingSectionId: "section-1" });
+  await page.setChapterBookInclusion.call(context, false);
+  await page.editChapterTitle.call(context, true);
+  assert.equal(commands.length, 2);
+});
+
+test("chapter action sheet stays closed when its plan arrives after leaving the page", async () => {
+  installWx();
+  const sheets = [];
+  let resolvePlan;
+  global.wx.showActionSheet = (options) => sheets.push(options);
+  const { page } = loadWorkspacePage({ voiceApiExports: { getMemoirBookPlan: () => new Promise((resolve) => { resolvePlan = resolve; }) } });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  context.pageVisible = true;
+  const opening = page.openChapterMoreActions.call(context);
+  context.pageVisible = false;
+  resolvePlan({ chapters: [{ id: "chapter-1", include_in_book: true }] });
+  await opening;
+  assert.equal(sheets.length, 0);
   assert.equal(context.data.operationKind, "");
 });

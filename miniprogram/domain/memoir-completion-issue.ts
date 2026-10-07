@@ -38,6 +38,7 @@ export interface MemoirCompletionIssue {
   related_material_ids: string[];
   input_signature: string;
   status: MemoirCompletionIssueStatus;
+  blocks_book: boolean;
   active_session_id?: string | null;
   outcome?: MemoirCompletionIssueOutcome | null;
   outcome_note: string;

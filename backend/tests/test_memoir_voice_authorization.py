@@ -1,4 +1,48 @@
 from tests.memoir_helpers import post_mobile_memoir_voice_session
+from app.services.memoir.voice_authorization import (
+    CURRENT_VOICE_AUTHORIZATION_VERSION,
+    audio_authorizer,
+    has_current_voice_authorization_consent,
+)
+from app.services.memoir import voice_authorization
+
+
+async def test_recording_requires_current_user_agreement(client, test_db, monkeypatch):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    assert not await has_current_voice_authorization_consent(test_db, user_id)
+    monkeypatch.setattr(voice_authorization, "AUDIO_AUTHORIZATION_REFRESH_SECONDS", 0)
+    authorized_audio = audio_authorizer(test_db, user_id)
+    assert not await authorized_audio()
+
+    for agreed in (True, False):
+        response = await client.post(
+            "/api/mobile/memoir/voice-authorization-consent",
+            json={"version": CURRENT_VOICE_AUTHORIZATION_VERSION, "agreed": agreed},
+        )
+        assert response.status_code == 201
+        assert await has_current_voice_authorization_consent(test_db, user_id) is agreed
+        assert await authorized_audio() is agreed
+
+
+async def test_voice_consent_is_not_shared_between_accounts(anonymous_client, test_db):
+    first = await anonymous_client.post(
+        "/api/auth/register",
+        json={"email": "first-voice@example.com", "password": "password123"},
+    )
+    assert first.status_code == 201
+    assert (await anonymous_client.post(
+        "/api/mobile/memoir/voice-authorization-consent",
+        json={"version": CURRENT_VOICE_AUTHORIZATION_VERSION, "agreed": True},
+    )).status_code == 201
+    assert await has_current_voice_authorization_consent(test_db, first.json()["user"]["id"])
+
+    await anonymous_client.post("/api/auth/logout")
+    second = await anonymous_client.post(
+        "/api/auth/register",
+        json={"email": "second-voice@example.com", "password": "password123"},
+    )
+    assert second.status_code == 201
+    assert not await has_current_voice_authorization_consent(test_db, second.json()["user"]["id"])
 
 
 async def test_voice_authorization_consent_requires_login(anonymous_client):

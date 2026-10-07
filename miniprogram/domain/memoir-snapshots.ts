@@ -18,6 +18,8 @@ export interface MemoirShareVideoCount {
   utterance_id: string;
   count: number;
   job_ids: string[];
+  current_job_ids?: string[];
+  job_titles?: Record<string, string>;
 }
 
 export interface MemoirBookSnapshot {
@@ -26,6 +28,8 @@ export interface MemoirBookSnapshot {
   plan?: MemoirBookPlan | null;
   drafts_by_chapter_id: Record<string, MemoirBookChapterDraft | null>;
   output?: MemoirBookOutput | null;
+  progress?: MemoirDraftProgress | null;
+  blocking_issue_count: number;
   automation_events: MemoirAutomationEventListResponse;
   image_assets: MemoirImageAssetListResponse;
   share_video_counts: MemoirShareVideoCount[];

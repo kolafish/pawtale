@@ -9,15 +9,15 @@
 
   <view wx:if="{{!profileMode}}" class="login-panel">
     <text class="panel-title">欢迎登录</text>
-    <text class="panel-copy">微信登录或使用已有 Pawtale 账号进入。</text>
+    <text class="panel-copy">使用微信账号登录。登录 code 将发送给后端用于识别账号；头像和昵称仅在您主动选择后保存。</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
     <view
       id="wechat-login-action"
-      class="primary-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+      class="primary-button support-action ui-block-action ui-pressable {{wechatLoading ? 'is-disabled' : ''}}"
       aria-role="button"
-      aria-disabled="{{loading || wechatLoading}}"
+      aria-disabled="{{wechatLoading}}"
       bindtap="submitWeChat"
     >
       <text class="login-action-mark" aria-hidden="true">微</text>
@@ -25,53 +25,6 @@
       <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
 
-    <view
-      id="account-login-toggle"
-      class="mode-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
-      aria-role="button"
-      aria-disabled="{{loading || wechatLoading}}"
-      bindtap="toggleAccountMode"
-    >
-      {{accountMode ? "收起账号登录" : "使用 Pawtale 账号登录"}}
-    </view>
-
-    <view wx:if="{{accountMode}}" class="account-panel">
-      <view class="field">
-        <text class="field-label">邮箱</text>
-        <input
-          id="account-email-input"
-          class="field-input support-form-input"
-          type="text"
-          value="{{email}}"
-          placeholder="name@example.com"
-          bindinput="changeEmail"
-        />
-      </view>
-
-      <view class="field">
-        <text class="field-label">密码</text>
-        <input
-          id="account-password-input"
-          class="field-input support-form-input"
-          password
-          value="{{password}}"
-          placeholder="至少 8 位"
-          bindinput="changePassword"
-        />
-      </view>
-
-      <view
-        id="account-login-action"
-        class="secondary-button support-action ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{loading || wechatLoading}}"
-        bindtap="submitAccount"
-      >
-        <text class="login-action-mark" aria-hidden="true">邮</text>
-        <text class="login-action-label">{{loading ? "登录中" : "账号登录"}}</text>
-        <text class="login-action-arrow" aria-hidden="true">›</text>
-      </view>
-    </view>
   </view>
 
   <view wx:else class="login-panel profile-setup-panel">

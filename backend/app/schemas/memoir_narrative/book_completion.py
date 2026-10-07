@@ -188,6 +188,7 @@ class MemoirChapterCompletionSummary(BaseModel):
     state: MemoirBookCompletionState
     next_action: MemoirChapterCompletionNextAction
     active_issue: MemoirChapterCompletionIssue | None = None
+    blocking_issue_count: int = Field(default=0, ge=0)
     headline: str
     detail: str
 
@@ -199,6 +200,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
     total_chapters: int
     completed_chapters: int
     chapters: list[MemoirChapterCompletionSummary]
+    blocking_issue_count: int = Field(default=0, ge=0)
     completion_job: MemoirBookCompletionJobResponse | None = None
     book_review: MemoirBookReviewResponse | None = None
     book_review_job: MemoirBookReviewJobResponse | None = None

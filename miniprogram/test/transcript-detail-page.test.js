@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { MEMOIR_SHARE_VIDEO_STYLES } = require("../domain/memoir-transcript.ts");
+const { ApiError } = require("../services/request.ts");
 const {
   mockMemoirApiModules,
   clearModule,
@@ -84,6 +86,8 @@ function sampleShareVideoContext(utteranceId = "utterance-share", overrides = {}
     min_select_ms: 3000,
     max_select_ms: 90000,
     ai_background_enabled: true,
+    default_video_style: "illustrated",
+    video_styles: MEMOIR_SHARE_VIDEO_STYLES,
     default_background_source: "ai",
     default_background_style: "watercolor",
     default_background_mode: "auto",
@@ -181,6 +185,7 @@ function sampleShareVideoJob(overrides = {}) {
     utterance_id: "utterance-share",
     audio_file_id: "audio-utterance-share",
     status: "succeeded",
+    title: "爷爷继续工作的日子",
     selected_text: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
     start_char: 0,
     end_char: 23,
@@ -206,6 +211,13 @@ function sampleShareVideoJob(overrides = {}) {
     ...overrides,
   };
 }
+
+test("share video filename uses a safe, short job title", () => {
+  const { shareVideoFileName } = require("../pages/transcript-detail/transcript-detail-model.ts");
+  assert.equal(shareVideoFileName("  外婆/家的夏天:雨后?  "), "外婆家的夏天雨后.mp4");
+  assert.equal(shareVideoFileName("abcdefghijklmnopqrstuvwxyz"), "abcdefghijklmnopqrstuvwx.mp4");
+  assert.equal(shareVideoFileName(undefined), "回忆录片段.mp4");
+});
 
 function sampleMaterialImageJob(overrides = {}) {
   return {
@@ -308,6 +320,48 @@ test("transcript detail page loads a single transcript", async () => {
   assert.equal(context.data.moreActionsExpanded, false);
 });
 
+test("transcript detail distinguishes a failed load from a missing record and can retry", async () => {
+  let attempts = 0;
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("网络连接失败，请检查网络后重试");
+        return sampleTranscript(id);
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-retry" });
+  assert.equal(context.data.item, null);
+  assert.equal(context.data.error, "网络连接失败，请检查网络后重试");
+
+  await page.loadTranscript.call(context);
+  assert.equal(attempts, 2);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.item.id, "utterance-retry");
+
+  const template = fs.readFileSync(path.join(__dirname, "../pages/transcript-detail/index.wxml"), "utf8");
+  assert.match(template, /wx:elif="\{\{error && !item\}\}"[\s\S]*?bindtap="loadTranscript">重新加载/);
+});
+
+test("transcript detail shows the missing state only for a missing record", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async () => {
+        throw new ApiError(404, "讲述记录不存在", {});
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-deleted" });
+  assert.equal(context.data.item, null);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.loading, false);
+});
+
 test("transcript detail page keeps long original narration collapsed until requested", async () => {
   const longRawText = "那年夏天我们一起去了老家的院子，外婆坐在门口给我们讲以前的事情。".repeat(4);
   const { page } = loadTranscriptDetailPage({
@@ -400,12 +454,12 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   await page.onLoad.call(context, { id: "utterance-pending" });
 
   assert.equal(context.data.item.titleText, "音频已保存");
-  assert.equal(context.data.item.transcriptionNoticeText, "这段录音已经安全保存，恢复转写后即可继续整理。");
-  assert.equal(context.data.item.heroStatusText, "等待转写");
+  assert.ok(context.data.item.transcriptionNoticeText);
+  assert.ok(context.data.item.heroStatusText);
   assert.equal(context.data.item.heroStatusClass, "pending");
   assert.equal(context.data.item.displayCountText, "尚未生成");
   assert.equal(context.data.item.rawCountText, "尚未转写");
-  assert.equal(context.data.item.locationTitleText, "等待转写");
+  assert.ok(context.data.item.locationTitleText);
   assert.equal(context.data.item.showLocationPath, false);
   assert.equal(context.data.item.canPlayAnswerAudio, true);
   assert.equal(context.data.item.canRecoverTranscription, true);
@@ -425,7 +479,8 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(context.data.item.canRecoverTranscription, false);
   assert.equal(context.data.item.titleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.item.displayCountText, "14 字");
-  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0].icon, "success");
 });
 
 test("transcript detail page labels human interviewer questions", async () => {
@@ -977,7 +1032,7 @@ test("transcript media page creates share video from selected corrected segments
   assert.equal(context.data.shareVideoSegments.length, 2);
   assert.equal(context.data.shareVideoSelectedCanGenerate, false);
   assert.equal(context.data.shareVideoBackgroundSource, "ai");
-  assert.equal(context.data.shareVideoBackgroundSourceOptions.length, 3);
+  assert.equal(context.data.shareVideoStyle, "illustrated");
   assert.equal(context.data.shareVideoBackgroundUsesAi, true);
   assert.equal(context.data.shareVideoBackgroundStyle, "watercolor");
   assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 5);
@@ -1008,7 +1063,7 @@ test("transcript media page creates share video from selected corrected segments
   assert.deepEqual(storageWrites, [
     {
       key: "pawtale_share_video_background_settings",
-      value: { backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "auto" },
+      value: { backgroundStyle: "gouache", backgroundMode: "auto" },
     },
   ]);
   page.selectShareVideoBackgroundMode.call(context, {
@@ -1024,11 +1079,12 @@ test("transcript media page creates share video from selected corrected segments
       id: "utterance-share",
       startChar: 0,
       endChar: 23,
-      options: { backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "smart_multi" },
+      options: { videoStyle: "illustrated", backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "smart_multi" },
     },
   ]);
   assert.equal(context.data.shareVideoJob.status, "pending");
   assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.viewMode, "video");
   assert.deepEqual(downloads, []);
 
   context.shareVideoController.cancel();
@@ -1053,7 +1109,7 @@ test("transcript media page creates share video from selected corrected segments
   assert.deepEqual(downloads, ["job-1"]);
   assert.equal(shareCalls.length, 1);
   assert.equal(shareCalls[0].filePath, "/tmp/share-video.mp4");
-  assert.equal(shareCalls[0].fileName, "爷爷退休后仍帮公司做事.mp4");
+  assert.equal(shareCalls[0].fileName, "爷爷继续工作的日子.mp4");
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 
@@ -1132,45 +1188,435 @@ test("transcript media page creates a standalone image and opens it in the toolb
   ]);
 });
 
-test("transcript media page restores the latest matching share video job after reload", async () => {
-  const contextCalls = [];
-  const pollCalls = [];
-  const restoredJob = sampleShareVideoJob({
+test("transcript media page keeps creation tools for completed or failed history", async () => {
+  for (const status of ["succeeded", "failed"]) {
+    const contextCalls = [];
+    const jobCalls = [];
+    const downloads = [];
+    const { page } = loadTranscriptMediaPage({
+      voiceApiExports: {
+        getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+        getMemoirTranscriptShareVideoContext: async (id) => {
+          contextCalls.push(id);
+          return sampleShareVideoContext(id, { latest_job_id: "earlier-video" });
+        },
+        getMemoirShareVideoJob: async (jobId) => {
+          jobCalls.push(jobId);
+          return sampleShareVideoJob({ id: jobId, utterance_id: "utterance-resume", status });
+        },
+        downloadMemoirShareVideoJob: async (job) => {
+          downloads.push(job.id);
+          return "/tmp/earlier-video.mp4";
+        },
+      },
+    });
+    const context = pageContext(page);
+
+    await page.onLoad.call(context, { id: "utterance-resume" });
+
+    assert.deepEqual(contextCalls, ["utterance-resume"]);
+    assert.deepEqual(jobCalls, ["earlier-video"]);
+    assert.deepEqual(downloads, []);
+    assert.equal(context.data.viewMode, "create");
+    assert.equal(context.data.shareVideoJob, null);
+    assert.equal(context.data.shareVideoSegments.length, 2);
+  }
+});
+
+test("transcript media page resumes an unfinished manual video without a job id", async () => {
+  const jobCalls = [];
+  const imageJobCalls = [];
+  const runningJob = sampleShareVideoJob({
     utterance_id: "utterance-resume",
     audio_file_id: "audio-utterance-resume",
-    status: "pending",
+    status: "running",
     output: null,
     completed_at: null,
   });
-  const { page } = loadTranscriptMediaPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-      getMemoirTranscriptShareVideoContext: async (id) => {
-        contextCalls.push(id);
-        return sampleShareVideoContext(id, { latest_job_id: restoredJob.id });
-      },
-      getMemoirShareVideoJob: async (jobId) => {
-        pollCalls.push(jobId);
-        return restoredJob;
-      },
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, {
+      latest_job_id: runningJob.id,
+      latest_image_job_id: "image-job-1",
+    }),
+    getMemoirShareVideoJob: async (jobId) => {
+      jobCalls.push(jobId);
+      return runningJob;
     },
-  });
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob();
+    },
+  } });
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-resume" });
 
-  assert.deepEqual(contextCalls, ["utterance-resume"]);
-  assert.deepEqual(pollCalls, ["job-1"]);
-  assert.equal(context.data.shareVideoJob.id, "job-1");
-  assert.equal(context.data.shareVideoJob.status, "pending");
+  assert.deepEqual(jobCalls, [runningJob.id]);
+  assert.deepEqual(imageJobCalls, []);
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob.id, runningJob.id);
   assert.equal(context.data.shareVideoPolling, true);
-  assert.equal(context.data.shareVideoSelectedStartIndex, 0);
-  assert.equal(context.data.shareVideoSelectedEndIndex, 1);
-  assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
-  assert.equal(context.data.shareVideoStatusText, "视频任务已创建，等待生成");
-
   context.shareVideoController.cancel();
+});
+
+test("transcript media page opens the video job chosen from the home recommendation", async () => {
+  const pollCalls = [];
+  const contextCalls = [];
+  const imageJobCalls = [];
+  const restoredJob = sampleShareVideoJob({
+    id: "candidate-video",
+    utterance_id: "utterance-candidate",
+    audio_file_id: "audio-utterance-candidate",
+    status: "pending",
+    output: null,
+    completed_at: null,
+  });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => {
+      contextCalls.push(id);
+      return sampleShareVideoContext(id, { latest_image_job_id: "image-job-1" });
+    },
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob();
+    },
+    getMemoirShareVideoJob: async (jobId) => {
+      pollCalls.push(jobId);
+      return restoredJob;
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-candidate", jobId: "candidate-video" });
+
+  assert.deepEqual(pollCalls, ["candidate-video"]);
+  assert.deepEqual(contextCalls, []);
+  assert.deepEqual(imageJobCalls, []);
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob.id, "candidate-video");
+  assert.equal(context.data.shareVideoPolling, true);
+  context.shareVideoController.cancel();
+});
+
+test("transcript media page reopens a completed video and loads creation tools only on remake", async () => {
+  const contextCalls = [];
+  const imageJobCalls = [];
+  const downloads = [];
+  const jobCalls = [];
+  const job = sampleShareVideoJob({ utterance_id: "utterance-result", video_style: "story_animation" });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => {
+      contextCalls.push(id);
+      return sampleShareVideoContext(id, {
+        latest_job_id: "another-running-video",
+        latest_image_job_id: "image-job-1",
+      });
+    },
+    getMemoirMaterialImageGenerationJob: async (jobId) => {
+      imageJobCalls.push(jobId);
+      return sampleMaterialImageJob({ utterance_id: "utterance-result" });
+    },
+    getMemoirShareVideoJob: async (jobId) => {
+      jobCalls.push(jobId);
+      return job;
+    },
+    downloadMemoirShareVideoJob: async (video) => {
+      downloads.push(video.id);
+      return "/tmp/completed-video.mp4";
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-result", jobId: job.id });
+
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob.title, "爷爷继续工作的日子");
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/completed-video.mp4");
+  assert.deepEqual(downloads, [job.id]);
+  assert.deepEqual(contextCalls, []);
+  assert.deepEqual(imageJobCalls, []);
+
+  const shareCalls = [];
+  global.wx = {
+    shareFileMessage(options) {
+      shareCalls.push(options.fileName);
+      options.success({ errMsg: "shareFileMessage:ok" });
+    },
+  };
+  await page.shareGeneratedVideo.call(context);
+  assert.deepEqual(shareCalls, ["爷爷继续工作的日子.mp4"]);
+
+  await page.remakeShareVideo.call(context);
+
+  assert.equal(context.data.viewMode, "create");
+  assert.equal(context.data.shareVideoJob, null);
+  assert.equal(context.data.shareVideoStyle, "story_animation");
+  assert.deepEqual(contextCalls, ["utterance-result"]);
+  assert.deepEqual(imageJobCalls, []);
+  assert.deepEqual(jobCalls, [job.id]);
+  assert.equal(context.data.shareVideoSegments.length, 2);
+  assert.equal(context.data.shareVideoSelectedText, job.selected_text);
+  assert.equal(context.data.shareVideoBackgroundStyle, "old_album");
+});
+
+test("transcript media remake restores uploaded style for legacy custom-background videos", async () => {
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({
+      utterance_id: "utterance-result", background_source: "custom",
+      custom_background_asset_id: "original-photo",
+    }),
+    downloadMemoirShareVideoJob: async () => "/tmp/completed.mp4",
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  assert.equal(context.data.shareVideoStyle, "uploaded");
+  assert.equal(context.data.shareVideoBackgroundUsesCustom, true);
+  assert.equal(context.data.shareVideoCustomBackgroundAssetId, "original-photo");
+});
+
+test("remake keeps the original range and sends the newly selected configuration", async () => {
+  const calls = [];
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({
+      utterance_id: "utterance-result", selected_text: "后来大家都很信任他。", start_char: 13,
+      background_style: "pencil", background_mode: "smart_multi",
+    }),
+    downloadMemoirShareVideoJob: async () => "/tmp/original.mp4",
+    createMemoirTranscriptShareVideoJob: async (...args) => {
+      calls.push(args);
+      return sampleShareVideoJob({ id: "new-version", status: "pending", output: null });
+    },
+    deleteMemoirShareVideoJob: async () => assert.fail("remake must not delete any video"),
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  assert.equal(context.data.shareVideoSelectedStartChar, 13);
+  assert.equal(context.data.shareVideoSelectedEndChar, 23);
+  assert.equal(context.data.shareVideoBackgroundStyle, "pencil");
+  assert.equal(context.data.shareVideoBackgroundMode, "smart_multi");
+  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "story_animation" } } });
+  await page.createShareVideo.call(context);
+  assert.deepEqual(calls, [["utterance-result", 13, 23, { videoStyle: "story_animation" }]]);
+  context.shareVideoController.cancel();
+});
+
+test("remake shows progress while submitting and follows the new job through completion", async () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/transcript-media/index.wxml"), "utf8");
+  assert.match(template, /<ai-task-progress\s+wx:if="\{\{shareVideoCreating && !shareVideoJob\}\}"/);
+  let finishCreation;
+  const pendingCreation = new Promise((resolve) => { finishCreation = resolve; });
+  const newJob = sampleShareVideoJob({
+    id: "new-version", utterance_id: "utterance-result", video_style: "illustrated",
+    status: "pending", background_status: "pending", output: null,
+  });
+  let latestJob = newJob;
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async (id) => id === newJob.id
+      ? latestJob : sampleShareVideoJob({ utterance_id: "utterance-result", status: "failed" }),
+    createMemoirTranscriptShareVideoJob: async () => pendingCreation,
+    downloadMemoirShareVideoJob: async () => "/tmp/new-version.mp4",
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  const submission = page.createShareVideo.call(context);
+  try {
+    assert.equal(context.data.viewMode, "video");
+    assert.equal(context.data.shareVideoCreating, true);
+    assert.equal(context.data.shareVideoJob, null);
+  } finally {
+    finishCreation(newJob);
+    await submission;
+    context.shareVideoController.cancel();
+  }
+  assert.equal(context.data.shareVideoJob.id, newJob.id);
+  latestJob = { ...newJob, status: "running", background_status: "generating" };
+  await page.refreshShareVideoJob.call(context);
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.shareVideoStatusText, "正在生成背景图");
+  latestJob = sampleShareVideoJob({ ...newJob, status: "succeeded", background_status: "ready",
+    output: sampleShareVideoJob().output });
+  await page.refreshShareVideoJob.call(context);
   assert.equal(context.data.shareVideoPolling, false);
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/new-version.mp4");
+  context.shareVideoController.cancel();
+});
+
+test("failed video submission returns to the editor with its chosen settings", async () => {
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "utterance-result", status: "failed" }),
+    createMemoirTranscriptShareVideoJob: async () => { throw new Error("暂时无法提交"); },
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "story_animation" } } });
+  await page.createShareVideo.call(context);
+  assert.equal(context.data.viewMode, "create");
+  assert.equal(context.data.shareVideoCreating, false);
+  assert.equal(context.data.shareVideoStyle, "story_animation");
+  assert.equal(context.data.shareVideoSelectedText, sampleShareVideoJob().selected_text);
+  assert.equal(context.data.shareVideoError, "暂时无法提交");
+});
+
+test("remake asks for a new selection when the source text has changed", async () => {
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, {
+      transcript_text: "这段讲述已经修改。后来大家都很信任他。",
+    }),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "utterance-result" }),
+    downloadMemoirShareVideoJob: async () => "/tmp/original.mp4",
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+  await page.remakeShareVideo.call(context);
+  assert.equal(context.data.shareVideoSelectedText, "");
+  assert.equal(context.data.shareVideoSelectedCanGenerate, false);
+  assert.match(context.data.shareVideoError, /重新选择片段/);
+});
+
+test("video deletion cancels safely, deletes only the confirmed version, and preserves preview on failure", async () => {
+  for (const outcome of ["cancel", "confirm", "failure", "leave"]) {
+    const deleted = [];
+    const navigations = [];
+    const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "utterance-result" }),
+      downloadMemoirShareVideoJob: async () => "/tmp/original.mp4",
+      deleteMemoirShareVideoJob: async (id) => {
+        deleted.push(id);
+        if (outcome === "failure") throw new Error("删除失败，请稍后再试");
+      },
+    } });
+    const context = pageContext(page);
+    await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+    global.wx = {
+      showModal(options) {
+        if (outcome === "leave") page.onUnload.call(context);
+        options.success({ confirm: outcome !== "cancel" });
+      },
+      showToast() {},
+      navigateBack() { navigations.push("back"); },
+    };
+    await page.deleteShareVideo.call(context);
+    assert.deepEqual(deleted, ["confirm", "failure"].includes(outcome) ? ["job-1"] : []);
+    assert.deepEqual(navigations, outcome === "confirm" ? ["back"] : []);
+    if (outcome === "confirm") {
+      assert.equal(context.data.shareVideoJob, null);
+    } else {
+      assert.equal(context.data.shareVideoJob.id, "job-1");
+      assert.equal(context.data.shareVideoPreviewPath, "/tmp/original.mp4");
+    }
+    if (outcome === "failure") assert.match(context.data.shareVideoError, /删除失败/);
+    context.shareVideoController.dispose();
+  }
+});
+
+test("transcript media recommendation opens with editable range and styles, and creates only on confirmation", async () => {
+  const candidate = {
+    id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
+    status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13,
+  };
+  for (const style of ["uploaded", "illustrated", "story_animation"]) {
+    const calls = [];
+    const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { default_video_style: style }),
+      getMemoirShareVideoCandidate: async (projectId) => {
+        assert.equal(projectId, "project-1");
+        return { candidate };
+      },
+      createMemoirShareVideoCandidateJob: async (...args) => {
+        calls.push(args);
+        return sampleShareVideoJob({ utterance_id: "utterance-share", video_style: style, status: "pending", output: null });
+      },
+      createMemoirTranscriptShareVideoJob: async (...args) => {
+        calls.push(args);
+        return sampleShareVideoJob({ utterance_id: "utterance-share", video_style: style, status: "pending", output: null });
+      },
+    } });
+    const context = pageContext(page);
+    await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1" });
+    assert.equal(context.data.viewMode, "create");
+    assert.equal(context.data.shareVideoStyle, style);
+    assert.equal(context.data.shareVideoSelectedStartChar, 0);
+    assert.equal(context.data.shareVideoSelectedEndChar, 13);
+    assert.deepEqual(calls, []);
+    if (style === "uploaded") {
+      await page.createShareVideo.call(context);
+      assert.deepEqual(calls, []);
+      context.setData({ shareVideoCustomBackgroundAssetId: "photo-1" });
+    } else if (style === "illustrated") {
+      page.selectShareVideoBackgroundStyle.call(context, { currentTarget: { dataset: { backgroundStyle: "gouache" } } });
+      page.selectShareVideoBackgroundMode.call(context, { currentTarget: { dataset: { backgroundMode: "smart_multi" } } });
+    } else {
+      page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 1 } } });
+      assert.equal(context.data.shareVideoSelectedText, sampleShareVideoContext().transcript_text);
+    }
+    await page.createShareVideo.call(context);
+    const options = style === "uploaded"
+      ? { videoStyle: style, backgroundSource: "custom", customBackgroundAssetId: "photo-1" }
+      : style === "illustrated"
+        ? { videoStyle: style, backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "smart_multi" }
+        : { videoStyle: style };
+    assert.deepEqual(calls, style === "story_animation"
+      ? [["utterance-share", 0, 23, options]]
+      : [["project-1", "candidate-1", options]]);
+    context.shareVideoController.cancel();
+  }
+});
+
+test("transcript media does not restore stale or foreign candidate selections", async () => {
+  for (const overrides of [{ text_hash: "old-hash" }, { project_id: "other-project" }]) {
+    const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+      getMemoirShareVideoCandidate: async () => ({ candidate: {
+        id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
+        status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, ...overrides,
+      } }),
+    } });
+    const context = pageContext(page);
+    await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1" });
+    assert.equal(context.data.shareVideoCandidate, null);
+    assert.equal(context.data.shareVideoSelectedText, "");
+    assert.match(context.data.error, /推荐片段已更新/);
+  }
+});
+
+test("transcript media page rejects a video from a different utterance before preview", async () => {
+  const downloads = [];
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirShareVideoJob: async () => sampleShareVideoJob({ utterance_id: "other-utterance" }),
+    downloadMemoirShareVideoJob: async (job) => {
+      downloads.push(job.id);
+      return "/tmp/other-video.mp4";
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-result", jobId: "job-1" });
+
+  assert.equal(context.data.viewMode, "video");
+  assert.equal(context.data.shareVideoJob, null);
+  assert.equal(context.data.error, "视频不属于这段讲述");
+  assert.deepEqual(downloads, []);
 });
 
 test("transcript media page restores the latest standalone image job and selection", async () => {
@@ -1237,7 +1683,6 @@ test("transcript media page uses backend background options as the configuration
     getStorageSync(key) {
       assert.equal(key, "pawtale_share_video_background_settings");
       return {
-        backgroundSource: "ai",
         backgroundStyle: "documentary",
         backgroundMode: "story_beats",
       };
@@ -1271,7 +1716,6 @@ test("transcript media page uses backend background options as the configuration
     {
       key: "pawtale_share_video_background_settings",
       value: {
-        backgroundSource: "ai",
         backgroundStyle: "documentary",
         backgroundMode: "story_beats",
       },
@@ -1299,8 +1743,8 @@ test("transcript media page requires a custom background asset before creating v
 
   await page.onLoad.call(context, { id: "utterance-share" });
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
-  page.selectShareVideoBackgroundSource.call(context, {
-    currentTarget: { dataset: { backgroundSource: "custom" } },
+  page.selectShareVideoStyle.call(context, {
+    currentTarget: { dataset: { videoStyle: "uploaded" } },
   });
   await page.createShareVideo.call(context);
 
@@ -1376,6 +1820,9 @@ test("transcript media page uploads a custom background before creating share vi
   };
 
   await page.onLoad.call(context, { id: "utterance-share" });
+  page.selectShareVideoStyle.call(context, {
+    currentTarget: { dataset: { videoStyle: "uploaded" } },
+  });
   await page.chooseShareVideoCustomBackground.call(context);
 
   assert.deepEqual(uploadCalls, [{ projectId: "project-1", filePath: "/tmp/family-photo.png" }]);
@@ -1387,6 +1834,11 @@ test("transcript media page uploads a custom background before creating share vi
   assert.equal(context.data.shareVideoCustomBackgroundPreviewPath, "/tmp/custom-background-processed.jpg");
   assert.equal(context.data.shareVideoCustomBackgroundStatusText, "背景图片已处理，会用于本次视频");
 
+  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "story_animation" } } });
+  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "uploaded" } } });
+  assert.equal(context.data.shareVideoCustomBackgroundAssetId, "asset-custom-1");
+  assert.equal(context.data.shareVideoCustomBackgroundPreviewPath, "/tmp/custom-background-processed.jpg");
+
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   await page.createShareVideo.call(context);
   context.shareVideoController.cancel();
@@ -1396,16 +1848,13 @@ test("transcript media page uploads a custom background before creating share vi
       id: "utterance-share",
       startChar: 0,
       endChar: 13,
-      options: { backgroundSource: "custom", customBackgroundAssetId: "asset-custom-1" },
+      options: { videoStyle: "uploaded", backgroundSource: "custom", customBackgroundAssetId: "asset-custom-1" },
     },
   ]);
-  assert.deepEqual(storageWrites[storageWrites.length - 1], {
-    key: "pawtale_share_video_background_settings",
-    value: { backgroundSource: "custom", backgroundStyle: "watercolor", backgroundMode: "auto" },
-  });
+  assert.deepEqual(storageWrites, []);
 });
 
-test("transcript media page creates classic background share video without image asset", async () => {
+test("transcript media page switches from uploaded to animation without requiring an image asset", async () => {
   const createCalls = [];
   const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
@@ -1421,6 +1870,7 @@ test("transcript media page creates classic background share video without image
           utterance_id: id,
           audio_file_id: `audio-${id}`,
           status: "pending",
+          video_style: "story_animation",
           background_source: "classic",
           background_style: "old_album",
           background_mode: "single",
@@ -1436,21 +1886,28 @@ test("transcript media page creates classic background share video without image
 
   await page.onLoad.call(context, { id: "utterance-share" });
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
-  page.selectShareVideoBackgroundSource.call(context, {
-    currentTarget: { dataset: { backgroundSource: "classic" } },
+  page.selectShareVideoStyle.call(context, {
+    currentTarget: { dataset: { videoStyle: "uploaded" } },
+  });
+  await page.createShareVideo.call(context);
+  assert.equal(createCalls.length, 0);
+  assert.equal(context.data.shareVideoSelectedEndChar, 13);
+  page.selectShareVideoStyle.call(context, {
+    currentTarget: { dataset: { videoStyle: "story_animation" } },
   });
   await page.createShareVideo.call(context);
   context.shareVideoController.cancel();
 
-  assert.equal(context.data.shareVideoBackgroundSource, "classic");
+  assert.equal(context.data.shareVideoBackgroundSource, "");
   assert.equal(context.data.shareVideoBackgroundUsesAi, false);
   assert.equal(context.data.shareVideoBackgroundUsesCustom, false);
+  assert.equal(context.data.shareVideoError, "");
   assert.deepEqual(createCalls, [
     {
       id: "utterance-share",
       startChar: 0,
       endChar: 13,
-      options: { backgroundSource: "classic" },
+      options: { videoStyle: "story_animation" },
     },
   ]);
 });

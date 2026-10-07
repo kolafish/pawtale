@@ -4,6 +4,25 @@
   padding: 24rpx 36rpx 120rpx;
 }
 
+.delete-account-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 220rpx;
+  min-height: 80rpx;
+  margin: 28rpx auto 0;
+  padding: 12rpx 24rpx;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  text-decoration: underline;
+}
+
+.delete-account-button::after {
+  border: 0;
+}
+
 .guest-login-panel {
   padding: 48rpx 36rpx 34rpx;
   text-align: center;
@@ -34,7 +53,7 @@
 
 .panel-title {
   font-family: var(--ui-font-editorial);
-  font-size: 38rpx;
+  font-size: var(--ui-font-page-title);
   line-height: 1.3;
 }
 
@@ -48,7 +67,7 @@
 .panel-copy {
   max-width: 520rpx;
   margin: 12rpx auto 0;
-  font-size: 26rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
 }
 
@@ -59,7 +78,7 @@
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface);
   color: var(--ui-accent-strong);
-  font-size: 29rpx;
+  font-size: var(--ui-font-action);
   box-shadow: var(--ui-control-shadow);
 }
 
@@ -134,14 +153,12 @@
 .name-edit-row,
 .project-overview-main,
 .settings-row-copy,
-.settings-disclosure-copy,
 .switch-copy {
   min-width: 0;
 }
 
 .profile-main,
 .settings-row-copy,
-.settings-disclosure-copy,
 .switch-copy {
   flex: 1;
 }
@@ -161,14 +178,14 @@
 .profile-email {
   margin-top: 6rpx;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   overflow-wrap: anywhere;
 }
 
 .profile-avatar-hint {
   margin-top: 5rpx;
   color: var(--ui-accent);
-  font-size: 21rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
 }
 
@@ -196,7 +213,7 @@
   border-radius: 16rpx;
   background: transparent;
   color: var(--ui-accent-strong);
-  font-size: 24rpx;
+  font-size: var(--ui-font-action);
 }
 
 .mini-button.ghost {
@@ -220,6 +237,7 @@
 
 .section-title {
   margin-bottom: 14rpx;
+  font-size: var(--ui-font-section-title);
 }
 
 .setting-header {
@@ -237,7 +255,7 @@
 .setting-current {
   flex: 0 0 auto;
   color: var(--ui-value-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.3;
 }
@@ -254,7 +272,7 @@
 
 .action-meta {
   margin-top: 7rpx;
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -263,6 +281,183 @@
   padding: 28rpx;
   background: var(--ui-success-surface);
   box-shadow: none;
+}
+
+.credit-card {
+  padding: 28rpx;
+}
+
+.credit-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.credit-percent {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.credit-progress-track {
+  height: 16rpx;
+  margin-top: 24rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: var(--ui-accent-surface-subtle);
+}
+
+.credit-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ui-accent);
+  transition: width 180ms ease-out;
+}
+
+.credit-hint {
+  display: block;
+  margin-top: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+  line-height: 1.45;
+}
+
+.credit-recharge-button,
+.credit-retry-button {
+  min-height: 76rpx;
+  margin: 22rpx 0 0;
+  padding: 0 24rpx;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-accent-surface-subtle);
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  font-weight: 800;
+  line-height: 76rpx;
+}
+
+.credit-card-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.credit-card-error .credit-retry-button {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.credit-usage-toggle,
+.credit-usage-more {
+  min-height: 72rpx;
+  margin: 12rpx 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  line-height: 72rpx;
+}
+
+.credit-usage-toggle {
+  text-align: left;
+}
+
+.credit-usage-toggle::after,
+.credit-usage-more::after {
+  border: 0;
+}
+
+.credit-usage-day-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 18rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+}
+
+.credit-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 18rpx 0;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.credit-usage-copy {
+  min-width: 0;
+}
+
+.credit-usage-copy .action-title,
+.credit-usage-amount {
+  font-size: var(--ui-font-meta);
+}
+
+.credit-usage-copy .action-meta,
+.credit-usage-message {
+  font-size: var(--ui-font-caption);
+}
+
+.credit-usage-amount {
+  flex: 0 0 auto;
+  color: var(--ui-text-primary);
+  font-weight: 700;
+}
+
+.credit-usage-message {
+  display: block;
+  padding: 18rpx 0;
+  color: var(--ui-text-secondary);
+}
+
+.recharge-qr-mask {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36rpx;
+  background: rgba(34, 29, 25, 0.56);
+}
+
+.recharge-qr-sheet {
+  width: 100%;
+  max-width: 620rpx;
+  padding: 34rpx 30rpx 28rpx;
+  border-radius: 28rpx;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow);
+}
+
+.recharge-qr-title {
+  display: block;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-editorial);
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.recharge-qr-copy {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.recharge-qr-image {
+  display: block;
+  width: min(100%, 520rpx);
+  margin: 24rpx auto 0;
+  border-radius: 12rpx;
 }
 
 .overview-stats {
@@ -295,25 +490,34 @@
 
 .overview-stat-value.small {
   font-family: inherit;
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   line-height: 1.3;
+  white-space: nowrap;
 }
 
 .overview-stat-label {
   display: block;
   margin-top: 10rpx;
   color: var(--ui-success-text);
-  font-size: 21rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.3;
+}
+
+.overview-stats-hint {
+  display: block;
+  margin-top: 22rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .settings-list {
   overflow: hidden;
 }
 
-.settings-nav-row,
-.settings-disclosure {
+.settings-nav-row {
   width: 100%;
   min-height: 112rpx;
   padding: 22rpx 26rpx;
@@ -346,13 +550,16 @@
 }
 
 .row-value {
-  max-width: 220rpx;
+  display: block;
+  max-width: 240rpx;
+  overflow: hidden;
   color: var(--ui-value-text);
-  font-size: 23rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.35;
   text-align: right;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-chevron {
@@ -367,7 +574,7 @@
 .status-pill {
   padding: 7rpx 13rpx;
   border-radius: 999rpx;
-  font-size: 22rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 800;
   line-height: 1.25;
   white-space: nowrap;
@@ -395,37 +602,6 @@
   gap: 24rpx;
 }
 
-.settings-disclosure-action {
-  min-width: 72rpx;
-  flex: 0 0 auto;
-  color: var(--ui-accent);
-  font-size: 24rpx;
-  font-weight: 800;
-  line-height: 1.3;
-  text-align: right;
-}
-
-.credential-panel {
-  margin-top: 14rpx;
-  padding: 28rpx;
-}
-
-.field + .field {
-  margin-top: 24rpx;
-}
-
-.field-label {
-  display: block;
-  color: var(--ui-section-title);
-  font-size: 25rpx;
-  font-weight: 800;
-  line-height: 1.3;
-}
-
-.field-input {
-  margin-top: 12rpx;
-}
-
 .logout-button {
   width: 100%;
   min-height: 88rpx;
@@ -433,13 +609,13 @@
   border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--ui-danger-text);
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   box-shadow: inset 0 0 0 1rpx rgba(168, 73, 63, 0.18);
 }
 
 .error {
   margin-bottom: 24rpx;
-  font-size: 27rpx;
+  font-size: var(--ui-font-body);
 }
 
 .me-page.large-text {
@@ -451,16 +627,25 @@
 .me-page.large-text .action-meta,
 .me-page.large-text .profile-email,
 .me-page.large-text .setting-current,
-.me-page.large-text .settings-disclosure-action,
 .me-page.large-text .row-value {
-  font-size: 28rpx;
+  font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }
 
-.me-page.large-text .field-label,
+.me-page.large-text .credit-hint,
+.me-page.large-text .credit-recharge-button,
+.me-page.large-text .credit-retry-button,
+.me-page.large-text .recharge-qr-copy {
+  font-size: var(--ui-font-large-meta);
+}
+
 .me-page.large-text .overview-stat-label {
-  font-size: 30rpx;
+  font-size: var(--ui-font-large-body);
   line-height: 1.4;
+}
+
+.me-page.large-text .overview-stats-hint {
+  font-size: var(--ui-font-large-meta);
 }
 
 .me-page.large-text .action-title,
@@ -492,8 +677,7 @@
 }
 
 .me-page.large-text .settings-nav-row,
-.me-page.large-text .switch-row,
-.me-page.large-text .settings-disclosure {
+.me-page.large-text .switch-row {
   min-height: 132rpx;
 }
 
@@ -502,5 +686,5 @@
 }
 
 .me-page.large-text .status-pill {
-  font-size: 26rpx;
+  font-size: var(--ui-font-large-caption);
 }

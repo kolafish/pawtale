@@ -8,7 +8,11 @@ import type {
   MemoirInterviewType,
   MemoirSessionGoal,
 } from "../../domain/memoir-voice-session";
-import type { MemoirVoiceTranscriptItem } from "../../domain/memoir-transcript";
+import type {
+  MemoirShareVideoCandidate,
+  MemoirShareVideoJob,
+  MemoirVoiceTranscriptItem,
+} from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -18,6 +22,14 @@ import {
   createMemoirVoiceSession,
 } from "../../services/memoir-voice-session-api";
 import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import {
+  dismissMemoirShareVideoCandidate,
+  downloadMemoirShareVideoThumbnail,
+  getMemoirShareVideoCandidate,
+  getMemoirShareVideoJob,
+  listMemoirShareVideos,
+} from "../../services/memoir-transcript-api";
+import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
@@ -44,9 +56,10 @@ import {
 import { pageUrl } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
-  saveVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_VERSION,
   VOICE_AUTHORIZATION_PAGE_URL,
+  type VoiceAuthorizationConsent,
 } from "../../services/voice-authorization";
 import {
   enableMiniProgramShareMenu,
@@ -83,6 +96,7 @@ interface HomeData extends HomeStoryData {
   selectedMode: NarrationMode;
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationRequested: boolean;
+  voiceAuthorizationSaving: boolean;
   greetingText: string;
   headerSubtitleText: string;
   voiceStartButtonClass: string;
@@ -93,6 +107,15 @@ interface HomeData extends HomeStoryData {
   largeTextEnabled: boolean;
   homePageClass: string;
   showContinueNarration: boolean;
+  shareCandidate: MemoirShareVideoCandidate | null;
+  shareCandidateDurationText: string;
+  shareCandidateDismissing: boolean;
+  shareCandidateError: string;
+  shareCandidateJob: MemoirShareVideoJob | null;
+  shareCandidateThumbnailPath: string;
+  shareVideoTotal: number;
+  shareVideoActiveCount: number;
+  shareVideoFailedCount: number;
 }
 
 interface CheckboxChangeEvent {
@@ -144,11 +167,12 @@ export function homeResumeHint(item?: Pick<
 }
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
-  const blocked = state.loading || state.creatingVoice || Boolean(state.voiceEntry);
+  const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.needsLogin ? "登录后开始"
     : !state.hasProject ? "种下我的故事"
+    : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
     : state.selectedMode === "book_completion" ? choice.action
     : state.hasStories ? "讲个新故事" : "讲第一个故事";
@@ -215,6 +239,16 @@ function applyHomeSnapshotData(
       showContinueNarration: false,
       voiceEntry: null,
       voiceAuthorizationRequested: false,
+      voiceAuthorizationSaving: false,
+      shareCandidate: null,
+      shareCandidateDurationText: "",
+      shareCandidateDismissing: false,
+      shareCandidateError: "",
+      shareCandidateJob: null,
+      shareCandidateThumbnailPath: "",
+      shareVideoTotal: 0,
+      shareVideoActiveCount: 0,
+      shareVideoFailedCount: 0,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -228,6 +262,8 @@ function applyHomeSnapshotData(
 
 definePage<HomeData>()({
   homeLoadSequence: 0,
+  shareCandidateRequestSequence: 0,
+  shareVideosRequestSequence: 0,
   homeVisible: false,
   homeLaunchScope: "",
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
@@ -256,6 +292,7 @@ definePage<HomeData>()({
     selectedMode: "free_narration",
     voiceAuthorizationAgreed: false,
     voiceAuthorizationRequested: false,
+    voiceAuthorizationSaving: false,
     greetingText: "你好，作者",
     headerSubtitleText: "每一个故事，都从一颗种子开始。",
     voiceStartButtonClass: "",
@@ -266,6 +303,15 @@ definePage<HomeData>()({
     largeTextEnabled: false,
     homePageClass: "home-page",
     showContinueNarration: false,
+    shareCandidate: null,
+    shareCandidateDurationText: "",
+    shareCandidateDismissing: false,
+    shareCandidateError: "",
+    shareCandidateJob: null,
+    shareCandidateThumbnailPath: "",
+    shareVideoTotal: 0,
+    shareVideoActiveCount: 0,
+    shareVideoFailedCount: 0,
     ...emptyHomeStoryData(),
   },
 
@@ -289,6 +335,8 @@ definePage<HomeData>()({
   onHide() {
     this.homeVisible = false;
     this.homeLoadSequence += 1;
+    this.shareCandidateRequestSequence += 1;
+    this.shareVideosRequestSequence += 1;
     this.homeRefreshTimer.cancel();
     this.growthAnimationTimer.cancel();
     this.setData({ story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
@@ -369,6 +417,8 @@ definePage<HomeData>()({
         if (!background) this.measureNarration();
         if (validTarget) this.openStoryProgress();
       });
+      void this.refreshShareCandidate(this.data.projectId);
+      void this.refreshShareVideos(this.data.projectId);
       if (freshEvents.size) this.growthAnimationTimer.schedule(() => this.clearGrowthAnimation());
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
@@ -394,6 +444,15 @@ definePage<HomeData>()({
           hasProject: false,
           selectedMode: "free_narration",
           voiceAuthorizationRequested: false,
+          voiceAuthorizationSaving: false,
+          shareCandidate: null,
+          shareCandidateDurationText: "",
+          shareCandidateError: "",
+          shareCandidateJob: null,
+          shareCandidateThumbnailPath: "",
+          shareVideoTotal: 0,
+          shareVideoActiveCount: 0,
+          shareVideoFailedCount: 0,
         });
         return;
       }
@@ -410,6 +469,138 @@ definePage<HomeData>()({
           this.homeRefreshTimer.schedule(() => { void this.loadHome(true); });
         }
       }
+    }
+  },
+
+  async refreshShareCandidate(projectId: string) {
+    const requestSequence = ++this.shareCandidateRequestSequence;
+    if (!this.homeVisible || !projectId || this.data.needsLogin || this.data.voiceEntry) return;
+    try {
+      const response = await getMemoirShareVideoCandidate(projectId);
+      if (requestSequence !== this.shareCandidateRequestSequence
+        || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
+      const candidate = response.candidate;
+      const existingJob = candidate?.video_job_id === this.data.shareCandidateJob?.id
+        ? this.data.shareCandidateJob : null;
+      this.setData({
+        shareCandidate: candidate,
+        shareCandidateDurationText: candidate?.duration_ms
+          ? formatTranscriptDurationSeconds(candidate.duration_ms / 1000)
+          : "",
+        shareCandidateError: "",
+        shareCandidateJob: existingJob,
+        shareCandidateThumbnailPath: existingJob ? this.data.shareCandidateThumbnailPath : "",
+      });
+      if (candidate?.status === "accepted" && candidate.video_job_id
+        && (!existingJob || existingJob.status === "pending" || existingJob.status === "running")) {
+        try {
+          const job = await getMemoirShareVideoJob(candidate.video_job_id);
+          if (requestSequence === this.shareCandidateRequestSequence
+            && this.homeVisible && this.data.projectId === projectId
+            && this.data.shareCandidate?.id === candidate.id) {
+            this.setData({ shareCandidateJob: job });
+          }
+        } catch (error) {
+          if (requestSequence === this.shareCandidateRequestSequence) {
+            console.warn("share video job refresh failed", error);
+          }
+        }
+      }
+      const job = this.data.shareCandidateJob;
+      if (job?.status === "succeeded" && !this.data.shareCandidateThumbnailPath
+        && requestSequence === this.shareCandidateRequestSequence) {
+        try {
+          const path = await downloadMemoirShareVideoThumbnail(job.id);
+          if (requestSequence === this.shareCandidateRequestSequence && this.homeVisible
+            && this.data.projectId === projectId && this.data.shareCandidate?.id === candidate?.id
+            && this.data.shareCandidateJob?.id === job.id) {
+            this.setData({ shareCandidateThumbnailPath: path });
+          }
+        } catch (error) {
+          console.warn("share video thumbnail unavailable", error);
+        }
+      }
+    } catch (error) {
+      if (requestSequence === this.shareCandidateRequestSequence) {
+        console.warn("share video suggestion refresh failed", error);
+      }
+    }
+  },
+
+  async refreshShareVideos(projectId: string) {
+    const requestSequence = ++this.shareVideosRequestSequence;
+    if (!this.homeVisible || !projectId || this.data.needsLogin || this.data.voiceEntry) return;
+    try {
+      const response = await listMemoirShareVideos(projectId, { limit: 1, offset: 0 });
+      if (requestSequence !== this.shareVideosRequestSequence
+        || !this.homeVisible || this.data.projectId !== projectId || this.data.voiceEntry) return;
+      this.setData({
+        shareVideoTotal: response.total,
+        shareVideoActiveCount: response.active_jobs.length,
+        shareVideoFailedCount: response.failed_jobs.length,
+      });
+    } catch (error) {
+      if (requestSequence === this.shareVideosRequestSequence) {
+        console.warn("share video library refresh failed", error);
+      }
+    }
+  },
+
+  openShareCandidateEditor() {
+    const candidate = this.data.shareCandidate;
+    if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
+      || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    this.setData({ shareCandidateError: "" });
+    wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
+      id: candidate.utterance_id,
+      candidateId: candidate.id,
+    }) });
+    trackAuditAction("home.share_video_candidate_edit", {}, {
+      projectId: this.data.projectId, voiceSessionId: candidate.voice_session_id,
+    });
+  },
+
+  openShareCandidateVideo() {
+    const candidate = this.data.shareCandidate;
+    if (!candidate || candidate.status !== "accepted" || !candidate.utterance_id
+      || !candidate.video_job_id || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    const completed = this.data.shareCandidateJob?.status === "succeeded";
+    wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
+      id: candidate.utterance_id,
+      jobId: candidate.video_job_id,
+    }), success: () => {
+      if (completed && this.data.shareCandidate?.id === candidate.id
+        && this.data.shareCandidate.video_job_id === candidate.video_job_id) {
+        void this.dismissShareCandidate();
+      }
+    } });
+  },
+
+  openShareVideoLibrary() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.voiceEntry) return;
+    wx.navigateTo({ url: pageUrl("/pages/share-videos/index", { projectId }) });
+  },
+
+  async dismissShareCandidate() {
+    const candidate = this.data.shareCandidate;
+    const projectId = this.data.projectId;
+    if (!candidate || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    this.shareCandidateRequestSequence += 1;
+    this.setData({ shareCandidateDismissing: true, shareCandidateError: "" });
+    try {
+      await dismissMemoirShareVideoCandidate(projectId, candidate.id);
+      if (this.homeVisible && this.data.projectId === projectId && this.data.shareCandidate?.id === candidate.id) {
+        this.shareCandidateRequestSequence += 1;
+        this.setData({ shareCandidate: null, shareCandidateDurationText: "", shareCandidateJob: null, shareCandidateThumbnailPath: "" });
+        void this.refreshShareVideos(projectId);
+      }
+    } catch (error) {
+      if (this.homeVisible && this.data.projectId === projectId) {
+        this.setData({ shareCandidateError: error instanceof Error ? error.message : "暂时无法关闭提示" });
+      }
+    } finally {
+      if (this.data.projectId === projectId) this.setData({ shareCandidateDismissing: false });
     }
   },
 
@@ -542,17 +733,39 @@ definePage<HomeData>()({
     });
   },
 
-  changeVoiceAuthorization(event: CheckboxChangeEvent) {
+  async changeVoiceAuthorization(event: CheckboxChangeEvent) {
+    if (this.data.voiceAuthorizationSaving) return;
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
-    const consent = saveVoiceAuthorizationConsent(agreed);
+    const consent: VoiceAuthorizationConsent = {
+      agreed,
+      version: VOICE_AUTHORIZATION_VERSION,
+      agreedAt: new Date().toISOString(),
+    };
+    const userId = this.data.userId;
+    const projectId = this.data.projectId;
     setHomeData(this, {
       voiceAuthorizationAgreed: consent.agreed,
-      voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
-      error: agreed ? "" : this.data.error,
+      voiceAuthorizationSaving: true,
+      error: "",
     }, () => this.measureNarration());
-    void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
-      console.warn("sync voice authorization consent change failed", error);
-    });
+    try {
+      await syncVoiceAuthorizationConsent({ consent });
+      if (userId !== this.data.userId || projectId !== this.data.projectId) return;
+      setHomeData(this, {
+        voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
+      });
+    } catch (error) {
+      if (userId !== this.data.userId || projectId !== this.data.projectId) return;
+      setHomeData(this, {
+        voiceAuthorizationAgreed: readVoiceAuthorizationConsent(),
+        voiceAuthorizationRequested: true,
+        error: error instanceof Error ? error.message : "语音授权保存失败",
+      });
+    } finally {
+      if (userId === this.data.userId && projectId === this.data.projectId) {
+        setHomeData(this, { voiceAuthorizationSaving: false });
+      }
+    }
   },
 
   openVoiceAuthorization() {
@@ -615,7 +828,7 @@ definePage<HomeData>()({
   },
 
   canStartVoiceChat(requireVoiceAuthorization = true) {
-    if (this.data.loading || this.data.creatingVoice || this.data.voiceEntry) {
+    if (this.data.loading || this.data.creatingVoice || this.data.voiceAuthorizationSaving || this.data.voiceEntry) {
       return false;
     }
     if (this.data.needsLogin) {

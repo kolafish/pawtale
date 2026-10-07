@@ -1,7 +1,11 @@
 import type {
   MemoirMaterialImageGenerationJob,
   MemoirShareVideoCustomBackgroundAsset,
+  MemoirShareVideoCandidate,
+  MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
+  MemoirShareVideoListResponse,
+  MemoirShareVideoStyle,
   MemoirMaterialOfflineASRState,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
@@ -14,6 +18,7 @@ import type {
 import type { MemoirTranscriptPolishLevel } from "../domain/memoir";
 import {
   memoirAIRequest,
+  memoirProjectPath,
   memoirRequest,
   queryString,
 } from "./memoir-api-client";
@@ -39,6 +44,7 @@ interface VoiceTranscriptListOptions {
 }
 
 interface ShareVideoJobOptions {
+  videoStyle?: MemoirShareVideoStyle;
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
@@ -49,6 +55,16 @@ interface ShareVideoJobRequest {
   start_char: number;
   end_char: number;
   ai_model: string | null;
+  video_style?: MemoirShareVideoStyle;
+  background_source?: string;
+  background_style?: string;
+  background_mode?: string;
+  custom_background_asset_id?: string;
+}
+
+interface ShareVideoCandidateJobRequest {
+  ai_model: string | null;
+  video_style?: MemoirShareVideoStyle;
   background_source?: string;
   background_style?: string;
   background_mode?: string;
@@ -125,6 +141,56 @@ export function createMemoirTranscriptShareVideoJob(
       start_char: startChar,
       end_char: endChar,
       ai_model: null,
+      ...(options.videoStyle ? { video_style: options.videoStyle } : {}),
+      ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
+      ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
+      ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
+      ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+    },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirShareVideoCandidate(
+  projectId: string,
+): Promise<MemoirShareVideoCandidateResponse> {
+  return memoirRequest<MemoirShareVideoCandidateResponse>(
+    memoirProjectPath(projectId, "/share-video-candidate"),
+  );
+}
+
+export function listMemoirShareVideos(
+  projectId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<MemoirShareVideoListResponse> {
+  return memoirRequest<MemoirShareVideoListResponse>(
+    `${memoirProjectPath(projectId, "/share-video/jobs")}${queryString({
+      limit: options.limit,
+      offset: options.offset,
+    })}`,
+  );
+}
+
+export function dismissMemoirShareVideoCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<MemoirShareVideoCandidate> {
+  return memoirRequest<MemoirShareVideoCandidate>(
+    memoirProjectPath(projectId, `/share-video-candidates/${encodeURIComponent(candidateId)}/dismiss`),
+    { method: "POST" },
+  );
+}
+
+export function createMemoirShareVideoCandidateJob(
+  projectId: string,
+  candidateId: string,
+  options: ShareVideoJobOptions = {},
+): Promise<MemoirShareVideoJob> {
+  return memoirAIRequest<MemoirShareVideoJob, ShareVideoCandidateJobRequest>(
+    memoirProjectPath(projectId, `/share-video-candidates/${encodeURIComponent(candidateId)}/create-video`),
+    {
+      ai_model: null,
+      ...(options.videoStyle ? { video_style: options.videoStyle } : {}),
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
@@ -208,6 +274,13 @@ export function getMemoirShareVideoJob(jobId: string): Promise<MemoirShareVideoJ
   );
 }
 
+export async function deleteMemoirShareVideoJob(jobId: string): Promise<void> {
+  await memoirRequest<unknown>(
+    `/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE", data: { confirm: true } },
+  );
+}
+
 export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
   if (/^https?:\/\//.test(downloadUrl)) {
     return downloadUrl;
@@ -228,6 +301,16 @@ export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<s
   return downloadAuthenticatedFile(url, {
     failureMessage: "视频下载失败",
     domainLabel: "视频下载",
+  });
+}
+
+export function downloadMemoirShareVideoThumbnail(jobId: string): Promise<string> {
+  const url = memoirShareVideoDownloadUrl(
+    `/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}/download?variant=thumbnail`,
+  );
+  return downloadAuthenticatedFile(url, {
+    failureMessage: "视频缩略图下载失败",
+    domainLabel: "视频缩略图",
   });
 }
 

@@ -49,6 +49,7 @@ from app.domain.memoir.types import (
     MemoirSectionType,
     MemoirSemanticCacheStatus,
     MemoirShareVideoJobStatus,
+    MemoirShareVideoCandidateStatus,
     MemoirTranscriptVersionType,
     MemoirVoiceSessionStatus,
 )
@@ -333,6 +334,59 @@ class MemoirTranscriptAlignment(Base):
         "MemoirVoiceUtterance",
         back_populates="transcript_alignment",
     )
+
+
+class MemoirShareVideoCandidate(Base):
+    __tablename__ = "memoir_share_video_candidates"
+    __table_args__ = (
+        UniqueConstraint("voice_session_id", name="uq_memoir_share_video_candidates_session"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirShareVideoCandidateStatus)})",
+            name="ck_memoir_share_video_candidates_status",
+        ),
+        CheckConstraint(
+            "status NOT IN ('ready', 'accepted') OR ("
+            "text_hash IS NOT NULL AND "
+            "start_char IS NOT NULL AND end_char IS NOT NULL AND end_char > start_char AND "
+            "start_ms IS NOT NULL AND end_ms IS NOT NULL AND end_ms > start_ms AND length(selected_text) > 0)",
+            name="ck_memoir_share_video_candidates_ready_range",
+        ),
+        Index(
+            "ix_memoir_share_video_candidates_project_latest",
+            "project_id", "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    voice_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("memoir_voice_sessions.id", ondelete="CASCADE"), nullable=False,
+    )
+    utterance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"), nullable=True,
+    )
+    audio_file_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("audio_files.id", ondelete="SET NULL"), nullable=True,
+    )
+    transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_transcript_versions.id", ondelete="SET NULL"), nullable=True,
+    )
+    text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    selected_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    start_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default=MemoirShareVideoCandidateStatus.NONE.value, nullable=False,
+    )
+    algorithm_version: Mapped[str] = mapped_column(String(32), default="v1", nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    video_job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_material_share_videos.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
 
 class MemoirMaterialShareVideo(Base):
@@ -980,6 +1034,12 @@ class MemoirCompletionIssue(Base):
         default=list,
         nullable=False,
     )
+    related_chapter_ids_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+    resolution: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     input_signature: Mapped[str] = mapped_column(
         String(128),
         nullable=False,
@@ -1267,6 +1327,16 @@ class MemoirBookOutputVersion(Base):
         back_populates="versions",
         foreign_keys=[output_id],
     )
+
+
+class MemoirBookShare(Base):
+    __tablename__ = "memoir_book_shares"
+
+    output_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_outputs.id", ondelete="CASCADE"), primary_key=True)
+    version_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_output_versions.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
 class MemoirBookRevisionProposal(Base):

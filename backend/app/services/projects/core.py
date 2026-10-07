@@ -168,7 +168,13 @@ async def update_project(
     return project_docs.project_response(project)
 
 
-async def delete_project(db: AsyncSession, project_id: str, current_user: User) -> None:
+async def delete_project(
+    db: AsyncSession,
+    project_id: str,
+    current_user: User,
+    *,
+    post_commit_cleanups: list[project_docs.PostCommitCleanup] | None = None,
+) -> None:
     current_user_is_admin = is_admin_user(current_user)
     project = await load_project(
         db,
@@ -185,6 +191,8 @@ async def delete_project(db: AsyncSession, project_id: str, current_user: User) 
         current_user_is_admin=current_user_is_admin,
     )
     if project.type == ProjectType.MEMOIR.value:
-        await memoir_project_deletion.delete_project(db, project)
+        await memoir_project_deletion.delete_project(
+            db, project, post_commit_cleanups=post_commit_cleanups,
+        )
         return
-    await project_docs.delete_project(db, project)
+    await project_docs.delete_project(db, project, post_commit_cleanups=post_commit_cleanups)

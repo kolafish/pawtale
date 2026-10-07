@@ -10,6 +10,11 @@
         <text class="chapter-story-detail">{{chapterStoryDetail}}</text>
       </view>
       <image class="chapter-growth-image" src="/assets/chapter-workspace/chapter-growth.png" mode="aspectFit" />
+      <button class="chapter-more-action" aria-label="本章更多操作" disabled="{{operationKind !== '' || editingSectionId !== ''}}" bindtap="openChapterMoreActions">本章操作 ···</button>
+      <view wx:if="{{audioTarget === 'chapter' && audioPhase !== 'idle'}}" class="chapter-audio-notice">
+        <text>{{audioPhase === 'preparing' ? '正在准备整章朗读…' : '正在朗读本章'}}</text>
+        <button class="chapter-audio-stop" bindtap="stopDraftSectionPlayback">停止朗读</button>
+      </view>
       <view wx:if="{{chapterPreparationJob && !chapterPreparationJob.candidate_content}}" class="chapter-preparation-status">
         <ai-task-progress
           title="{{chapterPreparationTitle}}"
@@ -21,8 +26,26 @@
           bindcancel="cancelChapterPreparation"
         />
       </view>
+      <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
+        <ai-task-progress
+          title="{{sectionRegenerationTitle}}"
+          detail="{{sectionRegenerationDetail}}"
+          mode="{{sectionRegenerationProgressMode}}"
+          progress="{{sectionRegenerationProgress}}"
+          can-cancel="{{sectionRegenerationJob.can_cancel}}"
+          cancel-text="取消整理"
+          bindcancel="cancelSectionRegeneration"
+        />
+      </view>
       <view
-        wx:if="{{chapterHasReadableDraft}}"
+        wx:if="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
+        class="chapter-read-primary chapter-next-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="showDraftUpdate"
+      >查看更新状态</view>
+      <view
+        wx:elif="{{chapterHasReadableDraft}}"
         class="chapter-read-primary ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -38,11 +61,18 @@
         aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
+      <view
+        wx:if="{{chapterHasReadableDraft && workspace.draft_needs_rewrite}}"
+        class="chapter-hero-followup ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="openChapterPreview"
+      ><text>阅读当前版本</text><text>›</text></view>
     </view>
 
     <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
-      <text class="section-kicker">后台整理的新稿</text>
-      <text class="status-detail">当前稿仍在使用。对照下面的变化后，再决定是否采用新稿。</text>
+      <text class="section-kicker">这次更新需要您判断</text>
+      <text class="status-detail">当前稿仍可阅读。请核对下面的变化，再决定是否采用新稿。</text>
       <text class="candidate-summary">{{candidateSummaryText}}</text>
       <block wx:if="{{candidateComparisonAvailable}}">
         <view class="candidate-switch ui-version-switch" aria-label="查看范围">
@@ -94,7 +124,7 @@
         </text>
       </view>
       <text wx:else class="candidate-content" selectable="{{true}}">{{candidateWholeContent}}</text>
-      <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">采用这版新稿</button>
+      <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">确认并采用新稿</button>
     </view>
 
     <view wx:if="{{!focusedSectionId && !editingToolsExpanded && sectionViews.length}}" class="content-card story-overview-card ui-card ui-card-borderless">
@@ -139,7 +169,7 @@
 
     <block wx:if="{{focusedSectionId && focusedSection}}">
       <view class="story-detail-summary">
-        <text class="story-detail-summary-text">{{focusedSection.visibleMaterials.length}} 段回忆 · {{focusedSection.hasDraft ? "已整理成故事" : "故事整理中"}}</text>
+        <text class="story-detail-summary-text">{{focusedSection.visibleMaterials.length}} 段回忆 · {{focusedSection.hasDraft ? "已整理成故事" : (workspace.completion_summary.state === "preparing" ? "故事整理中" : "尚无正文")}}</text>
         <view
           class="story-media-action ui-pressable"
           aria-role="button"
@@ -160,7 +190,6 @@
             class="draft-editor focused-story-editor"
             value="{{editingSectionContent}}"
             maxlength="-1"
-            auto-height
             cursor-spacing="24"
             aria-label="编辑故事 {{focusedSection.title}}"
             bindinput="changeDraftSectionContent"
@@ -209,7 +238,7 @@
               data-id="{{focusedSection.id}}"
               aria-role="button"
               aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-              bindtap="startDraftSectionEdit"
+              bindtap="openDraftSectionEditor"
             >
               <image class="focused-story-action-icon" src="/assets/chapter-workspace/pencil.svg" mode="aspectFit" />
               <text>自己修改</text>
@@ -228,7 +257,7 @@
         </block>
 
         <view wx:else class="focused-story-empty">
-          <text class="empty-detail">这个故事还在整理。完成当前步骤后，会根据讲过的回忆生成。</text>
+          <text class="empty-detail">{{workspace.completion_summary.state === "failed" || focusedSection.visibleMaterials.length ? readinessDetail : "这个故事还需要素材，请回到首页补充相关的回忆。"}}</text>
         </view>
       </view>
 
@@ -409,17 +438,6 @@
       </view>
 
       <view wx:if="{{sectionViews.length}}" class="structure-actions">
-        <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
-          <ai-task-progress
-            title="{{sectionRegenerationTitle}}"
-            detail="{{sectionRegenerationDetail}}"
-            mode="{{sectionRegenerationProgressMode}}"
-            progress="{{sectionRegenerationProgress}}"
-            can-cancel="{{sectionRegenerationJob.can_cancel}}"
-            cancel-text="取消整理"
-            bindcancel="cancelSectionRegeneration"
-          />
-        </view>
         <view
           class="structure-regenerate-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
@@ -457,24 +475,16 @@
           >{{operationKind === "rewrite_chapter" ? rewriteDraftBusyText : (operationKind !== "" ? "正在处理…" : draftRecoveryActionText)}}</view>
         </block>
         <block wx:else>
-          <text class="empty-title">正文还没有准备好</text>
-          <text class="empty-detail">先完成上面的当前步骤，系统会自动整理正文。</text>
+          <text class="empty-title">{{readinessTitle}}</text>
+          <text class="empty-detail">{{readinessDetail}}</text>
         </block>
       </view>
 
-      <view
-        wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action ui-pressable {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{!canConfirmChapter || operationKind !== '' || editingSectionId !== ''}}"
-        bindtap="confirmChapter"
-      >{{operationKind === "confirm_chapter" ? "正在收入书稿…" : "把这一章收入书稿"}}</view>
-
-      <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
+      <view wx:if="{{chapterHasReadableDraft && !workspace.draft_needs_rewrite && (workspace.completion_summary.state === 'confirmed' || workspace.completion_summary.state === 'draft_ready')}}" class="chapter-finished">
         <view class="chapter-finished-action ui-pressable" aria-role="button" bindtap="returnToBookFlow">
           <view class="chapter-finished-copy">
-            <text class="chapter-finished-title">已收入书稿</text>
-            <text class="chapter-finished-detail">有新变化时，整理好后可以再次更新</text>
+            <text class="chapter-finished-title">本章正文已更新</text>
+            <text class="chapter-finished-detail">有新讲述时，相关故事会继续整理</text>
           </view>
           <text class="chapter-finished-arrow">›</text>
         </view>

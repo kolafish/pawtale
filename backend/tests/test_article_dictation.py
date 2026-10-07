@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.models.users import User
+from app.routers import dictation_gateway
 from app.routers.projects import dictation as dictation_router
 from app.services.asr.gateway import VoiceGatewaySession
 from app.services.asr.streaming import StreamingASREvent
@@ -65,9 +66,9 @@ async def test_article_dictation_accepts_only_owned_article_document(
         return object()
 
     monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
-    monkeypatch.setattr(dictation_router, "voice_gateway_capacity_manager", CapacityManager())
-    monkeypatch.setattr(dictation_router, "VoiceGatewaySession", GatewaySession)
-    monkeypatch.setattr(dictation_router, "create_realtime_volc_streaming_asr_client", create_asr)
+    monkeypatch.setattr(dictation_gateway, "voice_gateway_capacity_manager", CapacityManager())
+    monkeypatch.setattr(dictation_gateway, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(dictation_gateway, "create_realtime_volc_streaming_asr_client", create_asr)
 
     websocket = FakeWebSocket()
     await dictation_router.stream_article_dictation(
@@ -89,6 +90,7 @@ async def test_article_dictation_accepts_only_owned_article_document(
     }
     assert "on_audio_frame" not in calls["gateway"]
     assert "on_asr_final" not in calls["gateway"]
+    assert calls["gateway"]["authorize_audio"] is None
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]
     assert not await dictation_router._article_document_is_available(

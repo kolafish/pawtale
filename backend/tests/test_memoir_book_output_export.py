@@ -1,12 +1,21 @@
+from hashlib import sha256
 from typing import get_args
 
+import pytest
 from PIL import Image
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-from app.schemas.memoir_book import MemoirBookCoverStyle
+from app.schemas.memoir_book import (
+    MemoirBookCoverStyle,
+    MemoirBookManuscript,
+    MemoirBookManuscriptProfile,
+    MemoirBookManuscriptTemplate,
+)
 from app.services.memoir import book_output_export
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
+from app.services.memoir.book_output_manuscript import editable_manuscript, stored_manuscript_design
 from app.services.memoir.book_output_export import (
     PDF_COVER_STYLES,
     MemoirBookOutputExportFormat,
@@ -18,6 +27,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
     PDF_LAYOUTS,
+    PDF_SANS_FONT_NAME,
     PDF_SANS_FONT_PATH,
     PDF_SERIF_BOLD_FONT_PATH,
     PDF_SERIF_BOLD_FONT_NAME,
@@ -26,6 +36,9 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFImageCommand,
     PDFLayout,
     MemoirBookOutputExportLayout,
+    configured_pdf_layout,
+    _pdf_page_commands,
+    _register_pdf_font,
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
@@ -35,6 +48,9 @@ EXPECTED_PDF_COVER_STYLES = {
     "dark_album",
     "moonlit_courtyard",
     "navy_gilt",
+    "heritage_classic",
+    "warm_journal",
+    "modern_minimal",
 }
 
 
@@ -148,6 +164,316 @@ def _text_command(page, text: str):
     return next(command for command in page.commands if command.text == text)
 
 
+def test_manuscript_design_changes_chapter_and_body_pdf_layout():
+    manuscript = _sample_manuscript("这是正文，留给家人阅读。")
+    base = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    designs = {
+        template: configured_pdf_layout(base, template=template)
+        for template in ("classic_family", "photo_memory", "oral_archive")
+    }
+    rendered = {}
+    for template, layout in designs.items():
+        pages = _build_manuscript_pdf_pages(
+            title="外婆回忆录",
+            content="外婆回忆录",
+            manuscript=manuscript,
+            layout=layout,
+        )
+        chapter_page = next(page for page in pages if page.anchor == "chapter-1")
+        title = _text_command(chapter_page, "外婆家的童年")
+        body = next(
+            command
+            for page in pages
+            for command in page.commands
+            if command.text == "这是正文，留给家人阅读。"
+        )
+        rendered[template] = (title.font_size, body.font_size, body.x, body.y)
+
+    assert len(set(rendered.values())) == 3
+    assert rendered["photo_memory"][0] > rendered["classic_family"][0]
+    assert rendered["oral_archive"][1] < rendered["classic_family"][1]
+
+    custom = configured_pdf_layout(
+        base,
+        template="custom",
+        custom_layout={"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"},
+    )
+    assert custom.font_size > base.font_size
+    assert custom.line_height > base.line_height
+    assert custom.margin_x > base.margin_x
+    assert custom.max_line_units < base.max_line_units
+
+    print_base = PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT]
+    for template in (*designs, "custom"):
+        print_layout = configured_pdf_layout(print_base, template=template)
+        assert print_layout.mirror_body_pages is True
+        assert print_layout.inner_margin_delta == print_base.inner_margin_delta
+
+
+def test_body_font_and_spacing_overrides_keep_preset_chapter_design():
+    text = "这是正文，留给家人阅读。"
+    base = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        manuscript = _sample_manuscript(text, cover_style="dark_album")
+        manuscript["profile"]["template"] = template
+        original = configured_pdf_layout(base, template=template)
+        for family, font in (("serif", PDF_SERIF_FONT_NAME), ("sans", PDF_SANS_FONT_NAME)):
+            adjusted = configured_pdf_layout(
+                base, template=template,
+                custom_layout={"font_family": family, "font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"},
+            )
+            assert adjusted.manuscript_template == original.manuscript_template
+            assert adjusted.font_size == original.font_size + 2
+            assert adjusted.margin_x == original.margin_x + 12
+            pages = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=adjusted)
+            chapter = next(page for page in pages if page.anchor == "chapter-1")
+            assert _text_command(chapter, text).font_name == font
+            assert any(image.path.name == f"{template}.png" for image in chapter.images)
+            assert pages[0].background_color == PDF_COVER_STYLES["dark_album"].background
+            assert _text_command(chapter, "院子里的日子").font_name == (
+                PDF_SANS_FONT_NAME if template == "modern_minimal" else PDF_SERIF_BOLD_FONT_NAME
+            )
+
+
+def test_legacy_preset_ignores_unused_adjustments_but_custom_keeps_them():
+    legacy = _sample_manuscript("旧正文。")
+    legacy["table_of_contents"][0]["chapter_id"] = "chapter-1"
+    legacy["back_matter"]["unconfirmed_facts"] = {"kind": "unconfirmed_facts", "title": "待确认", "content": ""}
+    legacy["schema_version"] = 3
+    legacy["profile"]["template"] = "warm_journal"
+    legacy["render_settings"]["custom_layout"] = {"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"}
+    assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "standard"
+    assert stored_manuscript_design(legacy)[1].font_scale == "standard"
+    upgraded = editable_manuscript(title="外婆回忆录", content="", snapshot=[], stored=legacy)
+    assert upgraded.schema_version == 5
+    assert upgraded.render_settings.custom_layout.font_scale == "standard"
+    legacy["profile"]["template"] = "custom"
+    assert MemoirBookManuscript.model_validate(legacy).render_settings.custom_layout.font_scale == "large"
+    assert stored_manuscript_design(legacy)[1].font_scale == "large"
+
+
+def test_additional_manuscript_templates_render_distinct_inner_pages_and_preserve_cover():
+    templates = ("heritage_classic", "warm_journal", "modern_minimal")
+    assert set(templates).issubset(get_args(MemoirBookManuscriptTemplate))
+    pdf_hashes = set()
+    section_styles = set()
+    for template in templates:
+        assert MemoirBookManuscriptProfile(template=template, title="外婆回忆录").template == template
+        assert stored_manuscript_design({"profile": {"template": template}})[0] == template
+        manuscript = _sample_manuscript("这是正文，留给家人阅读。", cover_style="dark_album")
+        manuscript["profile"]["template"] = template
+        layout = configured_pdf_layout(
+            PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template
+        )
+        pages = _build_manuscript_pdf_pages(
+            title="外婆回忆录", content="外婆回忆录", manuscript=manuscript,
+            layout=layout,
+        )
+        assert pages[0].background_color == PDF_COVER_STYLES["dark_album"].background
+        assert pages[-1].background_color == PDF_COVER_STYLES["dark_album"].background
+        chapter = next(page for page in pages if page.anchor == "chapter-1")
+        title = _text_command(chapter, "外婆家的童年")
+        section = _text_command(chapter, "院子里的日子")
+        quote = _text_command(chapter, "“我小时候常在外婆家的院子里晒太阳。”")
+        body = _text_command(chapter, "这是正文，留给家人阅读。")
+        section_styles.add((section.font_name, section.color, section.x))
+        assert quote.color is not None
+        assert chapter.decorations
+        assert any(image.path.name == f"{template}.png" for image in chapter.images)
+        footer = _pdf_page_commands(chapter, page_number=pages.index(chapter) + 1, layout=layout)[-1]
+        assert str(chapter.body_page_number) in footer.text
+        if template == "heritage_classic":
+            assert title.x > section.x
+            assert footer.text.startswith("· ")
+        elif template == "warm_journal":
+            assert title.x == section.x - 11
+            assert any(decoration.line_width == 2.2 for decoration in chapter.decorations)
+        else:
+            assert title.font_name == PDF_SANS_FONT_NAME
+            assert section.font_name == PDF_SANS_FONT_NAME
+            assert body.font_name == PDF_SANS_FONT_NAME
+            assert any(command.text == "01" for command in chapter.commands)
+            assert footer.text == "01"
+
+        export = render_book_output_export(
+            title="外婆回忆录", version=1, content="外婆回忆录",
+            manuscript=manuscript, export_format=MemoirBookOutputExportFormat.PDF,
+        )
+        assert export.content.startswith(b"%PDF-")
+        pdf_hashes.add(sha256(export.content).digest())
+
+    assert len(section_styles) == len(templates)
+    assert len(pdf_hashes) == len(templates)
+
+
+def test_generated_cover_and_chapter_artwork_render_in_reading_and_print_pdfs():
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        for export_layout in (
+            MemoirBookOutputExportLayout.STANDARD,
+            MemoirBookOutputExportLayout.LARGE_PRINT,
+        ):
+            manuscript = _sample_manuscript("这是正文，留给家人阅读。", cover_style=template)
+            manuscript["profile"]["template"] = template
+            manuscript["render_settings"]["back_cover_quote"] = "愿这些记忆被家人慢慢翻看。"
+            layout = configured_pdf_layout(PDF_LAYOUTS[export_layout], template=template)
+            pages = _build_manuscript_pdf_pages(
+                title="外婆回忆录", content="外婆回忆录", manuscript=manuscript,
+                layout=layout,
+            )
+            cover = pages[0]
+            back_cover = pages[-1]
+            chapter = next(page for page in pages if page.anchor == "chapter-1")
+            assert cover.background_image_path is not None
+            assert cover.background_image_path.name == f"{template}_cover.jpg"
+            assert cover.background_image_path.is_file()
+            assert back_cover.background_image_path is not None
+            assert back_cover.background_image_path.name == f"{template}_back_cover.jpg"
+            assert back_cover.background_image_path.is_file()
+            assert _text_command(cover, "外婆回忆录").text == "外婆回忆录"
+            ornament = next(image for image in chapter.images if image.path.name == f"{template}.png")
+            assert ornament.path.is_file()
+            assert ornament.y > layout.margin_bottom
+            export = render_book_output_export(
+                title="外婆回忆录", version=1, content="外婆回忆录",
+                manuscript=manuscript, export_format=MemoirBookOutputExportFormat.PDF,
+                layout=export_layout,
+            )
+            assert export.content.startswith(b"%PDF-")
+            assert b"/Subtype /Image" in export.content
+
+
+def test_generated_back_cover_keeps_long_quote_above_brand():
+    quote = "回忆会留在心里，" * 13
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        manuscript = _sample_manuscript("正文。", cover_style=template)
+        manuscript["profile"]["template"] = template
+        manuscript["render_settings"]["back_cover_quote"] = quote
+        layout = configured_pdf_layout(
+            PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template
+        )
+        back_cover = _build_manuscript_pdf_pages(
+            title="外婆回忆录", content="外婆回忆录", manuscript=manuscript,
+            layout=layout,
+        )[-1]
+        quote_lines = [command for command in back_cover.commands if "回忆" in command.text]
+        assert "".join(command.text for command in quote_lines) == quote
+        assert min(command.y for command in quote_lines) > max(
+            image.y + image.height for image in back_cover.images
+        ) + 12
+
+
+def test_generated_back_cover_elides_quote_that_exceeds_available_height():
+    quote = "外婆留下的回忆仍然陪伴着我们。" * 35
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        manuscript = _sample_manuscript("正文。", cover_style=template)
+        manuscript["profile"]["template"] = template
+        manuscript["render_settings"]["back_cover_quote"] = quote
+        layout = configured_pdf_layout(
+            PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template=template
+        )
+        back_cover = _build_manuscript_pdf_pages(
+            title="外婆回忆录", content="外婆回忆录", manuscript=manuscript,
+            layout=layout,
+        )[-1]
+        quote_lines = [command for command in back_cover.commands if "外婆" in command.text]
+        assert quote_lines[-1].text.endswith("…")
+        assert min(command.y for command in quote_lines) > max(
+            image.y + image.height for image in back_cover.images
+        ) + 12
+        assert manuscript["render_settings"]["back_cover_quote"] == quote
+
+
+def test_generated_cover_shortens_only_displayed_subtitle_when_title_is_long():
+    title = "外婆家的童年与那段留在心里的夏日旧时光" * 4
+    subtitle = "根据口述和家人的回忆整理的一段漫长故事" * 6
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        manuscript = _sample_manuscript("正文。", cover_style=template)
+        manuscript["profile"].update(title=title, subtitle=subtitle, template=template)
+        layout = configured_pdf_layout(
+            PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template=template
+        )
+        cover = _build_manuscript_pdf_pages(
+            title=title, content=title, manuscript=manuscript, layout=layout
+        )[0]
+        subtitle_lines = [
+            command for command in cover.commands
+            if command.font_size == layout.font_size + 2
+        ]
+        assert subtitle_lines
+        assert subtitle_lines[-1].text.endswith("…")
+        assert min(command.y for command in subtitle_lines) > layout.margin_bottom + 72 + 54
+        assert manuscript["profile"]["subtitle"] == subtitle
+
+
+def test_long_new_template_headings_stay_within_reading_and_print_margins():
+    _register_pdf_font()
+    long_title = "外婆家的童年与那段留在心里的夏日旧时光" * 4
+    long_section = "院子里那些很久以后依然记得的日子" * 3
+    for template in ("heritage_classic", "warm_journal", "modern_minimal"):
+        for export_layout in (
+            MemoirBookOutputExportLayout.STANDARD,
+            MemoirBookOutputExportLayout.LARGE_PRINT,
+        ):
+            manuscript = _sample_manuscript("这是正文，留给家人阅读。", cover_style=template)
+            manuscript["profile"]["template"] = template
+            manuscript["profile"]["title"] = long_title
+            manuscript["chapters"][0]["title"] = long_title
+            manuscript["chapters"][0]["sections"][0]["title"] = long_section
+            layout = configured_pdf_layout(PDF_LAYOUTS[export_layout], template=template)
+            pages = _build_manuscript_pdf_pages(
+                title=long_title, content=long_title,
+                manuscript=manuscript, layout=layout,
+            )
+            chapter_pages = [page for page in pages if page.section_title == long_title]
+            assert chapter_pages
+            title_lines = [
+                command for page in chapter_pages for command in page.commands
+                if command.font_size == layout.title_font_size and command.text in long_title
+            ]
+            section_lines = [
+                command for page in chapter_pages for command in page.commands
+                if command.font_size == layout.font_size + 2 and command.text in long_section
+            ]
+            assert len(title_lines) > 1
+            assert len(section_lines) > 1
+            assert "".join(command.text for command in title_lines) == long_title
+            assert "".join(command.text for command in section_lines) == long_section
+            assert all(command in chapter_pages[0].commands for command in title_lines)
+            cover_title_lines = [
+                command for command in pages[0].commands
+                if command.text in long_title and command.font_size >= 18
+            ]
+            assert "".join(command.text for command in cover_title_lines) == long_title
+            credit = _text_command(pages[0], "整理：家人整理")
+            assert min(command.y for command in cover_title_lines) > credit.y + 45
+            for command in cover_title_lines:
+                font_name = command.font_name or PDF_SERIF_FONT_NAME
+                text_width = pdfmetrics.stringWidth(command.text, font_name, command.font_size)
+                text_width += command.char_spacing * max(0, len(command.text) - 1)
+                assert command.x >= layout.margin_x
+                assert command.x + text_width <= layout.page_width - layout.margin_x
+            ornament = next(
+                image for image in chapter_pages[0].images
+                if image.path.name == f"{template}.png"
+            )
+            assert ornament.y + ornament.height < min(command.y for command in title_lines) - 8
+            assert ornament.y > layout.margin_bottom
+            for page_number, page in enumerate(pages, start=1):
+                if page not in chapter_pages:
+                    continue
+                inset = (
+                    layout.inner_margin_delta if page_number % 2 else -layout.inner_margin_delta
+                ) if layout.mirror_body_pages else 0
+                right_edge = layout.page_width - layout.margin_x + inset
+                for command in page.commands:
+                    if command not in title_lines and command not in section_lines:
+                        continue
+                    font_name = command.font_name or PDF_SERIF_FONT_NAME
+                    width = pdfmetrics.stringWidth(command.text, font_name, command.font_size)
+                    width += command.char_spacing * max(0, len(command.text) - 1)
+                    assert command.x + width <= right_edge + 1
+
+
 def test_pdf_cover_styles_are_selectable_across_schema_service_and_export():
     assert set(get_args(MemoirBookCoverStyle)) == EXPECTED_PDF_COVER_STYLES
     assert EXPECTED_PDF_COVER_STYLES.issubset(PDF_COVER_STYLES)
@@ -166,7 +492,9 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
         show_source_appendix=None,
     )
 
-    front_pages = pages[:4]
+    first_chapter_index = next(index for index, page in enumerate(pages) if page.anchor == "chapter-1")
+    front_pages = pages[:first_chapter_index]
+    assert len(front_pages) == 3
     assert all(not page.header_title for page in front_pages)
     assert all(page.body_page_number is None for page in front_pages)
     assert all(page.show_footer is False for page in front_pages)
@@ -175,10 +503,9 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert pages[0].decorations
     assert all(decoration.kind == "line" for decoration in pages[0].decorations)
     assert all(command.text != "口述：待补充" for command in pages[0].commands)
-    assert sum(
-        command.text == "根据口述访谈整理"
-        for command in front_pages[1].commands
-    ) == 1
+    assert any(command.text == "目录" for command in front_pages[-1].commands)
+    assert all(page.section_title != "扉页" for page in pages)
+    assert all(page.section_title != "附录" for page in pages)
 
     chapter_pages = [page for page in pages if page.section_title == "外婆家的童年"]
     assert chapter_pages[0].body_page_number == 1
@@ -432,8 +759,8 @@ def test_image_cover_styles_use_distinct_title_typography():
     navy_title = _text_command(navy_pages[0], "回望这一生")
     watercolor_subtitle = _text_command(watercolor_pages[0], "余晋口述回忆录")
     navy_subtitle = _text_command(navy_pages[0], "余晋口述回忆录")
-    watercolor_quote = _text_command(watercolor_pages[-1], "因为是家乡，")
-    navy_quote = _text_command(navy_pages[-1], "因为是家乡，")
+    watercolor_quote = next(command for command in watercolor_pages[-1].commands if "因为是家乡" in command.text)
+    navy_quote = next(command for command in navy_pages[-1].commands if "因为是家乡" in command.text)
 
     assert watercolor_title.font_name == PDF_SERIF_FONT_NAME
     assert navy_title.font_name == PDF_SERIF_BOLD_FONT_NAME
@@ -468,13 +795,7 @@ def test_table_of_contents_links_to_numbered_chapter_pages():
     assert page_command.target_anchor == "chapter-1"
     assert page_command.x > toc_command.x
     assert page_command.y == toc_command.y
-    section_command = next(
-        command
-        for command in toc_page.commands
-        if "院子里的日子" in command.text
-    )
-    assert section_command.text == "1.1　院子里的日子"
-    assert section_command.target_anchor == "chapter-1"
+    assert all("院子里的日子" not in command.text for command in toc_page.commands)
 
     chapter_page = next(page for page in pages if page.anchor == "chapter-1")
     assert any(
@@ -648,3 +969,199 @@ def test_body_text_indents_paragraphs_and_avoids_orphan_starts():
     )
     assert second_paragraph.x == layout.margin_x + layout.font_size * 2
     assert all(not command.text.startswith("第一段") for command in builder.pages[0].commands)
+
+
+@pytest.mark.parametrize("template", ["heritage_classic", "warm_journal", "modern_minimal"])
+def test_section_heading_keeps_body_start_on_the_same_page(template):
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template=template
+    )
+    builder = PDFBookBuilder(title="分页回归", layout=layout)
+    builder.new_page("测试章节", body_numbering=True)
+    builder.add_text("前一段正文")
+    builder.y = layout.margin_bottom + 100
+    heading = "童年院落里的微光与后来漫长岁月回忆"
+    body = "这一段讲述只用于分页测试，标题之后至少保留两行正文，阅读时不必翻页寻找开头。"
+
+    builder.add_section_heading(heading)
+    builder.add_body_text(body)
+
+    heading_page = next(
+        page for page in builder.pages if any(command.text.startswith("童年院落") for command in page.commands)
+    )
+    assert any(command.text.startswith("这一段讲述") for command in heading_page.commands)
+    assert len([command for command in heading_page.commands if command.font_size == layout.font_size]) >= 2
+    assert not any(command.text.startswith("童年院落") for command in builder.pages[0].commands)
+
+
+def test_pdf_heading_and_toc_do_not_leave_a_single_character_last_line():
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="warm_journal"
+    )
+    builder = PDFBookBuilder(title="换行回归", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    heading = "童年院落里的微光与后来漫长的岁月里"
+    builder.add_section_heading(heading)
+    heading_lines = [command.text for command in builder.current_page.commands]
+
+    assert len(heading_lines) == 2
+    assert "".join(heading_lines) == heading
+    assert len(heading_lines[-1]) > 1
+
+    builder.new_page("目录", show_footer=False)
+    label = f"1.1　{heading}"
+    builder.add_toc_row(label=label, page_text="", indent=18, font_size=14)
+    toc_lines = [command.text for command in builder.current_page.commands]
+
+    assert "".join(toc_lines) == label
+    assert len(toc_lines[-1]) > 1
+
+
+def test_pdf_text_and_toc_reserve_their_actual_line_height():
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    builder = PDFBookBuilder(title="行高回归", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.add_text("前文")
+    builder.y = layout.margin_bottom + layout.line_height + 1
+
+    builder.add_text("大行高标题", line_height=layout.line_height + 12)
+
+    assert all(command.text != "大行高标题" for command in builder.pages[0].commands)
+    builder.y = layout.margin_bottom + layout.line_height + 1
+    builder.add_toc_row(label="目录测试", page_text="2")
+    assert all(command.text != "目录测试" for command in builder.pages[1].commands)
+
+
+def test_print_chapters_keep_right_page_alignment_and_mirrored_body_margins():
+    paragraph = "这一段虚构讲述只用于测试章节分页和装订边距。"
+    content = "\n".join([paragraph] * 8)
+    manuscript = _sample_manuscript(content)
+    second_chapter = {
+        **manuscript["chapters"][0],
+        "chapter_id": "chapter-2",
+        "index": 2,
+        "title": "第二章的测试故事",
+        "content": paragraph,
+        "sections": [{**manuscript["chapters"][0]["sections"][0], "content": paragraph}],
+    }
+    manuscript["chapters"].append(second_chapter)
+    manuscript["table_of_contents"].append({"index": 2, "title": second_chapter["title"]})
+    manuscript["chapters"].append({**second_chapter, "chapter_id": "chapter-3", "index": 3})
+    manuscript["table_of_contents"].append({"index": 3, "title": second_chapter["title"]})
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="warm_journal"
+    )
+
+    pages = _build_manuscript_pdf_pages(
+        title="分页测试", content="", manuscript=manuscript, layout=layout
+    )
+
+    assert all((index + 1) % 2 == 1 for index, page in enumerate(pages) if page.anchor)
+    blank_pages = [page for page in pages if not page.commands and not page.images and not page.decorations]
+    assert blank_pages
+    assert all(not page.show_footer and not page.header_title and page.body_page_number is None for page in blank_pages)
+    for index, page in enumerate(pages):
+        body_start = next((command for command in page.commands if command.text.startswith("这一段虚构")), None)
+        if body_start is None:
+            continue
+        assert body_start.x == (
+            layout.margin_x
+            + (layout.inner_margin_delta if (index + 1) % 2 else -layout.inner_margin_delta)
+            + 2 * layout.font_size
+        )
+
+
+def test_export_cache_coalesces_processes_and_invalidates_owner_or_renderer_changes(tmp_path, monkeypatch):
+    import multiprocessing
+    import time
+    from dataclasses import replace
+    from app.services.file_exports import ExportFile
+    from app.services.memoir import book_output_export_cache as cache
+    from app.services.memoir.book_output_export_cache import PreparedBookExport
+
+    monkeypatch.setattr(cache.content_storage, "PROJECTS_DIR", tmp_path / "projects")
+    prepared = PreparedBookExport(
+        owner_id="owner", project_id="project", version_id="version", version=1,
+        title="写给他的话", content="正文", manuscript=None,
+        export_format=MemoirBookOutputExportFormat.PDF, layout=MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=False, render_date="2026-10-06",
+    )
+    log = tmp_path / "renders.txt"
+
+    def render(**_kwargs):
+        with log.open("a") as file:
+            file.write("render\n")
+        time.sleep(0.05)
+        return ExportFile(prepared.filename, "application/pdf", b"%PDF-test\n%%EOF\n")
+
+    def worker():
+        result = cache.render_cached_book_export(prepared, prepared.cache_key, render)
+        assert result.content.startswith(b"%PDF-")
+
+    context = multiprocessing.get_context("fork")
+    workers = [context.Process(target=worker) for _ in range(3)]
+    for process in workers:
+        process.start()
+    for process in workers:
+        process.join(timeout=5)
+        assert process.exitcode == 0
+    assert log.read_text() == "render\n"
+    cache.render_cached_book_export(prepared, prepared.cache_key, render)
+    assert log.read_text() == "render\n"
+    assert replace(prepared, owner_id="other-owner").cache_key != prepared.cache_key
+    assert replace(prepared, render_date="2026-10-07").cache_key != prepared.cache_key
+    monkeypatch.setattr(cache, "BOOK_EXPORT_RENDER_REVISION", cache.BOOK_EXPORT_RENDER_REVISION + 1)
+    upgraded = prepared.cache_key  # The already-prepared request remains fixed.
+    assert replace(prepared).cache_key != upgraded
+
+
+def test_illustration_file_content_changes_export_signature(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from app.schemas.memoir_book import MemoirBookManuscript
+    from app.services.memoir.book_output_export_cache import PreparedBookExport
+
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"first image")
+    manuscript = _sample_manuscript("正文")
+    manuscript["back_matter"]["unconfirmed_facts"] = {"kind": "unconfirmed_facts", "title": "待核实"}
+    manuscript["table_of_contents"][0]["chapter_id"] = "chapter-1"
+    manuscript["chapters"][0]["illustrations"] = [{"image_asset_id": "image-1", "storage_path": "photo.png"}]
+    prepared = PreparedBookExport(
+        owner_id="owner", project_id="project", version_id="version", version=1,
+        title="写给他的话", content="正文", manuscript=MemoirBookManuscript.model_validate(manuscript),
+        export_format=MemoirBookOutputExportFormat.PDF, layout=MemoirBookOutputExportLayout.STANDARD,
+        show_source_appendix=False, render_date="2026-10-06",
+    )
+    original = prepared.cache_key
+    photo.write_bytes(b"changed image")
+    assert replace(prepared).cache_key != original
+    photo.unlink()
+    assert replace(prepared).cache_key != original
+
+
+def test_uploaded_cover_keeps_preset_title_metadata_and_only_replaces_front_background(tmp_path, monkeypatch):
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    photo = tmp_path / "photo.jpg"
+    Image.new("RGB", (800, 600), "red").save(photo)
+    designs = [(style, style if style in {"heritage_classic", "warm_journal", "modern_minimal"} else "classic_family") for style in PDF_COVER_STYLES]
+    designs.append(("warm_journal", "custom"))
+    for cover_style, template in designs:
+        manuscript = _sample_manuscript("正文保持原样。", cover_style=cover_style)
+        manuscript["profile"].update(template=template, narrator_name="外婆")
+        layout = configured_pdf_layout(PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], template=template)
+        original = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=layout)
+        manuscript["render_settings"]["cover_image"] = {"image_asset_id": "photo", "storage_path": "photo.jpg"}
+        pages = _build_manuscript_pdf_pages(title="外婆回忆录", content="", manuscript=manuscript, layout=layout)
+        cover = pages[0]
+        assert cover.commands == original[0].commands
+        texts = [command.text for command in cover.commands]
+        assert "外婆回忆录" in texts
+        assert "根据口述访谈整理" in texts
+        assert "口述：外婆" in texts
+        assert "整理：家人整理" in texts
+        assert cover.background_image_path == photo
+        assert cover.background_image_preserve_aspect is True
+        assert any(decoration.opacity < 1 for decoration in cover.decorations)
+        assert pages[-1] == original[-1]
+        assert any(command.text == "正文保持原样。" for page in pages for command in page.commands)

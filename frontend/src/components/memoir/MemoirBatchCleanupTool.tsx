@@ -66,6 +66,9 @@ export function MemoirBatchCleanupTool({
       setPreviewItems([]);
       setSelectedIds([]);
       queryClient.invalidateQueries({ queryKey: ['memoirMaterials', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirBookPlan', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirChapterDraft', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirBookOutput', projectId] });
       queryClient.invalidateQueries({ queryKey: ['memoirAdvancedCleanupMaterials', projectId] });
     },
   });

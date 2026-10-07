@@ -15,6 +15,15 @@ test("voice live transcript uses one measured scroll path", () => {
   assert.doesNotMatch(template, /liveTextEndId/);
 });
 
+test("book completion recording removes panels that crowd the transcript", () => {
+  assert.match(template, /wx:if="\{\{!recording \|\| sessionGoal !== 'book_completion'\}\}" class="topic-panel"/);
+  assert.match(template, /wx:if="\{\{!embedded && !\(sessionGoal === 'book_completion' && recording\) && \(progressNoticeTitle/);
+  assert.match(template, /wx:if="\{\{!recording\}\}" class="completion-issue-head"/);
+  assert.match(template, /wx:if="\{\{showCompletionIssueActions && !recording\}\}"/);
+  assert.match(template, /class="completion-issue-question"/);
+  assert.match(template, /class="transcript-stage"/);
+});
+
 test("voice status pills separate control geometry from label typography", () => {
   for (const [containerClass, labelClass] of [
     ["assistant-label", "assistant-label-text"],
@@ -25,10 +34,4 @@ test("voice status pills separate control geometry from label typography", () =>
     assert.match(template, new RegExp(`<view[^>]+class="[^\"]*${containerClass}[^\"]*"[^>]*>`));
     assert.match(template, new RegExp(`<text[^>]+class="[^\"]*${labelClass}[^\"]*"[^>]*>`));
   }
-});
-
-test("voice permission recovery exposes the microphone settings action", () => {
-  assert.match(template, /wx:if="\{\{recorderSettingsRequired\}\}"/);
-  assert.match(template, /bindtap="openRecorderSettings"/);
-  assert.match(template, />去设置麦克风<\/button>/);
 });

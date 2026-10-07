@@ -643,7 +643,11 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
     ...initialVoiceChatData(),
     ...recorderPermissionPatch,
   });
-  assert.equal(recorderPermissionPatch.recorderSettingsRequired, true);
+  assert.equal(recorderPermissionView.recorderSettingsRequired, true);
   assert.equal(recorderPermissionView.showRecoveryPanel, true);
   assert.equal(recorderPermissionView.showRecoveryActions, true);
+  assert.equal(voiceChatViewPatch({
+    ...initialVoiceChatData(), ...recorderPermissionPatch, error: "",
+    recorderSettingsRequired: true,
+  }).recorderSettingsRequired, false);
 });

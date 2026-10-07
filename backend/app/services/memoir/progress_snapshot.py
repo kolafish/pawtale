@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import Float, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,7 +14,6 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
-    MemoirBookChapterDraft,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
@@ -33,12 +32,12 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.book_source_links import (
     ChapterSourceChangeState,
+    _latest_draft_versions,
     chapter_source_change_states_by_chapter,
     plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids,
 )
-from app.services.memoir.material_roles import is_countable_material
-from app.services.memoir.transcript_projection import current_utterance_text
+from app.services.memoir.material_roles import narrator_material_clause
 
 
 @dataclass(frozen=True)
@@ -56,139 +55,171 @@ class VoiceProgressMetrics:
     modules: list[MemoirVoiceModuleProgressResponse]
 
 
-def char_count(text: str | None) -> int:
-    return len("".join(str(text or "").split()))
+_WHITESPACE_RE = "[[:space:]\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
 
 
-def visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
-    return [
-        utterance
-        for utterance in voice_session.utterances
-        if is_countable_material(utterance, current_utterance_text(utterance))
-    ]
-
-
-def assistant_message_expects_answer(message: MemoirChatMessage) -> bool:
-    metadata = message.metadata_json if isinstance(message.metadata_json, dict) else {}
-    return metadata.get("expects_answer") is not False
-
-
-def utterance_duration_seconds(utterance: MemoirVoiceUtterance) -> int:
-    if utterance.start_ms is None or utterance.end_ms is None:
-        return 0
-    return max(0, round((utterance.end_ms - utterance.start_ms) / 1000))
-
-
-def _session_voice_counts(voice_session: MemoirVoiceSession) -> tuple[int, int, int, int, int]:
-    messages = list(voice_session.messages)
-    utterances = visible_utterances(voice_session)
-    user_messages = [
-        message for message in messages
-        if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
-    ]
-    assistant_messages = [
-        message for message in messages
-        if message.role == MemoirChatMessageRole.ASSISTANT.value
-        and message.content_text.strip()
-        and assistant_message_expects_answer(message)
-    ]
-    return (
-        len(user_messages),
-        len(assistant_messages),
-        len(utterances),
-        sum(char_count(current_utterance_text(utterance)) for utterance in utterances),
-        sum(utterance_duration_seconds(utterance) for utterance in utterances),
+def _current_utterance_chars():
+    utterance = MemoirVoiceUtterance
+    return func.coalesce(
+        func.nullif(func.regexp_replace(utterance.transcript_edited, _WHITESPACE_RE, "", "g"), ""),
+        func.regexp_replace(utterance.transcript_raw, _WHITESPACE_RE, "", "g"),
     )
 
 
-def _is_effective_session(voice_session: MemoirVoiceSession) -> bool:
-    return bool(visible_utterances(voice_session))
-
-
-def build_voice_progress_metrics(sessions: list[MemoirVoiceSession]) -> VoiceProgressMetrics:
-    active_statuses = {
-        MemoirVoiceSessionStatus.CREATED.value,
-        MemoirVoiceSessionStatus.LISTENING.value,
-        MemoirVoiceSessionStatus.SPEAKING.value,
-    }
-    effective_sessions = [session for session in sessions if _is_effective_session(session)]
-    module_stats: dict[str, dict[str, int]] = {}
-    user_message_count = 0
-    assistant_message_count = 0
-    utterance_count = 0
-    total_user_char_count = 0
-    total_audio_seconds = 0
-    for voice_session in effective_sessions:
-        session_user_count, session_assistant_count, session_utterance_count, session_chars, session_seconds = (
-            _session_voice_counts(voice_session)
+async def _voice_progress_metrics(
+    db: AsyncSession,
+    *,
+    user_id: str | None = None,
+    project_id: str | None = None,
+) -> VoiceProgressMetrics:
+    utterance = MemoirVoiceUtterance
+    message = MemoirChatMessage
+    session = MemoirVoiceSession
+    current_chars = _current_utterance_chars()
+    utterance_totals = (
+        select(
+            utterance.voice_session_id.label("session_id"),
+            func.count().label("utterances"),
+            func.sum(func.length(current_chars)).label("chars"),
+            func.sum(
+                func.greatest(
+                    0,
+                    func.round(
+                        (utterance.end_ms - utterance.start_ms).cast(Float) / 1000
+                    ),
+                )
+            ).label("seconds"),
         )
-        user_message_count += session_user_count
-        assistant_message_count += session_assistant_count
-        utterance_count += session_utterance_count
-        total_user_char_count += session_chars
-        total_audio_seconds += session_seconds
-
-        module = voice_session.current_guidance_module or (
-            MemoirInterviewType.HUMAN_INTERVIEW.value
-            if voice_session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value
-            else ("free_narration" if voice_session.guidance_mode == "free_narration" else "unassigned")
+        .where(current_chars != "", narrator_material_clause())
+        .group_by(utterance.voice_session_id)
+        .cte("utterance_totals")
+    )
+    module = func.coalesce(
+        func.nullif(session.current_guidance_module, ""),
+        case(
+            (session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value, "human_interview"),
+            (session.guidance_mode == "free_narration", "free_narration"),
+            else_="unassigned",
+        ),
+    ).label("module")
+    effective = (
+        select(
+            session.id.label("id"),
+            session.status.label("status"),
+            session.updated_at.label("updated_at"),
+            module,
+            utterance_totals.c.utterances,
+            utterance_totals.c.chars,
+            utterance_totals.c.seconds,
         )
-        stats = module_stats.setdefault(module, {"sessions": 0, "utterances": 0, "chars": 0})
-        stats["sessions"] += 1
-        stats["utterances"] += session_utterance_count
-        stats["chars"] += session_chars
-
+        .join(utterance_totals, utterance_totals.c.session_id == session.id)
+    )
+    if project_id is not None:
+        effective = effective.where(session.project_id == project_id)
+    else:
+        effective = effective.join(Project, Project.id == session.project_id).where(
+            Project.user_id == user_id
+        )
+    effective = effective.cte("effective_sessions")
+    grouped = (
+        select(
+            effective.c.module,
+            func.count().label("sessions"),
+            func.sum(effective.c.utterances).label("utterances"),
+            func.sum(effective.c.chars).label("chars"),
+        )
+        .group_by(effective.c.module)
+        .order_by(effective.c.module)
+    )
+    module_rows = (await db.execute(grouped)).all()
+    totals = (
+        await db.execute(
+            select(
+                func.count().label("sessions"),
+                func.count().filter(
+                    effective.c.status.in_([
+                        MemoirVoiceSessionStatus.CREATED.value,
+                        MemoirVoiceSessionStatus.LISTENING.value,
+                        MemoirVoiceSessionStatus.SPEAKING.value,
+                    ])
+                ).label("active"),
+                func.count().filter(
+                    effective.c.status == MemoirVoiceSessionStatus.STOPPED.value
+                ).label("stopped"),
+                func.count().filter(
+                    effective.c.status == MemoirVoiceSessionStatus.FAILED.value
+                ).label("failed"),
+                func.coalesce(func.sum(effective.c.utterances), 0).label("utterances"),
+                func.coalesce(func.sum(effective.c.chars), 0).label("chars"),
+                func.coalesce(func.sum(effective.c.seconds), 0).label("seconds"),
+                func.max(effective.c.updated_at).label("last_session_at"),
+            )
+        )
+    ).one()
+    user_messages, assistant_messages = (
+        await db.execute(
+            select(
+                func.count().filter(
+                    and_(
+                        message.role == MemoirChatMessageRole.USER.value,
+                        func.btrim(message.content_text) != "",
+                    )
+                ),
+                func.count().filter(
+                    and_(
+                        message.role == MemoirChatMessageRole.ASSISTANT.value,
+                        func.btrim(message.content_text) != "",
+                        case(
+                            (
+                                func.json_typeof(message.metadata_json["expects_answer"]) == "boolean",
+                                message.metadata_json["expects_answer"].as_string() != "false",
+                            ),
+                            else_=True,
+                        ),
+                    )
+                ),
+            )
+            .select_from(message)
+            .join(effective, effective.c.id == message.voice_session_id)
+        )
+    ).one()
     return VoiceProgressMetrics(
-        session_count=len(effective_sessions),
-        active_session_count=sum(1 for session in effective_sessions if session.status in active_statuses),
-        stopped_session_count=sum(
-            1 for session in effective_sessions if session.status == MemoirVoiceSessionStatus.STOPPED.value
-        ),
-        failed_session_count=sum(
-            1 for session in effective_sessions if session.status == MemoirVoiceSessionStatus.FAILED.value
-        ),
-        utterance_count=utterance_count,
-        user_message_count=user_message_count,
-        assistant_message_count=assistant_message_count,
-        total_user_char_count=total_user_char_count,
-        total_audio_seconds=total_audio_seconds,
-        last_session_at=effective_sessions[0].updated_at if effective_sessions else None,
+        session_count=totals.sessions,
+        active_session_count=totals.active,
+        stopped_session_count=totals.stopped,
+        failed_session_count=totals.failed,
+        utterance_count=totals.utterances,
+        user_message_count=user_messages,
+        assistant_message_count=assistant_messages,
+        total_user_char_count=totals.chars,
+        total_audio_seconds=int(totals.seconds),
+        last_session_at=totals.last_session_at,
         modules=[
             MemoirVoiceModuleProgressResponse(
-                module=module,
-                session_count=stats["sessions"],
-                utterance_count=stats["utterances"],
-                user_char_count=stats["chars"],
+                module=row.module,
+                session_count=row.sessions,
+                utterance_count=row.utterances,
+                user_char_count=row.chars,
             )
-            for module, stats in sorted(module_stats.items())
+            for row in module_rows
         ],
     )
 
 
-def _latest_draft_word_counts(plan: MemoirBookPlan | None) -> dict[str, int]:
-    if not plan:
-        return {}
-    counts: dict[str, int] = {}
-    for chapter in plan.chapters:
-        draft = chapter.draft
-        if not draft:
-            continue
-        latest = max(draft.versions, key=lambda version: (version.version, version.created_at, version.id), default=None)
-        if latest:
-            counts[chapter.id] = char_count(latest.content)
-    return counts
+def char_count(text: str | None) -> int:
+    return len("".join(str(text or "").split()))
 
 
 def _chapter_items(
     plan: MemoirBookPlan | None,
     *,
     valid_utterance_ids: set[str],
+    draft_word_counts: dict[str, int],
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
     source_change_states_by_chapter: dict[str, ChapterSourceChangeState] | None = None,
 ) -> list[MemoirProjectProgressChapterResponse]:
     if not plan:
         return []
-    draft_word_counts = _latest_draft_word_counts(plan)
     items: list[MemoirProjectProgressChapterResponse] = []
     refs_by_chapter = source_refs_by_chapter
     for chapter in sorted_chapters(plan):
@@ -230,65 +261,72 @@ def _chapter_items(
     return items
 
 
-async def _load_project_sessions(db: AsyncSession, project_id: str) -> list[MemoirVoiceSession]:
-    result = await db.execute(
-        select(MemoirVoiceSession)
-        .where(MemoirVoiceSession.project_id == project_id)
-        .options(
-            selectinload(MemoirVoiceSession.messages),
-            selectinload(MemoirVoiceSession.utterances),
-        )
-        .order_by(MemoirVoiceSession.updated_at.desc(), MemoirVoiceSession.created_at.desc())
-    )
-    return list(result.scalars())
-
-
 async def _load_project_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
     return await db.scalar(
         select(MemoirBookPlan)
         .where(MemoirBookPlan.project_id == project_id)
         .options(
             selectinload(MemoirBookPlan.chapters)
-            .selectinload(MemoirBookPlanChapter.draft)
-            .selectinload(MemoirBookChapterDraft.versions),
+            .selectinload(MemoirBookPlanChapter.draft),
         )
     )
 
 
-async def get_project_progress_snapshot(
+async def _valid_assigned_utterance_ids(
+    db: AsyncSession,
+    project_id: str,
+    candidate_ids: set[str],
+) -> set[str]:
+    if not candidate_ids:
+        return set()
+    utterance = MemoirVoiceUtterance
+    return set((await db.scalars(
+        select(utterance.id)
+        .join(MemoirVoiceSession, MemoirVoiceSession.id == utterance.voice_session_id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            utterance.id.in_(candidate_ids),
+            _current_utterance_chars() != "",
+            narrator_material_clause(),
+        )
+    )).all())
+
+
+async def _project_progress_snapshot_and_metrics(
     db: AsyncSession,
     *,
     user_id: str,
     project_id: str,
-    recent_event_limit: int = 5,
-    voice_unannounced_events_only: bool = False,
-) -> MemoirProjectProgressSnapshotResponse:
+    recent_event_limit: int,
+    voice_unannounced_events_only: bool,
+) -> tuple[MemoirProjectProgressSnapshotResponse, VoiceProgressMetrics]:
     await load_memoir_project(db, project_id, user_id)
-    sessions = await _load_project_sessions(db, project_id)
-    voice_metrics = build_voice_progress_metrics(sessions)
-    visible = [
-        utterance
-        for session in sessions
-        for utterance in visible_utterances(session)
-    ]
-    valid_utterance_ids = {utterance.id for utterance in visible}
-
+    voice_metrics = await _voice_progress_metrics(db, project_id=project_id)
     plan = await _load_project_plan(db, project_id)
     source_refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    candidate_ids = {
+        utterance_id
+        for refs in source_refs_by_chapter.values()
+        for utterance_id in source_ref_utterance_ids(refs)
+    }
+    valid_utterance_ids = await _valid_assigned_utterance_ids(db, project_id, candidate_ids)
+    latest_versions = (
+        await _latest_draft_versions(db, project_id=project_id) if plan else {}
+    )
     source_change_states = await chapter_source_change_states_by_chapter(
         db,
         plan,
         valid_utterance_ids=valid_utterance_ids,
+        source_refs_by_chapter=source_refs_by_chapter,
+        latest_versions=latest_versions,
     )
-    assigned_utterance_ids = {
-        utterance_id
-        for refs in source_refs_by_chapter.values()
-        for utterance_id in source_ref_utterance_ids(refs)
-        if utterance_id in valid_utterance_ids
-    }
     chapter_items = _chapter_items(
         plan,
         valid_utterance_ids=valid_utterance_ids,
+        draft_word_counts={
+            chapter_id: char_count(version.content)
+            for chapter_id, version in latest_versions.items()
+        },
         source_refs_by_chapter=source_refs_by_chapter,
         source_change_states_by_chapter=source_change_states,
     )
@@ -299,12 +337,11 @@ async def get_project_progress_snapshot(
         limit=recent_event_limit,
         voice_unannounced_only=voice_unannounced_events_only,
     )
-
-    return MemoirProjectProgressSnapshotResponse(
+    snapshot = MemoirProjectProgressSnapshotResponse(
         project_id=project_id,
-        valid_utterance_count=len(valid_utterance_ids),
-        assigned_utterance_count=len(assigned_utterance_ids),
-        pending_utterance_count=max(0, len(valid_utterance_ids) - len(assigned_utterance_ids)),
+        valid_utterance_count=voice_metrics.utterance_count,
+        assigned_utterance_count=len(valid_utterance_ids),
+        pending_utterance_count=max(0, voice_metrics.utterance_count - len(valid_utterance_ids)),
         session_count=voice_metrics.session_count,
         active_session_count=voice_metrics.active_session_count,
         stopped_session_count=voice_metrics.stopped_session_count,
@@ -322,6 +359,25 @@ async def get_project_progress_snapshot(
         recent_automation_events=recent_events,
         chapter_progress_items=chapter_items,
     )
+    return snapshot, voice_metrics
+
+
+async def get_project_progress_snapshot(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    recent_event_limit: int = 5,
+    voice_unannounced_events_only: bool = False,
+) -> MemoirProjectProgressSnapshotResponse:
+    snapshot, _ = await _project_progress_snapshot_and_metrics(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        recent_event_limit=recent_event_limit,
+        voice_unannounced_events_only=voice_unannounced_events_only,
+    )
+    return snapshot
 
 
 async def get_voice_progress_from_snapshot(
@@ -331,7 +387,10 @@ async def get_voice_progress_from_snapshot(
     project_id: str | None = None,
 ) -> MemoirVoiceProgressResponse:
     if project_id:
-        snapshot = await get_project_progress_snapshot(db, user_id=user_id, project_id=project_id)
+        snapshot, metrics = await _project_progress_snapshot_and_metrics(
+            db, user_id=user_id, project_id=project_id, recent_event_limit=5,
+            voice_unannounced_events_only=False,
+        )
         return MemoirVoiceProgressResponse(
             project_id=project_id,
             session_count=snapshot.session_count,
@@ -344,21 +403,11 @@ async def get_voice_progress_from_snapshot(
             total_user_char_count=snapshot.source_char_count,
             total_audio_seconds=snapshot.total_audio_seconds,
             last_session_at=snapshot.last_session_at,
-            modules=build_voice_progress_metrics(await _load_project_sessions(db, project_id)).modules,
+            modules=metrics.modules,
             snapshot=snapshot,
         )
 
-    result = await db.execute(
-        select(MemoirVoiceSession)
-        .join(Project, MemoirVoiceSession.project_id == Project.id)
-        .where(Project.user_id == user_id)
-        .options(
-            selectinload(MemoirVoiceSession.messages),
-            selectinload(MemoirVoiceSession.utterances),
-        )
-        .order_by(MemoirVoiceSession.updated_at.desc(), MemoirVoiceSession.created_at.desc())
-    )
-    metrics = build_voice_progress_metrics(list(result.scalars()))
+    metrics = await _voice_progress_metrics(db, user_id=user_id)
     return MemoirVoiceProgressResponse(
         project_id=None,
         session_count=metrics.session_count,

@@ -45,7 +45,7 @@ async def _target_section_id(
         str(value).strip()
         for value in issue.related_material_ids_json
         if str(value).strip()
-    ]
+    ] if issue.scope == MemoirCompletionIssueScope.CHAPTER.value else []
     if related_material_ids:
         related_section = await db.scalar(
             select(MemoirSection.id)
@@ -73,12 +73,17 @@ async def _target_section_id(
         if related_section is not None:
             return related_section
 
-    if issue.scope == MemoirCompletionIssueScope.CHAPTER.value and issue.chapter_id:
+    chapter_ids = (
+        [issue.chapter_id]
+        if issue.scope == MemoirCompletionIssueScope.CHAPTER.value and issue.chapter_id
+        else issue.related_chapter_ids_json
+    )
+    for chapter_id in chapter_ids:
         first_section = await db.scalar(
             select(MemoirSection.id)
             .where(
                 MemoirSection.project_id == issue.project_id,
-                MemoirSection.chapter_id == issue.chapter_id,
+                MemoirSection.chapter_id == chapter_id,
                 MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
                 MemoirSection.include_in_book.is_(True),
             )

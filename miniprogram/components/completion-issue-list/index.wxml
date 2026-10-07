@@ -68,23 +68,32 @@
 </block>
 
 <block wx:else>
-<view wx:if="{{requiredIssues.length}}" class="issue-group required">
-  <text class="group-title">需要确认 · {{requiredIssues.length}} 项</text>
+<view wx:for="{{requiredIssueGroups}}" wx:for-item="group" wx:key="id" class="issue-group {{group.className}}">
+  <text class="group-title">{{group.title}} · {{group.issues.length}} 项</text>
   <text class="group-detail">
-    {{allowRequiredConfirmation ? "请填写回答或处理说明；已保存的草稿仍可阅读。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
+    {{group.detail || (allowRequiredConfirmation ? "可以回答、说明或选择不处理；已保存的草稿仍可阅读。" : "涉及事实冲突或内容取舍，需要处理后才能确认本章。")}}
   </text>
-  <view wx:for="{{requiredIssues}}" wx:key="id" class="issue">
+  <view wx:for="{{group.issues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
     <text class="reason">{{item.reason}}</text>
     <block wx:if="{{allowRequiredConfirmation}}">
-      <view
-        wx:if="{{answeringIssueId !== item.id}}"
-        class="action ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
-        data-issue-id="{{item.id}}"
-        aria-role="button"
-        aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
-        bindtap="beginRequiredAnswer"
-      >填写回答或说明</view>
+      <view wx:if="{{answeringIssueId !== item.id}}" class="actions required-actions">
+        <view
+          class="action compact ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
+          data-issue-id="{{item.id}}"
+          aria-role="button"
+          aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
+          bindtap="beginRequiredAnswer"
+        >填写回答或说明</view>
+        <view
+          wx:if="{{!chapterId && item.scope === 'book'}}"
+          class="action compact subtle ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
+          data-issue-id="{{item.id}}"
+          aria-role="button"
+          aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
+          bindtap="leaveBookIssueUnchanged"
+        >不处理</view>
+      </view>
       <view wx:else class="required-answer-editor">
         <text class="required-answer-label">我的回答或处理说明</text>
         <voice-text-editor
@@ -113,7 +122,7 @@
 </view>
 
 <view wx:if="{{optionalIssues.length}}" class="issue-group optional">
-  <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可选补充 · " + optionalIssues.length + " 项"}}</text>
+  <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可以完善 · " + optionalIssues.length + " 项"}}</text>
   <text class="group-detail">{{chapterId ? "想聊时可以直接语音回答；暂时不想聊，也可以先放一放。" : "可以补讲、标记已处理或跳过，不会阻塞成书。"}}</text>
   <view wx:for="{{optionalIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>

@@ -30,7 +30,7 @@ async def test_stepfun_asr_builds_request_and_parses_done_event():
     service = StepFunASRService(
         api_key="test-key",
         base_url="https://api.stepfun.test",
-        model="stepaudio-2.5-asr",
+        model="stepaudio-3-asr-max",
     )
 
     async with _client(handler) as client:
@@ -49,7 +49,7 @@ async def test_stepfun_asr_builds_request_and_parses_done_event():
     payload = captured["payload"]
     assert payload["audio"]["data"] == base64.b64encode(b"audio").decode("ascii")
     transcription = payload["audio"]["input"]["transcription"]
-    assert transcription["model"] == "stepaudio-2.5-asr"
+    assert transcription["model"] == "stepaudio-3-asr-max"
     assert transcription["language"] == "zh"
     assert transcription["enable_itn"] is True
     assert transcription["enable_timestamp"] is False

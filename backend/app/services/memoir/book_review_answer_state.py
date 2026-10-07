@@ -10,6 +10,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
     MemoirCompletionIssueStatus,
+    MemoirCompletionIssueType,
 )
 from app.models.memoir import (
     MemoirBookOutput,
@@ -17,7 +18,6 @@ from app.models.memoir import (
     MemoirBookReview,
     MemoirCompletionIssue,
 )
-from app.services.memoir import completion_issues
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -49,16 +49,6 @@ class BookReviewAnswerContext:
             for answer in self.answers
             for chapter_id in answer.chapter_ids
         )
-
-
-def _candidate_map(review: MemoirBookReview) -> dict[str, dict]:
-    review_json = review.review_json if isinstance(review.review_json, dict) else {}
-    candidates = review_json.get("candidate_issues")
-    return dict(
-        completion_issues.book_review_candidate_fingerprints(
-            candidates if isinstance(candidates, list) else []
-        )
-    )
 
 
 def _answers_signature(answers: list[BookReviewAnswer]) -> str:
@@ -104,25 +94,22 @@ async def load_answer_context(
             )
         ).all()
     )
-    candidate_by_fingerprint = _candidate_map(review)
     answers: list[BookReviewAnswer] = []
     unresolved_count = 0
     for issue in issues:
         if issue.status != MemoirCompletionIssueStatus.CLOSED.value:
-            unresolved_count += 1
+            if issue.issue_type != MemoirCompletionIssueType.PRIVACY.value:
+                unresolved_count += 1
             continue
         if (
             issue.outcome != MemoirCompletionIssueOutcome.CONFIRMED.value
             or not issue.outcome_note.strip()
         ):
             continue
-        candidate = candidate_by_fingerprint.get(issue.fingerprint)
-        if not candidate:
-            continue
         chapter_ids = tuple(
             dict.fromkeys(
                 str(value).strip()
-                for value in candidate.get("chapter_ids", [])
+                for value in issue.related_chapter_ids_json
                 if str(value).strip()
             )
         )
@@ -136,7 +123,7 @@ async def load_answer_context(
                 reason=issue.reason.strip(),
                 answer=issue.outcome_note.strip(),
                 chapter_ids=chapter_ids,
-                resolution=str(candidate.get("resolution") or "").strip(),
+                resolution=issue.resolution,
             )
         )
     return BookReviewAnswerContext(

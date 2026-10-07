@@ -153,6 +153,12 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface EditImageOption {
+    src: string;
+    success?(result: GeneralCallbackResult & { tempFilePath: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+  }
+
   interface ChooseMediaFile {
     tempFilePath: string;
     size: number;
@@ -237,6 +243,14 @@ declare namespace WechatMiniprogram {
   }
 
   interface FileSystemManager {
+    accessSync(path: string): void;
+    mkdirSync(dirPath: string, recursive?: boolean): void;
+    copyFileSync(srcPath: string, destPath: string): void;
+    renameSync(oldPath: string, newPath: string): void;
+    readdirSync(dirPath: string): string[];
+    statSync(path: string): { size: number; lastModifiedTime: number };
+    unlinkSync(filePath: string): void;
+    rmdirSync(dirPath: string, recursive?: boolean): void;
     readFile(option: FileSystemReadFileOption): void;
     writeFile(option: FileSystemWriteFileOption): void;
     unlink?(option: FileSystemUnlinkOption): void;
@@ -344,6 +358,7 @@ declare namespace WechatMiniprogram {
 
   interface NavigateOption {
     url: string;
+    success?: (result: GeneralCallbackResult) => void;
   }
 
   interface NavigateBackOption {
@@ -481,6 +496,7 @@ declare namespace WechatMiniprogram {
     uploadFile(option: UploadFileOption): void;
     chooseImage(option: ChooseImageOption): void;
     chooseMedia?(option: ChooseMediaOption): void;
+    editImage?(option: EditImageOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;
@@ -492,6 +508,7 @@ declare namespace WechatMiniprogram {
     authorize?(option: AuthorizeOption): void;
     openSetting?(option: OpenSettingOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
+    hideShareMenu?(): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
     previewImage(option: PreviewImageOption): void;
     enableAlertBeforeUnload?(option: { message: string }): void;

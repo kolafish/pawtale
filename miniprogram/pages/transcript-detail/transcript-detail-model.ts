@@ -256,11 +256,12 @@ export function materialAssignmentPatch(
   };
 }
 
-export function shareVideoFileName(item: TranscriptDetailItemView | null): string {
-  const title = (item?.titleText || item?.summary_title || "回忆录片段")
-    .replace(/[\\/:*?"<>|]/g, "")
+export function shareVideoFileName(title: string | null | undefined): string {
+  const safeTitle = (title || "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
-  const shortTitle = Array.from(title).slice(0, 24).join("");
+  const shortTitle = Array.from(safeTitle).slice(0, 24).join("").trim();
   return `${shortTitle || "回忆录片段"}.mp4`;
 }
 
@@ -300,16 +301,16 @@ export function toViewItem(
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
     transcriptionNoticeText: canRecoverTranscription
-      ? "这段录音已经安全保存，恢复转写后即可继续整理。"
+      ? "录音已保存。把它转成文字后，就可以继续整理。"
       : "",
-    heroStatusText: canRecoverTranscription ? "等待转写" : "已整理",
+    heroStatusText: canRecoverTranscription ? "等待生成文字" : "已整理",
     heroStatusClass: canRecoverTranscription ? "pending" : "ready",
     displayCountText: canRecoverTranscription ? "尚未生成" : `${item.display_char_count} 字`,
     rawCountText: canRecoverTranscription ? "尚未转写" : `${item.raw_char_count} 字`,
     canRecoverTranscription,
     locationTitleText: hasLocation
       ? "已收进故事树"
-      : (canRecoverTranscription ? "等待转写" : "尚未整理"),
+      : (canRecoverTranscription ? "等待生成文字" : "尚未整理"),
     showLocationPath: hasLocation,
     chapterLocationText,
     sectionLocationText,
@@ -369,20 +370,6 @@ export function syncEditUnloadAlert(item: TranscriptDetailItemView | null): void
     return;
   }
   wx.disableAlertBeforeUnload?.();
-}
-
-export function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
-  return new Promise((resolve) => {
-    const preview = item.titleText || item.display_text || item.transcript_raw || "这条讲述记录";
-    wx.showModal({
-      title: "删除讲述记录",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
-      confirmText: "删除",
-      confirmColor: "#b64545",
-      success: (result) => resolve(Boolean(result.confirm)),
-      fail: () => resolve(false),
-    });
-  });
 }
 
 export function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise<boolean> {

@@ -5,7 +5,6 @@ import {
 } from "../../services/audio-playback";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-book-api";
@@ -32,6 +31,7 @@ interface ChapterWorkspaceDraftHost {
   beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
   loadPageData(silent?: boolean): Promise<void>;
+  syncDraftSectionUnloadAlert(): void;
 }
 
 function defineChapterWorkspaceDraftMethods<TMethods extends object>(
@@ -72,10 +72,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       editingSectionContent: section.content,
       error: "",
     });
-  },
-
-  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
-    this.openDraftSectionEditor(event);
+    this.syncDraftSectionUnloadAlert();
   },
 
   changeDraftSectionContent(event: PageTextInputEvent) {
@@ -83,6 +80,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     this.setData({ editingSectionContent: event.detail.value });
+    this.syncDraftSectionUnloadAlert();
   },
 
   cancelDraftSectionEdit() {
@@ -90,6 +88,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+    this.syncDraftSectionUnloadAlert();
   },
 
   startDraftSectionAIEdit(event: PageDatasetEvent<{ id?: string }>) {
@@ -165,6 +164,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         },
       );
       this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+      this.syncDraftSectionUnloadAlert();
       await this.loadPageData(true);
       wx.showToast({ title: "故事已保存", icon: "success" });
     } catch (error) {
@@ -174,30 +174,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
     } finally {
       this.finishOperation("save_draft_section", sectionId);
-    }
-  },
-
-  async confirmChapter() {
-    if (
-      !this.data.canConfirmChapter
-      || Boolean(this.data.editingSectionId)
-    ) {
-      return;
-    }
-    if (!this.beginOperation("confirm_chapter")) {
-      return;
-    }
-    try {
-      await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
-      await this.loadPageData(true);
-      wx.showToast({ title: "本章正文已确认", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
-    } finally {
-      this.finishOperation("confirm_chapter");
     }
   },
 

@@ -10,23 +10,13 @@ export interface AIModelSettings {
 
 const STORAGE_KEY = "pawtale_ai_model_settings";
 
-export const DEFAULT_AI_MODEL = "claude-opus-4-8";
+export const DEFAULT_AI_MODEL = "deepseek-flash";
 
 export const AI_MODEL_OPTIONS: AIModelOption[] = [
   {
     value: "deepseek-v4-pro",
     label: "DeepSeek V4 Pro",
     description: "质量优先，适合回忆录追问、整理和成文",
-  },
-  {
-    value: "claude-fable-5",
-    label: "Claude Fable 5",
-    description: "高质量别名模型，适合深度追问、整理和成书",
-  },
-  {
-    value: "claude-opus-4-8",
-    label: "Claude Opus 4.8",
-    description: "旗舰推理模型，适合复杂结构和长文润色",
   },
   {
     value: "doubao-seed-2-0-pro-260215",

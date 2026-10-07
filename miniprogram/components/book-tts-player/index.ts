@@ -1,5 +1,6 @@
 Component({
   properties: {
+    preparingText: { type: String, value: "" },
     title: {
       type: String,
       value: "正文朗读",

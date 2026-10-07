@@ -27,7 +27,7 @@
 .share-video-error {
   padding: 20rpx;
   border-radius: var(--ui-radius-inner);
-  font-size: 25rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -113,7 +113,7 @@
 .share-video-segment-text,
 .share-video-selection-text {
   color: var(--ui-text-primary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.58;
   overflow-wrap: anywhere;
 }
@@ -122,7 +122,7 @@
 .share-video-selection-meta {
   margin-top: 7rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -155,7 +155,7 @@
 .voice-edit-label {
   color: var(--ui-section-title);
   font-family: var(--ui-font-editorial);
-  font-size: 27rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -168,7 +168,7 @@
 
 .share-video-background-current {
   color: var(--ui-value-text);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -176,8 +176,8 @@
 .share-video-background-help {
   margin-top: 8rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
-  line-height: 1.5;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -201,7 +201,7 @@
 
 .share-video-background-label {
   color: var(--ui-text-primary);
-  font-size: 26rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -209,8 +209,8 @@
 .share-video-background-desc {
   margin-top: 4rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
-  line-height: 1.4;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
@@ -241,7 +241,7 @@
 .custom-background-status {
   margin-top: 12rpx;
   color: var(--ui-section-title);
-  font-size: 24rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -291,7 +291,7 @@
 
 .share-video-job-title {
   color: var(--ui-section-title);
-  font-size: 26rpx;
+  font-size: var(--ui-font-list-title);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -307,7 +307,7 @@
 .share-video-job-meta {
   margin-top: 6rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
+  font-size: var(--ui-font-caption);
   line-height: 1.4;
 }
 
@@ -341,13 +341,44 @@
   box-shadow: var(--ui-card-shadow);
 }
 
+.share-video-preview.is-portrait {
+  display: block;
+  width: 480rpx;
+  height: 853rpx;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.share-video-result-card .share-video-preview,
+.share-video-result-card .share-video-task-progress {
+  margin-top: 0;
+}
+
+.share-video-result-label {
+  display: block;
+  margin-bottom: 14rpx;
+  color: var(--ui-success-text);
+  font-size: var(--ui-font-meta);
+  font-weight: 700;
+}
+
+.share-video-result-actions {
+  margin-top: 22rpx;
+}
+
+.share-video-result-failed .primary-button,
+.share-video-retry {
+  width: 100%;
+  margin-top: 18rpx;
+}
+
 .detail-page.large-text .share-video-state,
 .detail-page.large-text .share-video-error,
 .detail-page.large-text .share-video-background-label,
 .detail-page.large-text .custom-background-status,
 .detail-page.large-text .share-video-job-title,
 .detail-page.large-text .voice-edit-label {
-  font-size: 30rpx;
+  font-size: var(--ui-font-large-body);
   line-height: 1.55;
 }
 
@@ -362,7 +393,8 @@
 .detail-page.large-text .share-video-background-current,
 .detail-page.large-text .share-video-background-desc,
 .detail-page.large-text .share-video-background-help,
+.detail-page.large-text .share-video-result-label,
 .detail-page.large-text .share-video-job-meta {
-  font-size: 28rpx;
+  font-size: var(--ui-font-large-meta);
   line-height: 1.5;
 }

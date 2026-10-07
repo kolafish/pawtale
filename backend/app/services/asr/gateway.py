@@ -35,6 +35,7 @@ TurnStartHandler = Callable[["VoiceGatewayTurnContext"], Awaitable[None]]
 VoiceGatewayStopReason = Literal["client_stop", "transport_closed", "terminal_error"]
 SessionStopHandler = Callable[[str | None, VoiceGatewayStopReason], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
+AudioAuthorizationHandler = Callable[[], Awaitable[bool]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 MAX_AUDIO_FRAME_BYTES = 256 * 1024
@@ -79,6 +80,7 @@ class VoiceGatewaySession:
         on_turn_start: TurnStartHandler | None = None,
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
+        authorize_audio: AudioAuthorizationHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
         text_normalizer: TextNormalizer = _identity_text,
         default_speaker_role: str = DEFAULT_SPEAKER_ROLE,
@@ -94,6 +96,7 @@ class VoiceGatewaySession:
         self.on_turn_start = on_turn_start
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
+        self.authorize_audio = authorize_audio
         self.on_asr_final = on_asr_final
         self.text_normalizer = text_normalizer
         self.default_speaker_role = default_speaker_role
@@ -113,6 +116,7 @@ class VoiceGatewaySession:
         self._turn_index = 0
         self._frame_count = 0
         self._audio_bytes = 0
+        self._total_audio_bytes = 0
         self._asr_event_count = 0
         self._asr_final_count = 0
         self._barge_in_factory = barge_in_detector_factory
@@ -192,11 +196,13 @@ class VoiceGatewaySession:
             await self._handle_barge_in(message)
             return False
         if message_type == "session.start":
+            await self._assert_audio_authorized()
             self._barge_in_detector = None
             self._barge_in_id = None
             await self._start_asr(message)
             return False
         if message_type == "audio.frame":
+            await self._assert_audio_authorized()
             await self._send_audio_frame(message)
             return False
         if message_type == "audio.end":
@@ -222,6 +228,7 @@ class VoiceGatewaySession:
                 self._barge_in_id = None
             return
         if message_type == "barge_in.start":
+            await self._assert_audio_authorized()
             if self._barge_in_factory is None or self._state != VoiceGatewayState.READY:
                 await self.client.send_json(self._event(
                     "barge_in.error", monitor_id=monitor_id, error="barge_in_unavailable",
@@ -233,6 +240,7 @@ class VoiceGatewaySession:
             return
         if message_type != "barge_in.frame":
             raise VoiceGatewayClientError("unsupported_barge_in_event")
+        await self._assert_audio_authorized()
         if monitor_id != self._barge_in_id or self._barge_in_detector is None:
             return  # Late frames from stopped playback cannot affect a newer monitor.
         encoded = message.get("audio")
@@ -334,6 +342,7 @@ class VoiceGatewaySession:
             return
         self._frame_count += 1
         self._audio_bytes += len(audio)
+        self._total_audio_bytes += len(audio)
         if self.on_audio_frame:
             try:
                 await self.on_audio_frame(audio)
@@ -341,6 +350,10 @@ class VoiceGatewaySession:
                 await self._mark_terminal_error(exc.code)
                 return
         await self._asr_client.send_audio(audio)
+
+    async def _assert_audio_authorized(self) -> None:
+        if self.authorize_audio and not await self.authorize_audio():
+            raise VoiceGatewayClientError("voice_authorization_revoked")
 
     async def _finish_audio(self) -> None:
         if self._state == VoiceGatewayState.READY and self._asr_client is None:
@@ -539,6 +552,19 @@ class VoiceGatewaySession:
         if self._state == VoiceGatewayState.STOPPED:
             return "asr_session_stopped"
         return "asr_session_not_started"
+
+    @property
+    def total_audio_bytes(self) -> int:
+        return self._total_audio_bytes
+
+    @property
+    def total_audio_duration_seconds(self) -> float:
+        # The mini program sends 16 kHz, 16-bit, mono PCM frames.
+        return self._total_audio_bytes / (16_000 * 2)
+
+    @property
+    def terminal_error(self) -> str | None:
+        return self._terminal_error
 
     def _event(self, event_type: str, **payload: Any) -> dict[str, Any]:
         return {

@@ -11,13 +11,16 @@ import httpx
 
 from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
+from app.services.ai_credits import assert_ai_credit_available
+from app.services.ai_costs import estimate_image_cost
+from app.services.ai_usage_records import AIUsageContext, record_ai_usage
 
 
 DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v2"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v4"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -63,21 +66,23 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
     pass
 
 
-_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张横版 16:9 的视频背景图：
+_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
 
-请理解原文所表达的场景、人物关系和整体氛围，并让画面的光线、色彩与情绪自然贴合原文。
+画面内容：
+- 从原文中选择一个具体、可见的回忆瞬间，不把不同时间或地点的事件拼贴在一起。
+- 优先呈现原文明确提到的时间、地点、人物关系、动作和关键物件，让这些细节成为画面主体；不要用泛泛的漂亮风景代替讲述的场景。
+- 原文没有说明的年代、地点、人物身份或生活细节不要猜测；缺少可见细节时，以克制的环境和光线衬托原文情绪。
 
 绘画风格：
 {drawing_instruction}
 
-视频背景构图：
-- 画面主体主要安排在左侧。
-- 画面中部和右侧保留大面积自然、干净、低细节的区域，供后期叠加口述文字。
-- 留白自然融入房间、天空、墙面、道路或环境空间，不生成生硬的纯色空块。
-- 中部和右侧不放人物面部、复杂物件或视觉焦点。
-- 背景衬托口述文字，不喧宾夺主。
+竖版构图：
+- 画面主体（人物、关键物件、场景焦点）安排在画面上方约六成的区域内，画面要饱满，不留大块空白。
+- 画面下方约三分之一是自然、安静、低细节的延伸，例如地面、石板路、桌面、水面、草地或阴影，后期会在这里叠加口述字幕；不生成生硬的纯色空块。
+- 下方三分之一不放人物面部、文字状物体或视觉焦点。
+- 主体四周留出一些余量，后期会做缓慢的推拉和平移镜头。
 
 生成边界：
 - 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。
@@ -362,6 +367,8 @@ class VolcArkImageGenerationService:
 async def get_or_generate_share_video_background(
     selected_text: str,
     style_id: str | None,
+    *,
+    usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
     normalized_style = normalize_share_video_background_style(style_id)
@@ -387,7 +394,37 @@ async def get_or_generate_share_video_background(
             cache_hit=True,
         )
 
-    image = await VolcArkImageGenerationService().generate(prompt.prompt)
+    try:
+        if usage_context and usage_context.user_id:
+            await assert_ai_credit_available(usage_context.user_id)
+        image = await VolcArkImageGenerationService().generate(prompt.prompt)
+    except Exception as exc:
+        await record_ai_usage(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=model or "unknown",
+            status="failed",
+            cost=estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=model,
+                image_count=1,
+            ),
+            image_count=1,
+            error_type=type(exc).__name__,
+            context=usage_context,
+        )
+        raise
+    await record_ai_usage(
+        provider=VolcArkImageGenerationService.provider_name,
+        model=image.model,
+        status="succeeded",
+        cost=estimate_image_cost(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=image.model,
+            image_count=1,
+        ),
+        image_count=1,
+        context=usage_context,
+    )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")

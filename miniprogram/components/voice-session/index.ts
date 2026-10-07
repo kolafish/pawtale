@@ -121,6 +121,10 @@ Component({
       this.triggerEvent("exit", { ...detail, voiceSessionId: this.data.voiceSessionId });
     }
   },
+  exitFailedSession() {
+    wx.showToast({ title: "本次保存异常，请核对记录", icon: "none" });
+    this.exitSession({ destination: "transcripts" });
+  },
 
   completionIssues() {
     const runtime = this.runtime();
@@ -352,13 +356,25 @@ Component({
       && !this.runtime().voiceStreaming.hasClient()
       && this.data.status !== "connecting"
     ) {
-      await this.syncVoiceAuthorizationAndConnect();
+      try {
+        await syncVoiceAuthorizationConsent({
+          consent,
+          sourceSessionId: this.data.voiceSessionId,
+        });
+        await this.syncVoiceAuthorizationAndConnect();
+      } catch (error) {
+        saveVoiceAuthorizationConsent(false);
+        const message = error instanceof Error ? error.message : "语音授权保存失败";
+        applyVoiceChatDataPatch(this, { ...voiceAuthorizationRequiredPatch(false), error: message });
+      }
     } else {
       void syncVoiceAuthorizationConsent({
         consent,
         sourceSessionId: this.data.voiceSessionId || undefined,
       }).catch((error) => {
-        console.warn("sync voice authorization consent change failed", error);
+        if (agreed) saveVoiceAuthorizationConsent(false);
+        const message = error instanceof Error ? error.message : "语音授权保存失败";
+        applyVoiceChatDataPatch(this, { ...voiceAuthorizationRequiredPatch(false), error: message });
       });
     }
   },
@@ -376,7 +392,7 @@ Component({
       return true;
     }
     applyVoiceChatDataPatch(this, voiceAuthorizationRequiredPatch(autoTriggered));
-    wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    wx.showToast({ title: "请先同意语音授权", icon: "none" });
     return false;
   },
 
@@ -394,7 +410,7 @@ Component({
       });
       return true;
     } catch (error) {
-      const fallback = forRecording ? "录音授权失败" : "声纹授权同步失败";
+      const fallback = forRecording ? "录音授权失败" : "语音授权同步失败";
       const message = error instanceof Error ? error.message : fallback;
       if (forRecording) {
         this.handleError(message, {
@@ -408,7 +424,6 @@ Component({
       applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(
         message,
         forRecording,
-        forRecording && isRecorderPermissionDeniedError(error),
       ));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
         wx.showToast({ title: fallback, icon: "none" });
@@ -422,7 +437,7 @@ Component({
     if (this.runtime().pageSuspended || this.runtime().disposed) return false;
     if (!synced) {
       if (autoTriggered) {
-        applyVoiceChatDataPatch(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
+        applyVoiceChatDataPatch(this, { autoListenStateText: "自动收音已暂停，等待语音授权同步" });
       }
       return false;
     }
@@ -449,7 +464,7 @@ Component({
         throw new Error("这次讲述不属于当前回忆录，请重新进入。");
       }
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
-      this.runtime().sessionStopConfirmed = detail.session.status === "stopped";
+      this.runtime().sessionStopConfirmed = detail.session.status === "stopped" || detail.session.status === "failed";
       this.applyVoiceSessionDetail(detail);
       await this.refreshCompletionIssue();
       this.reconcilePendingClose(detail);
@@ -599,6 +614,10 @@ Component({
         await stopMemoirVoiceSession(this.data.voiceSessionId);
       }
       const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       if (saved?.session.status !== "stopped") {
         this.handleError("暂未确认保存结果，请留在此页稍后重试。");
         return;
@@ -611,7 +630,11 @@ Component({
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       this.exitSession({ destination: "completion" });
     } catch (error) {
-      await this.refreshVoiceSessionSnapshot();
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
       applyVoiceChatDataPatch(this, { finishingSession: false });
@@ -657,10 +680,10 @@ Component({
   async openRecorderSettings() {
     try {
       const authorized = await openRecorderPermissionSettings();
+      if (this.runtime().disposed) return;
       if (!authorized) {
         applyVoiceChatDataPatch(this, {
           error: "麦克风权限仍未开启。请在小程序设置中允许录音；若已允许，请在手机系统设置中允许微信使用麦克风。",
-          recorderSettingsRequired: true,
         });
         return;
       }
@@ -673,7 +696,6 @@ Component({
         primaryActionText: "开始说话",
         persistenceStateText: "等待识别",
         recoveryNotice: "小程序录音权限已开启。若仍无法录音，请在手机系统设置中允许微信使用麦克风。",
-        recorderSettingsRequired: false,
         canReconnect: false,
         canFinishAfterDisconnect: false,
       });
@@ -681,25 +703,52 @@ Component({
         await this.connectGateway();
       }
     } catch (error) {
+      if (this.runtime().disposed) return;
       applyVoiceChatDataPatch(this, {
-        error: error instanceof Error ? error.message : "麦克风设置打开失败",
-        recorderSettingsRequired: true,
+        recoveryNotice: error instanceof Error ? error.message : "麦克风设置打开失败",
       });
     }
   },
 
   async finishAfterDisconnect() {
+    if (this.data.finishingSession) return;
+    applyVoiceChatDataPatch(this, { finishingSession: true, recording: false, error: "" });
     this.runtime().voiceStreaming.close({ force: true });
-    await this.refreshVoiceSessionSnapshot();
-    applyVoiceChatDataPatch(this, {
-      recording: false,
-      status: "closed",
-      statusText: statusText("closed"),
-      primaryActionText: "已保存",
-      canReconnect: false,
-      canFinishAfterDisconnect: false,
-    });
-    this.exitSession({ destination: "transcripts" });
+    try {
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (!saved) {
+        applyVoiceChatDataPatch(this, {
+          error: "暂时无法确认服务端保存状态，请检查网络后重试。",
+          persistenceStateText: "保存状态待确认",
+          recoveryNotice: "最后一句可能尚未保存，请重新连接或稍后重试",
+          canReconnect: true,
+          canFinishAfterDisconnect: true,
+        });
+        return;
+      }
+      if (saved.session.status === "failed") {
+        this.exitFailedSession();
+        return;
+      }
+      if (saved.session.status !== "stopped") {
+        applyVoiceChatDataPatch(this, {
+          error: "服务端尚未确认讲述结束，最后一句可能未保存；请重新连接或稍后重试。",
+          persistenceStateText: "保存状态待确认",
+          recoveryNotice: "讲述仍在进行中，请核对保存状态",
+          canReconnect: true,
+          canFinishAfterDisconnect: true,
+        });
+        return;
+      }
+      applyVoiceChatDataPatch(this, {
+        recording: false,
+        canReconnect: false,
+        canFinishAfterDisconnect: false,
+      });
+      this.exitSession({ destination: "transcripts" });
+    } finally {
+      applyVoiceChatDataPatch(this, { finishingSession: false });
+    }
   },
 
   maybeGenerateOpeningFollowUp() {
@@ -707,6 +756,7 @@ Component({
       this.data.interviewType === "human_interview"
       || this.data.sessionGoal === "book_completion"
       || this.runtime().pageSuspended
+      || this.data.finishingSession
       || this.data.followUpLoading
     ) {
       return;

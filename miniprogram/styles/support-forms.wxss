@@ -19,5 +19,5 @@
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface-soft);
   color: var(--ui-text-primary);
-  font-size: 29rpx;
+  font-size: var(--ui-font-action);
 }

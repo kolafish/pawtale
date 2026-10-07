@@ -155,7 +155,7 @@ def test_small_concurrency_provider_limit_defaults():
     assert settings.volc_ark_model == "doubao-seed-2-0-pro-260215"
     assert settings.volc_ark_thinking_type == "disabled"
     assert settings.anthropic_base_url == "https://blankapi.com"
-    assert settings.default_ai_model == "claude-opus-4-8"
+    assert settings.default_ai_model == "deepseek-flash"
     assert settings.tts_max_concurrent_requests == 3
     assert settings.volc_tts_resource_id == "seed-tts-2.0"
     assert settings.volc_tts_speaker == "zh_female_vv_uranus_bigtts"

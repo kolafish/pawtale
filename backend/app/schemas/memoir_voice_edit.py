@@ -12,18 +12,39 @@ class VoiceEditOperation(BaseModel):
         "rename_chapter",
         "rename_section",
         "regenerate_chapter_sections",
+        "consolidate_chapter_sections",
+        "split_chapter",
+        "merge_sections",
     ]
     target_ref: str = Field(min_length=1, max_length=80)
     new_title: str | None = Field(default=None, max_length=80)
+    utterance_ids: list[str] = Field(default_factory=list, max_length=30)
+    section_ids: list[str] = Field(default_factory=list, max_length=30)
 
     @model_validator(mode="after")
     def check_title(self) -> Self:
         if self.new_title is not None:
             self.new_title = self.new_title.strip()
-        if self.action.startswith("rename_") and not self.new_title:
-            raise ValueError("改名必须提供新标题")
-        if not self.action.startswith("rename_") and self.new_title is not None:
-            raise ValueError("只有改名操作可以提供新标题")
+        if self.action.startswith("rename_"):
+            if not self.new_title:
+                raise ValueError("改名必须提供新标题")
+        elif self.action != "split_chapter" and self.new_title is not None:
+            raise ValueError("只有改名或拆分章节可以提供新标题")
+        if self.action == "split_chapter":
+            if bool(self.utterance_ids) == bool(self.section_ids):
+                raise ValueError("拆分章节必须选择小节或讲述记录，不能混合选择")
+            selected = self.section_ids or self.utterance_ids
+            if len(set(selected)) != len(selected) or any(not item.strip() for item in selected):
+                raise ValueError("拆分章节不能选择重复或空白的对象")
+        elif self.action == "merge_sections":
+            if not self.section_ids or self.utterance_ids:
+                raise ValueError("合并小节必须选择来源小节，不能选择讲述记录")
+            if len(set(self.section_ids)) != len(self.section_ids) or any(not item.strip() for item in self.section_ids):
+                raise ValueError("合并小节不能选择重复或空白的对象")
+            if self.target_ref in self.section_ids:
+                raise ValueError("不能把小节合并到自身")
+        elif self.utterance_ids or self.section_ids:
+            raise ValueError("只有拆分章节或合并小节可以选择小节或讲述记录")
         return self
 
 
@@ -43,6 +64,9 @@ class VoiceEditProposal(BaseModel):
 class VoiceEditPreviewRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=2000)
     ai_model: str | None = None
+    supports_chapter_split: bool = False
+    supports_section_merge: bool = False
+    supports_composed_chapter_edits: bool = False
 
 
 class VoiceEditItem(VoiceEditOperation):
@@ -60,6 +84,12 @@ class VoiceEditPreviewResponse(BaseModel):
 class VoiceEditApplyRequest(BaseModel):
     signature: str = Field(min_length=2, max_length=8192)
     operations: list[VoiceEditOperation] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def require_split_title(self) -> Self:
+        if any(op.action == "split_chapter" and not op.new_title for op in self.operations):
+            raise ValueError("拆分章节必须确认新标题")
+        return self
 
 
 class VoiceEditApplyResponse(BaseModel):

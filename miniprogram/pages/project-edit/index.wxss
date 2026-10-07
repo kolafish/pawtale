@@ -22,20 +22,25 @@
 }
 
 .field-label {
+  display: block;
   margin-bottom: 14rpx;
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-list-title);
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .field-hint {
   display: block;
   margin: -4rpx 0 12rpx;
   color: var(--ui-text-secondary);
-  font-size: 23rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
   text-wrap: pretty;
 }
 
 .text-input {
-  font-size: 30rpx;
+  font-size: var(--ui-font-action);
 }
 
 .segmented {
@@ -54,7 +59,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28rpx;
+  font-size: var(--ui-font-action);
   font-weight: 800;
 }
 
@@ -102,8 +107,8 @@
 .mode-desc {
   margin-top: 8rpx;
   color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  line-height: 1.45;
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
 }
 
 .option-check {
@@ -116,7 +121,7 @@
   border-radius: 999rpx;
   background: rgba(255, 253, 250, 0.72);
   color: var(--ui-success-text);
-  font-size: 22rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 800;
   line-height: 36rpx;
   text-align: center;
@@ -138,7 +143,7 @@
   border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--ui-text-secondary);
-  font-size: 29rpx;
+  font-size: var(--ui-font-action);
 }
 
 .primary-button {
@@ -151,3 +156,6 @@
 .primary-button[disabled] {
   opacity: 0.66;
 }
+
+.large-text .field-label { font-size: var(--ui-font-large-list-title); }
+.large-text .field-hint { font-size: var(--ui-font-large-body); }

@@ -29,6 +29,15 @@ from app.schemas.memoir_images import (
     MemoirMaterialImageGenerationRequest,
 )
 from app.services.memoir import editing_jobs
+from app.services.ai_costs import estimate_image_cost
+from app.services.ai_credits import assert_current_ai_credit_available
+from app.services.ai_usage_records import (
+    AIUsageContext,
+    current_ai_usage_context,
+    record_ai_usage,
+    reset_ai_usage_context,
+    set_ai_usage_context,
+)
 from app.services.memoir.image_assets import AI_GENERATED_IMAGE_DISCLOSURE
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -43,7 +52,7 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 logger = logging.getLogger(__name__)
 
-MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v2"
+MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v3"
 MATERIAL_IMAGE_CONTENT_MAX_CHARS = 500
 MATERIAL_IMAGE_DIR = Path("memoir") / "material-images"
 
@@ -66,7 +75,7 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
     )
     content = _prompt_content(selected_text)
     style = share_video_background_style(normalized_style)
-    prompt = f"""根据以下老人口述内容，创作一张适合放进家庭回忆录正文的横版绘画插图：
+    prompt = f"""根据以下口述内容，创作一张适合放进家庭回忆录正文的横版绘画插图：
 
 {content}
 
@@ -462,9 +471,36 @@ async def run_material_image_generation_job(
         cache_hit = path.exists() and path.stat().st_size > 0
         resolved_model = asset.model
         usage: dict[str, object] = {}
+        estimated_cost: dict[str, object] = {}
         mime_type = mimetypes.guess_type(path.name)[0] or f"image/{extension}"
         if not cache_hit:
-            image = await VolcArkImageGenerationService().generate(prompt)
+            usage_token = set_ai_usage_context(
+                user_id=asset.user_id,
+                project_id=asset.project_id,
+                operation="memoir.material_image_generation",
+            )
+            usage_context: AIUsageContext | None = None
+            usage_context = current_ai_usage_context()
+            try:
+                await assert_current_ai_credit_available()
+                image = await VolcArkImageGenerationService().generate(prompt)
+            except Exception as exc:
+                await record_ai_usage(
+                    provider=VolcArkImageGenerationService.provider_name,
+                    model=asset.model or settings.volc_ark_image_model.strip() or "unknown",
+                    status="failed",
+                    cost=estimate_image_cost(
+                        provider=VolcArkImageGenerationService.provider_name,
+                        model=asset.model or settings.volc_ark_image_model.strip(),
+                        image_count=1,
+                    ),
+                    image_count=1,
+                    error_type=type(exc).__name__,
+                    context=usage_context,
+                )
+                raise
+            finally:
+                reset_ai_usage_context(usage_token)
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
             try:
@@ -475,6 +511,20 @@ async def run_material_image_generation_job(
             resolved_model = image.model
             usage = image.usage
             mime_type = image.mime_type or mime_type
+            image_cost = estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=resolved_model,
+                image_count=1,
+            )
+            estimated_cost = image_cost.as_dict()
+            await record_ai_usage(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=resolved_model,
+                status="succeeded",
+                cost=image_cost,
+                image_count=1,
+                context=usage_context,
+            )
 
         width, height = _image_dimensions(path)
         elapsed_seconds = perf_counter() - started_at
@@ -492,6 +542,7 @@ async def run_material_image_generation_job(
             "generation_elapsed_seconds": round(elapsed_seconds, 3),
             "generation_cache_hit": cache_hit,
             "generation_usage": usage,
+            "generation_estimated_cost": estimated_cost,
             "generation_error_type": "",
             "generation_error_message": "",
         }
@@ -507,6 +558,7 @@ async def run_material_image_generation_job(
                 "timeout_seconds": settings.volc_ark_image_timeout_seconds,
                 "elapsed_seconds": round(elapsed_seconds, 3),
                 "cache_hit": cache_hit,
+                "estimated_cost": estimated_cost,
             }
         )
     except asyncio.CancelledError:

@@ -30,7 +30,7 @@ export function wechatRecorderErrorMessage(errMsg?: string): string {
   if (message.includes("privacy")) {
     return wechatPrivacyErrorMessage(errMsg);
   }
-  if (message.includes("auth deny") || message.includes("permission") || message.includes("authorize")) {
+  if (isRecorderPermissionDeniedMessage(errMsg)) {
     return RECORDER_PERMISSION_DENIED_MESSAGE;
   }
   if (message.includes("is recording") || message.includes("busy") || message.includes("occupied")) {
@@ -44,13 +44,14 @@ export function wechatRecorderErrorMessage(errMsg?: string): string {
 
 export function isRecorderPermissionDeniedMessage(value?: string): boolean {
   const message = normalizeMessage(value);
-  return message.includes("auth deny")
+  return !message.includes("privacy") && (message.includes("auth deny")
     || message.includes("permission")
     || message.includes("authorize")
-    || message.includes("麦克风权限");
+    || message.includes("没有麦克风权限")
+    || message.includes("麦克风权限仍未开启"));
 }
 
-export function recorderPermissionDeniedError(): RecorderPermissionError {
+function recorderPermissionDeniedError(): RecorderPermissionError {
   const error = new Error(RECORDER_PERMISSION_DENIED_MESSAGE) as RecorderPermissionError;
   error.code = RECORDER_PERMISSION_DENIED_CODE;
   return error;
@@ -105,8 +106,12 @@ function recorderAuthorizationSetting(): Promise<boolean | undefined> {
 }
 
 async function ensureRecorderScopeAuthorization(): Promise<void> {
-  if (await recorderAuthorizationSetting()) {
+  const authorized = await recorderAuthorizationSetting();
+  if (authorized === true) {
     return;
+  }
+  if (authorized === false) {
+    throw recorderPermissionDeniedError();
   }
   const authorizeApi = wx.authorize;
   if (typeof authorizeApi !== "function") {

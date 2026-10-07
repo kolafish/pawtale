@@ -5,11 +5,13 @@ Layout: {DATA_DIR}/projects/{project_id}/{document_id}.md
 """
 import asyncio
 import fcntl
+import os
 import shutil
 from contextlib import asynccontextmanager
 import aiofiles
 import aiofiles.os
 from pathlib import Path
+from uuid import uuid4
 from app.config import DATA_DIR
 
 PROJECTS_DIR = DATA_DIR / "projects"
@@ -61,8 +63,13 @@ async def read_content(project_id: str, document_id: str) -> str:
 async def write_content(project_id: str, document_id: str, content: str) -> None:
     await ensure_project_dir(project_id)
     p = _doc_path(project_id, document_id)
-    async with aiofiles.open(p, mode="w", encoding="utf-8") as f:
-        await f.write(content)
+    temporary = p.with_name(f".{p.name}.{uuid4().hex}.tmp")
+    try:
+        async with aiofiles.open(temporary, mode="x", encoding="utf-8") as f:
+            await f.write(content)
+        os.replace(temporary, p)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 async def delete_content(project_id: str, document_id: str) -> None:

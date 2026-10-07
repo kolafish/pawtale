@@ -24,6 +24,28 @@ interface IssueInputEvent {
   detail: { value?: string };
 }
 
+export function requiredIssueGroups(issues: MemoirCompletionIssue[], bookMode: boolean) {
+  const groups = bookMode
+    ? [
+      {
+        id: "blocking",
+        title: "需要核对",
+        className: "required",
+        detail: "涉及事实冲突，处理后相关章节才能收入全书。可以填写处理说明，也可以明确选择保留现状。",
+        issues: issues.filter((issue) => issue.blocks_book),
+      },
+      {
+        id: "optional",
+        title: "可以完善",
+        className: "optional",
+        detail: "这些内容取舍不影响章节收入全书，可以按需要回答或保留现状。",
+        issues: issues.filter((issue) => !issue.blocks_book),
+      },
+    ]
+    : [{ id: "required", title: "需要确认", className: "required", detail: "", issues }];
+  return groups.filter((group) => group.issues.length);
+}
+
 Component({
   properties: {
     projectId: { type: String, value: "" },
@@ -32,6 +54,7 @@ Component({
     requiredIssues: { type: Array, value: [] },
     optionalIssues: { type: Array, value: [] },
     allowRequiredConfirmation: { type: Boolean, value: false },
+    bookConfirmationMode: { type: Boolean, value: false },
     friendlyMode: { type: Boolean, value: false },
     disabled: { type: Boolean, value: false },
   },
@@ -42,6 +65,18 @@ Component({
     requiredAnswer: "",
     requiredAnswerReady: false,
     requiredAnswerGatewayUrl: "",
+    requiredIssueGroups: [] as ReturnType<typeof requiredIssueGroups>,
+  },
+
+  observers: {
+    "requiredIssues,bookConfirmationMode"() {
+      this.setData({
+        requiredIssueGroups: requiredIssueGroups(
+          this.properties.requiredIssues as MemoirCompletionIssue[],
+          this.properties.bookConfirmationMode,
+        ),
+      });
+    },
   },
 
   methods: {
@@ -145,6 +180,42 @@ Component({
       await this.closeIssue(issueId, "confirmed", note);
     },
 
+    leaveBookIssueUnchanged(event: IssueEvent) {
+      const issue = this.issue(
+        this.properties.requiredIssues as MemoirCompletionIssue[],
+        event,
+      );
+      if (
+        !issue
+        || issue.scope !== "book"
+        || this.data.busyIssueId
+        || this.data.answeringIssueId
+        || this.properties.disabled
+      ) {
+        return;
+      }
+      const privacy = issue.issue_type === "privacy";
+      wx.showModal({
+        title: "不处理这项？",
+        content: privacy
+          ? "将结束本项待确认并保留当前表述，不做匿名化。更新书稿后，家人阅读、分享和导出可能包含这段文字。"
+          : "将结束本项待确认，保留当前书稿的相关表述，不作修改。",
+        confirmText: "不处理",
+        cancelText: "再想想",
+        success: ({ confirm }) => {
+          if (confirm && !this.data.answeringIssueId) {
+            void this.closeIssue(
+              issue.id,
+              "declined",
+              privacy
+                ? "用户确认不处理此项，保留当前书稿表述，不进行匿名化。"
+                : "用户确认不处理此项，保留当前书稿表述。",
+            );
+          }
+        },
+      });
+    },
+
     markHandled(event: IssueEvent) {
       const issue = this.issue(
         this.properties.optionalIssues as MemoirCompletionIssue[],
@@ -209,7 +280,7 @@ Component({
           });
         }
         this.triggerEvent("refresh");
-        wx.showToast({ title: "已处理", icon: "success" });
+        wx.showToast({ title: outcome === "declined" ? "已跳过" : "已处理", icon: "success" });
       } catch (error) {
         if (!routeAuthError(error, "login")) {
           wx.showToast({

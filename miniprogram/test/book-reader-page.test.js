@@ -25,10 +25,11 @@ function sampleFinishedBook(content = "全书正文") {
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockMemoirApiModules({
     createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
-    createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
+    prepareMemoirBookAudio: unmockedAsync("prepareMemoirBookAudio"),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
     getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
+    readMemoirBookShare: unmockedAsync("readMemoirBookShare"),
     ...voiceApiExports,
   });
   mockModule("../services/tts-settings.ts", {
@@ -63,8 +64,10 @@ test("book reader page loads the finished book by project id", async () => {
   assert.equal(context.data.readerTitle, "外婆回忆录");
   assert.equal(context.data.readerSubtitle, "根据口述访谈整理而成");
   assert.equal(context.data.readerMetaText, "2章 · 7字");
-  assert.equal(context.data.bookContent, "外婆回忆录正文");
-  assert.equal(context.data.bookPreviewChapters.length, 2);
+  assert.equal(context.readerText, "外婆回忆录正文");
+  assert.equal(context.data.bookContent, "");
+  assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.equal(context.data.readerChapterTotal, 2);
   assert.equal(context.data.bookPreviewTocItems[0].expanded, false);
   assert.equal(context.data.bookPreviewTocItems[0].storyCountText, "2个故事");
   assert.deepEqual(
@@ -73,13 +76,36 @@ test("book reader page loads the finished book by project id", async () => {
   );
   assert.deepEqual(
     context.data.bookPreviewChapters[0].sections.map((section) => section.content),
-    ["我小时候常在院子里晒太阳。", "外婆总在屋里屋外忙碌。"],
+    ["", ""],
   );
   assert.deepEqual(
     context.data.bookPreviewChapters[0].sections[0].paragraphs,
     ["我小时候常在院子里晒太阳。"],
   );
   assert.equal(context.data.error, "");
+});
+
+test("shared reader opens without owner access and hides owner-only narration", async () => {
+  const calls = [];
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: unmockedAsync("owner book API"),
+    readMemoirBookShare: async (token) => {
+      calls.push(token);
+      return sampleFinishedBook("只读分享正文");
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { shareToken: "family-token" });
+
+  assert.deepEqual(calls, ["family-token"]);
+  assert.equal(context.data.readerShared, true);
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.readerText, "只读分享正文");
+  assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.equal(context.data.error, "");
+  await page.playReaderAudio.call(context);
+  assert.equal(context.data.ttsBusyTarget, "");
 });
 
 test("reader paragraphs only honor line breaks saved by the language model", () => {
@@ -149,12 +175,13 @@ test("book reader previews and highlights one current chapter", async () => {
     paragraphs,
   );
   assert.equal(
-    context.data.bookContent,
+    context.readerText,
     `十九年点赞之交的淡交过往\n\n${longContent}\n\n爬山途中的细碎关照\n\n${secondContent}`,
   );
+  assert.equal(context.data.bookContent, "");
 
-  const activeText = Array.from(context.data.bookContent);
-  const currentTextStart = context.data.bookContent.indexOf("主动伸手");
+  const activeText = Array.from(context.readerText);
+  const currentTextStart = context.readerText.indexOf("主动伸手");
   page.onBookTTSProgressPatch.call(context, {
     ttsSpokenText: activeText.slice(0, currentTextStart).join(""),
     ttsCurrentText: activeText[currentTextStart],
@@ -170,11 +197,11 @@ test("book reader previews and highlights one current chapter", async () => {
   );
 });
 
-test("book reader page shares the same finished-book route", async () => {
+test("book reader hides private content from system sharing", async () => {
   const shareMenuCalls = [];
   global.wx = {
-    showShareMenu(options) {
-      shareMenuCalls.push(options);
+    hideShareMenu() {
+      shareMenuCalls.push("hidden");
     },
   };
   try {
@@ -186,23 +213,15 @@ test("book reader page shares the same finished-book route", async () => {
     await page.onLoad.call(context, { projectId: "project/1" });
     page.onShow.call(context);
 
-    assert.deepEqual(shareMenuCalls, [{
-      menus: ["shareAppMessage", "shareTimeline"],
-    }]);
-    assert.deepEqual(page.onShareAppMessage.call(context), {
-      title: "送你一本《外婆回忆录》",
-      path: "/pages/book-reader/index?projectId=project%2F1&from=share_book",
-    });
-    assert.deepEqual(page.onShareTimeline.call(context), {
-      title: "送你一本《外婆回忆录》",
-      query: "projectId=project%2F1&from=share_book",
-    });
+    assert.deepEqual(shareMenuCalls, ["hidden"]);
+    assert.equal(page.onShareAppMessage, undefined);
+    assert.equal(page.onShareTimeline, undefined);
   } finally {
     delete global.wx;
   }
 });
 
-test("book reader expands stories and jumps from the table of contents to the text", () => {
+test("book reader expands stories and jumps from the table of contents to the text", async () => {
   const scrolls = [];
   global.wx = {
     pageScrollTo(options) {
@@ -233,6 +252,11 @@ test("book reader expands stories and jumps from the table of contents to the te
       sections: [],
     }],
   });
+  context.bookChapters = [
+    { chapterId: "chapter-1", sections: [{ id: "section-1" }] },
+    { chapterId: "chapter-2", sections: [] },
+  ];
+  context.data.readerChapterTotal = 2;
 
   page.toggleTocChapter.call(context, {
     currentTarget: { dataset: { chapterIndex: "0" } },
@@ -240,7 +264,7 @@ test("book reader expands stories and jumps from the table of contents to the te
   assert.equal(context.data.bookPreviewTocItems[0].expanded, true);
 
   page.openReaderSection.call(context, {
-    currentTarget: { dataset: { chapterIndex: "0", sectionIndex: "0" } },
+    currentTarget: { dataset: { chapterId: "chapter-1", sectionId: "section-1" } },
   });
   page.toggleTocChapter.call(context, {
     currentTarget: { dataset: { chapterIndex: "1" } },
@@ -248,10 +272,11 @@ test("book reader expands stories and jumps from the table of contents to the te
   page.scrollReaderToTop.call(context);
 
   assert.deepEqual(scrolls, [
-    { selector: "#reader-section-0-0", duration: 280 },
-    { selector: "#reader-chapter-1", duration: 280 },
+    { selector: "#reader-section-0", duration: 280 },
+    { selector: "#reader-body", duration: 280 },
     { scrollTop: 0, duration: 280 },
   ]);
+  assert.equal(context.data.readerChapterIndex, 1);
 });
 
 test("book reader presents chapter updates as reading context", async () => {
@@ -353,16 +378,75 @@ test("book reader opens the version selected by the export flow", async () => {
   });
 
   assert.equal(context.data.versionId, "book-output-version-history");
-  assert.equal(context.data.bookContent, "历史版本正文");
+  assert.equal(context.readerText, "历史版本正文");
+  assert.equal(context.data.bookContent, "");
   assert.equal(context.data.bookViewingHistoricalVersion, true);
   assert.match(context.data.bookVersionNotice, /切回最新版/);
+});
+
+test("long books send only the current chapter to the view and keep later chapters reachable", async () => {
+  const manuscript = sampleBookManuscript();
+  const chapterText = "外婆在院子里讲故事。".repeat(1000);
+  manuscript.chapters = Array.from({ length: 10 }, (_, index) => ({
+    ...manuscript.chapters[0],
+    chapter_id: `chapter-${index + 1}`,
+    index: index + 1,
+    title: `第${index + 1}章`,
+    content: chapterText,
+    sections: [{
+      ...manuscript.chapters[0].sections[0],
+      section_id: `section-${index + 1}`,
+      content: chapterText,
+    }],
+  }));
+  manuscript.table_of_contents = manuscript.chapters.map((chapter) => ({
+    chapter_id: chapter.chapter_id,
+    index: chapter.index,
+    title: chapter.title,
+    char_count: chapterText.length,
+    source_count: 1,
+    sections: [{ section_id: chapter.sections[0].section_id, index: 1, title: "故事", char_count: chapterText.length, source_count: 1 }],
+  }));
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => sampleBookOutput(1, chapterText.repeat(10), false, [], [], manuscript),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project/1" });
+
+  assert.equal(context.data.readerChapterTotal, 10);
+  assert.equal(context.readerText.length, chapterText.length * 10);
+  assert.ok(Buffer.byteLength(JSON.stringify(context.data)) < 100_000);
+  global.wx = { pageScrollTo() {} };
+  page.showReaderChapter.call(context, 9);
+  delete global.wx;
+  assert.equal(context.data.readerChapterIndex, 9);
+  assert.equal(context.data.bookPreviewChapters[0].sections[0].paragraphs[0], chapterText);
+});
+
+test("flat books paginate without losing Unicode text", async () => {
+  const content = "回忆🌿".repeat(15_000);
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => sampleBookOutput(1, content),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project/1" });
+
+  assert.ok(context.data.readerChapterTotal > 1);
+  assert.ok(Array.from(context.data.bookContent).length <= 6000);
+  global.wx = { pageScrollTo() {} };
+  page.showReaderChapter.call(context, context.data.readerChapterTotal - 1);
+  delete global.wx;
+  assert.equal(context.flatPages.join(""), content);
+  assert.equal(context.data.bookContent, context.flatPages.at(-1));
 });
 
 test("book reader reads the latest full book with saved book voice settings", async () => {
   const requests = [];
   const playCalls = [];
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async (...args) => {
+    prepareMemoirBookAudio: async (...args) => {
       requests.push(args);
       return {
         audio_file_ids: ["audio-book-1"],
@@ -387,7 +471,9 @@ test("book reader reads the latest full book with saved book voice settings", as
     bookContent: "外婆回忆录正文",
     bookViewingHistoricalVersion: false,
   });
-  context.playAudioFiles = async (...args) => {
+  context.readerText = "外婆回忆录正文";
+  context.readerAudioVersionId = "book-output-version-1";
+  context.playAudioPlan = async (...args) => {
     playCalls.push(args);
   };
 
@@ -398,18 +484,32 @@ test("book reader reads the latest full book with saved book voice settings", as
     {
       voice: "zh_male_m191_uranus_bigtts",
       speed_ratio: 1.25,
+      version_id: "book-output-version-1",
+      retry_failed: true,
     },
   ]]);
   assert.equal(playCalls.length, 1);
-  assert.equal(playCalls[0][1], "book");
-  assert.equal(playCalls[0][3], "外婆回忆录正文");
+  assert.deepEqual(playCalls[0][2], { voice: "zh_male_m191_uranus_bigtts", speed_ratio: 1.25 });
   assert.equal(context.data.playbackError, "");
+});
+
+test("book reader opens the full text without starting narration", async () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+  let starts = 0;
+  context.playReaderAudio = async () => { starts += 1; };
+
+  await page.onLoad.call(context, { projectId: "project/1" });
+
+  assert.equal(context.data.loading, false);
+  assert.equal(context.readerText, "全书正文");
+  assert.equal(starts, 0);
 });
 
 test("book reader does not mismatch latest audio with historical text", async () => {
   let requestCount = 0;
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async () => {
+    prepareMemoirBookAudio: async () => {
       requestCount += 1;
       throw new Error("should not run");
     },
@@ -419,6 +519,7 @@ test("book reader does not mismatch latest audio with historical text", async ()
     bookContent: "历史版本正文",
     bookViewingHistoricalVersion: true,
   });
+  context.readerText = "历史版本正文";
 
   await page.playReaderAudio.call(context);
 
@@ -428,7 +529,7 @@ test("book reader does not mismatch latest audio with historical text", async ()
 
 test("book reader keeps the full text visible when narration fails", async () => {
   const { page } = loadBookReaderPage({
-    createMemoirBookOutputTTS: async () => {
+    prepareMemoirBookAudio: async () => {
       throw new Error("朗读服务暂时不可用");
     },
   });
@@ -437,6 +538,7 @@ test("book reader keeps the full text visible when narration fails", async () =>
     bookContent: "仍然可以阅读的全书正文",
     bookViewingHistoricalVersion: false,
   });
+  context.readerText = "仍然可以阅读的全书正文";
 
   await page.playReaderAudio.call(context);
 
@@ -472,6 +574,7 @@ test("chapter reader uses the existing chapter TTS and progress pipeline", async
     chapterId: "chapter-1",
     bookContent: "第一小节\n\n整章正文。",
   });
+  context.readerText = "第一小节\n\n整章正文。";
   context.playAudioFiles = async (...args) => {
     playCalls.push(args);
   };

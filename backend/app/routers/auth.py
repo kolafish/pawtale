@@ -2,24 +2,29 @@ import hashlib
 import re
 import secrets
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
     clear_session_cookie,
+    check_wechat_login_rate_limit,
     get_current_user,
     hash_password,
     is_admin_user,
+    issue_session,
     normalize_email,
-    set_session_cookie,
+    revoke_session,
+    SESSION_COOKIE_NAME,
     verify_password,
 )
+from app.config import is_production_environment
 from app.database import get_db
 from app.models.users import AuthIdentity, User
 from app.schemas.auth import (
     AuthLoginRequest,
+    AuthDeleteRequest,
     AuthRegisterRequest,
     AuthResponse,
     AuthSetCredentialsRequest,
@@ -29,6 +34,7 @@ from app.schemas.auth import (
     WeChatLoginRequest,
 )
 from app.services import user_avatars
+from app.services import account_deletion
 from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_wechat_login_code
 
 
@@ -39,6 +45,11 @@ WECHAT_PROVIDERS = {
 }
 WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _require_development_account_auth() -> None:
+    if is_production_environment():
+        raise HTTPException(status_code=404, detail="接口不存在")
 
 
 def _validate_email(email: str) -> str:
@@ -85,6 +96,17 @@ async def _find_wechat_identity(
     )
 
 
+async def _lock_wechat_identity(db: AsyncSession, provider: str, session: WeChatSession) -> None:
+    identity_keys = [f"openid:{provider}:{session.openid}"]
+    if session.unionid:
+        identity_keys.append(f"unionid:{session.unionid}")
+    for identity_key in identity_keys:
+        lock_key = int.from_bytes(
+            hashlib.sha256(identity_key.encode("utf-8")).digest()[:8], "big", signed=True
+        )
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+
 async def _wechat_union_user_id(
     db: AsyncSession,
     unionid: str | None,
@@ -129,6 +151,7 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     email = _validate_email(req.email)
     _validate_password(req.password)
 
@@ -142,9 +165,9 @@ async def register(
         display_name=(req.display_name or email.split("@", 1)[0]).strip() or "作者",
     )
     db.add(user)
-    await db.commit()
+    await db.flush()
+    await issue_session(db, response, user.id)
     await db.refresh(user)
-    set_session_cookie(response, user.id)
     return _auth_response(user)
 
 
@@ -159,22 +182,26 @@ async def login(
     user = result.scalar_one_or_none()
     if (
         not user
+        or (is_production_environment() and not is_admin_user(user))
         or not user.password_login_enabled
         or not verify_password(req.password, user.password_hash)
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码不正确")
-    set_session_cookie(response, user.id)
+    await issue_session(db, response, user.id)
     return _auth_response(user)
 
 
 @router.post("/wechat-login", response_model=AuthResponse)
 async def wechat_login(
     req: WeChatLoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     provider = WECHAT_PROVIDERS[req.miniprogram]
+    await check_wechat_login_rate_limit(db, request.client.host if request.client else "unknown")
     session = await _exchange_wechat_code(req.code, req.miniprogram)
+    await _lock_wechat_identity(db, provider, session)
     identity = await _find_wechat_identity(db, provider, session.openid)
     union_user_id = await _wechat_union_user_id(db, session.unionid)
     if identity:
@@ -205,9 +232,9 @@ async def wechat_login(
         )
         db.add_all([user, identity])
 
-    await db.commit()
+    await db.flush()
+    await issue_session(db, response, user.id)
     await db.refresh(user)
-    set_session_cookie(response, user.id)
     return _auth_response(user)
 
 
@@ -217,6 +244,7 @@ async def wechat_bind(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     provider = WECHAT_PROVIDERS[req.miniprogram]
     session = await _exchange_wechat_code(req.code, req.miniprogram)
     identity = await _find_wechat_identity(db, provider, session.openid)
@@ -249,6 +277,7 @@ async def set_credentials(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_development_account_auth()
     if current_user.password_login_enabled:
         raise HTTPException(status_code=409, detail="账号已设置登录凭据")
 
@@ -273,13 +302,36 @@ async def set_credentials(
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+):
+    await revoke_session(db, session_cookie)
     clear_session_cookie(response)
 
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)):
     return _user_response(current_user)
+
+
+@router.delete("/me", status_code=204)
+async def delete_me(
+    req: AuthDeleteRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_wechat_login_rate_limit(db, request.client.host if request.client else "unknown")
+    session = await _exchange_wechat_code(req.code, req.miniprogram)
+    provider = WECHAT_PROVIDERS[req.miniprogram]
+    identity = await _find_wechat_identity(db, provider, session.openid)
+    if identity is None or identity.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="微信身份与当前账号不匹配")
+    await account_deletion.delete_account(db, current_user)
+    clear_session_cookie(response)
 
 
 @router.patch("/me", response_model=UserResponse)

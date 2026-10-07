@@ -22,18 +22,86 @@
     <text class="empty-copy">这条讲述记录可能已删除，或不属于当前账号。</text>
   </view>
 
-  <view wx:elif="{{item.canRecoverTranscription}}" class="empty-panel">
+  <view wx:elif="{{viewMode === 'create' && item.canRecoverTranscription}}" class="empty-panel">
     <text class="empty-title">转写完成后再制作</text>
     <text class="empty-copy">原始音频已经保存，文字恢复完成后才能选择片段制作图片或视频。</text>
   </view>
 
   <block wx:else>
-    <view class="hero-panel">
+    <block wx:if="{{viewMode === 'video'}}">
+      <view class="hero-panel">
+        <text class="record-title">{{shareVideoJob ? (shareVideoJob.title || item.titleText) : "分享视频"}}</text>
+        <text class="record-meta">来自“{{item.titleText}}”的口述回忆</text>
+      </view>
+
+      <view class="section-card share-video-card share-video-result-card">
+        <view wx:if="{{loading && !shareVideoJob}}" class="share-video-state">正在打开视频</view>
+        <view wx:if="{{shareVideoError && (!shareVideoJob || shareVideoJob.status !== 'failed')}}" class="share-video-error">{{shareVideoError}}</view>
+
+        <ai-task-progress
+          wx:if="{{shareVideoCreating && !shareVideoJob}}"
+          class="share-video-task-progress"
+          title="{{shareVideoStatusText || '正在创建视频任务'}}"
+          detail="提交成功后会继续显示制作进度"
+          mode="indeterminate"
+        />
+        <block wx:elif="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}">
+          <text class="share-video-result-label">视频已生成</text>
+          <video
+            wx:if="{{shareVideoPreviewPath}}"
+            class="share-video-preview {{shareVideoPreviewPortrait ? 'is-portrait' : ''}}"
+            src="{{shareVideoPreviewPath}}"
+            bindloadedmetadata="markShareVideoPreviewShape"
+            controls
+            show-center-play-btn
+            enable-progress-gesture
+            object-fit="contain"
+          />
+          <ai-task-progress
+            wx:elif="{{shareVideoDownloadingPreview}}"
+            class="share-video-task-progress"
+            title="正在准备视频预览"
+            mode="indeterminate"
+          />
+          <button wx:elif="{{shareVideoError}}" class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重试预览</button>
+          <view class="actions-row share-video-actions share-video-result-actions">
+            <button
+              class="primary-button"
+              bindtap="shareGeneratedVideo"
+              loading="{{shareVideoSharing}}"
+              disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}"
+            >{{shareVideoSharing ? "分享中" : "分享给微信"}}</button>
+            <button class="ghost-button" bindtap="remakeShareVideo" disabled="{{shareVideoSharing || shareVideoDeleting}}">重新制作</button>
+          </view>
+          <text class="record-meta">重新制作时可以换一种风格，已有视频会保留。</text>
+          <button class="ghost-button share-video-retry" bindtap="deleteShareVideo" loading="{{shareVideoDeleting}}" disabled="{{shareVideoDownloadingPreview || shareVideoSharing || shareVideoDeleting}}">删除这版视频</button>
+        </block>
+
+        <block wx:elif="{{shareVideoJob && (shareVideoJob.status === 'pending' || shareVideoJob.status === 'running')}}">
+          <ai-task-progress
+            wx:if="{{shareVideoPolling}}"
+            class="share-video-task-progress"
+            title="{{shareVideoStatusText || '正在生成视频'}}"
+            detail="完成后可以先预览，再决定是否分享"
+            mode="indeterminate"
+          />
+          <button wx:else class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重新查看进度</button>
+        </block>
+
+        <view wx:elif="{{shareVideoJob && shareVideoJob.status === 'failed'}}" class="share-video-result-failed">
+          <text class="share-video-job-title">{{shareVideoStatusText || '视频生成失败'}}</text>
+          <button class="primary-button" bindtap="remakeShareVideo">重新制作</button>
+        </view>
+        <view wx:elif="{{!loading}}" class="share-video-state">暂时无法查看这段视频</view>
+      </view>
+    </block>
+
+    <view wx:if="{{viewMode === 'create'}}" class="hero-panel">
       <text class="record-title">做成图片或视频</text>
       <text class="record-meta">从“{{item.titleText}}”的成书文字中选择片段，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
     </view>
 
-    <view class="section-card share-video-card">
+    <view wx:if="{{viewMode === 'create'}}" class="section-card share-video-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">选择文字片段</text>
@@ -54,7 +122,7 @@
         <view wx:if="{{materialImageError}}" class="share-video-error">
           <text>{{materialImageError}}</text>
         </view>
-        <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments">
+        <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments" aria-label="选择连续文字片段">
           <view
             wx:for="{{shareVideoSegments}}"
             wx:for-item="segment"
@@ -63,6 +131,9 @@
             class="share-video-segment {{segment.className}}"
             data-index="{{segment.arrayIndex}}"
             bindtap="selectShareVideoSegment"
+            aria-role="button"
+            aria-pressed="{{segment.selected}}"
+            aria-disabled="{{!segment.selectable}}"
           >
             <text class="share-video-segment-text">{{segment.text}}</text>
             <text class="share-video-segment-meta">{{segment.timeRangeText}} · {{segment.durationText}}</text>
@@ -85,36 +156,43 @@
 
         <view class="share-video-background">
           <view class="share-video-background-head">
-            <text class="voice-edit-label">视频背景</text>
-            <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
+            <text class="voice-edit-label">本次视频风格</text>
+            <text class="share-video-background-current">{{shareVideoStyleLabel}}</text>
           </view>
-          <view class="share-video-background-options">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="本次视频风格">
             <view
-              wx:for="{{shareVideoBackgroundSourceOptions}}"
+              wx:for="{{shareVideoStyleOptions}}"
               wx:key="value"
-              class="share-video-background-option {{item.value === shareVideoBackgroundSource ? 'selected' : ''}}"
-              data-background-source="{{item.value}}"
-              bindtap="selectShareVideoBackgroundSource"
+              class="share-video-background-option {{item.value === shareVideoStyle ? 'selected' : ''}}"
+              data-video-style="{{item.value}}"
+              bindtap="selectShareVideoStyle"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoStyle}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
             </view>
           </view>
+          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">插图生成暂不可用，请选择自选画面或往事小剧场。</text>
         </view>
 
-        <view class="share-video-background">
+        <view wx:if="{{shareVideoUsesIllustration}}" class="share-video-background">
           <view class="share-video-background-head">
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
-          <text class="share-video-background-help">直接图片使用完整构图；视频选择 AI 背景时，会另行为字幕保留留白。</text>
-          <view class="share-video-background-options">
+          <text class="share-video-background-help">直接图片使用完整构图；回忆画卷会另行为字幕保留留白。</text>
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
               wx:key="value"
               class="share-video-background-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
               data-background-style="{{item.value}}"
               bindtap="selectShareVideoBackgroundStyle"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoBackgroundStyle}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
@@ -127,13 +205,16 @@
             <text class="voice-edit-label">视频画面模式</text>
             <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
           </view>
-          <view class="share-video-background-options">
+          <view class="share-video-background-options" aria-role="radiogroup" aria-label="视频画面模式">
             <view
               wx:for="{{shareVideoBackgroundModeOptions}}"
               wx:key="value"
               class="share-video-background-option {{item.value === shareVideoBackgroundMode ? 'selected' : ''}}"
               data-background-mode="{{item.value}}"
               bindtap="selectShareVideoBackgroundMode"
+              aria-role="radio"
+              aria-checked="{{item.value === shareVideoBackgroundMode}}"
+              aria-label="{{item.label}}，{{item.description}}"
             >
               <text class="share-video-background-label">{{item.label}}</text>
               <text class="share-video-background-desc">{{item.description}}</text>
@@ -173,18 +254,9 @@
             class="primary-button"
             bindtap="createShareVideo"
             loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-            disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
+            disabled="{{!shareVideoSelectedCanGenerate || shareVideoStyleUnavailable || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
           >
             {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
-          </button>
-          <button
-            wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}"
-            class="ghost-button"
-            bindtap="shareGeneratedVideo"
-            loading="{{shareVideoSharing}}"
-            disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
-          >
-            {{shareVideoSharing ? "分享中" : "分享给微信"}}
           </button>
         </view>
 
@@ -210,24 +282,11 @@
         </view>
 
         <ai-task-progress
-          wx:if="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+          wx:if="{{shareVideoCreating}}"
           class="share-video-task-progress"
           title="{{shareVideoStatusText || '正在生成视频'}}"
           detail="{{shareVideoSelectedMetaText}}"
           mode="indeterminate"
-        />
-        <view wx:elif="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
-          <text class="share-video-job-title">{{shareVideoStatusText}}</text>
-          <text wx:if="{{shareVideoSelectedMetaText}}" class="share-video-job-meta">{{shareVideoSelectedMetaText}}</text>
-        </view>
-        <video
-          wx:if="{{shareVideoPreviewPath}}"
-          class="share-video-preview"
-          src="{{shareVideoPreviewPath}}"
-          controls
-          show-center-play-btn
-          enable-progress-gesture
-          object-fit="contain"
         />
       </block>
     </view>

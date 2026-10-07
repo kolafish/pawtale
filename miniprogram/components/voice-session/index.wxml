@@ -1,5 +1,5 @@
 <view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}} {{embedded ? 'voice-session-embedded' : ''}}">
-  <view class="top-bar">
+  <view class="top-bar {{embedded ? '' : 'top-bar-balanced'}}">
     <button
       wx:if="{{embedded}}"
       id="voice-home-action"
@@ -26,14 +26,14 @@
     </button>
   </view>
 
-  <view class="topic-panel">
+  <view wx:if="{{!recording || sessionGoal !== 'book_completion'}}" class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>
     <text class="topic-kicker">正在聊</text>
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
 
   <view
-    wx:if="{{!embedded && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
+    wx:if="{{!embedded && !(sessionGoal === 'book_completion' && recording) && (progressNoticeTitle || storyGrowthNoticeState !== 'hidden')}}"
     class="story-growth-bubble {{progressNoticeTitle ? 'ready' : storyGrowthNoticeState}}"
     aria-live="polite"
   >
@@ -83,14 +83,14 @@
   <view wx:if="{{showRecoveryPanel}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
     <view wx:if="{{showRecoveryActions}}" class="recovery-actions">
-      <button wx:if="{{recorderSettingsRequired}}" class="recovery-button ui-button" bindtap="openRecorderSettings">去设置麦克风</button>
+      <button id="voice-recorder-settings" wx:if="{{recorderSettingsRequired}}" class="recovery-button ui-button" bindtap="openRecorderSettings">去设置麦克风</button>
       <button wx:if="{{canReconnect}}" class="recovery-button ui-button" bindtap="reconnectGateway">重新连接</button>
       <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ui-button ghost" bindtap="finishAfterDisconnect">查看讲述记录</button>
     </view>
   </view>
 
   <view wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
-    <text class="voice-auth-title">开始录音前需要声纹授权</text>
+    <text class="voice-auth-title">开始录音前需要语音授权</text>
     <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、小余语音回应、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
       <view class="voice-auth-row ui-consent-row">
@@ -107,21 +107,21 @@
           catchtap="openVoiceAuthorization"
           hover-class="ui-subtle-action-hover"
           aria-role="button"
-          aria-label="查看声纹授权协议"
-        >《声纹授权协议》</view>
+          aria-label="查看语音采集与处理授权"
+        >《语音采集与处理授权》</view>
       </view>
     </checkbox-group>
   </view>
 
   <view wx:if="{{showCompletionIssuePanel}}" class="{{completionIssuePanelClass}}">
-    <view class="completion-issue-head">
+    <view wx:if="{{!recording}}" class="completion-issue-head">
       <text class="completion-issue-label">本次只补这一点</text>
       <text class="completion-issue-status">{{completionIssueStatusText}}</text>
     </view>
     <text class="completion-issue-question">{{completionIssueQuestionText}}</text>
     <text wx:if="{{completionIssueError}}" class="completion-issue-error">{{completionIssueError}}</text>
     <text wx:if="{{completionIssueActionText}}" class="completion-issue-action-state">{{completionIssueActionText}}</text>
-    <view wx:if="{{showCompletionIssueActions}}" class="completion-issue-actions">
+    <view wx:if="{{showCompletionIssueActions && !recording}}" class="completion-issue-actions">
       <button
         class="completion-issue-defer ui-button ui-pressable {{completionIssueControlsDisabled ? 'is-disabled' : ''}}"
         disabled="{{completionIssueControlsDisabled}}"

@@ -39,6 +39,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_from_snapshot,
     manuscript_response,
     stored_cover_style,
+    stored_manuscript_design,
 )
 from app.services.memoir.book_output_snapshots import (
     book_content_from_chapter_snapshots,
@@ -322,11 +323,14 @@ def _candidate_manuscript(
     metadata_patch: dict[str, str],
 ) -> dict[str, Any]:
     illustrations, image_appendix = _stored_illustrations(baseline.manuscript_json)
+    template, custom_layout = stored_manuscript_design(baseline.manuscript_json)
     manuscript = manuscript_from_snapshot(
         title=title,
         content=content,
         snapshot=snapshots,
         cover_style_value=stored_cover_style(baseline),
+        template=template,
+        custom_layout=custom_layout,
         metadata=effective_book_metadata(
             project=project,
             stored=baseline.manuscript_json,

@@ -36,6 +36,7 @@ export interface MemoirChapterCompletionSummary {
   state: MemoirChapterCompletionState;
   next_action: MemoirChapterCompletionNextAction;
   active_issue?: MemoirChapterCompletionIssue | null;
+  blocking_issue_count: number;
   headline: string;
   detail: string;
 }
@@ -46,5 +47,6 @@ export interface MemoirBookCompletionOverview {
   detail: string;
   total_chapters: number;
   completed_chapters: number;
+  blocking_issue_count: number;
   chapters: MemoirChapterCompletionSummary[];
 }

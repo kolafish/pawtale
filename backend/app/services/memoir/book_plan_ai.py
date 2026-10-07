@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
@@ -35,7 +36,10 @@ class _BookPlanOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = ""
-    chapters: list[_BookPlanChapterOutput] = Field(min_length=1)
+    chapters: list[_BookPlanChapterOutput] = Field(
+        min_length=1,
+        max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
+    )
 
 
 class _ChapterTitleOutput(BaseModel):
@@ -79,7 +83,7 @@ def _compact_text(value: str, max_chars: int) -> str:
     return f"{text[: max_chars - 3].rstrip()}..."
 
 
-def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chapters: int) -> str:
+def build_plan_prompt(project_title: str, sources: list[SourceSegment]) -> str:
     source_text = "\n\n".join(
         (
             f"source_index: {source.source_index}\n"
@@ -90,7 +94,6 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chap
     return f"""请把下面的口述内容整理成回忆录章节规划。
 
 当前回忆录：{project_title}
-最多章节数：{max_chapters}
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
@@ -107,9 +110,11 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chap
 要求：
 - 只根据 source text 已经讲过的事实划分章节，不新增人物、时间、地点、事件或情绪。
 - 章节标题要短，像书稿目录，不要像 AI 总结标题。
+- 根据素材量和主题密度自主决定章节数量，不要为了凑数拆分，也不要为了减少章节强行合并。
 - source_indices 必须来自给定 source_index，且每章至少包含一个来源。
+- 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
 - evidence_quote 必须逐字来自对应 source text。
-- 如果素材很少，可以只返回 1 到 2 章。
+- 如果素材很少，只返回必要的少量章节。
 
 口述内容：
 {source_text}
@@ -138,7 +143,6 @@ def chapters_from_payload(
     payload: Any,
     *,
     sources: list[SourceSegment],
-    max_chapters: int,
 ) -> tuple[str, list[MemoirBookPlanChapterInput]]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail="AI 未返回有效章节规划 JSON")
@@ -146,9 +150,15 @@ def chapters_from_payload(
     raw_chapters = payload.get("chapters", [])
     if not isinstance(raw_chapters, list):
         raise HTTPException(status_code=502, detail="AI 未返回有效章节列表")
+    if len(raw_chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI 返回的章节数量超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章上限",
+        )
 
     chapters: list[MemoirBookPlanChapterInput] = []
-    for item in raw_chapters[:max_chapters]:
+    seen_utterances: set[str] = set()
+    for item in raw_chapters:
         if not isinstance(item, dict):
             continue
         title = string_value(item, "title")
@@ -156,7 +166,6 @@ def chapters_from_payload(
             continue
         quote = string_value(item, "evidence_quote")
         refs: list[MemoirBookChapterSourceRef] = []
-        seen_utterances: set[str] = set()
         for source_index in source_indices(item):
             source = source_by_index.get(source_index)
             if not source or source.utterance_id in seen_utterances:
@@ -224,11 +233,10 @@ async def generate_book_plan_from_sources(
     *,
     project_title: str,
     sources: list[SourceSegment],
-    max_chapters: int,
     ai_model: str | None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedBookPlan:
-    prompt = build_plan_prompt(project_title, sources, max_chapters)
+    prompt = build_plan_prompt(project_title, sources)
     client = ai_client
     try:
         if client is None:
@@ -257,7 +265,6 @@ async def generate_book_plan_from_sources(
     title, chapters = chapters_from_payload(
         generated.value.model_dump(),
         sources=sources,
-        max_chapters=max_chapters,
     )
     return GeneratedBookPlan(
         title=title,

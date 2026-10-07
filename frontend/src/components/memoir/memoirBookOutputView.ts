@@ -15,17 +15,6 @@ const DEFAULT_FORM: MemoirBookOutputForm = {
   cover_style: 'classic_plain',
 };
 
-const FORM_FIELDS: Array<keyof MemoirBookOutputForm> = [
-  'title',
-  'subtitle',
-  'narrator_name',
-  'prepared_by',
-  'preface',
-  'afterword',
-  'back_cover_quote',
-  'cover_style',
-];
-
 export function bookOutputForm(output: MemoirBookOutput | null | undefined): MemoirBookOutputForm {
   if (!output?.latest_version?.manuscript) {
     return { ...DEFAULT_FORM, title: output?.title ?? '' };
@@ -42,13 +31,6 @@ export function bookOutputForm(output: MemoirBookOutput | null | undefined): Mem
     back_cover_quote: manuscript.render_settings.back_cover_quote,
     cover_style: manuscript.render_settings.cover_style,
   };
-}
-
-export function bookOutputFormsEqual(
-  first: MemoirBookOutputForm,
-  second: MemoirBookOutputForm,
-) {
-  return FORM_FIELDS.every(field => first[field] === second[field]);
 }
 
 export function saveBrowserDownload(blob: Blob, filename: string) {

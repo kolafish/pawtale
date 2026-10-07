@@ -2,6 +2,16 @@ import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
+import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
+import {
+  buildAutomationEventViews,
+  type BookAutomationEventView,
+} from "../book/book-automation-view-model";
+import {
+  listMemoirAutomationEvents,
+  acknowledgeMemoirAutomationEvent,
+  acknowledgeDismissibleMemoirAutomationEvents,
+} from "../../services/memoir-voice-session-api";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import {
   aiTaskProgressPercent,
@@ -47,6 +57,7 @@ interface ChapterView extends MemoirChapterCompletionSummary {
   actionText: string;
   chapterClass: string;
   disabled: boolean;
+  needsAttention: boolean;
 }
 
 interface EditorialActionView extends MemoirBookEditorialAction {
@@ -82,6 +93,12 @@ function activeTaskProgress(title: string, detail: string): TaskProgressView {
 }
 
 interface BookCompletionData {
+  automationEventItems: BookAutomationEventView[];
+  automationEventBusyTarget: string;
+  automationDismissibleCount: number;
+  automationEventClearing: boolean;
+  automationEventLoading: boolean;
+  automationEventError: string;
   pageClass: string;
   largeTextEnabled: boolean;
   projectId: string;
@@ -91,6 +108,7 @@ interface BookCompletionData {
   headline: string;
   detail: string;
   progressText: string;
+  blockingIssueCount: number;
   chapters: ChapterView[];
   canReviewBook: boolean;
   bulkCheckVisible: boolean;
@@ -119,6 +137,9 @@ interface BookCompletionData {
 }
 
 interface ChapterDataset {
+  id?: string;
+  eventIds?: string;
+  action?: string;
   chapterId?: string;
   actionId?: string;
 }
@@ -364,14 +385,16 @@ function chapterView(
   preparingChapterId: string,
   recheckingAll = false,
 ): ChapterView {
-  const stateText = {
-    not_started: "待检查",
-    preparing: "正在检查",
-    needs_input: "需要确认",
-    draft_ready: "等待通读",
-    confirmed: "已经确认",
-    failed: "检查未完成",
-  }[item.state];
+  const stateText = item.state === "needs_input" && item.next_action.kind === "wait"
+    ? "待补充讲述"
+    : {
+      not_started: "待检查",
+      preparing: "正在检查",
+      needs_input: "需要确认",
+      draft_ready: "正文可读",
+      confirmed: "正文可读",
+      failed: "检查未完成",
+    }[item.state];
   const busy = (
     recheckingAll
     || preparingChapterId === item.chapter_id
@@ -385,11 +408,16 @@ function chapterView(
       ? "查看进度"
       : (busy
       ? "正在检查"
-      : (item.state === "confirmed"
+      : (item.state === "confirmed" || item.state === "draft_ready"
         ? "查看正文"
         : (item.next_action.action_text || "查看本章"))),
     chapterClass: `chapter-item ${item.state}`,
     disabled: busy && !progressAvailable,
+    needsAttention: Boolean(
+      item.active_issue
+      || item.blocking_issue_count
+      || (item.state !== "confirmed" && item.state !== "draft_ready"),
+    ),
   };
 }
 
@@ -402,6 +430,7 @@ export function bookCompletionViewPatch(
   | "headline"
   | "detail"
   | "progressText"
+  | "blockingIssueCount"
   | "chapters"
   | "canReviewBook"
   | "bulkCheckVisible"
@@ -418,9 +447,10 @@ export function bookCompletionViewPatch(
   );
   return {
     headline: overview.headline,
+    blockingIssueCount: overview.blocking_issue_count || 0,
     detail: overview.detail,
     progressText: overview.total_chapters
-      ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已确认`
+      ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已更新`
       : "还没有章节",
     chapters: overview.chapters.map(
       (item) => chapterView(item, preparingChapterId, recheckingAll),
@@ -435,9 +465,18 @@ export function bookCompletionViewPatch(
 
 definePage<BookCompletionData>()({
   overviewPoller: pageRuntime(() => new PollingTimer(POLL_INTERVAL_MS)),
+  overviewLoadSequence: 0,
+  automationLoadSequence: 0,
+  automationEvents: [] as MemoirAutomationEvent[],
   pageVisible: false,
 
   data: {
+    automationEventItems: [],
+    automationEventBusyTarget: "",
+    automationDismissibleCount: 0,
+    automationEventClearing: false,
+    automationEventLoading: false,
+    automationEventError: "",
     pageClass: accessibilityPageClass(PAGE_CLASS),
     largeTextEnabled: readLargeTextEnabled(),
     projectId: "",
@@ -447,6 +486,7 @@ definePage<BookCompletionData>()({
     headline: "逐章整理这本书",
     detail: "",
     progressText: "",
+    blockingIssueCount: 0,
     chapters: [],
     canReviewBook: false,
     bulkCheckVisible: false,
@@ -484,21 +524,25 @@ definePage<BookCompletionData>()({
   async onShow() {
     this.setData({ ...accessibilityPagePatch(PAGE_CLASS), largeTextEnabled: readLargeTextEnabled() });
     this.pageVisible = true;
-    await this.loadOverview();
+    await Promise.all([this.loadOverview(), this.loadAutomationEvents()]);
   },
 
   onHide() {
     this.pageVisible = false;
+    this.overviewLoadSequence += 1;
+    this.automationLoadSequence += 1;
     this.stopPolling();
   },
 
   onUnload() {
     this.pageVisible = false;
+    this.overviewLoadSequence += 1;
+    this.automationLoadSequence += 1;
     this.stopPolling();
   },
 
   async onPullDownRefresh() {
-    await this.loadOverview();
+    await Promise.all([this.loadOverview(), this.loadAutomationEvents()]);
     wx.stopPullDownRefresh();
   },
 
@@ -520,7 +564,128 @@ definePage<BookCompletionData>()({
     });
   },
 
+  openBookRegeneration() {
+    if (!this.data.projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-export/index", {
+        projectId: this.data.projectId,
+        action: "regenerate",
+      }),
+    });
+  },
+
+  async loadAutomationEvents() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.automationEventBusyTarget || this.data.automationEventClearing) {
+      return;
+    }
+    const sequence = ++this.automationLoadSequence;
+    this.setData({ automationEventLoading: true, automationEventError: "" });
+    try {
+      const response = await listMemoirAutomationEvents(projectId, 8);
+      if (sequence !== this.automationLoadSequence || projectId !== this.data.projectId) {
+        return;
+      }
+      this.applyAutomationEvents(response.items);
+      if (response.items.some((event) => event.status === "pending")) {
+        this.schedulePolling();
+      }
+    } catch (error) {
+      if (sequence !== this.automationLoadSequence || routeAuthError(error)) {
+        return;
+      }
+      this.setData({ automationEventError: error instanceof Error ? error.message : "整理记录加载失败" });
+    } finally {
+      if (sequence === this.automationLoadSequence) {
+        this.setData({ automationEventLoading: false });
+      }
+    }
+  },
+
+  applyAutomationEvents(events: MemoirAutomationEvent[]) {
+    this.automationEvents = events;
+    this.setData({
+      automationEventItems: buildAutomationEventViews(
+        events,
+        this.data.automationEventBusyTarget,
+      ),
+      automationDismissibleCount: events.filter((event) => (
+        event.status === "completed" || event.status === "failed"
+      )).length,
+    });
+  },
+
+  async acknowledgeAutomationEvent(event: ChapterTapEvent) {
+    const eventId = datasetString(event, "id");
+    const eventIdsText = datasetString(event, "eventIds") || eventId;
+    const action = datasetString(event, "action") || "acknowledge";
+    if (action !== "acknowledge" && action !== "acknowledge_group") {
+      return;
+    }
+    if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget || this.data.automationEventClearing) {
+      return;
+    }
+    const eventIds = eventIdsText.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!eventIds.length) {
+      return;
+    }
+    this.automationLoadSequence += 1;
+    this.setData({
+      automationEventLoading: false,
+      automationEventBusyTarget: eventId,
+      automationEventItems: this.data.automationEventItems.map((item) => (
+        item.id === eventId ? { ...item, busy: true } : item
+      )),
+      automationEventError: "",
+    });
+    try {
+      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(this.data.projectId, id)));
+      const acknowledgedIds = new Set(eventIds);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((item) => !acknowledgedIds.has(item.id)),
+      );
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "自动处理记录确认失败",
+      });
+    } finally {
+      this.setData({ automationEventBusyTarget: "" });
+      this.applyAutomationEvents(this.automationEvents);
+    }
+  },
+
+  async acknowledgeDismissibleAutomationEvents() {
+    if (
+      !this.data.projectId
+      || !this.data.automationDismissibleCount
+      || this.data.automationEventClearing
+      || this.data.automationEventBusyTarget
+    ) {
+      return;
+    }
+    this.automationLoadSequence += 1;
+    this.setData({ automationEventClearing: true, automationEventLoading: false, automationEventError: "" });
+    try {
+      await acknowledgeDismissibleMemoirAutomationEvents(this.data.projectId);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((event) => (
+          event.status === "pending" || event.status === "needs_review"
+        )),
+      );
+      wx.showToast({ title: "已收起完成记录", icon: "none" });
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "完成记录收起失败",
+      });
+    } finally {
+      this.setData({ automationEventClearing: false });
+    }
+  },
+
   async loadOverview(silent = false) {
+    const loadSequence = ++this.overviewLoadSequence;
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
       return;
@@ -532,6 +697,9 @@ definePage<BookCompletionData>()({
       const overview = await getMemoirBookCompletionOverview(
         this.data.projectId,
       );
+      if (loadSequence !== this.overviewLoadSequence) {
+        return;
+      }
       const bulkCheckJob = overview.completion_job;
       const batchActive = bookCompletionJobActive(bulkCheckJob);
       const view = bookCompletionViewPatch(
@@ -613,6 +781,7 @@ definePage<BookCompletionData>()({
         || reviewJobActive
         || revisionActive
         || overview.chapters.some((item) => item.state === "preparing")
+        || this.automationEvents.some((event) => event.status === "pending")
       ) {
         this.schedulePolling();
       } else {
@@ -634,7 +803,7 @@ definePage<BookCompletionData>()({
               ? "已停止全书检查"
               : (checkedChapters.some((item) => item.state === "needs_input")
                 ? "发现需要补充的内容"
-                : (checkedChapters.every((item) => item.state === "confirmed")
+                : (checkedChapters.every((item) => item.state === "confirmed" || item.state === "draft_ready")
                   ? "暂未发现待补内容"
                   : "检查完成，请查看结果")));
           wx.showToast({ title: toastTitle, icon: "none" });
@@ -659,6 +828,9 @@ definePage<BookCompletionData>()({
         }
       }
     } catch (error) {
+      if (loadSequence !== this.overviewLoadSequence) {
+        return;
+      }
       if (routeAuthError(error)) {
         return;
       }
@@ -891,7 +1063,6 @@ definePage<BookCompletionData>()({
       (!this.data.includeBookReviewAnswers && !actionIds.length)
       || this.data.generatingRevision
       || this.data.revisionCancelling
-      || this.data.requiredBookIssues.length > 0
     ) {
       return;
     }
@@ -1004,7 +1175,7 @@ definePage<BookCompletionData>()({
     }
     this.overviewPoller.schedule(() => {
       if (this.pageVisible) {
-        void this.loadOverview(true);
+        void Promise.all([this.loadOverview(true), this.loadAutomationEvents()]);
       }
     });
   },

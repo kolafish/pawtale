@@ -1,17 +1,17 @@
 .voice-authorization-page { --ui-fixed-action-space: 172rpx; padding: 24rpx 32rpx 0; }
 .voice-authorization-page > .ui-page-context-row { min-height: 44rpx; margin-bottom: 18rpx; justify-content: flex-start; gap: 12rpx; }
 .voice-authorization-page > .ui-page-context-row::before { content: ""; width: 10rpx; height: 10rpx; flex: 0 0 10rpx; border-radius: 50%; background: var(--ui-accent); }
-.voice-authorization-page .ui-page-context { color: var(--ui-text-muted); font-size: 23rpx; }
+.voice-authorization-page .ui-page-context { color: var(--ui-text-muted); font-size: var(--ui-font-body); }
 .agreement-panel { padding: 8rpx 30rpx; }
 .section { padding: 28rpx 0 30rpx; }
 .section + .section { border-top: 1rpx solid var(--ui-divider); }
-.section-title { font-size: 29rpx; }
+.section-title { font-size: var(--ui-font-section-title); }
 
 .paragraph {
   display: block;
   margin-top: 12rpx;
   color: var(--ui-text-primary);
-  font-size: 28rpx;
+  font-size: var(--ui-font-body);
   line-height: 1.72;
   word-break: break-word;
   text-wrap: pretty;
@@ -28,7 +28,10 @@
 
 .ghost-button,
 .primary-button {
+  width: 100%;
   height: 92rpx;
+  padding: 0;
+  white-space: nowrap;
   border-radius: var(--ui-radius-control);
   font-size: 30rpx;
   font-weight: 700;

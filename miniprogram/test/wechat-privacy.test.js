@@ -76,14 +76,17 @@ test("wechat recorder authorization requests the mini program microphone scope",
 });
 
 test("wechat recorder authorization sends denied users to settings", async () => {
+  let authorized;
+  let authorizeCalls = 0;
   global.wx = {
     getPrivacySetting(options) {
       options.success({ needAuthorization: false });
     },
     getSetting(options) {
-      options.success({ authSetting: { "scope.record": false } });
+      options.success({ authSetting: { "scope.record": authorized } });
     },
     authorize(options) {
+      authorizeCalls += 1;
       options.fail({ errMsg: "authorize:fail auth deny" });
     },
   };
@@ -96,18 +99,28 @@ test("wechat recorder authorization sends denied users to settings", async () =>
     ensureRecorderPrivacyAuthorization(),
     (error) => isRecorderPermissionDeniedError(error) && /小程序设置/.test(error.message),
   );
+  assert.equal(authorizeCalls, 1, "首次拒绝返回可恢复的权限错误");
+  authorized = false;
+  await assert.rejects(ensureRecorderPrivacyAuthorization(), isRecorderPermissionDeniedError);
+  assert.equal(authorizeCalls, 1, "已拒绝时不重复请求授权");
+  authorized = true;
+  await ensureRecorderPrivacyAuthorization();
+  assert.equal(authorizeCalls, 1, "已允许时直接继续");
   delete global.wx;
 });
 
 test("wechat recorder settings reports whether microphone access is enabled", async () => {
+  let authorized = true;
   global.wx = {
     openSetting(options) {
-      options.success({ authSetting: { "scope.record": true } });
+      options.success({ authSetting: { "scope.record": authorized } });
     },
   };
   const { openRecorderPermissionSettings } = privacyModule();
 
   assert.equal(await openRecorderPermissionSettings(), true);
+  authorized = false;
+  assert.equal(await openRecorderPermissionSettings(), false);
   delete global.wx;
 });
 

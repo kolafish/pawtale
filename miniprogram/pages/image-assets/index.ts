@@ -29,6 +29,7 @@ import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
+  pageUrl,
   pickerIndex,
   queryParam,
   type PageDatasetEvent,
@@ -67,8 +68,10 @@ interface ImageAssetView extends MemoirImageAsset {
 
 interface VideoAssetView {
   id: string;
+  utteranceId: string;
   title: string;
   detail: string;
+  isCurrent: boolean;
 }
 
 type StoryMaterialScope = "" | "chapter" | "section" | "unassigned";
@@ -95,6 +98,7 @@ interface ImageAssetsData {
   previewingVideoId: string;
   videoPreviewPath: string;
   videoPreviewTitle: string;
+  videoPreviewPortrait: boolean;
 }
 
 interface ImageAssetDataset {
@@ -167,6 +171,9 @@ function placementText(asset: MemoirImageAsset): string {
   if (appendixCount) {
     parts.push("已加入书末图录");
   }
+  if (enabled.some((placement) => placement.placement_type === "cover")) {
+    parts.push("已用于封面");
+  }
   const extra = enabled.length > parts.length ? `等 ${enabled.length} 处` : "";
   return [...parts, extra].filter(Boolean).join(" · ");
 }
@@ -185,6 +192,9 @@ function buildAssetView(
   current?: ImageAssetView,
 ): ImageAssetView {
   const localPath = current?.localPath || "";
+  const captionDraft = current?.captionChanged && trimText(current.captionDraft) !== trimText(asset.caption)
+    ? current.captionDraft
+    : trimText(asset.caption);
   return {
     ...asset,
     localPath,
@@ -195,8 +205,8 @@ function buildAssetView(
     statusText: statusText(asset),
     placementText: placementText(asset),
     createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
-    captionDraft: trimText(asset.caption),
-    captionChanged: false,
+    captionDraft,
+    captionChanged: trimText(captionDraft) !== trimText(asset.caption),
     detailsExpanded: current?.detailsExpanded || false,
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
@@ -233,8 +243,10 @@ function videoViews(
 ): VideoAssetView[] {
   return videos.map((video, index) => ({
     id: video.id,
-    title: `分享视频 ${index + 1}`,
+    utteranceId: video.utteranceId,
+    title: video.title?.trim() || `分享视频 ${index + 1}`,
     detail: shortText(materialText.get(video.utteranceId) || "") || "点按播放视频",
+    isCurrent: video.isCurrent,
   }));
 }
 
@@ -286,6 +298,7 @@ definePage<ImageAssetsData>()({
     previewingVideoId: "",
     videoPreviewPath: "",
     videoPreviewTitle: "",
+    videoPreviewPortrait: true,
   },
 
   onLoad(options: PageQuery = {}) {
@@ -556,8 +569,22 @@ definePage<ImageAssetsData>()({
     }
   },
 
+  markVideoPreviewShape(event: { detail: { width: number; height: number } }) {
+    this.setData({ videoPreviewPortrait: event.detail.height >= event.detail.width });
+  },
+
   closeVideoPreview() {
     this.setData({ videoPreviewPath: "", videoPreviewTitle: "" });
+  },
+
+  remakeVideo(event: DatasetEvent) {
+    const video = this.data.videos.find((item) => item.id === datasetString(event, "id"));
+    if (!video?.utteranceId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/transcript-media/index", { id: video.utteranceId }),
+    });
   },
 
   onThumbnailError(event: DatasetEvent) {

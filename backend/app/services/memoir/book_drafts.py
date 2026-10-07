@@ -290,6 +290,10 @@ async def revise_chapter_draft(
         strict=True,
     ):
         revised = dict(previous)
+        if revision.content != previous.get("content"):
+            # A user version copies every section. Record the actual edited
+            # section so later automatic updates can retain the other prose.
+            revised["user_edited"] = True
         revised["content"] = revision.content
         revised_sections.append(revised)
     content = "\n\n".join(
@@ -305,7 +309,7 @@ async def revise_chapter_draft(
         content=content,
         created_by=MemoirCreatedBy.USER.value,
         model=None,
-        prompt_snapshot=chapter_generation.CHAPTER_GENERATION_ENGINE,
+        prompt_snapshot=latest.prompt_snapshot,
         feedback="用户按小节修改正文",
         input_signature=context.input_signature,
         used_material_ids_json=list(latest.used_material_ids_json),

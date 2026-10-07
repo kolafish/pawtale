@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirSessionGoal,
     MemoirShareVideoJobStatus,
+    MemoirShareVideoCandidateStatus,
     MemoirTranscriptPolishLevel,
     MemoirVoiceSessionStatus,
 )
@@ -21,6 +22,7 @@ from app.schemas.memoir_automation import (
     MemoirAutomationEventVoicePlaybackRequest as MemoirAutomationEventVoicePlaybackRequest,
     MemoirAutomationEventVoicePlaybackResponse as MemoirAutomationEventVoicePlaybackResponse,
 )
+from app.services.memoir.share_video_styles import DEFAULT_SHARE_VIDEO_STYLE, ShareVideoStyle
 
 
 class MemoirVoiceSessionCreate(BaseModel):
@@ -441,6 +443,12 @@ class MemoirShareVideoBackgroundSourceResponse(BaseModel):
     description: str
 
 
+class MemoirShareVideoStyleResponse(BaseModel):
+    value: ShareVideoStyle
+    label: str
+    description: str
+
+
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
@@ -455,6 +463,8 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     min_select_ms: int = 3000
     max_select_ms: int = 90000
     ai_background_enabled: bool = False
+    default_video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
+    video_styles: list[MemoirShareVideoStyleResponse] = Field(default_factory=list)
     default_background_source: str = "ai"
     default_background_style: str = "watercolor"
     default_background_mode: str = "auto"
@@ -470,6 +480,7 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     start_char: int = Field(ge=0)
     end_char: int = Field(gt=0)
     ai_model: str | None = Field(default=None, max_length=120)
+    video_style: ShareVideoStyle | None = None
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
@@ -493,9 +504,42 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     def _valid_range(self) -> "MemoirShareVideoJobCreateRequest":
         if self.end_char <= self.start_char:
             raise ValueError("结束位置必须大于开始位置")
-        if self.background_source == "custom" and not self.custom_background_asset_id:
-            raise ValueError("请选择自定义背景图")
         return self
+
+
+class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ai_model: str | None = Field(default=None, max_length=120)
+    video_style: ShareVideoStyle | None = None
+    background_source: str | None = Field(default=None, max_length=40)
+    background_style: str | None = Field(default=None, max_length=40)
+    background_mode: str | None = Field(default=None, max_length=40)
+    custom_background_asset_id: str | None = Field(default=None, max_length=36)
+
+
+class MemoirShareVideoCandidateResponse(BaseModel):
+    id: str
+    project_id: str
+    voice_session_id: str
+    utterance_id: str | None
+    audio_file_id: str | None
+    transcript_version_id: str | None
+    text_hash: str | None
+    selected_text: str
+    start_char: int | None
+    end_char: int | None
+    start_ms: int | None
+    end_ms: int | None
+    duration_ms: int | None
+    status: MemoirShareVideoCandidateStatus
+    video_job_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirShareVideoCandidateLatestResponse(BaseModel):
+    candidate: MemoirShareVideoCandidateResponse | None
 
 
 class MemoirShareVideoOutputResponse(BaseModel):
@@ -508,6 +552,23 @@ class MemoirShareVideoCountResponse(BaseModel):
     utterance_id: str
     count: int = Field(ge=1)
     job_ids: list[str] = Field(min_length=1)
+    job_titles: dict[str, str] = Field(default_factory=dict)
+    current_job_ids: list[str] = Field(default_factory=list)
+
+
+class MemoirShareVideoListItemResponse(BaseModel):
+    id: str
+    utterance_id: str
+    title: str
+    selected_text: str
+    duration_ms: int
+    video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class MemoirShareVideoDeleteRequest(BaseModel):
+    confirm: Literal[True]
 
 
 class MemoirShareVideoJobResponse(BaseModel):
@@ -516,12 +577,14 @@ class MemoirShareVideoJobResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
     status: MemoirShareVideoJobStatus
+    title: str
     selected_text: str
     start_char: int
     end_char: int
     start_ms: int
     end_ms: int
     duration_ms: int
+    video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
     background_source: str = "ai"
     background_style: str = "watercolor"
     background_mode: str = "auto"
@@ -538,6 +601,15 @@ class MemoirShareVideoJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+
+
+class MemoirShareVideoJobListResponse(BaseModel):
+    items: list[MemoirShareVideoListItemResponse] = Field(default_factory=list)
+    active_jobs: list[MemoirShareVideoJobResponse] = Field(default_factory=list)
+    failed_jobs: list[MemoirShareVideoJobResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
 
 
 class MemoirShareVideoCustomBackgroundAssetResponse(BaseModel):

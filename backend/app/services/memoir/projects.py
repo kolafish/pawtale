@@ -1,6 +1,6 @@
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -8,7 +8,7 @@ from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
-from app.models.memoir import MemoirChatMessage
+from app.models.memoir import MemoirBookChapterDraft, MemoirChatMessage
 from app.models.projects import DocumentGroup, Project
 from app.models.users import User
 from app.schemas.memoir_projects import (
@@ -22,7 +22,9 @@ import app.services.project_documents as project_docs
 from app.services.memoir import project_deletion
 from app.services.memoir import book_outputs
 from app.services.memoir.project_ai_preferences import (
+    project_transcript_polish_level,
     remember_project_transcript_polish_level,
+    remember_project_share_video_style,
 )
 from app.services.projects.access import load_project
 
@@ -129,10 +131,6 @@ def _memoir_project_options():
     )
 
 
-def _voice_text_char_count(text: str) -> int:
-    return len("".join(str(text or "").split()))
-
-
 def _project_response_with_voice_words(
     project: Project,
     voice_char_counts: dict[str, int],
@@ -154,7 +152,19 @@ async def _memoir_voice_char_counts(
     if not project_ids:
         return {}
     result = await db.execute(
-        select(MemoirChatMessage.project_id, MemoirChatMessage.content_text)
+        select(
+            MemoirChatMessage.project_id,
+            func.sum(
+                func.length(
+                    func.regexp_replace(
+                        MemoirChatMessage.content_text,
+                        "[[:space:]\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]",
+                        "",
+                        "g",
+                    )
+                )
+            ),
+        )
         .join(Project, MemoirChatMessage.project_id == Project.id)
         .where(
             Project.user_id == user_id,
@@ -163,11 +173,9 @@ async def _memoir_voice_char_counts(
             MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
             MemoirChatMessage.content_text != "",
         )
+        .group_by(MemoirChatMessage.project_id)
     )
-    counts: dict[str, int] = {}
-    for project_id, content_text in result.all():
-        counts[project_id] = counts.get(project_id, 0) + _voice_text_char_count(content_text)
-    return counts
+    return dict(result.all())
 
 
 async def _load_memoir_project_response(
@@ -233,6 +241,7 @@ async def memoir_identity_response(
         id=user.id,
         email=user.email,
         password_login_enabled=user.password_login_enabled,
+        role=user.role,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         created_at=user.created_at,
@@ -258,6 +267,8 @@ async def create_mobile_memoir_project(
         metadata_json=_profile_metadata(req, include_defaults=True),
     )
     remember_project_transcript_polish_level(project, req.transcript_polish_level)
+    if _field_was_set(req, "share_video_style"):
+        remember_project_share_video_style(project, req.share_video_style)
     db.add(project)
     await db.flush()
     await initialize_project_template(db, project)
@@ -285,9 +296,21 @@ async def update_mobile_memoir_project(
         )
     if req.description is not None:
         project.description = req.description
+    previous_polish_level = project_transcript_polish_level(project)
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
     if _field_was_set(req, "transcript_polish_level") and req.transcript_polish_level:
         remember_project_transcript_polish_level(project, req.transcript_polish_level)
+    if req.share_video_style is not None:
+        remember_project_share_video_style(project, req.share_video_style)
+    if project_transcript_polish_level(project) != previous_polish_level:
+        existing_draft = await db.scalar(
+            select(MemoirBookChapterDraft.id)
+            .where(MemoirBookChapterDraft.project_id == project_id)
+            .limit(1)
+        )
+        if existing_draft is not None:
+            from app.services.memoir.automatic_book_draft import schedule_book_draft
+            await schedule_book_draft(db, project_id=project_id, source="polish_level")
     project.updated_at = utcnow_naive()
     await db.commit()
     return await _load_memoir_project_response(db, project.id, user_id)
