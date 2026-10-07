@@ -13,7 +13,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v4"
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v5"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
@@ -377,7 +377,7 @@ def _user_prompt(
 4. 每个 scene 只包含 sentence_ids。
 5. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
 6. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
-7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文的称呼，例如“我”“父亲”），能看出的性别、大致年龄和穿着，以及地点、年代和季节。只写原文明确说过或能直接推断的内容，不知道的不写，不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
+7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文里的称呼）、大致年龄和穿着，以及地点、年代和季节。只写原文明确说过的内容，不知道的不写。性别只在原文用了“她”“妈妈”“爷爷”“姐姐”这类明确表示性别的词时才写；讲述者“我”的性别原文一般没有说，不要猜。不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
 
 音频时长：{round(duration_ms / 1000, 1)} 秒
 原文字符数：{len(selected_text)}

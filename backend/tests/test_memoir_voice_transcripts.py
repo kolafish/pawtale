@@ -730,7 +730,7 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v5"
+    assert prompt.template_version == "memoir-share-video-background-v6"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
@@ -790,6 +790,7 @@ def test_share_video_scene_background_prompt_carries_story_context():
 async def test_share_video_background_retries_without_rejected_reference_image(tmp_path, monkeypatch):
     settings = SimpleNamespace(
         memoir_share_video_ai_background_enabled=True,
+        memoir_share_video_reference_image_enabled=True,
         volc_ark_api_key="test-key",
         volc_ark_image_model="doubao-seedream-5-0-lite-260128",
         volc_ark_image_output_format="png",
@@ -824,6 +825,13 @@ async def test_share_video_background_retries_without_rejected_reference_image(t
     assert asset is not None
     assert references[0].startswith("data:image/jpeg;base64,")
     assert references[1:] == [""]
+    reference_prompt = share_video_backgrounds.build_share_video_background_prompt(
+        "后来去县城读书。",
+        "watercolor",
+        reference_image=references[0],
+    ).prompt
+    assert reference_prompt.startswith("参考图只用来确定人物长什么样")
+    assert "不要在参考图上修改" in reference_prompt
 
 
 def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
