@@ -1,5 +1,5 @@
 <view class="story-home ui-accessible-page {{largeText ? 'large-text' : ''}}">
-  <view class="story-hero ui-card ui-card-borderless">
+  <view class="story-hero ui-card ui-card-borderless {{canOpenBook && story.overview.hasChapters && showBookHint ? 'has-book-hint' : ''}}">
     <view
       id="active-project-action"
       class="hero-heading {{canSwitchProject ? 'ui-pressable' : ''}}"
@@ -19,7 +19,7 @@
         bindtap="openBook"
         hover-class="{{canOpenBook ? 'story-tree-book-hover' : 'none'}}"
         aria-role="{{canOpenBook ? 'button' : 'img'}}"
-        aria-label="{{canOpenBook ? '进入' + story.memoir.title + '的书稿整理页' : '故事树成长到第 ' + story.overview.growthStage + ' 阶段'}}"
+        aria-label="{{canOpenBook ? '看整本书《' + story.memoir.title + '》' : '故事树成长到第 ' + story.overview.growthStage + ' 阶段'}}"
       >
         <image
           class="hero-tree-image"
@@ -32,12 +32,20 @@
         wx:for="{{story.overview.themeTags}}"
         wx:key="id"
         wx:for-index="tagIndex"
-        class="theme-tag theme-tag-{{tagIndex}} theme-tone-{{item.tone}}"
+        class="theme-tag theme-tag-{{tagIndex}} theme-tone-{{item.tone}} ui-pressable"
+        data-id="{{item.id}}"
+        bindtap="openChapter"
+        hover-class="theme-tag-hover"
+        aria-role="button"
+        aria-label="打开主题：{{item.title}}"
       >
         <view class="theme-tag-leaf" aria-hidden="true"></view>
         <text class="theme-tag-text">{{item.title}}</text>
+        <text class="theme-tag-arrow" aria-hidden="true">›</text>
       </view>
+      <view wx:if="{{canOpenBook && story.overview.hasChapters}}" class="hero-book-badge" aria-hidden="true">翻开整本书 ›</view>
     </view>
+    <text wx:if="{{canOpenBook && story.overview.hasChapters && showBookHint}}" class="hero-book-hint">点这棵树，可以翻看整本书</text>
 
     <view
       wx:if="{{story.overview.hasChapters}}"

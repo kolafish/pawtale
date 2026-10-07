@@ -149,3 +149,26 @@ test("home launch storage failures do not block the main flow", () => {
   console.warn = originalWarn;
   delete global.wx;
 });
+
+test("home book hint is remembered per user after the book is opened", () => {
+  const storage = {};
+  global.wx = {
+    getStorageSync(key) {
+      return storage[key];
+    },
+    setStorageSync(key, value) {
+      storage[key] = value;
+    },
+  };
+  const { homeBookOpened, markHomeBookOpened, resolveHomeLaunch } = loadHomeLaunchState();
+
+  assert.equal(homeBookOpened("user-1"), false);
+  markHomeBookOpened("user-1", Date.parse("2026-07-01T00:00:00.000Z"));
+  resolveHomeLaunch("user-1", { hasProject: true, projectId: "project-1" });
+
+  assert.equal(homeBookOpened("user-1"), true);
+  assert.equal(homeBookOpened("user-2"), false);
+  assert.equal(homeBookOpened(""), false);
+
+  delete global.wx;
+});

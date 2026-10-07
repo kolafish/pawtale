@@ -91,6 +91,8 @@ function loadHomePage({
   });
   mockModule("../services/home-launch-state.ts", {
     dismissHomeLaunch: () => {},
+    homeBookOpened: () => false,
+    markHomeBookOpened: () => {},
     resolveHomeLaunch: () => "none",
     ...launchStateExports,
   });

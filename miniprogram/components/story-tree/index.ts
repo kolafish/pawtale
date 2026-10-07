@@ -13,6 +13,7 @@ Component({
     canOpenBook: { type: Boolean, value: false },
     canSwitchProject: { type: Boolean, value: false },
     canVoiceEdit: { type: Boolean, value: false },
+    showBookHint: { type: Boolean, value: false },
   },
 
   data: { showAllChapters: false },
