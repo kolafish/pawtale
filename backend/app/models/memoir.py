@@ -383,6 +383,14 @@ class MemoirShareVideoCandidate(Base):
     )
     algorithm_version: Mapped[str] = mapped_column(String(32), default="v1", nullable=False)
     reason_code: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    # The model's 1-5 scores, kept for every judged range so thresholds can be tuned later.
+    emotion_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    visual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    standalone_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # One line shown on the recommendation card.
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # A sentence of selected_text that opens a video made from this candidate.
+    hook_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     video_job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_material_share_videos.id", ondelete="SET NULL"), nullable=True,
     )
