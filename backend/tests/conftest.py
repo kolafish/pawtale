@@ -102,6 +102,9 @@ async def test_engine(verified_postgres_schema):
         POSTGRES_DATABASE_URL,
         pool_size=5,
         max_overflow=20,
+        # A cancelled request can return a closed connection to the pool;
+        # replace it on checkout instead of failing the next test's cleanup.
+        pool_pre_ping=True,
     )
     # Services that open their own sessions must use the same test database.
     async_session_maker.configure(bind=engine)
