@@ -20,6 +20,7 @@ from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
+    get_or_generate_share_video_background_set,
     share_video_narrator_context,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
@@ -220,7 +221,6 @@ async def prepare_share_video_background(
 
         async def generate_scene(
             scene: ShareVideoScene,
-            reference_image_path: Path | None,
         ) -> tuple[ShareVideoScene, ShareVideoBackgroundAsset | None, ShareVideoBackgroundGenerationError | None]:
             try:
                 asset = await get_or_generate_share_video_background(
@@ -229,7 +229,6 @@ async def prepare_share_video_background(
                     story_text=story_text,
                     visual_context=visual_context,
                     narrator_context=narrator_context,
-                    reference_image_path=reference_image_path,
                     usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError as exc:
@@ -277,15 +276,29 @@ async def prepare_share_video_background(
             metadata.background_scenes = [scene_assets[index] for index in sorted(scene_assets)]
             await persist_progress(metadata)
 
-        # The first scene is drawn alone so the rest can use it as a reference
-        # image and keep the same people; the rest are drawn in parallel.
-        first_scene, first_asset, first_error = await generate_scene(plan.scenes[0], None)
-        await record_scene(first_scene, first_asset, first_error)
-        reference_image_path = first_asset.path if first_asset is not None else None
-        pending = [
-            asyncio.create_task(generate_scene(scene, reference_image_path))
-            for scene in plan.scenes[1:]
-        ]
+        # Several scenes are drawn in one group request so the people stay the
+        # same; a failed group, or any image it did not return, is drawn alone.
+        set_assets: list[ShareVideoBackgroundAsset | None] | None = None
+        if len(plan.scenes) > 1:
+            try:
+                set_assets = await get_or_generate_share_video_background_set(
+                    [_scene_source_text(job.selected_text, scene) for scene in plan.scenes],
+                    background_style,
+                    story_text=story_text,
+                    visual_context=visual_context,
+                    narrator_context=narrator_context,
+                    usage_context=usage_context,
+                )
+            except ShareVideoBackgroundGenerationError:
+                set_assets = None
+        remaining: list[ShareVideoScene] = []
+        for index, scene in enumerate(plan.scenes):
+            set_asset = set_assets[index] if set_assets is not None else None
+            if set_asset is None:
+                remaining.append(scene)
+            else:
+                await record_scene(scene, set_asset, None)
+        pending = [asyncio.create_task(generate_scene(scene)) for scene in remaining]
         try:
             for finished in asyncio.as_completed(pending):
                 await record_scene(*await finished)

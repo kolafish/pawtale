@@ -3,13 +3,11 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import hashlib
-import io
 from pathlib import Path
 import re
 from uuid import uuid4
 
 import httpx
-from PIL import Image, UnidentifiedImageError
 
 from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
@@ -22,9 +20,8 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v7"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v8"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
-SHARE_VIDEO_REFERENCE_IMAGE_MAX_EDGE = 1024
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
 
@@ -66,16 +63,27 @@ class VolcArkGeneratedImage:
 
 
 class ShareVideoBackgroundGenerationError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+    pass
 
 
-_VIDEO_BACKGROUND_PROMPT = """{reference}根据以下口述内容，创作一张竖版 9:16 的短视频画面：
+_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
 {narrator}{story_context}
-画面内容：
+{rules}"""
+
+_VIDEO_BACKGROUND_SET_PROMPT = """根据同一段口述，生成一组共 {count} 张竖版 9:16 的短视频画面。这组图按顺序对应下面 {count} 个片段，一个片段一张图。
+
+整段口述：
+{story_text}
+{narrator}{visual_context}
+这是同一段回忆里的连续画面：同一个人物在各张图里保持一致的长相、性别、年龄、发型和穿着，环境和年代前后一致；每张图的场景、构图、镜头角度和人物动作按各自片段重新设计，不要画成几张差不多的图。
+
+{scenes}
+
+{rules}"""
+
+_VIDEO_BACKGROUND_RULES = """画面内容：
 - 从原文中选择一个具体、可见的回忆瞬间，不把不同时间或地点的事件拼贴在一起。
 - 优先呈现原文明确提到的时间、地点、人物关系、动作和关键物件，让这些细节成为画面主体；不要用泛泛的漂亮风景代替讲述的场景。
 - 原文没有说明的年代、地点、人物身份或生活细节不要猜测；缺少可见细节时，以克制的环境和光线衬托原文情绪。
@@ -91,7 +99,6 @@ _VIDEO_BACKGROUND_PROMPT = """{reference}根据以下口述内容，创作一张
 
 生成边界：
 - 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。
-- 原文和讲述者信息都没有说明性别的人物，不要默认画成男性。
 - 不出现文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和和夸张电影光效。"""
 
@@ -100,11 +107,6 @@ _VIDEO_BACKGROUND_STORY_CONTEXT = """
 
 {story_text}
 {visual_context}"""
-
-_VIDEO_BACKGROUND_REFERENCE = """参考图只用来确定人物长什么样：沿用参考图中人物的长相、性别、年龄、发型和穿着。
-请画一张全新的画面，不要在参考图上修改、延伸或添加元素：场景、背景、构图、镜头角度和人物动作都按下面的口述内容重新设计，要和参考图明显不同。
-
-"""
 
 _VIDEO_BACKGROUND_VISUAL_CONTEXT = """
 各画面共用的人物和场景设定，人物的年龄、外貌、穿着和环境要与同一视频的其他画面保持一致：
@@ -254,19 +256,6 @@ def _story_context(story_text: str, visual_context: str) -> str:
     )
 
 
-def reference_image_data_uri(path: Path) -> str:
-    """Downscaled JPEG data URI of an earlier scene, sent as the image reference."""
-    try:
-        with Image.open(path) as image:
-            image = image.convert("RGB")
-            image.thumbnail((SHARE_VIDEO_REFERENCE_IMAGE_MAX_EDGE, SHARE_VIDEO_REFERENCE_IMAGE_MAX_EDGE))
-            buffer = io.BytesIO()
-            image.save(buffer, format="JPEG", quality=85)
-    except (OSError, UnidentifiedImageError) as exc:
-        raise ShareVideoBackgroundGenerationError("参考图读取失败") from exc
-    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-
-
 _NARRATOR_GENDER_LABELS = {"male": "男性", "female": "女性"}
 
 
@@ -286,30 +275,19 @@ def share_video_narrator_context(profile: dict[str, object] | None) -> str:
     return "；".join(parts) + "。" if parts else ""
 
 
-def build_share_video_background_prompt(
-    selected_text: str,
-    style_id: str | None,
-    *,
-    story_text: str = "",
-    visual_context: str = "",
-    narrator_context: str = "",
-    reference_image: str = "",
-) -> ShareVideoBackgroundPrompt:
-    style = share_video_background_style(style_id)
-    content = _prompt_content(selected_text)
-    prompt = _VIDEO_BACKGROUND_PROMPT.format(
-        reference=_VIDEO_BACKGROUND_REFERENCE if reference_image else "",
-        content=content,
-        narrator=f"\n讲述者信息：{narrator_context.strip()}\n" if narrator_context.strip() else "",
-        story_context=_story_context(story_text, visual_context),
-        drawing_instruction=style.drawing_instruction,
-    ).strip()
+def _narrator_block(narrator_context: str) -> str:
+    narrator = narrator_context.strip()
+    if not narrator:
+        return ""
+    return f"\n讲述者资料（人物性别、年龄先从口述内容推断，内容里看不出来时再参考）：{narrator}\n"
+
+
+def _prompt_result(style: ShareVideoBackgroundStyle, content: str, prompt: str) -> ShareVideoBackgroundPrompt:
     prompt_hash = hashlib.sha256(
         "\n".join((
             SHARE_VIDEO_BACKGROUND_PROMPT_VERSION,
             style.value,
             prompt,
-            hashlib.sha256(reference_image.encode("ascii")).hexdigest() if reference_image else "",
         )).encode("utf-8")
     ).hexdigest()
     return ShareVideoBackgroundPrompt(
@@ -319,6 +297,50 @@ def build_share_video_background_prompt(
         prompt_hash=prompt_hash,
         template_version=SHARE_VIDEO_BACKGROUND_PROMPT_VERSION,
     )
+
+
+def build_share_video_background_prompt(
+    selected_text: str,
+    style_id: str | None,
+    *,
+    story_text: str = "",
+    visual_context: str = "",
+    narrator_context: str = "",
+) -> ShareVideoBackgroundPrompt:
+    style = share_video_background_style(style_id)
+    content = _prompt_content(selected_text)
+    prompt = _VIDEO_BACKGROUND_PROMPT.format(
+        content=content,
+        narrator=_narrator_block(narrator_context),
+        story_context=_story_context(story_text, visual_context),
+        rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),
+    ).strip()
+    return _prompt_result(style, content, prompt)
+
+
+def build_share_video_background_set_prompt(
+    scene_texts: list[str],
+    style_id: str | None,
+    *,
+    story_text: str,
+    visual_context: str = "",
+    narrator_context: str = "",
+) -> ShareVideoBackgroundPrompt:
+    """One prompt for a consistent set of images, one per scene, in order."""
+    style = share_video_background_style(style_id)
+    content = "\n".join(
+        f"第 {index + 1} 张：{_prompt_content(text)}" for index, text in enumerate(scene_texts)
+    )
+    visual = re.sub(r"\s+", " ", (visual_context or "").strip())
+    prompt = _VIDEO_BACKGROUND_SET_PROMPT.format(
+        count=len(scene_texts),
+        story_text=_prompt_content(story_text),
+        narrator=_narrator_block(narrator_context),
+        visual_context=_VIDEO_BACKGROUND_VISUAL_CONTEXT.format(visual_context=visual) if visual else "",
+        scenes=content,
+        rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),
+    ).strip()
+    return _prompt_result(style, content, prompt)
 
 
 def _safe_path_part(value: str) -> str:
@@ -360,7 +382,29 @@ class VolcArkImageGenerationService:
         self.timeout_seconds = settings.volc_ark_image_timeout_seconds
         self.max_concurrent_requests = settings.volc_ark_image_max_concurrent_requests
 
-    async def generate(self, prompt: str, *, reference_image: str = "") -> VolcArkGeneratedImage:
+    async def generate(self, prompt: str) -> VolcArkGeneratedImage:
+        images = await self._generate(prompt, {}, self.timeout_seconds)
+        if not images or images[0] is None:
+            raise ShareVideoBackgroundGenerationError("火山图片生成没有可用图片数据")
+        return images[0]
+
+    async def generate_set(self, prompt: str, count: int) -> list[VolcArkGeneratedImage | None]:
+        """Ark group generation: up to `count` images of the same people in one request."""
+        return await self._generate(
+            prompt,
+            {
+                "sequential_image_generation": "auto",
+                "sequential_image_generation_options": {"max_images": count},
+            },
+            self.timeout_seconds * max(1, count),
+        )
+
+    async def _generate(
+        self,
+        prompt: str,
+        extra_payload: dict[str, object],
+        timeout_seconds: float,
+    ) -> list[VolcArkGeneratedImage | None]:
         if not self.api_key:
             raise ShareVideoBackgroundGenerationError("火山方舟 API Key 未配置")
         if not self.model:
@@ -373,12 +417,11 @@ class VolcArkImageGenerationService:
             "response_format": self.response_format,
             "output_format": self.output_format,
             "watermark": False,
+            **extra_payload,
         }
-        if reference_image:
-            payload["image"] = reference_image
 
-        async def request() -> VolcArkGeneratedImage:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+        async def request() -> list[VolcArkGeneratedImage | None]:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 try:
                     response = await client.post(
                         f"{self.base_url}/images/generations",
@@ -392,8 +435,7 @@ class VolcArkImageGenerationService:
                 except httpx.HTTPStatusError as exc:
                     status_code = exc.response.status_code
                     raise ShareVideoBackgroundGenerationError(
-                        f"火山图片生成失败，HTTP {status_code}",
-                        status_code=status_code,
+                        f"火山图片生成失败，HTTP {status_code}"
                     ) from exc
                 except httpx.HTTPError as exc:
                     raise ShareVideoBackgroundGenerationError("火山图片生成请求失败") from exc
@@ -402,16 +444,25 @@ class VolcArkImageGenerationService:
                     result = response.json()
                 except ValueError as exc:
                     raise ShareVideoBackgroundGenerationError("火山图片生成返回格式无效") from exc
-                content = await self._extract_image_content(client, result)
-                if not content:
-                    raise ShareVideoBackgroundGenerationError("火山图片生成返回空图片")
+                data = result.get("data")
+                if not isinstance(data, list) or not data:
+                    raise ShareVideoBackgroundGenerationError("火山图片生成没有返回图片")
                 usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
-                return VolcArkGeneratedImage(
-                    content=content,
-                    mime_type=f"image/{self.output_format}",
-                    model=str(result.get("model") or self.model),
-                    usage=usage,
-                )
+                model = str(result.get("model") or self.model)
+                images: list[VolcArkGeneratedImage | None] = []
+                for item in data:
+                    content = await self._extract_image_content(client, item)
+                    images.append(
+                        VolcArkGeneratedImage(
+                            content=content,
+                            mime_type=f"image/{self.output_format}",
+                            model=model,
+                            usage=usage,
+                        )
+                        if content
+                        else None
+                    )
+                return images
 
         return await provider_concurrency_limiter.run(
             "ai_image",
@@ -419,19 +470,16 @@ class VolcArkImageGenerationService:
             request,
         )
 
-    async def _extract_image_content(self, client: httpx.AsyncClient, result: dict[str, object]) -> bytes:
-        data = result.get("data")
-        if not isinstance(data, list) or not data:
-            raise ShareVideoBackgroundGenerationError("火山图片生成没有返回图片")
-        first = data[0]
-        if not isinstance(first, dict):
-            raise ShareVideoBackgroundGenerationError("火山图片生成返回格式无效")
+    async def _extract_image_content(self, client: httpx.AsyncClient, item: object) -> bytes | None:
+        # Group generation reports a failed image as an item without image data.
+        if not isinstance(item, dict):
+            return None
 
-        b64_json = first.get("b64_json")
+        b64_json = item.get("b64_json")
         if isinstance(b64_json, str) and b64_json.strip():
             return _decode_base64_image(b64_json.strip())
 
-        url = first.get("url")
+        url = item.get("url")
         if isinstance(url, str) and url.strip():
             try:
                 response = await client.get(url.strip())
@@ -440,7 +488,17 @@ class VolcArkImageGenerationService:
                 raise ShareVideoBackgroundGenerationError("火山图片下载失败") from exc
             return response.content
 
-        raise ShareVideoBackgroundGenerationError("火山图片生成没有可用图片数据")
+        return None
+
+
+def _write_background(path: Path, content: bytes) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        temp_path.write_bytes(content)
+        temp_path.replace(path)
+    except OSError as exc:
+        raise ShareVideoBackgroundGenerationError("分享视频背景图缓存写入失败") from exc
 
 
 async def get_or_generate_share_video_background(
@@ -450,7 +508,6 @@ async def get_or_generate_share_video_background(
     story_text: str = "",
     visual_context: str = "",
     narrator_context: str = "",
-    reference_image_path: Path | None = None,
     usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
@@ -460,54 +517,12 @@ async def get_or_generate_share_video_background(
     if not settings.volc_ark_api_key.strip():
         return None
 
-    reference_image = (
-        reference_image_data_uri(reference_image_path)
-        if reference_image_path and settings.memoir_share_video_reference_image_enabled
-        else ""
-    )
-    try:
-        return await _get_or_generate_background(
-            selected_text,
-            normalized_style,
-            story_text=story_text,
-            visual_context=visual_context,
-            narrator_context=narrator_context,
-            reference_image=reference_image,
-            usage_context=usage_context,
-        )
-    except ShareVideoBackgroundGenerationError as exc:
-        # A rejected reference image should not cost the scene its picture.
-        if not reference_image or exc.status_code != 400:
-            raise
-    return await _get_or_generate_background(
-        selected_text,
-        normalized_style,
-        story_text=story_text,
-        visual_context=visual_context,
-        narrator_context=narrator_context,
-        reference_image="",
-        usage_context=usage_context,
-    )
-
-
-async def _get_or_generate_background(
-    selected_text: str,
-    normalized_style: str,
-    *,
-    story_text: str,
-    visual_context: str,
-    narrator_context: str,
-    reference_image: str,
-    usage_context: AIUsageContext | None,
-) -> ShareVideoBackgroundAsset:
-    settings = get_settings()
     prompt = build_share_video_background_prompt(
         selected_text,
         normalized_style,
         story_text=story_text,
         visual_context=visual_context,
         narrator_context=narrator_context,
-        reference_image=reference_image,
     )
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()
@@ -528,10 +543,7 @@ async def _get_or_generate_background(
     try:
         if usage_context and usage_context.user_id:
             await assert_ai_credit_available(usage_context.user_id)
-        image = await VolcArkImageGenerationService().generate(
-            prompt.prompt,
-            reference_image=reference_image,
-        )
+        image = await VolcArkImageGenerationService().generate(prompt.prompt)
     except Exception as exc:
         await record_ai_usage(
             provider=VolcArkImageGenerationService.provider_name,
@@ -559,13 +571,7 @@ async def _get_or_generate_background(
         image_count=1,
         context=usage_context,
     )
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        temp_path.write_bytes(image.content)
-        temp_path.replace(path)
-    except OSError as exc:
-        raise ShareVideoBackgroundGenerationError("分享视频背景图缓存写入失败") from exc
+    _write_background(path, image.content)
     return ShareVideoBackgroundAsset(
         path=path,
         storage_path=storage_path,
@@ -576,3 +582,98 @@ async def _get_or_generate_background(
         model=image.model,
         cache_hit=False,
     )
+
+
+async def get_or_generate_share_video_background_set(
+    scene_texts: list[str],
+    style_id: str | None,
+    *,
+    story_text: str,
+    visual_context: str = "",
+    narrator_context: str = "",
+    usage_context: AIUsageContext | None = None,
+) -> list[ShareVideoBackgroundAsset | None] | None:
+    """Generate every scene image in one group request so the people stay the same.
+
+    Returns one entry per scene; an entry is None when the provider returned fewer
+    images than asked, so the caller can draw that scene on its own.
+    """
+    settings = get_settings()
+    normalized_style = normalize_share_video_background_style(style_id)
+    if not settings.memoir_share_video_ai_background_enabled:
+        return None
+    if not settings.volc_ark_api_key.strip():
+        return None
+
+    prompt = build_share_video_background_set_prompt(
+        scene_texts,
+        normalized_style,
+        story_text=story_text,
+        visual_context=visual_context,
+        narrator_context=narrator_context,
+    )
+    extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
+    model = settings.volc_ark_image_model.strip()
+    storage_paths = [
+        _background_storage_path(prompt.style.value, model, f"{prompt.prompt_hash}-{index + 1}", extension)
+        for index in range(len(scene_texts))
+    ]
+    paths = [_background_file_path(storage_path) for storage_path in storage_paths]
+
+    def asset(index: int, asset_model: str, cache_hit: bool) -> ShareVideoBackgroundAsset:
+        return ShareVideoBackgroundAsset(
+            path=paths[index],
+            storage_path=storage_paths[index],
+            style_id=prompt.style.value,
+            prompt_hash=f"{prompt.prompt_hash}-{index + 1}",
+            prompt_template_version=prompt.template_version,
+            provider=VolcArkImageGenerationService.provider_name,
+            model=asset_model,
+            cache_hit=cache_hit,
+        )
+
+    if all(path.exists() and path.stat().st_size > 0 for path in paths):
+        return [asset(index, model, True) for index in range(len(paths))]
+
+    try:
+        if usage_context and usage_context.user_id:
+            await assert_ai_credit_available(usage_context.user_id)
+        images = await VolcArkImageGenerationService().generate_set(prompt.prompt, len(scene_texts))
+    except Exception as exc:
+        await record_ai_usage(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=model or "unknown",
+            status="failed",
+            cost=estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=model,
+                image_count=len(scene_texts),
+            ),
+            image_count=len(scene_texts),
+            error_type=type(exc).__name__,
+            context=usage_context,
+        )
+        raise
+    generated = [image for image in images[: len(scene_texts)] if image is not None]
+    if generated:
+        await record_ai_usage(
+            provider=VolcArkImageGenerationService.provider_name,
+            model=generated[0].model,
+            status="succeeded",
+            cost=estimate_image_cost(
+                provider=VolcArkImageGenerationService.provider_name,
+                model=generated[0].model,
+                image_count=len(generated),
+            ),
+            image_count=len(generated),
+            context=usage_context,
+        )
+    assets: list[ShareVideoBackgroundAsset | None] = []
+    for index in range(len(scene_texts)):
+        image = images[index] if index < len(images) else None
+        if image is None:
+            assets.append(None)
+            continue
+        _write_background(paths[index], image.content)
+        assets.append(asset(index, image.model, False))
+    return assets
