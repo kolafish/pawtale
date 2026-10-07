@@ -719,6 +719,19 @@ async def test_uploaded_cover_is_independent_of_auto_body_images_and_templates(c
     selected = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements", json={"placement_type": "cover"})
     assert selected.status_code == 201
     cover_placement = next(p for p in selected.json()["placements"] if p["placement_type"] == "cover")
+    assert cover_placement["display_size"] == "cover_frame"
+    placement_path = f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements/{cover_placement['id']}"
+    full_bleed = await client.patch(placement_path, json={"display_size": "cover_full_bleed"})
+    assert full_bleed.status_code == 200
+    mismatched = await client.patch(placement_path, json={"display_size": "half_width"})
+    assert mismatched.status_code == 400
+    framed = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
+    assert framed["render_settings"]["cover_image"]["display_size"] == "cover_full_bleed"
+    body_placement = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset['id']}/placements",
+        json={"placement_type": "appendix", "display_size": "cover_frame"},
+    )
+    assert body_placement.status_code == 400
     after_upload = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
     assert after_upload["schema_version"] == 5
     assert after_upload["render_settings"]["custom_layout"]["font_scale"] == "standard"

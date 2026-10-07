@@ -209,6 +209,10 @@ class PDFImageCommand:
     y: float
     width: float
     height: float
+    crop_to_fill: bool = False
+    # Height of a dark gradient baked into the bottom of the image, as a
+    # fraction of its height, so light text stays readable over any photo.
+    bottom_shade: float = 0.0
 
 
 @dataclass
@@ -218,7 +222,8 @@ class PDFPage:
     images: list[PDFImageCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
     background_image_path: Path | None = None
-    background_image_preserve_aspect: bool = False
+    background_image_crop_to_fill: bool = False
+    background_image_bottom_shade: float = 0.0
     text_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
@@ -1063,19 +1068,49 @@ def _register_pdf_font() -> None:
         _PDF_FONT_REGISTERED = True
 
 
+def _cropped_to_box(source: Image.Image, command: PDFImageCommand) -> Image.Image:
+    box_ratio = command.width / command.height
+    if abs(source.width / source.height - box_ratio) < 0.01:
+        return source
+    if source.width / source.height > box_ratio:
+        size = (round(source.height * box_ratio), source.height)
+    else:
+        size = (source.width, round(source.width / box_ratio))
+    return ImageOps.fit(source, size, Image.Resampling.LANCZOS)
+
+
+PDF_IMAGE_SHADE_COLOR = (18, 13, 10)
+PDF_IMAGE_SHADE_MAX_ALPHA = 0.86
+
+
+def _with_bottom_shade(image: Image.Image, fraction: float) -> Image.Image:
+    shade_height = max(1, round(image.height * min(1.0, fraction)))
+    ramp = Image.linear_gradient("L").resize((1, shade_height))
+    alpha = Image.new("L", (1, image.height), 0)
+    # Ease in over the top part of the band so there is no visible edge.
+    alpha.paste(ramp.point(lambda v: round(255 * PDF_IMAGE_SHADE_MAX_ALPHA * min(1.0, v / 255 / 0.6) ** 1.4)),
+        (0, image.height - shade_height))
+    shade = Image.new("RGBA", image.size, (*PDF_IMAGE_SHADE_COLOR, 255))
+    shade.putalpha(alpha.resize(image.size))
+    return Image.alpha_composite(image, shade)
+
+
 def _optimized_pdf_image_source(command: PDFImageCommand) -> str | ImageReader:
     max_width = max(1, round(command.width * PDF_EMBEDDED_IMAGE_DPI / 72))
     max_height = max(1, round(command.height * PDF_EMBEDDED_IMAGE_DPI / 72))
     with Image.open(command.path) as original:
         source_format = (original.format or "").upper()
-        with ImageOps.exif_transpose(original) as source:
+        with ImageOps.exif_transpose(original) as transposed:
+            source = _cropped_to_box(transposed, command) if command.crop_to_fill else transposed
             within_print_size = source.width <= max_width and source.height <= max_height
-            if within_print_size and source_format in {"JPEG", "JPG"}:
+            if within_print_size and source_format in {"JPEG", "JPG"} and source is transposed:
                 return str(command.path)
 
             if not within_print_size:
                 source.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
             image = source.convert("RGBA")
+            if command.bottom_shade > 0:
+                image = _with_bottom_shade(image, command.bottom_shade)
             if image.getchannel("A").getextrema()[0] < 255:
                 output = BytesIO()
                 image.save(
@@ -1144,7 +1179,8 @@ def _render_pdf_pages(
                 _optimized_pdf_image_source(PDFImageCommand(
                     path=page.background_image_path, x=0, y=0,
                     width=layout.page_width, height=layout.page_height,
-                )) if page.background_image_preserve_aspect else str(page.background_image_path)
+                    crop_to_fill=True, bottom_shade=page.background_image_bottom_shade,
+                )) if page.background_image_crop_to_fill else str(page.background_image_path)
             )
             pdf.drawImage(
                 background_source,
@@ -1152,8 +1188,6 @@ def _render_pdf_pages(
                 0,
                 width=layout.page_width,
                 height=layout.page_height,
-                preserveAspectRatio=page.background_image_preserve_aspect,
-                anchor="c",
                 mask="auto",
             )
         for decoration in page.decorations:

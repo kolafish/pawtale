@@ -281,21 +281,43 @@
             <text class="layout-option-title">封面图片</text>
             <view class="book-cover-image-row">
               <view class="book-cover-image-preview">
-                <view class="layout-cover-art {{bookCoverStylePreviewClass}} {{bookUploadedCoverAssetId ? 'has-photo' : ''}}">
-                  <image wx:if="{{bookUploadedCoverPath || (!bookUploadedCoverAssetId && bookCoverStylePreviewImage)}}" class="layout-cover-image" src="{{bookUploadedCoverPath || bookCoverStylePreviewImage}}" mode="aspectFit" />
+                <view wx:if="{{bookUploadedCoverAssetId && bookCoverImageLayout === 'cover_full_bleed'}}" class="cover-photo-full">
+                  <image wx:if="{{bookUploadedCoverPath}}" class="layout-cover-image" src="{{bookUploadedCoverPath}}" mode="aspectFill" />
+                  <view class="cover-photo-full-shade" />
+                  <text class="cover-photo-full-title">{{bookTitleInput || bookPreviewTitle}}</text>
+                  <text class="cover-photo-full-credit">整理：{{bookPreparedByInput || '家人'}}</text>
+                </view>
+                <view wx:else class="layout-cover-art {{bookCoverStylePreviewClass}} {{bookUploadedCoverAssetId ? 'has-photo' : ''}}">
+                  <image wx:if="{{bookCoverStylePreviewImage}}" class="layout-cover-image" src="{{bookCoverStylePreviewImage}}" mode="aspectFit" />
+                  <view wx:if="{{bookUploadedCoverAssetId}}" class="cover-photo-frame">
+                    <image wx:if="{{bookUploadedCoverPath}}" src="{{bookUploadedCoverPath}}" mode="aspectFit" />
+                  </view>
                   <text class="layout-cover-kicker">家庭回忆录</text>
                   <text class="layout-cover-title">{{bookTitleInput || bookPreviewTitle}}</text>
-                  <text wx:if="{{bookUploadedCoverAssetId && bookSubtitleInput}}" class="book-cover-photo-subtitle">{{bookSubtitleInput}}</text>
                   <text class="layout-cover-credit">整理：{{bookPreparedByInput || '家人'}}</text>
                 </view>
               </view>
               <view class="book-cover-image-actions">
                 <button class="layout-action preview ui-button" bindtap="changeBookCoverImage" loading="{{bookLayoutBusyTarget === 'save:cover'}}" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">{{bookUploadedCoverAssetId ? '更换图片' : '上传图片'}}</button>
                 <view wx:if="{{bookUploadedCoverAssetId}}" class="book-cover-image-tools">
-                  <button class="book-cover-image-link ui-button" data-action="edit" bindtap="changeBookCoverImage" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">编辑照片</button>
+                  <button class="book-cover-image-link ui-button" data-action="edit" bindtap="changeBookCoverImage" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">{{bookCoverImageLayout === 'cover_full_bleed' ? '调整取景' : '编辑照片'}}</button>
                   <button class="book-cover-image-link ui-button" data-action="restore" bindtap="changeBookCoverImage" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget || bookTitleSaving || bookViewingHistoricalVersion}}">恢复默认</button>
                 </view>
                 <button class="book-cover-image-link ui-button" data-template="current" bindtap="previewBookLayout" disabled="{{bookLayoutBusyTarget || bookExportBusyTarget}}">预览 PDF ›</button>
+              </view>
+            </view>
+            <view wx:if="{{bookUploadedCoverAssetId}}" class="cover-layout-choice">
+              <view
+                wx:for="{{bookCoverImageLayoutOptions}}"
+                wx:key="value"
+                class="cover-layout-option ui-pressable {{bookCoverImageLayout === item.value ? 'is-selected' : ''}}"
+                aria-role="button"
+                aria-selected="{{bookCoverImageLayout === item.value}}"
+                data-layout="{{item.value}}"
+                bindtap="changeBookCoverImageLayout"
+              >
+                <text class="cover-layout-option-title">{{item.label}}</text>
+                <text class="cover-layout-option-detail">{{item.description}}</text>
               </view>
             </view>
             <text wx:if="{{(bookLayoutFeedbackTarget === 'cover' || bookLayoutFeedbackTarget === 'current') && bookLayoutFeedbackText}}" class="layout-feedback {{bookLayoutFeedbackError ? 'error' : ''}}">{{bookLayoutFeedbackText}}</text>

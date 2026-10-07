@@ -14,6 +14,10 @@ from app.domain.memoir.types import (
 
 
 MemoirImageDisplaySize = Literal["full_width", "half_width", "inline"]
+# A cover photo is either set into the layout's artwork (frame) or fills the
+# whole front cover with the text on a darkened band (full_bleed).
+MemoirCoverImageLayout = Literal["cover_frame", "cover_full_bleed"]
+COVER_IMAGE_LAYOUTS: frozenset[str] = frozenset(("cover_frame", "cover_full_bleed"))
 
 
 class MemoirMaterialImageGenerationRequest(BaseModel):
@@ -140,7 +144,7 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
     placement_type: MemoirBookImagePlacementType = MemoirBookImagePlacementType.CHAPTER_OPENING
     chapter_id: str | None = None
     caption_override: str | None = None
-    display_size: MemoirImageDisplaySize = "full_width"
+    display_size: MemoirImageDisplaySize | MemoirCoverImageLayout = "full_width"
 
     @field_validator("chapter_id")
     @classmethod
@@ -162,7 +166,7 @@ class MemoirBookImagePlacementUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     caption_override: str | None = None
-    display_size: MemoirImageDisplaySize | None = None
+    display_size: MemoirImageDisplaySize | MemoirCoverImageLayout | None = None
     enabled: bool | None = None
 
     @field_validator("caption_override")

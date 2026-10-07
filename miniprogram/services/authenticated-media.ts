@@ -285,3 +285,17 @@ export function editImageFile(src: string): Promise<string | null> {
     });
   });
 }
+
+// Lets the user frame a photo at a fixed ratio. Resolves null on cancel, or
+// when this WeChat version has no crop page, so callers keep the original.
+export function cropImageFile(src: string, cropScale: WechatMiniprogram.CropImageOption["cropScale"]): Promise<string | null> {
+  if (typeof wx.cropImage !== "function") return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    wx.cropImage!({
+      src,
+      cropScale,
+      success: (result) => resolve(result.tempFilePath || null),
+      fail: (error) => isChooseImageCancel(error) ? resolve(null) : reject(new Error(error.errMsg || "裁剪图片失败")),
+    });
+  });
+}
