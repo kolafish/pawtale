@@ -101,7 +101,13 @@ export class StreamingVoiceController {
       onStatus: (status) => {
         if (isCurrent()) {
           callbacks.onStatus(status);
-          if (status === "closed" || status === "error") {
+          if (status === "error") {
+            const failedClient = clientRef();
+            this.client = null;
+            failedClient?.close({ force: true });
+            return;
+          }
+          if (status === "closed") {
             this.client = null;
           }
         }

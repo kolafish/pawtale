@@ -224,6 +224,17 @@ function createVoiceFixtureServer() {
       respond(response, 200, { items: [], total: 0, limit: 8 });
       return;
     }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/share-video-candidate`) {
+      respond(response, 200, { candidate: null });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/share-video/jobs`) {
+      respond(response, 200, {
+        items: [], active_jobs: [], failed_jobs: [], total: 0,
+        limit: Number(url.searchParams.get("limit") || 20), offset: Number(url.searchParams.get("offset") || 0),
+      });
+      return;
+    }
     if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/draft-progress`) {
       respond(response, 200, { status: "idle", title: "等待讲述", detail: "", can_retry: false });
       return;

@@ -151,6 +151,8 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-authorization.ts", {
     ensureVoiceRecordingAuthorization: async () => true,
+    isRecorderPermissionDeniedError: () => false,
+    openRecorderPermissionSettings: async () => true,
     readVoiceAuthorizationConsent: () => false,
     saveVoiceAuthorizationConsent: (agreed = true) => ({ agreed, version: "test", agreedAt: "now" }),
     syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
@@ -159,6 +161,7 @@ function loadVoiceChatPage({
   });
   mockModule("../services/wechat-privacy.ts", {
     ensureRecorderPrivacyAuthorization: async () => {},
+    isRecorderPermissionDeniedMessage: (message = "") => message.includes("麦克风权限"),
     wechatPrivacyErrorMessage: (message) => message || "微信隐私授权失败",
     ...wechatPrivacyExports,
   });
@@ -218,6 +221,51 @@ function installAutoEndingAudioContext() {
     },
   };
 }
+
+test("microphone settings recovers authorization without replacing a healthy connection", async () => {
+  let authorized = true;
+  let settingsError = null;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      openRecorderPermissionSettings: async () => {
+        if (settingsError) throw settingsError;
+        return authorized;
+      },
+    },
+  });
+  for (const hasClient of [true, false]) {
+    let connectCalls = 0;
+    const context = {
+      ...page,
+      data: { ...page.data, status: "error", error: "没有麦克风权限" },
+      voiceStreaming: { hasClient: () => hasClient },
+      async connectGateway() { connectCalls += 1; },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+    };
+    await page.openRecorderSettings.call(context);
+    assert.equal(connectCalls, hasClient ? 0 : 1);
+    assert.equal(context.data.error, "");
+    assert.equal(context.data.recorderSettingsRequired, false);
+    assert.equal(context.data.status, hasClient ? "ready" : "idle");
+
+    context.data.error = "没有麦克风权限";
+    authorized = false;
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data.recorderSettingsRequired, true);
+    assert.equal(connectCalls, hasClient ? 0 : 1);
+
+    settingsError = new Error("openSetting:fail");
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data.recorderSettingsRequired, true, "设置打开失败仍允许重试");
+    assert.equal(context.data.recoveryNotice, "openSetting:fail");
+    settingsError = null;
+    authorized = true;
+    context.disposed = true;
+    const before = context.data;
+    await page.openRecorderSettings.call(context);
+    assert.equal(context.data, before, "已离开的页面不更新或重连");
+  }
+});
 
 test("voice chat blocks recording before voice authorization consent", () => {
   const toasts = [];

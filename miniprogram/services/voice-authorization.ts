@@ -1,6 +1,7 @@
 import { ensureBackendSession, getMemoirIdentity } from "./auth";
 import { request } from "./request";
 import { ensureRecorderPrivacyAuthorization } from "./wechat-privacy";
+export { isRecorderPermissionDeniedError, openRecorderPermissionSettings } from "./wechat-privacy";
 import { readMemoirStore } from "../stores/session";
 
 export const VOICE_AUTHORIZATION_VERSION = "2026-09-21";

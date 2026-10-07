@@ -633,4 +633,21 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
   assert.equal(errorPatch.errorKindText, "连接错误");
   assert.equal(errorPatch.gatewayStateText, "连接异常");
   assert.equal(errorPatch.canReconnect, true);
+
+  const recorderPermissionPatch = voiceChatErrorPatch(
+    "没有麦克风权限",
+    { kind: "recorder", code: "recorder_permission_denied", message: "没有麦克风权限" },
+    { persistenceStateText: "等待识别", recoveryNotice: "" },
+  );
+  const recorderPermissionView = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    ...recorderPermissionPatch,
+  });
+  assert.equal(recorderPermissionView.recorderSettingsRequired, true);
+  assert.equal(recorderPermissionView.showRecoveryPanel, true);
+  assert.equal(recorderPermissionView.showRecoveryActions, true);
+  assert.equal(voiceChatViewPatch({
+    ...initialVoiceChatData(), ...recorderPermissionPatch, error: "",
+    recorderSettingsRequired: true,
+  }).recorderSettingsRequired, false);
 });

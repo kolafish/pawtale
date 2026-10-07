@@ -83,6 +83,7 @@
   <view wx:if="{{showRecoveryPanel}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
     <view wx:if="{{showRecoveryActions}}" class="recovery-actions">
+      <button id="voice-recorder-settings" wx:if="{{recorderSettingsRequired}}" class="recovery-button ui-button" bindtap="openRecorderSettings">去设置麦克风</button>
       <button wx:if="{{canReconnect}}" class="recovery-button ui-button" bindtap="reconnectGateway">重新连接</button>
       <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ui-button ghost" bindtap="finishAfterDisconnect">查看讲述记录</button>
     </view>

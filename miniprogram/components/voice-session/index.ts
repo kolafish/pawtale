@@ -24,6 +24,8 @@ import { storyProgressTitle } from "../../services/story-growth-notice";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   ensureVoiceRecordingAuthorization,
+  isRecorderPermissionDeniedError,
+  openRecorderPermissionSettings,
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -411,9 +413,18 @@ Component({
       const fallback = forRecording ? "录音授权失败" : "语音授权同步失败";
       const message = error instanceof Error ? error.message : fallback;
       if (forRecording) {
-        this.handleError(message, { kind: "recorder", code: "voice_recording_authorization_failed", message });
+        this.handleError(message, {
+          kind: "recorder",
+          code: isRecorderPermissionDeniedError(error)
+            ? "recorder_permission_denied"
+            : "voice_recording_authorization_failed",
+          message,
+        });
       }
-      applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(message, forRecording));
+      applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(
+        message,
+        forRecording,
+      ));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
         wx.showToast({ title: fallback, icon: "none" });
       }
@@ -664,6 +675,39 @@ Component({
       errorKindText: "",
     });
     await this.connectGateway();
+  },
+
+  async openRecorderSettings() {
+    try {
+      const authorized = await openRecorderPermissionSettings();
+      if (this.runtime().disposed) return;
+      if (!authorized) {
+        applyVoiceChatDataPatch(this, {
+          error: "麦克风权限仍未开启。请在小程序设置中允许录音；若已允许，请在手机系统设置中允许微信使用麦克风。",
+        });
+        return;
+      }
+      const hasClient = this.runtime().voiceStreaming.hasClient();
+      applyVoiceChatDataPatch(this, {
+        error: "",
+        errorKindText: "",
+        status: hasClient ? "ready" : "idle",
+        statusText: statusText(hasClient ? "ready" : "idle"),
+        primaryActionText: "开始说话",
+        persistenceStateText: "等待识别",
+        recoveryNotice: "小程序录音权限已开启。若仍无法录音，请在手机系统设置中允许微信使用麦克风。",
+        canReconnect: false,
+        canFinishAfterDisconnect: false,
+      });
+      if (!hasClient) {
+        await this.connectGateway();
+      }
+    } catch (error) {
+      if (this.runtime().disposed) return;
+      applyVoiceChatDataPatch(this, {
+        recoveryNotice: error instanceof Error ? error.message : "麦克风设置打开失败",
+      });
+    }
   },
 
   async finishAfterDisconnect() {

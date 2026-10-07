@@ -1,4 +1,5 @@
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
+import { isRecorderPermissionDeniedMessage } from "../../services/wechat-privacy";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import { NARRATION_MODES, narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
@@ -99,6 +100,7 @@ export interface VoiceChatData {
   recoveryNotice: string;
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
+  recorderSettingsRequired: boolean;
   finishButtonText: string;
   storyGrowthNoticeState: "hidden" | "pending" | "ready" | "failed" | "needs_input" | "no_change";
   storyGrowthNoticeTitle: string;
@@ -248,6 +250,7 @@ export function initialVoiceChatData(): VoiceChatData {
     recoveryNotice: "",
     canReconnect: false,
     canFinishAfterDisconnect: false,
+    recorderSettingsRequired: false,
     finishButtonText: "保存离开",
     storyGrowthNoticeState: "hidden",
     storyGrowthNoticeTitle: "",
@@ -360,6 +363,7 @@ export type VoiceChatViewPatch = Pick<
   | "narratorRecordButtonClass"
   | "interviewerRecordButtonClass"
   | "showErrorKindStrip"
+  | "recorderSettingsRequired"
   | "showRecoveryPanel"
   | "showRecoveryActions"
   | "showVoiceAuthorizationPanel"
@@ -694,6 +698,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   ].filter(Boolean).join(" ");
   const narrationMode = narrationModeForSession({ guidance_mode: state.guidanceMode,
     interview_type: state.interviewType, session_goal: state.sessionGoal });
+  const recorderSettingsRequired = isRecorderPermissionDeniedMessage(state.error);
   return {
     narrationMode,
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
@@ -710,8 +715,18 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     narratorRecordButtonClass: `role-record-button narrator${roleRecordButtonSuffix}`,
     interviewerRecordButtonClass: `role-record-button interviewer${roleRecordButtonSuffix}`,
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
-    showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
-    showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
+    recorderSettingsRequired,
+    showRecoveryPanel: Boolean(
+      state.recoveryNotice
+      || state.canReconnect
+      || state.canFinishAfterDisconnect
+      || recorderSettingsRequired
+    ),
+    showRecoveryActions: Boolean(
+      state.canReconnect
+      || state.canFinishAfterDisconnect
+      || recorderSettingsRequired
+    ),
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
     showAssistantPanel,
     showCompletionIssuePanel,

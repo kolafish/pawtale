@@ -132,6 +132,10 @@ before(async () => {
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
   session.artifacts.mark("voice:setup:privacy-mocked");
+  await session.miniProgram.mockWxMethod("getSetting", {
+    authSetting: { "scope.record": true },
+  });
+  session.artifacts.mark("voice:setup:recorder-permission-mocked");
   await session.miniProgram.mockWxMethod("showModal", { confirm: false, cancel: true });
   session.artifacts.mark("voice:setup:modal-mocked");
   fixture.reset();
@@ -155,7 +159,7 @@ after(async () => {
       } catch (error) {
         teardownError = error;
       }
-      for (const method of ["getRecorderManager", "getPrivacySetting", "showModal"]) {
+      for (const method of ["getRecorderManager", "getPrivacySetting", "getSetting", "openSetting", "showModal"]) {
         try {
           await session.miniProgram.restoreWxMethod(method);
         } catch {
@@ -324,6 +328,18 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(await (await page.$(".mode-label")).text(), "自由讲述");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
+
+    await session.miniProgram.mockWxMethod("getSetting", { authSetting: { "scope.record": false } });
+    await tapBoundAction(await elementById(page, "voice-primary-action"));
+    await waitForPageData(page, data => data.recorderSettingsRequired && !data.recordingStarting, "拒绝麦克风权限显示设置入口");
+    const gatewayCount = fixture.state.gatewayConnections.length;
+    await session.miniProgram.mockWxMethod("getSetting", { authSetting: { "scope.record": true } });
+    await session.miniProgram.mockWxMethod("openSetting", { authSetting: { "scope.record": true } });
+    await tapBoundAction(await elementById(page, "voice-recorder-settings"));
+    await waitForPageData(page, data => !data.recorderSettingsRequired && data.status === "ready", "从设置返回恢复录音操作");
+    assert.equal(fixture.state.gatewayConnections.length, gatewayCount, "权限恢复保留健康的语音连接");
+    assert.equal(fixture.state.createdSessions, 1);
+    session.artifacts.mark("voice:permission:recovered");
 
     const endedSessionId = (await host.data()).voiceEntry.voiceSessionId;
     await tapBoundAction(await elementById(page, "voice-home-action"));

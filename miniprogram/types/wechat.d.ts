@@ -414,6 +414,30 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface AuthorizationSetting {
+    "scope.record"?: boolean;
+    [scope: string]: boolean | undefined;
+  }
+
+  interface GetSettingOption {
+    success?(result: { authSetting: AuthorizationSetting; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface AuthorizeOption {
+    scope: "scope.record";
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface OpenSettingOption {
+    success?(result: { authSetting: AuthorizationSetting; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface ShareAppMessageOption {
     from: "button" | "menu";
     target?: {
@@ -480,6 +504,9 @@ declare namespace WechatMiniprogram {
     createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
+    getSetting?(option: GetSettingOption): void;
+    authorize?(option: AuthorizeOption): void;
+    openSetting?(option: OpenSettingOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
     hideShareMenu?(): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
