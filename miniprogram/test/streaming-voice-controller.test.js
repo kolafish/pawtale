@@ -115,6 +115,11 @@ test("StreamingVoiceController force closes a client after recorder failure", as
     onStatus: (status) => statuses.push(status),
   }));
   const client = clients[0];
+  const close = client.close.bind(client);
+  client.close = (options) => {
+    close(options);
+    client.options.callbacks.onStatus("closed");
+  };
   client.options.callbacks.onStatus("error");
 
   assert.deepEqual(statuses, ["error"]);
