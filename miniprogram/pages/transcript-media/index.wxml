@@ -49,8 +49,9 @@
           <text class="share-video-result-label">视频已生成</text>
           <video
             wx:if="{{shareVideoPreviewPath}}"
-            class="share-video-preview"
+            class="share-video-preview {{shareVideoPreviewPortrait ? 'is-portrait' : ''}}"
             src="{{shareVideoPreviewPath}}"
+            bindloadedmetadata="markShareVideoPreviewShape"
             controls
             show-center-play-btn
             enable-progress-gesture

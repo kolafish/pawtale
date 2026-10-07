@@ -70,7 +70,7 @@ def test_material_image_prompt_is_not_a_subtitle_background_prompt():
     assert "不冒充真实历史照片" in illustration_prompt
     assert "画面中部和右侧" not in illustration_prompt
     assert "不需要为字幕预留中部或右侧空白" not in illustration_prompt
-    assert "画面中部和右侧保留大面积" in video_prompt
+    assert "下方约三分之一" in video_prompt
     assert "不要因为这是回忆录内容" not in illustration_prompt
     assert "不要因为这是回忆录内容" not in video_prompt
 

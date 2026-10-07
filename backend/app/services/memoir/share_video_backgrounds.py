@@ -20,7 +20,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v3"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v4"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -66,7 +66,7 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
     pass
 
 
-_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张横版 16:9 的视频背景图：
+_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
 
 {content}
 
@@ -78,12 +78,11 @@ _VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张横版 16:9
 绘画风格：
 {drawing_instruction}
 
-视频背景构图：
-- 画面主体主要安排在左侧。
-- 画面中部和右侧保留大面积自然、干净、低细节的区域，供后期叠加口述文字。
-- 留白自然融入房间、天空、墙面、道路或环境空间，不生成生硬的纯色空块。
-- 中部和右侧不放人物面部、复杂物件或视觉焦点。
-- 背景衬托口述文字，不喧宾夺主。
+竖版构图：
+- 画面主体（人物、关键物件、场景焦点）安排在画面上方约六成的区域内，画面要饱满，不留大块空白。
+- 画面下方约三分之一是自然、安静、低细节的延伸，例如地面、石板路、桌面、水面、草地或阴影，后期会在这里叠加口述字幕；不生成生硬的纯色空块。
+- 下方三分之一不放人物面部、文字状物体或视觉焦点。
+- 主体四周留出一些余量，后期会做缓慢的推拉和平移镜头。
 
 生成边界：
 - 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。

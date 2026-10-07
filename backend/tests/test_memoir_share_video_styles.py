@@ -119,6 +119,7 @@ async def test_uploaded_style_keeps_asset_identity_and_separate_ai_jobs(client, 
     async def process(source_path, target_path):
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(source_path.read_bytes())
+        return 8, 8
 
     monkeypatch.setattr(share_video_custom_backgrounds, "_process_background_image", process)
     text = "后来我们约起一起走。"
@@ -186,7 +187,7 @@ async def test_animation_worker_skips_images_and_reuses_persisted_plan_on_retry(
     calls = []
 
     async def title(*_args, **_kwargs):
-        return None
+        return None, ""
 
     async def plan(text, timings, duration_ms, *, ai_model, usage_context):
         calls.append((text, ai_model))
@@ -212,7 +213,7 @@ async def test_animation_worker_skips_images_and_reuses_persisted_plan_on_retry(
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         request.target_path.write_bytes(b"rendered animation")
 
-    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", title)
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", title)
     monkeypatch.setattr(share_video_jobs, "plan_share_video_story", plan)
     monkeypatch.setattr(share_video_jobs.background_orchestration, "prepare_share_video_background", no_images)
     monkeypatch.setattr(share_video_jobs.rendering, "render_share_video_clip", render)
@@ -239,7 +240,7 @@ async def test_animation_planning_failure_is_visible_without_image_fallback(clie
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
 
     async def title(*_args, **_kwargs):
-        return None
+        return None, ""
 
     async def invalid_plan(*_args, **_kwargs):
         raise ShareVideoStoryPlanningError("分镜引用不属于所选讲述")
@@ -247,7 +248,7 @@ async def test_animation_planning_failure_is_visible_without_image_fallback(clie
     async def never_render(*_args, **_kwargs):
         pytest.fail("Invalid animation must fail instead of changing style")
 
-    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", title)
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", title)
     monkeypatch.setattr(share_video_jobs, "plan_share_video_story", invalid_plan)
     monkeypatch.setattr(share_video_jobs.rendering, "render_share_video_clip", never_render)
     monkeypatch.setattr(share_video_jobs.background_orchestration, "prepare_share_video_background", never_render)

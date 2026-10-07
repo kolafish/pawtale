@@ -4,8 +4,10 @@ from app.services.memoir.share_video_rendering import (
     ShareVideoRenderRequest,
     _QUOTE_PAGE_MAX_CHARS,
     _quote_line_ranges,
-    _subtitle_file_content,
+    _relative_timings,
+    _spoken_char_count,
     _subtitle_ranges,
+    usable_hook_text,
 )
 
 
@@ -70,27 +72,33 @@ def test_unpunctuated_subtitles_keep_every_character_in_two_line_pages() -> None
     assert all(end - start <= _QUOTE_PAGE_MAX_CHARS for start, end in pages)
 
 
-def test_karaoke_preserves_silence_between_spoken_phrases(tmp_path: Path) -> None:
+def test_captions_light_spoken_characters_and_hold_through_pauses(tmp_path: Path) -> None:
     request = ShareVideoRenderRequest(
         source_audio_path=tmp_path / "source.wav",
         source_audio_mime_type="audio/wav",
         target_path=tmp_path / "share.mp4",
         selected_text="去年，后来",
         char_timings=[
-            {"start_ms": 0, "end_ms": 100},
-            {"start_ms": 100, "end_ms": 200},
-            {"start_ms": 200, "end_ms": 250},
-            {"start_ms": 1250, "end_ms": 1350},
-            {"start_ms": 1350, "end_ms": 1450},
+            {"start_ms": 5000, "end_ms": 5100},
+            {"start_ms": 5100, "end_ms": 5200},
+            {"start_ms": 5200, "end_ms": 5250},
+            {"start_ms": 6250, "end_ms": 6350},
+            {"start_ms": 6350, "end_ms": 6450},
         ],
-        start_ms=0,
-        end_ms=1450,
+        start_ms=5000,
+        end_ms=6450,
     )
+    timings = _relative_timings(request)
 
-    quote_event = next(
-        line for line in _subtitle_file_content(request).splitlines() if ",Quote," in line
-    )
+    # The 1-second pause keeps "去年，" lit without starting "后来".
+    assert _spoken_char_count(timings, 0, 5, 700) == 3
+    assert _spoken_char_count(timings, 0, 5, 1300) == 4
+    assert _spoken_char_count(timings, 0, 5, 1450) == 5
 
-    # ASS karaoke durations are cumulative from the dialogue start. The 1-second
-    # pause must delay the next highlight without extending the first phrase.
-    assert r"{\kf25}去年，{\k100}{\kf20}后来" in quote_event
+
+def test_opening_hook_must_quote_a_short_sentence_of_the_clip() -> None:
+    text = "那年中秋，院子里的栀子花开了。可那天晚上，他没有回来。"
+
+    assert usable_hook_text(" 可那天晚上，他没有回来。", text) == "可那天晚上，他没有回来。"
+    assert usable_hook_text("他再也没有回来。", text) == ""
+    assert usable_hook_text(text, text) == ""

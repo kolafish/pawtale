@@ -42,8 +42,9 @@
       <button class="action-button video-preview-close ui-button" bindtap="closeVideoPreview">关闭</button>
     </view>
     <video
-      class="video-preview"
+      class="video-preview {{videoPreviewPortrait ? 'is-portrait' : ''}}"
       src="{{videoPreviewPath}}"
+      bindloadedmetadata="markVideoPreviewShape"
       controls
       show-center-play-btn
       show-fullscreen-btn

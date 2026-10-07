@@ -98,6 +98,7 @@ interface ImageAssetsData {
   previewingVideoId: string;
   videoPreviewPath: string;
   videoPreviewTitle: string;
+  videoPreviewPortrait: boolean;
 }
 
 interface ImageAssetDataset {
@@ -297,6 +298,7 @@ definePage<ImageAssetsData>()({
     previewingVideoId: "",
     videoPreviewPath: "",
     videoPreviewTitle: "",
+    videoPreviewPortrait: true,
   },
 
   onLoad(options: PageQuery = {}) {
@@ -565,6 +567,10 @@ definePage<ImageAssetsData>()({
     } finally {
       this.setData({ previewingVideoId: "" });
     }
+  },
+
+  markVideoPreviewShape(event: { detail: { width: number; height: number } }) {
+    this.setData({ videoPreviewPortrait: event.detail.height >= event.detail.width });
   },
 
   closeVideoPreview() {

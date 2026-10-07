@@ -1,13 +1,13 @@
 import base64
 import asyncio
 import json
-import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote
 from unittest.mock import AsyncMock
 
+from PIL import Image
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -73,9 +73,9 @@ PNG_1X1 = base64.b64decode(
 @pytest.fixture(autouse=True)
 def _stub_optional_video_title_ai(monkeypatch):
     async def no_suggested_title(selected_text, *, ai_model):
-        return None
+        return None, ""
 
-    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", no_suggested_title)
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", no_suggested_title)
 
 
 async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
@@ -602,55 +602,17 @@ async def test_share_video_context_returns_latest_job_only_for_current_text(clie
     assert changed_context.json()["latest_job_id"] is None
 
 
-def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path):
+def test_share_video_captions_use_memoir_page_layout_and_packaged_font():
     text = "对孙女的偏爱与心平之辩"
-    request = share_video_rendering.ShareVideoRenderRequest(
-        source_audio_path=tmp_path / "source.wav",
-        source_audio_mime_type="audio/wav",
-        target_path=tmp_path / "share.mp4",
-        selected_text=text,
-        char_timings=[
-            {"start_ms": index * 100, "end_ms": (index + 1) * 100}
-            for index, _char in enumerate(text)
-        ],
-        start_ms=0,
-        end_ms=len(text) * 100,
-    )
+    timings = [{"start_ms": index * 100, "end_ms": (index + 1) * 100} for index, _char in enumerate(text)]
 
-    subtitle_content = share_video_rendering._subtitle_file_content(request)
-    subtitle_plain_text = re.sub(r"\{\\kf\d+\}", "", subtitle_content)
-    font_dir = share_video_rendering._share_video_font_dir()
-    filter_argument = share_video_rendering._subtitle_filter_argument(tmp_path / "subtitles.ass")
-    video_filter_argument = share_video_rendering._video_filter_argument(tmp_path / "subtitles.ass")
+    pages = share_video_rendering._caption_pages(text, timings, len(text) * 100)
 
-    assert f"Style: Quote,{share_video_rendering._SHARE_VIDEO_FONT_NAME}," in subtitle_content
-    assert "回忆录访谈 · 原声摘录" in subtitle_content
-    assert "口述片段" in subtitle_content
-    assert r"对孙女的偏爱\N与心平之辩" in subtitle_plain_text
-    assert subtitle_content.count(r"{\kf") < len(text)
-    assert (font_dir / share_video_rendering._SHARE_VIDEO_FONT_FILE).is_file()
-    assert ":fontsdir='" in filter_argument
-    assert str(font_dir) in filter_argument
-    assert video_filter_argument == filter_argument
-    image_video_filter = share_video_rendering._video_filter_argument(
-        tmp_path / "subtitles.ass",
-        has_background_image=True,
-    )
-    assert "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720" in image_video_filter
-    assert ":fontsdir='" in image_video_filter
-    card_filter = share_video_rendering._single_background_filter_complex(
-        tmp_path / "subtitles.ass",
-        has_background_image=True,
-        body_seconds=12,
-        intro_seconds=1,
-        outro_seconds=1,
-    )
-    assert "[0:v]scale=1280:720" in card_filter
-    assert "[padded][2:v]overlay=0:0" in card_filter
-    assert "[withintro][3:v]overlay=0:0" in card_filter
-    assert "[1:a]adelay=1000," in card_filter
-    assert "[vout]" in card_filter
-    assert card_filter.endswith("[aout]")
+    assert len(pages) == 1
+    assert [text[line.start:line.end] for line in pages[0].lines] == ["对孙女的偏爱", "与心平之辩"]
+    assert (
+        share_video_rendering._SHARE_VIDEO_FONT_DIR / share_video_rendering._SHARE_VIDEO_FONT_FILE
+    ).is_file()
 
 
 def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
@@ -681,36 +643,18 @@ def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
     assert all(fragment[0] not in "，,、。！？!?；;" for fragment in line_texts)
 
 
-def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
-    segments = [
-        share_video_rendering.ShareVideoBackgroundSegment(
-            image_path=tmp_path / "scene-1.png",
-            start_ms=0,
-            end_ms=12_000,
-        ),
-        share_video_rendering.ShareVideoBackgroundSegment(
-            image_path=tmp_path / "scene-2.png",
-            start_ms=12_000,
-            end_ms=24_000,
-        ),
-    ]
+def test_share_video_long_scenes_become_several_moving_shots(tmp_path):
+    first, second = tmp_path / "scene-1.png", tmp_path / "scene-2.png"
+    for path in (first, second):
+        Image.new("RGB", (900, 1600), (120, 110, 90)).save(path)
 
-    filter_argument = share_video_rendering._multi_background_filter_complex(
-        segments,
-        tmp_path / "subtitles.ass",
-        use_xfade=False,
-        body_seconds=24,
-        intro_seconds=1.5,
-        outro_seconds=1.7,
-    )
+    shots = share_video_rendering._picture_shots([(first, 0.0, 12.0), (second, 12.0, 15.0)])
 
-    assert "xfade=" not in filter_argument
-    assert "concat=n=2:v=1:a=0" in filter_argument
-    assert "[concatbg]" in filter_argument
-    assert "[padded][3:v]overlay=0:0" in filter_argument
-    assert "[withintro][4:v]overlay=0:0" in filter_argument
-    assert "[2:a]adelay=1500," in filter_argument
-    assert "[vout]" in filter_argument
+    assert [(shot.start, shot.end) for shot in shots] == [(0.0, 6.0), (6.0, 12.0), (12.0, 15.0)]
+    assert len({shot.move for shot in shots}) == 3
+    assert shots[0].canvas is shots[1].canvas
+    frame = share_video_rendering._shots_visual(shots)(11.9)
+    assert frame.size == (share_video_rendering._VIDEO_WIDTH, share_video_rendering._VIDEO_HEIGHT)
 
 
 def test_share_video_background_prompts_cover_default_styles():
@@ -767,10 +711,10 @@ def test_share_video_background_prompts_cover_default_styles():
     assert "二十世纪中国老连环画" in storybook.prompt
     assert "storybook" not in [option["value"] for option in options]
     for prompt in (watercolor, pencil, ink_paper, gouache, old_album, storybook):
-        assert "画面主体主要安排在左侧" in prompt.prompt
-        assert "画面中部和右侧保留大面积" in prompt.prompt
+        assert "画面上方约六成" in prompt.prompt
+        assert "下方约三分之一" in prompt.prompt
         assert "不出现文字" in prompt.prompt
-        assert "横版 16:9" in prompt.prompt
+        assert "竖版 9:16" in prompt.prompt
         assert "不要因为这是回忆录内容" not in prompt.prompt
 
     long_prompt = share_video_backgrounds.build_share_video_background_prompt(
@@ -786,13 +730,13 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v3"
+    assert prompt.template_version == "memoir-share-video-background-v4"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
     assert "不要用泛泛的漂亮风景代替讲述的场景" in prompt.prompt
     assert "原文没有说明的年代、地点、人物身份或生活细节不要猜测" in prompt.prompt
-    assert "画面中部和右侧保留大面积" in prompt.prompt
+    assert "下方约三分之一" in prompt.prompt
 
 
 def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation():
@@ -907,11 +851,12 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     process_calls: list[tuple[Path, Path]] = []
 
-    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
         process_calls.append((source_path, target_path))
         assert source_path.read_bytes() == PNG_1X1
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(b"processed background jpg")
+        return 1080, 1440
 
     monkeypatch.setattr(
         share_video_custom_backgrounds,
@@ -940,8 +885,8 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     assert payload["status"] == "ready"
     assert payload["preview_url"] == f"/api/mobile/memoir/projects/{project_id}/image-assets/{payload['id']}/file"
     assert payload["mime_type"] == "image/jpeg"
-    assert payload["width"] == 1280
-    assert payload["height"] == 720
+    assert payload["width"] == 1080
+    assert payload["height"] == 1440
     assert payload["processing_preset"] == "memoir_soft"
     assert payload["original_mime_type"] == "image/png"
     assert payload["original_size_bytes"] == len(PNG_1X1)
@@ -955,7 +900,7 @@ async def test_mobile_memoir_uploads_custom_share_video_background(
     assert asset.provider == "user_upload"
     assert asset.metadata_json["share_video_background_source"] == "custom_upload"
     assert asset.metadata_json["original_storage_path"].endswith("/original.png")
-    assert asset.metadata_json["processing_json"]["target_width"] == 1280
+    assert asset.metadata_json["processing_json"]["fit"] == "keep_aspect"
 
     preview_response = await client.get(payload["preview_url"])
 
@@ -1069,9 +1014,9 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
         assert selected_text == text[:end_char]
         if suggested_title is None:
             raise RuntimeError("title provider unavailable")
-        return suggested_title
+        return suggested_title, ""
 
-    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title", suggest_title)
+    monkeypatch.setattr(share_video_jobs, "_suggest_share_video_title_and_hook", suggest_title)
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
@@ -1111,7 +1056,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
     assert "output" in response_schema["required"]
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
-    assert render_requests[0].title == expected_title
+    assert render_requests[0].hook_text == ""
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
@@ -1593,10 +1538,11 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         tmp_path / "share-videos",
     )
 
-    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> tuple[int, int]:
         assert source_path.read_bytes() == PNG_1X1
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(b"processed background jpg")
+        return 1080, 1440
 
     async def fail_ai_background_generation(_selected_text, _style_id):
         raise AssertionError("custom background should not call AI background generation")
