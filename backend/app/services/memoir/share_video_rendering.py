@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+import io
 import math
 import os
 from pathlib import Path
@@ -51,6 +52,7 @@ _STORY_BACKDROP = (46, 39, 32)
 _END_PAPER = (244, 236, 222)
 _END_INK = (64, 52, 40)
 _END_MUTED = (120, 106, 88)
+_END_CODE_SIZE = 240
 _END_TAGLINE = "也为家里的长辈，留一本回忆录"
 
 
@@ -78,6 +80,8 @@ class ShareVideoRenderRequest:
     hook_text: str = ""
     book_title: str = ""
     narrator_name: str = ""
+    # PNG mini program code that opens this video's playback page.
+    mini_program_code: bytes | None = None
 
 
 class ShareVideoGenerationError(RuntimeError):
@@ -679,25 +683,40 @@ def _fit_font(text: str, size: int, max_width: int, *, bold: bool) -> ImageFont.
     return font
 
 
-def _end_card(book_title: str, narrator_name: str) -> Image.Image:
+def _end_card(book_title: str, narrator_name: str, mini_program_code: bytes | None = None) -> Image.Image:
     ys, xs = np.mgrid[0:_VIDEO_HEIGHT, 0:_VIDEO_WIDTH].astype(np.float32)
     falloff = np.clip(1 - 0.22 * (((xs - _VIDEO_WIDTH / 2) / _VIDEO_WIDTH) ** 2 + ((ys - _VIDEO_HEIGHT * 0.45) / _VIDEO_HEIGHT) ** 2) * 2, 0.8, 1)
     card = Image.fromarray((falloff[..., None] * np.array(_END_PAPER, np.float32)).astype(np.uint8)).convert("RGBA")
     draw = ImageDraw.Draw(card)
     center = _VIDEO_WIDTH / 2
+    code = None
+    if mini_program_code:
+        try:
+            code = Image.open(io.BytesIO(mini_program_code)).convert("RGBA")
+            code.thumbnail((_END_CODE_SIZE, _END_CODE_SIZE), Image.LANCZOS)
+        except (OSError, ValueError):
+            code = None
+    # The code takes the middle of the card, so the text block moves up.
+    top = 300 if code else 380
     clean_title = "".join(char for char in book_title.strip().strip("《》") if char.isprintable())[:18]
     if clean_title:
-        draw.text((center, 380), "这段故事，出自", font=_font(30), fill=_END_MUTED, anchor="mm")
+        draw.text((center, top), "这段故事，出自", font=_font(30), fill=_END_MUTED, anchor="mm")
         title = f"《{clean_title}》"
-        draw.text((center, 462), title, font=_fit_font(title, 60, 640, bold=True), fill=_END_INK, anchor="mm")
+        draw.text((center, top + 82), title, font=_fit_font(title, 60, 640, bold=True), fill=_END_INK, anchor="mm")
     else:
-        draw.text((center, 440), "一段家庭口述", font=_font(44, bold=True), fill=_END_INK, anchor="mm")
+        draw.text((center, top + 60), "一段家庭口述", font=_font(44, bold=True), fill=_END_INK, anchor="mm")
     clean_narrator = "".join(char for char in narrator_name.strip() if char.isprintable())[:12]
     if clean_narrator:
-        draw.text((center, 540), f"讲述人 · {clean_narrator}", font=_font(30), fill=_END_MUTED, anchor="mm")
+        draw.text((center, top + 160), f"讲述人 · {clean_narrator}", font=_font(30), fill=_END_MUTED, anchor="mm")
+    lockup_top = 760
+    if code:
+        code_top = top + 240
+        card.alpha_composite(code, (round(center - code.width / 2), code_top))
+        draw.text((center, code_top + code.height + 36), "微信扫码，打开这段讲述", font=_font(24), fill=_END_MUTED, anchor="mm")
+        lockup_top = code_top + code.height + 100
     lockup = render_brand_lockup(300, variant="dark")
-    card.alpha_composite(lockup, (round(center - lockup.width / 2), 760))
-    draw.text((center, 760 + lockup.height + 48), _END_TAGLINE, font=_font(24), fill=_END_MUTED, anchor="mm")
+    card.alpha_composite(lockup, (round(center - lockup.width / 2), lockup_top))
+    draw.text((center, lockup_top + lockup.height + 48), _END_TAGLINE, font=_font(24), fill=_END_MUTED, anchor="mm")
     return card.convert("RGB")
 
 
@@ -714,7 +733,7 @@ def _video_frames(
     shade, grain = _finishing_layers()
     watermark = render_brand_lockup(150, variant="light")
     watermark_mask = _with_alpha(watermark, 0.6)
-    end_card = np.asarray(_end_card(request.book_title, request.narrator_name), np.float32)
+    end_card = np.asarray(_end_card(request.book_title, request.narrator_name, request.mini_program_code), np.float32)
     total_seconds = hook_seconds + body_seconds + _END_CARD_SECONDS
     if hook_seconds:
         opening = np.asarray(visual(0.0), np.float32)

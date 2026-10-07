@@ -546,6 +546,23 @@ class MemoirShareVideoOutputResponse(BaseModel):
     mime_type: str
     size_bytes: int
     download_url: str
+    # Opens the public playback page from a forwarded card.
+    share_code: str
+
+
+class MemoirSharedVideoReadRequest(BaseModel):
+    code: str
+
+
+class MemoirSharedVideoResponse(BaseModel):
+    title: str
+    book_title: str
+    narrator_name: str
+    duration_ms: int
+    video_url: str
+    poster_url: str
+    # Present only while the author keeps the whole book shared.
+    book_share_token: str | None = None
 
 
 class MemoirShareVideoCountResponse(BaseModel):

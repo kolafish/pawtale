@@ -7,6 +7,7 @@ import type {
   MemoirShareVideoListResponse,
   MemoirShareVideoStyle,
   MemoirMaterialOfflineASRState,
+  MemoirSharedVideo,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
   MemoirVoiceSearchTranscriptionResponse,
@@ -24,12 +25,14 @@ import {
 } from "./memoir-api-client";
 import {
   downloadAuthenticatedFile,
+  downloadPublicFile,
   uploadAuthenticatedFile,
 } from "./authenticated-media";
 import {
   ApiError,
   cleanBaseUrl,
   readBackendConfig,
+  request,
 } from "./request";
 import { readSelectedTranscriptPolishLevel } from "./transcript-polish-settings";
 
@@ -290,6 +293,21 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
     throw new ApiError(0, "未配置后端 HTTP 地址", {});
   }
   return `${cleanBaseUrl(config.httpBaseUrl)}${downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`}`;
+}
+
+export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> {
+  return request<MemoirSharedVideo>("/api/mobile/memoir/share-video/shares/read", {
+    method: "POST",
+    data: { code },
+  });
+}
+
+// The backend serves whole files, so the clip plays from a local copy like the owner's preview.
+export function downloadMemoirSharedVideo(video: MemoirSharedVideo): Promise<string> {
+  return downloadPublicFile(memoirShareVideoDownloadUrl(video.video_url), {
+    failureMessage: "视频下载失败",
+    domainLabel: "视频下载",
+  });
 }
 
 export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<string> {

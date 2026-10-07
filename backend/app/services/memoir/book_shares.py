@@ -132,6 +132,21 @@ async def revoke_share(db: AsyncSession, *, user_id: str, project_id: str) -> No
     await db.commit()
 
 
+async def readable_share_token(db: AsyncSession, project_id: str) -> str | None:
+    """The author's live book link, if a reader could open it right now."""
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    share = await db.get(MemoirBookShare, output.id, populate_existing=True) if output else None
+    if share is None or share.expires_at <= utcnow_naive():
+        return None
+    owner_id = await db.scalar(select(Project.user_id).where(Project.id == project_id))
+    if owner_id is None:
+        return None
+    version, stale = await _current_version(db, user_id=owner_id, project_id=project_id)
+    if stale or version is None or share.version_id != version.id:
+        return None
+    return _stable_token(share.output_id, share.token_hash)
+
+
 async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     invalid = HTTPException(status_code=404, detail="分享链接已失效")
     stable_match = STABLE_TOKEN_PATTERN.fullmatch(token)

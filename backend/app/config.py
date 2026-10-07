@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     wechat_xiaoyu_miniprogram_appid: str = ""
     wechat_xiaoyu_miniprogram_secret: str = ""
     wechat_jscode2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+    # Mini program codes printed in share videos open this version: release, trial or develop.
+    wechat_miniprogram_code_env_version: str = "release"
 
     # AI API Keys
     deepseek_api_key: str = ""

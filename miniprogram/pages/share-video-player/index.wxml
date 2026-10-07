@@ -1,0 +1,35 @@
+<view class="ui-page-shell {{pageClass}}">
+  <view wx:if="{{loading && !video}}" class="empty-panel">
+    <text class="empty-copy">正在打开视频</text>
+  </view>
+
+  <view wx:elif="{{error && !video}}" class="empty-panel">
+    <text class="empty-title">{{error}}</text>
+    <button class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
+    <button class="primary-button shared-video-action" bindtap="openHome">看看老余口述</button>
+  </view>
+
+  <block wx:elif="{{video}}">
+    <image wx:if="{{!videoUrl}}" class="shared-video is-portrait" src="{{posterUrl}}" mode="aspectFill" />
+    <video
+      wx:else
+      class="shared-video {{portrait ? 'is-portrait' : ''}}"
+      src="{{videoUrl}}"
+      poster="{{posterUrl}}"
+      bindloadedmetadata="markVideoShape"
+      controls
+      autoplay
+      show-center-play-btn
+      enable-progress-gesture
+      object-fit="contain"
+    />
+    <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+    <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
+    <view class="hero-panel shared-video-info">
+      <text class="record-title">{{video.title}}</text>
+      <text wx:if="{{video.book_title}}" class="record-meta">出自《{{video.book_title}}》{{video.narrator_name ? ' · 讲述人 ' + video.narrator_name : ''}}</text>
+    </view>
+    <button wx:if="{{video.book_share_token}}" class="ghost-button shared-video-action" bindtap="openBook">阅读这本回忆录</button>
+    <button class="primary-button shared-video-action" bindtap="openHome">也为家里的长辈，留一本回忆录</button>
+  </block>
+</view>

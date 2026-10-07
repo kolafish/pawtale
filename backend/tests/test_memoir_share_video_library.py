@@ -3,12 +3,14 @@ from io import BytesIO
 import subprocess
 from types import SimpleNamespace
 
+from httpx import ASGITransport, AsyncClient
 from PIL import Image
 import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirShareVideoJobStatus
+from app.main import app
 from app.models.memoir import (
     MemoirMaterialShareVideo,
     MemoirImageAsset,
@@ -318,6 +320,15 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(job.id.encode())
         path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
+    shared_read = "/api/mobile/memoir/share-video/shares/read"
+    share_code = chosen.share_code
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        shared = await guest.post(shared_read, json={"code": share_code})
+        assert shared.status_code == 200, shared.text
+        assert shared.json()["video_url"] == f"/api/mobile/memoir/share-video/shares/{share_code}/video"
+        assert shared.json()["book_share_token"] is None
+        assert (await guest.get(shared.json()["video_url"])).content == chosen.id.encode()
+        assert (await guest.post(shared_read, json={"code": "0" * 20})).status_code == 404
     url = f"/api/mobile/memoir/share-video/jobs/{chosen.id}"
     for body in (None, {}, {"confirm": False}):
         response = await client.request("DELETE", url, json=body)
@@ -332,6 +343,10 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert (await client.get(url)).status_code == 404
     assert (await client.get(f"{url}/download")).status_code == 404
     assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{retained.id}/download")).content == b"retained"
+    # Deleting the video takes back every card and printed code that opened it.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.post(shared_read, json={"code": share_code})).status_code == 404
+        assert (await guest.get(f"/api/mobile/memoir/share-video/shares/{share_code}/video")).status_code == 404
     library = await client.get(f"/api/mobile/memoir/projects/{chosen.project_id}/share-video/jobs")
     assert [item["id"] for item in library.json()["items"]] == [retained.id]
     await test_db.refresh(asset)
