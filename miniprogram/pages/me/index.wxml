@@ -125,7 +125,7 @@
       <view wx:if="{{creditAvailable}}" class="credit-card ui-card ui-card-borderless">
         <view class="credit-card-head">
           <view>
-            <text class="action-title">当前可用 ¥{{creditRemainingText}}</text>
+            <text class="action-title">{{creditOverdrawn ? "已超出额度" : "当前可用"}} ¥{{creditRemainingText}}</text>
             <text class="action-meta">已使用 ¥{{creditUsedText}} / ¥{{creditTotalText}}</text>
           </view>
           <text class="credit-percent ui-tabular">{{creditProgressPercent}}%</text>
@@ -133,7 +133,7 @@
         <view class="credit-progress-track" aria-label="AI 额度已使用 {{creditProgressPercent}}%">
           <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
         </view>
-        <text class="credit-hint">额度按 AI 实际调用成本计算。余额用尽后，可添加微信联系管理员。</text>
+        <text class="credit-hint">额度按 AI 厂商公开价格原价扣除，不加价。余额用尽后，可添加微信联系管理员。</text>
         <button class="credit-recharge-button support-action ui-pressable" bindtap="openRechargeQr">添加微信充值</button>
         <button class="credit-usage-toggle ui-pressable" bindtap="toggleCreditUsageDetails">
           {{creditUsageExpanded ? "收起使用明细" : "查看使用明细"}}
@@ -142,7 +142,7 @@
           <view wx:for="{{creditUsageDays}}" wx:for-item="day" wx:key="dateText" class="credit-usage-day">
             <view class="credit-usage-day-head">
               <text>{{day.dateText}}</text>
-              <text class="ui-tabular">当日合计 -¥{{day.amountText}}</text>
+              <text class="ui-tabular">当日扣费 -¥{{day.amountText}}</text>
             </view>
             <view wx:for="{{day.purposes}}" wx:for-item="group" wx:key="purpose" class="credit-usage-row">
               <view class="credit-usage-copy">
@@ -151,10 +151,17 @@
               </view>
               <text class="credit-usage-amount ui-tabular">-¥{{group.amountText}}</text>
             </view>
+            <view wx:for="{{day.credits}}" wx:for-item="entry" wx:key="id" class="credit-usage-row">
+              <view class="credit-usage-copy">
+                <text class="action-title">{{entry.label}}</text>
+                <text wx:if="{{entry.note}}" class="action-meta">{{entry.note}}</text>
+              </view>
+              <text class="credit-usage-amount ui-tabular">{{entry.amountText}}</text>
+            </view>
           </view>
           <text wx:if="{{creditUsageLoading}}" class="credit-usage-message">正在加载…</text>
           <text wx:if="{{creditUsageError}}" class="credit-usage-message">{{creditUsageError}}</text>
-          <text wx:if="{{!creditUsageLoading && !creditUsageError && !creditUsageItems.length}}" class="credit-usage-message">暂无扣费记录</text>
+          <text wx:if="{{!creditUsageLoading && !creditUsageError && !creditUsageDays.length}}" class="credit-usage-message">暂无额度记录</text>
           <button wx:if="{{creditUsageError || (creditUsageHasMore && !creditUsageLoading)}}" class="credit-usage-more ui-pressable" bindtap="loadMoreCreditUsageDetails">
             {{creditUsageError ? "重新加载" : "加载更早记录"}}
           </button>

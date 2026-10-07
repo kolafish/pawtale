@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 
 
@@ -109,22 +110,51 @@ class AITokenPricing:
     #  cache_hit_rmb_per_million, cache_write_rmb_per_million). A None max
     # value is the final open-ended tier.
     context_tiers: tuple[tuple[int | None, float, float, float | None, float | None], ...] = ()
+    # Multiplier applied to every rate outside DeepSeek's peak hours; None means
+    # the provider has no time-of-day pricing.
+    off_peak_multiplier: float | None = None
 
     def rates_for_input_tokens(
         self,
         input_tokens: int,
+        *,
+        at: datetime | None = None,
     ) -> tuple[float, float, float | None, float | None]:
-        for max_input_tokens, input_rate, output_rate, cache_hit_rate, cache_write_rate in (
-            self.context_tiers
-        ):
-            if max_input_tokens is None or input_tokens <= max_input_tokens:
-                return input_rate, output_rate, cache_hit_rate, cache_write_rate
-        return (
+        rates = (
             self.input_rmb_per_million,
             self.output_rmb_per_million,
             self.cache_hit_rmb_per_million,
             self.cache_write_rmb_per_million,
         )
+        for max_input_tokens, input_rate, output_rate, cache_hit_rate, cache_write_rate in (
+            self.context_tiers
+        ):
+            if max_input_tokens is None or input_tokens <= max_input_tokens:
+                rates = (input_rate, output_rate, cache_hit_rate, cache_write_rate)
+                break
+        if self.off_peak_multiplier is None or is_deepseek_peak_time(at):
+            return rates
+        multiplier = self.off_peak_multiplier
+        return tuple(  # type: ignore[return-value]
+            rate * multiplier if rate is not None else None for rate in rates
+        )
+
+
+_BEIJING = timezone(timedelta(hours=8))
+# DeepSeek peak hours, Beijing time, Monday-Friday. Statutory holidays are
+# off-peak upstream too, but they are not modelled here, so holiday calls are
+# charged at the peak rate.
+_DEEPSEEK_PEAK_HOURS = ((9, 12), (14, 18))
+
+
+def is_deepseek_peak_time(at: datetime | None = None) -> bool:
+    moment = at or datetime.now(UTC)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    local = moment.astimezone(_BEIJING)
+    if local.weekday() >= 5:
+        return False
+    return any(start <= local.hour < end for start, end in _DEEPSEEK_PEAK_HOURS)
 
 
 CostStatus = Literal["estimated", "unknown"]
@@ -163,38 +193,25 @@ class AIUnitPricing:
     source: str
 
 
-def _usd(
-    provider: str,
-    model: str,
-    input_usd: float,
-    output_usd: float,
-    *,
-    cache_hit_usd: float | None = None,
-    cache_write_usd: float | None = None,
-) -> AITokenPricing:
-    rate = 7.2
-    return AITokenPricing(
-        provider=provider,
-        model=model,
-        input_rmb_per_million=round(input_usd * rate, 6),
-        output_rmb_per_million=round(output_usd * rate, 6),
-        cache_hit_rmb_per_million=(
-            round(cache_hit_usd * rate, 6) if cache_hit_usd is not None else None
-        ),
-        cache_write_rmb_per_million=(
-            round(cache_write_usd * rate, 6) if cache_write_usd is not None else None
-        ),
-        source="public list estimate; USD/CNY=7.2",
-    )
-
-
 _PRICING: dict[tuple[str, str], AITokenPricing] = {
-    # DeepSeek peak rates are used so the estimate does not understate cost.
-    ("deepseek", "deepseek-flash"): _usd(
-        "deepseek", "deepseek-flash", 0.30, 1.20, cache_hit_usd=0.006
+    # DeepSeek list prices are peak rates; off-peak hours cost half.
+    ("deepseek", "deepseek-flash"): AITokenPricing(
+        provider="deepseek",
+        model="deepseek-flash",
+        input_rmb_per_million=2.0,
+        output_rmb_per_million=8.0,
+        cache_hit_rmb_per_million=0.04,
+        source="https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+        off_peak_multiplier=0.5,
     ),
-    ("deepseek", "deepseek-v4-pro"): _usd(
-        "deepseek", "deepseek-v4-pro", 1.32, 3.96, cache_hit_usd=0.044
+    ("deepseek", "deepseek-v4-pro"): AITokenPricing(
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        input_rmb_per_million=9.0,
+        output_rmb_per_million=27.0,
+        cache_hit_rmb_per_million=0.30,
+        source="https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+        off_peak_multiplier=0.5,
     ),
     ("volc_ark", "doubao-seed-2-0-pro-260215"): AITokenPricing(
         provider="volc_ark",
@@ -266,7 +283,9 @@ def estimate_ai_cost(
     provider: str | None,
     model: str | None,
     usage: NormalizedAIUsage | object,
+    at: datetime | None = None,
 ) -> AICostEstimate:
+    """Estimate one upstream request; ``at`` picks time-of-day rates (default: now)."""
     normalized = usage if isinstance(usage, NormalizedAIUsage) else normalize_ai_usage(usage)
     pricing = token_pricing(provider, model)
     if pricing is None:
@@ -274,7 +293,8 @@ def estimate_ai_cost(
     if normalized.input_tokens is None or normalized.output_tokens is None:
         return AICostEstimate(None, "unknown", provider, model, "provider returned incomplete token usage", pricing.source)
     input_rate, output_rate, cache_hit_rate, cache_write_rate = pricing.rates_for_input_tokens(
-        normalized.input_tokens
+        normalized.input_tokens,
+        at=at,
     )
     cached = normalized.cached_input_tokens
     cache_write = normalized.cache_write_input_tokens
@@ -362,4 +382,19 @@ def estimate_text_cost(
         provider,
         model,
         source=pricing.source,
+    )
+
+
+def sum_cost_estimates(estimates: list[AICostEstimate]) -> AICostEstimate:
+    """Add up separately billed upstream requests; any unknown part makes the total unknown."""
+    first = estimates[0]
+    unknown = next((estimate for estimate in estimates if estimate.amount_rmb is None), None)
+    if unknown is not None:
+        return unknown
+    return AICostEstimate(
+        round(sum(estimate.amount_rmb or 0.0 for estimate in estimates), 6),
+        "estimated",
+        first.provider,
+        first.model,
+        source=first.source,
     )

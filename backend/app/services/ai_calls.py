@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import asyncio
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 import logging
 from typing import Any, Generic, TypeVar
 
@@ -12,6 +14,7 @@ from app.services.ai_costs import (
     NormalizedAIUsage,
     estimate_ai_cost,
     normalize_ai_usage,
+    sum_cost_estimates,
 )
 from app.services.ai_types import AITextClient
 from app.services.ai_streaming import AITextStreamChunk
@@ -46,6 +49,18 @@ class AITextCallResult:
         repr=False,
         compare=False,
     )
+    completed_at: datetime = field(
+        default_factory=lambda: datetime.now(UTC),
+        repr=False,
+        compare=False,
+    )
+    # Per-attempt (usage, completed_at) when several upstream requests were
+    # merged; each request is priced on its own context tier and time.
+    attempts: tuple[tuple[dict[str, Any], datetime], ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
 
     @property
     def model_mismatch(self) -> bool:
@@ -65,10 +80,17 @@ class AITextCallResult:
 
     @property
     def cost_estimate(self) -> AICostEstimate:
+        model = self.response_model or self.resolved_model
+        if self.attempts:
+            return sum_cost_estimates([
+                estimate_ai_cost(provider=self.provider, model=model, usage=usage, at=completed_at)
+                for usage, completed_at in self.attempts
+            ])
         return estimate_ai_cost(
             provider=self.provider,
-            model=self.response_model or self.resolved_model,
+            model=model,
             usage=self.normalized_usage,
+            at=self.completed_at,
         )
 
     def diagnostics(self) -> dict[str, object]:
@@ -209,12 +231,13 @@ def with_attempt_totals(
     attempts: list[AITextCallResult],
     elapsed_ms: int,
 ) -> AITextCallResult:
-    usages = [attempt.usage for attempt in attempts if attempt.usage]
+    priced = [attempt for attempt in attempts if attempt.usage]
     return replace(
         response,
-        usage=_merge_usage_values(usages) if usages else {},
+        usage=_merge_usage_values([attempt.usage for attempt in priced]) if priced else {},
         elapsed_ms=elapsed_ms,
         attempt_count=len(attempts),
+        attempts=tuple((attempt.usage, attempt.completed_at) for attempt in priced),
     )
 
 
@@ -264,7 +287,13 @@ async def generate_text_with_client(
     return result
 
 
-async def stream_text_with_client(
+_STREAM_DONE = object()
+# Upstream streams keep running after the consumer stops (for example when the
+# speaker interrupts a voice turn) so the final usage chunk still gets billed.
+_background_streams: set[asyncio.Task[None]] = set()
+
+
+async def _pump_text_stream(
     client: AITextClient,
     system_prompt: str,
     user_prompt: str,
@@ -273,8 +302,8 @@ async def stream_text_with_client(
     temperature: float,
     max_tokens: int,
     timeout: float,
-) -> AsyncIterator[AITextStreamChunk]:
-    await assert_current_ai_credit_available()
+    queue: asyncio.Queue[object],
+) -> None:
     provider = getattr(client, "provider_name", None)
     resolved_model = getattr(client, "model_name", requested_model)
     mismatch_logged = False
@@ -303,7 +332,7 @@ async def stream_text_with_client(
                     enriched.response_model,
                 )
                 mismatch_logged = True
-            yield enriched
+            queue.put_nowait(enriched)
     except Exception as exc:
         await record_ai_usage(
             provider=provider or "unknown",
@@ -312,7 +341,8 @@ async def stream_text_with_client(
             cost=AICostEstimate(None, "unknown", provider, resolved_model or requested_model, reason="AI stream failed"),
             error_type=type(exc).__name__,
         )
-        raise
+        queue.put_nowait(exc)
+        return
     if last_chunk is not None:
         await record_ai_usage(
             provider=last_chunk.provider or "unknown",
@@ -321,6 +351,40 @@ async def stream_text_with_client(
             cost=last_chunk.cost_estimate,
             usage=last_chunk.normalized_usage,
         )
+    queue.put_nowait(_STREAM_DONE)
+
+
+async def stream_text_with_client(
+    client: AITextClient,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    requested_model: str | None,
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
+) -> AsyncIterator[AITextStreamChunk]:
+    await assert_current_ai_credit_available()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    pump = asyncio.create_task(_pump_text_stream(
+        client,
+        system_prompt,
+        user_prompt,
+        requested_model=requested_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        queue=queue,
+    ))
+    _background_streams.add(pump)
+    pump.add_done_callback(_background_streams.discard)
+    while True:
+        item = await queue.get()
+        if item is _STREAM_DONE:
+            return
+        if isinstance(item, Exception):
+            raise item
+        yield item  # type: ignore[misc]
 
 
 def validate_structured_response(
@@ -377,18 +441,28 @@ async def generate_structured_with_client(
             max_attempts=max_attempts,
         )
     except Exception as exc:
+        # A structured output that failed validation still returned exact
+        # token usage, so it is billed; other failures have no usage to bill.
+        response = exc.response if isinstance(exc, AIStructuredOutputError) else None
         await record_ai_usage(
-            provider=getattr(client, "provider_name", None) or "unknown",
-            model=getattr(client, "model_name", None) or requested_model or "unknown",
+            provider=(response.provider if response else None)
+            or getattr(client, "provider_name", None)
+            or "unknown",
+            model=(response.response_model or response.resolved_model if response else None)
+            or getattr(client, "model_name", None)
+            or requested_model
+            or "unknown",
             status="failed",
-            cost=AICostEstimate(
+            cost=response.cost_estimate if response else AICostEstimate(
                 None,
                 "unknown",
                 getattr(client, "provider_name", None),
                 getattr(client, "model_name", None) or requested_model,
                 reason="structured AI call failed before a billable response was returned",
             ),
+            usage=response.normalized_usage if response else None,
             error_type=type(exc).__name__,
+            billable=response is not None,
         )
         raise
     await record_ai_usage(

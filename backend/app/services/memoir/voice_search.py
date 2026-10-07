@@ -171,6 +171,7 @@ async def transcribe_voice_search_audio(
     collect_task: asyncio.Task[None] | None = None
     status = "failed"
     error_type: str | None = None
+    audio_sent = False
     normalized_mime_type = mime_type.split(";", 1)[0].strip().lower()
     audio_duration_seconds = (
         len(audio) / (16_000 * 2)
@@ -197,6 +198,7 @@ async def transcribe_voice_search_audio(
         await asr_client.start()
         collect_task = asyncio.create_task(collect_events())
         await asr_client.send_audio(audio)
+        audio_sent = True
         await asr_client.finish()
         await asyncio.wait_for(asyncio.shield(collect_task), timeout=ASR_SEARCH_DRAIN_TIMEOUT_SECONDS)
         transcript = (final_texts[-1] if final_texts else latest_text).strip()
@@ -223,6 +225,7 @@ async def transcribe_voice_search_audio(
             audio_duration_seconds=audio_duration_seconds,
             status=status,
             error_type=error_type,
+            billable=audio_sent,
         )
 
     return transcript

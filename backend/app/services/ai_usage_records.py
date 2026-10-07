@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from decimal import Decimal
@@ -63,10 +64,33 @@ async def record_ai_usage(
     audio_duration_seconds: float | None = None,
     error_type: str | None = None,
     context: AIUsageContext | None = None,
+    billable: bool | None = None,
 ) -> None:
+    """Record one upstream call and debit its cost.
+
+    Only successful calls are debited by default. Callers pass ``billable=True``
+    for a failed or interrupted call whose usage is still exactly known (for
+    example audio already streamed to ASR, or tokens of a rejected structured
+    output), since the provider charges for it.
+    """
     resolved_context = context or _CONTEXT.get()
     if resolved_context is None:
+        logger.warning(
+            "AI usage has no user context and is not billed provider=%s model=%s status=%s",
+            provider,
+            model,
+            status,
+        )
         return
+    if billable is None:
+        billable = status == "succeeded"
+    if status == "succeeded" and cost.amount_rmb is None:
+        logger.warning(
+            "AI usage has no price and is not billed provider=%s model=%s reason=%s",
+            provider,
+            model,
+            cost.reason,
+        )
     try:
         usage = usage or NormalizedAIUsage()
         record = AIUsageRecord(
@@ -97,7 +121,7 @@ async def record_ai_usage(
             await db.flush()
             if (
                 resolved_context.user_id
-                and status == "succeeded"
+                and billable
                 and cost.amount_rmb is not None
                 and Decimal(str(cost.amount_rmb)) > 0
             ):
@@ -128,3 +152,14 @@ async def record_ai_usage(
             provider,
             model,
         )
+
+
+_background_records: set[asyncio.Task[None]] = set()
+
+
+def record_ai_usage_in_background(**kwargs) -> None:
+    """Record usage from a task that is being cancelled without awaiting the write."""
+    kwargs.setdefault("context", _CONTEXT.get())
+    task = asyncio.create_task(record_ai_usage(**kwargs))
+    _background_records.add(task)
+    task.add_done_callback(_background_records.discard)

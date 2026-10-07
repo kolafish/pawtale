@@ -20,7 +20,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_calls import stream_text_with_client
 from app.services.ai_costs import estimate_text_cost
-from app.services.ai_usage_records import record_ai_usage
+from app.services.ai_usage_records import record_ai_usage, record_ai_usage_in_background
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
@@ -721,6 +721,22 @@ class VoiceAssistantTurnStreamSession:
                     audio_protocol=req.audio_protocol,
                     on_chunk=artifacts.append_tts_chunk,
                 )
+        except asyncio.CancelledError:
+            # Interrupted turn: the text already sent was synthesized upstream.
+            if tts_character_count > 0:
+                record_ai_usage_in_background(
+                    provider=tts_client.provider_name,
+                    model=tts_client.model_name,
+                    status="cancelled",
+                    cost=estimate_text_cost(
+                        provider=tts_client.provider_name,
+                        model=tts_client.model_name,
+                        character_count=tts_character_count,
+                    ),
+                    input_characters=tts_character_count,
+                    billable=True,
+                )
+            raise
         except Exception as exc:
             if tts_character_count > 0:
                 await record_ai_usage(
