@@ -136,3 +136,18 @@
   width: 100%;
   margin-top: 22rpx;
 }
+
+.video-library-task-actions {
+  display: flex;
+  gap: 12rpx;
+}
+
+.video-library-delete {
+  min-height: 44px;
+  margin: 0;
+  padding: 10rpx 18rpx;
+  border-radius: 16rpx;
+  color: var(--ui-danger-text);
+  background: transparent;
+  font-size: var(--ui-font-meta);
+}

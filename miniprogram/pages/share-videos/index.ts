@@ -4,6 +4,7 @@ import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { getMemoirIdentity } from "../../services/auth";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
+  deleteMemoirShareVideoJob,
   getMemoirShareVideoJob,
   listMemoirShareVideos,
   memoirSharedVideoUrl,
@@ -20,6 +21,7 @@ import { formatBeijingDateTimeShort } from "../../services/time";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { PollingTimer } from "../../services/polling-timer";
 import { shareVideoJobStatusText } from "../../services/transcript-share-video";
+import { shareVideoDeleteConfirmation } from "../../services/share-video-delete";
 
 const PAGE_SIZE = 20;
 
@@ -45,6 +47,7 @@ interface ShareVideosData {
   taskItems: ShareVideoTaskView[];
   total: number;
   hasMore: boolean;
+  deletingId: string;
 }
 
 type VideoEvent = PageDatasetEvent<{ id?: string; utteranceId?: string }>;
@@ -84,6 +87,7 @@ definePage<ShareVideosData>()({
     taskItems: [],
     total: 0,
     hasMore: false,
+    deletingId: "",
   },
 
   onLoad(options?: PageQuery) {
@@ -227,6 +231,29 @@ definePage<ShareVideosData>()({
     wx.navigateTo({
       url: pageUrl("/pages/transcript-media/index", { id: utteranceId, jobId: id }),
     });
+  },
+
+  async deleteFailedVideo(event: VideoEvent) {
+    const task = this.data.taskItems.find((item) => item.id === datasetString(event, "id"));
+    if (!task || task.status !== "failed" || this.data.deletingId) return;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      wx.showModal({
+        ...shareVideoDeleteConfirmation(task),
+        confirmColor: "#b64545",
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      });
+    });
+    if (!confirmed) return;
+    this.setData({ deletingId: task.id, error: "" });
+    try {
+      await deleteMemoirShareVideoJob(task.id);
+      this.setData({ taskItems: this.data.taskItems.filter((item) => item.id !== task.id) });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "删除失败，请稍后重试" });
+    } finally {
+      this.setData({ deletingId: "" });
+    }
   },
 
   pickClip() {
