@@ -230,15 +230,16 @@ _ALIASES = {
     ("deepseek", "deepseek"): "deepseek-flash",
     ("deepseek", "deepseek-v4-flash"): "deepseek-flash",
     ("volc_ark", "volc-doubao-pro"): "doubao-seed-2-0-pro-260215",
+    ("volc_ark", "doubao-seedream-5-0-lite-260128"): "doubao-seedream-5-0-260128",
 }
 
 _UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
-    ("volc_ark", "doubao-seedream-5-0-lite-260128"): AIUnitPricing(
+    ("volc_ark", "doubao-seedream-5-0-260128"): AIUnitPricing(
         provider="volc_ark",
-        model="doubao-seedream-5-0-lite-260128",
+        model="doubao-seedream-5-0-260128",
         unit="image",
         rmb_per_unit=0.22,
-        source="https://www.volcengine.com/product/ark",
+        source="https://docs.volcengine.com/docs/ark/model-pricing?lang=zh&redirect=1",
     ),
     ("stepfun", "stepaudio-3-asr-max"): AIUnitPricing(
         provider="stepfun",
@@ -318,7 +319,7 @@ def _unit_pricing(provider: str | None, model: str | None) -> AIUnitPricing | No
     if not provider or not model:
         return None
     key = (provider.strip().lower(), model.strip().lower())
-    return _UNIT_PRICING.get(key)
+    return _UNIT_PRICING.get((key[0], _ALIASES.get(key, key[1])))
 
 
 def estimate_image_cost(
