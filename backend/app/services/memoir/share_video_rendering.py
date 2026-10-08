@@ -187,6 +187,13 @@ async def share_video_thumbnail(source_path: Path) -> Path:
     return await _video_still(source_path, ".thumbnail.jpg", 2, "scale=320:-2", 5)
 
 
+async def share_video_poster(source_path: Path, hook_text: str = "") -> Path:
+    """The portrait opening frame, with the opening line fully shown, as the player's poster."""
+    # Videos without an opening line start on the story image straight away.
+    seek_seconds = _hook_seconds(hook_text.strip()) - 0.5 if hook_text.strip() else 0.5
+    return await _video_still(source_path, ".poster.jpg", seek_seconds, "null", 2)
+
+
 async def share_video_end_frame(source_path: Path) -> Path:
     """The closing card with the mini program code, held on screen after playback."""
     return await _video_still(source_path, ".end.jpg", -0.3, "null", 2)

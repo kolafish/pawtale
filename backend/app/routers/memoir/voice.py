@@ -757,6 +757,12 @@ async def _share_video_file_response(
         except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
             raise HTTPException(status_code=503, detail="视频缩略图暂时不可用") from exc
         return FileResponse(thumbnail, media_type="image/jpeg")
+    if variant == "poster":
+        try:
+            poster = await memoir_share_video_jobs.rendering.share_video_poster(path, video.hook_text)
+        except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="视频封面暂时不可用") from exc
+        return FileResponse(poster, media_type="image/jpeg")
     if variant == "end":
         try:
             end_frame = await memoir_share_video_jobs.rendering.share_video_end_frame(path)
@@ -799,7 +805,7 @@ async def _share_video_file_response(
 async def download_mobile_memoir_share_video_job(
     job_id: str,
     request: Request,
-    variant: Literal["video", "thumbnail", "card", "end"] = "video",
+    variant: Literal["video", "thumbnail", "card", "poster", "end"] = "video",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -826,7 +832,7 @@ async def read_mobile_memoir_shared_video(
 async def download_mobile_memoir_shared_video(
     code: str,
     request: Request,
-    variant: Literal["video", "thumbnail", "card", "end"] = "video",
+    variant: Literal["video", "thumbnail", "card", "poster", "end"] = "video",
     db: AsyncSession = Depends(get_db),
 ):
     video = await memoir_share_video_shares.load_shared_video_file(db, code)

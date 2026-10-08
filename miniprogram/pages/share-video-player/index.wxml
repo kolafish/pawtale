@@ -10,7 +10,7 @@
   </view>
 
   <block wx:elif="{{video}}">
-    <image wx:if="{{!videoUrl}}" class="shared-video is-portrait" src="{{posterUrl}}" mode="aspectFit" />
+    <image wx:if="{{!videoUrl}}" class="shared-video is-portrait" src="{{posterUrl}}" mode="aspectFill" />
     <block wx:elif="{{ended}}">
       <image
         class="shared-video is-portrait"

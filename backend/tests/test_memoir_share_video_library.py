@@ -280,6 +280,11 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     red, green, _blue = end_image.getpixel((360, 640))
     assert red > 180 and green < 80
 
+    # The player's poster is the portrait opening frame.
+    poster = await client.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=poster")
+    assert poster.status_code == 200 and poster.headers["content-type"] == "image/jpeg"
+    assert Image.open(BytesIO(poster.content)).size == (720, 1280)
+
 
 async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
@@ -359,13 +364,14 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
         path.with_suffix(".card.jpg").write_bytes(b"card")
         path.with_suffix(".end.jpg").write_bytes(b"end")
+        path.with_suffix(".poster.jpg").write_bytes(b"poster")
     shared_read = "/api/mobile/memoir/share-video/shares/read"
     share_code = chosen.share_code
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         shared = await guest.post(shared_read, json={"code": share_code})
         assert shared.status_code == 200, shared.text
         assert shared.json()["video_url"] == f"/api/mobile/memoir/share-video/shares/{share_code}/video"
-        assert shared.json()["poster_url"] == f"{shared.json()['video_url']}?variant=card"
+        assert shared.json()["poster_url"] == f"{shared.json()['video_url']}?variant=poster"
         assert shared.json()["end_frame_url"] == f"{shared.json()['video_url']}?variant=end"
         assert shared.json()["book_share_token"] is None
         assert (await guest.get(shared.json()["video_url"])).content == chosen.id.encode()
@@ -390,6 +396,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".thumbnail.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".card.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".end.jpg").exists()
+    assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".poster.jpg").exists()
     assert (await client.get(url)).status_code == 404
     assert (await client.get(f"{url}/download")).status_code == 404
     assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{retained.id}/download")).content == b"retained"
