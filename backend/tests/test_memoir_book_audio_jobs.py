@@ -110,7 +110,7 @@ async def test_new_versions_reuse_unchanged_reordered_paragraphs_and_pin_old_pla
     assert (await prepare(test_db, project_id, user_id, new)).ready_count == 2
 
 
-@pytest.mark.parametrize("change", ["voice", "speed", "model", "sample_rate"])
+@pytest.mark.parametrize("change", ["voice", "speed", "model", "provider", "sample_rate"])
 async def test_audio_profile_changes_invalidate_cache(client, test_db, tts, change):
     project_id, user_id, version = await seed(client, test_db, "一段正文。")
     first = await prepare(test_db, project_id, user_id, version)
@@ -122,6 +122,8 @@ async def test_audio_profile_changes_invalidate_cache(client, test_db, tts, chan
         options["speed_ratio"] = 1.25
     elif change == "model":
         tts.model_name = "another-model"
+    elif change == "provider":
+        tts.provider_name = "stepfun"
     else:
         tts.sample_rate = 48000
     changed = await prepare(test_db, project_id, user_id, version, **options)

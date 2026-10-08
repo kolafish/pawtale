@@ -51,6 +51,19 @@ export const TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
   },
 ];
 
+export const BOOK_TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
+  { value: "", label: "默认音色", description: "温柔女声，适合长篇叙述" },
+  { value: "wenrounvsheng", label: "温柔女声", description: "柔和舒缓，适合回忆录朗读" },
+  { value: "linjiajiejie", label: "邻家女声", description: "亲切自然，适合故事讲述" },
+  { value: "cixingnansheng", label: "磁性男声", description: "沉稳温暖，适合长篇朗读" },
+];
+
+const LEGACY_BOOK_VOICES: Record<string, string> = {
+  zh_female_vv_uranus_bigtts: "wenrounvsheng",
+  zh_female_xiaohe_uranus_bigtts: "linjiajiejie",
+  zh_male_m191_uranus_bigtts: "cixingnansheng",
+};
+
 export const TTS_SPEED_OPTIONS: TTSSpeedOption[] = [
   {
     value: 0.7,
@@ -70,13 +83,18 @@ export const TTS_SPEED_OPTIONS: TTSSpeedOption[] = [
 ];
 
 const VOICE_VALUES = new Set(TTS_VOICE_OPTIONS.map((option) => option.value));
+const BOOK_VOICE_VALUES = new Set(BOOK_TTS_VOICE_OPTIONS.map((option) => option.value));
 const SPEED_VALUES = new Set(TTS_SPEED_OPTIONS.map((option) => option.value));
 
-export function normalizeTTSVoice(value: unknown): string {
+export function normalizeTTSVoice(value: unknown, scope: TTSSettingsScope = "chat"): string {
   if (typeof value !== "string") {
     return "";
   }
   const voice = value.trim();
+  if (scope === "book") {
+    const migrated = LEGACY_BOOK_VOICES[voice] || voice;
+    return BOOK_VOICE_VALUES.has(migrated) ? migrated : "";
+  }
   return VOICE_VALUES.has(voice) ? voice : "";
 }
 
@@ -85,13 +103,13 @@ export function normalizeTTSSpeedRatio(value: unknown): number {
   return SPEED_VALUES.has(ratio) ? ratio : DEFAULT_TTS_SPEED_RATIO;
 }
 
-export function normalizeTTSSettings(value: unknown): TTSSettings {
+export function normalizeTTSSettings(value: unknown, scope: TTSSettingsScope = "chat"): TTSSettings {
   if (!value || typeof value !== "object") {
     return { ...DEFAULT_TTS_SETTINGS };
   }
   const candidate = value as Partial<TTSSettings>;
   return {
-    voice: normalizeTTSVoice(candidate.voice),
+    voice: normalizeTTSVoice(candidate.voice, scope),
     speedRatio: normalizeTTSSpeedRatio(candidate.speedRatio),
   };
 }
@@ -108,16 +126,15 @@ function hasLegacySettingsShape(value: unknown): boolean {
 
 export function normalizeScopedTTSSettings(value: unknown): ScopedTTSSettings {
   if (hasLegacySettingsShape(value)) {
-    const migrated = normalizeTTSSettings(value);
     return {
-      chat: migrated,
-      book: migrated,
+      chat: normalizeTTSSettings(value, "chat"),
+      book: normalizeTTSSettings(value, "book"),
     };
   }
   const candidate = (value && typeof value === "object" ? value : {}) as Partial<ScopedTTSSettings>;
   return {
     chat: normalizeTTSSettings(candidate.chat),
-    book: normalizeTTSSettings(candidate.book),
+    book: normalizeTTSSettings(candidate.book, "book"),
   };
 }
 
@@ -144,7 +161,7 @@ export function readTTSSettingsProfiles(): ScopedTTSSettings {
 
 export function saveScopedTTSSettings(scope: TTSSettingsScope, settings: TTSSettings): TTSSettings {
   const profiles = readTTSSettingsProfiles();
-  const normalized = normalizeTTSSettings(settings);
+  const normalized = normalizeTTSSettings(settings, scope);
   wx.setStorageSync(STORAGE_KEY, {
     ...profiles,
     [scope]: normalized,
@@ -163,11 +180,12 @@ export function readBookTTSSettings(): TTSSettings {
 export function bookTTSRequestFromSettings(
   settings: TTSSettings,
 ): MemoirBookAudioRequest {
+  const normalized = normalizeTTSSettings(settings, "book");
   return {
-    ...(settings.voice ? { voice: settings.voice } : {}),
-    ...(settings.speedRatio === DEFAULT_TTS_SPEED_RATIO
+    ...(normalized.voice ? { voice: normalized.voice } : {}),
+    ...(normalized.speedRatio === DEFAULT_TTS_SPEED_RATIO
       ? {}
-      : { speed_ratio: settings.speedRatio }),
+      : { speed_ratio: normalized.speedRatio }),
   };
 }
 

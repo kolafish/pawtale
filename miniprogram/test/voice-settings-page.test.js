@@ -79,6 +79,10 @@ function loadVoiceSettingsPage({
     ...accessibilityExports,
   });
   mockModule("../services/tts-settings.ts", {
+    BOOK_TTS_VOICE_OPTIONS: [
+      { value: "", label: "默认音色", description: "温柔女声" },
+      { value: "cixingnansheng", label: "磁性男声", description: "适合长篇朗读" },
+    ],
     TTS_VOICE_OPTIONS: [
       {
         value: "",

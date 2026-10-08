@@ -149,6 +149,13 @@ def test_volc_seed_2_pro_uses_input_context_pricing_tiers():
     assert long.amount_rmb == 0.216
 
 
+@pytest.mark.parametrize("text, expected", [("字" * 10000, 0.9), ("你好，Hi!", 0.00036)])
+def test_step_mini_prices_chinese_letters_and_punctuation(text, expected):
+    cost = estimate_text_cost(provider="stepfun", model="step-tts-mini", character_count=len(text), text=text)
+    assert cost.status == "estimated"
+    assert cost.amount_rmb == expected
+
+
 def test_deepseek_off_peak_hours_cost_half_of_list_price():
     usage = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
 

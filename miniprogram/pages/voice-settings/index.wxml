@@ -100,7 +100,7 @@
       <view class="settings-subgroup">
         <text class="subgroup-label">音色</text>
         <view
-          wx:for="{{ttsVoiceOptions}}"
+          wx:for="{{bookTTSVoiceOptions}}"
           wx:key="value"
           class="option-row compact {{item.value === bookTTSVoice ? 'selected' : ''}}"
           aria-role="button"

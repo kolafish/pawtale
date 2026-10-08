@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application_errors import ApplicationError
+from app.config import get_settings
 from app.models.memoir import AudioFile
 from app.schemas.memoir_book import MemoirBookAudioResponse
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
@@ -16,13 +17,17 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_from_json,
     alignment_segments_to_json,
 )
-from app.services.memoir.voice_tts import get_tts_client
+from app.services.tts_stepfun import StepFunTTSClient
 from app.services.memoir.voice_tts_types import TTSClient, TTS_UNAVAILABLE_MESSAGE
 from app.services.ai_costs import estimate_text_cost
 from app.services.ai_usage_records import record_ai_usage
 
 
 MAX_TTS_CHARS_PER_CHUNK = 900
+
+
+def get_tts_client() -> StepFunTTSClient:
+    return StepFunTTSClient(get_settings())
 
 
 @dataclass(frozen=True)
@@ -85,13 +90,17 @@ def cached_audio_response(
     voice: str | None,
     speed_ratio: float,
     force_regenerate: bool,
+    tts_client: TTSClient | None = None,
 ) -> MemoirBookAudioResponse | None:
     cache = metadata_json.get(cache_key)
     if force_regenerate or not isinstance(cache, dict):
         return None
+    client = tts_client or get_tts_client()
     audio_file_ids = cache.get("audio_file_ids")
     if (
-        cache.get("source_text_hash") == text_hash
+        cache.get("provider") == client.provider_name
+        and cache.get("model") == client.model_name
+        and cache.get("source_text_hash") == text_hash
         and (cache.get("voice") or None) == (voice or None)
         and _cache_speed_ratio(cache.get("speed_ratio")) == speed_ratio
         and isinstance(audio_file_ids, list)
@@ -225,6 +234,7 @@ async def synthesize_text_audio(
                         provider=client.provider_name,
                         model=client.model_name,
                         character_count=len(chunk.text),
+                        text=chunk.text,
                     ),
                     input_characters=len(chunk.text),
                     error_type=type(exc).__name__,
@@ -238,6 +248,7 @@ async def synthesize_text_audio(
                     provider=result.provider,
                     model=result.model,
                     character_count=len(chunk.text),
+                    text=chunk.text,
                 ),
                 input_characters=len(chunk.text),
             )

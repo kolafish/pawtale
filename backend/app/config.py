@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     stepfun_base_url: str = "https://api.stepfun.com"
     stepfun_asr_model: str = "stepaudio-3-asr-max"
     stepfun_asr_timeout_seconds: float = 120.0
+    stepfun_tts_timeout_seconds: float = 120.0
 
     # Memoir editing worker
     memoir_editing_worker_enabled: bool = True
@@ -131,7 +132,7 @@ class Settings(BaseSettings):
     voice_gateway_max_active_sessions: int = 10
     voice_gateway_max_active_sessions_per_user: int = 1
 
-    # Assistant TTS
+    # Interactive assistant TTS; long-form narration uses Step TTS Mini.
     tts_provider: str = "disabled"
     tts_timeout_seconds: float = 30.0
     tts_max_concurrent_requests: int = 3

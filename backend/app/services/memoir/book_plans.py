@@ -77,6 +77,7 @@ async def synthesize_book_outline_audio(
         voice=req.voice,
         speed_ratio=speed_ratio,
         force_regenerate=req.force_regenerate,
+        tts_client=tts_client,
     )
     if cached:
         return cached

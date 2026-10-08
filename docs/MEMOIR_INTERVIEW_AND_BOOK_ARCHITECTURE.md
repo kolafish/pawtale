@@ -379,6 +379,11 @@ provider deadline < backend operation deadline < proxy deadline < client deadlin
 Provider 超时表示结果未知，不能因为客户端没有收到结果就自动重复付费调用。只有确定请求未被接受或业务明确幂等时才允许自动重试。多阶段生成每完成一个昂贵步骤立即提交，后续失败只重做失败步骤。
 
 全书朗读固定 `BookOutputVersion`，通过 `/book-output/tts/plan` 返回按段落拆分的播放清单。
+大纲、章节、小节和全书朗读统一使用 StepFun `step-tts-mini`，默认温柔女声，输出 24 kHz MP3。
+实时访谈仍由 assistant TTS 配置选择 provider。朗读继续复用既有分段、任务、音频存储和计费链路，
+接收 Step SSE 的逐字时间戳；只有完整成功的音频才可保存。旧小程序的三种音色 ID 在后端映射为
+对应的 Step 女声/男声，新小程序按聊天和朗读分别保存音色。缓存必须匹配 provider 和 model，
+旧豆包音频不会作为 Step 音频复用；切换只在再次请求相应朗读时生成，不批量重建历史音频。
 长段落再按标点拆为最多 600 字的片段；音频对齐信息保存为片段内偏移，播放时映射回该版本正文。
 复用 `EditingJob.generate_book_audio_chunk` 的唯一去重键和完成结果，键包含用户、项目、实际文本、
 provider、模型、解析后的音色、语速、格式和采样率。相同内容的并发请求共享任务及租约；
