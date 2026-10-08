@@ -254,10 +254,11 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     await test_db.commit()
     path = share_video_jobs.share_video_file_path(job)
     path.parent.mkdir(parents=True)
-    # Green story image with a blue caption band where the subtitles sit.
+    # Green story image with a blue caption band where the subtitles sit, then a red closing card.
     subprocess.run([
         share_video_jobs.rendering._ffmpeg_executable(), "-y", "-f", "lavfi",
-        "-i", "color=c=green:s=720x1280:d=5,drawbox=y=880:w=720:h=400:color=blue:t=fill",
+        "-i", "color=c=green:s=720x1280:d=5,drawbox=y=880:w=720:h=400:color=blue:t=fill,"
+        "drawbox=w=720:h=1280:color=red:t=fill:enable='gte(t,4.4)'",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
     ], check=True, capture_output=True, timeout=10)
 
@@ -270,6 +271,14 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     assert all(image.getpixel((x, 300))[2] < 80 for x in (10, 360, 710))
     text_rows = image.crop((0, 380, 720, 576)).convert("L")
     assert text_rows.getextrema()[1] > 200
+
+    # After playback the page holds the closing card, so its mini program code stays scannable.
+    end = await client.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=end")
+    assert end.status_code == 200 and end.headers["content-type"] == "image/jpeg"
+    end_image = Image.open(BytesIO(end.content)).convert("RGB")
+    assert end_image.size == (720, 1280)
+    red, green, _blue = end_image.getpixel((360, 640))
+    assert red > 180 and green < 80
 
 
 async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):
@@ -349,12 +358,15 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path.write_bytes(job.id.encode())
         path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
         path.with_suffix(".card.jpg").write_bytes(b"card")
+        path.with_suffix(".end.jpg").write_bytes(b"end")
     shared_read = "/api/mobile/memoir/share-video/shares/read"
     share_code = chosen.share_code
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         shared = await guest.post(shared_read, json={"code": share_code})
         assert shared.status_code == 200, shared.text
         assert shared.json()["video_url"] == f"/api/mobile/memoir/share-video/shares/{share_code}/video"
+        assert shared.json()["poster_url"] == f"{shared.json()['video_url']}?variant=card"
+        assert shared.json()["end_frame_url"] == f"{shared.json()['video_url']}?variant=end"
         assert shared.json()["book_share_token"] is None
         assert (await guest.get(shared.json()["video_url"])).content == chosen.id.encode()
         # The player streams by byte ranges instead of downloading the whole clip first.
@@ -377,6 +389,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert not share_video_jobs.share_video_file_path(chosen).exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".thumbnail.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".card.jpg").exists()
+    assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".end.jpg").exists()
     assert (await client.get(url)).status_code == 404
     assert (await client.get(f"{url}/download")).status_code == 404
     assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{retained.id}/download")).content == b"retained"

@@ -212,6 +212,7 @@ export interface MemoirSharedVideo {
   duration_ms: number;
   video_url: string;
   poster_url: string;
+  end_frame_url: string;
   book_share_token: string | null;
 }
 
