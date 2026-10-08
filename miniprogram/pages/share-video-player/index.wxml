@@ -36,7 +36,6 @@
         <text>也为家里的长辈，</text>
         <text>留下一本回忆录</text>
       </view>
-      <text class="shared-video-invitation-copy">把那些慢慢想起的故事，留给家人。</text>
       <view class="shared-video-invitation-footer">
         <view class="shared-video-invitation-art" aria-hidden="true">
           <image src="/assets/memoir-book-header.png" mode="aspectFit" aria-hidden="true" />
