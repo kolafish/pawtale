@@ -38,10 +38,12 @@
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
     <button class="ui-button shared-video-invitation" bindtap="openHome" hover-class="ui-accent-action-hover" aria-label="也为家里的长辈留下一本回忆录，去讲讲故事">
-      <image class="shared-video-invitation-art" src="/assets/memoir-book-header.png" mode="aspectFit" aria-hidden="true" />
       <view class="shared-video-invitation-title">
         <text>也为家里的长辈，</text>
         <text>留下一本回忆录</text>
+      </view>
+      <view class="shared-video-invitation-art" aria-hidden="true">
+        <image src="/assets/memoir-book-header.png" mode="widthFix" aria-hidden="true" />
       </view>
       <view class="shared-video-invitation-action">
         <text>去讲讲故事</text><text aria-hidden="true">→</text>

@@ -21,7 +21,7 @@
   position: relative;
   display: flex;
   justify-content: space-between;
-  gap: 20rpx;
+  gap: 12rpx;
   width: 100%;
   margin: 16rpx 0 0;
   padding: 24rpx;
@@ -34,6 +34,7 @@
 
 .shared-video-invitation-title {
   position: relative;
+  flex-shrink: 0;
   min-width: 0;
   color: var(--ui-accent-strong);
   font-family: var(--ui-font-editorial);
@@ -47,13 +48,23 @@
 }
 
 .shared-video-invitation-art {
-  position: absolute;
-  right: 96rpx;
-  bottom: -20rpx;
-  width: 360rpx;
-  height: 160rpx;
-  opacity: 0.16;
+  position: relative;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0.24;
   pointer-events: none;
+}
+
+.shared-video-invitation-art image {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  /* The asset's left half is transparent; fit the visible book in the gap. */
+  width: 188%;
+  height: auto;
+  transform: translateY(-50%);
 }
 
 .shared-video-invitation-action {
@@ -66,7 +77,8 @@
   min-height: max(88rpx, 44px);
   padding: 12rpx 16rpx;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-accent-surface);
+  background: transparent;
+  box-shadow: inset 0 0 0 1rpx var(--ui-accent-border);
   color: var(--ui-accent-strong);
   font-size: 26rpx;
   font-weight: 600;
