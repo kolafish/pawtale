@@ -504,7 +504,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       return;
     }
     if (this.data.shareVideoStyleUnavailable) {
-      this.setData({ shareVideoError: "AI 生成插图暂不可用，请选择「上传照片或插图」或「往事小剧场」" });
+      this.setData({ shareVideoError: "AI 生成插图暂不可用，请选择「上传照片或插图」" });
       return;
     }
     if (this.data.shareVideoStyle === "uploaded"
@@ -533,17 +533,15 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       options: {
         videoStyle: this.data.shareVideoStyle,
         ...(changedHook ? { hookText } : {}),
-        ...(this.data.shareVideoStyle !== "story_animation" ? {
-          backgroundSource: this.data.shareVideoBackgroundSource,
-          ...(this.data.shareVideoBackgroundSource === "ai" ? {
-            backgroundStyle: this.data.shareVideoBackgroundStyle,
-            backgroundMode: this.data.shareVideoBackgroundMode,
-            ...(this.data.shareVideoBackgroundNote.trim()
-              ? { backgroundNote: this.data.shareVideoBackgroundNote.trim() } : {}),
-          } : {}),
-          ...(this.data.shareVideoBackgroundSource === "custom" ? {
-            customBackgroundAssetId: this.data.shareVideoCustomBackgroundAssetId,
-          } : {}),
+        backgroundSource: this.data.shareVideoBackgroundSource,
+        ...(this.data.shareVideoBackgroundSource === "ai" ? {
+          backgroundStyle: this.data.shareVideoBackgroundStyle,
+          backgroundMode: this.data.shareVideoBackgroundMode,
+          ...(this.data.shareVideoBackgroundNote.trim()
+            ? { backgroundNote: this.data.shareVideoBackgroundNote.trim() } : {}),
+        } : {}),
+        ...(this.data.shareVideoBackgroundSource === "custom" ? {
+          customBackgroundAssetId: this.data.shareVideoCustomBackgroundAssetId,
         } : {}),
       },
       ...(candidate ? { candidate: { projectId: item.project_id, id: candidate.id } } : {}),

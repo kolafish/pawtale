@@ -191,7 +191,7 @@
               <text class="share-video-background-desc">{{item.description}}</text>
             </view>
           </view>
-          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">AI 生成插图暂不可用，请选择「上传照片或插图」或「往事小剧场」。</text>
+          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">AI 生成插图暂不可用，请选择「上传照片或插图」。</text>
         </view>
 
         <view wx:if="{{shareVideoUsesIllustration}}" class="share-video-background">
