@@ -39,7 +39,7 @@ class _AccountDeletionSession:
         return None
 
     async def execute(self, _statement):
-        return None
+        return SimpleNamespace(all=lambda: [])
 
     async def delete(self, item):
         self.pending_deletes.append(item)
@@ -236,3 +236,12 @@ async def test_account_deletion_removes_projects_sessions_consents_and_personal_
     new_login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "owner"})
     assert new_login.status_code == 200
     assert new_login.json()["user"]["id"] != user_id
+    credit = (await anonymous_client.get("/api/billing/ai-credit-summary")).json()
+    assert float(credit["free_credit_rmb"]) == 0
+    assert float(credit["total_credit_rmb"]) == 0
+
+    anonymous_client.cookies.clear()
+    other_login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "someone-else"})
+    assert other_login.status_code == 200
+    other_credit = (await anonymous_client.get("/api/billing/ai-credit-summary")).json()
+    assert float(other_credit["free_credit_rmb"]) == 10

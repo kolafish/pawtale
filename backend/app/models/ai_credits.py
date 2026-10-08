@@ -60,3 +60,12 @@ class AICreditTransaction(Base):
     operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     note: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive, index=True)
+
+
+class AIFreeCreditClaim(Base):
+    """Keyed hash of a WeChat identity whose account was deleted after receiving free credit."""
+
+    __tablename__ = "ai_free_credit_claims"
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)

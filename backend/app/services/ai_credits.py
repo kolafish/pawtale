@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 
@@ -8,13 +10,16 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application_errors import InsufficientAICreditError
+from app.config import get_settings
 from app.database import async_session_maker
 from app.models.ai_credits import (
     AICreditAccount,
     AICreditTransaction,
+    AIFreeCreditClaim,
     DEFAULT_FREE_CREDIT_RMB,
 )
 from app.models.ai_usage import AIUsageRecord
+from app.models.users import AuthIdentity
 from app.schemas.billing import AICreditSummaryResponse
 
 
@@ -54,6 +59,62 @@ async def ensure_ai_credit_account(
     if account is None:
         raise RuntimeError("AI credit account could not be initialized")
     return account
+
+
+def _free_credit_claim_hashes(provider: str, openid: str, unionid: str | None) -> set[str]:
+    keys = [f"openid:{provider}:{openid}"]
+    if unionid:
+        keys.append(f"unionid:{unionid}")
+    secret = get_settings().app_secret_key.encode("utf-8")
+    return {
+        hmac.new(secret, f"free-ai-credit:{key}".encode("utf-8"), hashlib.sha256).hexdigest()
+        for key in keys
+    }
+
+
+async def record_free_credit_claims(db: AsyncSession, user_id: str) -> None:
+    """Remember the user's WeChat identities so a re-created account gets no second free credit."""
+    rows = (await db.execute(
+        select(
+            AuthIdentity.provider,
+            AuthIdentity.provider_user_id,
+            AuthIdentity.provider_union_id,
+        ).where(AuthIdentity.user_id == user_id)
+    )).all()
+    hashes = set().union(*(_free_credit_claim_hashes(*row) for row in rows))
+    if hashes:
+        await db.execute(
+            insert(AIFreeCreditClaim)
+            .values([{"key_hash": key_hash} for key_hash in sorted(hashes)])
+            .on_conflict_do_nothing(index_elements=[AIFreeCreditClaim.key_hash])
+        )
+
+
+async def withhold_claimed_free_credit(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    provider: str,
+    openid: str,
+    unionid: str | None,
+) -> None:
+    """Open a new user's account without free credit if this WeChat identity already claimed it."""
+    claimed = await db.scalar(
+        select(AIFreeCreditClaim.key_hash)
+        .where(AIFreeCreditClaim.key_hash.in_(_free_credit_claim_hashes(provider, openid, unionid)))
+        .limit(1)
+    )
+    if claimed:
+        await db.execute(
+            insert(AICreditAccount)
+            .values(
+                user_id=user_id,
+                free_credit_rmb=Decimal("0"),
+                recharged_credit_rmb=Decimal("0"),
+                manual_grant_rmb=Decimal("0"),
+            )
+            .on_conflict_do_nothing(index_elements=[AICreditAccount.user_id])
+        )
 
 
 async def get_ai_credit_summary(
