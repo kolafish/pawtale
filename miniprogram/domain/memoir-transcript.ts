@@ -18,8 +18,8 @@ export interface MemoirShareVideoStyleOption {
 }
 
 export const MEMOIR_SHARE_VIDEO_STYLES: MemoirShareVideoStyleOption[] = [
-  { value: "uploaded", label: "自选画面", description: "上传老照片或插图，配上讲述原声和字幕。" },
-  { value: "illustrated", label: "回忆画卷", description: "根据讲述生成插图，配原声和字幕展开回忆。" },
+  { value: "uploaded", label: "上传照片或插图", description: "使用自己上传的照片或插图，配上讲述原声和字幕。" },
+  { value: "illustrated", label: "AI 生成插图", description: "根据讲述内容用 AI 生成插图，配上讲述原声和字幕。" },
   { value: "story_animation", label: "往事小剧场", description: "人物与场景动画配原声和字幕，让故事动起来。" },
 ];
 

@@ -62,7 +62,7 @@ test("video library lists metadata in pages and opens only the chosen video", as
   assert.equal(context.data.hasMore, true);
   await context.loadVideos(false);
   assert.deepEqual(context.data.items.map((item) => item.id), ["video-2", "video-1"]);
-  assert.deepEqual(context.data.items.map((item) => item.styleLabel), ["往事小剧场", "回忆画卷"]);
+  assert.deepEqual(context.data.items.map((item) => item.styleLabel), ["往事小剧场", "AI 生成插图"]);
   assert.equal(context.data.hasMore, false);
   assert.deepEqual(calls, [
     ["project-1", { limit: 20, offset: 0 }],

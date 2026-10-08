@@ -92,7 +92,7 @@ async def test_explicit_styles_require_their_source_but_legacy_default_survives(
     selection = {"start_char": 0, "end_char": len(text)}
     unavailable = await client.post(url, json={**selection, "video_style": "illustrated"})
     assert unavailable.status_code == 400
-    assert "回忆画卷" in unavailable.json()["detail"]
+    assert "AI 生成插图" in unavailable.json()["detail"]
     upload = await client.post(url, json={**selection, "video_style": "uploaded"})
     assert upload.status_code == 400
     assert "背景图" in upload.json()["detail"]
