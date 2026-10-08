@@ -13,6 +13,7 @@ from app.schemas.audit import (
     AuditEventsIngestRequest,
     AuditEventsIngestResponse,
     AuditUserDayResponse,
+    LaoyuUsersResponse,
 )
 from app.services import audit as audit_service
 
@@ -62,3 +63,11 @@ async def audit_user_day(
     if response is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     return response
+
+
+@router.get("/laoyu-users", response_model=LaoyuUsersResponse)
+async def audit_laoyu_users(
+    db: AsyncSession = Depends(get_db),
+    _admin_user: User = Depends(get_current_admin_user),
+):
+    return await audit_service.laoyu_users(db)

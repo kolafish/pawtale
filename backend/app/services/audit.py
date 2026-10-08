@@ -3,12 +3,16 @@ from __future__ import annotations
 from collections import Counter
 from datetime import date, datetime, timezone
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.projects.types import ProjectType
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
-from app.models.users import User
+from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_common import AudioFile
+from app.models.projects import Project
+from app.models.users import AuthIdentity, User
 from app.schemas.audit import (
     AuditDashboardResponse,
     AuditDashboardSummary,
@@ -20,11 +24,16 @@ from app.schemas.audit import (
     AuditSessionResponse,
     AuditUserBrief,
     AuditUserDayResponse,
+    LaoyuUserUsageResponse,
+    LaoyuUsersResponse,
 )
 
 
 MAX_ACTIVE_EVENT_DURATION_MS = 60_000
 EXIT_EVENT_TYPES = {"page_leave"}
+# 老余口述 logs in with this WeChat identity provider and reports audit events as the "miniprogram" platform.
+LAOYU_IDENTITY_PROVIDER = "wechat_miniprogram"
+LAOYU_AUDIT_PLATFORM = "miniprogram"
 
 
 def _utc_naive(value: datetime) -> datetime:
@@ -384,3 +393,90 @@ async def user_day(db: AsyncSession, user_id: str, day: date) -> AuditUserDayRes
             for session in sessions
         ],
     )
+
+
+async def laoyu_users(db: AsyncSession) -> LaoyuUsersResponse:
+    """List users who signed in to 老余口述 or used it, with their memoir recording and app usage totals."""
+    wechat_user_ids = select(AuthIdentity.user_id).where(AuthIdentity.provider == LAOYU_IDENTITY_PROVIDER)
+    app_usage = (
+        select(
+            AuditDailyUserUsage.user_id.label("user_id"),
+            func.sum(AuditDailyUserUsage.active_ms).label("active_ms"),
+            func.count(func.distinct(AuditDailyUserUsage.date)).label("active_days"),
+            func.max(AuditDailyUserUsage.last_seen_at).label("last_seen_at"),
+        )
+        .where(AuditDailyUserUsage.platform == LAOYU_AUDIT_PLATFORM)
+        .group_by(AuditDailyUserUsage.user_id)
+        .subquery()
+    )
+    memoir_projects = (
+        select(Project.user_id.label("user_id"), func.count(Project.id).label("project_count"))
+        .where(Project.type == ProjectType.MEMOIR.value)
+        .group_by(Project.user_id)
+        .subquery()
+    )
+    voice_sessions = (
+        select(
+            Project.user_id.label("user_id"),
+            func.count(MemoirVoiceSession.id).label("session_count"),
+            func.max(MemoirVoiceSession.created_at).label("last_voice_at"),
+        )
+        .join(Project, MemoirVoiceSession.project_id == Project.id)
+        .group_by(Project.user_id)
+        .subquery()
+    )
+    utterances = (
+        select(
+            Project.user_id.label("user_id"),
+            func.count(MemoirVoiceUtterance.id).label("utterance_count"),
+            func.coalesce(func.sum(AudioFile.duration_seconds), 0).label("recorded_seconds"),
+        )
+        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+        .join(Project, MemoirVoiceSession.project_id == Project.id)
+        .outerjoin(AudioFile, MemoirVoiceUtterance.audio_file_id == AudioFile.id)
+        .group_by(Project.user_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(
+            User,
+            User.id.in_(wechat_user_ids).label("wechat_bound"),
+            app_usage.c.active_ms,
+            app_usage.c.active_days,
+            app_usage.c.last_seen_at,
+            memoir_projects.c.project_count,
+            voice_sessions.c.session_count,
+            voice_sessions.c.last_voice_at,
+            utterances.c.utterance_count,
+            utterances.c.recorded_seconds,
+        )
+        .outerjoin(app_usage, app_usage.c.user_id == User.id)
+        .outerjoin(memoir_projects, memoir_projects.c.user_id == User.id)
+        .outerjoin(voice_sessions, voice_sessions.c.user_id == User.id)
+        .outerjoin(utterances, utterances.c.user_id == User.id)
+        .where(or_(User.id.in_(wechat_user_ids), app_usage.c.user_id.is_not(None)))
+    )
+
+    users = []
+    for row in result.all():
+        user: User = row.User
+        activity = [value for value in (row.last_seen_at, row.last_voice_at) if value is not None]
+        users.append(
+            LaoyuUserUsageResponse(
+                user=_user_brief(user),
+                created_at=user.created_at,
+                wechat_bound=bool(row.wechat_bound),
+                memoir_project_count=row.project_count or 0,
+                voice_session_count=row.session_count or 0,
+                utterance_count=row.utterance_count or 0,
+                recorded_seconds=int(row.recorded_seconds or 0),
+                last_voice_at=row.last_voice_at,
+                miniprogram_active_ms=int(row.active_ms or 0),
+                miniprogram_active_days=row.active_days or 0,
+                miniprogram_last_seen_at=row.last_seen_at,
+                last_active_at=max(activity) if activity else None,
+            )
+        )
+    users.sort(key=lambda item: (item.last_active_at or item.created_at or datetime.min), reverse=True)
+    return LaoyuUsersResponse(users=users)

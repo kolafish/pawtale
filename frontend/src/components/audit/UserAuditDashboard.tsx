@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
@@ -15,6 +14,8 @@ import {
 } from 'lucide-react';
 import { auditApi } from '../../api';
 import { AdminCreditPanel } from './AdminCreditPanel';
+import { Metric } from './AuditMetric';
+import { formatDateTime, formatDuration } from './auditFormat';
 import type {
   AuditDashboardFilters,
   AuditDailyFeatureUsage,
@@ -109,27 +110,6 @@ function defaultDateRange() {
   const from = new Date();
   from.setDate(to.getDate() - 6);
   return { from: toDateInput(from), to: toDateInput(to) };
-}
-
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '0 分钟';
-  const totalSeconds = Math.round(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
-  if (minutes > 0) return `${minutes} 分 ${seconds} 秒`;
-  return `${seconds} 秒`;
-}
-
-function formatDateTime(value?: string | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 function labelOrDash(value?: string | null): string {
@@ -263,38 +243,23 @@ function aggregateFeatures(rows: AuditDailyFeatureUsage[]): FeatureTotal[] {
     .slice(0, 20);
 }
 
-interface MetricProps {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  subLabel?: string;
-}
-
-function Metric({ icon, label, value, subLabel }: MetricProps) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="mb-3 flex items-center justify-between text-gray-500">
-        <span className="text-sm">{label}</span>
-        {icon}
-      </div>
-      <div className="text-2xl font-semibold text-gray-900">{value}</div>
-      {subLabel && <div className="mt-1 text-xs text-gray-500">{subLabel}</div>}
-    </div>
-  );
-}
-
 interface SelectedUserDay {
   userId: string;
   date: string;
   name: string;
 }
 
-export function UserAuditDashboard() {
+interface UserAuditDashboardProps {
+  initialUserId?: string;
+  initialPlatform?: AuditPlatform;
+}
+
+export function UserAuditDashboard({ initialUserId = '', initialPlatform }: UserAuditDashboardProps = {}) {
   const defaultRange = useMemo(() => defaultDateRange(), []);
   const [fromDate, setFromDate] = useState(defaultRange.from);
   const [toDate, setToDate] = useState(defaultRange.to);
-  const [platform, setPlatform] = useState<'' | AuditPlatform>('');
-  const [userId, setUserId] = useState('');
+  const [platform, setPlatform] = useState<'' | AuditPlatform>(initialPlatform ?? '');
+  const [userId, setUserId] = useState(initialUserId);
   const [featureCode, setFeatureCode] = useState('');
   const [selectedDay, setSelectedDay] = useState<SelectedUserDay | null>(null);
   const [detailEventType, setDetailEventType] = useState('');

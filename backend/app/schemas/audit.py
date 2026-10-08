@@ -160,3 +160,22 @@ class AuditUserDayResponse(BaseModel):
     user: AuditUserBrief
     date: date
     sessions: list[AuditSessionResponse]
+
+
+class LaoyuUserUsageResponse(BaseModel):
+    user: AuditUserBrief
+    created_at: datetime | None = None
+    wechat_bound: bool
+    memoir_project_count: int
+    voice_session_count: int
+    utterance_count: int
+    recorded_seconds: int
+    last_voice_at: datetime | None = None
+    miniprogram_active_ms: int
+    miniprogram_active_days: int
+    miniprogram_last_seen_at: datetime | None = None
+    last_active_at: datetime | None = None
+
+
+class LaoyuUsersResponse(BaseModel):
+    users: list[LaoyuUserUsageResponse]
