@@ -214,8 +214,10 @@ async def prepare_share_video_background(
         metadata.background_error_message = ""
         await persist_progress(metadata)
 
-        story_text = job.selected_text if len(plan.scenes) > 1 else ""
-        visual_context = plan.visual_context if story_text else ""
+        story_text = job.selected_text
+        visual_context = plan.visual_context
+        if plan.person_count:
+            visual_context += f"\n参与这段经历的人物数量：{plan.person_count}。"
         scene_assets: dict[int, ShareVideoSceneAssetMetadata] = {}
         scene_paths: dict[int, Path | None] = {}
         errors: dict[int, str] = {}
