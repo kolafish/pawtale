@@ -13,7 +13,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v9"
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v10"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
@@ -376,12 +376,12 @@ def _user_prompt(
         f"{round(sentence.end_ms / 1000, 1)}s] {sentence.text}"
         for sentence in sentences
     )
-    return f"""请为以下完整口述内容规划视频背景画面，画面数量由内容决定。
+    return f"""请为以下完整口述内容规划视频背景画面，结合讲述内容和视频时长，自主确定画面数量与切换位置。
 
 要求：
 1. 输出 JSON 对象，格式为 {{"person_count":"人数说明","visual_context":"...","scenes":[...]}}。
-2. 只有当原文里的地点、时间或主要人物真正发生变化，眼睛能看到的画面需要换掉时，才开始一个新画面。一直在讲同一个场景、同一件事，就只用 1 个画面；不要为了平均切分或用满上限而拆分。
-3. 每个画面最好能停留 6 秒以上；画面太碎时合并到相邻画面。
+2. 规划分镜时，综合考虑口述内容、音频总时长，以及各句子／短句单元的起止时间，判断每个画面适合承载的内容范围和停留时长，使画面与讲述进度相协调。
+3. 根据叙事重点、人物动作、关键物件及时间、地点的变化安排画面衔接，让每个画面表达明确、观看节奏自然。画面数量由以上因素共同决定，不预设数量，也不按固定时间间隔切分。同时考虑各句的叙事作用与前后关联，使每个画面组都对应一个清晰、可呈现的内容重点；表达评价、语气或承接的句子，应结合其所依附的事件理解。
 4. 每个 scene 只包含 sentence_ids。
 5. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
 6. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
