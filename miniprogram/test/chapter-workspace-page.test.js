@@ -1345,7 +1345,7 @@ test("chapter workspace reads one draft section with saved book voice settings",
     "chapter-1",
     "section-1",
     {
-      voice: "zh_female_xiaohe_uranus_bigtts",
+      voice: "linjiajiejie",
       speed_ratio: 1.5,
     },
   ]]);
@@ -1784,7 +1784,7 @@ test("chapter workspace offers the migrated chapter actions and preserves narrat
   assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "不收入本书"]);
   assert.equal(context.data.operationKind, "");
   await page.playChapterAudio.call(context);
-  assert.deepEqual(calls, [{ projectId: "project-1", chapterId: "chapter-1", payload: { voice: "zh_female_xiaohe_uranus_bigtts", speed_ratio: 1.5 } }]);
+  assert.deepEqual(calls, [{ projectId: "project-1", chapterId: "chapter-1", payload: { voice: "linjiajiejie", speed_ratio: 1.5 } }]);
   assert.equal(context.data.audioPhase, "idle");
   context.setData({ chapterHasReadableDraft: false });
   context.pageVisible = true;
