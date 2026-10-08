@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application_errors import InsufficientAICreditError
+from app.clock import utcnow_naive
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.ai_credits import (
@@ -98,7 +99,7 @@ async def withhold_claimed_free_credit(
     openid: str,
     unionid: str | None,
 ) -> None:
-    """Open a new user's account without free credit if this WeChat identity already claimed it."""
+    """Withhold duplicate free credit when a WeChat identity is recognized, including on later logins."""
     claimed = await db.scalar(
         select(AIFreeCreditClaim.key_hash)
         .where(AIFreeCreditClaim.key_hash.in_(_free_credit_claim_hashes(provider, openid, unionid)))
@@ -113,7 +114,11 @@ async def withhold_claimed_free_credit(
                 recharged_credit_rmb=Decimal("0"),
                 manual_grant_rmb=Decimal("0"),
             )
-            .on_conflict_do_nothing(index_elements=[AICreditAccount.user_id])
+            .on_conflict_do_update(
+                index_elements=[AICreditAccount.user_id],
+                set_={"free_credit_rmb": Decimal("0"), "updated_at": utcnow_naive()},
+                where=AICreditAccount.free_credit_rmb != Decimal("0"),
+            )
         )
 
 
