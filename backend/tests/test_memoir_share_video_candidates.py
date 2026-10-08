@@ -97,10 +97,6 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     repeated = await client.post(create_url, json={"background_source": "classic"})
     assert repeated.status_code == 201
     assert repeated.json()["id"] == created_job.json()["id"]
-    animated = await client.post(create_url, json={"video_style": "story_animation"})
-    assert animated.status_code == 201, animated.text
-    assert animated.json()["video_style"] == "story_animation"
-    assert animated.json()["id"] != created_job.json()["id"]
     assert (await client.get(url)).json()["candidate"]["status"] == "accepted"
 
     # The author can open with another short line from the clip, but not with words it never says.
@@ -137,7 +133,7 @@ async def test_recommendation_follows_latest_manual_video_for_its_source_range(
     create_url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
     remade = await client.post(create_url, json={
         "start_char": candidate["start_char"], "end_char": candidate["end_char"],
-        "video_style": "story_animation",
+        "background_source": "classic",
     })
     assert remade.status_code == 201, remade.text
     new_id = remade.json()["id"]
@@ -161,7 +157,7 @@ async def test_recommendation_follows_latest_manual_video_for_its_source_range(
     first_sentence_end = STORY.index("。") + 1
     assert first_sentence_end < candidate["end_char"]
     different_range = await client.post(create_url, json={
-        "start_char": 0, "end_char": first_sentence_end, "video_style": "story_animation",
+        "start_char": 0, "end_char": first_sentence_end, "background_source": "classic",
     })
     assert different_range.status_code == 201, different_range.text
     assert different_range.json()["id"] != new_id

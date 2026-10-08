@@ -294,8 +294,7 @@ export function shareVideoStylePatch(
     preferredValue || "",
     normalizeMemoirShareVideoStyle(context?.default_video_style),
   )!;
-  const backgroundSource = selected.value === "uploaded" ? "custom"
-    : selected.value === "illustrated" ? "ai" : "";
+  const backgroundSource = selected.value === "uploaded" ? "custom" : "ai";
   return {
     shareVideoStyle: selected.value,
     shareVideoStyleLabel: selected.label,
@@ -376,9 +375,6 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
 
 export function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
-    if (job.video_style === "story_animation") {
-      return "视频已生成";
-    }
     if (job.background_source === "custom") {
       return "视频已生成，已使用自定义背景";
     }
@@ -399,11 +395,6 @@ export function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
     return job.error_message || "视频生成失败";
   }
   if (job.status === "running") {
-    if (job.video_style === "story_animation") {
-      return job.background_status === "planning" || job.background_status === "pending"
-        ? "正在安排故事画面"
-        : "正在制作人物与场景动画";
-    }
     if (job.background_source === "custom" || job.background_source === "classic") {
       return "正在合成视频";
     }

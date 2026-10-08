@@ -44,7 +44,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
     title: "爷爷的回忆",
     metadata_json: {
       transcript_polish_level: "high",
-      share_video_style: "story_animation",
+      share_video_style: "uploaded",
       memoir_profile: {
         narrator_name: "爷爷",
         narrator_gender: "male",
@@ -71,7 +71,7 @@ test("project edit loads and saves memoir-level interview and polish settings", 
   assert.equal(context.data.narratorName, "爷爷");
   assert.equal(context.data.defaultNarrationMode, "human_interview");
   assert.equal(context.data.transcriptPolishLevel, "high");
-  assert.equal(context.data.shareVideoStyle, "story_animation");
+  assert.equal(context.data.shareVideoStyle, "uploaded");
   assert.deepEqual(context.data.narrationOptions.map(option => option.value), [
     "free_narration",
     "guided_interview",

@@ -1,6 +1,4 @@
 import asyncio
-from dataclasses import replace
-from hashlib import sha256
 from io import BytesIO
 import math
 from pathlib import Path
@@ -13,60 +11,6 @@ from PIL import Image, ImageChops
 import pytest
 
 from app.services.memoir import share_video_rendering as rendering
-from app.services.memoir.share_video_story_plan import ShareVideoStoryPlan
-
-
-def _ride_plan(text: str) -> ShareVideoStoryPlan:
-    return ShareVideoStoryPlan.model_validate({
-        "source_text_hash": sha256(text.encode()).hexdigest(),
-        "duration_ms": 1000, "provider": "test", "model": "test",
-        "actors": [{"id": "companions", "figure": "group",
-                    "evidence": {"sentence_id": 0, "quote": "我们"}}],
-        "shots": [{
-            "sentence_ids": [0], "start_ms": 0, "end_ms": 1000,
-            "setting": "vehicle", "action": "ride", "gesture": "relaxed", "camera": "track",
-            "framing": "medium", "actor_ids": ["companions"], "active_actor_id": "companions",
-            "props": [], "evidence": [{"sentence_id": 0, "quote": text}], "movement_scale": 1.2,
-        }],
-    })
-
-
-async def test_story_video_encodes_moving_scenes_with_the_same_cut_original_audio(tmp_path: Path):
-    ffmpeg = rendering._ffmpeg_executable()
-    audio = tmp_path / "source.wav"
-    rate = 48000
-    # A distinct middle second proves that the shared, nonzero source range
-    # is cut; the surrounding seconds must not enter either video.
-    with wave.open(str(audio), "wb") as wav:
-        wav.setparams((1, 2, rate, 0, "NONE", "not compressed"))
-        wav.writeframes(b"".join(struct.pack("<h", round(9000 * math.sin(
-            math.tau * (440 if rate <= i < 2*rate else 880) * i / rate
-        ))) for i in range(3*rate)))
-    text = "我们坐车出发。"
-    request = rendering.ShareVideoRenderRequest(
-        source_audio_path=audio, source_audio_mime_type="audio/wav",
-        target_path=tmp_path / "story.mp4", selected_text=text,
-        char_timings=[{"start_ms": 1000+round(i*1000/len(text)),
-                       "end_ms": 1000+round((i+1)*1000/len(text))} for i in range(len(text))],
-        start_ms=1000, end_ms=2000, book_title="相约出发",
-        video_style="story_animation", animation_plan=_ride_plan(text),
-    )
-    await rendering.render_share_video_clip(request)
-    reference = replace(request, target_path=tmp_path / "reference.mp4",
-                        video_style="illustrated", animation_plan=None)
-    await rendering.render_share_video_clip(reference)
-    def decoded_audio(path):
-        return subprocess.check_output([ffmpeg, "-v", "error", "-i", str(path), "-map", "0:a:0",
-                                        "-f", "s16le", "-acodec", "pcm_s16le", "-"])
-    assert decoded_audio(request.target_path) == decoded_audio(reference.target_path)
-    def frame(at):
-        data = subprocess.check_output([ffmpeg, "-v", "error", "-ss", str(at), "-i", str(request.target_path),
-                                        "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
-        return Image.open(BytesIO(data)).convert("RGB")
-    first, later = frame(0.1), frame(0.6)
-    assert first.size == later.size == (720, 1280)
-    stage = (0, 360, 720, 700)
-    assert ImageChops.difference(first.crop(stage), later.crop(stage)).getbbox()
 
 
 async def test_opening_hook_plays_before_the_narration(tmp_path: Path):
