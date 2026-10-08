@@ -432,10 +432,6 @@
   line-height: 1.5;
 }
 
-.home-share-pick .home-share-candidate-primary {
-  flex: 0 0 auto;
-}
-
 .home-share-all {
   flex: 0 0 auto;
   min-height: 40px;

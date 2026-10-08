@@ -59,6 +59,7 @@ from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
+    share_video_background_style_label,
 )
 from app.services.memoir.share_video_custom_backgrounds import (
     SHARE_VIDEO_BACKGROUND_SOURCE_AI,
@@ -211,6 +212,28 @@ async def _suggest_share_video_title_and_hook(
     if _title_contains_sensitive_number(hook):
         hook = ""
     return (cleaned if len(cleaned) >= 2 else None), rendering.usable_hook_text(hook, selected_text)
+
+
+def _illustration_style_label(metadata: ShareVideoJobMetadata) -> str:
+    if metadata.background_source != SHARE_VIDEO_BACKGROUND_SOURCE_AI:
+        return ""
+    return share_video_background_style_label(metadata.background_style)
+
+
+def _list_item_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoListItemResponse:
+    metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+    return MemoirShareVideoListItemResponse(
+        id=job.id,
+        utterance_id=job.utterance_id,
+        title=share_video_title(metadata, job.selected_text),
+        selected_text=job.selected_text,
+        duration_ms=max(0, job.end_ms - job.start_ms),
+        video_style=metadata.video_style,
+        background_style_label=_illustration_style_label(metadata),
+        created_at=job.created_at,
+        completed_at=job.completed_at,
+        share_code=job.share_code,
+    )
 
 
 def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str, ...]:
@@ -393,6 +416,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         background_effective_mode=metadata.background_effective_mode,
         custom_background_asset_id=metadata.custom_background_asset_id,
         background_note=metadata.background_note,
+        background_style_label=_illustration_style_label(metadata),
         background_scene_count=metadata.background_scene_count,
         background_status=metadata.background_status,
         background_provider=metadata.background_provider,
@@ -705,17 +729,7 @@ async def list_share_video_jobs(
     total = rows[0][1] if rows else await db.scalar(completed_total)
     return MemoirShareVideoJobListResponse(
         items=[
-            MemoirShareVideoListItemResponse(
-                id=job.id,
-                utterance_id=job.utterance_id,
-                title=share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text),
-                selected_text=job.selected_text,
-                duration_ms=max(0, job.end_ms - job.start_ms),
-                video_style=ShareVideoJobMetadata.from_json(job.metadata_json).video_style,
-                created_at=job.created_at,
-                completed_at=job.completed_at,
-                share_code=job.share_code,
-            )
+            _list_item_response(job)
             for job, _ in rows
             if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
         ],

@@ -308,11 +308,17 @@ test("home keeps completed videos in the library after handling the latest sugge
   assert.deepEqual(calls, [["p1", { limit: 1, offset: 0 }]]);
   assert.equal(context.data.shareCandidate, null);
   assert.equal(context.data.shareVideoTotal, 5);
-  context.openShareVideoLibrary();
+  // Without a suggestion the whole card opens the library; it no longer carries a separate clip picker.
+  context.openShareCard();
   assert.deepEqual(navigations, [
     "/pages/share-videos/index?projectId=p1",
   ]);
-  assert.match(pageWxml, /bindtap="openShareVideoLibrary"/);
+  assert.match(pageWxml, /class="home-share-candidate"[^>]*bindtap="openShareCard"/);
+  assert.doesNotMatch(pageWxml, /挑一段做视频/);
+  // A suggestion keeps its own buttons, so taps that bubble up to the card do nothing more.
+  context.setData({ shareCandidate: { id: "c1", status: "ready" } });
+  context.openShareCard();
+  assert.equal(navigations.length, 1);
 });
 
 test("home exposes the video progress library while the first manually selected story is still generating", async () => {
@@ -328,11 +334,10 @@ test("home exposes the video progress library while the first manually selected 
   assert.equal(context.data.shareCandidate, null);
   assert.equal(context.data.shareVideoTotal, 0);
   assert.equal(context.data.shareVideoActiveCount, 1);
-  context.openShareVideoLibrary();
+  context.openShareCard();
   assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   assert.match(wxml, /wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"\s+class="home-share-candidate"/);
-  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
 });
 
 test("home keeps the video library reachable when all manually selected video tasks have failed", async () => {
@@ -350,11 +355,10 @@ test("home keeps the video library reachable when all manually selected video ta
   assert.equal(context.data.shareVideoTotal, 0);
   assert.equal(context.data.shareVideoActiveCount, 0);
   assert.equal(context.data.shareVideoFailedCount, 1);
-  context.openShareVideoLibrary();
+  context.openShareCard();
   assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   assert.match(wxml, /wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"\s+class="home-share-candidate"/);
-  assert.match(wxml, /<button[^>]*wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"[^>]*bindtap="openShareVideoLibrary"/);
 });
 
 test("only a successful completed-video preview dismisses the latest suggestion", async () => {

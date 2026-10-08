@@ -590,6 +590,17 @@ definePage<HomeData>()({
     navigateToVideoClipPicker();
   },
 
+  openShareCard() {
+    // A suggestion card has its own buttons; otherwise the whole card is the link.
+    const candidate = this.data.shareCandidate;
+    if (candidate && (candidate.status === "ready" || candidate.status === "accepted")) return;
+    if (this.data.shareVideoTotal || this.data.shareVideoActiveCount || this.data.shareVideoFailedCount) {
+      this.openShareVideoLibrary();
+    } else {
+      this.pickShareVideoClip();
+    }
+  },
+
   openShareVideoLibrary() {
     const projectId = this.data.projectId;
     if (!projectId || this.data.voiceEntry) return;

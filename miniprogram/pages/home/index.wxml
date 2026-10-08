@@ -109,11 +109,17 @@
           wx:if="{{!voiceEntry && ((shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')) || shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount || (hasProject && hasLastStoryHint))}}"
           class="home-share-candidate"
           aria-label="我的分享视频"
+          bindtap="openShareCard"
+          hover-class="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted') ? 'none' : 'ui-subtle-action-hover'}}"
         >
           <view class="home-share-candidate-head">
             <text class="home-share-module-title">分享视频</text>
-            <button wx:if="{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">{{shareVideoActiveCount ? '制作中 ' + shareVideoActiveCount + ' 个' : shareVideoTotal ? '全部 ' + shareVideoTotal + ' 个' : '制作失败 ' + shareVideoFailedCount + ' 个'}} ›</button>
-            <button wx:elif="{{shareCandidate && shareCandidate.status === 'ready'}}" class="home-share-all ui-button" bindtap="pickShareVideoClip" hover-class="ui-subtle-action-hover">自己挑一段 ›</button>
+            <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
+              <button wx:if="{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount}}" class="home-share-all ui-button" bindtap="openShareVideoLibrary" hover-class="ui-subtle-action-hover">{{shareVideoActiveCount ? '制作中 ' + shareVideoActiveCount + ' 个' : shareVideoTotal ? '全部 ' + shareVideoTotal + ' 个' : '制作失败 ' + shareVideoFailedCount + ' 个'}} ›</button>
+              <button wx:elif="{{shareCandidate.status === 'ready'}}" class="home-share-all ui-button" bindtap="pickShareVideoClip" hover-class="ui-subtle-action-hover">自己挑一段 ›</button>
+            </block>
+            <!-- Without a suggestion the whole card is one link, so the count is only a label. -->
+            <text wx:else class="home-share-all">{{shareVideoActiveCount ? '制作中 ' + shareVideoActiveCount + ' 个' : shareVideoTotal ? '全部 ' + shareVideoTotal + ' 个' : shareVideoFailedCount ? '制作失败 ' + shareVideoFailedCount + ' 个' : '挑一段'}} ›</text>
           </view>
           <block wx:if="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted')}}">
             <view class="home-share-candidate-content">
@@ -161,8 +167,7 @@
             </view>
           </block>
           <view wx:else class="home-share-pick">
-            <text class="home-share-pick-copy">把一段讲述配上原声和字幕，做成视频发给家人。</text>
-            <button class="home-share-candidate-primary ui-button" bindtap="pickShareVideoClip" hover-class="ui-subtle-action-hover">挑一段做视频 ›</button>
+            <text class="home-share-pick-copy">{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount ? '做好的视频都在这里，点开可以预览和转发。' : '把一段讲述配上原声和字幕，做成视频发给家人。'}}</text>
           </view>
         </view>
 

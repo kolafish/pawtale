@@ -230,6 +230,12 @@ def normalize_share_video_background_mode(value: str | None) -> str:
     return normalized
 
 
+def share_video_background_style_label(style_id: str | None) -> str:
+    """The illustration style's name for display; empty for a style no longer offered."""
+    style = _BACKGROUND_STYLE_BY_VALUE.get((style_id or "").strip())
+    return style.label if style else ""
+
+
 def share_video_background_style(style_id: str | None) -> ShareVideoBackgroundStyle:
     normalized = normalize_share_video_background_style(style_id)
     return _BACKGROUND_STYLE_BY_VALUE[normalized]

@@ -235,6 +235,7 @@ export interface MemoirShareVideoJob {
   background_effective_mode?: string;
   custom_background_asset_id?: string | null;
   background_note?: string;
+  background_style_label?: string;
   background_scene_count?: number;
   background_status?: string;
   background_provider?: string | null;
@@ -255,6 +256,8 @@ export interface MemoirShareVideoListItem {
   selected_text: string;
   duration_ms: number;
   video_style: MemoirShareVideoStyle;
+  // The illustration style an AI-illustrated video was made in; empty otherwise.
+  background_style_label?: string;
   created_at: string;
   completed_at: string | null;
   share_code: string;
