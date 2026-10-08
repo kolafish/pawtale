@@ -21,7 +21,7 @@ test("illustration subsettings preserve the selected video style", () => {
     backgroundStyle: "watercolor",
     backgroundMode: "auto",
   });
-  for (const style of ["uploaded", "illustrated", "story_animation"]) {
+  for (const style of ["uploaded", "illustrated"]) {
     const selected = shareVideoStylePatch(context, style);
     const state = { ...selected, ...patch };
     assert.equal(state.shareVideoStyle, selected.shareVideoStyle);
@@ -34,7 +34,7 @@ test("illustration subsettings preserve the selected video style", () => {
 });
 
 test("video style selection uses the project default and keeps unavailable illustration explicit", () => {
-  assert.equal(shareVideoStylePatch({ default_video_style: "story_animation" }).shareVideoStyle, "story_animation");
+  assert.equal(shareVideoStylePatch({ default_video_style: "uploaded" }).shareVideoStyle, "uploaded");
   const patch = shareVideoStylePatch({ default_video_style: "illustrated", ai_background_enabled: false });
   assert.equal(patch.shareVideoStyle, "illustrated");
   assert.equal(patch.shareVideoStyleUnavailable, true);

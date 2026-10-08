@@ -286,10 +286,10 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     assert Image.open(BytesIO(poster.content)).size == (720, 1280)
 
 
-async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):
+async def test_remake_preserves_completed_file_and_lists_each_version(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
     monkeypatch.setattr(share_video_jobs, "get_settings", lambda: SimpleNamespace(
-        memoir_share_video_ai_background_enabled=False, volc_ark_api_key="",
+        memoir_share_video_ai_background_enabled=True, volc_ark_api_key="test-key",
     ))
     text = "小时候我住在外婆家。"
     created = await create_test_voice_transcript(client, test_db, text=text)
@@ -304,7 +304,7 @@ async def test_remake_preserves_completed_file_and_lists_each_style(client, test
 
     remake = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{old.utterance_id}/share-video/jobs",
-        json={"start_char": 0, "end_char": len(text), "video_style": "story_animation"},
+        json={"start_char": 0, "end_char": len(text), "video_style": "illustrated"},
     )
     assert remake.status_code == 201, remake.text
     assert remake.json()["id"] != old.id
@@ -321,7 +321,7 @@ async def test_remake_preserves_completed_file_and_lists_each_style(client, test
 
     library = await client.get(f"/api/mobile/memoir/projects/{old.project_id}/share-video/jobs")
     assert {item["id"]: item["video_style"] for item in library.json()["items"]} == {
-        old.id: "illustrated", new.id: "story_animation",
+        old.id: "illustrated", new.id: "illustrated",
     }
     for job, contents in ((old, b"original video"), (new, b"new video!")):
         response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job.id}/download")

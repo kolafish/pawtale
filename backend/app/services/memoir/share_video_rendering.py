@@ -21,8 +21,6 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from app.services.memoir.branding import render_brand_lockup
-from app.services.memoir.share_video_story_plan import ShareVideoStoryPlan, validate_story_plan_source
-from app.services.memoir.share_video_styles import ShareVideoStyle
 
 
 _VIDEO_WIDTH = 720
@@ -48,7 +46,6 @@ _HOOK_MAX_CHARS = 20
 _CAPTION_COLOR = (255, 250, 240)
 _CLASSIC_TOP = (74, 60, 46)
 _CLASSIC_BOTTOM = (34, 28, 22)
-_STORY_BACKDROP = (46, 39, 32)
 _END_PAPER = (244, 236, 222)
 _END_INK = (64, 52, 40)
 _END_MUTED = (120, 106, 88)
@@ -74,8 +71,6 @@ class ShareVideoRenderRequest:
     end_ms: int
     background_image_path: Path | None = None
     background_segments: list[ShareVideoBackgroundSegment] | None = None
-    video_style: ShareVideoStyle = "illustrated"
-    animation_plan: ShareVideoStoryPlan | None = None
     # A sentence quoted verbatim from selected_text, shown before the narration.
     hook_text: str = ""
     book_title: str = ""
@@ -675,21 +670,6 @@ def _shots_visual(shots: list[_Shot]) -> Callable[[float], Image.Image]:
     return visual
 
 
-def _story_visual(plan: ShareVideoStoryPlan) -> Callable[[float], Image.Image]:
-    from app.services.memoir.share_video_story_animation import create_story_renderer
-
-    stage_height = round(_VIDEO_WIDTH * 9 / 16)
-    renderer = create_story_renderer(plan, _VIDEO_WIDTH, stage_height)
-    backdrop = Image.new("RGB", (_VIDEO_WIDTH, _VIDEO_HEIGHT), _STORY_BACKDROP)
-    stage_top = round(_VIDEO_HEIGHT * _SUBJECT_CENTER_Y - stage_height / 2)
-
-    def visual(t: float) -> Image.Image:
-        frame = backdrop.copy()
-        frame.paste(renderer(t), (0, stage_top))
-        return frame
-    return visual
-
-
 def _valid_background_segments(
     request: ShareVideoRenderRequest,
 ) -> list[ShareVideoBackgroundSegment]:
@@ -704,8 +684,6 @@ def _valid_background_segments(
 
 
 def _body_visual(request: ShareVideoRenderRequest, body_seconds: float) -> Callable[[float], Image.Image]:
-    if request.video_style == "story_animation":
-        return _story_visual(request.animation_plan)
     segments = _valid_background_segments(request)
     if len(segments) > 1:
         return _shots_visual(_picture_shots([
@@ -856,10 +834,6 @@ async def _prepare_audio(
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
-    if request.video_style == "story_animation":
-        if request.animation_plan is None:
-            raise ShareVideoGenerationError("往事小剧场缺少场景规划")
-        validate_story_plan_source(request.animation_plan, request.selected_text, request.end_ms-request.start_ms)
     ffmpeg = _ffmpeg_executable()
     request.target_path.parent.mkdir(parents=True, exist_ok=True)
     body_seconds = max(0.1, (request.end_ms - request.start_ms) / 1000)
