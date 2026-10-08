@@ -80,6 +80,8 @@ class _ProposedPlan(_Strict):
 
 
 class StoryShot(_ShotDescription):
+    # Job metadata omits nulls on disk; keep the AI proposal field required.
+    active_actor_id: str | None = None
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
 
