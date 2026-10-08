@@ -3,7 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  sampleAudioResponse,
+  sampleAudioPlan,
   sampleAutomationEvent,
   sampleBookOutput,
   sampleDraft,
@@ -63,13 +63,8 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         options.success({ statusCode: 200, data, header: {} });
         return;
       }
-      if (
-        options.url.endsWith("/draft/tts")
-        || (options.url.includes("/draft/sections/") && options.url.endsWith("/tts"))
-        || options.url.endsWith("/outline/tts")
-        || options.url.endsWith("/book-output/tts")
-      ) {
-        data = sampleAudioResponse();
+      if (options.url.endsWith("/tts/plan")) {
+        data = sampleAudioPlan();
       } else if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         data = sampleDraft();
       } else if (options.url.endsWith("/book-output/title-suggestions")) {
@@ -739,11 +734,10 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.reviseMemoirBookChapterDraft("project/1", "chapter/1", { expected_version_id: "version/1", sections: [{ section_id: "section/1", content: "修改后的小节正文" }] }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/revise`, data: { expected_version_id: "version/1", sections: [{ section_id: "section/1", content: "修改后的小节正文" }] } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.assembleMemoirBookOutput("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble`, data: {} },
-    { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 600000 },
-    { call: () => api.createMemoirBookChapterDraftSectionTTS("project/1", "chapter/1", "section/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/sections/section%2F1/tts`, timeout: 600000 },
-    { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 600000 },
-    { call: () => api.createMemoirBookOutputTTS("project/1", {}), method: "POST", url: `${base}/book-output/tts`, timeout: 600000 },
-    { call: () => api.prepareMemoirBookAudio("project/1", { version_id: "version/1", start_index: 2 }), method: "POST", url: `${base}/book-output/tts/plan`, timeout: 30000, data: { version_id: "version/1", start_index: 2 } },
+    { call: () => api.prepareMemoirAudio("project/1", { kind: "chapter", chapterId: "chapter/1" }, {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts/plan`, timeout: 30000 },
+    { call: () => api.prepareMemoirAudio("project/1", { kind: "section", chapterId: "chapter/1", sectionId: "section/1" }, {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/sections/section%2F1/tts/plan`, timeout: 30000 },
+    { call: () => api.prepareMemoirAudio("project/1", { kind: "outline" }, {}), method: "POST", url: `${base}/book-plan/outline/tts/plan`, timeout: 30000 },
+    { call: () => api.prepareMemoirAudio("project/1", { kind: "book", versionId: "version/1" }, { start_index: 2 }), method: "POST", url: `${base}/book-output/tts/plan`, timeout: 30000, data: { version_id: "version/1", start_index: 2 } },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
     { call: () => api.getMemoirBookCompletionOverview("project/1"), method: "GET", url: `${narrativeBase}/book-completion/overview` },
     { call: () => api.enqueueMemoirBookReviewJob("project/1", true), method: "POST", url: `${narrativeBase}/book-review/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },

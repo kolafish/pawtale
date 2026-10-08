@@ -20,6 +20,8 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.schemas.memoir_book import (
+    MemoirAudioPlanRequest,
+    MemoirBookAudioPlanResponse,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
     MemoirBookChapterDraftRevisionRequest,
@@ -27,22 +29,13 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftVersionResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_audio import (
-    audio_cache_payload,
-    audio_response,
-    cached_audio_response,
-    discard_staged_audio_files,
-    effective_tts_speed_ratio,
-    source_text_hash,
-    synthesize_text_audio,
-)
+from app.services.memoir.book_audio_jobs import AudioSource, complete_audio_plan, prepare_audio_plan
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_snapshots import (
     normalized_section_snapshots,
     sectioned_chapter_content,
 )
 from app.services.memoir import chapter_generation
-from app.services.memoir.voice_tts_types import TTSClient
 
 
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
@@ -339,152 +332,52 @@ async def revise_chapter_draft(
     return _draft_response(refreshed)
 
 
+async def _chapter_audio_source(
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str,
+    req: MemoirAudioPlanRequest, section_id: str | None = None, allow_admin: bool = False,
+) -> AudioSource:
+    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, allow_admin=allow_admin)
+    _require_confirmed_plan(chapter)
+    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
+    if draft is None or not draft.versions:
+        raise HTTPException(400, "章节稿为空，无法朗读")
+    if req.version_id:
+        version = next((v for v in draft.versions if v.id == req.version_id), None)
+        if version is None:
+            raise HTTPException(404, "章节稿版本不存在")
+    else:
+        version = max(draft.versions, key=lambda v: (v.version, v.created_at, v.id))
+    sections = normalized_section_snapshots(version.section_snapshot_json)
+    cache_key = CHAPTER_TTS_CACHE_KEY
+    if section_id is None:
+        text = sectioned_chapter_content(sections) or version.content.strip()
+    else:
+        section = next((s for s in sections if s["section_id"] == section_id), None)
+        if section is None:
+            raise HTTPException(404, "小节正文不存在")
+        text = f"{section['title']}\n\n{section['content']}".strip()
+        cache_key = f"{CHAPTER_SECTION_TTS_CACHE_KEY_PREFIX}:{section_id}"
+    return AudioSource(version.id, text, draft.metadata_json or {}, cache_key)
+
+
+async def prepare_chapter_draft_audio(
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str,
+    req: MemoirAudioPlanRequest, section_id: str | None = None, allow_admin: bool = False,
+) -> MemoirBookAudioPlanResponse:
+    source = await _chapter_audio_source(
+        db, user_id=user_id, project_id=project_id, chapter_id=chapter_id,
+        section_id=section_id, req=req, allow_admin=allow_admin,
+    )
+    return await prepare_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=req, allow_admin=allow_admin)
+
+
 async def synthesize_chapter_draft_audio(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None = None,
-    allow_admin: bool = False,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str,
+    req: MemoirBookAudioRequest, section_id: str | None = None, allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
-    chapter = await _load_chapter(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        allow_admin=allow_admin,
+    plan_req = MemoirAudioPlanRequest(**req.model_dump(), retry_failed=True)
+    source = await _chapter_audio_source(
+        db, user_id=user_id, project_id=project_id, chapter_id=chapter_id,
+        section_id=section_id, req=plan_req, allow_admin=allow_admin,
     )
-    _require_confirmed_plan(chapter)
-    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if draft is None or not draft.versions:
-        raise HTTPException(status_code=400, detail="章节稿为空，无法朗读")
-    latest = max(
-        draft.versions,
-        key=lambda item: (item.version, item.created_at, item.id),
-    )
-    sections = normalized_section_snapshots(latest.section_snapshot_json)
-    text = sectioned_chapter_content(sections) or latest.content.strip()
-    return await _synthesize_cached_draft_audio(
-        db,
-        user_id=user_id,
-        draft=draft,
-        text=text,
-        cache_key=CHAPTER_TTS_CACHE_KEY,
-        cache_metadata={
-            "draft_version_id": latest.id,
-            "chapter_id": chapter.id,
-        },
-        req=req,
-        tts_client=tts_client,
-    )
-
-
-async def _synthesize_cached_draft_audio(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    draft: MemoirBookChapterDraft,
-    text: str,
-    cache_key: str,
-    cache_metadata: dict[str, object],
-    req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None,
-) -> MemoirBookAudioResponse:
-    text_hash = source_text_hash(text)
-    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
-    cached = cached_audio_response(
-        draft.metadata_json or {},
-        cache_key=cache_key,
-        text_hash=text_hash,
-        voice=req.voice,
-        speed_ratio=speed_ratio,
-        force_regenerate=req.force_regenerate,
-        tts_client=tts_client,
-    )
-    if cached:
-        return cached
-    synthesis = await synthesize_text_audio(
-        db,
-        user_id=user_id,
-        text=text,
-        voice=req.voice,
-        speed_ratio=req.speed_ratio,
-        tts_client=tts_client,
-    )
-    try:
-        draft.metadata_json = {
-            **(draft.metadata_json or {}),
-            cache_key: {
-                **audio_cache_payload(
-                    synthesis,
-                    voice=req.voice,
-                    speed_ratio=speed_ratio,
-                ),
-                **cache_metadata,
-            },
-        }
-        db.add(draft)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
-        raise
-    return audio_response(synthesis)
-
-
-async def synthesize_chapter_draft_section_audio(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    chapter_id: str,
-    section_id: str,
-    req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None = None,
-    allow_admin: bool = False,
-) -> MemoirBookAudioResponse:
-    chapter = await _load_chapter(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        allow_admin=allow_admin,
-    )
-    _require_confirmed_plan(chapter)
-    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if draft is None or not draft.versions:
-        raise HTTPException(status_code=400, detail="章节稿为空，无法朗读")
-    latest = max(
-        draft.versions,
-        key=lambda item: (item.version, item.created_at, item.id),
-    )
-    section = next(
-        (
-            item
-            for item in normalized_section_snapshots(
-                latest.section_snapshot_json
-            )
-            if item["section_id"] == section_id
-        ),
-        None,
-    )
-    if section is None:
-        raise HTTPException(status_code=404, detail="小节正文不存在")
-    text = f"{section['title']}\n\n{section['content']}".strip()
-    cache_key = f"{CHAPTER_SECTION_TTS_CACHE_KEY_PREFIX}:{section_id}"
-    return await _synthesize_cached_draft_audio(
-        db,
-        user_id=user_id,
-        draft=draft,
-        text=text,
-        cache_key=cache_key,
-        cache_metadata={
-            "draft_version_id": latest.id,
-            "chapter_id": chapter.id,
-            "section_id": section_id,
-        },
-        req=req,
-        tts_client=tts_client,
-    )
+    return await complete_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=plan_req, allow_admin=allow_admin)

@@ -1764,6 +1764,7 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     tmp_path,
     monkeypatch,
 ):
+    register_memoir_editing_job_handlers()
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -1788,17 +1789,17 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     assert third.status_code == 200
     assert first.json()["audio_file_ids"] == second.json()["audio_file_ids"]
     assert first.json()["audio_file_ids"] != third.json()["audio_file_ids"]
-    assert first.json()["chunk_count"] == 1
-    assert first.json()["audio_file_durations_seconds"] == [0.48]
-    assert first.json()["duration_seconds"] == 0.48
+    assert first.json()["chunk_count"] == 2
+    assert first.json()["audio_file_durations_seconds"] == [0.48, 0.48]
+    assert first.json()["duration_seconds"] == 0.96
     assert first.json()["alignment_provider"] == "fake-tts"
     assert first.json()["alignment"][0]["text_start"] == 0
-    assert len(fake_tts.calls) == 2
-    assert fake_tts.calls[0]["text"] == (
+    assert len(fake_tts.calls) == 4
+    assert "\n\n".join(call["text"] for call in fake_tts.calls[:2]) == (
         "外婆家的童年\n\n我小时候常在外婆家的院子里晒太阳。"
     )
     assert fake_tts.calls[0]["speed_ratio"] == 1.5
-    assert fake_tts.calls[1]["speed_ratio"] == 0.7
+    assert fake_tts.calls[2]["speed_ratio"] == 0.7
     playback = await client.get(f"/api/mobile/memoir/audio-files/{first.json()['audio_file_ids'][0]}/playback")
     assert playback.status_code == 200
 
@@ -1809,6 +1810,7 @@ async def test_mobile_memoir_book_chapter_section_tts_reads_only_selected_sectio
     tmp_path,
     monkeypatch,
 ):
+    register_memoir_editing_job_handlers()
     monkeypatch.setattr(
         "app.services.memoir.audio_files.MEMOIR_AUDIO_DIR",
         tmp_path / "audio",
@@ -1847,8 +1849,8 @@ async def test_mobile_memoir_book_chapter_section_tts_reads_only_selected_sectio
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
     assert first.json()["audio_file_ids"] == second.json()["audio_file_ids"]
-    assert len(fake_tts.calls) == 1
-    assert fake_tts.calls[0]["text"] == (
+    assert len(fake_tts.calls) == 2
+    assert "\n\n".join(call["text"] for call in fake_tts.calls[:2]) == (
         "外婆家的童年\n\n我小时候常在外婆家的院子里晒太阳。"
     )
     assert fake_tts.calls[0]["speed_ratio"] == 0.7
@@ -1860,6 +1862,7 @@ async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
     tmp_path,
     monkeypatch,
 ):
+    register_memoir_editing_job_handlers()
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)

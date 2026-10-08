@@ -279,25 +279,19 @@ export interface MemoirBookAudioRequest {
   force_regenerate?: boolean;
 }
 
-export interface MemoirBookAudioResponse {
-  audio_file_ids: string[];
-  audio_file_durations_seconds?: Array<number | null>;
-  provider: string;
-  model: string;
-  mime_type: string;
-  chunk_count: number;
-  source_text_hash: string;
-  duration_seconds?: number | null;
-  alignment_provider?: string | null;
-  alignment?: TTSAlignmentSegment[];
-}
-
-export interface MemoirBookAudioPlanRequest extends MemoirBookAudioRequest {
-  version_id: string;
+export interface MemoirAudioPlanRequest extends MemoirBookAudioRequest {
+  version_id?: string;
+  source_text_hash?: string;
   start_index?: number;
   profile_key?: string;
   retry_failed?: boolean;
 }
+
+export type MemoirAudioSource =
+  | { kind: "book"; versionId: string }
+  | { kind: "outline" }
+  | { kind: "chapter"; chapterId: string; versionId?: string }
+  | { kind: "section"; chapterId: string; sectionId: string; versionId?: string };
 
 export interface MemoirBookAudioSegment {
   index: number;

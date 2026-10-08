@@ -1,4 +1,6 @@
 require("./register-ts");
+const { memoirAudioPlanLoader } = require("../services/memoir-book-api.ts");
+const { sampleAudioPlan } = require("./book-fixtures");
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -24,8 +26,7 @@ function sampleFinishedBook(content = "全书正文") {
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockMemoirApiModules({
-    createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
-    prepareMemoirBookAudio: unmockedAsync("prepareMemoirBookAudio"),
+    memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
     getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
@@ -442,54 +443,22 @@ test("flat books paginate without losing Unicode text", async () => {
   assert.equal(context.data.bookContent, context.flatPages.at(-1));
 });
 
-test("book reader reads the latest full book with saved book voice settings", async () => {
-  const requests = [];
-  const playCalls = [];
+for (const mode of ["book", "chapter"]) test(`${mode} reader uses the shared plan and saved settings`, async () => {
+  const requests = [], played = [];
   const { page } = loadBookReaderPage({
-    prepareMemoirBookAudio: async (...args) => {
-      requests.push(args);
-      return {
-        audio_file_ids: ["audio-book-1"],
-        audio_file_durations_seconds: [1.2],
-        provider: "fake",
-        model: "fake-tts",
-        mime_type: "audio/mpeg",
-        chunk_count: 1,
-        source_text_hash: "hash",
-        duration_seconds: 1.2,
-        alignment: [],
-      };
-    },
-  }, {
-    readBookTTSRequest: () => ({
-      voice: "zh_male_m191_uranus_bigtts",
-      speed_ratio: 1.25,
-    }),
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookContent: "外婆回忆录正文",
-    bookViewingHistoricalVersion: false,
-  });
-  context.readerText = "外婆回忆录正文";
-  context.readerAudioVersionId = "book-output-version-1";
-  context.playAudioPlan = async (...args) => {
-    playCalls.push(args);
-  };
-
+    prepareMemoirAudio: async (...args) => { requests.push(args); return sampleAudioPlan(); },
+  }, { readBookTTSRequest: () => ({ voice: "voice-1", speed_ratio: 1.25 }) });
+  const context = pageContext(page, { readerMode: mode, projectId: "project-1", chapterId: "chapter-1" });
+  context.readerText = "正文内容";
+  context.readerAudioVersionId = "version-1";
+  context.audioPlayback.playFile = async (id) => { played.push([id, context.data.playingTarget]); };
   await page.playReaderAudio.call(context);
-
-  assert.deepEqual(requests, [[
-    "project/1",
-    {
-      voice: "zh_male_m191_uranus_bigtts",
-      speed_ratio: 1.25,
-      version_id: "book-output-version-1",
-      retry_failed: true,
-    },
-  ]]);
-  assert.equal(playCalls.length, 1);
-  assert.deepEqual(playCalls[0][2], { voice: "zh_male_m191_uranus_bigtts", speed_ratio: 1.25 });
+  assert.deepEqual(requests, [["project-1", mode === "book"
+    ? { kind: "book", versionId: "version-1" }
+    : { kind: "chapter", chapterId: "chapter-1", versionId: "version-1" },
+    { voice: "voice-1", speed_ratio: 1.25, start_index: 0, retry_failed: true }]]);
+  assert.deepEqual(played, [["audio-1", mode]]);
+  assert.equal(context.data.bookTTSProgressPercent, 100);
   assert.equal(context.data.playbackError, "");
 });
 
@@ -509,7 +478,7 @@ test("book reader opens the full text without starting narration", async () => {
 test("book reader does not mismatch latest audio with historical text", async () => {
   let requestCount = 0;
   const { page } = loadBookReaderPage({
-    prepareMemoirBookAudio: async () => {
+    prepareMemoirAudio: async () => {
       requestCount += 1;
       throw new Error("should not run");
     },
@@ -529,7 +498,7 @@ test("book reader does not mismatch latest audio with historical text", async ()
 
 test("book reader keeps the full text visible when narration fails", async () => {
   const { page } = loadBookReaderPage({
-    prepareMemoirBookAudio: async () => {
+    prepareMemoirAudio: async () => {
       throw new Error("朗读服务暂时不可用");
     },
   });
@@ -545,47 +514,4 @@ test("book reader keeps the full text visible when narration fails", async () =>
   assert.equal(context.data.error, "");
   assert.equal(context.data.bookContent, "仍然可以阅读的全书正文");
   assert.equal(context.data.playbackError, "朗读服务暂时不可用");
-});
-
-test("chapter reader uses the existing chapter TTS and progress pipeline", async () => {
-  const requests = [];
-  const playCalls = [];
-  const { page } = loadBookReaderPage({
-    createMemoirBookChapterDraftTTS: async (...args) => {
-      requests.push(args);
-      return {
-        audio_file_ids: ["audio-chapter-1"],
-        audio_file_durations_seconds: [1.2],
-        provider: "fake",
-        model: "fake-tts",
-        mime_type: "audio/mpeg",
-        chunk_count: 1,
-        source_text_hash: "hash",
-        duration_seconds: 1.2,
-        alignment: [],
-      };
-    },
-  }, {
-    readBookTTSRequest: () => ({ voice: "voice-1", speed_ratio: 1.25 }),
-  });
-  const context = pageContext(page, {
-    readerMode: "chapter",
-    projectId: "project-1",
-    chapterId: "chapter-1",
-    bookContent: "第一小节\n\n整章正文。",
-  });
-  context.readerText = "第一小节\n\n整章正文。";
-  context.playAudioFiles = async (...args) => {
-    playCalls.push(args);
-  };
-
-  await page.playReaderAudio.call(context);
-
-  assert.deepEqual(requests, [[
-    "project-1",
-    "chapter-1",
-    { voice: "voice-1", speed_ratio: 1.25 },
-  ]]);
-  assert.equal(playCalls[0][1], "chapter");
-  assert.equal(playCalls[0][3], "第一小节\n\n整章正文。");
 });

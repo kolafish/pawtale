@@ -1,7 +1,4 @@
 import type {
-  MemoirBookAudioResponse,
-  MemoirBookAudioPlan,
-  MemoirBookAudioRequest,
   MemoirBookOutput,
   MemoirBookOutputVersion,
 } from "../../domain/memoir-book";
@@ -12,8 +9,7 @@ import {
 } from "../../services/accessibility-settings";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
-  createMemoirBookChapterDraftTTS,
-  prepareMemoirBookAudio,
+  memoirAudioPlanLoader,
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
   readMemoirBookShare,
@@ -42,7 +38,6 @@ import {
   type BookOutputChapterPreviewView,
 } from "../book/book-view-model";
 import {
-  playBookAudioFiles,
   playBookAudioPlan,
   stopBookPlayback,
   type BookTTSState,
@@ -444,24 +439,12 @@ definePage<BookReaderData>()({
       playbackError: "",
     });
     try {
-      if (this.data.readerMode === "book") {
-        const request = readBookTTSRequest();
-        const plan = await prepareMemoirBookAudio(this.data.projectId, {
-          ...request, version_id: this.readerAudioVersionId, retry_failed: true,
-        });
-        if (token === this.playToken) await this.playAudioPlan(plan, token, request);
-        return;
-      }
-      const response = await createMemoirBookChapterDraftTTS(
-        this.data.projectId,
-        this.data.chapterId,
-        readBookTTSRequest(),
-      );
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, this.readerText);
+      const source = this.data.readerMode === "book"
+        ? { kind: "book" as const, versionId: this.readerAudioVersionId }
+        : { kind: "chapter" as const, chapterId: this.data.chapterId, versionId: this.readerAudioVersionId || undefined };
+      const prepare = memoirAudioPlanLoader(this.data.projectId, source, readBookTTSRequest());
+      const plan = await prepare();
+      if (token === this.playToken) await playBookAudioPlan(this, plan, token, this.readerText, prepare, target);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -478,24 +461,6 @@ definePage<BookReaderData>()({
         this.setData({ ttsBusyTarget: "" });
       }
     }
-  },
-
-  async playAudioPlan(plan: MemoirBookAudioPlan, token: number, request: MemoirBookAudioRequest) {
-    return playBookAudioPlan(this, plan, token, this.readerText, (index, current, retryFailed) =>
-      prepareMemoirBookAudio(this.data.projectId, {
-        ...request, voice: current.voice || undefined, speed_ratio: current.speed_ratio,
-        version_id: current.version_id, profile_key: current.profile_key,
-        start_index: index, retry_failed: retryFailed,
-      }));
-  },
-
-  async playAudioFiles(
-    response: MemoirBookAudioResponse,
-    target: string,
-    token: number,
-    activeText: string,
-  ) {
-    return playBookAudioFiles(this, response, target, token, activeText);
   },
 
   onBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
@@ -605,6 +570,7 @@ definePage<BookReaderData>()({
     try {
       const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
       const data = chapterReaderData(workspace);
+      this.readerAudioVersionId = workspace.draft_version_id || "";
       this.readerText = trimText(data.bookContent);
       this.chapterParagraphRanges = chapterParagraphRanges(
         data.bookPreviewChapters[0]?.sections || [],

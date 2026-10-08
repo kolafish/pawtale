@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import hashlib
 import json
 import re
@@ -15,6 +16,7 @@ from app.config import get_settings
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import AudioFile, MemoirBookOutput, MemoirBookOutputVersion, MemoirEditingJob
 from app.schemas.memoir_book import (
+    MemoirAudioPlanRequest,
     MemoirBookAudioPlanRequest,
     MemoirBookAudioPlanResponse,
     MemoirBookAudioResponse,
@@ -31,6 +33,14 @@ from app.services.memoir.editing_jobs import (
     run_editing_job,
 )
 from app.services.memoir.voice_tts_types import TTSClient
+
+
+@dataclass(frozen=True)
+class AudioSource:
+    version_id: str
+    text: str
+    legacy_metadata: dict
+    legacy_cache_key: str
 
 
 class AudioProfile(BaseModel):
@@ -92,7 +102,7 @@ def split_book_audio_text(text: str) -> list[book_audio.TTSChunk]:
         raise HTTPException(400, "朗读内容为空")
     result: list[book_audio.TTSChunk] = []
     for paragraph in re.finditer(r"\S[\s\S]*?(?=\n[ \t]*\n|\Z)", content):
-        for chunk in book_audio.split_tts_text(paragraph.group(), max_chars=600):
+        for chunk in book_audio.split_tts_text(paragraph.group(), max_chars=180):
             result.append(book_audio.TTSChunk(
                 text=chunk.text,
                 text_start=paragraph.start() + chunk.text_start,
@@ -120,15 +130,15 @@ async def _usable_audio(
 
 
 async def _legacy_audio_plan(
-    db: AsyncSession, *, project_id: str, user_id: str, version: MemoirBookOutputVersion,
-    profile: AudioProfile, req: MemoirBookAudioPlanRequest,
+    db: AsyncSession, *, project_id: str, user_id: str, source: AudioSource,
+    profile: AudioProfile, req: MemoirAudioPlanRequest,
 ) -> MemoirBookAudioPlanResponse | None:
-    """Keep an existing whole-book recording for identical narration text.
+    """Keep an existing complete recording for identical narration text.
 
     Old caches did not record the resolved default voice/sample rate, so they
     cannot safely populate the cross-version chunk cache.
     """
-    text_hash = book_audio.source_text_hash(version.content.strip())
+    text_hash = book_audio.source_text_hash(source.text.strip())
     signature = book_audio.source_text_hash(f"legacy:{text_hash}:{profile_key(profile)}")
     key = f"book-audio-legacy:{project_id}:{signature}"
     job = await db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == key))
@@ -136,12 +146,11 @@ async def _legacy_audio_plan(
     imported = await db.scalar(select(MemoirEditingJob.id).where(
         MemoirEditingJob.project_id == project_id,
         MemoirEditingJob.dedupe_key.like(f"book-audio-legacy:{project_id}:%"),
-        MemoirEditingJob.payload_json["text"].as_string() == version.content.strip(),
+        MemoirEditingJob.payload_json["text"].as_string() == source.text.strip(),
     ).limit(1)) if job is None else None
     if job is None and imported is None:
-        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
         cached = book_audio.cached_audio_response(
-            output.metadata_json or {} if output else {}, cache_key="book_tts",
+            source.legacy_metadata, cache_key=source.legacy_cache_key,
             text_hash=text_hash, voice=req.voice, speed_ratio=profile.speed_ratio,
             force_regenerate=req.force_regenerate,
         )
@@ -154,14 +163,14 @@ async def _legacy_audio_plan(
                 db, project_id=project_id, job_type=MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK,
                 dedupe_key=key,
                 payload_json=AudioChunkPayload(
-                    version_id=version.id, user_id=user_id, text=version.content.strip(), profile=profile,
+                    version_id=source.version_id, user_id=user_id, text=source.text.strip(), profile=profile,
                 ).model_dump(mode="json"),
             )
             job.status = MemoirEditingJobStatus.SUCCEEDED.value
             job.result_json = AudioChunkResult(audio=cached).model_dump(mode="json")
             await db.flush()
             cached = await _usable_audio(db, job, user_id)
-    chunks = book_audio.split_tts_text(version.content)
+    chunks = book_audio.split_tts_text(source.text)
     if cached is None or len(cached.audio_file_ids) != len(chunks):
         return None
     if req.start_index >= len(chunks):
@@ -186,7 +195,7 @@ async def _legacy_audio_plan(
         elapsed_ms += round((duration or 0) * 1000)
     await db.commit()
     return MemoirBookAudioPlanResponse(
-        version_id=version.id, source_text_hash=text_hash, profile_key=signature,
+        version_id=source.version_id, source_text_hash=text_hash, profile_key=signature,
         voice=profile.voice, speed_ratio=profile.speed_ratio, segments=segments,
         ready_count=len(segments), poll_after_ms=max(250, round(get_settings().book_audio_poll_seconds * 1000)),
     )
@@ -235,21 +244,40 @@ async def run_book_audio_chunk_job(db: AsyncSession, job: MemoirEditingJob) -> E
     return EditingJobResult(result_json=result)
 
 
-async def prepare_book_audio(
+async def _book_audio_source(
     db: AsyncSession, *, user_id: str, project_id: str,
     req: MemoirBookAudioPlanRequest, allow_admin: bool = False,
-) -> MemoirBookAudioPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    owner_id = project.user_id
-    if owner_id is None:
-        raise HTTPException(409, "书稿缺少所属用户")
+) -> AudioSource:
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     version = await db.scalar(select(MemoirBookOutputVersion).where(
         MemoirBookOutputVersion.project_id == project_id,
         MemoirBookOutputVersion.id == req.version_id,
     ))
     if version is None:
         raise HTTPException(404, "书稿版本不存在")
-    text = version.content.strip()
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    return AudioSource(version.id, version.content.strip(), output.metadata_json or {} if output else {}, "book_tts")
+
+
+async def prepare_book_audio(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirBookAudioPlanRequest, allow_admin: bool = False,
+) -> MemoirBookAudioPlanResponse:
+    source = await _book_audio_source(db, user_id=user_id, project_id=project_id, req=req, allow_admin=allow_admin)
+    return await prepare_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=req, allow_admin=allow_admin)
+
+
+async def prepare_audio_plan(
+    db: AsyncSession, *, user_id: str, project_id: str, source: AudioSource,
+    req: MemoirAudioPlanRequest, allow_admin: bool = False,
+) -> MemoirBookAudioPlanResponse:
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    owner_id = project.user_id
+    if owner_id is None:
+        raise HTTPException(409, "书稿缺少所属用户")
+    text = source.text.strip()
+    if req.source_text_hash and req.source_text_hash != book_audio.source_text_hash(text):
+        raise HTTPException(409, "朗读内容已变化，请重新发起朗读")
     profile = audio_profile(book_audio.get_tts_client(), req.voice, req.speed_ratio)
     signature = profile_key(profile)
     chunks = split_book_audio_text(text)
@@ -273,7 +301,7 @@ async def prepare_book_audio(
         wants_legacy or (req.profile_key is None and not all(cached_by_key.get(key) for key in keys))
     ):
         legacy = await _legacy_audio_plan(
-            db, project_id=project_id, user_id=owner_id, version=version, profile=profile, req=req,
+            db, project_id=project_id, user_id=owner_id, source=source, profile=profile, req=req,
         )
         if legacy:
             return legacy
@@ -294,7 +322,7 @@ async def prepare_book_audio(
                 job_type=MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK,
                 dedupe_key=key,
                 payload_json=AudioChunkPayload(
-                    version_id=version.id, user_id=owner_id, text=chunk.text, profile=profile,
+                    version_id=source.version_id, user_id=owner_id, text=chunk.text, profile=profile,
                 ).model_dump(mode="json"),
                 retry_failed=req.retry_failed,
                 replace_completed=bool(job and job.status == MemoirEditingJobStatus.SUCCEEDED.value),
@@ -315,21 +343,21 @@ async def prepare_book_audio(
         ))
     await db.commit()
     return MemoirBookAudioPlanResponse(
-        version_id=version.id, source_text_hash=book_audio.source_text_hash(text),
+        version_id=source.version_id, source_text_hash=book_audio.source_text_hash(text),
         profile_key=signature, voice=profile.voice, speed_ratio=profile.speed_ratio,
         segments=segments, ready_count=sum(s.status == "succeeded" for s in segments),
         poll_after_ms=max(250, round(settings.book_audio_poll_seconds * 1000)),
     )
 
 
-async def complete_book_audio(
-    db: AsyncSession, *, user_id: str, project_id: str,
-    req: MemoirBookAudioPlanRequest,
+async def complete_audio_plan(
+    db: AsyncSession, *, user_id: str, project_id: str, source: AudioSource,
+    req: MemoirAudioPlanRequest,
     allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
     """The shipped client still expects a complete response; share the same cache/jobs."""
-    plan = await prepare_book_audio(
-        db, user_id=user_id, project_id=project_id, req=req,
+    plan = await prepare_audio_plan(
+        db, user_id=user_id, project_id=project_id, source=source, req=req,
         allow_admin=allow_admin,
     )
     for index in range(len(plan.segments)):
@@ -337,8 +365,8 @@ async def complete_book_audio(
             "start_index": index, "profile_key": plan.profile_key, "retry_failed": False,
         })
         if plan.segments[index].status == "idle":
-            plan = await prepare_book_audio(
-                db, user_id=user_id, project_id=project_id, req=current_req,
+            plan = await prepare_audio_plan(
+                db, user_id=user_id, project_id=project_id, source=source, req=current_req,
                 allow_admin=allow_admin,
             )
         while plan.segments[index].status != "succeeded":
@@ -352,8 +380,8 @@ async def complete_book_audio(
                 else:
                     await db.commit()
                     await asyncio.sleep(plan.poll_after_ms / 1000)
-            plan = await prepare_book_audio(
-                db, user_id=user_id, project_id=project_id, req=current_req,
+            plan = await prepare_audio_plan(
+                db, user_id=user_id, project_id=project_id, source=source, req=current_req,
                 allow_admin=allow_admin,
             )
     # Rebuild offsets from the current playlist; cached alignments remain chunk-local.
@@ -376,3 +404,11 @@ async def complete_book_audio(
         duration_seconds=elapsed_ms / 1000 or None,
         alignment_provider=profile.provider if alignment else None, alignment=alignment,
     )
+
+
+async def complete_book_audio(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirBookAudioPlanRequest, allow_admin: bool = False,
+) -> MemoirBookAudioResponse:
+    source = await _book_audio_source(db, user_id=user_id, project_id=project_id, req=req, allow_admin=allow_admin)
+    return await complete_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=req, allow_admin=allow_admin)

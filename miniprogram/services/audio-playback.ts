@@ -25,12 +25,6 @@ export interface AudioPlaybackPlayOptions {
   errorMessage?: string | ((error: AudioPlaybackError) => string);
 }
 
-export interface AudioFileSequenceOptions {
-  token: number;
-  isCurrent: (token: number) => boolean;
-  playFile: (audioFileId: string, index: number) => Promise<void>;
-}
-
 interface ActivePlayback {
   audio: WechatMiniprogram.InnerAudioContext;
   resolve: () => void;
@@ -42,22 +36,6 @@ export function configureAudiblePlayback(audio: WechatMiniprogram.InnerAudioCont
   wx.setInnerAudioOption?.({ obeyMuteSwitch: false, mixWithOther: true });
   audio.obeyMuteSwitch = false;
   audio.volume = 1;
-}
-
-export async function playAudioFileSequence(
-  audioFileIds: string[],
-  options: AudioFileSequenceOptions,
-): Promise<boolean> {
-  if (!audioFileIds.length) {
-    throw new Error("没有可播放的音频");
-  }
-  for (let index = 0; index < audioFileIds.length; index += 1) {
-    if (!options.isCurrent(options.token)) {
-      return false;
-    }
-    await options.playFile(audioFileIds[index], index);
-  }
-  return options.isCurrent(options.token);
 }
 
 export class AudioPlaybackController {

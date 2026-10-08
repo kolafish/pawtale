@@ -7,20 +7,14 @@ from app.models.memoir import (
     MemoirBookPlan,
 )
 from app.schemas.memoir_book import (
+    MemoirAudioPlanRequest,
+    MemoirBookAudioPlanResponse,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
     MemoirBookPlanResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_audio import (
-    audio_cache_payload,
-    audio_response,
-    cached_audio_response,
-    discard_staged_audio_files,
-    effective_tts_speed_ratio,
-    source_text_hash,
-    synthesize_text_audio,
-)
+from app.services.memoir.book_audio_jobs import AudioSource, complete_audio_plan, prepare_audio_plan
 from app.services.memoir.book_plan_sources import (
     load_plan_with_chapters as _load_plan,
     plan_response as _plan_response,
@@ -28,7 +22,6 @@ from app.services.memoir.book_plan_sources import (
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
 )
-from app.services.memoir.voice_tts_types import TTSClient
 
 
 BOOK_OUTLINE_TTS_CACHE_KEY = "outline_tts_audio"
@@ -48,60 +41,36 @@ async def get_book_plan(
     return await _plan_response(db, plan)
 
 
-async def synthesize_book_outline_audio(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    req: MemoirBookAudioRequest,
-    tts_client: TTSClient | None = None,
-    allow_admin: bool = False,
-) -> MemoirBookAudioResponse:
+async def _outline_audio_source(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirAudioPlanRequest, allow_admin: bool = False,
+) -> AudioSource:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
-        raise HTTPException(status_code=404, detail="章节规划不存在")
+        raise HTTPException(404, "章节规划不存在")
+    if req.version_id and req.version_id != plan.id:
+        raise HTTPException(409, "章节规划已变化，请重新发起朗读")
+    refs = await _plan_source_ref_dicts_by_chapter(db, plan)
+    text = build_book_outline_audio_text(plan, source_counts_by_chapter={key: len(value) for key, value in refs.items()})
+    return AudioSource(plan.id, text, plan.metadata_json or {}, BOOK_OUTLINE_TTS_CACHE_KEY)
 
-    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
-    source_counts_by_chapter = {
-        chapter_id: len(refs)
-        for chapter_id, refs in refs_by_chapter.items()
-    }
-    text = build_book_outline_audio_text(plan, source_counts_by_chapter=source_counts_by_chapter)
-    text_hash = source_text_hash(text)
-    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
-    cached = cached_audio_response(
-        plan.metadata_json or {},
-        cache_key=BOOK_OUTLINE_TTS_CACHE_KEY,
-        text_hash=text_hash,
-        voice=req.voice,
-        speed_ratio=speed_ratio,
-        force_regenerate=req.force_regenerate,
-        tts_client=tts_client,
-    )
-    if cached:
-        return cached
 
-    synthesis = await synthesize_text_audio(
-        db,
-        user_id=user_id,
-        text=text,
-        voice=req.voice,
-        speed_ratio=req.speed_ratio,
-        tts_client=tts_client,
-    )
-    try:
-        plan.metadata_json = {
-            **(plan.metadata_json or {}),
-            BOOK_OUTLINE_TTS_CACHE_KEY: audio_cache_payload(synthesis, voice=req.voice, speed_ratio=speed_ratio),
-        }
-        db.add(plan)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
-        raise
-    return audio_response(synthesis)
+async def prepare_book_outline_audio(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirAudioPlanRequest, allow_admin: bool = False,
+) -> MemoirBookAudioPlanResponse:
+    source = await _outline_audio_source(db, user_id=user_id, project_id=project_id, req=req, allow_admin=allow_admin)
+    return await prepare_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=req, allow_admin=allow_admin)
+
+
+async def synthesize_book_outline_audio(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirBookAudioRequest, allow_admin: bool = False,
+) -> MemoirBookAudioResponse:
+    plan_req = MemoirAudioPlanRequest(**req.model_dump(), retry_failed=True)
+    source = await _outline_audio_source(db, user_id=user_id, project_id=project_id, req=plan_req, allow_admin=allow_admin)
+    return await complete_audio_plan(db, user_id=user_id, project_id=project_id, source=source, req=plan_req, allow_admin=allow_admin)
 
 
 def build_book_outline_audio_text(

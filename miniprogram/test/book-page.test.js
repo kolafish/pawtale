@@ -1,4 +1,6 @@
 require("./register-ts");
+const { memoirAudioPlanLoader } = require("../services/memoir-book-api.ts");
+const { sampleAudioPlan } = require("./book-fixtures");
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -14,7 +16,6 @@ const {
 } = require("./page-harness");
 
 const {
-  sampleAudioResponse,
   sampleAutomationEvent,
   sampleBookManuscript,
   sampleBookOutput,
@@ -139,10 +140,9 @@ function loadBookPage({
     ...authExports,
   });
   mockMemoirApiModules({
+    memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     applyMemoirBookPlanStructureCommand: unmockedAsync("applyMemoirBookPlanStructureCommand"),
     confirmMemoirBookPlan: unmockedAsync("confirmMemoirBookPlan"),
-    createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
-    createMemoirBookPlanOutlineTTS: unmockedAsync("createMemoirBookPlanOutlineTTS"),
     assembleMemoirBookOutput: unmockedAsync("assembleMemoirBookOutput"),
     updateMemoirBookOutput: unmockedAsync("updateMemoirBookOutput"),
     downloadMemoirVoiceAudio: unmockedAsync("downloadMemoirVoiceAudio"),
@@ -1178,38 +1178,20 @@ test("book page opens automatically assembled drafts without chapter confirmatio
 });
 
 
-test("book page sends saved TTS voice and speed for outline audio", async () => {
-  const calls = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookPlanOutlineTTS: async (projectId, data) => {
-        calls.push({ kind: "outline", projectId, data });
-        return sampleAudioResponse();
-      },
-    },
-    ttsExports: {
-      readBookTTSRequest: () => ({
-        voice: "zh_male_m191_uranus_bigtts",
-        speed_ratio: 1.5,
-      }),
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
-
-  await page.requestBookAudio.call(context);
-
-  assert.deepEqual(calls, [
-    {
-      kind: "outline",
-      projectId: "project/1",
-      data: {
-        voice: "zh_male_m191_uranus_bigtts",
-        speed_ratio: 1.5,
-      },
-    },
-  ]);
+test("book outline uses the shared audio plan and saved voice settings", async () => {
+  const calls = [], played = [];
+  const { page } = loadBookPage({ voiceApiExports: {
+    prepareMemoirAudio: async (...args) => { calls.push(args); return sampleAudioPlan(); },
+  }, ttsExports: { readBookTTSRequest: () => ({ voice: "cixingnansheng", speed_ratio: 1.5 }) } });
+  const context = pageContext(page, { projectId: "project/1", chapters: [{ title: "童年" }] });
+  context.bookPlan = { title: "回忆录" };
+  context.audioPlayback.playFile = async (id) => { played.push(id); };
+  await page.playBookOutlineAudio.call(context);
+  assert.deepEqual(calls, [["project/1", { kind: "outline" }, {
+    voice: "cixingnansheng", speed_ratio: 1.5, start_index: 0, retry_failed: true,
+  }]]);
+  assert.deepEqual(played, ["audio-1"]);
 });
-
 
 test("book overview routes settings before a draft and keeps export unavailable until readable", () => {
   const urls = [];

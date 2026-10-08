@@ -368,13 +368,18 @@ class MemoirBookAudioResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
-class MemoirBookAudioPlanRequest(MemoirBookAudioRequest):
+class MemoirAudioPlanRequest(MemoirBookAudioRequest):
     model_config = ConfigDict(extra="forbid")
 
-    version_id: str = Field(min_length=1, max_length=36)
+    version_id: str | None = Field(default=None, min_length=1, max_length=36)
+    source_text_hash: str | None = Field(default=None, min_length=64, max_length=64)
     start_index: int = Field(default=0, ge=0)
     profile_key: str | None = Field(default=None, min_length=64, max_length=64)
     retry_failed: bool = False
+
+
+class MemoirBookAudioPlanRequest(MemoirAudioPlanRequest):
+    version_id: str = Field(min_length=1, max_length=36)
 
 
 class MemoirBookAudioSegmentResponse(BaseModel):
