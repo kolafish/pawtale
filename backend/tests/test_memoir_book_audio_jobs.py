@@ -261,3 +261,96 @@ async def test_interrupted_provider_call_requires_explicit_retry(client, test_db
     retried = await prepare(test_db, project_id, user_id, version, retry_failed=True)
     assert await run_test_editing_job(test_db, retried.segments[0].job_id)
     assert len(tts.calls) == 1
+
+
+@pytest.mark.parametrize("target", ["chapter", "section", "outline"])
+async def test_narration_entries_prepare_immediately_and_share_legacy_playback(client, test_db, tts, target):
+    from app.models.memoir import MemoirSection
+
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    endpoint = f"{base}/outline/tts"
+    if target != "outline":
+        endpoint = f"{base}/chapters/{chapters[0].id}/draft"
+        if target == "section":
+            section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapters[0].id))
+            endpoint += f"/sections/{section.id}"
+        endpoint += "/tts"
+    first = await client.post(endpoint + "/plan", json={})
+    assert first.status_code == 200, first.text
+    plan = first.json()
+    assert tts.calls == []
+    assert await run_test_editing_job(test_db, plan["segments"][0]["job_id"])
+    ready = await client.post(endpoint + "/plan", json={
+        "version_id": plan["version_id"], "source_text_hash": plan["source_text_hash"], "profile_key": plan["profile_key"],
+    })
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["segments"][0]["audio_file_id"]
+    if len(plan["segments"]) > 1:
+        assert ready.json()["segments"][1]["status"] == "pending"
+    completed = await client.post(endpoint, json={})
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["audio_file_ids"][0] == ready.json()["segments"][0]["audio_file_id"]
+    assert len(tts.calls) == len(plan["segments"])
+
+
+async def test_chapter_and_section_share_cache_and_pin_reading_version(client, test_db, tts):
+    from app.models.memoir import MemoirBookChapterDraftVersion, MemoirSection
+
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapter_id = chapters[0].id
+    version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == chapter_id))
+    section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapter_id))
+    base = f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter_id}/draft"
+    first = (await client.post(base + "/tts/plan", json={})).json()
+    for segment in first["segments"]:
+        assert await run_test_editing_job(test_db, segment["job_id"])
+    section_plan = (await client.post(base + f"/sections/{section.id}/tts/plan", json={})).json()
+    assert section_plan["ready_count"] == len(first["segments"])
+    assert [s["job_id"] for s in section_plan["segments"]] == [s["job_id"] for s in first["segments"]]
+    new = MemoirBookChapterDraftVersion(
+        draft_id=version.draft_id, chapter_id=chapter_id, project_id=project_id,
+        version=version.version + 1, content="新增的故事。", created_by=version.created_by,
+        section_snapshot_json=[{**v, "content": "新增的故事。"} for v in version.section_snapshot_json],
+    )
+    test_db.add(new)
+    await test_db.commit()
+    pinned = await client.post(base + "/tts/plan", json={
+        "version_id": first["version_id"], "source_text_hash": first["source_text_hash"], "profile_key": first["profile_key"],
+    })
+    assert pinned.status_code == 200, pinned.text
+    assert pinned.json()["ready_count"] == len(first["segments"])
+    current = (await client.post(base + "/tts/plan", json={})).json()
+    assert current["version_id"] == new.id
+    assert current["source_text_hash"] != first["source_text_hash"]
+    assert current["segments"][0]["audio_file_id"] == pinned.json()["segments"][0]["audio_file_id"]
+    assert len(tts.calls) == len(first["segments"])
+    wrong = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[1].id}/draft/tts/plan", json={"version_id": version.id})
+    assert wrong.status_code == 404
+
+
+async def test_outline_change_is_rejected_before_new_jobs_are_enqueued(client, test_db, tts):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    url = f"/api/mobile/memoir/projects/{project_id}/book-plan/outline/tts/plan"
+    first = (await client.post(url, json={})).json()
+    count = len((await test_db.scalars(select(MemoirEditingJob))).all())
+    chapters[0].title = "修改后的章节名"
+    await test_db.commit()
+    changed = await client.post(url, json={
+        "version_id": plan.id, "source_text_hash": first["source_text_hash"], "profile_key": first["profile_key"],
+    })
+    assert changed.status_code == 409
+    assert len((await test_db.scalars(select(MemoirEditingJob))).all()) == count
+    assert tts.calls == []
+
+
+def test_long_paragraphs_have_short_chunks_and_exact_unicode_offsets():
+    text = "这是回忆🌿里的故事。" * 90
+    chunks = book_audio_jobs.split_book_audio_text(text)
+    assert len(chunks) > 2
+    assert all(len(c.text) <= 180 for c in chunks)
+    assert all(text[c.text_start:c.text_end] == c.text for c in chunks)
+    assert "".join(c.text for c in chunks) == text

@@ -17,6 +17,7 @@ from app.schemas.memoir_book import (
     MemoirBookCustomLineSpacing,
     MemoirBookCustomPageMargin,
     MemoirBookManuscriptTemplate,
+    MemoirAudioPlanRequest,
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
     MemoirBookAudioPlanRequest,
@@ -477,7 +478,7 @@ async def create_mobile_memoir_book_chapter_section_tts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_drafts.synthesize_chapter_draft_section_audio(
+    return await memoir_book_drafts.synthesize_chapter_draft_audio(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -717,4 +718,46 @@ async def prepare_mobile_memoir_book_audio(
 ):
     return await book_audio_jobs.prepare_book_audio(
         db, user_id=current_user.id, project_id=project_id, req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-plan/outline/tts/plan", response_model=MemoirBookAudioPlanResponse)
+async def prepare_mobile_memoir_outline_audio(
+    project_id: str,
+    req: MemoirAudioPlanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.prepare_book_outline_audio(
+        db, user_id=current_user.id, project_id=project_id, req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/tts/plan", response_model=MemoirBookAudioPlanResponse)
+async def prepare_mobile_memoir_chapter_audio(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirAudioPlanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_drafts.prepare_chapter_draft_audio(
+        db, user_id=current_user.id, project_id=project_id, req=req,
+        chapter_id=chapter_id,
+    )
+
+
+@router.post("/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/sections/{section_id}/tts/plan", response_model=MemoirBookAudioPlanResponse)
+async def prepare_mobile_memoir_section_audio(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    req: MemoirAudioPlanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_drafts.prepare_chapter_draft_audio(
+        db, user_id=current_user.id, project_id=project_id, req=req,
+        chapter_id=chapter_id,
+        section_id=section_id,
     )

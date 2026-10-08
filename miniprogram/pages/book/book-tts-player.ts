@@ -1,8 +1,7 @@
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
-import type { MemoirBookAudioResponse, MemoirBookAudioPlan, MemoirBookAudioSegment } from "../../domain/memoir-book";
+import type { MemoirBookAudioPlan, MemoirBookAudioSegment } from "../../domain/memoir-book";
 import { PollingTimer } from "../../services/polling-timer";
 import {
-  playAudioFileSequence,
   type AudioPlaybackController,
 } from "../../services/audio-playback";
 import {
@@ -63,12 +62,16 @@ export function applyBookTTSProgressPatch(
   host.onBookTTSProgressPatch?.(patch);
 }
 
-export async function playBookAudioPlan(
-  host: BookTTSHost,
+export type AudioPlanHost = Pick<BookTTSHost,
+  "audioPlayback" | "playToken" | "bookTTSPollTimer" | "bookTTSWake">;
+
+export async function playAudioPlanSegments(
+  host: AudioPlanHost,
   initialPlan: MemoirBookAudioPlan,
   token: number,
-  activeText: string,
   prepare: (index: number, plan: MemoirBookAudioPlan, retryFailed: boolean) => Promise<MemoirBookAudioPlan>,
+  onPreparing: (index: number, count: number) => void,
+  playSegment: (segment: MemoirBookAudioSegment) => Promise<unknown>,
 ): Promise<void> {
   let plan = initialPlan;
   const isCurrent = () => token === host.playToken;
@@ -82,129 +85,86 @@ export async function playBookAudioPlan(
     return next;
   };
   if (!isCurrent()) return;
-  host.setData({
-    bookTTSActiveTarget: "book", bookTTSActiveText: activeText,
-    bookTTSDurationSeconds: 0, bookTTSAlignment: [],
-  });
-  try {
-    for (let index = 0; index < plan.segments.length && isCurrent(); index += 1) {
-      while (isCurrent() && plan.segments[index].status !== "succeeded") {
-        const segment = plan.segments[index];
-        if (segment.status === "failed") {
-          throw new Error(segment.error_message || "本段朗读生成失败，请重试");
-        }
-        host.setData({
-          playingTarget: "", ttsBusyTarget: "book",
-          bookTTSPreparingText: `正在准备第 ${index + 1} 段，共 ${plan.segments.length} 段…`,
-        });
-        if (segment.status !== "idle") {
-          host.bookTTSPollTimer = new PollingTimer(plan.poll_after_ms);
-          await new Promise<void>((resolve) => {
-            host.bookTTSWake = resolve;
-            host.bookTTSPollTimer?.schedule(resolve);
-          });
-          if (!isCurrent()) return;
-          host.bookTTSWake = undefined;
-        }
-        if (!isCurrent()) return;
-        plan = acceptPlan(await prepare(index, plan, false));
-      }
-      if (!isCurrent()) return;
+  for (let index = 0; index < plan.segments.length && isCurrent(); index += 1) {
+    while (isCurrent() && plan.segments[index].status !== "succeeded") {
       const segment = plan.segments[index];
-      if (!segment.audio_file_id) throw new Error("本段没有可播放的音频");
-      host.bookTTSChunk = segment;
-      host.setData({ ttsBusyTarget: "", playingTarget: "book", bookTTSPreparingText: "" });
-      // Prepare and download the next segment while the current one plays.
-      const ahead = index + 1 < plan.segments.length
-        ? prepare(index + 1, plan, initialPlan.segments[index + 1].status === "failed").then(async (next) => {
-            next = acceptPlan(next);
-            if (isCurrent() && next.segments[index + 1].audio_file_id) {
-              await host.audioPlayback.prefetchFile(next.segments[index + 1].audio_file_id!);
-            }
-            return { plan: next, error: null };
-          }).catch((error: unknown) => ({ plan: null, error }))
-        : null;
-      await playBookAudioFile(host, segment.audio_file_id, token, 0, positiveFiniteSeconds(segment.duration_seconds));
-      if (!isCurrent()) return;
-      if (ahead) {
-        const next = await ahead;
-        if (!isCurrent()) return;
-        if (next.error) throw next.error;
-        if (next.plan) plan = next.plan;
-        if (plan.segments[index + 1].status === "pending" || plan.segments[index + 1].status === "running") {
-          plan = acceptPlan(await prepare(index + 1, plan, false));
-        }
+      if (segment.status === "failed") {
+        throw new Error(segment.error_message || "本段朗读生成失败，请重试");
       }
+      onPreparing(index, plan.segments.length);
+      if (segment.status !== "idle") {
+        host.bookTTSPollTimer = new PollingTimer(plan.poll_after_ms);
+        await new Promise<void>((resolve) => {
+          host.bookTTSWake = resolve;
+          host.bookTTSPollTimer?.schedule(resolve);
+        });
+        if (!isCurrent()) return;
+        host.bookTTSWake = undefined;
+      }
+      if (!isCurrent()) return;
+      plan = acceptPlan(await prepare(index, plan, false));
     }
-    if (isCurrent()) {
-      host.setData({
-        bookTTSSpokenText: activeText, bookTTSCurrentText: "", bookTTSRemainingText: "",
-        bookTTSProgressPercent: 100,
-      });
-    }
-  } catch (error) {
-    if (isCurrent()) resetBookTTSProgress(host);
-    throw error;
-  } finally {
-    if (isCurrent()) {
-      host.bookTTSChunk = null;
-      host.setData({ playingTarget: "", ttsBusyTarget: "" });
-      stopBookTTSProgressTimer(host);
+    if (!isCurrent()) return;
+    const segment = plan.segments[index];
+    if (!segment.audio_file_id) throw new Error("本段没有可播放的音频");
+    // Prepare and download the next segment while the current one plays.
+    const ahead = index + 1 < plan.segments.length
+      ? prepare(index + 1, plan, initialPlan.segments[index + 1].status === "failed").then(async (next) => {
+          next = acceptPlan(next);
+          if (isCurrent() && next.segments[index + 1].audio_file_id) {
+            await host.audioPlayback.prefetchFile(next.segments[index + 1].audio_file_id!);
+          }
+          return { plan: next, error: null };
+        }).catch((error: unknown) => ({ plan: null, error }))
+      : null;
+    await playSegment(segment);
+    if (!isCurrent()) return;
+    if (ahead) {
+      const next = await ahead;
+      if (!isCurrent()) return;
+      if (next.error) throw next.error;
+      if (next.plan) plan = next.plan;
+      if (plan.segments[index + 1].status === "pending" || plan.segments[index + 1].status === "running") {
+        plan = acceptPlan(await prepare(index + 1, plan, false));
+      }
     }
   }
 }
 
-export async function playBookAudioFiles(
+export async function playBookAudioPlan(
   host: BookTTSHost,
-  response: MemoirBookAudioResponse,
-  target: string,
+  initialPlan: MemoirBookAudioPlan,
   token: number,
   activeText: string,
+  prepare: (index: number, plan: MemoirBookAudioPlan, retryFailed: boolean) => Promise<MemoirBookAudioPlan>,
+  target = "book",
 ): Promise<void> {
-  const audioFileIds = response.audio_file_ids || [];
-  const durationSeconds = positiveFiniteSeconds(response.duration_seconds);
-  const alignment = Array.isArray(response.alignment) ? response.alignment : [];
+  if (token !== host.playToken) return;
   host.setData({
-    playingTarget: target,
-    error: "",
-    bookTTSActiveTarget: target,
-    bookTTSActiveText: activeText,
-    bookTTSDurationSeconds: durationSeconds,
-    bookTTSAlignment: alignment,
+    bookTTSActiveTarget: target, bookTTSActiveText: activeText,
+    bookTTSDurationSeconds: 0, bookTTSAlignment: [],
   });
-  updateBookTTSProgress(host, 0, durationSeconds);
-  let elapsedBeforeSeconds = 0;
   try {
-    const completed = await playAudioFileSequence(audioFileIds, {
-      token,
-      isCurrent: (candidate) => candidate === host.playToken,
-      playFile: async (audioFileId, index) => {
-        const fallbackDurationSeconds = positiveFiniteSeconds(
-          response.audio_file_durations_seconds?.[index],
-        );
-        const playedSeconds = await playBookAudioFile(
-          host,
-          audioFileId,
-          token,
-          elapsedBeforeSeconds,
-          fallbackDurationSeconds,
-        );
-        elapsedBeforeSeconds += fallbackDurationSeconds || playedSeconds;
-      },
+    await playAudioPlanSegments(host, initialPlan, token, prepare, (index, count) => {
+      host.setData({ playingTarget: "", ttsBusyTarget: target,
+        bookTTSPreparingText: `正在准备第 ${index + 1} 段，共 ${count} 段…` });
+    }, async (segment) => {
+      host.bookTTSChunk = segment;
+      host.setData({ ttsBusyTarget: "", playingTarget: target, bookTTSPreparingText: "" });
+      await playBookAudioFile(host, segment.audio_file_id!, token, 0, positiveFiniteSeconds(segment.duration_seconds));
     });
-    if (completed) {
-      updateBookTTSProgress(host, durationSeconds || elapsedBeforeSeconds, durationSeconds || elapsedBeforeSeconds);
-    }
+    if (token === host.playToken) host.setData({
+      bookTTSSpokenText: activeText, bookTTSCurrentText: "", bookTTSRemainingText: "", bookTTSProgressPercent: 100,
+    });
   } catch (error) {
-    if (token === host.playToken) {
-      resetBookTTSProgress(host);
-    }
+    if (token === host.playToken) resetBookTTSProgress(host);
     throw error;
   } finally {
     if (token === host.playToken) {
-      host.setData({ playingTarget: "" });
+      host.bookTTSChunk = null;
+      host.setData({ playingTarget: "", ttsBusyTarget: "" });
+      stopBookTTSProgressTimer(host);
     }
-    stopBookTTSProgressTimer(host);
   }
 }
 
@@ -334,10 +294,14 @@ export function playbackTimeForProgress(
   return host.ttsProgress.playbackTimeForAudio(audio);
 }
 
-export function stopBookPlayback(host: BookTTSHost): void {
+export function stopAudioPlanPolling(host: AudioPlanHost): void {
   host.bookTTSPollTimer?.cancel();
   host.bookTTSWake?.();
   host.bookTTSWake = undefined;
+}
+
+export function stopBookPlayback(host: BookTTSHost): void {
+  stopAudioPlanPolling(host);
   host.audioPlayback.stop();
   host.playToken = host.audioPlayback.currentToken();
   stopBookTTSProgressTimer(host);

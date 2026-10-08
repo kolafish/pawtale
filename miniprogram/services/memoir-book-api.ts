@@ -1,8 +1,8 @@
 import type {
   MemoirBookAudioRequest,
-  MemoirBookAudioResponse,
   MemoirBookAudioPlan,
-  MemoirBookAudioPlanRequest,
+  MemoirAudioPlanRequest,
+  MemoirAudioSource,
   MemoirBookAssemblyResponse,
   MemoirBookChapterDraft,
   MemoirBookChapterDraftRevisionRequest,
@@ -299,80 +299,44 @@ export function assembleMemoirBookOutput(
   );
 }
 
-export function createMemoirBookChapterDraftTTS(
+export function prepareMemoirAudio(
   projectId: string,
-  chapterId: string,
-  data: MemoirBookAudioRequest = {},
-): Promise<MemoirBookAudioResponse> {
-  return memoirRequest<MemoirBookAudioResponse>(
-    bookPlanChapterPath(projectId, chapterId, "/draft/tts"),
-    {
-      method: "POST",
-      data,
-      timeoutProfile: "generation",
-      invalidatesSnapshots: false,
-    },
-  );
-}
-
-export function createMemoirBookChapterDraftSectionTTS(
-  projectId: string,
-  chapterId: string,
-  sectionId: string,
-  data: MemoirBookAudioRequest = {},
-): Promise<MemoirBookAudioResponse> {
-  return memoirRequest<MemoirBookAudioResponse>(
-    bookPlanChapterPath(
-      projectId,
-      chapterId,
-      `/draft/sections/${encodeURIComponent(sectionId)}/tts`,
-    ),
-    {
-      method: "POST",
-      data,
-      timeoutProfile: "generation",
-      invalidatesSnapshots: false,
-    },
-  );
-}
-
-export function createMemoirBookPlanOutlineTTS(
-  projectId: string,
-  data: MemoirBookAudioRequest = {},
-): Promise<MemoirBookAudioResponse> {
-  return memoirRequest<MemoirBookAudioResponse>(
-    bookPlanPath(projectId, "/outline/tts"),
-    {
-      method: "POST",
-      data,
-      timeoutProfile: "generation",
-      invalidatesSnapshots: false,
-    },
-  );
-}
-
-export function createMemoirBookOutputTTS(
-  projectId: string,
-  data: MemoirBookAudioRequest = {},
-): Promise<MemoirBookAudioResponse> {
-  return memoirRequest<MemoirBookAudioResponse>(
-    memoirProjectPath(projectId, "/book-output/tts"),
-    {
-      method: "POST",
-      data,
-      timeoutProfile: "generation",
-      invalidatesSnapshots: false,
-    },
-  );
-}
-
-export function prepareMemoirBookAudio(
-  projectId: string,
-  data: MemoirBookAudioPlanRequest,
+  source: MemoirAudioSource,
+  data: MemoirAudioPlanRequest,
 ): Promise<MemoirBookAudioPlan> {
-  return memoirRequest<MemoirBookAudioPlan>(memoirProjectPath(projectId, "/book-output/tts/plan"), {
-    method: "POST", data, timeoutProfile: "interactive", invalidatesSnapshots: false,
+  let path: string;
+  if (source.kind === "book") {
+    path = memoirProjectPath(projectId, "/book-output/tts/plan");
+  } else if (source.kind === "outline") {
+    path = bookPlanPath(projectId, "/outline/tts/plan");
+  } else {
+    const suffix = source.kind === "section"
+      ? `/draft/sections/${encodeURIComponent(source.sectionId)}/tts/plan`
+      : "/draft/tts/plan";
+    path = bookPlanChapterPath(projectId, source.chapterId, suffix);
+  }
+  return memoirRequest<MemoirBookAudioPlan>(path, {
+    method: "POST", data: {
+      ...((source.kind !== "outline" && source.versionId) ? { version_id: source.versionId } : {}),
+      ...data,
+    },
+    timeoutProfile: "interactive", invalidatesSnapshots: false,
   });
+}
+
+export function memoirAudioPlanLoader(
+  projectId: string, source: MemoirAudioSource, request: MemoirBookAudioRequest,
+  prepare: typeof prepareMemoirAudio = prepareMemoirAudio,
+) {
+  return (index = 0, current?: MemoirBookAudioPlan, retryFailed = true): Promise<MemoirBookAudioPlan> =>
+    prepare(projectId, source, {
+      ...request,
+      ...(current ? {
+        version_id: current.version_id, source_text_hash: current.source_text_hash,
+        voice: current.voice || undefined, speed_ratio: current.speed_ratio, profile_key: current.profile_key,
+      } : {}),
+      start_index: index, retry_failed: retryFailed,
+    });
 }
 
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {

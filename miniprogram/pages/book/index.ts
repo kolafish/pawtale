@@ -1,5 +1,4 @@
 import type {
-  MemoirBookAudioResponse,
   MemoirBookChapterDraft,
   MemoirBookOutput,
   MemoirBookPlan,
@@ -15,7 +14,7 @@ import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookShare,
-  createMemoirBookPlanOutlineTTS,
+  memoirAudioPlanLoader,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
@@ -53,7 +52,7 @@ import { writeTranscriptNavigationTarget } from "../../services/transcript-navig
 import { hideMiniProgramShareMenu } from "../../services/share";
 import {
   applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
-  playBookAudioFiles,
+  playBookAudioPlan,
   stopBookPlayback,
   stopBookTTSProgressTimer as stopBookTTSPlaybackProgressTimer,
 } from "./book-tts-player";
@@ -927,12 +926,13 @@ definePage<BookPageData>()({
       error: "",
     });
     try {
-      const response = await this.requestBookAudio();
+      const prepare = memoirAudioPlanLoader(this.data.projectId, { kind: "outline" }, readBookTTSRequest());
+      const plan = await prepare();
       if (token !== this.playToken) {
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, activeText);
+      await playBookAudioPlan(this, plan, token, activeText, prepare, target);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -947,14 +947,6 @@ definePage<BookPageData>()({
         this.setData({ ttsBusyTarget: "" });
       }
     }
-  },
-
-  async requestBookAudio() {
-    return createMemoirBookPlanOutlineTTS(this.data.projectId, readBookTTSRequest());
-  },
-
-  async playAudioFiles(response: MemoirBookAudioResponse, target: string, token: number, activeText: string) {
-    return playBookAudioFiles(this, response, target, token, activeText);
   },
 
   applyBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {

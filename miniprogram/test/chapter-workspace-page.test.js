@@ -1,4 +1,6 @@
 require("./register-ts");
+const { memoirAudioPlanLoader } = require("../services/memoir-book-api.ts");
+const { sampleAudioPlan } = require("./book-fixtures");
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -195,6 +197,7 @@ function loadWorkspacePage({
   cacheExports = {},
 } = {}) {
   mockMemoirApiModules({
+    memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     getMemoirChapterWorkspace: async () => currentWorkspace,
     getMemoirChapterSectionRegenerationJob: async () => ({
       job_id: null,
@@ -226,13 +229,7 @@ function loadWorkspacePage({
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
     confirmMemoirBookChapterDraft: async () => ({}),
-    createMemoirBookChapterDraftTTS: async () => ({
-      audio_file_ids: [],
-    }),
     getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: true }] }),
-    createMemoirBookChapterDraftSectionTTS: async () => ({
-      audio_file_ids: [],
-    }),
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", {
@@ -699,9 +696,9 @@ test("chapter workspace blocks row actions while another operation is active", a
   const ttsRequests = [];
   const { page } = loadWorkspacePage({
     voiceApiExports: {
-      createMemoirBookChapterDraftSectionTTS: async (...args) => {
+      prepareMemoirAudio: async (...args) => {
         ttsRequests.push(args);
-        return { audio_file_ids: ["audio-1"] };
+        return sampleAudioPlan();
       },
     },
   });
@@ -1308,9 +1305,9 @@ test("chapter workspace reads one draft section with saved book voice settings",
   const played = [];
   const { page } = loadWorkspacePage({
     voiceApiExports: {
-      createMemoirBookChapterDraftSectionTTS: async (...args) => {
+      prepareMemoirAudio: async (...args) => {
         requests.push(args);
-        return { audio_file_ids: ["audio-1", "audio-2"] };
+        return sampleAudioPlan(["audio-1", "audio-2"]);
       },
     },
   });
@@ -1331,6 +1328,7 @@ test("chapter workspace reads one draft section with saved book voice settings",
     stop() {
       token += 1;
     },
+    async prefetchFile() {},
     async playFile(audioFileId, playToken) {
       played.push([audioFileId, playToken]);
     },
@@ -1340,15 +1338,13 @@ test("chapter workspace reads one draft section with saved book voice settings",
     currentTarget: { dataset: { id: "section-1" } },
   });
 
-  assert.deepEqual(requests, [[
-    "project-1",
-    "chapter-1",
-    "section-1",
-    {
-      voice: "linjiajiejie",
-      speed_ratio: 1.5,
-    },
-  ]]);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], ["project-1", {
+    kind: "section", chapterId: "chapter-1", sectionId: "section-1", versionId: "version-1",
+  }, { voice: "linjiajiejie", speed_ratio: 1.5, start_index: 0, retry_failed: true }]);
+  assert.equal(requests[1][2].start_index, 1);
+  assert.equal(requests[1][2].source_text_hash, "hash");
+  assert.equal(requests[1][2].version_id, "version-1");
   assert.deepEqual(played, [["audio-1", 2], ["audio-2", 2]]);
   assert.equal(context.data.audioPhase, "idle");
   assert.equal(context.data.audioTarget, "");
@@ -1772,9 +1768,9 @@ test("chapter workspace offers the migrated chapter actions and preserves narrat
   global.wx.showActionSheet = (options) => sheets.push(options);
   const { page } = loadWorkspacePage({
     voiceApiExports: {
-      createMemoirBookChapterDraftTTS: async (projectId, chapterId, payload) => {
-        calls.push({ projectId, chapterId, payload });
-        return { audio_file_ids: [] };
+      prepareMemoirAudio: async (projectId, source, payload) => {
+        calls.push({ projectId, source, payload });
+        return sampleAudioPlan([]);
       },
     },
   });
@@ -1784,7 +1780,7 @@ test("chapter workspace offers the migrated chapter actions and preserves narrat
   assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "不收入本书"]);
   assert.equal(context.data.operationKind, "");
   await page.playChapterAudio.call(context);
-  assert.deepEqual(calls, [{ projectId: "project-1", chapterId: "chapter-1", payload: { voice: "linjiajiejie", speed_ratio: 1.5 } }]);
+  assert.deepEqual(calls, [{ projectId: "project-1", source: { kind: "chapter", chapterId: "chapter-1", versionId: "version-1" }, payload: { voice: "linjiajiejie", speed_ratio: 1.5, start_index: 0, retry_failed: true } }]);
   assert.equal(context.data.audioPhase, "idle");
   context.setData({ chapterHasReadableDraft: false });
   context.pageVisible = true;
@@ -1859,4 +1855,29 @@ test("chapter action sheet stays closed when its plan arrives after leaving the 
   await opening;
   assert.equal(sheets.length, 0);
   assert.equal(context.data.operationKind, "");
+});
+
+test("leaving a workspace during audio preparation cancels polling and playback", async () => {
+  const { flushAsyncWork } = require("./page-harness");
+  installWx();
+  let requests = 0;
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    prepareMemoirAudio: async () => {
+      requests += 1;
+      const plan = sampleAudioPlan();
+      plan.poll_after_ms = 60000;
+      plan.segments[0] = { ...plan.segments[0], status: "pending", audio_file_id: null };
+      return plan;
+    },
+  } });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  const playback = page.playDraftSection.call(context, { currentTarget: { dataset: { id: "section-1" } } });
+  await flushAsyncWork();
+  assert.equal(context.data.audioPhase, "preparing");
+  assert.equal(context.bookTTSPollTimer.pending, true);
+  page.onHide.call(context);
+  await playback;
+  assert.equal(context.bookTTSPollTimer.pending, false);
+  assert.equal(context.data.audioPhase, "idle");
+  assert.equal(requests, 1);
 });

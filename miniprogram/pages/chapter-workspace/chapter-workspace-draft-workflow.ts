@@ -1,11 +1,10 @@
-import type { MemoirBookAudioResponse } from "../../domain/memoir-book";
+import type { MemoirAudioSource } from "../../domain/memoir-book";
 import {
   AudioPlaybackController,
-  playAudioFileSequence,
 } from "../../services/audio-playback";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  createMemoirBookChapterDraftSectionTTS,
+  memoirAudioPlanLoader,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-book-api";
 import { routeAuthError } from "../../services/navigation";
@@ -23,7 +22,9 @@ import {
   type ChapterWorkspacePageData,
 } from "./chapter-workspace-model";
 
-interface ChapterWorkspaceDraftHost {
+import { playAudioPlanSegments, stopAudioPlanPolling, type AudioPlanHost } from "../book/book-tts-player";
+
+interface ChapterWorkspaceDraftHost extends AudioPlanHost {
   data: ChapterWorkspacePageData;
   audioPlayback: AudioPlaybackController;
   playToken: number;
@@ -187,19 +188,14 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
     }
     await this.playDraftAudio(
       sectionId,
-      () => createMemoirBookChapterDraftSectionTTS(
-        this.data.projectId,
-        this.data.chapterId,
-        sectionId,
-        readBookTTSRequest(),
-      ),
+      { kind: "section", chapterId: this.data.chapterId, sectionId, versionId: this.data.workspace?.draft_version_id || undefined },
       "故事朗读失败",
     );
   },
 
   async playDraftAudio(
     target: string,
-    createAudio: () => Promise<MemoirBookAudioResponse>,
+    source: MemoirAudioSource,
     errorMessage: string,
   ) {
     if (
@@ -225,22 +221,14 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       error: "",
     });
     try {
-      const response = await createAudio();
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({
-        audioPhase: "playing",
-        audioTarget: target,
-      });
-      await playAudioFileSequence(response.audio_file_ids || [], {
-        token,
-        isCurrent: (candidate) => candidate === this.playToken,
-        playFile: (audioFileId) => this.audioPlayback.playFile(
-          audioFileId,
-          token,
-          { errorMessage },
-        ),
+      const prepare = memoirAudioPlanLoader(this.data.projectId, source, readBookTTSRequest());
+      const plan = await prepare();
+      if (token !== this.playToken) return;
+      await playAudioPlanSegments(this, plan, token, prepare, () => {
+        this.setData({ audioPhase: "preparing", audioTarget: target });
+      }, async (segment) => {
+        this.setData({ audioPhase: "playing", audioTarget: target });
+        await this.audioPlayback.playFile(segment.audio_file_id!, token, { errorMessage });
       });
     } catch (error) {
       if (routeAuthError(error, "login")) {
@@ -262,6 +250,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
   },
 
   stopDraftSectionPlayback() {
+    stopAudioPlanPolling(this);
     this.audioPlayback.stop();
     this.playToken = this.audioPlayback.currentToken();
     if (this.data.audioPhase !== "idle" || this.data.audioTarget) {

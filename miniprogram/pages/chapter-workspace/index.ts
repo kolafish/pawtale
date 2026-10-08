@@ -43,12 +43,10 @@ import { promptRequiredText } from "../../services/text-prompt";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   applyMemoirBookPlanStructureCommand,
-  createMemoirBookChapterDraftTTS,
   generateMemoirBookChapterTitle,
   getMemoirBookPlan,
   updateMemoirBookChapterTitle,
 } from "../../services/memoir-book-api";
-import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   CLOSED_DRAFT_SECTION_EDITOR,
   PREPARATION_POLL_INTERVAL_MS,
@@ -640,11 +638,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     await this.playDraftAudio(
       "chapter",
-      () => createMemoirBookChapterDraftTTS(
-        this.data.projectId,
-        this.data.chapterId,
-        readBookTTSRequest(),
-      ),
+      { kind: "chapter", chapterId: this.data.chapterId, versionId: this.data.workspace?.draft_version_id || undefined },
       "章节朗读失败",
     );
   },

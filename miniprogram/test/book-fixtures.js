@@ -364,38 +364,18 @@ function sampleBookOutput(
   };
 }
 
-function sampleAudioResponse() {
+function sampleAudioPlan(ids = ["audio-1"], overrides = {}) {
   return {
-    audio_file_ids: ["audio-book-1", "audio-book-2"],
-    audio_file_durations_seconds: [1.2, 1.4],
-    provider: "fake",
-    model: "fake-tts",
-    mime_type: "audio/mpeg",
-    chunk_count: 2,
-    source_text_hash: "hash",
-    duration_seconds: 2.6,
-    alignment_provider: "fake",
-    alignment: [
-      {
-        text: "外婆",
-        start_ms: 0,
-        end_ms: 600,
-        text_start: 0,
-        text_end: 2,
-      },
-      {
-        text: "回忆录",
-        start_ms: 600,
-        end_ms: 1200,
-        text_start: 2,
-        text_end: 5,
-      },
-    ],
+    version_id: "version-1", source_text_hash: "hash", profile_key: "profile", voice: "voice-1", speed_ratio: 1,
+    poll_after_ms: 1, ready_count: ids.length,
+    segments: ids.map((id, index) => ({ index, text_start: index * 4, text_end: index * 4 + 4,
+      status: "succeeded", audio_file_id: id, duration_seconds: 1, alignment: [], error_message: "" })),
+    ...overrides,
   };
 }
 
 module.exports = {
-  sampleAudioResponse,
+  sampleAudioPlan,
   sampleAutomationEvent,
   sampleBookManuscript,
   sampleBookOutput,
