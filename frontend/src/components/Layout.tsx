@@ -1,9 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { BarChart3, FolderOpen, LogOut, UserCircle } from 'lucide-react';
+import { BarChart3, FolderOpen, LogOut, UserCircle, Users } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
 import { UserAuditDashboard } from './audit/UserAuditDashboard';
+import { LaoyuUserList } from './audit/LaoyuUserList';
 import { getAIModelOptions } from '../constants/aiModels';
 import type { User } from '../types';
 import { useDraftSaves } from '../hooks/project/draftSaves';
@@ -22,7 +23,8 @@ export function Layout({ user, onLogout }: LayoutProps) {
     setIsAdmin(user.role === 'admin');
     if (user.role !== 'admin') setDefaultAiModel('deepseek-flash');
   }, [setDefaultAiModel, setIsAdmin, user.role]);
-  const [activeView, setActiveView] = useState<'workspace' | 'audit'>('workspace');
+  const [activeView, setActiveView] = useState<'workspace' | 'audit' | 'laoyu'>('workspace');
+  const [auditUserId, setAuditUserId] = useState('');
   const canViewAudit = user.role === 'admin';
   const currentView = canViewAudit ? activeView : 'workspace';
 
@@ -76,6 +78,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
                 type="button"
                 onClick={() => leaveWorkspace(() => {
                   closeProject();
+                  setAuditUserId('');
                   setActiveView('audit');
                 })}
                 className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
@@ -87,6 +90,22 @@ export function Layout({ user, onLogout }: LayoutProps) {
               >
                 <BarChart3 size={15} />
                 <span className="hidden md:inline">审计</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => leaveWorkspace(() => {
+                  closeProject();
+                  setActiveView('laoyu');
+                })}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                  currentView === 'laoyu'
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-gray-500 hover:bg-white/70 hover:text-gray-700'
+                }`}
+                title="老余口述用户"
+              >
+                <Users size={15} />
+                <span className="hidden md:inline">老余用户</span>
               </button>
             </div>
           )}
@@ -124,7 +143,22 @@ export function Layout({ user, onLogout }: LayoutProps) {
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">
-        {currentView === 'audit' ? <UserAuditDashboard /> : <WritingWorkspace />}
+        {currentView === 'audit' && (
+          <UserAuditDashboard
+            key={auditUserId}
+            initialUserId={auditUserId}
+            initialPlatform={auditUserId ? 'miniprogram' : undefined}
+          />
+        )}
+        {currentView === 'laoyu' && (
+          <LaoyuUserList
+            onOpenAudit={(userId) => {
+              setAuditUserId(userId);
+              setActiveView('audit');
+            }}
+          />
+        )}
+        {currentView === 'workspace' && <WritingWorkspace />}
       </main>
     </div>
   );

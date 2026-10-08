@@ -22,6 +22,25 @@ export interface AuditUserBrief {
   role: string;
 }
 
+export interface LaoyuUserUsage {
+  user: AuditUserBrief;
+  created_at: string | null;
+  wechat_bound: boolean;
+  memoir_project_count: number;
+  voice_session_count: number;
+  utterance_count: number;
+  recorded_seconds: number;
+  last_voice_at: string | null;
+  miniprogram_active_ms: number;
+  miniprogram_active_days: number;
+  miniprogram_last_seen_at: string | null;
+  last_active_at: string | null;
+}
+
+export interface LaoyuUsersResponse {
+  users: LaoyuUserUsage[];
+}
+
 export interface AuditDashboardFilters {
   from: string;
   to: string;

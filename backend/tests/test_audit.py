@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
-from app.models.users import User
+from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_common import AudioFile
+from app.models.projects import Project
+from app.models.users import AuthIdentity, User
 
 
 def audit_payload(client_session_id: str = "client-session-1") -> dict:
@@ -165,3 +168,47 @@ async def test_admin_can_query_audit_dashboard_and_user_day(client, test_db):
         "event-2",
         "event-3",
     ]
+
+
+async def test_laoyu_users_requires_admin(client):
+    response = await client.get("/api/audit/laoyu-users")
+
+    assert response.status_code == 403
+
+
+async def test_admin_lists_laoyu_users_with_recording_and_app_usage(client, test_db):
+    await client.post("/api/audit/events", json=audit_payload())
+    admin = await make_current_user_admin(test_db)
+
+    wechat_user = User(email="wechat_a@wechat.local", password_hash="x", display_name="老余")
+    xiaoyu_user = User(email="wechat_b@wechat.local", password_hash="x", display_name="小鱼用户")
+    test_db.add_all([wechat_user, xiaoyu_user])
+    await test_db.flush()
+    test_db.add_all([
+        AuthIdentity(user_id=wechat_user.id, provider="wechat_miniprogram", provider_user_id="openid-a"),
+        AuthIdentity(user_id=xiaoyu_user.id, provider="wechat_miniprogram_xiaoyu", provider_user_id="openid-b"),
+    ])
+    project = Project(user_id=wechat_user.id, type="memoir", title="我的一生")
+    audio = AudioFile(user_id=wechat_user.id, storage_path="a.pcm", mime_type="audio/pcm", size_bytes=1, duration_seconds=42)
+    test_db.add_all([project, audio])
+    await test_db.flush()
+    voice_session = MemoirVoiceSession(project_id=project.id)
+    test_db.add(voice_session)
+    await test_db.flush()
+    test_db.add(MemoirVoiceUtterance(voice_session_id=voice_session.id, audio_file_id=audio.id, transcript_raw="小时候"))
+    await test_db.commit()
+
+    response = await client.get("/api/audit/laoyu-users")
+
+    assert response.status_code == 200
+    users = {row["user"]["id"]: row for row in response.json()["users"]}
+    assert set(users) == {admin.id, wechat_user.id}
+    assert users[wechat_user.id]["wechat_bound"] is True
+    assert users[wechat_user.id]["memoir_project_count"] == 1
+    assert users[wechat_user.id]["voice_session_count"] == 1
+    assert users[wechat_user.id]["utterance_count"] == 1
+    assert users[wechat_user.id]["recorded_seconds"] == 42
+    assert users[wechat_user.id]["miniprogram_active_ms"] == 0
+    assert users[admin.id]["wechat_bound"] is False
+    assert users[admin.id]["miniprogram_active_ms"] == 90000
+    assert users[admin.id]["miniprogram_active_days"] == 1

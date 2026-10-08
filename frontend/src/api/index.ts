@@ -24,6 +24,7 @@ import type {
   AuditDashboardFilters,
   AuditDashboardResponse,
   AuditUserDayResponse,
+  LaoyuUsersResponse,
   AdminAICreditResponse,
   AICreditKind,
   MemoirBookPlan,
@@ -65,6 +66,8 @@ export const auditApi = {
     api.get<AuditDashboardResponse>('/audit/dashboard', { params: filters }).then(r => r.data),
   userDay: (userId: string, day: string) =>
     api.get<AuditUserDayResponse>(`/audit/users/${encodeURIComponent(userId)}/days/${day}`).then(r => r.data),
+  laoyuUsers: () =>
+    api.get<LaoyuUsersResponse>('/audit/laoyu-users').then(r => r.data),
 };
 
 // AI credit administration API
