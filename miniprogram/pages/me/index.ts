@@ -596,7 +596,7 @@ definePage<MeData>()({
     const confirmation = await new Promise<{ confirm: boolean }>((resolve) => {
       wx.showModal({
         title: "注销账号",
-        content: "注销后，账号、回忆录及录音资料将从在线服务中删除，无法在小程序恢复。请确认是否继续。",
+        content: "注销后，账号、回忆录及录音资料将从在线服务中删除，无法在小程序恢复；用同一微信重新登录不再赠送免费 AI 额度。请确认是否继续。",
         confirmText: "确认注销",
         confirmColor: "#b0473d",
         success: resolve,

@@ -35,6 +35,7 @@ from app.schemas.auth import (
 )
 from app.services import user_avatars
 from app.services import account_deletion
+from app.services.ai_credits import withhold_claimed_free_credit
 from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_wechat_login_code
 
 
@@ -216,6 +217,7 @@ async def wechat_login(
         user = await db.get(User, union_user_id) if union_user_id else None
         if union_user_id and user is None:
             raise HTTPException(status_code=409, detail="微信身份关联的用户不存在")
+        is_new_user = user is None
         if user is None:
             user = User(
                 email=_provisional_wechat_email(provider, session.openid),
@@ -231,6 +233,15 @@ async def wechat_login(
             profile_json={},
         )
         db.add_all([user, identity])
+        await db.flush()
+        if is_new_user:
+            await withhold_claimed_free_credit(
+                db,
+                user.id,
+                provider=provider,
+                openid=session.openid,
+                unionid=session.unionid,
+            )
 
     await db.flush()
     await issue_session(db, response, user.id)

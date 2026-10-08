@@ -16,6 +16,7 @@ from app.models.memoir_common import AudioFile
 from app.models.projects import Project
 from app.models.users import AuthIdentity, AuthSession, User
 from app.services import user_avatars
+from app.services.ai_credits import record_free_credit_claims
 from app.services import content_storage
 from app.services.project_documents import PostCommitCleanup
 from app.services.projects import core as project_core
@@ -58,6 +59,7 @@ async def delete_account(db: AsyncSession, user: User) -> None:
             await db.execute(delete(GitHubInstallation).where(GitHubInstallation.user_id == user_id))
             await db.execute(delete(AudioFile).where(AudioFile.user_id == user_id))
             await db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
+            await record_free_credit_claims(db, user_id)
             await db.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user_id))
             await db.delete(user)
             await db.commit()
