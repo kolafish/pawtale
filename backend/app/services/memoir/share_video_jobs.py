@@ -464,7 +464,7 @@ async def create_share_video_job(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and not ai_background_enabled:
-        raise HTTPException(status_code=400, detail="回忆画卷当前不可用，请选择自选画面")
+        raise HTTPException(status_code=400, detail="AI 生成插图当前不可用，请选择「上传照片或插图」")
     try:
         background_style = normalize_share_video_background_style(req.background_style)
     except ValueError as exc:
