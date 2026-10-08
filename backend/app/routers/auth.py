@@ -217,7 +217,6 @@ async def wechat_login(
         user = await db.get(User, union_user_id) if union_user_id else None
         if union_user_id and user is None:
             raise HTTPException(status_code=409, detail="微信身份关联的用户不存在")
-        is_new_user = user is None
         if user is None:
             user = User(
                 email=_provisional_wechat_email(provider, session.openid),
@@ -233,17 +232,15 @@ async def wechat_login(
             profile_json={},
         )
         db.add_all([user, identity])
-        await db.flush()
-        if is_new_user:
-            await withhold_claimed_free_credit(
-                db,
-                user.id,
-                provider=provider,
-                openid=session.openid,
-                unionid=session.unionid,
-            )
 
     await db.flush()
+    await withhold_claimed_free_credit(
+        db,
+        user.id,
+        provider=provider,
+        openid=session.openid,
+        unionid=identity.provider_union_id,
+    )
     await issue_session(db, response, user.id)
     await db.refresh(user)
     return _auth_response(user)
@@ -341,6 +338,8 @@ async def delete_me(
     identity = await _find_wechat_identity(db, provider, session.openid)
     if identity is None or identity.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="微信身份与当前账号不匹配")
+    if session.unionid:
+        identity.provider_union_id = session.unionid
     await account_deletion.delete_account(db, current_user)
     clear_session_cookie(response)
 
