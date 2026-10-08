@@ -24,11 +24,13 @@ interface DatasetEvent {
 }
 
 function displayDate(value: string): string {
-  const date = new Date(value);
+  // Backend timestamps without an offset are UTC; display a Beijing calendar day.
+  const normalized = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(new Date(normalized).getTime() + 8 * 60 * 60 * 1000);
   if (Number.isNaN(date.getTime())) {
     return "";
   }
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 function articleItems(items: ArticleListItem[]): ArticleItem[] {

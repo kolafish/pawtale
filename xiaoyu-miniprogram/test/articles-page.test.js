@@ -14,7 +14,7 @@ function article(id, title) {
     can_edit: true,
     total_word_count: 12,
     document_count: 1,
-    updated_at: "2026-07-29T08:00:00Z",
+    updated_at: "2026-07-29T20:00:00",
   };
 }
 
@@ -49,6 +49,7 @@ test("article list loads, creates, opens and deletes articles", async () => {
 
   await page.loadArticles.call(context);
   assert.equal(context.data.articles[0].wordCountText, "12 字");
+  assert.equal(context.data.articles[0].updatedText, "2026-07-30");
 
   await page.createArticle.call(context);
   page.openArticle.call(context, {

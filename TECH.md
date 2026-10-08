@@ -63,6 +63,13 @@ backend/app/
 - AI provider 子类只实现 transport，产品 prompt 和用例放在独立 service；
 - 后台任务使用数据库 job、lease、heartbeat 和幂等发布，不依赖进程内队列保存业务真相。
 
+## 时间与日期
+
+- Web、老余和小鱼小程序的用户可见时间统一为北京时间（UTC+08:00），不跟随设备时区；日期筛选、审计日统计、账单周期和导出日期也采用北京时间。
+- 数据库时间戳继续以 UTC 保存；无时区后缀的后端时间戳按 UTC 解析，有显式时区的时间戳保留其绝对时刻，再转换为北京时间展示。
+- Web 与老余小程序分别复用 `frontend/src/utils/time.ts` 和 `miniprogram/services/time.ts`；后端审计根据 `occurred_at` 计算北京时间日期，不信任客户端的本地 `event_date`。
+- 登录过期、缓存有效期、后台任务调度及音视频相对时长使用绝对时间或经过时长，不做八小时平移。
+
 ## API 分区
 
 ### 共享 API

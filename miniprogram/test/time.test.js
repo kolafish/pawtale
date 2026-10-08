@@ -33,8 +33,17 @@ test("normalizes timestamps for sorting persisted records", () => {
   const { timestampMs } = timeModule();
 
   assert.equal(timestampMs("2026-06-16T01:05:00Z"), Date.parse("2026-06-16T01:05:00Z"));
+  assert.equal(timestampMs("2026-06-16T01:05:00"), Date.parse("2026-06-16T01:05:00Z"));
   assert.equal(timestampMs("invalid"), 0);
   assert.equal(timestampMs(null), 0);
+});
+
+test("uses Beijing calendar dates regardless of device timezone", () => {
+  const { formatBeijingDate } = timeModule();
+  assert.equal(formatBeijingDate("2026-10-07T20:30:00"), "2026-10-08");
+  assert.equal(formatBeijingDate("2026-12-31T16:00:00Z"), "2027-01-01");
+  assert.equal(formatBeijingDate("2026-10-08"), "2026-10-08");
+  assert.equal(formatBeijingDate(null), "");
 });
 
 test("formats playback seconds as an unclipped minute clock", () => {

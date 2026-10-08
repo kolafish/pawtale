@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ChevronRight, FileText, FolderOpen, Download, X, Github, RefreshCw, UploadCloud, Unlink } from 'lucide-react';
 import { projectsApi } from '../api';
 import type { GitSyncRepositoryOption, Project, ProjectExportDownloadFormat } from '../types';
+import { formatBeijingDateTime } from '../utils/time';
 
 type InspectorTab = 'document' | 'project';
 
@@ -153,7 +154,7 @@ export function Inspector({
   };
 
   const lastSyncedAt = syncStatus?.project_config?.last_synced_at
-    ? new Date(syncStatus.project_config.last_synced_at).toLocaleString('zh-CN')
+    ? formatBeijingDateTime(syncStatus.project_config.last_synced_at)
     : null;
 
   const syncError = syncStatus?.project_config?.last_error || runSyncMutation.data?.error || null;

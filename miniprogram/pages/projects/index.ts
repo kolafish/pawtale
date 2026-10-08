@@ -17,6 +17,7 @@ import {
   type PageDatasetEvent,
 } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
+import { formatBeijingDate } from "../../services/time";
 
 interface ProjectDataset {
   id?: string;
@@ -43,17 +44,6 @@ interface ProjectsData {
   projects: ProjectItem[];
 }
 
-function displayDate(value?: string): string {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function projectItems(response: MemoirProjectListResponse): ProjectItem[] {
   const canDelete = response.projects.length > 1;
   return response.projects.map((project) => ({
@@ -61,7 +51,7 @@ function projectItems(response: MemoirProjectListResponse): ProjectItem[] {
     active: project.id === response.active_project_id,
     canDelete,
     profileSummary: projectProfileSummary(project),
-    updatedText: displayDate(project.last_opened_at || project.updated_at || project.created_at),
+    updatedText: formatBeijingDate(project.last_opened_at || project.updated_at || project.created_at),
     wordCountText: `${project.total_word_count || 0} 字`,
   }));
 }

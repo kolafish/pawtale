@@ -33,7 +33,7 @@ function material(overrides: Partial<MemoirMaterialItem> = {}): MemoirMaterialIt
 describe('memoir material interview time', () => {
   it('uses the session start time and displays it in China time', () => {
     const item = material({
-      session_started_at: '2026-07-05T17:30:00Z',
+      session_started_at: '2026-07-05T17:30:00',
       session_created_at: '2026-07-07T08:00:00Z',
     });
 

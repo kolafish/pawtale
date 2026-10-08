@@ -17,7 +17,7 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import { formatBeijingDateTimeShort } from "../../services/time";
+import { formatBeijingDateTimeShort, timestampMs } from "../../services/time";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { PollingTimer } from "../../services/polling-timer";
 import { shareVideoJobStatusText } from "../../services/transcript-share-video";
@@ -180,7 +180,7 @@ definePage<ShareVideosData>()({
       const updates = new Map(jobs.map((job) => [job.id, job]));
       const completed = jobs
         .filter((job) => job.status === "succeeded" && !this.data.items.some((item) => item.id === job.id))
-        .sort((left, right) => Date.parse(right.completed_at || right.created_at) - Date.parse(left.completed_at || left.created_at)
+        .sort((left, right) => timestampMs(right.completed_at || right.created_at) - timestampMs(left.completed_at || left.created_at)
           || right.id.localeCompare(left.id))
         .map((job) => toViewItem({
           ...job,

@@ -7,6 +7,7 @@ import { formatProjectStructure, getProjectProfile } from '../domain/projectProf
 import { useAppStore } from '../stores/appStore';
 import { ProjectDeleteDialog } from './ProjectDeleteDialog';
 import type { Project, ProjectListItem } from '../types';
+import { formatBeijingDateTime } from '../utils/time';
 
 export function ProjectHome() {
   const queryClient = useQueryClient();
@@ -101,8 +102,7 @@ export function ProjectHome() {
   };
 
   const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    return formatBeijingDateTime(dateStr, { month: 'short', day: 'numeric' });
   };
 
   return (

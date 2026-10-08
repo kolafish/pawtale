@@ -87,6 +87,19 @@ test("audit tracker batches page view and leave events", async () => {
   delete global.wx;
 });
 
+test("audit events use Beijing days when a session crosses midnight", async () => {
+  const requests = installWxMock(successResponse);
+  const tracker = trackerModule();
+  let currentTime = new Date("2026-10-07T15:59:59Z");
+  tracker.__setAuditNowForTest(() => currentTime);
+  tracker.trackAuditPageShow("/pages/home/index");
+  currentTime = new Date("2026-10-07T16:00:01Z");
+  await tracker.trackAuditPageLeave("app_background");
+  assert.deepEqual(requests[0].data.events.map((event) => event.event_date), ["2026-10-07", "2026-10-08"]);
+  tracker.__resetAuditTrackerForTest();
+  delete global.wx;
+});
+
 test("audit tracker requeues events after transient upload failure", async () => {
   let failNext = true;
   const requests = installWxMock((options) => {

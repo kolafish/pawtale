@@ -43,7 +43,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { readBookTTSRequest } from "../../services/tts-settings";
-import { formatBeijingDateTimeShort } from "../../services/time";
+import { formatBeijingDateTimeShort, timestampMs } from "../../services/time";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -470,7 +470,7 @@ definePage<BookPageData>()({
         const latest = events.filter((event) => (
           event.chapter_id === chapter.id && event.event_type === "chapter_draft_generated"
         ))
-          .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
+          .sort((a, b) => timestampMs(b.updated_at) - timestampMs(a.updated_at))[0];
         const status = latest?.metadata_json?.acknowledged_at ? undefined : latest?.status;
         return {
           ...chapter,
