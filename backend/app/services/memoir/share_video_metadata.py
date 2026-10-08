@@ -54,6 +54,7 @@ class ShareVideoScenePlanMetadata(_ShareVideoMetadataModel):
     strategy: str = ""
     plan_hash: str = ""
     visual_context: str = ""
+    person_count: str = ""
     scenes: list[ShareVideoPlannedSceneMetadata] = Field(default_factory=list)
 
 

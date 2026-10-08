@@ -857,7 +857,7 @@ def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
     ]
     sentences = share_video_scene_planner.share_video_sentence_units(text, char_timings, 38_000)
 
-    prompt = share_video_scene_planner._user_prompt(text, sentences, 38_000, 2, 3)
+    prompt = share_video_scene_planner._user_prompt(text, sentences, 38_000)
 
     assert "sentence_ids" in prompt
     assert "不要输出 start_char/end_char" in prompt
@@ -868,6 +868,79 @@ def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
     assert "image_prompt_content" not in prompt
     assert "visual_summary" not in prompt
     assert "evidence_quote" not in prompt
+
+
+@pytest.mark.parametrize("sentence_groups", [[[0, 1, 2, 3]], [[0, 1], [2, 3]]])
+async def test_share_video_planned_people_reach_single_and_group_image_requests(
+    sentence_groups, tmp_path, monkeypatch,
+):
+    orchestration = share_video_jobs.background_orchestration
+    text = (
+        "我们还是走过那条路线。到了夏天，那条路线上还有桑葚。对，桑葚。"
+        "到了夏末，晚上就会有萤火虫，星星点点的，有的萤火虫会趴在路边的草丛上，"
+        "有的会在路上的空中飞来飞去。甚至我们还看到过两次猫头鹰，"
+        "夜晚的时候悄无声息地从头顶上飞过去。"
+    )
+    person_count = "至少2人，准确人数未说明"
+    visual_context = "讲述者“我”与同伴（关系未说明）在夏末的夜晚走过固定路线；讲述者为女性。"
+    narrator = share_video_backgrounds.share_video_narrator_context({"narrator_gender": "female", "narrator_age": 40})
+    monkeypatch.setattr(share_video_scene_planner, "get_settings", lambda: SimpleNamespace(
+        memoir_share_video_scene_planner_enabled=True,
+        memoir_share_video_scene_planner_model="deepseek-flash",
+    ))
+    monkeypatch.setattr(share_video_scene_planner, "get_ai_service", lambda _: SimpleNamespace(
+        provider_name="deepseek", model_name="deepseek-flash",
+    ))
+
+    async def fake_generate(_client, system_prompt, user_prompt, *, output_model, **kwargs):
+        assert narrator in user_prompt
+        assert "person_count" in user_prompt
+        return SimpleNamespace(value=output_model.model_validate({
+            "person_count": person_count,
+            "visual_context": visual_context,
+            "scenes": [{"sentence_ids": ids} for ids in sentence_groups],
+        }))
+
+    monkeypatch.setattr(share_video_scene_planner, "generate_structured_with_client", fake_generate)
+    image_prompts = []
+    asset = share_video_backgrounds.ShareVideoBackgroundAsset(
+        path=tmp_path / "scene.png", storage_path="memoir/share-video-backgrounds/scene.png",
+        style_id="watercolor", prompt_hash="test", prompt_template_version="test",
+        provider="volc_ark", model="test", cache_hit=False,
+    )
+
+    async def fake_single(selected_text, style_id, *, usage_context=None, **context):
+        image_prompts.append(share_video_backgrounds.build_share_video_background_prompt(
+            selected_text, style_id, **context,
+        ).prompt)
+        return asset
+
+    async def fake_group(scene_texts, style_id, *, usage_context=None, **context):
+        image_prompts.append(share_video_backgrounds.build_share_video_background_set_prompt(
+            scene_texts, style_id, **context,
+        ).prompt)
+        return [asset] * len(scene_texts)
+
+    monkeypatch.setattr(orchestration, "get_or_generate_share_video_background", fake_single)
+    monkeypatch.setattr(orchestration, "get_or_generate_share_video_background_set", fake_group)
+    monkeypatch.setattr(orchestration, "register_share_video_background_asset", AsyncMock())
+    metadata = orchestration.ShareVideoJobMetadata(background_mode="smart_multi")
+    db = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(metadata_json={
+        "memoir_profile": {"narrator_gender": "female", "narrator_age": 40},
+    })))
+    prepared = await orchestration.prepare_share_video_background(
+        db, job=SimpleNamespace(project_id="test", selected_text=text, start_ms=0, end_ms=31_400),
+        metadata=metadata, persist_progress=AsyncMock(), ai_background_enabled=True, volc_ark_api_key="test",
+    )
+
+    assert metadata.background_status == "ready"
+    assert metadata.background_scene_plan.strategy == "llm_sentence_units"
+    restored = orchestration.ShareVideoJobMetadata.from_json(metadata.to_json())
+    assert restored.background_scene_plan.person_count == person_count
+    assert restored.background_scene_plan.visual_context == visual_context
+    assert len(prepared.segments) == len(sentence_groups)
+    assert len(image_prompts) == 1
+    assert person_count in image_prompts[0] and visual_context in image_prompts[0]
 
 
 def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
