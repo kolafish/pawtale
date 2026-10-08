@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import re
+from typing import NamedTuple
 import unicodedata
 from uuid import uuid4
 
@@ -649,6 +650,8 @@ async def delete_share_video_job(
     try:
         video_path.unlink(missing_ok=True)
         video_path.with_suffix(".thumbnail.jpg").unlink(missing_ok=True)
+        video_path.with_suffix(".card.jpg").unlink(missing_ok=True)
+        video_path.with_suffix(".card-still.jpg").unlink(missing_ok=True)
     except OSError:
         logger.exception("failed to remove deleted share video file job_id=%s", job_id)
     _remove_video_completion_marker(video_path)
@@ -807,21 +810,29 @@ async def load_completed_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
-) -> tuple[MemoirShareVideoOutput, Path, str]:
+) -> CompletedShareVideo:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
     if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or job.output is None:
         raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
     return completed_share_video_file(job)
 
 
-def completed_share_video_file(job: MemoirMaterialShareVideo) -> tuple[MemoirShareVideoOutput, Path, str]:
+class CompletedShareVideo(NamedTuple):
+    output: MemoirShareVideoOutput
+    path: Path
+    title: str
+    hook_text: str
+
+
+def completed_share_video_file(job: MemoirMaterialShareVideo) -> CompletedShareVideo:
     output = job.output
     if output is None:
         raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
     path = share_video_file_path(job, output)
     if not path.exists():
         raise HTTPException(status_code=404, detail="分享视频文件不存在")
-    return output, path, share_video_title(ShareVideoJobMetadata.from_json(job.metadata_json), job.selected_text)
+    metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+    return CompletedShareVideo(output, path, share_video_title(metadata, job.selected_text), metadata.hook_text)
 
 
 def _claimable_share_video_job(now: datetime, max_attempts: int):

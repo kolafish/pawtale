@@ -306,9 +306,10 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
 }
 
 // Share-code links need no login, so the player can stream them directly.
-export function memoirSharedVideoUrl(shareCode: string, variant: "video" | "thumbnail" = "video"): string {
+// "card" is the sharp 5:4 cover made for WeChat's forwarded card.
+export function memoirSharedVideoUrl(shareCode: string, variant: "video" | "thumbnail" | "card" = "video"): string {
   const path = `/api/mobile/memoir/share-video/shares/${encodeURIComponent(shareCode)}/video`;
-  return memoirShareVideoDownloadUrl(variant === "thumbnail" ? `${path}?variant=thumbnail` : path);
+  return memoirShareVideoDownloadUrl(variant === "video" ? path : `${path}?variant=${variant}`);
 }
 
 export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> {

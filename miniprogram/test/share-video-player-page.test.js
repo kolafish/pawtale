@@ -8,6 +8,7 @@ function loadPlayer(readMemoirSharedVideo) {
   mockMemoirApiModules({
     readMemoirSharedVideo,
     memoirShareVideoDownloadUrl: (url) => `https://api.example.com${url}`,
+    memoirSharedVideoUrl: (code, variant) => `https://api.example.com/shares/${code}/${variant}`,
   });
   return loadPageModule("../pages/share-video-player/index.ts");
 }
@@ -41,7 +42,8 @@ test("a scanned mini program code opens the clip and forwards the same card", as
     assert.deepEqual(page.onShareAppMessage.call(context), {
       title: "外婆家的冬天",
       path: "/pages/share-video-player/index?code=0123456789abcdef0123",
-      imageUrl: "https://api.example.com/api/mobile/memoir/share-video/shares/abc/video?variant=thumbnail",
+      // The forwarded card uses the 5:4 cover, not the small list thumbnail.
+      imageUrl: "https://api.example.com/shares/0123456789abcdef0123/card",
     });
     page.openBook.call(context);
     assert.deepEqual(navigations, ["/pages/book-reader/index?shareToken=book-token"]);

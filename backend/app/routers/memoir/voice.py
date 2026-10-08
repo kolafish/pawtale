@@ -747,17 +747,22 @@ async def _read_file_range(path: Path, start: int, end: int):
 
 async def _share_video_file_response(
     request: Request,
-    path: Path,
-    mime_type: str,
-    title: str,
+    video: memoir_share_video_jobs.CompletedShareVideo,
     variant: str,
 ) -> Response:
+    path, mime_type, title = video.path, video.output.mime_type, video.title
     if variant == "thumbnail":
         try:
             thumbnail = await memoir_share_video_jobs.rendering.share_video_thumbnail(path)
         except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
             raise HTTPException(status_code=503, detail="视频缩略图暂时不可用") from exc
         return FileResponse(thumbnail, media_type="image/jpeg")
+    if variant == "card":
+        try:
+            cover = await memoir_share_video_jobs.rendering.share_video_card_cover(path, video.hook_text)
+        except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
+            raise HTTPException(status_code=503, detail="视频封面暂时不可用") from exc
+        return FileResponse(cover, media_type="image/jpeg")
     # Starlette 0.35 serves only whole files; byte ranges let the video player stream.
     size = path.stat().st_size
     byte_range = _byte_range(request.headers.get("range", ""), size)
@@ -788,17 +793,17 @@ async def _share_video_file_response(
 async def download_mobile_memoir_share_video_job(
     job_id: str,
     request: Request,
-    variant: Literal["video", "thumbnail"] = "video",
+    variant: Literal["video", "thumbnail", "card"] = "video",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    output, path, title = await memoir_share_video_jobs.load_completed_share_video_job(
+    video = await memoir_share_video_jobs.load_completed_share_video_job(
         db,
         job_id,
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
-    return await _share_video_file_response(request, path, output.mime_type, title, variant)
+    return await _share_video_file_response(request, video, variant)
 
 
 @router.post("/share-video/shares/read", response_model=MemoirSharedVideoResponse)
@@ -815,11 +820,11 @@ async def read_mobile_memoir_shared_video(
 async def download_mobile_memoir_shared_video(
     code: str,
     request: Request,
-    variant: Literal["video", "thumbnail"] = "video",
+    variant: Literal["video", "thumbnail", "card"] = "video",
     db: AsyncSession = Depends(get_db),
 ):
-    output, path, title = await memoir_share_video_shares.load_shared_video_file(db, code)
-    return await _share_video_file_response(request, path, output.mime_type, title, variant)
+    video = await memoir_share_video_shares.load_shared_video_file(db, code)
+    return await _share_video_file_response(request, video, variant)
 
 
 @router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)

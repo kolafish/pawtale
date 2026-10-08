@@ -156,23 +156,78 @@ async def _run_ffmpeg(args: list[str], *, frames: Iterable[bytes] | None = None)
         raise ShareVideoGenerationError(message[0] if message else "ffmpeg 执行失败")
 
 
-async def share_video_thumbnail(source_path: Path) -> Path:
-    thumbnail_path = source_path.with_suffix(".thumbnail.jpg")
-    if thumbnail_path.is_file() and thumbnail_path.stat().st_size:
-        return thumbnail_path
-    # Use the first story image after the short title card, then reuse this
-    # immutable job's small JPEG rather than downloading the video on home.
-    with tempfile.TemporaryDirectory(prefix="thumbnail-", dir=source_path.parent) as directory:
-        temporary_path = Path(directory) / "thumbnail.jpg"
+# The longest opening hook is 3 s, so this lands on the first story image in every video.
+_CARD_SEEK_SECONDS = 3.5
+_CARD_HEIGHT = round(_VIDEO_WIDTH * 4 / 5)
+_CARD_TOP = round(_VIDEO_HEIGHT * _SUBJECT_CENTER_Y - _CARD_HEIGHT / 2)
+
+
+async def _video_still(source_path: Path, suffix: str, seek_seconds: float, video_filter: str, quality: int) -> Path:
+    still_path = source_path.with_suffix(suffix)
+    if still_path.is_file() and still_path.stat().st_size:
+        return still_path
+    # Each job's video is immutable, so the still is extracted once and reused.
+    with tempfile.TemporaryDirectory(prefix="still-", dir=source_path.parent) as directory:
+        temporary_path = Path(directory) / "still.jpg"
         await asyncio.wait_for(_run_ffmpeg([
-            _ffmpeg_executable(), "-y", "-ss", "2", "-i", str(source_path),
-            "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "5", "-an",
+            _ffmpeg_executable(), "-y", "-ss", str(seek_seconds), "-i", str(source_path),
+            "-frames:v", "1", "-vf", video_filter, "-q:v", str(quality), "-an",
             str(temporary_path),
         ]), timeout=10)
         if not temporary_path.is_file() or not temporary_path.stat().st_size:
             raise ShareVideoGenerationError("视频缩略图生成失败")
-        temporary_path.replace(thumbnail_path)
-    return thumbnail_path
+        temporary_path.replace(still_path)
+    return still_path
+
+
+async def share_video_thumbnail(source_path: Path) -> Path:
+    # A small frame for lists, so home does not download the video.
+    return await _video_still(source_path, ".thumbnail.jpg", 2, "scale=320:-2", 5)
+
+
+async def share_video_card_cover(source_path: Path, hook_text: str = "") -> Path:
+    """A 5:4 cover for WeChat's forwarded card, with the video's opening line on it.
+
+    The card shows a 5:4 image, so a portrait frame gets centre-cropped and upscaled;
+    cropping a full-width still here keeps the picture sharp and leaves out the
+    watermark and moving captions, and the opening line is set once, whole.
+    """
+    cover_path = source_path.with_suffix(".card.jpg")
+    if cover_path.is_file() and cover_path.stat().st_size:
+        return cover_path
+    still_path = await _video_still(
+        source_path,
+        ".card-still.jpg",
+        _CARD_SEEK_SECONDS,
+        f"crop={_VIDEO_WIDTH}:{_CARD_HEIGHT}:0:{_CARD_TOP}",
+        2,
+    )
+    with Image.open(still_path) as still:
+        cover = still.convert("RGB")
+    if hook_text.strip():
+        _draw_card_hook(cover, hook_text.strip())
+    temporary_path = cover_path.with_name(f".{cover_path.name}.{os.getpid()}.tmp")
+    cover.save(temporary_path, "JPEG", quality=90)
+    temporary_path.replace(cover_path)
+    still_path.unlink(missing_ok=True)
+    return cover_path
+
+
+def _draw_card_hook(cover: Image.Image, hook_text: str) -> None:
+    lines = [hook_text[start:end] for start, end in _quote_line_ranges(hook_text, 0, len(hook_text))]
+    lines[0] = f"“{lines[0]}"
+    lines[-1] = f"{lines[-1]}”"
+    font = _font(46, bold=True)
+    line_height = 66
+    text_top = cover.height - 44 - line_height * len(lines)
+    # A soft dark fade behind the line keeps it readable on any picture.
+    fade_top = max(0, text_top - 90)
+    ys = np.linspace(0, 1, cover.height - fade_top, dtype=np.float32)[:, None]
+    pixels = np.asarray(cover, np.float32)
+    pixels[fade_top:] *= (1 - 0.6 * ys * ys * (3 - 2 * ys))[..., None]
+    cover.paste(Image.fromarray(np.clip(pixels, 0, 255).astype(np.uint8)))
+    layer = _text_layer(lines, font, line_height=line_height, fill=(*_CAPTION_COLOR, 255), shadow=True)
+    cover.paste(layer, (0, text_top - 24), layer)
 
 
 

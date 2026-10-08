@@ -244,6 +244,34 @@ async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(
     assert (await client.get(url)).status_code == 404
 
 
+async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
+    created = await create_test_voice_transcript(client, test_db)
+    job = await _add_video_job(
+        test_db, created, job_id="card", status=MemoirShareVideoJobStatus.SUCCEEDED,
+        created_at=utcnow_naive(), metadata={"hook_text": "到了夏天，那条路上还有桑葚"},
+    )
+    await test_db.commit()
+    path = share_video_jobs.share_video_file_path(job)
+    path.parent.mkdir(parents=True)
+    # Green story image with a blue caption band where the subtitles sit.
+    subprocess.run([
+        share_video_jobs.rendering._ffmpeg_executable(), "-y", "-f", "lavfi",
+        "-i", "color=c=green:s=720x1280:d=5,drawbox=y=880:w=720:h=400:color=blue:t=fill",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+    ], check=True, capture_output=True, timeout=10)
+
+    response = await client.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=card")
+
+    assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
+    image = Image.open(BytesIO(response.content)).convert("RGB")
+    assert image.size == (720, 576)
+    # No caption band, and the chosen opening line is set in light text near the bottom.
+    assert all(image.getpixel((x, 300))[2] < 80 for x in (10, 360, 710))
+    text_rows = image.crop((0, 380, 720, 576)).convert("L")
+    assert text_rows.getextrema()[1] > 200
+
+
 async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
     monkeypatch.setattr(share_video_jobs, "get_settings", lambda: SimpleNamespace(
@@ -320,6 +348,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(job.id.encode())
         path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
+        path.with_suffix(".card.jpg").write_bytes(b"card")
     shared_read = "/api/mobile/memoir/share-video/shares/read"
     share_code = chosen.share_code
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
@@ -347,6 +376,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert response.status_code == 204, response.text
     assert not share_video_jobs.share_video_file_path(chosen).exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".thumbnail.jpg").exists()
+    assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".card.jpg").exists()
     assert (await client.get(url)).status_code == 404
     assert (await client.get(f"{url}/download")).status_code == 404
     assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{retained.id}/download")).content == b"retained"
