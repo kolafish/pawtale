@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
-from typing import Literal
 
 from fastapi import HTTPException
 import httpx
@@ -39,9 +38,10 @@ class _Subtitle(BaseModel):
 
 
 class _SpeechEvent(BaseModel):
-    type: Literal["speech.audio.delta", "speech.audio.done", "response.subtitle", "speech.audio.error", "error"]
+    # Unknown event types are ignored so a new provider event cannot fail narration.
+    type: str
     audio: str = ""
-    data: _Subtitle | None = None
+    data: dict | None = None
 
 
 class StepFunTTSClient(TTSClient):
@@ -108,10 +108,12 @@ class StepFunTTSClient(TTSClient):
                         elif event.type == "response.subtitle":
                             if event.data is None:
                                 raise ValueError("StepFun TTS subtitle is missing")
-                            for word in event.data.items:
+                            for word in _Subtitle.model_validate(event.data).items:
                                 start = text.find(word.text, cursor)
+                                # Normalized words (e.g. 50% read as 百分之五十) are not in the
+                                # input; skip their highlight instead of discarding paid audio.
                                 if start < 0 or word.end_time < word.start_time:
-                                    raise ValueError("StepFun TTS subtitle does not match the input")
+                                    continue
                                 cursor = start + len(word.text)
                                 alignment.append(TTSAlignmentSegment(
                                     text=word.text, text_start=start, text_end=cursor,

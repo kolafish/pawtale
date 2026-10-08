@@ -95,7 +95,7 @@ def test_only_longform_narration_uses_step_mini(monkeypatch):
     assert isinstance(get_tts_client(settings), VolcTTSClient)
 
 
-@pytest.mark.parametrize("failure", ["truncated", "late_error", "bad_base64", "no_subtitles", "bad_subtitle"])
+@pytest.mark.parametrize("failure", ["truncated", "late_error", "bad_base64", "no_subtitles"])
 async def test_partial_or_invalid_provider_responses_never_become_completed_audio(monkeypatch, failure):
     stream_events = events()
     if failure == "truncated":
@@ -104,15 +104,30 @@ async def test_partial_or_invalid_provider_responses_never_become_completed_audi
         stream_events.append({"type": "speech.audio.error", "message": "upstream failed"})
     elif failure == "bad_base64":
         stream_events[0]["audio"] = "!invalid!"
-    elif failure == "no_subtitles":
-        stream_events.pop(1)
     else:
-        stream_events[1]["data"] = {"text": TEXT, "items": [{"text": "wrong", "start_time": 0, "end_time": 1}]}
+        stream_events.pop(1)
     calls = mock_provider(monkeypatch, stream_events)
     with pytest.raises(HTTPException) as caught:
         await StepFunTTSClient(Settings(stepfun_api_key="test-key")).synthesize(TEXT)
     assert caught.value.status_code == 503
     assert len(calls) == 1
+
+
+async def test_normalized_subtitles_and_new_event_types_keep_completed_audio(monkeypatch):
+    text = "涨了50%，你好。"
+    stream_events = events()
+    stream_events.insert(0, {"type": "speech.audio.start", "data": {"session": "s-1"}})
+    stream_events[2]["data"] = {"text": text, "items": [
+        {"text": "涨了", "start_time": 0, "end_time": 300},
+        {"text": "百分之五十，", "start_time": 300, "end_time": 1200},
+        {"text": "你好。", "start_time": 1300, "end_time": 1700},
+    ]}
+    mock_provider(monkeypatch, stream_events)
+    result = await StepFunTTSClient(Settings(stepfun_api_key="test-key")).synthesize(text)
+    assert result.audio == b"mp3-onemp3-two"
+    assert result.duration_seconds == 1.7
+    assert [(s.text, s.text_start) for s in result.alignment] == [("涨了", 0), ("你好。", 6)]
+    assert all(text[s.text_start:s.text_end] == s.text for s in result.alignment)
 
 
 async def test_http_failure_is_not_retried(monkeypatch):
