@@ -652,6 +652,8 @@ async def delete_share_video_job(
         video_path.with_suffix(".thumbnail.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".card.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".card-still.jpg").unlink(missing_ok=True)
+        video_path.with_suffix(".end.jpg").unlink(missing_ok=True)
+        video_path.with_suffix(".poster.jpg").unlink(missing_ok=True)
     except OSError:
         logger.exception("failed to remove deleted share video file job_id=%s", job_id)
     _remove_video_completion_marker(video_path)

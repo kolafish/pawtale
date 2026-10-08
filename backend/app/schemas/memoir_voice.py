@@ -571,6 +571,8 @@ class MemoirSharedVideoResponse(BaseModel):
     duration_ms: int
     video_url: str
     poster_url: str
+    # The closing frame with the mini program code, shown once playback ends.
+    end_frame_url: str
     # Present only while the author keeps the whole book shared.
     book_share_token: str | None = None
 

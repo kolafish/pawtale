@@ -11,12 +11,23 @@
 
   <block wx:elif="{{video}}">
     <image wx:if="{{!videoUrl}}" class="shared-video is-portrait" src="{{posterUrl}}" mode="aspectFill" />
+    <block wx:elif="{{ended}}">
+      <image
+        class="shared-video is-portrait"
+        src="{{endFrameUrl}}"
+        mode="aspectFit"
+        show-menu-by-longpress
+        aria-label="视频结尾，长按识别小程序码"
+      />
+      <button class="ghost-button shared-video-action" bindtap="replayVideo">重新播放</button>
+    </block>
     <video
       wx:else
       class="shared-video {{portrait ? 'is-portrait' : ''}}"
       src="{{videoUrl}}"
       poster="{{posterUrl}}"
       bindloadedmetadata="markVideoShape"
+      bindended="holdEndFrame"
       binderror="markVideoError"
       controls
       autoplay

@@ -12,6 +12,9 @@ interface SharedVideoPlayerData {
   video: MemoirSharedVideo | null;
   videoUrl: string;
   posterUrl: string;
+  // After playback the page holds the closing card so its mini program code can be scanned.
+  endFrameUrl: string;
+  ended: boolean;
   portrait: boolean;
 }
 
@@ -25,6 +28,8 @@ definePage<SharedVideoPlayerData>()({
     video: null,
     videoUrl: "",
     posterUrl: "",
+    endFrameUrl: "",
+    ended: false,
     portrait: true,
   },
 
@@ -50,7 +55,7 @@ definePage<SharedVideoPlayerData>()({
       this.setData({ loading: false, error: "这个链接不完整，请让家人重新转发" });
       return;
     }
-    this.setData({ loading: true, error: "", videoUrl: "" });
+    this.setData({ loading: true, error: "", videoUrl: "", ended: false });
     try {
       const video = await readMemoirSharedVideo(this.shareCode);
       // The backend answers byte ranges, so the player streams instead of waiting for the whole file.
@@ -58,6 +63,7 @@ definePage<SharedVideoPlayerData>()({
         video,
         videoUrl: memoirShareVideoDownloadUrl(video.video_url),
         posterUrl: memoirShareVideoDownloadUrl(video.poster_url),
+        endFrameUrl: video.end_frame_url ? memoirShareVideoDownloadUrl(video.end_frame_url) : "",
       });
       enableMiniProgramShareMenu();
     } catch (error) {
@@ -65,6 +71,17 @@ definePage<SharedVideoPlayerData>()({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  holdEndFrame() {
+    if (this.data.endFrameUrl) {
+      this.setData({ ended: true });
+    }
+  },
+
+  replayVideo() {
+    // Remounting the autoplaying video starts it again from the beginning.
+    this.setData({ ended: false });
   },
 
   markVideoError() {

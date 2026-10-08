@@ -43,7 +43,8 @@ async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoRes
         narrator_name=narrator_name,
         duration_ms=max(0, job.end_ms - job.start_ms),
         video_url=base_url,
-        poster_url=f"{base_url}?variant=thumbnail",
+        poster_url=f"{base_url}?variant=poster",
+        end_frame_url=f"{base_url}?variant=end",
         book_share_token=await readable_share_token(db, job.project_id),
     )
 
