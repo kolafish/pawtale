@@ -105,6 +105,10 @@ async def test_engine(verified_postgres_schema):
         # A cancelled request can return a closed connection to the pool;
         # replace it on checkout instead of failing the next test's cleanup.
         pool_pre_ping=True,
+        # On the shared loop a cancelled request can also leave a connection
+        # open in a transaction; let the server end it instead of letting its
+        # locks block every later test.
+        connect_args={"server_settings": {"idle_in_transaction_session_timeout": "60000"}},
     )
     # Services that open their own sessions must use the same test database.
     async_session_maker.configure(bind=engine)
@@ -121,6 +125,14 @@ async def _clear_postgres_tables(engine) -> None:
     # DELETE with foreign-key triggers off is far cheaper than TRUNCATE on the
     # nearly empty tables a test leaves behind.
     async with engine.begin() as conn:
+        # A transaction a previous test left open would block these deletes,
+        # and later schema changes, forever.
+        await conn.execute(text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND state IN ('idle in transaction', 'idle in transaction (aborted)')"
+        ))
+        await conn.execute(text("SET LOCAL lock_timeout = '30s'"))
         await conn.execute(text("SET LOCAL session_replication_role = replica"))
         raw = await conn.get_raw_connection()
         await raw.driver_connection.execute("; ".join(f'DELETE FROM "{name}"' for name in Base.metadata.tables))

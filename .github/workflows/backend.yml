@@ -21,6 +21,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: paradedb/paradedb:0.25.6
