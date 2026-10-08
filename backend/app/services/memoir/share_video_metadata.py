@@ -85,6 +85,7 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_mode: str = DEFAULT_SHARE_VIDEO_BACKGROUND_MODE
     background_effective_mode: str = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
     custom_background_asset_id: str | None = None
+    background_note: str = ""
     background_status: BackgroundStatus = "disabled"
     background_scene_count: int = Field(default=0, ge=0)
     background_generated_count: int = Field(default=0, ge=0)

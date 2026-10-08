@@ -228,6 +228,7 @@ def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str
         metadata.background_style,
         metadata.background_mode,
         metadata.custom_background_asset_id or "",
+        metadata.background_note,
     )
 
 
@@ -402,6 +403,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         background_mode=metadata.background_mode,
         background_effective_mode=metadata.background_effective_mode,
         custom_background_asset_id=metadata.custom_background_asset_id,
+        background_note=metadata.background_note,
         background_scene_count=metadata.background_scene_count,
         background_status=metadata.background_status,
         background_provider=metadata.background_provider,
@@ -533,6 +535,7 @@ async def create_share_video_job(
         background_mode=background_mode,
         background_effective_mode=effective_background_mode,
         custom_background_asset_id=custom_background_asset_id,
+        background_note=req.background_note.strip() if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI else "",
         background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
         background_status="disabled" if story_animation else background_orchestration.initial_background_status(
             background_source,

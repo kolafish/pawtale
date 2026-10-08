@@ -567,6 +567,7 @@ async def create_candidate_share_video(
             background_mode=req.background_mode,
             custom_background_asset_id=req.custom_background_asset_id,
             hook_text=candidate.hook_text if req.hook_text is None else req.hook_text,
+            background_note=req.background_note,
         ),
     )
     candidate.status = MemoirShareVideoCandidateStatus.ACCEPTED.value

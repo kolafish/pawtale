@@ -77,6 +77,8 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoCustomBackgroundAssetId: string;
   shareVideoCustomBackgroundPreviewPath: string;
   shareVideoCustomBackgroundStatusText: string;
+  // Who the people are, written by the author so the illustrations get gender, age and relationships right.
+  shareVideoBackgroundNote: string;
   // Illustration style and image mode stay folded behind one row until asked for.
   shareVideoMoreSettingsOpen: boolean;
 }
@@ -114,6 +116,7 @@ export interface TranscriptShareVideoCreateOptions {
   backgroundMode?: string;
   customBackgroundAssetId?: string;
   hookText?: string;
+  backgroundNote?: string;
 }
 
 export interface TranscriptShareVideoCreateInput {
@@ -365,6 +368,7 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
     shareVideoCustomBackgroundAssetId: "",
     shareVideoCustomBackgroundPreviewPath: "",
     shareVideoCustomBackgroundStatusText: "",
+    shareVideoBackgroundNote: "",
     shareVideoMoreSettingsOpen: false,
     ...initialTranscriptShareVideoTaskState(),
   };
