@@ -124,30 +124,12 @@ _SELECTABLE_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
         ),
     ),
     ShareVideoBackgroundStyle(
-        value="pencil",
-        label="柔和铅笔",
-        description="细腻铅笔线条和轻柔明暗，适合人物关系与安静日常",
-        drawing_instruction=(
-            "使用柔和的石墨铅笔绘画风格，以细腻线条、轻柔排线和适度明暗塑造场景。"
-            "可以根据原文氛围加入少量低浓度彩铅，纸面干净自然，保留明确的手绘笔触。"
-        ),
-    ),
-    ShareVideoBackgroundStyle(
         value="ink_paper",
         label="水墨淡彩",
         description="现代水墨与透明淡彩，适合含蓄、平静和富有东方气韵的内容",
         drawing_instruction=(
             "使用现代水墨淡彩绘画风格，以自然墨色层次、简洁线条和少量透明淡彩"
             "表现人物与生活场景。画面含蓄而清晰，纸面干净自然，色彩跟随原文氛围。"
-        ),
-    ),
-    ShareVideoBackgroundStyle(
-        value="gouache",
-        label="叙事水粉",
-        description="明确色块和柔和笔触，适合具体事件与富有生活气息的场景",
-        drawing_instruction=(
-            "使用叙事水粉画风格，以明确而协调的色块、柔和笔触和概括但可信的造型"
-            "表现人物、房间、街道与生活物件。画面自然、有层次，色彩和明度跟随原文氛围。"
         ),
     ),
     ShareVideoBackgroundStyle(
@@ -161,9 +143,27 @@ _SELECTABLE_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
     ),
 )
 
-# Historical jobs and image assets persist style IDs. Keep the removed option
+# Historical jobs and image assets persist style IDs. Keep removed options
 # readable for retries without presenting it for new generation.
 _LEGACY_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
+    ShareVideoBackgroundStyle(
+        value="pencil",
+        label="柔和铅笔",
+        description="细腻铅笔线条和轻柔明暗，适合人物关系与安静日常",
+        drawing_instruction=(
+            "使用柔和的石墨铅笔绘画风格，以细腻线条、轻柔排线和适度明暗塑造场景。"
+            "可以根据原文氛围加入少量低浓度彩铅，纸面干净自然，保留明确的手绘笔触。"
+        ),
+    ),
+    ShareVideoBackgroundStyle(
+        value="gouache",
+        label="叙事水粉",
+        description="明确色块和柔和笔触，适合具体事件与富有生活气息的场景",
+        drawing_instruction=(
+            "使用叙事水粉画风格，以明确而协调的色块、柔和笔触和概括但可信的造型"
+            "表现人物、房间、街道与生活物件。画面自然、有层次，色彩和明度跟随原文氛围。"
+        ),
+    ),
     ShareVideoBackgroundStyle(
         value="storybook",
         label="老故事书",
