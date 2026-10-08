@@ -106,7 +106,7 @@ definePage<TranscriptMediaData>()({
       return homeShareAppMessage();
     }
     trackAuditAction("transcript.detail_share_video_card", { job_id: job.id }, { projectId: job.project_id });
-    return sharedVideoShareMessage(job.title, shareCode, memoirSharedVideoUrl(shareCode, "thumbnail"));
+    return sharedVideoShareMessage(job.title, shareCode, memoirSharedVideoUrl(shareCode, "card"));
   },
 
   markShareVideoPreviewShape(event: { detail: { width: number; height: number } }) {

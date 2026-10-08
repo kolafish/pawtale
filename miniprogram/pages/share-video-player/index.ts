@@ -1,6 +1,6 @@
 import type { MemoirSharedVideo } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import { memoirShareVideoDownloadUrl, readMemoirSharedVideo } from "../../services/memoir-transcript-api";
+import { memoirShareVideoDownloadUrl, memoirSharedVideoUrl, readMemoirSharedVideo } from "../../services/memoir-transcript-api";
 import { definePage } from "../../services/page-definition";
 import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
@@ -41,7 +41,7 @@ definePage<SharedVideoPlayerData>()({
   onShareAppMessage() {
     const video = this.data.video;
     return video && this.shareCode
-      ? sharedVideoShareMessage(video.title, this.shareCode, this.data.posterUrl)
+      ? sharedVideoShareMessage(video.title, this.shareCode, memoirSharedVideoUrl(this.shareCode, "card"))
       : homeShareAppMessage();
   },
 

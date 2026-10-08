@@ -156,23 +156,48 @@ async def _run_ffmpeg(args: list[str], *, frames: Iterable[bytes] | None = None)
         raise ShareVideoGenerationError(message[0] if message else "ffmpeg 执行失败")
 
 
-async def share_video_thumbnail(source_path: Path) -> Path:
-    thumbnail_path = source_path.with_suffix(".thumbnail.jpg")
-    if thumbnail_path.is_file() and thumbnail_path.stat().st_size:
-        return thumbnail_path
-    # Use the first story image after the short title card, then reuse this
-    # immutable job's small JPEG rather than downloading the video on home.
-    with tempfile.TemporaryDirectory(prefix="thumbnail-", dir=source_path.parent) as directory:
-        temporary_path = Path(directory) / "thumbnail.jpg"
+# The longest opening hook is 3 s, so this lands on the first story image in every video.
+_CARD_SEEK_SECONDS = 3.5
+_CARD_HEIGHT = round(_VIDEO_WIDTH * 4 / 5)
+_CARD_TOP = round(_VIDEO_HEIGHT * _SUBJECT_CENTER_Y - _CARD_HEIGHT / 2)
+
+
+async def _video_still(source_path: Path, suffix: str, seek_seconds: float, video_filter: str, quality: int) -> Path:
+    still_path = source_path.with_suffix(suffix)
+    if still_path.is_file() and still_path.stat().st_size:
+        return still_path
+    # Each job's video is immutable, so the still is extracted once and reused.
+    with tempfile.TemporaryDirectory(prefix="still-", dir=source_path.parent) as directory:
+        temporary_path = Path(directory) / "still.jpg"
         await asyncio.wait_for(_run_ffmpeg([
-            _ffmpeg_executable(), "-y", "-ss", "2", "-i", str(source_path),
-            "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "5", "-an",
+            _ffmpeg_executable(), "-y", "-ss", str(seek_seconds), "-i", str(source_path),
+            "-frames:v", "1", "-vf", video_filter, "-q:v", str(quality), "-an",
             str(temporary_path),
         ]), timeout=10)
         if not temporary_path.is_file() or not temporary_path.stat().st_size:
             raise ShareVideoGenerationError("视频缩略图生成失败")
-        temporary_path.replace(thumbnail_path)
-    return thumbnail_path
+        temporary_path.replace(still_path)
+    return still_path
+
+
+async def share_video_thumbnail(source_path: Path) -> Path:
+    # A small frame for lists, so home does not download the video.
+    return await _video_still(source_path, ".thumbnail.jpg", 2, "scale=320:-2", 5)
+
+
+async def share_video_card_cover(source_path: Path) -> Path:
+    """A 5:4 full-width crop around the story image for WeChat's forwarded card.
+
+    The card shows a 5:4 image, so a portrait frame gets centre-cropped and upscaled;
+    cropping here keeps the picture sharp and leaves out the watermark and captions.
+    """
+    return await _video_still(
+        source_path,
+        ".card.jpg",
+        _CARD_SEEK_SECONDS,
+        f"crop={_VIDEO_WIDTH}:{_CARD_HEIGHT}:0:{_CARD_TOP}",
+        2,
+    )
 
 
 
