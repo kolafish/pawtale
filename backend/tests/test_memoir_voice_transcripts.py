@@ -731,7 +731,7 @@ def test_share_video_background_prompt_prioritizes_spoken_scene_details():
 
     prompt = share_video_backgrounds.build_share_video_background_prompt(spoken_text, None)
 
-    assert prompt.template_version == "memoir-share-video-background-v8"
+    assert prompt.template_version == "memoir-share-video-background-v9"
     assert spoken_text in prompt.prompt
     assert "一个具体、可见的回忆瞬间" in prompt.prompt
     assert "时间、地点、人物关系、动作和关键物件" in prompt.prompt
@@ -795,6 +795,10 @@ def test_share_video_scene_background_prompt_carries_story_context():
         ),
     ).prompt
     assert "（人物性别、年龄先从口述内容推断，内容里看不出来时再参考）：讲述者“我”是女性；家乡在湖南。" in narrated
+    noted = share_video_backgrounds.build_share_video_background_prompt(
+        "我们去河边洗衣服。", "watercolor", background_note="“我们”是我和妹妹"
+    ).prompt
+    assert "用户补充的人物背景（人物性别、年龄和关系以此为准）：“我们”是我和妹妹" in noted
     assert "不要默认画成男性" not in narrated
     assert share_video_backgrounds.share_video_narrator_context({"narrator_gender": "unspecified"}) == ""
 
@@ -1151,7 +1155,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
         ),
     )
 
-    async def fail_background_generation(_selected_text, _style_id, *, narrator_context="", usage_context=None):
+    async def fail_background_generation(_selected_text, _style_id, *, narrator_context="", background_note="", usage_context=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -1908,8 +1912,12 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
 
     narrator = "讲述者“我”是女性；现在约 82 岁，回忆里的年纪按故事发生的时间推算。"
 
-    async def fake_plan(selected_text, char_timings, duration_ms, *, ai_model=None, narrator_context=""):
-        assert narrator_context == narrator
+    note = "“我们”是我和妹妹，那年我十岁。"
+
+    async def fake_plan(
+        selected_text, char_timings, duration_ms, *, ai_model=None, narrator_context="", background_note=""
+    ):
+        assert (narrator_context, background_note) == (narrator, note)
         assert selected_text == text
         assert duration_ms == 36_000
         assert len(char_timings) == len(text)
@@ -1962,13 +1970,19 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         story_text,
         visual_context="",
         narrator_context="",
+        background_note="",
         usage_context=None,
     ):
         # The group returns only the first image; the rest are drawn one by one.
         set_calls.append(list(scene_texts))
         assert (story_text, visual_context, narrator_context) == (text, "父亲四十来岁，老县城", narrator)
         first = await fake_background(
-            scene_texts[0], style_id, story_text=story_text, visual_context=visual_context, narrator_context=narrator_context
+            scene_texts[0],
+            style_id,
+            story_text=story_text,
+            visual_context=visual_context,
+            narrator_context=narrator_context,
+            background_note=background_note,
         )
         return [first] + [None] * (len(scene_texts) - 1)
 
@@ -1979,9 +1993,10 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         story_text="",
         visual_context="",
         narrator_context="",
+        background_note="",
         usage_context=None,
     ):
-        assert narrator_context == narrator
+        assert (narrator_context, background_note) == (narrator, note)
         image_calls.append((selected_text, style_id))
         image_contexts.append((story_text, visual_context))
         image_path = image_dir / f"scene-{len(image_calls)}.png"
@@ -2028,12 +2043,14 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
             "end_char": len(text),
             "background_style": "old_album",
             "background_mode": "smart_multi",
+            "background_note": f"  {note} ",
         },
     )
 
     assert response.status_code == 201
     job_id = response.json()["id"]
     assert response.json()["background_mode"] == "smart_multi"
+    assert response.json()["background_note"] == note
     assert response.json()["background_effective_mode"] == "smart_multi"
 
     assert await _claim_and_run_share_video_job(test_db, job_id) is True

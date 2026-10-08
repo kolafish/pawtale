@@ -234,6 +234,7 @@ export interface MemoirShareVideoJob {
   background_mode?: string;
   background_effective_mode?: string;
   custom_background_asset_id?: string | null;
+  background_note?: string;
   background_scene_count?: number;
   background_status?: string;
   background_provider?: string | null;

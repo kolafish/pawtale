@@ -202,6 +202,23 @@
           <text wx:if="{{!shareVideoMoreSettingsOpen}}" class="share-video-background-help">{{shareVideoBackgroundStyleLabel}}，张数：{{shareVideoBackgroundModeLabel}}</text>
         </view>
 
+        <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
+          <view class="share-video-background-head">
+            <text class="voice-edit-label">人物背景（选填）</text>
+          </view>
+          <text class="share-video-background-help">写清楚画面里的人是谁，插图会按这里画人物的性别、年龄和关系。</text>
+          <textarea
+            class="share-video-note-input"
+            value="{{shareVideoBackgroundNote}}"
+            bindinput="changeShareVideoBackgroundNote"
+            placeholder="例如：讲述者是女性，“我们”是我和妹妹，那年我十岁左右"
+            maxlength="300"
+            auto-height
+            cursor-spacing="24"
+            disabled="{{shareVideoCreating || shareVideoPolling}}"
+          />
+        </view>
+
         <view wx:if="{{shareVideoUsesIllustration && shareVideoMoreSettingsOpen}}" class="share-video-background">
           <view class="share-video-background-head">
             <text class="voice-edit-label">插图风格</text>

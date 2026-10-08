@@ -487,6 +487,8 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
     # A verbatim sentence from the selection shown before the narration; empty lets the title step pick.
     hook_text: str = Field(default="", max_length=200)
+    # Who the people are (gender, age, relationships), written by the author for the illustrations.
+    background_note: str = Field(default="", max_length=300)
 
     @field_validator(
         "ai_model",
@@ -520,6 +522,7 @@ class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
     # None keeps the recommendation's own opening line; "" lets the title step pick.
     hook_text: str | None = Field(default=None, max_length=200)
+    background_note: str = Field(default="", max_length=300)
 
 
 class MemoirShareVideoCandidateResponse(BaseModel):
@@ -615,6 +618,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     background_mode: str = "auto"
     background_effective_mode: str = "single"
     custom_background_asset_id: str | None = None
+    background_note: str = ""
     background_scene_count: int = 0
     background_status: str = "disabled"
     background_provider: str | None = None

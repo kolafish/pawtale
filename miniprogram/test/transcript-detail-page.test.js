@@ -1073,6 +1073,7 @@ test("transcript media page creates share video from selected corrected segments
   });
   assert.equal(context.data.shareVideoBackgroundMode, "smart_multi");
   assert.equal(context.data.shareVideoBackgroundModeLabel, "智能多图");
+  page.changeShareVideoBackgroundNote.call(context, { detail: { value: " “我们”是我和妹妹 " } });
 
   await page.createShareVideo.call(context);
 
@@ -1081,7 +1082,13 @@ test("transcript media page creates share video from selected corrected segments
       id: "utterance-share",
       startChar: 0,
       endChar: 23,
-      options: { videoStyle: "illustrated", backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "smart_multi" },
+      options: {
+        videoStyle: "illustrated",
+        backgroundSource: "ai",
+        backgroundStyle: "gouache",
+        backgroundMode: "smart_multi",
+        backgroundNote: "“我们”是我和妹妹",
+      },
     },
   ]);
   assert.equal(context.data.shareVideoJob.status, "pending");

@@ -20,7 +20,7 @@ DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v8"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v9"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -275,11 +275,15 @@ def share_video_narrator_context(profile: dict[str, object] | None) -> str:
     return "；".join(parts) + "。" if parts else ""
 
 
-def _narrator_block(narrator_context: str) -> str:
+def _narrator_block(narrator_context: str, background_note: str = "") -> str:
+    block = ""
+    note = re.sub(r"\s+", " ", background_note.strip())
+    if note:
+        block += f"\n用户补充的人物背景（人物性别、年龄和关系以此为准）：{note}\n"
     narrator = narrator_context.strip()
-    if not narrator:
-        return ""
-    return f"\n讲述者资料（人物性别、年龄先从口述内容推断，内容里看不出来时再参考）：{narrator}\n"
+    if narrator:
+        block += f"\n讲述者资料（人物性别、年龄先从口述内容推断，内容里看不出来时再参考）：{narrator}\n"
+    return block
 
 
 def _prompt_result(style: ShareVideoBackgroundStyle, content: str, prompt: str) -> ShareVideoBackgroundPrompt:
@@ -306,12 +310,13 @@ def build_share_video_background_prompt(
     story_text: str = "",
     visual_context: str = "",
     narrator_context: str = "",
+    background_note: str = "",
 ) -> ShareVideoBackgroundPrompt:
     style = share_video_background_style(style_id)
     content = _prompt_content(selected_text)
     prompt = _VIDEO_BACKGROUND_PROMPT.format(
         content=content,
-        narrator=_narrator_block(narrator_context),
+        narrator=_narrator_block(narrator_context, background_note),
         story_context=_story_context(story_text, visual_context),
         rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),
     ).strip()
@@ -325,6 +330,7 @@ def build_share_video_background_set_prompt(
     story_text: str,
     visual_context: str = "",
     narrator_context: str = "",
+    background_note: str = "",
 ) -> ShareVideoBackgroundPrompt:
     """One prompt for a consistent set of images, one per scene, in order."""
     style = share_video_background_style(style_id)
@@ -335,7 +341,7 @@ def build_share_video_background_set_prompt(
     prompt = _VIDEO_BACKGROUND_SET_PROMPT.format(
         count=len(scene_texts),
         story_text=_prompt_content(story_text),
-        narrator=_narrator_block(narrator_context),
+        narrator=_narrator_block(narrator_context, background_note),
         visual_context=_VIDEO_BACKGROUND_VISUAL_CONTEXT.format(visual_context=visual) if visual else "",
         scenes=content,
         rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),
@@ -508,6 +514,7 @@ async def get_or_generate_share_video_background(
     story_text: str = "",
     visual_context: str = "",
     narrator_context: str = "",
+    background_note: str = "",
     usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
@@ -523,6 +530,7 @@ async def get_or_generate_share_video_background(
         story_text=story_text,
         visual_context=visual_context,
         narrator_context=narrator_context,
+        background_note=background_note,
     )
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()
@@ -591,6 +599,7 @@ async def get_or_generate_share_video_background_set(
     story_text: str,
     visual_context: str = "",
     narrator_context: str = "",
+    background_note: str = "",
     usage_context: AIUsageContext | None = None,
 ) -> list[ShareVideoBackgroundAsset | None] | None:
     """Generate every scene image in one group request so the people stay the same.
@@ -611,6 +620,7 @@ async def get_or_generate_share_video_background_set(
         story_text=story_text,
         visual_context=visual_context,
         narrator_context=narrator_context,
+        background_note=background_note,
     )
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()

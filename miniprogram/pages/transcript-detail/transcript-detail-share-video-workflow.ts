@@ -17,6 +17,7 @@ import {
   datasetChoice,
   datasetString,
   type PageDatasetEvent,
+  type PageTextInputEvent,
 } from "../../services/page-input";
 import {
   initialTranscriptShareVideoData,
@@ -75,6 +76,7 @@ export interface TranscriptMediaWorkflowMethods {
   selectShareVideoBackgroundStyle(event: ShareVideoBackgroundEvent): void;
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent): void;
   toggleShareVideoMoreSettings(): void;
+  changeShareVideoBackgroundNote(event: PageTextInputEvent): void;
   chooseShareVideoCustomBackground(): Promise<void>;
   createMaterialImage(): Promise<void>;
   openImageAssets(): void;
@@ -196,6 +198,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
           normalizeMemoirShareVideoStyle(previousJob.video_style, previousJob.background_source)),
         ...(sameText ? selection : {}),
         shareVideoCustomBackgroundAssetId: previousJob.custom_background_asset_id || "",
+        shareVideoBackgroundNote: previousJob.background_note || "",
         shareVideoCustomBackgroundStatusText: previousJob.custom_background_asset_id
           ? "沿用原视频的图片，也可以重新选择" : "",
         shareVideoError: sameText ? "" : "讲述文字已更新，请重新选择片段。已有视频会继续保留。",
@@ -323,6 +326,10 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
 
   toggleShareVideoMoreSettings() {
     this.setData({ shareVideoMoreSettingsOpen: !this.data.shareVideoMoreSettingsOpen });
+  },
+
+  changeShareVideoBackgroundNote(event: PageTextInputEvent) {
+    this.setData({ shareVideoBackgroundNote: event.detail.value });
   },
 
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent) {
@@ -531,6 +538,8 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
           ...(this.data.shareVideoBackgroundSource === "ai" ? {
             backgroundStyle: this.data.shareVideoBackgroundStyle,
             backgroundMode: this.data.shareVideoBackgroundMode,
+            ...(this.data.shareVideoBackgroundNote.trim()
+              ? { backgroundNote: this.data.shareVideoBackgroundNote.trim() } : {}),
           } : {}),
           ...(this.data.shareVideoBackgroundSource === "custom" ? {
             customBackgroundAssetId: this.data.shareVideoCustomBackgroundAssetId,

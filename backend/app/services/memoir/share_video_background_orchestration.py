@@ -201,6 +201,7 @@ async def prepare_share_video_background(
             duration_ms,
             ai_model=metadata.ai_model,
             narrator_context=narrator_context,
+            background_note=metadata.background_note,
         )
         metadata.background_status = "generating"
         metadata.background_scene_plan = ShareVideoScenePlanMetadata.model_validate(
@@ -231,6 +232,7 @@ async def prepare_share_video_background(
                     story_text=story_text,
                     visual_context=visual_context,
                     narrator_context=narrator_context,
+                    background_note=metadata.background_note,
                     usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError as exc:
@@ -289,6 +291,7 @@ async def prepare_share_video_background(
                     story_text=story_text,
                     visual_context=visual_context,
                     narrator_context=narrator_context,
+                    background_note=metadata.background_note,
                     usage_context=usage_context,
                 )
             except ShareVideoBackgroundGenerationError:
@@ -353,6 +356,7 @@ async def prepare_share_video_background(
                 job.selected_text,
                 background_style,
                 narrator_context=narrator_context,
+                background_note=metadata.background_note,
                 usage_context=usage_context,
             )
         except ShareVideoBackgroundGenerationError as exc:
