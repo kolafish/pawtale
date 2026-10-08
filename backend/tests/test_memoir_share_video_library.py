@@ -295,7 +295,7 @@ async def test_remake_preserves_completed_file_and_lists_each_version(client, te
     created = await create_test_voice_transcript(client, test_db, text=text)
     old = await _add_video_job(
         test_db, created, job_id="original", status=MemoirShareVideoJobStatus.SUCCEEDED,
-        created_at=utcnow_naive(), metadata={"video_style": "illustrated"},
+        created_at=utcnow_naive(), metadata={"video_style": "illustrated", "background_style": "old_album"},
     )
     await test_db.commit()
     path = share_video_jobs.share_video_file_path(old)
@@ -322,6 +322,10 @@ async def test_remake_preserves_completed_file_and_lists_each_version(client, te
     library = await client.get(f"/api/mobile/memoir/projects/{old.project_id}/share-video/jobs")
     assert {item["id"]: item["video_style"] for item in library.json()["items"]} == {
         old.id: "illustrated", new.id: "illustrated",
+    }
+    # Each version shows the illustration style it was made in.
+    assert {item["id"]: item["background_style_label"] for item in library.json()["items"]} == {
+        old.id: "怀旧影像", new.id: "清透水彩",
     }
     for job, contents in ((old, b"original video"), (new, b"new video!")):
         response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job.id}/download")

@@ -43,7 +43,6 @@
 }
 
 .video-library-title,
-.video-library-quote,
 .video-library-date {
   display: block;
 }
@@ -98,16 +97,8 @@
   margin-top: 14rpx;
 }
 
-.video-library-quote {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  margin-top: 14rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-body);
-  line-height: 1.6;
-  overflow-wrap: anywhere;
+.video-library-item .video-library-time {
+  margin-top: 4rpx;
 }
 
 .video-library-card-foot {

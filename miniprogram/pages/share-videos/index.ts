@@ -53,11 +53,12 @@ interface ShareVideosData {
 type VideoEvent = PageDatasetEvent<{ id?: string; utteranceId?: string }>;
 
 function toViewItem(item: MemoirShareVideoListItem): ShareVideoItemView {
+  const videoStyleLabel = MEMOIR_SHARE_VIDEO_STYLES.find(
+    (style) => style.value === normalizeMemoirShareVideoStyle(item.video_style),
+  )!.label;
   return {
     ...item,
-    styleLabel: MEMOIR_SHARE_VIDEO_STYLES.find(
-      (style) => style.value === normalizeMemoirShareVideoStyle(item.video_style),
-    )!.label,
+    styleLabel: item.background_style_label ? `${videoStyleLabel} · ${item.background_style_label}` : videoStyleLabel,
     durationText: formatTranscriptDurationSeconds(item.duration_ms / 1000),
     completedAtText: formatBeijingDateTimeShort(item.completed_at || item.created_at),
     thumbnailUrl: item.share_code ? memoirSharedVideoUrl(item.share_code, "thumbnail") : "",

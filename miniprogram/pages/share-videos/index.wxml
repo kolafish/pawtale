@@ -5,7 +5,7 @@
 
   <view class="hero-panel video-library-hero">
     <text class="record-title">我的分享视频</text>
-    <text class="record-meta">{{total ? '已生成 ' + total + ' 段视频，点开可以预览和分享。' : '讲述做成的视频，会收集在这里。'}}</text>
+    <text wx:if="{{total}}" class="record-meta">共 {{total}} 段</text>
   </view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
@@ -29,7 +29,6 @@
         <view wx:for="{{taskItems}}" wx:key="id" class="section-card video-library-card">
           <text class="video-library-title">《{{item.title}}》</text>
           <text class="video-library-progress {{item.status === 'failed' ? 'is-failed' : ''}}">{{item.status === 'failed' ? '制作失败：' + item.statusText : item.statusText}}</text>
-          <text class="video-library-quote">“{{item.selected_text}}”</text>
           <view class="video-library-card-foot">
             <text class="video-library-date">{{item.styleLabel}}</text>
             <view class="video-library-task-actions">
@@ -66,8 +65,8 @@
         </view>
         <view class="video-library-body">
           <text class="video-library-title">《{{item.title}}》</text>
-          <text class="video-library-quote">“{{item.selected_text}}”</text>
-          <text class="video-library-date">{{item.styleLabel}} · {{item.completedAtText}}</text>
+          <text class="video-library-date">{{item.styleLabel}}</text>
+          <text class="video-library-date video-library-time">{{item.completedAtText}}</text>
         </view>
       </view>
     </view>

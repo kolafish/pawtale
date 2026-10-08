@@ -21,6 +21,7 @@ function video(id, utteranceId) {
     selected_text: "小时候在院子里看月亮。",
     duration_ms: 30000,
     video_style: id === "video-2" ? "uploaded" : "illustrated",
+    background_style_label: id === "video-2" ? "" : "清透水彩",
     created_at: "2026-09-24T08:00:00",
     completed_at: "2026-09-24T08:01:00",
   };
@@ -62,7 +63,7 @@ test("video library lists metadata in pages and opens only the chosen video", as
   assert.equal(context.data.hasMore, true);
   await context.loadVideos(false);
   assert.deepEqual(context.data.items.map((item) => item.id), ["video-2", "video-1"]);
-  assert.deepEqual(context.data.items.map((item) => item.styleLabel), ["自己配图", "AI配图"]);
+  assert.deepEqual(context.data.items.map((item) => item.styleLabel), ["自己配图", "AI配图 · 清透水彩"]);
   assert.equal(context.data.hasMore, false);
   assert.deepEqual(calls, [
     ["project-1", { limit: 20, offset: 0 }],

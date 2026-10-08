@@ -592,6 +592,8 @@ class MemoirShareVideoListItemResponse(BaseModel):
     selected_text: str
     duration_ms: int
     video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
+    # The illustration style an AI-illustrated video was made in; empty otherwise.
+    background_style_label: str = ""
     created_at: datetime
     completed_at: datetime | None
     share_code: str
@@ -621,6 +623,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     background_effective_mode: str = "single"
     custom_background_asset_id: str | None = None
     background_note: str = ""
+    background_style_label: str = ""
     background_scene_count: int = 0
     background_status: str = "disabled"
     background_provider: str | None = None
