@@ -15,6 +15,7 @@ class AuditEventIngestItem(BaseModel):
     client_event_id: str
     event_type: AuditEventType
     occurred_at: datetime
+    # Older clients send their local date; the server derives the Beijing day from occurred_at.
     event_date: date | None = None
     page_path: str = ""
     feature_code: str = ""

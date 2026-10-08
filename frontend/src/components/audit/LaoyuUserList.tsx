@@ -5,16 +5,13 @@ import { auditApi } from '../../api';
 import { Metric } from './AuditMetric';
 import { formatDateTime, formatDuration } from './auditFormat';
 import type { LaoyuUserUsage } from '../../types';
+import { formatBeijingDate, timestampMs } from '../../utils/time';
 
 const RECENT_DAYS = 7;
 
 function isRecent(value: string | null, days: number): boolean {
   if (!value) return false;
-  return Date.now() - new Date(value).getTime() <= days * 24 * 60 * 60 * 1000;
-}
-
-function formatDate(value: string | null): string {
-  return value ? new Date(value).toLocaleDateString('zh-CN') : '-';
+  return Date.now() - timestampMs(value) <= days * 24 * 60 * 60 * 1000;
 }
 
 function matchesKeyword(row: LaoyuUserUsage, keyword: string): boolean {
@@ -115,7 +112,7 @@ export function LaoyuUserList({ onOpenAudit }: { onOpenAudit: (userId: string) =
                         {row.wechat_bound ? '微信登录' : '邮箱账号'} · {row.user.email}
                       </div>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDate(row.created_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatBeijingDate(row.created_at) || '-'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">{row.memoir_project_count}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-700">
                       {row.voice_session_count} / {row.utterance_count}

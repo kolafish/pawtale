@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { billingAdminApi } from '../../api';
 import type { AICreditKind } from '../../types';
+import { formatBeijingDateTime } from '../../utils/time';
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -105,7 +106,7 @@ export function AdminCreditPanel({ userId }: { userId: string }) {
           {credits.map((entry) => (
             <li key={entry.id} className="flex items-center justify-between gap-3 py-1.5">
               <span className="text-gray-700">
-                {new Date(entry.created_at).toLocaleString('zh-CN')} · {entry.label}
+                {formatBeijingDateTime(entry.created_at)} · {entry.label}
                 {entry.note ? ` · ${entry.note}` : ''}
               </span>
               <span className="tabular-nums text-gray-900">{Number(entry.amount_rmb) < 0 ? '-' : '+'}¥{money(Math.abs(Number(entry.amount_rmb)))}</span>

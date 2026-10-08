@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
 from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
@@ -120,6 +122,36 @@ async def test_audit_late_older_page_leave_does_not_replace_latest_exit(client, 
     assert session.exit_page_path == "/pages/voice-chat/index"
     assert session.exit_feature_code == "voice_chat.session"
     assert session.exit_reason == "app_background"
+
+
+async def test_audit_uses_beijing_days_for_legacy_and_offset_timestamps(client, test_db):
+    payload = {
+        "client_session_id": "beijing-midnight",
+        "platform": "miniprogram",
+        "events": [
+            {"client_event_id": "after", "event_type": "heartbeat", "occurred_at": "2026-10-07T16:00:00"},
+            {"client_event_id": "before", "event_type": "page_view", "occurred_at": "2026-10-07T15:59:00Z"},
+            {"client_event_id": "offset", "event_type": "page_leave", "occurred_at": "2026-10-08T00:01:00+08:00"},
+        ],
+    }
+    for item in payload["events"]:
+        item.update(event_date="2026-10-07", feature_code="home.view", duration_ms=1000)
+    # A missing client date must follow the same Beijing rule as an incorrect one.
+    del payload["events"][2]["event_date"]
+    response = await client.post("/api/audit/events", json=payload)
+    assert response.status_code == 200
+    assert response.json()["accepted"] == 3
+
+    daily = (await test_db.scalars(select(AuditDailyUserUsage).order_by(AuditDailyUserUsage.date))).all()
+    assert [(row.date, row.active_ms, row.session_count, row.event_count) for row in daily] == [
+        (date(2026, 10, 7), 1000, 1, 1), (date(2026, 10, 8), 2000, 1, 2),
+    ]
+    feature = (await test_db.scalars(select(AuditDailyFeatureUsage).order_by(AuditDailyFeatureUsage.date))).all()
+    assert [(row.date, row.event_count) for row in feature] == [(date(2026, 10, 7), 1), (date(2026, 10, 8), 2)]
+    admin = await make_current_user_admin(test_db)
+    detail = await client.get(f"/api/audit/users/{admin.id}/days/2026-10-08")
+    assert detail.status_code == 200
+    assert [event["client_event_id"] for event in detail.json()["sessions"][0]["events"]] == ["after", "offset"]
 
 
 async def test_audit_dashboard_requires_admin(client):

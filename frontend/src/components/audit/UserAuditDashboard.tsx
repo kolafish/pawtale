@@ -16,6 +16,7 @@ import { auditApi } from '../../api';
 import { AdminCreditPanel } from './AdminCreditPanel';
 import { Metric } from './AuditMetric';
 import { formatDateTime, formatDuration } from './auditFormat';
+import { formatBeijingDate, timestampMs } from '../../utils/time';
 import type {
   AuditDashboardFilters,
   AuditDailyFeatureUsage,
@@ -100,16 +101,9 @@ const FEATURE_LABELS: Record<string, string> = {
   'admin.project.delete': '管理员删除项目',
 };
 
-function toDateInput(date: Date): string {
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return localDate.toISOString().slice(0, 10);
-}
-
 function defaultDateRange() {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(to.getDate() - 6);
-  return { from: toDateInput(from), to: toDateInput(to) };
+  const now = Date.now();
+  return { from: formatBeijingDate(now - 6 * 24 * 60 * 60 * 1000), to: formatBeijingDate(now) };
 }
 
 function labelOrDash(value?: string | null): string {
@@ -161,7 +155,7 @@ function eventTypeLabel(eventType: string): string {
 
 function sortedSessionEvents(session: AuditSession): AuditEvent[] {
   return [...session.events].sort(
-    (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime(),
+    (a, b) => timestampMs(a.occurred_at) - timestampMs(b.occurred_at),
   );
 }
 

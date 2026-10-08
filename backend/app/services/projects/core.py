@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import is_admin_user
+from app.clock import beijing_date
 from app.domain.projects.types import ProjectType
 from app.domain.projects.templates import initialize_project_template
 from app.models.projects import DocumentGroup, Project
@@ -46,7 +47,7 @@ async def _stage_project_delete_audit(
         db,
         current_user.id,
         AuditEventsIngestRequest(
-            client_session_id=f"server-project-delete:{current_user.id}:{occurred_at.date().isoformat()}",
+            client_session_id=f"server-project-delete:{current_user.id}:{beijing_date(occurred_at).isoformat()}",
             platform="web",
             metadata_json={"source": "server"},
             events=[

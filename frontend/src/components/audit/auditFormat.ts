@@ -1,3 +1,5 @@
+import { formatBeijingDateTimeShort } from '../../utils/time';
+
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0 分钟';
   const totalSeconds = Math.round(ms / 1000);
@@ -10,11 +12,5 @@ export function formatDuration(ms: number): string {
 }
 
 export function formatDateTime(value?: string | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatBeijingDateTimeShort(value) || '-';
 }

@@ -1,4 +1,5 @@
 import { ApiError, readSessionCookie, request } from "./request";
+import { formatBeijingDate } from "./time";
 
 type AuditEventType = "page_view" | "page_leave" | "feature_start" | "feature_end" | "action" | "heartbeat";
 type AuditExitReason = "app_background" | "page_unload" | "logout" | "timeout" | "navigate" | "unknown";
@@ -90,14 +91,6 @@ function now(): Date {
   return nowFn();
 }
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function localDate(value: Date): string {
-  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
-}
-
 function normalizePagePath(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) {
@@ -137,7 +130,7 @@ function eventPayload(
     client_event_id: nextEventId(eventTime),
     event_type: eventType,
     occurred_at: eventTime.toISOString(),
-    event_date: localDate(eventTime),
+    event_date: formatBeijingDate(eventTime.toISOString()),
     page_path: normalizePagePath(pagePath),
     feature_code: featureCode,
     ...(options.projectId ? { project_id: options.projectId } : {}),

@@ -7,6 +7,7 @@ from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import beijing_date
 from app.domain.projects.types import ProjectType
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
 from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
@@ -162,7 +163,7 @@ async def ingest_events(
     *,
     commit: bool = True,
 ) -> AuditEventsIngestResponse:
-    ordered_events = sorted(req.events, key=lambda item: item.occurred_at)
+    ordered_events = sorted(req.events, key=lambda item: _utc_naive(item.occurred_at))
     first_seen_at = _utc_naive(ordered_events[0].occurred_at)
     session = await _load_or_create_session(db, user_id, req, first_seen_at)
     accepted = 0
@@ -180,7 +181,7 @@ async def ingest_events(
             continue
 
         occurred_at = _utc_naive(item.occurred_at)
-        event_date = item.event_date or occurred_at.date()
+        event_date = beijing_date(occurred_at)
         page_path = _limit(item.page_path, 255)
         feature_code = _limit(item.feature_code, 120)
         exit_reason = _limit(item.exit_reason, 60)

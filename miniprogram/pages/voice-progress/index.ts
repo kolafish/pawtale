@@ -25,6 +25,7 @@ import {
 } from "../../services/memoir-voice-session-api";
 import { returnToHomeVoice, routeAuthError } from "../../services/navigation";
 import { definePage } from "../../services/page-definition";
+import { formatBeijingDateTimeShort } from "../../services/time";
 import {
   datasetString,
   pageUrl,
@@ -128,21 +129,6 @@ export function sessionTitle(item: MemoirVoiceSessionSummary): string {
   return `${NARRATION_MODES[mode].label}${topic ? ` · ${topic}` : ""}`;
 }
 
-function formatDate(value?: string | null): string {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${month}-${day} ${hour}:${minute}`;
-}
-
 function formatDuration(seconds: number): string {
   if (!seconds) {
     return "0s";
@@ -164,7 +150,7 @@ function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView
     ...item,
     titleText: sessionTitle(item),
     statusText: statusText(item.status),
-    updatedText: formatDate(item.updated_at || item.created_at),
+    updatedText: formatBeijingDateTimeShort(item.updated_at || item.created_at),
     durationText: formatDuration(item.total_audio_seconds),
     canContinue: canContinueVoiceSession(item.status),
   };

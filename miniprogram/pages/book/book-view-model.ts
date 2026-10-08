@@ -17,8 +17,8 @@ import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import {
   sourceRefKey,
 } from "../../services/memoir-book-sources";
-import { formatBeijingDateTimeShort } from "../../services/time";
-import { createdAtTime, trimText } from "./book-view-model-utils";
+import { formatBeijingDateTimeShort, timestampMs } from "../../services/time";
+import { trimText } from "./book-view-model-utils";
 
 export type {
   BookAutomationEventView,
@@ -915,7 +915,7 @@ function planSourceRecordNumbers(chapters: Pick<MemoirBookPlanChapter, "source_r
   });
   return refs
     .sort((left, right) => (
-      createdAtTime(left.created_at || "") - createdAtTime(right.created_at || "")
+      timestampMs(left.created_at) - timestampMs(right.created_at)
       || sourceRefSortKey(left).localeCompare(sourceRefSortKey(right))
     ))
     .reduce<Record<string, number>>((memo, ref, index) => {
