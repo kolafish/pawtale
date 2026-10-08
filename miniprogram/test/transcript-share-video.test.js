@@ -41,6 +41,21 @@ test("video style selection uses the project default and keeps unavailable illus
   assert.equal(shareVideoStylePatch(null, "uploaded").shareVideoBackgroundUsesCustom, true);
 });
 
+test("retired saved background styles fall back to the backend default", () => {
+  const context = {
+    default_background_style: "watercolor",
+    default_background_mode: "auto",
+    background_styles: ["watercolor", "ink_paper", "old_album"].map((value) => ({ value, label: value })),
+    background_modes: [{ value: "auto", label: "自动" }],
+  };
+  for (const backgroundStyle of ["pencil", "gouache"]) {
+    const patch = shareVideoBackgroundPatch(context, { backgroundStyle, backgroundMode: "auto" });
+    assert.equal(patch.shareVideoBackgroundStyle, "watercolor");
+    assert.deepEqual(patch.shareVideoBackgroundStyleOptions.map((option) => option.value),
+      ["watercolor", "ink_paper", "old_album"]);
+  }
+});
+
 function shareVideoJob(overrides = {}) {
   return {
     id: "job-1",

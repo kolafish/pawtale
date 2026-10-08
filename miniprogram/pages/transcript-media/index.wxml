@@ -191,7 +191,7 @@
               <text class="share-video-background-desc">{{item.description}}</text>
             </view>
           </view>
-          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">AI 生成插图暂不可用，请选择「上传照片或插图」。</text>
+          <text wx:if="{{shareVideoStyleUnavailable}}" class="share-video-background-help">AI配图暂不可用，请选择「自己配图」。</text>
         </view>
 
         <view wx:if="{{shareVideoUsesIllustration}}" class="share-video-background">
@@ -224,20 +224,23 @@
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
-          <text class="share-video-background-help">选一种画风，AI 会按这段讲述画插图。</text>
+          <text class="share-video-background-help">同一画面的画风示意，实际配图按你的讲述生成。</text>
           <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
               wx:key="value"
-              class="share-video-background-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
+              class="share-video-background-option share-video-style-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
               data-background-style="{{item.value}}"
               bindtap="selectShareVideoBackgroundStyle"
               aria-role="radio"
               aria-checked="{{item.value === shareVideoBackgroundStyle}}"
               aria-label="{{item.label}}，{{item.description}}"
             >
-              <text class="share-video-background-label">{{item.label}}</text>
-              <text class="share-video-background-desc">{{item.description}}</text>
+              <image wx:if="{{item.previewImage}}" class="share-video-style-preview" src="{{item.previewImage}}" mode="aspectFill" aria-hidden="true" />
+              <view class="share-video-style-copy">
+                <text class="share-video-background-label">{{item.label}}</text>
+                <text class="share-video-background-desc">{{item.description}}</text>
+              </view>
             </view>
           </view>
         </view>

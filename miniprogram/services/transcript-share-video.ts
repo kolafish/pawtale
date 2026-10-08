@@ -30,6 +30,16 @@ export interface TranscriptShareVideoSegmentView extends MemoirTranscriptShareVi
   className: string;
 }
 
+interface ShareVideoBackgroundStyleView extends MemoirShareVideoBackgroundStyle {
+  previewImage: string;
+}
+
+const BACKGROUND_STYLE_PREVIEWS: Record<string, string> = {
+  watercolor: "/assets/share-video-styles/watercolor.jpg",
+  ink_paper: "/assets/share-video-styles/ink-paper.jpg",
+  old_album: "/assets/share-video-styles/old-album.jpg",
+};
+
 export interface TranscriptShareVideoTaskState {
   shareVideoCreating: boolean;
   shareVideoPolling: boolean;
@@ -69,7 +79,7 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoBackgroundUsesCustom: boolean;
   shareVideoBackgroundStyle: string;
   shareVideoBackgroundStyleLabel: string;
-  shareVideoBackgroundStyleOptions: MemoirShareVideoBackgroundStyle[];
+  shareVideoBackgroundStyleOptions: ShareVideoBackgroundStyleView[];
   shareVideoBackgroundMode: string;
   shareVideoBackgroundModeLabel: string;
   shareVideoBackgroundModeOptions: MemoirShareVideoBackgroundMode[];
@@ -311,7 +321,10 @@ export function shareVideoBackgroundPatch(
   context: MemoirTranscriptShareVideoContext | null,
   preferred: ShareVideoBackgroundSettings = readShareVideoBackgroundSettings(),
 ): ShareVideoBackgroundPatch {
-  const styleOptions = context?.background_styles || [];
+  const styleOptions = (context?.background_styles || []).map((option) => ({
+    ...option,
+    previewImage: BACKGROUND_STYLE_PREVIEWS[option.value] || "",
+  }));
   const modeOptions = context?.background_modes || [];
   const style = selectedShareVideoOption(
     styleOptions,

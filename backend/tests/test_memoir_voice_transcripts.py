@@ -662,16 +662,12 @@ def test_share_video_background_prompts_cover_default_styles():
     options = share_video_backgrounds.share_video_background_style_options()
     assert [option["value"] for option in options] == [
         "watercolor",
-        "pencil",
         "ink_paper",
-        "gouache",
         "old_album",
     ]
     assert [option["label"] for option in options] == [
         "清透水彩",
-        "柔和铅笔",
         "水墨淡彩",
-        "叙事水粉",
         "怀旧影像",
     ]
     mode_options = share_video_backgrounds.share_video_background_mode_options()
@@ -710,7 +706,7 @@ def test_share_video_background_prompts_cover_default_styles():
     assert "叙事水粉画" in gouache.prompt
     assert "银盐胶片颗粒" in old_album.prompt
     assert "二十世纪中国老连环画" in storybook.prompt
-    assert "storybook" not in [option["value"] for option in options]
+    assert {"pencil", "gouache", "storybook"}.isdisjoint(option["value"] for option in options)
     for prompt in (watercolor, pencil, ink_paper, gouache, old_album, storybook):
         assert "画面上方约六成" in prompt.prompt
         assert "下方约三分之一" in prompt.prompt

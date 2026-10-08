@@ -504,7 +504,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       return;
     }
     if (this.data.shareVideoStyleUnavailable) {
-      this.setData({ shareVideoError: "AI 生成插图暂不可用，请选择「上传照片或插图」" });
+      this.setData({ shareVideoError: "AI配图暂不可用，请选择「自己配图」" });
       return;
     }
     if (this.data.shareVideoStyle === "uploaded"

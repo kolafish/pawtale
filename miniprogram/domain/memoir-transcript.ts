@@ -18,8 +18,8 @@ export interface MemoirShareVideoStyleOption {
 }
 
 export const MEMOIR_SHARE_VIDEO_STYLES: MemoirShareVideoStyleOption[] = [
-  { value: "uploaded", label: "上传照片或插图", description: "使用自己上传的照片或插图，配上讲述原声和字幕。" },
-  { value: "illustrated", label: "AI 生成插图", description: "根据讲述内容用 AI 生成插图，配上讲述原声和字幕。" },
+  { value: "uploaded", label: "自己配图", description: "使用自己上传的照片或插图，配上讲述原声和字幕。" },
+  { value: "illustrated", label: "AI配图", description: "AI 根据讲述内容生成插图，配上讲述原声和字幕。" },
 ];
 
 export function normalizeMemoirShareVideoStyle(value: unknown, backgroundSource?: string): MemoirShareVideoStyle {
