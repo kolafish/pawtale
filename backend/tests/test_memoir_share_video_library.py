@@ -249,7 +249,7 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     created = await create_test_voice_transcript(client, test_db)
     job = await _add_video_job(
         test_db, created, job_id="card", status=MemoirShareVideoJobStatus.SUCCEEDED,
-        created_at=utcnow_naive(),
+        created_at=utcnow_naive(), metadata={"hook_text": "到了夏天，那条路上还有桑葚"},
     )
     await test_db.commit()
     path = share_video_jobs.share_video_file_path(job)
@@ -266,8 +266,10 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
     image = Image.open(BytesIO(response.content)).convert("RGB")
     assert image.size == (720, 576)
-    red, green, blue = image.getpixel((360, 570))
-    assert green > 100 and blue < 80
+    # No caption band, and the chosen opening line is set in light text near the bottom.
+    assert all(image.getpixel((x, 300))[2] < 80 for x in (10, 360, 710))
+    text_rows = image.crop((0, 380, 720, 576)).convert("L")
+    assert text_rows.getextrema()[1] > 200
 
 
 async def test_remake_preserves_completed_file_and_lists_each_style(client, test_db, tmp_path, monkeypatch):

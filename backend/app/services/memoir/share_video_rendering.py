@@ -185,19 +185,49 @@ async def share_video_thumbnail(source_path: Path) -> Path:
     return await _video_still(source_path, ".thumbnail.jpg", 2, "scale=320:-2", 5)
 
 
-async def share_video_card_cover(source_path: Path) -> Path:
-    """A 5:4 full-width crop around the story image for WeChat's forwarded card.
+async def share_video_card_cover(source_path: Path, hook_text: str = "") -> Path:
+    """A 5:4 cover for WeChat's forwarded card, with the video's opening line on it.
 
     The card shows a 5:4 image, so a portrait frame gets centre-cropped and upscaled;
-    cropping here keeps the picture sharp and leaves out the watermark and captions.
+    cropping a full-width still here keeps the picture sharp and leaves out the
+    watermark and moving captions, and the opening line is set once, whole.
     """
-    return await _video_still(
+    cover_path = source_path.with_suffix(".card.jpg")
+    if cover_path.is_file() and cover_path.stat().st_size:
+        return cover_path
+    still_path = await _video_still(
         source_path,
-        ".card.jpg",
+        ".card-still.jpg",
         _CARD_SEEK_SECONDS,
         f"crop={_VIDEO_WIDTH}:{_CARD_HEIGHT}:0:{_CARD_TOP}",
         2,
     )
+    with Image.open(still_path) as still:
+        cover = still.convert("RGB")
+    if hook_text.strip():
+        _draw_card_hook(cover, hook_text.strip())
+    temporary_path = cover_path.with_name(f".{cover_path.name}.{os.getpid()}.tmp")
+    cover.save(temporary_path, "JPEG", quality=90)
+    temporary_path.replace(cover_path)
+    still_path.unlink(missing_ok=True)
+    return cover_path
+
+
+def _draw_card_hook(cover: Image.Image, hook_text: str) -> None:
+    lines = [hook_text[start:end] for start, end in _quote_line_ranges(hook_text, 0, len(hook_text))]
+    lines[0] = f"“{lines[0]}"
+    lines[-1] = f"{lines[-1]}”"
+    font = _font(46, bold=True)
+    line_height = 66
+    text_top = cover.height - 44 - line_height * len(lines)
+    # A soft dark fade behind the line keeps it readable on any picture.
+    fade_top = max(0, text_top - 90)
+    ys = np.linspace(0, 1, cover.height - fade_top, dtype=np.float32)[:, None]
+    pixels = np.asarray(cover, np.float32)
+    pixels[fade_top:] *= (1 - 0.6 * ys * ys * (3 - 2 * ys))[..., None]
+    cover.paste(Image.fromarray(np.clip(pixels, 0, 255).astype(np.uint8)))
+    layer = _text_layer(lines, font, line_height=line_height, fill=(*_CAPTION_COLOR, 255), shadow=True)
+    cover.paste(layer, (0, text_top - 24), layer)
 
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
 
 from fastapi import HTTPException
@@ -10,10 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirShareVideoJobStatus
-from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoOutput
+from app.models.memoir import MemoirMaterialShareVideo
 from app.schemas.memoir_voice import MemoirSharedVideoResponse
 from app.services.memoir.book_shares import readable_share_token
-from app.services.memoir.share_video_jobs import completed_share_video_file, share_video_end_card_source
+from app.services.memoir.share_video_jobs import (
+    CompletedShareVideo,
+    completed_share_video_file,
+    share_video_end_card_source,
+)
 
 SHARE_CODE_PATTERN = re.compile(r"[0-9a-f]{20}\Z")
 
@@ -31,7 +34,7 @@ async def _shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
 
 async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoResponse:
     job = await _shared_job(db, code)
-    _output, _path, title = completed_share_video_file(job)
+    title = completed_share_video_file(job).title
     book_title, narrator_name = await share_video_end_card_source(db, job.project_id)
     base_url = f"/api/mobile/memoir/share-video/shares/{code}/video"
     return MemoirSharedVideoResponse(
@@ -45,5 +48,5 @@ async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoRes
     )
 
 
-async def load_shared_video_file(db: AsyncSession, code: str) -> tuple[MemoirShareVideoOutput, Path, str]:
+async def load_shared_video_file(db: AsyncSession, code: str) -> CompletedShareVideo:
     return completed_share_video_file(await _shared_job(db, code))
