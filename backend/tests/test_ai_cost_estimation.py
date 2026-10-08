@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app.services.ai_calls import AITextCallResult, with_attempt_totals
 from app.services.ai_costs import (
     estimate_audio_cost,
@@ -80,14 +82,28 @@ def test_normalizes_anthropic_cache_tokens_into_total_input():
     assert usage.total_tokens == 120
 
 
-def test_estimates_off_text_provider_costs_and_removes_claude_pricing():
+@pytest.mark.parametrize("model", [
+    "doubao-seedream-5-0-lite-260128",
+    "doubao-seedream-5-0-260128",
+])
+@pytest.mark.parametrize(("image_count", "expected_cost"), [(1, 0.22), (5, 1.10)])
+def test_seedream_requested_and_response_models_share_image_pricing(model, image_count, expected_cost):
     image = estimate_image_cost(
         provider="volc_ark",
-        model="doubao-seedream-5-0-lite-260128",
-        image_count=2,
+        model=model,
+        image_count=image_count,
     )
-    assert image.amount_rmb == 0.44
+    assert image.amount_rmb == expected_cost
+    assert image.status == "estimated"
 
+
+def test_unconfigured_image_model_does_not_inherit_seedream_pricing():
+    image = estimate_image_cost(provider="volc_ark", model="doubao-seedream-unconfigured", image_count=1)
+    assert image.amount_rmb is None
+    assert image.status == "unknown"
+
+
+def test_estimates_audio_and_tts_costs_and_removes_claude_pricing():
     asr = estimate_audio_cost(
         provider="stepfun",
         model="stepaudio-3-asr-max",

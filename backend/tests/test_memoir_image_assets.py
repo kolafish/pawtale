@@ -1,4 +1,5 @@
 from copy import deepcopy
+from decimal import Decimal
 from io import BytesIO
 
 import pytest
@@ -90,7 +91,7 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
         return VolcArkGeneratedImage(
             content=_png_bytes(),
             mime_type="image/png",
-            model="fake-image-model",
+            model="doubao-seedream-5-0-260128",
             usage={"generated_images": 1},
         )
 
@@ -162,11 +163,19 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
     assert ready_asset["status"] == "ready"
     assert ready_asset["include_in_book"] is False
     assert ready_asset["provider"] == "volc_ark"
-    assert ready_asset["model"] == "fake-image-model"
+    assert ready_asset["model"] == "doubao-seedream-5-0-260128"
     assert ready_asset["width"] == 1280
     assert ready_asset["height"] == 720
     assert ready_asset["metadata_json"]["generation_stage"] == "ready"
     assert ready_asset["metadata_json"]["disclosure"] == image_assets.AI_GENERATED_IMAGE_DISCLOSURE
+    assert ready_asset["metadata_json"]["generation_estimated_cost"]["amount_rmb"] == 0.22
+
+    summary = (await client.get("/api/billing/ai-credit-summary")).json()
+    assert Decimal(summary["used_rmb"]) == Decimal("0.22")
+    [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
+    assert [(item["purpose"], Decimal(item["cost_rmb"])) for item in day["purposes"]] == [
+        ("图片生成", Decimal("0.22")),
+    ]
 
     file_response = await client.get(ready_asset["file_url"])
     assert file_response.status_code == 200
