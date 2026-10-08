@@ -27,7 +27,11 @@ const sharedVideo = {
 test("a scanned mini program code opens the clip and forwards the same card", async () => {
   const codes = [];
   const navigations = [];
-  global.wx = { navigateTo: ({ url }) => navigations.push(url) };
+  const navigationTitles = [];
+  global.wx = {
+    navigateTo: ({ url }) => navigations.push(url),
+    setNavigationBarTitle: ({ title }) => navigationTitles.push(title),
+  };
   try {
     const { page } = loadPlayer(async (code) => {
       codes.push(code);
@@ -40,6 +44,7 @@ test("a scanned mini program code opens the clip and forwards the same card", as
     assert.deepEqual(codes, ["0123456789abcdef0123"]);
     assert.equal(context.data.videoUrl, "https://api.example.com/api/mobile/memoir/share-video/shares/abc/video");
     assert.equal(context.data.error, "");
+    assert.deepEqual(navigationTitles, [sharedVideo.book_title]);
     assert.deepEqual(page.onShareAppMessage.call(context), {
       title: "外婆家的冬天",
       path: "/pages/share-video-player/index?code=0123456789abcdef0123",

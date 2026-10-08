@@ -3,6 +3,7 @@ import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { memoirShareVideoDownloadUrl, memoirSharedVideoUrl, readMemoirSharedVideo } from "../../services/memoir-transcript-api";
 import { definePage } from "../../services/page-definition";
 import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
 
 interface SharedVideoPlayerData {
@@ -65,6 +66,7 @@ definePage<SharedVideoPlayerData>()({
         posterUrl: memoirShareVideoDownloadUrl(video.poster_url),
         endFrameUrl: video.end_frame_url ? memoirShareVideoDownloadUrl(video.end_frame_url) : "",
       });
+      setPageNavigationTitle(video.book_title || video.title);
       enableMiniProgramShareMenu();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "这段视频暂时打不开" });

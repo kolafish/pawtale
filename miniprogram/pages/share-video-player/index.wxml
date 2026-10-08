@@ -37,24 +37,18 @@
     />
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
-    <view class="hero-panel shared-video-info">
-      <text class="record-title">{{video.title}}</text>
-      <text wx:if="{{video.book_title}}" class="record-meta">出自《{{video.book_title}}》{{video.narrator_name ? ' · 讲述人 ' + video.narrator_name : ''}}</text>
-    </view>
-    <button wx:if="{{video.book_share_token}}" class="ghost-button shared-video-action" bindtap="openBook">阅读这本回忆录</button>
     <button class="ui-button shared-video-invitation" bindtap="openHome" hover-class="ui-accent-action-hover" aria-label="也为家里的长辈留下一本回忆录，去讲讲故事">
       <view class="shared-video-invitation-title">
         <text>也为家里的长辈，</text>
         <text>留下一本回忆录</text>
       </view>
-      <view class="shared-video-invitation-footer">
-        <view class="shared-video-invitation-art" aria-hidden="true">
-          <image src="/assets/memoir-book-header.png" mode="aspectFit" aria-hidden="true" />
-        </view>
-        <view class="shared-video-invitation-action">
-          <text>去讲讲故事</text><text aria-hidden="true">→</text>
-        </view>
+      <view class="shared-video-invitation-art" aria-hidden="true">
+        <image src="/assets/memoir-book-header.png" mode="widthFix" aria-hidden="true" />
+      </view>
+      <view class="shared-video-invitation-action">
+        <text>去讲讲故事</text><text aria-hidden="true">→</text>
       </view>
     </button>
+    <button wx:if="{{video.book_share_token}}" class="ghost-button shared-video-action" bindtap="openBook">阅读这本回忆录</button>
   </block>
 </view>
