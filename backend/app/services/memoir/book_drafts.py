@@ -401,6 +401,7 @@ async def _synthesize_cached_draft_audio(
         voice=req.voice,
         speed_ratio=speed_ratio,
         force_regenerate=req.force_regenerate,
+        tts_client=tts_client,
     )
     if cached:
         return cached

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
+import unicodedata
 
 
 def _count(value: object) -> int | None:
@@ -248,6 +249,13 @@ _UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
         rmb_per_unit=2.8,
         source="https://platform.stepfun.com/docs/zh/guides/pricing/details",
     ),
+    ("stepfun", "step-tts-mini"): AIUnitPricing(
+        provider="stepfun",
+        model="step-tts-mini",
+        unit="text_character",
+        rmb_per_unit=0.00009,
+        source="https://platform.stepfun.com/docs/zh/guides/pricing/details",
+    ),
     ("volc_streaming_asr", "volc.seedasr.sauc.duration"): AIUnitPricing(
         provider="volc_streaming_asr",
         model="volc.seedasr.sauc.duration",
@@ -369,6 +377,7 @@ def estimate_text_cost(
     provider: str | None,
     model: str | None,
     character_count: int | None,
+    text: str | None = None,
 ) -> AICostEstimate:
     pricing = _unit_pricing(provider, model)
     if pricing is None or pricing.unit != "text_character":
@@ -377,8 +386,15 @@ def estimate_text_cost(
         return AICostEstimate(None, "unknown", provider, model, "text character count is required", pricing.source)
     if character_count <= 0:
         return AICostEstimate(None, "unknown", provider, model, "text character count must be positive", pricing.source)
+    billable_characters = float(character_count)
+    if pricing.provider == "stepfun" and pricing.model == "step-tts-mini" and text is not None:
+        # Step counts two English letters or punctuation marks as one character.
+        billable_characters = sum(
+            0.5 if (char.isascii() and char.isalpha()) or unicodedata.category(char).startswith("P") else 1
+            for char in text
+        )
     return AICostEstimate(
-        round(character_count * pricing.rmb_per_unit, 6),
+        round(billable_characters * pricing.rmb_per_unit, 6),
         "estimated",
         provider,
         model,

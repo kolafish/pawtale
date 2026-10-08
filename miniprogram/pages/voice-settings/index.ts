@@ -25,6 +25,7 @@ import {
   saveScopedTTSSettings,
   TTS_SPEED_OPTIONS,
   TTS_VOICE_OPTIONS,
+  BOOK_TTS_VOICE_OPTIONS,
   type TTSSpeedOption,
   type TTSSettingsScope,
   type TTSVoiceOption,
@@ -41,6 +42,7 @@ interface VoiceSettingsData {
   bookTTSVoice: string;
   bookTTSSpeedRatio: number;
   ttsVoiceOptions: TTSVoiceOption[];
+  bookTTSVoiceOptions: TTSVoiceOption[];
   ttsSpeedOptions: TTSSpeedOption[];
 }
 
@@ -87,6 +89,7 @@ function voiceSettingsData(): VoiceSettingsData {
     bookTTSVoice: profiles.book.voice,
     bookTTSSpeedRatio: profiles.book.speedRatio,
     ttsVoiceOptions: TTS_VOICE_OPTIONS,
+    bookTTSVoiceOptions: BOOK_TTS_VOICE_OPTIONS,
     ttsSpeedOptions: TTS_SPEED_OPTIONS,
   };
 }

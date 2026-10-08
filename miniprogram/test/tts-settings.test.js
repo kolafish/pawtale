@@ -36,14 +36,14 @@ test("normalizes scoped TTS settings and migrates the legacy flat shape", () => 
     }),
     {
       chat: { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 0.7 },
-      book: { voice: "zh_male_m191_uranus_bigtts", speedRatio: 1.5 },
+      book: { voice: "cixingnansheng", speedRatio: 1.5 },
     },
   );
   assert.deepEqual(
     normalizeScopedTTSSettings({ voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 }),
     {
       chat: { voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 },
-      book: { voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 },
+      book: { voice: "wenrounvsheng", speedRatio: 1.5 },
     },
   );
   assert.deepEqual(normalizeScopedTTSSettings("bad"), {
@@ -66,7 +66,7 @@ test("builds book TTS requests without redundant defaults", () => {
       speedRatio: 1.5,
     }),
     {
-      voice: "zh_female_xiaohe_uranus_bigtts",
+      voice: "linjiajiejie",
       speed_ratio: 1.5,
     },
   );
@@ -74,4 +74,25 @@ test("builds book TTS requests without redundant defaults", () => {
     bookTTSRequestFromSettings({ voice: "", speedRatio: 1 }),
     {},
   );
+});
+
+test("keeps narration voices separate from conversation and saves the migration", () => {
+  for (const voice of ["wenrounvsheng", "linjiajiejie", "cixingnansheng"]) {
+    assert.equal(normalizeTTSVoice(voice, "book"), voice);
+    assert.equal(normalizeTTSVoice(voice, "chat"), "");
+  }
+  let stored = {
+    chat: { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 0.7 },
+    book: { voice: "zh_male_m191_uranus_bigtts", speedRatio: 1.5 },
+  };
+  global.wx = {
+    getStorageSync: () => stored,
+    setStorageSync: (_key, value) => { stored = value; },
+  };
+  const { readBookTTSRequest, saveScopedTTSSettings } = require("../services/tts-settings.ts");
+  assert.deepEqual(readBookTTSRequest(), { voice: "cixingnansheng", speed_ratio: 1.5 });
+  saveScopedTTSSettings("book", { voice: "wenrounvsheng", speedRatio: 1 });
+  assert.deepEqual(stored.chat, { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 0.7 });
+  assert.equal(stored.book.voice, "wenrounvsheng");
+  assert.deepEqual(readBookTTSRequest(), { voice: "wenrounvsheng" });
 });
