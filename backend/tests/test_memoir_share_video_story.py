@@ -9,6 +9,7 @@ from PIL import ImageChops
 
 from app.services.ai_usage_records import AIUsageContext, current_ai_usage_context
 from app.services.memoir import share_video_story_plan as planning
+from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
 from app.services.memoir.share_video_story_animation import create_story_renderer
 
 
@@ -77,9 +78,32 @@ def test_persisted_story_reuses_only_same_source_and_complete_audio():
         planning.ShareVideoStoryPlan.model_validate(payload)
 
 
+def test_story_metadata_roundtrip_preserves_a_shot_without_a_performer():
+    # Reduced from a completed video whose quiet second shot lost its null
+    # active_actor_id when the job metadata was saved with exclude_none=True.
+    text = "中间下了大雨了。"
+    plan = planning.ShareVideoStoryPlan.model_validate({
+        "source_text_hash": sha256(text.encode()).hexdigest(),
+        "duration_ms": 4782, "provider": "test", "model": "test",
+        "actors": [],
+        "shots": [{
+            "sentence_ids": [0], "setting": "plain_room", "action": "talk", "gesture": "relaxed",
+            "camera": "still", "framing": "medium", "actor_ids": [], "active_actor_id": None,
+            "props": [], "evidence": [{"sentence_id": 0, "quote": text}],
+            "movement_scale": 0.8, "start_ms": 0, "end_ms": 4782,
+        }],
+    })
+    metadata = ShareVideoJobMetadata(video_style="story_animation", animation_plan=plan)
+    restored = ShareVideoJobMetadata.from_json(metadata.to_json())
+    assert restored.animation_plan == plan
+    planning.validate_story_plan_source(restored.animation_plan, text, 4782)
+    assert create_story_renderer(restored.animation_plan, 640, 360)(2).size == (640, 360)
+
+
 @pytest.mark.parametrize("mutation,reason", [
     (lambda p: p["shots"][2].update(action="walk"), "Vehicle setting"),
     (lambda p: p["shots"][1].update(actor_ids=[], active_actor_id=None), "visible actor"),
+    (lambda p: p["shots"][0].pop("active_actor_id"), "declared performer"),
 ])
 def test_cached_story_cannot_request_an_unrenderable_action(mutation, reason):
     payload = mapped().model_dump(mode="json")
