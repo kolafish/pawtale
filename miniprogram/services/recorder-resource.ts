@@ -78,10 +78,11 @@ export class WechatRecorderResource {
     this.stopRequested = true;
     this.stopPromise = (async () => {
       const stopped = this.waitForStop();
-      try {
-        this.manager?.stop();
-      } catch {
-        if (this.recorderStarted) {
+      // start() is asynchronous; stop() before onStart reports a native error.
+      if (this.recorderStarted) {
+        try {
+          this.manager?.stop();
+        } catch {
           this.handleStop();
         }
       }
@@ -115,14 +116,15 @@ export class WechatRecorderResource {
         return;
       }
       this.recorderStarted = true;
-      this.handlers?.onStart?.();
       if (this.stopRequested) {
         try {
           this.manager?.stop();
         } catch {
           this.handleStop();
         }
+        return;
       }
+      this.handlers?.onStart?.();
     });
     this.manager.onFrameRecorded?.((result) => {
       this.handlers?.onFrame?.(result);

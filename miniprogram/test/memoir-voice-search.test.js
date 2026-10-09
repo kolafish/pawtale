@@ -128,6 +128,7 @@ test("voice search service records PCM audio and returns transcribed text", asyn
 });
 
 test("voice search service auto-stops after speech followed by silence", async () => {
+  let onStart = null;
   let onStop = null;
   let onFrameRecorded = null;
   const stops = [];
@@ -138,7 +139,7 @@ test("voice search service auto-stops after speech followed by silence", async (
         stop() {
           stops.push("stop");
         },
-        onStart() {},
+        onStart(callback) { onStart = callback; },
         onStop(callback) {
           onStop = callback;
         },
@@ -167,6 +168,7 @@ test("voice search service auto-stops after speech followed by silence", async (
 
   const promise = recordMemoirVoiceSearchQuery();
   await flushAsyncSetup();
+  onStart();
   onFrameRecorded({ frameBuffer: pcmFrame(2600), isLastFrame: false });
   onFrameRecorded({ frameBuffer: pcmFrame(2600), isLastFrame: false });
   for (let index = 0; index < 8; index += 1) {
@@ -182,6 +184,7 @@ test("voice search service auto-stops after speech followed by silence", async (
 });
 
 test("voice search service auto-stops when no speech is detected", async () => {
+  let onStart = null;
   let onStop = null;
   let onFrameRecorded = null;
   const stops = [];
@@ -193,7 +196,7 @@ test("voice search service auto-stops when no speech is detected", async () => {
         stop() {
           stops.push("stop");
         },
-        onStart() {},
+        onStart(callback) { onStart = callback; },
         onStop(callback) {
           onStop = callback;
         },
@@ -222,6 +225,7 @@ test("voice search service auto-stops when no speech is detected", async () => {
     noVoiceTranscriptMessage: "没有听到声音，语音对话已暂停",
   });
   await flushAsyncSetup();
+  onStart();
   for (let index = 0; index < 30; index += 1) {
     onFrameRecorded({ frameBuffer: pcmFrame(0), isLastFrame: false });
   }
@@ -388,6 +392,7 @@ test("cancelled voice search does not start recording after authorization return
 });
 
 test("cancelled voice search stops the recorder and never uploads its late stop result", async () => {
+  let onStart;
   let onStop;
   let stops = 0;
   let uploads = 0;
@@ -396,7 +401,7 @@ test("cancelled voice search stops the recorder and never uploads its late stop 
       return {
         start() {},
         stop() { stops += 1; },
-        onStart() {},
+        onStart(callback) { onStart = callback; },
         onStop(callback) { onStop = callback; },
         onFrameRecorded() {}, onError() {},
       };
@@ -417,6 +422,8 @@ test("cancelled voice search stops the recorder and never uploads its late stop 
   const search = recordMemoirVoiceSearchQuery();
   await flushAsyncSetup();
   cancelMemoirVoiceSearchRecording();
+  assert.equal(stops, 0);
+  onStart();
   onStop({ tempFilePath: "/tmp/search.pcm", duration: 800, fileSize: 3200 });
 
   await assert.rejects(search, /语音搜索已取消/);
