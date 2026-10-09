@@ -210,10 +210,16 @@ def public_reading_response(
                     "narrator_name": "", "prepared_by": "", "interview_date_range": "",
                 }),
                 "chapters": chapters,
+                "table_of_contents": [
+                    item for item in manuscript.table_of_contents
+                    if chapter_ids is None or item.chapter_id in chapter_ids
+                ],
                 "front_matter": [],
                 "back_matter": back_matter,
                 "image_appendix": [],
-                "render_settings": manuscript.render_settings.model_copy(update={"back_cover_quote": ""}),
+                "render_settings": manuscript.render_settings.model_copy(update={
+                    "back_cover_quote": "", "cover_image": None,
+                }),
             }),
         })
     elif chapter_ids is not None:
