@@ -550,6 +550,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     deleteMemoirShareVideoJob,
     getMemoirShareVideoJob,
     getMemoirTranscriptShareVideoContext,
+    memoirSharedVideoUrl,
   } = require("../services/memoir-transcript-api.ts");
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
@@ -611,6 +612,10 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.equal(downloads[0].timeout, 60000);
   assert.equal(downloads[1].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1/download?variant=thumbnail");
   assert.equal(downloads[1].header.Cookie, "pawtale_session=abc");
+  const publicVideoUrl = "http://backend.local:8000/api/mobile/memoir/share-video/shares/share%2Fcode/video";
+  assert.equal(memoirSharedVideoUrl("share/code"), publicVideoUrl);
+  assert.equal(memoirSharedVideoUrl("share/code", "thumbnail"), `${publicVideoUrl}?variant=thumbnail`);
+  assert.equal(memoirSharedVideoUrl("share/code", "card"), `${publicVideoUrl}?variant=card&v=2`);
   delete global.wx;
 });
 

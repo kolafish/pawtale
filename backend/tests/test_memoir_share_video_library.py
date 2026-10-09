@@ -245,12 +245,13 @@ async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(
     assert (await client.get(url)).status_code == 404
 
 
-async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, test_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("hook_text", ["到了夏天，那条路上还有桑葚", ""])
+async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, test_db, tmp_path, monkeypatch, hook_text):
     monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
     created = await create_test_voice_transcript(client, test_db)
     job = await _add_video_job(
         test_db, created, job_id="card", status=MemoirShareVideoJobStatus.SUCCEEDED,
-        created_at=utcnow_naive(), metadata={"hook_text": "到了夏天，那条路上还有桑葚"},
+        created_at=utcnow_naive(), metadata={"hook_text": hook_text, "title": "从武装队长到农会主席"},
     )
     await test_db.commit()
     path = share_video_jobs.share_video_file_path(job)
@@ -263,15 +264,19 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
     ], check=True, capture_output=True, timeout=10)
 
-    response = await client.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=card")
+    # Already-shared clips may have a cached image without any cover text.
+    Image.new("RGB", (720, 576), "green").save(path.with_suffix(".card.jpg"))
+    url = f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=card&v=2"
+    response = await client.get(url)
 
     assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
     image = Image.open(BytesIO(response.content)).convert("RGB")
     assert image.size == (720, 576)
-    # No caption band, and the chosen opening line is set in light text near the bottom.
+    # No cropped video captions; both an opening quote and a title-only clip have cover text.
     assert all(image.getpixel((x, 300))[2] < 80 for x in (10, 360, 710))
     text_rows = image.crop((0, 380, 720, 576)).convert("L")
     assert text_rows.getextrema()[1] > 200
+    assert (await client.get(url)).content == response.content
 
     # After playback the page holds the closing card, so its mini program code stays scannable.
     end = await client.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}/video?variant=end")
@@ -368,6 +373,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         path.write_bytes(job.id.encode())
         path.with_suffix(".thumbnail.jpg").write_bytes(b"thumbnail")
         path.with_suffix(".card.jpg").write_bytes(b"card")
+        path.with_suffix(".card-v2.jpg").write_bytes(b"updated card")
         path.with_suffix(".end.jpg").write_bytes(b"end")
         path.with_suffix(".poster.jpg").write_bytes(b"poster")
     shared_read = "/api/mobile/memoir/share-video/shares/read"
@@ -400,6 +406,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert not share_video_jobs.share_video_file_path(chosen).exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".thumbnail.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".card.jpg").exists()
+    assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".card-v2.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".end.jpg").exists()
     assert not share_video_jobs.share_video_file_path(chosen).with_suffix(".poster.jpg").exists()
     assert (await client.get(url)).status_code == 404

@@ -771,7 +771,7 @@ async def _share_video_file_response(
         return FileResponse(end_frame, media_type="image/jpeg")
     if variant == "card":
         try:
-            cover = await memoir_share_video_jobs.rendering.share_video_card_cover(path, video.hook_text)
+            cover = await memoir_share_video_jobs.rendering.share_video_card_cover(path, video.hook_text, title)
         except (memoir_share_video_jobs.rendering.ShareVideoGenerationError, TimeoutError, OSError) as exc:
             raise HTTPException(status_code=503, detail="视频封面暂时不可用") from exc
         return FileResponse(cover, media_type="image/jpeg")
