@@ -63,6 +63,7 @@ from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
     current_utterance_text,
+    has_story_content,
     source_text_hash,
 )
 
@@ -73,6 +74,7 @@ SYSTEM_PROMPT = (
     "不要改名、删除、移动或重排已有结构。"
 )
 SETTLE_SECONDS = 3
+MAX_UNASSIGNED_ATTEMPTS = 2
 ALLOWED_ACTIONS = {
     "assign_existing",
     "create_section",
@@ -116,6 +118,7 @@ class DeferredSource(BaseModel):
     text_hash: str
     status: Literal["pending", "needs_user"]
     reason: str
+    attempts: int = 0
 
 
 class GrowthBatch(BaseModel):
@@ -473,16 +476,21 @@ async def _place_groups(
     on_placed: Callable[[str], Awaitable[None]],
 ) -> list[str]:
     placed: list[str] = []
+    plan = await load_plan_with_chapters(db, project_id)
+    chapter_by_title = {chapter.title: chapter.id for chapter in (plan.chapters if plan else [])}
     for group_index, group in enumerate(batch.groups):
         if group.action == "leave_unassigned":
             continue
         target_section_id = group.section_id
         for utterance_id in group.utterance_ids:
+            same_title_chapter_id = (
+                chapter_by_title.get(group.new_chapter_title) if group.action == "create_chapter" else None
+            )
             if target_section_id:
                 request = MemoirSectionMaterialPlacementRequest(target_section_id=target_section_id)
-            elif group.action == "create_section":
+            elif group.action == "create_section" or same_title_chapter_id:
                 request = MemoirSectionMaterialPlacementRequest(
-                    target_chapter_id=group.chapter_id,
+                    target_chapter_id=group.chapter_id or same_title_chapter_id,
                     new_section_title=group.new_section_title,
                 )
             elif group.action == "create_chapter":
@@ -518,6 +526,8 @@ async def _place_groups(
                 select(MemoirSection.version).where(MemoirSection.id == target_section_id)
             )
             batch.section_chapters[target_section_id] = placement.chapter_id
+            if group.action == "create_chapter":
+                chapter_by_title.setdefault(group.new_chapter_title, placement.chapter_id)
             if placement.chapter_id not in batch.chapter_updated_at:
                 batch.chapter_updated_at[placement.chapter_id] = await db.scalar(
                     select(MemoirBookPlanChapter.updated_at).where(MemoirBookPlanChapter.id == placement.chapter_id)
@@ -588,9 +598,10 @@ async def grow_story_tree(
         if item.id not in existing_material_ids
         and not item.completion_issue_id
         and is_ready_story_material(item)
+        and has_story_content(current_utterance_text(item))
         and not (
             item.id in deferred
-            and deferred[item.id].status == "needs_user"
+            and deferred[item.id].attempts >= MAX_UNASSIGNED_ATTEMPTS
             and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
         )
     ]
@@ -637,11 +648,17 @@ async def grow_story_tree(
                 if source_id in assigned_ids:
                     progress.deferred.pop(source_id, None)
                     continue
-                needs_user = group.action == "leave_unassigned" and bool(group.reason)
+                text_hash = batch.sources[source_id][0]
+                previous = deferred.get(source_id)
+                attempts = previous.attempts if previous and previous.text_hash == text_hash else 0
+                if group.action == "leave_unassigned" and group.reason:
+                    attempts += 1
+                needs_user = attempts >= MAX_UNASSIGNED_ATTEMPTS
                 progress.deferred[source_id] = DeferredSource(
-                    text_hash=batch.sources[source_id][0],
+                    text_hash=text_hash,
                     status="needs_user" if needs_user else "pending",
                     reason=group.reason if needs_user else "素材尚未归类，等待下一次整理",
+                    attempts=attempts,
                 )
         progress.batch = None
     placed_ids = list(dict.fromkeys(progress.placed_ids))

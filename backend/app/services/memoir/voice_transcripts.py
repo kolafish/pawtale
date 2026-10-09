@@ -63,7 +63,7 @@ from app.services.memoir.project_ai_preferences import (
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
-from app.services.memoir.transcript_projection import current_utterance_text
+from app.services.memoir.transcript_projection import current_utterance_text, has_story_content
 from app.services.memoir.utterance_editing_pipeline import (
     claim_transcript_mutation_guard,
     schedule_ready_utterance_background_work,
@@ -270,6 +270,8 @@ async def generate_cleaned_transcript_text(
     source_text = source_text.strip()
     if not source_text:
         raise HTTPException(status_code=400, detail="讲述内容为空，无法整理")
+    if not has_story_content(source_text):
+        return CleanedTranscriptText(content=source_text, provider=None, created_by=MemoirCreatedBy.SYSTEM)
 
     client: AITextClient | None = ai_client
     try:

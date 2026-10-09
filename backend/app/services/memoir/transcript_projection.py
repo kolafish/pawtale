@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import re
 
 from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance
+
+
+_NON_STORY_RE = re.compile(r"[\W_]|嗯|啊|呃|额|哦|那个|这个|就是")
+MIN_STORY_CHARS = 2
+
+
+def has_story_content(text: str) -> bool:
+    return len(_NON_STORY_RE.sub("", text)) >= MIN_STORY_CHARS
 
 
 def current_utterance_text(utterance: MemoirVoiceUtterance) -> str:

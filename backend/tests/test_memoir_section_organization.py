@@ -1623,30 +1623,57 @@ async def test_retry_initial_story_with_empty_chapters_preserves_existing_user_d
 
 
 @pytest.mark.parametrize("reason", ["", "需要确认讲的是哪一段经历"])
-async def test_later_story_includes_omissions_but_preserves_explicit_pending_decisions(
+async def test_set_aside_story_is_retried_before_waiting_for_user(
     client, test_db, monkeypatch, reason,
 ):
-    project_id, _, _, data = await _bootstrap_two_chapters(client, test_db)
-    old, old_job = await _stopped_growth_job(client, test_db, project_id, "早年一次旅行。")
-    async def first(**kwargs):
-        return [story_tree_growth.GrowthGroup(utterance_ids=[old["utterance_id"]],
-                                            action="leave_unassigned", reason=reason)]
-    monkeypatch.setattr(story_tree_growth, "decide_story_growth", first)
-    result = await story_tree_growth.run_story_tree_growth_job(test_db, old_job)
-    old_job.result_json = result.result_json
-    old_job.status = "succeeded"
-    await test_db.commit()
-    assert result.result_json["growth"]["deferred"][old["utterance_id"]]["reason"]
-    current, job = await _stopped_growth_job(client, test_db, project_id, "最近去香山的经历。")
+    project_id, _, _, _ = await _bootstrap_two_chapters(client, test_db)
     seen = []
-    async def second(**kwargs):
-        seen.extend(item.id for item in kwargs["utterances"])
-        return [story_tree_growth.GrowthGroup(utterance_ids=list(seen), action="assign_existing",
-                                            section_id=data["sections"][0]["id"])]
-    monkeypatch.setattr(story_tree_growth, "decide_story_growth", second)
-    await story_tree_growth.run_story_tree_growth_job(test_db, job)
-    assert current["utterance_id"] in seen
-    assert (old["utterance_id"] in seen) == (not reason)
+    async def set_aside(**kwargs):
+        ids = [item.id for item in kwargs["utterances"]]
+        seen.append(ids)
+        return [story_tree_growth.GrowthGroup(utterance_ids=ids, action="leave_unassigned", reason=reason)]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", set_aside)
+    sources, results = [], []
+    for text in ["早年一次旅行。", "最近去香山的经历。", "后来又去了颐和园。"]:
+        source, job = await _stopped_growth_job(client, test_db, project_id, text)
+        sources.append(source["utterance_id"])
+        result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        results.append(result.result_json["growth"]["deferred"])
+        job.result_json = result.result_json
+        job.status = "succeeded"
+        await test_db.commit()
+    old, first, second = sources
+    if reason:
+        assert seen == [[old], [old, first], [first, second]]
+        assert results[1][old]["status"] == "needs_user"
+        assert results[1][old]["attempts"] == 2
+    else:
+        assert seen == [[old], [old, first], [old, first, second]]
+
+
+async def test_new_chapters_with_the_same_title_are_merged(client, test_db, monkeypatch):
+    from sqlalchemy import func
+
+    project_id, _, _, _ = await _bootstrap_two_chapters(client, test_db)
+    first, job = await _stopped_growth_job(client, test_db, project_id, "第一次去香山。")
+    second, _ = await _stopped_growth_job(client, test_db, project_id, "后来在颐和园划船。")
+    async def decide(**kwargs):
+        return [
+            story_tree_growth.GrowthGroup(utterance_ids=[first["utterance_id"]], action="create_chapter",
+                                          new_chapter_title="北京游玩", new_section_title="香山"),
+            story_tree_growth.GrowthGroup(utterance_ids=[second["utterance_id"]], action="create_chapter",
+                                          new_chapter_title="北京游玩", new_section_title="颐和园"),
+        ]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert len(result.result_json["new_chapter_ids"]) == 1
+    assert await test_db.scalar(select(func.count(MemoirBookPlanChapter.id)).where(
+        MemoirBookPlanChapter.title == "北京游玩",
+    )) == 1
+    sections = (await test_db.scalars(select(MemoirSection).where(
+        MemoirSection.chapter_id == result.result_json["new_chapter_ids"][0],
+    ))).all()
+    assert {section.title for section in sections} == {"香山", "颐和园"}
 
 
 async def test_story_assignment_resumes_saved_group_without_repeating_model_or_structure(
