@@ -84,7 +84,19 @@ definePage<TranscriptMediaData>()({
   },
 
   async onLoad(options?: PageQuery) {
-    this.shareVideoController.setStateListener((patch) => this.setData(patch));
+    this.shareVideoController.setStateListener((patch) => {
+      const previousJob = this.data.shareVideoJob;
+      const job = patch.shareVideoJob;
+      this.setData({
+        ...patch,
+        ...(job !== undefined && job?.id !== previousJob?.id
+          ? { shareVideoLikeCount: 0, shareVideoLikers: [] } : {}),
+      });
+      if (job?.status === "succeeded" && job.output?.share_code
+        && job.output.share_code !== previousJob?.output?.share_code) {
+        void this.loadShareVideoLikers(job.output.share_code, this.loadToken);
+      }
+    });
     this.materialImageController.setStateListener((patch) => this.setData(patch));
     this.resetShareVideoState();
     this.requestedShareVideoJobId = queryParam(options, "jobId");
@@ -135,7 +147,6 @@ definePage<TranscriptMediaData>()({
           throw new Error("视频不属于这段讲述");
         }
         await this.shareVideoController.showJob(job);
-        if (job.output?.share_code) void this.loadShareVideoLikers(job.output.share_code, requestToken);
       } else {
         await this.openShareVideoPanel(!this.requestedShareVideoCandidateId, !this.requestedShareVideoCandidateId);
         if (this.requestedShareVideoCandidateId) {
@@ -188,7 +199,7 @@ definePage<TranscriptMediaData>()({
     try {
       // The author reads the same likes as family and gets every name back.
       const likes = await readMemoirShareLikes({ video_code: shareCode });
-      if (requestToken !== this.loadToken) return;
+      if (requestToken !== this.loadToken || this.data.shareVideoJob?.output?.share_code !== shareCode) return;
       this.setData({ shareVideoLikeCount: likes.count, shareVideoLikers: shareLikerViews(likes.likers) });
     } catch (error) {
       console.warn("share video likes unavailable", error);

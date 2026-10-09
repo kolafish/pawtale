@@ -2157,6 +2157,7 @@ test("the author's video page names everyone who liked the forwarded video", asy
   const job = sampleShareVideoJob({ utterance_id: "utterance-result" });
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
     getMemoirShareVideoJob: async () => job,
     readMemoirShareLikes: async (target) => {
       likeTargets.push(target);
@@ -2182,4 +2183,27 @@ test("the author's video page names everyone who liked the forwarded video", asy
     { key: "0", url: "https://avatar.example.com/aunt.jpg", name: "三姑" },
     { key: "1", url: "", name: "未留名" },
   ]);
+  await page.remakeShareVideo.call(context);
+  assert.equal(context.data.shareVideoLikeCount, 0);
+  assert.deepEqual(context.data.shareVideoLikers, []);
+});
+
+test("likes from the previous video cannot arrive after remaking it", async () => {
+  let finishLikes;
+  const pendingLikes = new Promise((resolve) => { finishLikes = resolve; });
+  const job = sampleShareVideoJob({ utterance_id: "utterance-result" });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+    getMemoirShareVideoJob: async () => job,
+    readMemoirShareLikes: async () => pendingLikes,
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-result", jobId: job.id });
+  await page.remakeShareVideo.call(context);
+  finishLikes({ count: 1, likers: [{ display_name: "三姑", avatar_url: null }], liked: false, can_like: false });
+  await pendingLikes;
+  await Promise.resolve();
+  assert.equal(context.data.shareVideoLikeCount, 0);
+  assert.deepEqual(context.data.shareVideoLikers, []);
 });
