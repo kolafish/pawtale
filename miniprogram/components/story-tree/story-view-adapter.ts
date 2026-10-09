@@ -13,7 +13,13 @@ function formatBookChars(count: number): string {
   return count ? `${count} 字` : "";
 }
 
-export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
+/** The parts of a story snapshot the tree draws; a visitor's sample memoir supplies them too. */
+export type StoryViewSource = Pick<MemoirStorySnapshot, "chapters" | "book_chapter_count" | "book_char_count"> & {
+  identity: { active_project: { title: string } | null };
+  progress?: { material_count: number } | null;
+};
+
+export function storyViewData(snapshot: StoryViewSource): StoryViewData {
   const project = snapshot.identity.active_project;
   const chapters = snapshot.chapters.map((chapter, index) => {
     return {

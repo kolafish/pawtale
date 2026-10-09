@@ -12,6 +12,7 @@ from app.schemas.memoir_projects import MemoirIdentityResponse
 from app.schemas.memoir_voice import (
     MemoirAutomationEventListResponse,
     MemoirShareVideoCountResponse,
+    MemoirSharedVideoResponse,
     MemoirVoiceTranscriptItemResponse,
 )
 
@@ -125,3 +126,17 @@ class MemoirStorySnapshotResponse(MemoirHomeSnapshotResponse):
     unassigned_video_count: int = 0
     automation_events: MemoirAutomationEventListResponse
     growth_events: list[MemoirStoryGrowthEvent] = Field(default_factory=list)
+
+
+class MemoirDemoVideoResponse(MemoirSharedVideoResponse):
+    share_code: str
+
+
+class MemoirDemoStoryResponse(BaseModel):
+    """A sample memoir for visitors; no owner or interview details."""
+
+    title: str = ""
+    chapters: list[MemoirStoryChapterResponse] = Field(default_factory=list)
+    book_chapter_count: int = Field(default=0, ge=0)
+    book_char_count: int = 0
+    videos: list[MemoirDemoVideoResponse] = Field(default_factory=list)

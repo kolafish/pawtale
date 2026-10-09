@@ -73,6 +73,10 @@ export function readMemoirBookShare(token: string): Promise<MemoirBookOutput> {
   });
 }
 
+export function readMemoirDemoBook(): Promise<MemoirBookOutput> {
+  return request<MemoirBookOutput>("/api/mobile/memoir/demo-book");
+}
+
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
 }

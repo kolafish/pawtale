@@ -13,6 +13,7 @@ import {
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
   readMemoirBookShare,
+  readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
@@ -330,10 +331,12 @@ definePage<BookReaderData>()({
     const chapterId = queryParam(query, "chapterId");
     const versionId = queryParam(query, "versionId");
     const shareToken = queryParam(query, "shareToken");
+    // Visitors open the sample memoir's open chapters before logging in.
+    const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, versionId, readerMode, readerShared: Boolean(shareToken) });
-    if (shareToken) {
-      await this.loadSharedBookReader(shareToken);
+    this.setData({ projectId, chapterId, versionId, readerMode, readerShared: Boolean(shareToken) || demo });
+    if (shareToken || demo) {
+      await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook() : readMemoirBookShare(shareToken)));
       return;
     }
     if (!projectId) {
@@ -552,11 +555,11 @@ definePage<BookReaderData>()({
     if (!this.readerText) this.setData({ error: "这本书还没有生成成书内容。" });
   },
 
-  async loadSharedBookReader(token: string) {
+  async loadSharedBookReader(read: () => Promise<MemoirBookOutput>) {
     this.stopPlayback();
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
-      this.applyBookReaderOutput(await readMemoirBookShare(token));
+      this.applyBookReaderOutput(await read());
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "分享链接已失效" });
     } finally {

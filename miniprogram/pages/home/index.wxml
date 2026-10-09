@@ -89,6 +89,15 @@
       </view>
 
       <view slot="afterHero" id="home-narration-end" class="after-hero">
+        <view wx:if="{{needsLogin && demoVideos.length}}" class="home-demo-videos">
+          <text class="home-demo-videos-title">示例故事视频</text>
+          <view wx:for="{{demoVideos}}" wx:key="share_code" class="home-demo-video ui-pressable" data-code="{{item.share_code}}"
+            bindtap="openDemoVideo" hover-class="ui-subtle-action-hover" aria-role="button" aria-label="观看视频：{{item.title}}">
+            <image class="home-demo-video-poster" src="{{item.poster_url}}" mode="aspectFill" aria-hidden="true" />
+            <text class="home-demo-video-title">{{item.title}}</text>
+            <text class="home-demo-video-arrow" aria-hidden="true">›</text>
+          </view>
+        </view>
         <text wx:if="{{narrationSaved && !growthNoticeText}}" class="home-saved-notice" aria-live="polite">这段故事已经长进您的故事树。</text>
 
         <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">

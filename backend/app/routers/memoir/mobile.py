@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -10,8 +10,10 @@ from app.schemas.memoir_projects import (
     MemoirProjectListResponse,
     MemoirProjectUpdate,
 )
+from app.schemas.memoir_book import MemoirBookOutputResponse
 from app.schemas.memoir_snapshots import (
     MemoirBookSnapshotResponse,
+    MemoirDemoStoryResponse,
     MemoirHomeSnapshotResponse,
     MemoirDraftProgressResponse,
     MemoirStorySnapshotResponse,
@@ -24,7 +26,7 @@ from app.schemas.memoir_topic_map import (
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import read_snapshots as memoir_read_snapshots
-from app.services.memoir import draft_progress, story_snapshot
+from app.services.memoir import demo_story, draft_progress, story_snapshot
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.narrative import topic_map
 
@@ -38,6 +40,18 @@ async def get_mobile_memoir_identity(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_projects.memoir_identity_response(db, current_user)
+
+
+@router.get("/demo-story", response_model=MemoirDemoStoryResponse)
+async def get_mobile_memoir_demo_story(response: Response, db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await demo_story.demo_story(db)
+
+
+@router.get("/demo-book", response_model=MemoirBookOutputResponse)
+async def get_mobile_memoir_demo_book(response: Response, db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await demo_story.demo_book(db)
 
 
 @router.get("/home-snapshot", response_model=MemoirHomeSnapshotResponse)
