@@ -12,8 +12,8 @@
         <button wx:elif="{{!bookShareActive}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
         <button wx:else class="reading-share-primary-button" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
       </view>
-      <view wx:if="{{bookShareLikeText}}" class="book-share-likes">
-        <template is="shareLikePeople" data="{{avatars: bookShareLikeAvatars, text: bookShareLikeText}}" />
+      <view wx:if="{{bookShareLikeCount}}" class="book-share-likes">
+        <template is="shareLikeList" data="{{count: bookShareLikeCount, likers: bookShareLikers}}" />
       </view>
       <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
         <button class="book-share-manage-button" disabled="{{bookShareBusy || bookShareStale}}" bindtap="regenerateBookShare">重新生成</button>

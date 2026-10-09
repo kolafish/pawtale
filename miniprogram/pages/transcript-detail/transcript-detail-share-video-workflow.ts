@@ -1,3 +1,4 @@
+import type { ShareLikerView } from "../../services/share-likes";
 import { chooseImageFile } from "../../services/authenticated-media";
 import type { MemoirShareVideoCustomBackgroundAsset } from "../../domain/memoir-transcript";
 import {
@@ -56,6 +57,9 @@ export interface TranscriptMediaData
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
+  // Who among the family liked the forwarded video, shown to the author.
+  shareVideoLikeCount: number;
+  shareVideoLikers: ShareLikerView[];
 }
 
 interface TranscriptMediaWorkflowHost {

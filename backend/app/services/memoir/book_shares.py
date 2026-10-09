@@ -106,7 +106,7 @@ async def share_status(
         token=_stable_token(output.id, share.token_hash, chapter=chapter_id is not None) if active else None,
         stale=stale,
         current=bool(active and not stale and version and share.version_id == version.id),
-        likes=await like_summary(db, _like_target(output)),
+        likes=await like_summary(db, _like_target(output), limit=None),
     )
 
 

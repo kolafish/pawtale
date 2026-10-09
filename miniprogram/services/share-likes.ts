@@ -18,6 +18,21 @@ export interface ShareLikeAvatar {
   url: string;
 }
 
+export interface ShareLikerView {
+  key: string;
+  url: string;
+  name: string;
+}
+
+// The author's full list: every liker with a picture and a name.
+export function shareLikerViews(likers: MemoirShareLikeSummary["likers"]): ShareLikerView[] {
+  return likers.map((liker, index) => ({
+    key: String(index),
+    url: resolveBackendAvatarUrl(liker.avatar_url),
+    name: liker.display_name.trim() || "未留名",
+  }));
+}
+
 export interface ShareLikePeople {
   avatars: ShareLikeAvatar[];
   text: string;
@@ -53,6 +68,8 @@ export interface ShareLikeData {
   shareLikeBusy: boolean;
   shareLikeAvatars: ShareLikeAvatar[];
   shareLikeText: string;
+  // The visitor liked anonymously; the author would only see "未留名".
+  shareLikeProfileMissing: boolean;
 }
 
 export const INITIAL_SHARE_LIKE_DATA: ShareLikeData = {
@@ -62,6 +79,7 @@ export const INITIAL_SHARE_LIKE_DATA: ShareLikeData = {
   shareLikeBusy: false,
   shareLikeAvatars: [],
   shareLikeText: "",
+  shareLikeProfileMissing: false,
 };
 
 function shareLikePatch(likes: MemoirShareLikes): Partial<ShareLikeData> {
@@ -72,6 +90,7 @@ function shareLikePatch(likes: MemoirShareLikes): Partial<ShareLikeData> {
     shareCanLike: likes.can_like,
     shareLikeAvatars: people.avatars,
     shareLikeText: people.text,
+    shareLikeProfileMissing: Boolean(likes.profile_missing),
   };
 }
 
@@ -116,6 +135,10 @@ export const shareLikeMethods = defineShareLikeMethods({
       // Reading or watching works without likes.
       console.warn("share likes unavailable", error);
     }
+  },
+
+  openShareLikeProfile() {
+    wx.navigateTo({ url: "/pages/login/index?from=like" });
   },
 
   refreshShareLikes() {

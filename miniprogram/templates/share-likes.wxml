@@ -10,6 +10,19 @@
   </view>
 </template>
 
+<template name="shareLikeList">
+  <view class="share-like-list">
+    <text class="share-like-list-title">♥ {{count}} 位家人点了赞</text>
+    <view class="share-like-list-people">
+      <view wx:for="{{likers}}" wx:key="key" class="share-like-list-person">
+        <image wx:if="{{item.url}}" class="share-like-list-avatar" src="{{item.url}}" mode="aspectFill" aria-hidden="true" />
+        <text wx:else class="share-like-list-avatar is-placeholder" aria-hidden="true">家</text>
+        <text class="share-like-list-name">{{item.name}}</text>
+      </view>
+    </view>
+  </view>
+</template>
+
 <template name="shareLikeBar">
   <view wx:if="{{shareLikeVisible}}" class="share-like-bar">
     <button
@@ -23,6 +36,9 @@
       <text class="share-like-heart" aria-hidden="true">{{shareLiked ? '♥' : '♡'}}</text>
       <text>{{shareLiked ? '已赞' : '点赞'}}</text>
     </button>
-    <template is="shareLikePeople" data="{{avatars: shareLikeAvatars, text: shareLikeText}}" />
+    <view class="share-like-people-shell">
+      <template is="shareLikePeople" data="{{avatars: shareLikeAvatars, text: shareLikeText}}" />
+      <text wx:if="{{shareLiked && shareLikeProfileMissing}}" class="share-like-profile-link" bindtap="openShareLikeProfile" aria-role="button">留下名字和头像，让讲故事的人知道是你 ›</text>
+    </view>
   </view>
 </template>

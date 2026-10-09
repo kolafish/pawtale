@@ -1,3 +1,4 @@
+<import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{item ? (item.project_title || "我的回忆录") : "做成图片或视频"}}</text>
@@ -83,6 +84,9 @@
             loading="{{shareVideoDeleting}}"
             disabled="{{shareVideoSharing || shareVideoDeleting}}"
           >重新制作或删除 ›</button>
+          <view wx:if="{{shareVideoLikeCount}}" class="share-video-likes">
+            <template is="shareLikeList" data="{{count: shareVideoLikeCount, likers: shareVideoLikers}}" />
+          </view>
         </block>
 
         <block wx:elif="{{shareVideoJob && (shareVideoJob.status === 'pending' || shareVideoJob.status === 'running')}}">

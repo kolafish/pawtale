@@ -17,6 +17,8 @@ export interface MemoirShareLikeSummary {
 export interface MemoirShareLikes extends MemoirShareLikeSummary {
   liked: boolean;
   can_like: boolean;
+  // Absent from servers deployed before the reminder existed.
+  profile_missing?: boolean;
 }
 
 export interface MemoirShareLikeActivityItem {

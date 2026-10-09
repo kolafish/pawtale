@@ -155,7 +155,7 @@
       <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === readerChapterTotal - 1}}" bindtap="nextReaderChapter">下一{{bookPreviewChapters.length ? '章' : '页'}}</view>
     </view>
 
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText}}" />
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
 
     <view class="reader-top-action-shell">
       <view

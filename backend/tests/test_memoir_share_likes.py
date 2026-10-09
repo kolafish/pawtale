@@ -49,7 +49,9 @@ async def test_family_likes_a_shared_book_across_link_renewal(client, test_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         visitor = await guest.post(f"{LIKES}/read", json=target)
         assert visitor.status_code == 200
-        assert visitor.json() == {"count": 0, "likers": [], "liked": False, "can_like": True}
+        assert visitor.json() == {
+            "count": 0, "likers": [], "liked": False, "can_like": True, "profile_missing": False,
+        }
         assert (await guest.put(LIKES, json={**target, "liked": True})).status_code == 401
 
     aunt = await _family_member(test_db, "三姑", "/api/auth/avatars/aunt/a.jpg")
@@ -59,7 +61,9 @@ async def test_family_likes_a_shared_book_across_link_renewal(client, test_db):
         assert liked.status_code == 200, liked.text
         assert liked.json()["liked"] is True
         assert (await aunt.put(LIKES, json={**target, "liked": True})).json()["count"] == 1
-        await cousin.put(LIKES, json={**target, "liked": True})
+        # A relative who kept WeChat's placeholder name is reminded to leave one.
+        assert (await cousin.put(LIKES, json={**target, "liked": True})).json()["profile_missing"] is True
+        assert liked.json()["profile_missing"] is False
 
         status = (await client.get(share_path)).json()["likes"]
         assert status == {
@@ -118,6 +122,9 @@ async def test_chapter_and_video_likes_are_counted_separately(client, test_db):
 
     library = (await client.get(f"/api/mobile/memoir/projects/{project_id}/share-video/jobs")).json()
     assert [(item["id"], item["like_count"]) for item in library["items"]] == [(video.id, 1)]
+    # The author's video page names everyone who liked it.
+    author_view = (await client.post(f"{LIKES}/read", json={"video_code": video.share_code})).json()
+    assert (author_view["can_like"], author_view["likers"]) == (False, [{"display_name": "小军", "avatar_url": None}])
     activity = (await client.get(f"/api/mobile/memoir/projects/{project_id}/share-likes")).json()["items"]
     assert sorted(item["target_kind"] for item in activity) == ["chapter", "video"]
 

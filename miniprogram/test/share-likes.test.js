@@ -76,6 +76,7 @@ test("a visitor likes a forwarded video by tapping, then is asked once for avata
         return likes({
           count: liked ? 2 : 1,
           liked,
+          profile_missing: liked,
           likers: [
             ...(liked ? [{ display_name: "", avatar_url: null }] : []),
             { display_name: "三姑", avatar_url: "/api/auth/avatars/a/1.jpg" },
@@ -107,6 +108,11 @@ test("a visitor likes a forwarded video by tapping, then is asked once for avata
   assert.equal(context.data.shareLikeText, "三姑等 2 位家人觉得好");
   assert.deepEqual(context.data.shareLikeAvatars.map((avatar) => avatar.url), ["", "https://api.example.com/api/auth/avatars/a/1.jpg"]);
   assert.deepEqual(navigations, ["/pages/login/index?from=like"]);
+  // Skipping the form leaves a way back to it, since the author would only see "未留名".
+  assert.equal(context.data.shareLikeProfileMissing, true);
+  page.openShareLikeProfile.call(context);
+  assert.deepEqual(navigations, ["/pages/login/index?from=like", "/pages/login/index?from=like"]);
+  navigations.length = 1;
 
   // Unliking and liking again never asks a second time.
   signedIn = false;

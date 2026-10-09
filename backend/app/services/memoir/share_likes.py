@@ -57,14 +57,17 @@ def _liker(user: User) -> MemoirShareLiker:
     )
 
 
-async def like_summary(db: AsyncSession, target: ShareLikeTarget) -> MemoirShareLikeSummary:
+async def like_summary(
+    db: AsyncSession, target: ShareLikeTarget, *, limit: int | None = LIKER_LIMIT,
+) -> MemoirShareLikeSummary:
+    """Newest likers first; the author's own views pass limit=None to name everyone."""
     count = await db.scalar(select(func.count()).select_from(MemoirShareLike).where(target.column == target.target_id))
     likers = await db.scalars(
         select(User)
         .join(MemoirShareLike, MemoirShareLike.user_id == User.id)
         .where(target.column == target.target_id)
         .order_by(MemoirShareLike.created_at.desc(), MemoirShareLike.id.desc())
-        .limit(LIKER_LIMIT)
+        .limit(limit)
     )
     return MemoirShareLikeSummary(count=count or 0, likers=[_liker(user) for user in likers])
 
@@ -74,14 +77,18 @@ async def _project_owner_id(db: AsyncSession, target: ShareLikeTarget) -> str | 
 
 
 async def read_likes(db: AsyncSession, target: ShareLikeTarget, viewer_id: str | None) -> MemoirShareLikesResponse:
-    summary = await like_summary(db, target)
-    liked = viewer_id is not None and await db.scalar(select(MemoirShareLike.id).where(
-        target.column == target.target_id, MemoirShareLike.user_id == viewer_id,
-    )) is not None
+    is_author = viewer_id is not None and viewer_id == await _project_owner_id(db, target)
+    summary = await like_summary(db, target, limit=None if is_author else LIKER_LIMIT)
+    viewer = await db.scalar(
+        select(User).join(MemoirShareLike, MemoirShareLike.user_id == User.id).where(
+            target.column == target.target_id, MemoirShareLike.user_id == viewer_id,
+        )
+    ) if viewer_id is not None else None
     return MemoirShareLikesResponse(
         **summary.model_dump(),
-        liked=liked,
-        can_like=viewer_id is None or viewer_id != await _project_owner_id(db, target),
+        liked=viewer is not None,
+        can_like=not is_author,
+        profile_missing=viewer is not None and not _liker(viewer).display_name,
     )
 
 

@@ -28,6 +28,8 @@ import {
   sharedVideoShareMessage,
 } from "../../services/share";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import { readMemoirShareLikes } from "../../services/memoir-share-like-api";
+import { shareLikerViews } from "../../services/share-likes";
 import { shareVideoDeleteConfirmation } from "../../services/share-video-delete";
 import {
   initialTranscriptMaterialImageTaskState,
@@ -75,6 +77,8 @@ definePage<TranscriptMediaData>()({
     shareVideoPreviewPortrait: true,
     utteranceId: "",
     item: null,
+    shareVideoLikeCount: 0,
+    shareVideoLikers: [],
     ...initialTranscriptShareVideoData(),
     ...initialTranscriptMaterialImageTaskState(),
   },
@@ -131,6 +135,7 @@ definePage<TranscriptMediaData>()({
           throw new Error("视频不属于这段讲述");
         }
         await this.shareVideoController.showJob(job);
+        if (job.output?.share_code) void this.loadShareVideoLikers(job.output.share_code, requestToken);
       } else {
         await this.openShareVideoPanel(!this.requestedShareVideoCandidateId, !this.requestedShareVideoCandidateId);
         if (this.requestedShareVideoCandidateId) {
@@ -178,6 +183,17 @@ definePage<TranscriptMediaData>()({
   },
 
   ...transcriptMediaWorkflowMethods,
+
+  async loadShareVideoLikers(shareCode: string, requestToken: number) {
+    try {
+      // The author reads the same likes as family and gets every name back.
+      const likes = await readMemoirShareLikes({ video_code: shareCode });
+      if (requestToken !== this.loadToken) return;
+      this.setData({ shareVideoLikeCount: likes.count, shareVideoLikers: shareLikerViews(likes.likers) });
+    } catch (error) {
+      console.warn("share video likes unavailable", error);
+    }
+  },
 
   async saveShareVideoToAlbum() {
     const job = this.data.shareVideoJob;

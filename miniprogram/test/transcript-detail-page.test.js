@@ -2151,3 +2151,35 @@ test("transcript detail page deletes after confirmation and navigates back", asy
   assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
   assert.deepEqual(navigations, [{ delta: 1 }]);
 });
+
+test("the author's video page names everyone who liked the forwarded video", async () => {
+  const likeTargets = [];
+  const job = sampleShareVideoJob({ utterance_id: "utterance-result" });
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirShareVideoJob: async () => job,
+    readMemoirShareLikes: async (target) => {
+      likeTargets.push(target);
+      return {
+        count: 2,
+        likers: [
+          { display_name: "三姑", avatar_url: "https://avatar.example.com/aunt.jpg" },
+          { display_name: "", avatar_url: null },
+        ],
+        liked: false,
+        can_like: false,
+      };
+    },
+  } });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-result", jobId: job.id });
+  await Promise.resolve();
+
+  assert.deepEqual(likeTargets, [{ video_code: job.output.share_code }]);
+  assert.equal(context.data.shareVideoLikeCount, 2);
+  assert.deepEqual(context.data.shareVideoLikers, [
+    { key: "0", url: "https://avatar.example.com/aunt.jpg", name: "三姑" },
+    { key: "1", url: "", name: "未留名" },
+  ]);
+});
