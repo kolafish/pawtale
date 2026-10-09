@@ -35,6 +35,9 @@ from app.services.memoir.book_manuscript_cleanup import (
 
 
 DEFAULT_BOOK_COVER_STYLE = "classic_plain"
+# A book's first assembly starts with this set; later versions keep whatever the author picked.
+NEW_BOOK_TEMPLATE: MemoirBookManuscriptTemplate = "heritage_classic"
+NEW_BOOK_COVER_STYLE: MemoirBookCoverStyle = "heritage_classic"
 BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
 BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
 BOOK_INFORMATION_LABELS = {

@@ -1202,6 +1202,19 @@ async def test_book_manuscript_design_survives_new_book_assembly(client, test_db
     }
 
 
+async def test_first_book_assembly_starts_with_heritage_classic(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    assert assembled.status_code == 200
+    manuscript = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")).json()["latest_version"]["manuscript"]
+    assert (manuscript["profile"]["template"], manuscript["render_settings"]["cover_style"]) == (
+        "heritage_classic",
+        "heritage_classic",
+    )
+
+
 async def test_project_title_update_replaces_existing_book_output_title(client, test_db):
     project_id = await ensure_mobile_memoir_project(client, title="旧项目名称")
     await _create_confirmed_book_plan(test_db, project_id=project_id)
