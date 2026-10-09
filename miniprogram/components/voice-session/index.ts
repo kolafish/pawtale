@@ -772,6 +772,7 @@ Component({
       this.data.interviewType === "human_interview"
       || this.data.sessionGoal === "book_completion"
       || this.runtime().pageSuspended
+      || this.data.finishingSession
       || !this.data.voiceSessionId
       || this.data.followUpLoading
     ) {

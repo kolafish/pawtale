@@ -3716,3 +3716,30 @@ test("revoking voice consent while recorder privacy is pending never starts serv
   releasePrivacy(); await pending;
   assert.equal(starts, 0);
 });
+
+test("late final transcript during finish must not start another assistant connection", async () => {
+  const starts = [];
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "finishing-voice",
+      finishingSession: true,
+      lastFollowUpSourceMessageId: "previous",
+    },
+    setData(patch) { this.data = { ...this.data, ...patch }; },
+    confirmSavedTranscriptSnapshot: async () => {},
+    startCompletionIssueVerification() {},
+    async generateStreamingFollowUp() { starts.push(this.data.finishingSession); },
+  };
+  context.handleFinal({
+    type: "asr.final", turn_final: true, text: "最后一句已保存。",
+    message_id: "last-message", utterance_id: "last-utterance", audio_file_id: "last-audio",
+  });
+  await flushAsyncWork();
+  assert.deepEqual(starts, []);
+  assert.equal(context.data.transcriptLines.length, 1);
+  assert.equal(context.data.transcriptLines[0].text, "最后一句已保存。");
+  assert.equal(context.data.transcriptLines[0].message_id, "last-message");
+});
