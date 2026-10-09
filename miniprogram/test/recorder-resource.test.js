@@ -38,6 +38,7 @@ test("recorder resource gives the microphone to only one owner until onStop rele
   assert.equal(resource.start("barge-in", { format: "PCM" }, {}), true);
   assert.equal(resource.currentOwner(), "barge-in");
   assert.equal(resource.start("asr", { format: "PCM" }, {}), false);
+  recorder.callbacks.start();
 
   const stopped = resource.stopAndWait("barge-in");
   assert.equal(recorder.stops, 1);
@@ -87,25 +88,36 @@ test("recorder resource releases ownership before notifying stop handlers", () =
 
 test("recorder resource waits for native start before completing an early stop", async () => {
   const recorder = recorderHarness();
+  let nativeStarted = false;
+  const errors = [];
+  let starts = 0;
   recorder.stop = function stopBeforeNativeStart() {
     this.stops += 1;
-    if (this.stops === 1) {
-      throw new Error("operateRecorder:fail recorder not start");
+    if (!nativeStarted) {
+      queueMicrotask(() => recorder.callbacks.error({
+        errMsg: "operateRecorder:fail recorder not start",
+      }));
     }
   };
   const { WechatRecorderResource } = require("../services/recorder-resource.ts");
   const resource = new WechatRecorderResource(() => recorder);
 
-  assert.equal(resource.start("barge-in", { format: "PCM" }, {}), true);
+  assert.equal(resource.start("barge-in", { format: "PCM" }, {
+    onStart: () => { starts += 1; },
+    onError: (message) => errors.push(message),
+  }), true);
   const stopped = resource.stopAndWait("barge-in");
   await Promise.resolve();
 
-  assert.equal(recorder.stops, 1);
+  assert.deepEqual(errors, []);
+  assert.equal(recorder.stops, 0);
   assert.equal(resource.isBusy(), true);
   assert.equal(resource.start("asr", { format: "PCM" }, {}), false);
 
+  nativeStarted = true;
   recorder.callbacks.start();
-  assert.equal(recorder.stops, 2);
+  assert.equal(starts, 0);
+  assert.equal(recorder.stops, 1);
   recorder.callbacks.stop();
   await stopped;
 
@@ -124,5 +136,38 @@ test("recorder resource stops an orphan native recorder start after owner releas
   recorder.callbacks.start();
 
   assert.equal(recorder.stops, 1);
+  assert.equal(resource.isBusy(), false);
+});
+
+test("recorder resource stops once when the start handler requests cancellation", async () => {
+  const recorder = recorderHarness();
+  const { WechatRecorderResource } = require("../services/recorder-resource.ts");
+  const resource = new WechatRecorderResource(() => recorder);
+  let stopped;
+  resource.start("asr", { format: "PCM" }, {
+    onStart: () => { stopped = resource.stopAndWait("asr"); },
+  });
+
+  recorder.callbacks.start();
+  assert.equal(recorder.stops, 1);
+  recorder.callbacks.stop();
+  await stopped;
+  assert.equal(resource.isBusy(), false);
+});
+
+test("recorder resource reports a real native start failure while cancellation is pending", async () => {
+  const recorder = recorderHarness();
+  const { WechatRecorderResource } = require("../services/recorder-resource.ts");
+  const resource = new WechatRecorderResource(() => recorder);
+  const errors = [];
+  resource.start("asr", { format: "PCM" }, {
+    onError: (message) => errors.push(message),
+  });
+  const stopped = resource.stopAndWait("asr");
+  recorder.callbacks.error({ errMsg: "record:fail auth deny" });
+  await stopped;
+
+  assert.deepEqual(errors, ["record:fail auth deny"]);
+  assert.equal(recorder.stops, 0);
   assert.equal(resource.isBusy(), false);
 });

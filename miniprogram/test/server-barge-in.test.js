@@ -86,8 +86,47 @@ test("closing while the native recorder is opening stops passive capture", async
   h.client.close({ force: true });
   await Promise.resolve();
   assert.equal(h.client.isBargeInMonitoring(), false);
+  assert.equal(h.native.stops, 0);
+  h.native.callbacks.start();
+  await Promise.resolve();
   assert.equal(h.native.stops, 1);
   assert.equal(h.events.some(e => e.type === "session.start"), false);
+});
+
+test("cancelling passive capture before native start keeps the gateway available for manual recording", async t => {
+  const h = harness(t);
+  let nativeStarted = false;
+  h.native.stop = () => {
+    h.native.stops++;
+    queueMicrotask(() => {
+      if (!nativeStarted) {
+        h.native.callbacks.error({ errMsg: "operateRecorder:fail recorder not start" });
+      } else {
+        nativeStarted = false;
+        h.native.callbacks.stop();
+      }
+    });
+  };
+  assert.equal(h.client.startBargeInMonitoring(h.callbacks), true);
+  const stopped = h.client.stopBargeInMonitoring();
+  await Promise.resolve();
+  assert.deepEqual(h.errors, []);
+  assert.equal(h.native.stops, 0);
+
+  nativeStarted = true;
+  h.native.callbacks.start();
+  await stopped;
+  assert.deepEqual(h.errors, []);
+  assert.equal(h.native.stops, 1);
+  assert.equal(h.client.socketOpen, true);
+  assert.equal(h.events.some(e => e.type === "session.start"), false);
+
+  assert.equal(h.client.startRecording(), true);
+  nativeStarted = true;
+  h.native.callbacks.start();
+  h.frame(30);
+  assert.equal(h.events.filter(e => e.type === "session.start").length, 1);
+  assert.equal(h.events.filter(e => e.type === "audio.frame").length, 1);
 });
 
 test("server unavailability leaves manual recording available", async t => {
