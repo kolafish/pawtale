@@ -1574,7 +1574,7 @@ test("transcript media recommendation opens with editable range and styles, and 
   }
 });
 
-test("the home card's primary action starts the recommended clip with its opening line", async () => {
+test("a recommended clip opens its settings with the recommended opening line", async () => {
   const calls = [];
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
@@ -1589,9 +1589,9 @@ test("the home card's primary action starts the recommended clip with its openin
     },
   } });
   const context = pageContext(page);
-  await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1", create: "1" });
-  assert.equal(context.data.viewMode, "video");
-  assert.deepEqual(calls.map((call) => call[1]), ["candidate-1"]);
+  await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1" });
+  assert.equal(context.data.viewMode, "create");
+  assert.deepEqual(calls, []);
   assert.equal(context.data.shareVideoHookText, "爷爷退休后还在帮公司做事。");
 
   // Choosing "automatic" instead is sent explicitly, since the default here is the recommendation's line.
@@ -1602,9 +1602,8 @@ test("the home card's primary action starts the recommended clip with its openin
     delete global.wx;
   }
   assert.equal(context.data.shareVideoHookText, "");
-  context.shareVideoController.cancel();
-  context.setData({ viewMode: "create" });
   await page.createShareVideo.call(context);
+  assert.deepEqual(calls.map((call) => call[1]), ["candidate-1"]);
   assert.equal(calls.at(-1)[2].hookText, "");
   context.shareVideoController.cancel();
 });

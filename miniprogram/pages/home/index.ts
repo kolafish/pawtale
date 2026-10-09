@@ -562,19 +562,17 @@ definePage<HomeData>()({
     }
   },
 
-  // The primary action starts the video with default settings; "调整" opens the same page to edit first.
-  openShareCandidateEditor(event?: PageDatasetEvent<{ create?: string }>) {
+  // Opens the same settings page as a hand-picked clip, with the recommended range already selected.
+  openShareCandidateEditor() {
     const candidate = this.data.shareCandidate;
     if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
       || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
-    const create = event ? datasetString(event, "create") === "1" : false;
     this.setData({ shareCandidateError: "" });
     wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
       id: candidate.utterance_id,
       candidateId: candidate.id,
-      ...(create ? { create: "1" } : {}),
     }) });
-    trackAuditAction(create ? "home.share_video_candidate_create" : "home.share_video_candidate_edit", {}, {
+    trackAuditAction("home.share_video_candidate_open", {}, {
       projectId: this.data.projectId, voiceSessionId: candidate.voice_session_id,
     });
   },
