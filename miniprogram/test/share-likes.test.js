@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { ApiError } = require("../services/request.ts");
 const {
@@ -13,6 +15,16 @@ const {
 } = require("./page-harness");
 
 const CODE = "0123456789abcdef0123";
+
+test("book and chapter share panels receive the full liker list", () => {
+  for (const page of ["book", "chapter-workspace"]) {
+    const template = fs.readFileSync(path.join(__dirname, `../pages/${page}/index.wxml`), "utf8");
+    const binding = template.match(/<template\s+is="readingSharePanel"\s+data="([^"]+)"/);
+    assert.ok(binding, `${page} must render the reading share panel`);
+    assert.match(binding[1], /\bbookShareLikeCount\b/, `${page} must pass the like count`);
+    assert.match(binding[1], /\bbookShareLikers\b/, `${page} must pass the full liker list`);
+  }
+});
 
 function loadPlayer({ likeApi = {}, loginWithWeChat = unmockedAsync("loginWithWeChat") } = {}) {
   mockMemoirApiModules({

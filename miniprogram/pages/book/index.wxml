@@ -51,7 +51,7 @@
     <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookCompletion" aria-role="button">
       <text>{{bookStaleNotice || bookActivityNotice}}</text><text aria-hidden="true">›</text>
     </view>
-    <template is="readingSharePanel" data="{{bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription}}" />
+    <template is="readingSharePanel" data="{{bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers}}" />
   </view>
 
   <view
