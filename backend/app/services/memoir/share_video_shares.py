@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import MemoirMaterialShareVideo
 from app.schemas.memoir_voice import MemoirSharedVideoResponse
@@ -45,7 +46,10 @@ async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoRes
         video_url=base_url,
         poster_url=f"{base_url}?variant=poster",
         end_frame_url=f"{base_url}?variant=end",
-        book_share_token=await readable_share_token(db, job.project_id),
+        # Demo clips authorize the selected chapter only, including when forwarded.
+        book_share_token=None if code in {
+            item.strip() for item in get_settings().memoir_demo_video_codes.split(",")
+        } else await readable_share_token(db, job.project_id),
     )
 
 

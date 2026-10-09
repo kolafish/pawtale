@@ -11,6 +11,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookPlanChapter,
+    MemoirMaterialShareVideo,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookOutputResponse
@@ -36,7 +37,14 @@ async def _demo_project(db: AsyncSession) -> tuple[Project, set[str]] | None:
         select(MemoirBookPlanChapter.project_id).where(MemoirBookPlanChapter.id == chapter_ids[0])
     )
     project = await db.get(Project, project_id) if project_id else None
-    return (project, set(chapter_ids)) if project else None
+    if project is None:
+        return None
+    readable_ids = set(await db.scalars(select(MemoirBookPlanChapter.id).where(
+        MemoirBookPlanChapter.project_id == project.id,
+        MemoirBookPlanChapter.id.in_(chapter_ids),
+        MemoirBookPlanChapter.include_in_book.is_(True),
+    )))
+    return (project, readable_ids) if readable_ids else None
 
 
 async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
@@ -44,11 +52,16 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
     if demo is None:
         return MemoirDemoStoryResponse()
     project, readable_ids = demo
+    book = await _demo_book(db, project.id, readable_ids)
+    readable_ids = {
+        chapter.chapter_id for chapter in book.latest_version.manuscript.chapters
+        if chapter.content.strip()
+    } if book and book.latest_version and book.latest_version.manuscript else set()
     chapter_views = {}
     for chapter in await chapter_rows(db, project.id):
         if not chapter.include_in_book:
             continue
-        readable = chapter.id in readable_ids and bool(chapter.char_count)
+        readable = chapter.id in readable_ids
         chapter_views[chapter.id] = MemoirStoryChapterResponse(
             id=chapter.id,
             title=chapter.title,
@@ -61,10 +74,19 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
     await attach_sections(db, project.id, chapter_views)
     chapters = list(chapter_views.values())
     videos = []
-    for code in _configured(get_settings().memoir_demo_video_codes):
+    codes = _configured(get_settings().memoir_demo_video_codes)
+    project_codes = set(await db.scalars(select(MemoirMaterialShareVideo.share_code).where(
+        MemoirMaterialShareVideo.project_id == project.id,
+        MemoirMaterialShareVideo.share_code.in_(codes),
+    )))
+    for code in dict.fromkeys(codes):
+        if code not in project_codes:
+            continue
         try:
             video = await share_video_shares.read_shared_video(db, code)
-        except HTTPException:
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
             continue  # A deleted video simply leaves the sample.
         videos.append(MemoirDemoVideoResponse(**video.model_dump(), share_code=code))
     return MemoirDemoStoryResponse(
@@ -76,11 +98,12 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
     )
 
 
-async def demo_book(db: AsyncSession) -> MemoirBookOutputResponse:
-    demo = await _demo_project(db)
+async def _demo_book(
+    db: AsyncSession, project_id: str, chapter_ids: set[str],
+) -> MemoirBookOutputResponse | None:
     output = await db.scalar(
-        select(MemoirBookOutput).where(MemoirBookOutput.project_id == demo[0].id)
-    ) if demo else None
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
     version = await db.scalar(
         select(MemoirBookOutputVersion)
         .where(MemoirBookOutputVersion.output_id == output.id)
@@ -88,5 +111,14 @@ async def demo_book(db: AsyncSession) -> MemoirBookOutputResponse:
         .limit(1)
     ) if output else None
     if version is None:
+        return None
+    result = public_reading_response(output, version, chapter_ids=chapter_ids)
+    return result if result.latest_version and result.latest_version.content.strip() else None
+
+
+async def demo_book(db: AsyncSession) -> MemoirBookOutputResponse:
+    demo = await _demo_project(db)
+    result = await _demo_book(db, demo[0].id, demo[1]) if demo else None
+    if result is None:
         raise HTTPException(status_code=404, detail="示例回忆录暂时无法阅读")
-    return public_reading_response(output, version, chapter_ids=demo[1])
+    return result

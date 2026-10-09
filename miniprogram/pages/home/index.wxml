@@ -29,7 +29,7 @@
       id="story-tree"
       story="{{story}}"
       large-text="{{largeTextEnabled}}"
-      can-open-book="{{hasProject}}"
+      can-open-book="{{hasProject || (needsLogin && demoReadableChapterIds.length > 0)}}"
       can-switch-project="{{hasProject}}"
       can-voice-edit="{{hasProject}}"
       show-book-hint="{{showBookHint}}"
