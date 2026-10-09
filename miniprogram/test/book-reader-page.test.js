@@ -109,6 +109,20 @@ test("shared reader opens without owner access and hides owner-only narration", 
   assert.equal(context.data.ttsBusyTarget, "");
 });
 
+test("demo reader uses the public book and disables account-only audio", async () => {
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: unmockedAsync("owner book API"),
+    readMemoirDemoBook: async () => sampleFinishedBook("家里的人完整章节"),
+  });
+  const context = pageContext(page);
+  await context.onLoad({ demo: "1" });
+  assert.equal(context.data.readerShared, true);
+  assert.equal(context.readerText, "家里的人完整章节");
+  assert.equal(context.data.error, "");
+  await context.playReaderAudio();
+  assert.equal(context.data.ttsBusyTarget, "");
+});
+
 test("reader paragraphs only honor line breaks saved by the language model", () => {
   const unbrokenContent = [
     "十九年前，我们因为一次偶然的点赞认识。",

@@ -72,7 +72,11 @@ async def attach_sections(
     for section in (
         await db.execute(
             select(MemoirSection.id, MemoirSection.chapter_id, MemoirSection.title)
-            .where(MemoirSection.project_id == project_id, MemoirSection.status == "active")
+            .where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.status == "active",
+                MemoirSection.chapter_id.in_(chapter_views),
+            )
             .order_by(MemoirSection.sort_order, MemoirSection.id)
         )
     ).all():
@@ -84,7 +88,11 @@ async def attach_sections(
         await db.execute(
             select(MemoirSectionMaterial.section_id, func.count())
             .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
-            .where(MemoirSectionMaterial.project_id == project_id, MemoirSection.status == "active")
+            .where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSection.status == "active",
+                MemoirSection.chapter_id.in_(chapter_views),
+            )
             .group_by(MemoirSectionMaterial.section_id)
         )
     ).all():

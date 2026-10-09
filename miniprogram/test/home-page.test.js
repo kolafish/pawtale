@@ -435,7 +435,6 @@ test("home keeps interview-engine notices out of the story overview", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
   assert.match(pageWxml, /<story-tree/);
-  assert.match(pageWxml, /can-open-book="\{\{hasProject\}\}"/);
   assert.match(pageWxml, /bind:openbook="openBook"/);
   assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
@@ -1391,10 +1390,31 @@ test("visitors browse the sample memoir and open only its readable chapters", as
 
   context.openChapter({ detail: { chapterId: "family" } });
   context.openChapter({ detail: { chapterId: "closed" } });
+  context.openBook();
   context.openDemoVideo({ currentTarget: { dataset: { code: "code-1" } } });
   assert.deepEqual(opened, [
+    "/pages/book-reader/index?demo=1",
     "/pages/book-reader/index?demo=1",
     "/pages/share-video-player/index?code=code-1",
   ]);
   assert.equal(toasts.length, 1);
+});
+
+test("a failed demo refresh clears old public links and remains retryable without login", async () => {
+  const { ApiError } = require("../services/request.ts");
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
+    getMemoirDemoStory: async () => { throw new Error("offline"); },
+  } });
+  const context = pageContext(page, {
+    needsLogin: true,
+    demoVideos: [{ share_code: "old-video" }],
+    demoReadableChapterIds: ["old-chapter"],
+  });
+  await context.loadHome();
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.loading, false);
+  assert.ok(context.data.storyError);
+  assert.deepEqual(context.data.demoVideos, []);
+  assert.deepEqual(context.data.demoReadableChapterIds, []);
 });

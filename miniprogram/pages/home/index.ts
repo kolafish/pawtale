@@ -89,6 +89,7 @@ interface HomeData extends HomeStoryData {
   voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
   demoVideos: MemoirDemoVideo[];
+  demoReadableChapterIds: string[];
   error: string;
   userId: string;
   displayName: string;
@@ -235,6 +236,8 @@ function applyHomeSnapshotData(
     loading: false,
     error: "",
     needsLogin: false,
+    demoVideos: [],
+    demoReadableChapterIds: [],
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
@@ -280,7 +283,6 @@ definePage<HomeData>()({
   growthAnimationTimer: pageRuntime(() => new PollingTimer(800)),
   homeScrollTop: 0,
   narrationBottom: Infinity,
-  demoReadableChapterIds: [] as string[],
 
   data: {
     loading: false,
@@ -288,6 +290,7 @@ definePage<HomeData>()({
     voiceEntry: null,
     needsLogin: false,
     demoVideos: [],
+    demoReadableChapterIds: [],
     error: "",
     userId: "",
     displayName: "",
@@ -441,6 +444,8 @@ definePage<HomeData>()({
         setHomeData(this, {
           ...emptyHomeStoryData(),
           needsLogin: true,
+          demoVideos: [],
+          demoReadableChapterIds: [],
           voiceEntry: null,
           showContinueNarration: false,
           userId: "",
@@ -464,7 +469,7 @@ definePage<HomeData>()({
           shareVideoActiveCount: 0,
           shareVideoFailedCount: 0,
         });
-        void this.loadDemoStory(loadSequence);
+        await this.loadDemoStory(loadSequence);
         return;
       }
       if (showedCachedData || background || this.data.storyLoaded) {
@@ -732,6 +737,10 @@ definePage<HomeData>()({
   },
 
   openBook() {
+    if (this.data.needsLogin && this.data.demoReadableChapterIds.length) {
+      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
+      return;
+    }
     if (!this.data.projectId) return;
     markHomeBookOpened(this.data.userId);
     if (this.data.showBookHint) setHomeData(this, { showBookHint: false });
@@ -756,14 +765,20 @@ definePage<HomeData>()({
   async loadDemoStory(loadSequence: number) {
     try {
       const demo = await getMemoirDemoStory();
-      if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin || !demo.chapters.length) return;
-      this.demoReadableChapterIds = demo.chapters.filter(chapter => chapter.readable).map(chapter => chapter.id);
+      if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin) return;
+      if (!demo.chapters.length) {
+        setHomeData(this, { storyError: "示例回忆录暂未开放，请稍后再来。" });
+        return;
+      }
       setHomeData(this, {
+        demoReadableChapterIds: demo.chapters.filter(chapter => chapter.readable).map(chapter => chapter.id),
         story: storyViewData({ ...demo, identity: { active_project: { title: demo.title } } }),
         storyLoaded: true,
         demoVideos: demo.videos.map(video => ({ ...video, poster_url: memoirShareVideoDownloadUrl(video.poster_url) })),
       });
     } catch (error) {
+      if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin) return;
+      setHomeData(this, { storyError: "示例回忆录暂时无法加载，请重新读取故事。" });
       console.warn("load demo memoir failed", error);
     }
   },
@@ -771,7 +786,7 @@ definePage<HomeData>()({
   openChapter(event: StoryTreeChapterEvent) {
     const { chapterId } = event.detail;
     if (this.data.needsLogin) {
-      if (this.demoReadableChapterIds.includes(chapterId)) {
+      if (this.data.demoReadableChapterIds.includes(chapterId)) {
         wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
       } else {
         wx.showToast({ title: "示例只开放了部分章节", icon: "none" });
