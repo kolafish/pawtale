@@ -24,6 +24,8 @@ ADMIN_ROLE = "admin"
 SESSION_LIFETIME = timedelta(days=30)
 WECHAT_LOGIN_WINDOW = timedelta(minutes=15)
 WECHAT_LOGIN_ATTEMPT_LIMIT = 120
+# The name a WeChat account carries until its owner picks one.
+WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 
 
 def normalize_email(email: str) -> str:
@@ -157,6 +159,14 @@ async def get_current_user(
         project_id=request.path_params.get("project_id"),
     )
     return user
+
+
+async def get_optional_user_id(
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+) -> str | None:
+    """The signed-in user on public pages, which also serve visitors."""
+    return await session_user_id(db, session_cookie) if session_cookie else None
 
 
 async def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:

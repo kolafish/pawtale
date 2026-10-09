@@ -17,6 +17,7 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
 )
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
+from app.schemas.memoir_share_likes import MemoirShareLikeSummary
 from app.schemas.memoir_voice import (
     MemoirAutomationEventResponse as MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
@@ -737,6 +738,8 @@ class MemoirBookShareStatusResponse(BaseModel):
     token: str | None = None
     stale: bool = False
     current: bool = False
+    # Likes stay with the book or chapter across links and versions.
+    likes: MemoirShareLikeSummary = Field(default_factory=MemoirShareLikeSummary)
 
 
 class MemoirBookShareCreateResponse(BaseModel):

@@ -26,6 +26,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
+    MemoirShareLike,
     MemoirShareVideoOutput,
     MemoirVoiceUtterance,
 )
@@ -220,7 +221,7 @@ def _illustration_style_label(metadata: ShareVideoJobMetadata) -> str:
     return share_video_background_style_label(metadata.background_style)
 
 
-def _list_item_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoListItemResponse:
+def _list_item_response(job: MemoirMaterialShareVideo, like_count: int) -> MemoirShareVideoListItemResponse:
     metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
     return MemoirShareVideoListItemResponse(
         id=job.id,
@@ -233,6 +234,7 @@ def _list_item_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoListIt
         created_at=job.created_at,
         completed_at=job.completed_at,
         share_code=job.share_code,
+        like_count=like_count,
     )
 
 
@@ -728,12 +730,14 @@ async def list_share_video_jobs(
         )
     ).all()
     total = rows[0][1] if rows else await db.scalar(completed_total)
+    completed = [job for job, _ in rows if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value]
+    like_counts = dict((await db.execute(
+        select(MemoirShareLike.share_video_id, func.count())
+        .where(MemoirShareLike.share_video_id.in_([job.id for job in completed]))
+        .group_by(MemoirShareLike.share_video_id)
+    )).tuples().all()) if completed else {}
     return MemoirShareVideoJobListResponse(
-        items=[
-            _list_item_response(job)
-            for job, _ in rows
-            if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
-        ],
+        items=[_list_item_response(job, like_counts.get(job.id, 0)) for job in completed],
         active_jobs=[_job_response(job) for job, _ in rows if job.status in active_statuses],
         failed_jobs=[
             _job_response(job) for job, _ in rows

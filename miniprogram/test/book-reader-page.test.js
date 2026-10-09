@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  clearModule,
   mockMemoirApiModules,
   loadPageModule,
   mockModule,
@@ -37,6 +38,7 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
     readBookTTSRequest: () => ({}),
     ...ttsExports,
   });
+  clearModule("../services/share-likes.ts");
   return loadPageModule("../pages/book-reader/index.ts");
 }
 
@@ -94,12 +96,18 @@ test("shared reader opens without owner access and hides owner-only narration", 
       calls.push(token);
       return sampleFinishedBook("只读分享正文");
     },
+    // Family like what the link shows, whether a whole book or one chapter.
+    readMemoirShareLikes: async (target) => {
+      calls.push(target);
+      return { count: 0, likers: [], liked: false, can_like: true };
+    },
   });
   const context = pageContext(page);
 
   await page.onLoad.call(context, { shareToken: "family-token" });
 
-  assert.deepEqual(calls, ["family-token"]);
+  assert.deepEqual(calls, ["family-token", { reading_token: "family-token" }]);
+  assert.equal(context.data.shareLikeVisible, true);
   assert.equal(context.data.readerShared, true);
   assert.equal(context.data.projectId, "");
   assert.equal(context.readerText, "只读分享正文");
@@ -117,6 +125,7 @@ test("demo reader uses the public book and disables account-only audio", async (
   const context = pageContext(page);
   await context.onLoad({ demo: "1" });
   assert.equal(context.data.readerShared, true);
+  assert.equal(context.data.shareLikeVisible, false);
   assert.equal(context.readerText, "家里的人完整章节");
   assert.equal(context.data.error, "");
   await context.playReaderAudio();

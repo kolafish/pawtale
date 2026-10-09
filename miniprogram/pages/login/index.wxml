@@ -28,9 +28,9 @@
   </view>
 
   <view wx:else class="login-panel profile-setup-panel">
-    <text class="panel-eyebrow">微信登录成功</text>
-    <text class="panel-title">使用您的微信头像和昵称</text>
-    <text class="panel-copy">头像和昵称由您主动选择，也可以稍后在“我的”页面修改。</text>
+    <text class="panel-eyebrow">{{profileAfterLike ? "已点赞" : "微信登录成功"}}</text>
+    <text class="panel-title">{{profileAfterLike ? "让家人知道是谁点的赞" : "使用您的微信头像和昵称"}}</text>
+    <text class="panel-copy">{{profileAfterLike ? "头像和昵称会显示在点赞的家人里，也可以跳过。" : "头像和昵称由您主动选择，也可以稍后在“我的”页面修改。"}}</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
@@ -78,7 +78,7 @@
       hover-class="primary-button-hover"
     >
       <text class="login-action-mark" aria-hidden="true">✓</text>
-      <text class="login-action-label">{{profileSaving ? "保存中" : "保存并进入"}}</text>
+      <text class="login-action-label">{{profileSaving ? "保存中" : (profileAfterLike ? "保存" : "保存并进入")}}</text>
       <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
     <view
@@ -88,7 +88,7 @@
       bindtap="skipWeChatProfile"
       hover-class="ui-subtle-action-hover"
     >
-      稍后设置
+      {{profileAfterLike ? "跳过" : "稍后设置"}}
     </view>
   </view>
 </view>

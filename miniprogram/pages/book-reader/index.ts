@@ -31,6 +31,8 @@ import {
   type PageQuery,
 } from "../../services/page-input";
 import { hideMiniProgramShareMenu } from "../../services/share";
+import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
+import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import {
   bookReadingData,
   readingParagraphs,
@@ -53,7 +55,7 @@ type ReaderData = Omit<BookReadingData, "bookPreviewTocItems"> & {
   bookPreviewTocItems: BookReaderTocItem[];
 };
 
-type BookReaderData = ReaderData & BookTTSState & {
+type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
   pageClass: string;
   loading: boolean;
   playbackError: string;
@@ -295,6 +297,7 @@ definePage<BookReaderData>()({
   readerAudioVersionId: "",
   bookChapters: [] as BookOutputChapterPreviewView[],
   flatPages: [] as string[],
+  shareLikeTarget: null as MemoirShareLikeTarget | null,
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -324,7 +327,10 @@ definePage<BookReaderData>()({
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
     ...readerData(null),
+    ...INITIAL_SHARE_LIKE_DATA,
   },
+
+  ...shareLikeMethods,
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
@@ -337,6 +343,8 @@ definePage<BookReaderData>()({
     this.setData({ projectId, chapterId, versionId, readerMode, readerShared: Boolean(shareToken) || demo });
     if (shareToken || demo) {
       await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook() : readMemoirBookShare(shareToken)));
+      // Family who open a forwarded link can like what they read.
+      if (shareToken && !this.data.error) await this.loadShareLikes({ reading_token: shareToken });
       return;
     }
     if (!projectId) {
@@ -354,6 +362,8 @@ definePage<BookReaderData>()({
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     hideMiniProgramShareMenu();
+    // Back from choosing an avatar after a like.
+    this.refreshShareLikes();
   },
 
   onHide() {

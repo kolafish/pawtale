@@ -35,6 +35,7 @@ function mockMemoirApiModules(exports) {
     "memoir-book-completion-api",
     "memoir-chapter-workspace-api",
     "memoir-completion-issue-api",
+    "memoir-share-like-api",
     "memoir-snapshot-api",
     "memoir-transcript-api",
     "memoir-voice-session-api",

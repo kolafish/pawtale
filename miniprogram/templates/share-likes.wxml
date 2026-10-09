@@ -1,0 +1,28 @@
+<template name="shareLikePeople">
+  <view class="share-like-people">
+    <view wx:if="{{avatars.length}}" class="share-like-avatars" aria-hidden="true">
+      <block wx:for="{{avatars}}" wx:key="key">
+        <image wx:if="{{item.url}}" class="share-like-avatar" src="{{item.url}}" mode="aspectFill" />
+        <text wx:else class="share-like-avatar is-placeholder">家</text>
+      </block>
+    </view>
+    <text wx:if="{{text}}" class="share-like-text">{{text}}</text>
+  </view>
+</template>
+
+<template name="shareLikeBar">
+  <view wx:if="{{shareLikeVisible}}" class="share-like-bar">
+    <button
+      wx:if="{{shareCanLike}}"
+      class="share-like-button ui-button {{shareLiked ? 'is-liked' : ''}}"
+      bindtap="toggleShareLike"
+      disabled="{{shareLikeBusy}}"
+      aria-label="{{shareLiked ? '取消点赞' : '点赞'}}"
+      hover-class="ui-subtle-action-hover"
+    >
+      <text class="share-like-heart" aria-hidden="true">{{shareLiked ? '♥' : '♡'}}</text>
+      <text>{{shareLiked ? '已赞' : '点赞'}}</text>
+    </button>
+    <template is="shareLikePeople" data="{{avatars: shareLikeAvatars, text: shareLikeText}}" />
+  </view>
+</template>

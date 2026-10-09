@@ -1,4 +1,5 @@
 <import src="../../templates/reading-share.wxml" />
+<import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
   <view wx:if="{{showingCachedBook}}" class="book-cache-banner ui-error-banner">

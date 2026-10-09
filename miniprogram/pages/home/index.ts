@@ -77,6 +77,7 @@ import {
   writeCachedMemoirHome,
 } from "../../stores/memoir-read-cache";
 import { userDisplayName } from "../../services/user-display-name";
+import { loadShareLikeNotice, markShareLikeNoticeSeen, type ShareLikeNotice } from "../../services/share-likes";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
@@ -124,6 +125,8 @@ interface HomeData extends HomeStoryData {
   shareVideoTotal: number;
   shareVideoActiveCount: number;
   shareVideoFailedCount: number;
+  // Family likes on forwarded stories that the author has not acknowledged yet.
+  shareLikeNotice: ShareLikeNotice | null;
 }
 
 interface CheckboxChangeEvent {
@@ -258,6 +261,7 @@ function applyHomeSnapshotData(
       shareVideoTotal: 0,
       shareVideoActiveCount: 0,
       shareVideoFailedCount: 0,
+      shareLikeNotice: null,
     } : {}),
     lastStoryHint: latestHint,
     hasLastStoryHint: Boolean(latestHint),
@@ -274,6 +278,7 @@ definePage<HomeData>()({
   homeLoadSequence: 0,
   shareCandidateRequestSequence: 0,
   shareVideosRequestSequence: 0,
+  shareLikeNoticeRequestSequence: 0,
   homeVisible: false,
   homeLaunchScope: "",
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
@@ -325,6 +330,7 @@ definePage<HomeData>()({
     shareVideoTotal: 0,
     shareVideoActiveCount: 0,
     shareVideoFailedCount: 0,
+    shareLikeNotice: null,
     ...emptyHomeStoryData(),
   },
 
@@ -350,6 +356,7 @@ definePage<HomeData>()({
     this.homeLoadSequence += 1;
     this.shareCandidateRequestSequence += 1;
     this.shareVideosRequestSequence += 1;
+    this.shareLikeNoticeRequestSequence += 1;
     this.homeRefreshTimer.cancel();
     this.growthAnimationTimer.cancel();
     this.setData({ story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
@@ -432,6 +439,7 @@ definePage<HomeData>()({
       });
       void this.refreshShareCandidate(this.data.projectId);
       void this.refreshShareVideos(this.data.projectId);
+      if (!background) void this.refreshShareLikeNotice(this.data.userId, this.data.projectId);
       if (freshEvents.size) this.growthAnimationTimer.schedule(() => this.clearGrowthAnimation());
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
@@ -468,6 +476,7 @@ definePage<HomeData>()({
           shareVideoTotal: 0,
           shareVideoActiveCount: 0,
           shareVideoFailedCount: 0,
+          shareLikeNotice: null,
         });
         await this.loadDemoStory(loadSequence);
         return;
@@ -560,6 +569,27 @@ definePage<HomeData>()({
         console.warn("share video library refresh failed", error);
       }
     }
+  },
+
+  async refreshShareLikeNotice(userId: string, projectId: string) {
+    const requestSequence = ++this.shareLikeNoticeRequestSequence;
+    if (!this.homeVisible || !userId || !projectId || this.data.needsLogin) return;
+    try {
+      const notice = await loadShareLikeNotice(userId, projectId);
+      if (requestSequence !== this.shareLikeNoticeRequestSequence || this.data.projectId !== projectId) return;
+      this.setData({ shareLikeNotice: notice });
+    } catch (error) {
+      if (requestSequence === this.shareLikeNoticeRequestSequence) {
+        console.warn("share like notice refresh failed", error);
+      }
+    }
+  },
+
+  dismissShareLikeNotice() {
+    const notice = this.data.shareLikeNotice;
+    if (!notice) return;
+    markShareLikeNoticeSeen(this.data.userId, this.data.projectId, notice.latestAt);
+    this.setData({ shareLikeNotice: null });
   },
 
   // Opens the same settings page as a hand-picked clip, with the recommended range already selected.

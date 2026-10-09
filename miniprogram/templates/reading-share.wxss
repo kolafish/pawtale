@@ -1,9 +1,13 @@
+@import "./share-likes.wxss";
 .book-share-panel {
   padding: 24rpx 30rpx;
   border-top: 1rpx solid var(--ui-divider);
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-body);
   line-height: 1.5;
+}
+.book-share-likes {
+  margin-top: 18rpx;
 }
 .book-share-description {
   display: block;

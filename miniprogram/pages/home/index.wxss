@@ -1,3 +1,4 @@
+@import "../../templates/share-likes.wxss";
 .home-page {
   max-width: 980rpx;
   margin: 0 auto;
@@ -705,3 +706,13 @@
 }
 
 .large-text .home-demo-video-title { font-size: var(--ui-font-large-body); }
+
+.home-like-notice {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.home-like-notice .share-like-text {
+  color: var(--ui-text-primary);
+}

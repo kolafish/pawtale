@@ -1,3 +1,4 @@
+@import "../../templates/share-likes.wxss";
 @import "../../styles/transcript-record.wxss";
 
 .shared-video {

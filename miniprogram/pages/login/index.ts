@@ -1,6 +1,7 @@
 import {
-  type BackendAuthUser,
+  hasUsableDisplayName,
   loginWithWeChat,
+  needsWeChatProfileSetup,
   updateBackendProfile,
 } from "../../services/auth";
 import {
@@ -8,13 +9,13 @@ import {
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
 import { relaunchHome } from "../../services/navigation";
+import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
 import {
   resolveBackendAvatarUrl,
   uploadBackendAvatar,
 } from "../../services/user-profile";
 
-const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
 
 interface InputEvent {
@@ -33,19 +34,12 @@ interface LoginData {
   pageClass: string;
   wechatLoading: boolean;
   profileMode: boolean;
+  // Opened right after a family member's first like; finishing returns to what they liked.
+  profileAfterLike: boolean;
   profileSaving: boolean;
   profileDisplayName: string;
   profileAvatarPath: string;
   error: string;
-}
-
-function hasUsableDisplayName(user: BackendAuthUser): boolean {
-  const name = user.display_name.trim();
-  return Boolean(name && name !== WECHAT_PLACEHOLDER_DISPLAY_NAME);
-}
-
-export function needsWeChatProfileSetup(user: BackendAuthUser): boolean {
-  return !hasUsableDisplayName(user) || !String(user.avatar_url || "").trim();
 }
 
 definePage<LoginData>()({
@@ -53,14 +47,29 @@ definePage<LoginData>()({
     pageClass: accessibilityPageClass(PAGE_CLASS),
     wechatLoading: false,
     profileMode: false,
+    profileAfterLike: false,
     profileSaving: false,
     profileDisplayName: "",
     profileAvatarPath: "",
     error: "",
   },
 
+  onLoad(query: PageQuery = {}) {
+    if (queryParam(query, "from") === "like") {
+      this.setData({ profileMode: true, profileAfterLike: true });
+    }
+  },
+
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
+  },
+
+  finishProfile() {
+    if (this.data.profileAfterLike) {
+      wx.navigateBack();
+    } else {
+      relaunchHome();
+    }
   },
 
   changeProfileDisplayName(event: InputEvent) {
@@ -115,7 +124,7 @@ definePage<LoginData>()({
       if (this.data.profileAvatarPath && !/^https?:\/\//i.test(this.data.profileAvatarPath)) {
         await uploadBackendAvatar(this.data.profileAvatarPath);
       }
-      relaunchHome();
+      this.finishProfile();
     } catch (error) {
       this.setData({
         error: error instanceof Error ? error.message : "微信资料保存失败",
@@ -129,6 +138,6 @@ definePage<LoginData>()({
     if (this.data.profileSaving) {
       return;
     }
-    relaunchHome();
+    this.finishProfile();
   },
 });

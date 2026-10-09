@@ -1,3 +1,4 @@
+import type { MemoirShareLikeSummary } from "./memoir-share-likes";
 import type { TTSAlignmentSegment } from "./memoir-audio";
 
 export type MemoirCreatedBy = "user" | "ai" | "asr" | "system";
@@ -570,6 +571,8 @@ export interface MemoirBookShareStatus {
   token: string | null;
   stale: boolean;
   current: boolean;
+  // Missing until the backend that records likes is deployed.
+  likes?: MemoirShareLikeSummary;
 }
 
 export interface MemoirBookShareCreated {

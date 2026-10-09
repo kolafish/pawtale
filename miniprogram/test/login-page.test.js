@@ -10,9 +10,12 @@ const {
   pageContext,
   unmockedAsync,
 } = require("./page-harness");
+const { hasUsableDisplayName, needsWeChatProfileSetup } = require("../services/auth.ts");
 
 function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
   mockModule("../services/auth.ts", {
+    hasUsableDisplayName,
+    needsWeChatProfileSetup,
     loginWithWeChat: unmockedAsync("loginWithWeChat"),
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
@@ -154,4 +157,23 @@ test("login page saves selected wechat nickname and avatar before entering", asy
   assert.deepEqual(avatarUploads, ["wxfile://chosen-avatar"]);
   assert.deepEqual(relaunches, ["/pages/home/index"]);
   assert.equal(context.data.profileSaving, false);
+});
+
+test("a first like asks for avatar and nickname, then returns to what was liked", async () => {
+  const backs = [];
+  const relaunches = [];
+  global.wx = {
+    navigateBack: () => backs.push(true),
+    reLaunch: ({ url }) => relaunches.push(url),
+  };
+  const { page } = loadLoginPage();
+  const context = pageContext(page);
+
+  page.onLoad.call(context, { from: "like" });
+  assert.equal(context.data.profileMode, true);
+  assert.equal(context.data.profileAfterLike, true);
+
+  page.skipWeChatProfile.call(context);
+  assert.deepEqual(backs, [true]);
+  assert.deepEqual(relaunches, []);
 });

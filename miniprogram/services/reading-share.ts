@@ -1,6 +1,7 @@
 import { createMemoirBookShare, getMemoirBookShareStatus, revokeMemoirBookShare, updateMemoirBookShare } from "./memoir-book-api";
 import { routeAuthError } from "./navigation";
 import { pageUrl } from "./page-input";
+import { shareLikePeople, type ShareLikeAvatar } from "./share-likes";
 import { formatBeijingDateTimeShort } from "./time";
 
 const BOOK_SHARE_INACTIVE_DESCRIPTION = "生成后 7 天有效；你可以决定何时更新家人看到的书稿。";
@@ -20,6 +21,9 @@ export interface ReadingShareData {
   bookShareBusy: boolean;
   bookShareStatusKnown: boolean;
   bookShareDescription: string;
+  // Who among the family liked this book or chapter, shown to the author only.
+  bookShareLikeAvatars: ShareLikeAvatar[];
+  bookShareLikeText: string;
 }
 
 export const INITIAL_READING_SHARE_DATA: ReadingShareData = {
@@ -31,6 +35,8 @@ export const INITIAL_READING_SHARE_DATA: ReadingShareData = {
   bookShareBusy: false,
   bookShareStatusKnown: false,
   bookShareDescription: BOOK_SHARE_INACTIVE_DESCRIPTION,
+  bookShareLikeAvatars: [],
+  bookShareLikeText: "",
 };
 
 interface ReadingShareTarget {
@@ -90,7 +96,10 @@ export const readingShareMethods = defineReadingShareMethods({
       this.bookShareToken = status.active ? status.token || "" : "";
       const stale = status.stale || Boolean(this.readingShareTarget().stale);
       const needsUpdate = status.active && !stale && !status.current;
+      const likePeople = shareLikePeople(status.likes ?? { count: 0, likers: [] });
       this.setData({
+        bookShareLikeAvatars: likePeople.avatars,
+        bookShareLikeText: likePeople.text,
         bookShareActive: status.active,
         bookShareReady: status.active && status.current && !stale && Boolean(this.bookShareToken),
         bookShareNeedsUpdate: needsUpdate,

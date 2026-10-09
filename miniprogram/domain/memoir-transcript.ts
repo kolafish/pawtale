@@ -261,6 +261,8 @@ export interface MemoirShareVideoListItem {
   created_at: string;
   completed_at: string | null;
   share_code: string;
+  // Family likes from the forwarded card; absent on videos still being made.
+  like_count?: number;
 }
 
 export interface MemoirShareVideoListResponse {
