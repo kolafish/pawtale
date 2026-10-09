@@ -1,3 +1,4 @@
+@import "../../templates/reading-share.wxss";
 .workspace-page {
   padding: 22rpx 30rpx 112rpx;
   color: var(--ui-text-primary);
