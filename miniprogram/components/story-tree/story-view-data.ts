@@ -12,6 +12,7 @@ export interface StoryThemeTagView {
   id: string;
   title: string;
   tone: StoryTone;
+  readable: boolean;
 }
 
 export interface StorySectionView {

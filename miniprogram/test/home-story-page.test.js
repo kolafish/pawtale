@@ -65,6 +65,7 @@ test("story maps server content into the hero, themes and book summary", () => {
   assert.equal(view.overview.growthStage, 2);
   assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
+  assert.deepEqual(view.overview.themeTags.map(tag => tag.readable), [true, false]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
   assert.equal(view.overview.growthAnimating, false);

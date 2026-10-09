@@ -67,6 +67,7 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
         id: chapter.id,
         title: chapter.title,
         tone: chapter.tone,
+        readable: chapter.readable,
       })),
       hasChapters: chapters.length > 0,
       growthAnimating: false,
