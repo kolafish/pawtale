@@ -1,4 +1,5 @@
 import { readSelectedAIModel } from "./ai-model-settings";
+import { classifyVoiceGatewayError } from "./memoir-streaming-asr-protocol";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-session-api";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import { readChatTTSSettings } from "./tts-settings";
@@ -136,7 +137,7 @@ export class VoiceAssistantTurnStreamClient {
   private socketOpen = false;
   private closed = false;
   private startSent = false;
-  private messageChain: Promise<void> = Promise.resolve();
+  private lastEventType = "";
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
   private resolveStart?: (event: VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent) => void;
@@ -153,11 +154,14 @@ export class VoiceAssistantTurnStreamClient {
     this.startSent = false;
     this.socketOpen = false;
     this.socketTask = null;
-    this.messageChain = Promise.resolve();
+    this.lastEventType = "";
     this.clearTimers();
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const turnActivityTimeoutMs = options.turnActivityTimeoutMs ?? TURN_ACTIVITY_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
+    if (this.closed) {
+      throw new Error("AI 回应已取消");
+    }
     const url = this.options.streamUrl || assistantTurnStreamUrl(this.voiceSessionId);
     const startPayload = this.startPayload(options);
     const terminalEvent = await new Promise<VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent>(
@@ -211,21 +215,16 @@ export class VoiceAssistantTurnStreamClient {
           resetActivityTimer();
         });
         socketTask.onMessage((message) => {
-          if (!this.closed) {
-            this.messageChain = this.messageChain
-              .then(() => {
-                if (this.closed) {
-                  return undefined;
-                }
-                return this.handleSocketMessage(message.data, startPayload, settle, resetActivityTimer);
-              })
-              .catch((error) => {
-                if (this.closed) {
-                  return;
-                }
-                settle(() => reject(error instanceof Error ? error : new Error("AI 回应处理失败")));
-                this.closeSocket("assistant turn stream failed");
-              });
+          if (this.closed) {
+            return;
+          }
+          // Consume protocol events before onClose can discard a terminal result.
+          // Audio playback has its own queue in VoiceAssistantTurnRuntime.
+          try {
+            this.handleSocketMessage(message.data, startPayload, settle, resetActivityTimer);
+          } catch (error) {
+            settle(() => reject(error instanceof Error ? error : new Error("AI 回应处理失败")));
+            this.closeSocket("assistant turn stream failed");
           }
         });
         socketTask.onError((error) => {
@@ -234,9 +233,17 @@ export class VoiceAssistantTurnStreamClient {
           }
           failStart(error.errMsg || "AI 回应连接失败", "assistant turn stream error");
         });
-        socketTask.onClose(() => {
+        socketTask.onClose((event) => {
           this.socketOpen = false;
           if (!this.closed) {
+            const closeEvent = event as WechatMiniprogram.GeneralCallbackResult & { code?: number; reason?: string };
+            console.warn("assistant turn socket closed before terminal event", {
+              voiceSessionId: this.voiceSessionId,
+              code: closeEvent.code,
+              reason: closeEvent.reason,
+              startSent: this.startSent,
+              lastEventType: this.lastEventType,
+            });
             this.closed = true;
             this.socketTask = null;
             settle(() => reject(new Error("AI 回应连接已关闭")));
@@ -291,17 +298,33 @@ export class VoiceAssistantTurnStreamClient {
     };
   }
 
-  private async handleSocketMessage(
+  private handleSocketMessage(
     data: string | ArrayBuffer,
     startPayload: Record<string, unknown>,
     settle: (callback: () => void) => void,
     resetActivityTimer: () => void,
-  ): Promise<void> {
+  ): void {
     const event = safeJsonParse(typeof data === "string" ? data : "");
     if (!event || typeof event.type !== "string") {
       return;
     }
+    this.lastEventType = event.type;
     resetActivityTimer();
+    if (event.type === "session.error") {
+      const { message } = classifyVoiceGatewayError({
+        type: "session.error",
+        error: typeof event.error === "string" ? event.error : "voice_gateway_error",
+      });
+      this.callbacks.onFailed?.({
+        type: "turn.failed",
+        voice_session_id: this.voiceSessionId,
+        state: "failed",
+        error: message,
+      });
+      settle(() => this.rejectStart?.(new Error(message)));
+      this.closeSocket("assistant turn rejected");
+      return;
+    }
     if (event.type === "turn.ready") {
       this.sendStart(startPayload);
       return;

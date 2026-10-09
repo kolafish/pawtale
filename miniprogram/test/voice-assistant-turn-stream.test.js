@@ -352,3 +352,90 @@ test("assistant turn stream closes socket on socket errors", async () => {
   assert.equal(harness.closeCalls(), 1);
   delete global.wx;
 });
+
+test("assistant turn stream preserves gateway rejection before socket close", async () => {
+  for (const code of ["voice_gateway_user_session_exists", "voice_gateway_auth_failed", "ai_credit_insufficient"]) {
+    const harness = installWxSocketHarness();
+    const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+    const { classifyVoiceGatewayError } = require("../services/memoir-streaming-asr-protocol.ts");
+    const failures = [];
+    const client = new VoiceAssistantTurnStreamClient("voice-1", {
+      onFailed: (event) => failures.push(event),
+    });
+    const startPromise = client.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    harness.handlers.open();
+    const rejection = { type: "session.error", state: "failed", error: code };
+    socketMessage(harness.handlers, rejection);
+    harness.handlers.close({ code: 1008, reason: "" });
+
+    const expected = classifyVoiceGatewayError(rejection).message;
+    await assert.rejects(startPromise, { message: expected });
+    assert.equal(failures[0].error, expected);
+    assert.equal(harness.sent.length, 0);
+    delete global.wx;
+  }
+});
+
+test("assistant turn stream keeps a terminal message delivered immediately before close", async () => {
+  for (const terminal of [
+    { type: "turn.completed", message_id: "assistant-1", text: "已完成的回应" },
+    { type: "turn.failed", error: "provider failed" },
+  ]) {
+    const harness = installWxSocketHarness();
+    const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+    const client = new VoiceAssistantTurnStreamClient("voice-1");
+    const startPromise = client.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    harness.handlers.open();
+    socketMessage(harness.handlers, terminal);
+    harness.handlers.close({ code: 1000, reason: "" });
+
+    if (terminal.type === "turn.completed") {
+      assert.equal((await startPromise).message_id, "assistant-1");
+    } else {
+      await assert.rejects(startPromise, { message: terminal.error });
+    }
+    delete global.wx;
+  }
+});
+
+test("assistant turn stream still rejects an unexpected close without a terminal event", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const harness = installWxSocketHarness();
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const client = new VoiceAssistantTurnStreamClient("voice-1");
+  const startPromise = client.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.handlers.open();
+  socketMessage(harness.handlers, { type: "turn.ready" });
+  harness.handlers.close({ code: 1006, reason: "" });
+
+  await assert.rejects(startPromise, /AI 回应连接已关闭/);
+  assert.equal(warn.mock.calls[0].arguments[1].code, 1006);
+  assert.equal(warn.mock.calls[0].arguments[1].lastEventType, "turn.ready");
+  delete global.wx;
+});
+
+test("assistant turn cancelled during session preparation never opens a late socket", async () => {
+  const harness = installWxSocketHarness();
+  const api = require("../services/memoir-voice-session-api.ts");
+  const originalCookieHeader = api.backendSessionCookieHeader;
+  let ready;
+  api.backendSessionCookieHeader = () => new Promise((resolve) => { ready = resolve; });
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const client = new VoiceAssistantTurnStreamClient("voice-1");
+  const startPromise = client.start();
+  const cancelled = assert.rejects(startPromise, /AI 回应已取消/);
+  try {
+    client.cancel();
+    ready("pawtale_session=abc");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(harness.handlers.connectOptions, undefined);
+    await cancelled;
+  } finally {
+    client.close();
+    api.backendSessionCookieHeader = originalCookieHeader;
+    delete global.wx;
+  }
+});
