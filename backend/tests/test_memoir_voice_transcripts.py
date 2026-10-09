@@ -3253,6 +3253,16 @@ async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
     assert result.created_by == MemoirCreatedBy.SYSTEM
 
 
+async def test_generate_cleaned_transcript_text_skips_model_for_filler_only_text():
+    ai_client = CapturingAIClient()
+    result = await generate_cleaned_transcript_text("那个", ai_client=ai_client)
+
+    assert result.content == "那个"
+    assert result.provider is None
+    assert result.created_by == MemoirCreatedBy.SYSTEM
+    assert ai_client.prompt == ""
+
+
 @pytest.mark.parametrize(
     ("level", "requirement"),
     [
