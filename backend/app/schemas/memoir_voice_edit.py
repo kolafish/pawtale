@@ -67,6 +67,7 @@ class VoiceEditPreviewRequest(BaseModel):
     supports_chapter_split: bool = False
     supports_section_merge: bool = False
     supports_composed_chapter_edits: bool = False
+    supports_multiple_chapter_splits: bool = False
 
 
 class VoiceEditItem(VoiceEditOperation):

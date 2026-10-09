@@ -112,7 +112,7 @@ definePage<EditData>()({
       const splitConfirmation = preview.questions.length === 0 && preview.operations.length === 1
         && preview.operations[0].action === "split_chapter" && preview.operations[0].section_ids?.length
         ? preview.operations[0] : null;
-      this.setData({ preview, splitConfirmation, items: preview.operations.map(item => ({ ...item, selected: true, selectionKey: `${item.action}:${item.target_ref}` })), selectedCount: preview.operations.length });
+      this.setData({ preview, splitConfirmation, items: preview.operations.map((item, index) => ({ ...item, selected: true, selectionKey: `${item.action}:${item.target_ref}:${index}` })), selectedCount: preview.operations.length });
     } catch (error) {
       if (sequence === this.requestSequence) this.setData({ error: error instanceof Error ? error.message : "没有得到修改结果，请重试" });
     } finally {
