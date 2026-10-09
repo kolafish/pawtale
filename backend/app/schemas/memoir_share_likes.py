@@ -39,6 +39,8 @@ class MemoirShareLikesResponse(MemoirShareLikeSummary):
     liked: bool = False
     # The author sees who liked their story but does not like it themselves.
     can_like: bool = True
+    # The viewer liked without leaving a name, so the author cannot tell who they are.
+    profile_missing: bool = False
 
 
 class MemoirShareLikeActivityItem(BaseModel):

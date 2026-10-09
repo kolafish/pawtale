@@ -61,3 +61,54 @@
   font-size: var(--ui-font-meta);
   line-height: 1.4;
 }
+.share-like-people-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10rpx;
+  min-width: 0;
+}
+.share-like-profile-link {
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-meta);
+  line-height: 1.4;
+}
+.share-like-list-title {
+  display: block;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-font-body);
+  font-weight: 600;
+}
+.share-like-list-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx 12rpx;
+  margin-top: 16rpx;
+}
+.share-like-list-person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+  width: 128rpx;
+}
+.share-like-list-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 16rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  font-size: 34rpx;
+  line-height: 88rpx;
+  text-align: center;
+}
+.share-like-list-name {
+  max-width: 128rpx;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+  line-height: 1.3;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
