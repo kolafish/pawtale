@@ -9,6 +9,7 @@ from . import material_editor
 from . import mobile
 from . import narrative
 from . import sections
+from . import share_likes
 from . import section_digests
 from . import transcript_cleanup_editor
 from . import voice
@@ -30,4 +31,5 @@ router.include_router(book.router, prefix="/api/mobile/memoir")
 router.include_router(book_reviews.router, prefix="/api/memoir")
 router.include_router(mobile.router, prefix="/api/mobile/memoir")
 router.include_router(voice.router, prefix="/api/mobile/memoir")
+router.include_router(share_likes.router, prefix="/api/mobile/memoir")
 router.include_router(voice_gateway.router, prefix="/api/mobile/memoir")

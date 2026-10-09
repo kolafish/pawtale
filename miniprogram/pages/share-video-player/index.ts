@@ -5,8 +5,10 @@ import { definePage } from "../../services/page-definition";
 import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
+import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
+import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 
-interface SharedVideoPlayerData {
+interface SharedVideoPlayerData extends ShareLikeData {
   pageClass: string;
   loading: boolean;
   error: string;
@@ -21,6 +23,7 @@ interface SharedVideoPlayerData {
 
 definePage<SharedVideoPlayerData>()({
   shareCode: "",
+  shareLikeTarget: null as MemoirShareLikeTarget | null,
 
   data: {
     pageClass: "detail-page",
@@ -32,7 +35,10 @@ definePage<SharedVideoPlayerData>()({
     endFrameUrl: "",
     ended: false,
     portrait: true,
+    ...INITIAL_SHARE_LIKE_DATA,
   },
+
+  ...shareLikeMethods,
 
   async onLoad(options?: PageQuery) {
     // Cards pass code; the printed mini program code passes it as scene.
@@ -42,6 +48,8 @@ definePage<SharedVideoPlayerData>()({
 
   onShow() {
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
+    // Back from choosing an avatar after a like.
+    this.refreshShareLikes();
   },
 
   onShareAppMessage() {
@@ -68,6 +76,7 @@ definePage<SharedVideoPlayerData>()({
       });
       setPageNavigationTitle(video.book_title || video.title);
       enableMiniProgramShareMenu();
+      void this.loadShareLikes({ video_code: this.shareCode });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "这段视频暂时打不开" });
     } finally {

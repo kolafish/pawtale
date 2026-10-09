@@ -1361,6 +1361,37 @@ class MemoirChapterShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
+class MemoirShareLike(Base):
+    """One family member's like on a shared book, chapter or story video."""
+
+    __tablename__ = "memoir_share_likes"
+    __table_args__ = (
+        CheckConstraint(
+            "num_nonnulls(book_output_id, chapter_id, share_video_id) = 1",
+            name="ck_memoir_share_likes_one_target",
+        ),
+        UniqueConstraint("user_id", "book_output_id", name="uq_memoir_share_likes_user_book"),
+        UniqueConstraint("user_id", "chapter_id", name="uq_memoir_share_likes_user_chapter"),
+        UniqueConstraint("user_id", "share_video_id", name="uq_memoir_share_likes_user_video"),
+        Index("ix_memoir_share_likes_project_created", "project_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Likes belong to the content, so they survive link renewal and new versions.
+    book_output_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_book_outputs.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    chapter_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    share_video_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_material_share_videos.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+
+
 class MemoirBookRevisionProposal(Base):
     __tablename__ = "memoir_book_revision_proposals"
     __table_args__ = (

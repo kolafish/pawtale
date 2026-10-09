@@ -1,3 +1,4 @@
+@import "../../templates/share-likes.wxss";
 .book-reader-page {
   padding: 26rpx 28rpx calc(76rpx + env(safe-area-inset-bottom));
   color: var(--ui-text-primary);

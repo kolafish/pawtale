@@ -1,3 +1,4 @@
+<import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{loading && !video}}" class="empty-panel">
     <text class="empty-copy">正在打开视频</text>
@@ -37,6 +38,7 @@
     />
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText}}" />
     <button class="ui-button shared-video-invitation" bindtap="openHome" hover-class="ui-accent-action-hover" aria-label="也为家里的长辈留下一本回忆录，去讲讲故事">
       <view class="shared-video-invitation-title">
         <text>也为家里的长辈，</text>

@@ -13,6 +13,7 @@ from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import MemoirMaterialShareVideo
 from app.schemas.memoir_voice import MemoirSharedVideoResponse
 from app.services.memoir.book_shares import readable_share_token
+from app.services.memoir.share_likes import ShareLikeTarget, video_target
 from app.services.memoir.share_video_jobs import (
     CompletedShareVideo,
     completed_share_video_file,
@@ -51,6 +52,10 @@ async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoRes
             item.strip() for item in get_settings().memoir_demo_video_codes.split(",")
         } else await readable_share_token(db, job.project_id),
     )
+
+
+async def video_like_target(db: AsyncSession, code: str) -> ShareLikeTarget:
+    return video_target(await _shared_job(db, code))
 
 
 async def load_shared_video_file(db: AsyncSession, code: str) -> CompletedShareVideo:

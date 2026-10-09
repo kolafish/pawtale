@@ -27,6 +27,17 @@ export interface UpdateProfileInput {
   display_name: string;
 }
 
+const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
+
+export function hasUsableDisplayName(user: BackendAuthUser): boolean {
+  const name = user.display_name.trim();
+  return Boolean(name && name !== WECHAT_PLACEHOLDER_DISPLAY_NAME);
+}
+
+export function needsWeChatProfileSetup(user: BackendAuthUser): boolean {
+  return !hasUsableDisplayName(user) || !String(user.avatar_url || "").trim();
+}
+
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   writeMemoirIdentitySnapshot(identity);
   return identity;

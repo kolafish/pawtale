@@ -597,6 +597,7 @@ class MemoirShareVideoListItemResponse(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     share_code: str
+    like_count: int = 0
 
 
 class MemoirShareVideoDeleteRequest(BaseModel):

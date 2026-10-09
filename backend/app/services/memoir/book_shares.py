@@ -33,6 +33,7 @@ from app.services.memoir.book_outputs import _output_version_response, get_book_
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
 from app.services.memoir.completion_read_model import chapter_workspace
+from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, like_summary
 
 
 SHARE_LIFETIME = timedelta(days=7)
@@ -105,6 +106,7 @@ async def share_status(
         token=_stable_token(output.id, share.token_hash, chapter=chapter_id is not None) if active else None,
         stale=stale,
         current=bool(active and not stale and version and share.version_id == version.id),
+        likes=await like_summary(db, _like_target(output)),
     )
 
 
@@ -187,7 +189,8 @@ async def readable_share_token(db: AsyncSession, project_id: str) -> str | None:
     return _stable_token(share.output_id, share.token_hash)
 
 
-async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
+async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, ShareVersion]:
+    """The book or chapter behind a reading link, while a reader can open it."""
     invalid = HTTPException(status_code=404, detail="分享链接已失效")
     stable_match = STABLE_TOKEN_PATTERN.fullmatch(token)
     chapter_link = bool(stable_match and stable_match.group(1) == "c1")
@@ -224,6 +227,21 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     )
     if stale or current_version is None or share.version_id != current_version.id:
         raise HTTPException(status_code=409, detail="书稿正在更新，暂时无法阅读分享内容")
+    return resource, version
+
+
+def _like_target(resource: ShareResource) -> ShareLikeTarget:
+    return chapter_target(resource) if isinstance(resource, MemoirBookPlanChapter) else book_target(resource)
+
+
+async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
+    """Readers like what the link shows: the whole book or one chapter."""
+    resource, _ = await readable_share(db, token)
+    return _like_target(resource)
+
+
+async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
+    resource, version = await readable_share(db, token)
     if isinstance(resource, MemoirBookPlanChapter) and isinstance(version, MemoirBookChapterDraftVersion):
         # Adapt the saved chapter to the existing public reader without creating a book.
         output = MemoirBookOutput(

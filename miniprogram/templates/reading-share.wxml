@@ -1,3 +1,4 @@
+<import src="./share-likes.wxml" />
 <template name="readingSharePanel">
     <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
       <text class="book-share-description">{{chapterShare ? '分享后，对方可直接阅读本章全部正文，不包含其他章节。' : '分享后，对方可以在小程序里阅读你确认分享的书稿。'}}</text>
@@ -10,6 +11,9 @@
         <button wx:elif="{{bookShareNeedsUpdate}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="updateBookShare">更新家人阅读的书稿</button>
         <button wx:elif="{{!bookShareActive}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
         <button wx:else class="reading-share-primary-button" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
+      </view>
+      <view wx:if="{{bookShareLikeText}}" class="book-share-likes">
+        <template is="shareLikePeople" data="{{avatars: bookShareLikeAvatars, text: bookShareLikeText}}" />
       </view>
       <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
         <button class="book-share-manage-button" disabled="{{bookShareBusy || bookShareStale}}" bindtap="regenerateBookShare">重新生成</button>

@@ -16,6 +16,7 @@ from app.auth import (
     issue_session,
     normalize_email,
     revoke_session,
+    WECHAT_PLACEHOLDER_DISPLAY_NAME,
     SESSION_COOKIE_NAME,
     verify_password,
 )
@@ -44,7 +45,6 @@ WECHAT_PROVIDERS = {
     "laoyu": "wechat_miniprogram",
     "xiaoyu": "wechat_miniprogram_xiaoyu",
 }
-WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 

@@ -68,6 +68,7 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
     assert initial_status.headers["cache-control"] == "no-store"
     assert initial_status.json() == {
         "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
+        "likes": {"count": 0, "likers": []},
     }
     created = await client.post(share_path)
     assert created.status_code == 200
@@ -133,6 +134,7 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
         assert await readable_share_token(test_db, project_id) is None
         assert (await client.get(share_path)).json() == {
             "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
+            "likes": {"count": 0, "likers": []},
         }
 
         renewed = await client.post(share_path)

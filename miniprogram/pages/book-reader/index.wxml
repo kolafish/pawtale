@@ -1,3 +1,4 @@
+<import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>正在打开成书...</text>
@@ -153,6 +154,8 @@
       <text class="reader-page-count">{{readerChapterIndex + 1}} / {{readerChapterTotal}}</text>
       <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === readerChapterTotal - 1}}" bindtap="nextReaderChapter">下一{{bookPreviewChapters.length ? '章' : '页'}}</view>
     </view>
+
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText}}" />
 
     <view class="reader-top-action-shell">
       <view
