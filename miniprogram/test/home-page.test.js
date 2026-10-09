@@ -569,7 +569,7 @@ test("home start action follows account, project, story and completion states", 
   assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
-  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "登录后开始");
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "种下我的故事");
   assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, true);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);

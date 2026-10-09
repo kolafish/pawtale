@@ -42,6 +42,7 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
+import { DEMO_BOOK_SHARE_TOKEN } from "../../config";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   isAuthError,
@@ -86,6 +87,7 @@ interface HomeData extends HomeStoryData {
   creatingVoice: boolean;
   voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
+  demoBookAvailable: boolean;
   error: string;
   userId: string;
   displayName: string;
@@ -174,8 +176,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
-    : state.needsLogin ? "登录后开始"
-    : !state.hasProject ? "种下我的故事"
+    : state.needsLogin || !state.hasProject ? "种下我的故事"
     : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
     : state.selectedMode === "book_completion" ? choice.action
@@ -184,8 +185,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     headerSubtitleText: state.loading ? "正在看看您的故事树。"
-      : state.needsLogin ? "登录后，把想说的故事慢慢留下来。"
-      : !state.hasProject ? "每一个故事，都从一颗种子开始。"
+      : state.needsLogin || !state.hasProject ? "每一个故事，都从一颗种子开始。"
       : state.hasStories ? ""
       : "从一段回忆开始，让故事慢慢发芽。",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
@@ -284,6 +284,7 @@ definePage<HomeData>()({
     creatingVoice: false,
     voiceEntry: null,
     needsLogin: false,
+    demoBookAvailable: Boolean(DEMO_BOOK_SHARE_TOKEN),
     error: "",
     userId: "",
     displayName: "",
@@ -442,8 +443,8 @@ definePage<HomeData>()({
           userId: "",
           displayName: "作者",
           projectId: "",
-          projectTitle: "登录后创建回忆录",
-          projectDisplayTitle: "登录后创建回忆录",
+          projectTitle: "",
+          projectDisplayTitle: "",
           lastStoryHint: "",
           hasLastStoryHint: false,
           launchVariant: "none",
@@ -806,6 +807,10 @@ definePage<HomeData>()({
 
   createProject() {
     wx.navigateTo({ url: "/pages/project-edit/index" });
+  },
+
+  openDemoBook() {
+    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { shareToken: DEMO_BOOK_SHARE_TOKEN }) });
   },
 
   openProjects() {

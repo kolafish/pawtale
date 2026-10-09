@@ -89,6 +89,8 @@
       </view>
 
       <view slot="afterHero" id="home-narration-end" class="after-hero">
+        <button wx:if="{{needsLogin && demoBookAvailable}}" id="home-demo-book" class="home-story-action ui-button"
+          bindtap="openDemoBook">先看看示例回忆录</button>
         <text wx:if="{{narrationSaved && !growthNoticeText}}" class="home-saved-notice" aria-live="polite">这段故事已经长进您的故事树。</text>
 
         <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
