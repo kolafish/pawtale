@@ -309,7 +309,9 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
 // "card" is the sharp 5:4 cover made for WeChat's forwarded card.
 export function memoirSharedVideoUrl(shareCode: string, variant: "video" | "thumbnail" | "card" = "video"): string {
   const path = `/api/mobile/memoir/share-video/shares/${encodeURIComponent(shareCode)}/video`;
-  return memoirShareVideoDownloadUrl(variant === "video" ? path : `${path}?variant=${variant}`);
+  // Refresh WeChat's cached textless covers; v2 uses the title when no opening quote exists.
+  const query = variant === "card" ? "?variant=card&v=2" : variant === "thumbnail" ? "?variant=thumbnail" : "";
+  return memoirShareVideoDownloadUrl(`${path}${query}`);
 }
 
 export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> {

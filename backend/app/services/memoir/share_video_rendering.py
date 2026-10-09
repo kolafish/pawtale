@@ -194,14 +194,15 @@ async def share_video_end_frame(source_path: Path) -> Path:
     return await _video_still(source_path, ".end.jpg", -0.3, "null", 2)
 
 
-async def share_video_card_cover(source_path: Path, hook_text: str = "") -> Path:
-    """A 5:4 cover for WeChat's forwarded card, with the video's opening line on it.
+async def share_video_card_cover(source_path: Path, hook_text: str = "", title: str = "") -> Path:
+    """A 5:4 forwarded cover with the opening quote, or the title when none exists.
 
     The card shows a 5:4 image, so a portrait frame gets centre-cropped and upscaled;
     cropping a full-width still here keeps the picture sharp and leaves out the
     watermark and moving captions, and the opening line is set once, whole.
     """
-    cover_path = source_path.with_suffix(".card.jpg")
+    # v2 replaces cached textless covers when a clip has no usable opening quote.
+    cover_path = source_path.with_suffix(".card-v2.jpg")
     if cover_path.is_file() and cover_path.stat().st_size:
         return cover_path
     still_path = await _video_still(
@@ -213,8 +214,9 @@ async def share_video_card_cover(source_path: Path, hook_text: str = "") -> Path
     )
     with Image.open(still_path) as still:
         cover = still.convert("RGB")
-    if hook_text.strip():
-        _draw_card_hook(cover, hook_text.strip())
+    caption = hook_text.strip() or title.strip()
+    if caption:
+        _draw_card_text(cover, caption, quoted=bool(hook_text.strip()))
     temporary_path = cover_path.with_name(f".{cover_path.name}.{os.getpid()}.tmp")
     cover.save(temporary_path, "JPEG", quality=90)
     temporary_path.replace(cover_path)
@@ -222,10 +224,11 @@ async def share_video_card_cover(source_path: Path, hook_text: str = "") -> Path
     return cover_path
 
 
-def _draw_card_hook(cover: Image.Image, hook_text: str) -> None:
-    lines = [hook_text[start:end] for start, end in _quote_line_ranges(hook_text, 0, len(hook_text))]
-    lines[0] = f"“{lines[0]}"
-    lines[-1] = f"{lines[-1]}”"
+def _draw_card_text(cover: Image.Image, text: str, *, quoted: bool) -> None:
+    lines = [text[start:end] for start, end in _quote_line_ranges(text, 0, len(text))]
+    if quoted:
+        lines[0] = f"“{lines[0]}"
+        lines[-1] = f"{lines[-1]}”"
     font = _font(46, bold=True)
     line_height = 66
     text_top = cover.height - 44 - line_height * len(lines)

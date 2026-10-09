@@ -659,6 +659,7 @@ async def delete_share_video_job(
         video_path.unlink(missing_ok=True)
         video_path.with_suffix(".thumbnail.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".card.jpg").unlink(missing_ok=True)
+        video_path.with_suffix(".card-v2.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".card-still.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".end.jpg").unlink(missing_ok=True)
         video_path.with_suffix(".poster.jpg").unlink(missing_ok=True)
