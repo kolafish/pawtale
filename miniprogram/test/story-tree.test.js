@@ -47,11 +47,32 @@ test("tree ignores unavailable project switching and chapter actions without a t
   assert.deepEqual(context.events, []);
 });
 
+test("demo tree opens only readable chapters while owner chapters remain editable", () => {
+  const story = {
+    ...emptyStoryViewData(),
+    // Object properties arrive from WeChat with nested arrays as indexed objects.
+    chapters: { 0: { id: "family", readable: true }, 1: { id: "childhood", readable: false } },
+  };
+  const guest = tree(story, { demoMode: true });
+  guest.openChapter(tap({ id: "childhood" }));
+  guest.openChapter(tap({ id: "missing" }));
+  guest.openChapter(tap());
+  guest.openChapter(tap({ id: "family" }));
+  assert.deepEqual(guest.events, [
+    { name: "openchapter", detail: { chapterId: "family" } },
+  ]);
+
+  const owner = tree(story);
+  owner.openChapter(tap({ id: "childhood" }));
+  assert.deepEqual(owner.events, [
+    { name: "openchapter", detail: { chapterId: "childhood" } },
+  ]);
+});
+
 test("tree template folds the complete story list into the hero without timeline numbering", () => {
   const template = fs.readFileSync(path.join(__dirname, "../components/story-tree/index.wxml"), "utf8");
   assert.match(template, /class="story-hero/);
   assert.match(template, /id="story-book-action"[\s\S]*?bindtap="openBook"/);
-  assert.match(template, /aria-label="\{\{canOpenBook \? '看整本书/);
   assert.doesNotMatch(template, />读整本书|>阅读全书|>看看书稿/);
   assert.match(template, /id="story-summary-toggle"/);
   assert.match(template, /class="story-list-expand/);

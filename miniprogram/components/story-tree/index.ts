@@ -14,6 +14,7 @@ Component({
     canSwitchProject: { type: Boolean, value: false },
     canVoiceEdit: { type: Boolean, value: false },
     showBookHint: { type: Boolean, value: false },
+    demoMode: { type: Boolean, value: false },
   },
 
   data: { showAllChapters: false },
@@ -46,6 +47,12 @@ Component({
 
     openChapter(event: TreeTapEvent) {
       const chapterId = datasetString(event, "id");
+      if (this.properties.demoMode) {
+        const chapters = Object.values(
+          (this.properties.story as ReturnType<typeof emptyStoryViewData>).chapters || {},
+        );
+        if (!chapters.some(chapter => chapter.id === chapterId && chapter.readable)) return;
+      }
       if (chapterId) this.triggerEvent("openchapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
     },
 

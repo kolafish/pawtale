@@ -28,6 +28,7 @@
       wx:if="{{storyLoaded || needsLogin}}"
       id="story-tree"
       story="{{story}}"
+      demo-mode="{{needsLogin}}"
       large-text="{{largeTextEnabled}}"
       can-open-book="{{hasProject || (needsLogin && demoReadableChapterIds.length > 0)}}"
       can-switch-project="{{hasProject}}"
