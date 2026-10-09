@@ -265,6 +265,9 @@ test("home replaces a cached failed recommendation job with the latest remake an
 });
 
 test("home editor entry keeps voice and dismiss guards", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  // One entry: the recommendation opens the same settings as a hand-picked clip instead of starting at once.
+  assert.doesNotMatch(pageWxml, /data-create|>调整</);
   const created = [];
   const navigations = [];
   const candidate = {

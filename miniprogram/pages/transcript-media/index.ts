@@ -63,8 +63,6 @@ definePage<TranscriptMediaData>()({
   loadToken: 0,
   requestedShareVideoJobId: "",
   requestedShareVideoCandidateId: "",
-  // Set by the home card's primary action: start the recommended clip with default settings.
-  createRequestedCandidate: false,
   shareVideoBackgroundUploadToken: 0,
 
   data: {
@@ -87,16 +85,12 @@ definePage<TranscriptMediaData>()({
     this.resetShareVideoState();
     this.requestedShareVideoJobId = queryParam(options, "jobId");
     this.requestedShareVideoCandidateId = queryParam(options, "candidateId");
-    this.createRequestedCandidate = Boolean(this.requestedShareVideoCandidateId) && queryParam(options, "create") === "1";
     this.setData({
       utteranceId: queryParam(options, "id"),
       viewMode: this.requestedShareVideoJobId ? "video" : "create",
     });
     setPageNavigationTitle(this.requestedShareVideoJobId ? "分享视频" : "做成图片或视频");
     await this.loadTranscript();
-    if (this.createRequestedCandidate && this.data.shareVideoCandidate && this.data.shareVideoSelectedCanGenerate) {
-      await this.createShareVideo();
-    }
   },
 
   onShareAppMessage() {

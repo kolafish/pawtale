@@ -148,18 +148,10 @@
               <button
                 wx:if="{{shareCandidate.status === 'ready'}}"
                 class="home-share-candidate-primary ui-button"
-                data-create="1"
                 bindtap="openShareCandidateEditor"
                 disabled="{{shareCandidateDismissing}}"
                 hover-class="ui-subtle-action-hover"
               >做成视频 ›</button>
-              <button
-                wx:if="{{shareCandidate.status === 'ready'}}"
-                class="home-share-candidate-secondary ui-button"
-                bindtap="openShareCandidateEditor"
-                disabled="{{shareCandidateDismissing}}"
-                hover-class="ui-subtle-action-hover"
-              >调整</button>
               <button
                 wx:elif="{{shareCandidate.video_job_id}}"
                 class="home-share-candidate-primary ui-button"
