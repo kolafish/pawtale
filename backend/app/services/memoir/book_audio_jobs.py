@@ -96,18 +96,26 @@ def chunk_key(project_id: str, user_id: str, profile: AudioProfile, text: str) -
 
 
 def split_book_audio_text(text: str) -> list[book_audio.TTSChunk]:
-    """Paragraph boundaries keep an edit from shifting chunks in later paragraphs."""
+    """Join short prefixes to the next paragraph without shifting later paragraphs."""
     content = text.strip()
     if not content:
         raise HTTPException(400, "朗读内容为空")
     result: list[book_audio.TTSChunk] = []
-    for paragraph in re.finditer(r"\S[\s\S]*?(?=\n[ \t]*\n|\Z)", content):
-        for chunk in book_audio.split_tts_text(paragraph.group(), max_chars=180):
+    paragraphs = list(re.finditer(r"\S[\s\S]*?(?=\n[ \t]*\n|\Z)", content))
+    start = 0
+    for index, paragraph in enumerate(paragraphs):
+        end = paragraph.end()
+        if len(content[start:end].strip()) < 40 and index + 1 < len(paragraphs):
+            continue
+        # A newline after a title must not split it back into a tiny audio file.
+        for chunk in book_audio.split_tts_text(content[start:end], max_chars=180, min_chars=40):
             result.append(book_audio.TTSChunk(
                 text=chunk.text,
-                text_start=paragraph.start() + chunk.text_start,
-                text_end=paragraph.start() + chunk.text_end,
+                text_start=start + chunk.text_start,
+                text_end=start + chunk.text_end,
             ))
+        if index + 1 < len(paragraphs):
+            start = paragraphs[index + 1].start()
     return result
 
 
@@ -279,8 +287,12 @@ async def prepare_audio_plan(
     if req.source_text_hash and req.source_text_hash != book_audio.source_text_hash(text):
         raise HTTPException(409, "朗读内容已变化，请重新发起朗读")
     profile = audio_profile(book_audio.get_tts_client(), req.voice, req.speed_ratio)
-    signature = profile_key(profile)
     chunks = split_book_audio_text(text)
+    # Playlist offsets can change independently of the audio profile. Reject an
+    # in-flight old layout while retaining unchanged text in the chunk cache.
+    signature = book_audio.source_text_hash(json.dumps([
+        profile_key(profile), [(chunk.text_start, chunk.text_end) for chunk in chunks],
+    ]))
     keys = [chunk_key(project_id, owner_id, profile, chunk.text) for chunk in chunks]
     jobs = {job.dedupe_key: job for job in (await db.scalars(
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key.in_(keys))

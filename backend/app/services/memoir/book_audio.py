@@ -54,7 +54,9 @@ def source_text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def split_tts_text(text: str, *, max_chars: int = MAX_TTS_CHARS_PER_CHUNK) -> list[TTSChunk]:
+def split_tts_text(
+    text: str, *, max_chars: int = MAX_TTS_CHARS_PER_CHUNK, min_chars: int = 0,
+) -> list[TTSChunk]:
     content = text.strip()
     if not content:
         raise HTTPException(status_code=400, detail="朗读内容为空")
@@ -69,7 +71,7 @@ def split_tts_text(text: str, *, max_chars: int = MAX_TTS_CHARS_PER_CHUNK) -> li
         if end < len(content):
             window = content[start:end]
             split_at = max(window.rfind("。"), window.rfind("，"), window.rfind("\n"))
-            if split_at > 0:
+            if split_at > 0 and split_at + 1 >= min_chars:
                 end = start + split_at + 1
         raw_chunk = content[start:end]
         chunk = raw_chunk.strip()

@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import pytest
 from sqlalchemy import select
@@ -27,7 +28,12 @@ def tts(monkeypatch, tmp_path):
     return client
 
 
-async def seed(client, db, content="书名\n\n第一段🌿正文。\n\n第二段正文。\n\n第三段正文。"):
+FIRST_PARAGRAPH = "第一段🌿正文。" * 8
+SECOND_PARAGRAPH = "第二段正文。" * 8
+THIRD_PARAGRAPH = "第三段正文。" * 8
+
+
+async def seed(client, db, content=f"书名\n\n{FIRST_PARAGRAPH}\n\n{SECOND_PARAGRAPH}\n\n{THIRD_PARAGRAPH}"):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(db, project_id=project_id)
     version = await _seed_confirmed_book_output(db, project_id=project_id)
@@ -50,7 +56,7 @@ async def test_plan_returns_before_synthesis_and_reuses_completed_first_chunk(cl
     response = await client.post(url, json={"version_id": version.id})
     assert response.status_code == 200, response.text
     first = response.json()
-    assert [s["status"] for s in first["segments"]] == ["pending", "pending", "idle", "idle"]
+    assert [s["status"] for s in first["segments"]] == ["pending", "pending", "idle"]
     assert tts.calls == []
     assert await run_test_editing_job(test_db, first["segments"][0]["job_id"])
     plan = await prepare(test_db, project_id, user_id, version)
@@ -59,6 +65,7 @@ async def test_plan_returns_before_synthesis_and_reuses_completed_first_chunk(cl
     assert plan.segments[1].status == "pending"
     assert plan.segments[2].status == "idle"
     assert len(tts.calls) == 1
+    assert tts.calls[0]["text"] == f"书名\n\n{FIRST_PARAGRAPH}"
 
 
 async def test_concurrent_requests_and_worker_claims_share_one_task(client, test_db, tts):
@@ -83,14 +90,14 @@ async def test_concurrent_requests_and_worker_claims_share_one_task(client, test
 
 
 async def test_new_versions_reuse_unchanged_reordered_paragraphs_and_pin_old_playlist(client, test_db, tts):
-    project_id, user_id, old = await seed(client, test_db, "第一段🌿正文。\n\n第二段正文。")
+    project_id, user_id, old = await seed(client, test_db, f"{FIRST_PARAGRAPH}\n\n{SECOND_PARAGRAPH}")
     original = await prepare(test_db, project_id, user_id, old)
     for segment in original.segments:
         assert await run_test_editing_job(test_db, segment.job_id)
     original = await prepare(test_db, project_id, user_id, old)
     new = MemoirBookOutputVersion(
         output_id=old.output_id, project_id=project_id, plan_id=old.plan_id, version=old.version + 1,
-        content="新增的正文。\n\n第二段正文。\n\n第一段🌿正文。", created_by=old.created_by,
+        content=f"{THIRD_PARAGRAPH}\n\n{SECOND_PARAGRAPH}\n\n{FIRST_PARAGRAPH}", created_by=old.created_by,
     )
     test_db.add(new)
     output = await test_db.get(MemoirBookOutput, old.output_id)
@@ -133,7 +140,7 @@ async def test_audio_profile_changes_invalidate_cache(client, test_db, tts, chan
 
 
 async def test_failures_retry_only_explicitly_and_keep_completed_audio(client, test_db, tts, monkeypatch):
-    project_id, user_id, version = await seed(client, test_db, "第一段正文。\n\n第二段正文。")
+    project_id, user_id, version = await seed(client, test_db, f"{FIRST_PARAGRAPH}\n\n{SECOND_PARAGRAPH}")
     plan = await prepare(test_db, project_id, user_id, version)
     assert await run_test_editing_job(test_db, plan.segments[0].job_id)
     original = tts.synthesize
@@ -325,7 +332,8 @@ async def test_chapter_and_section_share_cache_and_pin_reading_version(client, t
     current = (await client.post(base + "/tts/plan", json={})).json()
     assert current["version_id"] == new.id
     assert current["source_text_hash"] != first["source_text_hash"]
-    assert current["segments"][0]["audio_file_id"] == pinned.json()["segments"][0]["audio_file_id"]
+    assert current["segments"][0]["status"] == "pending"
+    assert current["segments"][0]["job_id"] != pinned.json()["segments"][0]["job_id"]
     assert len(tts.calls) == len(first["segments"])
     wrong = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[1].id}/draft/tts/plan", json={"version_id": version.id})
     assert wrong.status_code == 404
@@ -354,3 +362,33 @@ def test_long_paragraphs_have_short_chunks_and_exact_unicode_offsets():
     assert all(len(c.text) <= 180 for c in chunks)
     assert all(text[c.text_start:c.text_end] == c.text for c in chunks)
     assert "".join(c.text for c in chunks) == text
+
+
+@pytest.mark.parametrize("prefix,body", [
+    ("出门去", "早上我们带上行李出发，沿着小路走向车站。" * 20),
+    ("出门去", "一路🌿" * 100),
+    ("旅行记\n\n出门去", "那年夏天，我们一起去了远方。" * 20),
+])
+def test_short_prefix_plays_with_body_and_keeps_later_paragraphs_reusable(prefix, body):
+    text = f"{prefix}\n\n{body}\n\n{SECOND_PARAGRAPH}"
+    chunks = book_audio_jobs.split_book_audio_text(text)
+    assert chunks[0].text.startswith(prefix + "\n\n" + body[:20])
+    assert all(len(chunk.text) <= 180 for chunk in chunks)
+    assert all(text[c.text_start:c.text_end] == c.text for c in chunks)
+    assert re.sub(r"\s+", "", "".join(c.text for c in chunks)) == re.sub(r"\s+", "", text)
+    assert chunks[-1].text == SECOND_PARAGRAPH
+
+
+async def test_old_chunk_layout_is_rejected_without_losing_cached_audio(client, test_db, tts):
+    project_id, user_id, version = await seed(client, test_db)
+    plan = await prepare(test_db, project_id, user_id, version)
+    assert await run_test_editing_job(test_db, plan.segments[0].job_id)
+    old_signature = book_audio_jobs.profile_key(book_audio_jobs.audio_profile(tts, None, None))
+    count = len((await test_db.scalars(select(MemoirEditingJob))).all())
+    response = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/tts/plan", json={
+        "version_id": version.id, "profile_key": old_signature,
+    })
+    assert response.status_code == 409
+    assert len((await test_db.scalars(select(MemoirEditingJob))).all()) == count
+    assert (await prepare(test_db, project_id, user_id, version)).segments[0].audio_file_id
+    assert len(tts.calls) == 1
