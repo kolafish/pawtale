@@ -1,3 +1,4 @@
+<import src="../../templates/reading-share.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
   <view wx:if="{{showingCachedBook}}" class="book-cache-banner ui-error-banner">
@@ -49,23 +50,7 @@
     <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookCompletion" aria-role="button">
       <text>{{bookStaleNotice || bookActivityNotice}}</text><text aria-hidden="true">›</text>
     </view>
-    <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
-      <text class="book-share-description">分享后，对方可以在小程序里阅读你确认分享的书稿。</text>
-      <button class="book-share-manage-button" bindtap="openBookReader" disabled="{{bookStaleNotice}}">预览阅读页</button>
-      <text class="book-share-description">{{bookShareStatusKnown ? bookShareDescription : (bookShareBusy ? '正在读取阅读链接…' : '暂时无法读取阅读链接，请重试。')}}</text>
-      <view class="book-share-primary-action">
-        <button wx:if="{{!bookShareStatusKnown}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
-        <button wx:elif="{{bookShareReady}}" class="primary-button small" open-type="share" disabled="{{bookShareBusy}}">发送阅读页</button>
-        <button wx:elif="{{bookShareStale}}" class="primary-button small" disabled="{{true}}">书稿更新中</button>
-        <button wx:elif="{{bookShareNeedsUpdate}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="updateBookShare">更新家人阅读的书稿</button>
-        <button wx:elif="{{!bookShareActive}}" class="primary-button small" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
-        <button wx:else class="primary-button small" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
-      </view>
-      <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
-        <button class="book-share-manage-button" disabled="{{bookShareBusy || bookShareStale}}" bindtap="regenerateBookShare">重新生成</button>
-        <button class="book-share-manage-button is-danger" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
-      </view>
-    </view>
+    <template is="readingSharePanel" data="{{bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription}}" />
   </view>
 
   <view

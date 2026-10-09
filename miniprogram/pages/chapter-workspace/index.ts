@@ -1,3 +1,5 @@
+import { INITIAL_READING_SHARE_DATA, readingShareMethods } from "../../services/reading-share";
+import { hideMiniProgramShareMenu } from "../../services/share";
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import {
   accessibilityPageClass,
@@ -86,7 +88,11 @@ definePage<ChapterWorkspacePageData>()({
   sectionRegenerationLoadSequence: 0,
   sectionFocusId: "",
 
+  bookShareToken: "",
+  bookShareStatusSequence: 0,
+
   data: {
+    ...INITIAL_READING_SHARE_DATA,
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: true,
     error: "",
@@ -168,6 +174,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async onShow() {
+    hideMiniProgramShareMenu();
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     this.pageVisible = true;
     if (this.loadedOnce) {
@@ -177,6 +184,22 @@ definePage<ChapterWorkspacePageData>()({
         this.refreshSectionRegenerationJob(true),
       ]);
     }
+  },
+
+  ...readingShareMethods,
+
+  readingShareTarget() {
+    return {
+      projectId: this.data.projectId,
+      chapterId: this.data.chapterId,
+      title: this.data.workspace?.chapter_title || "本章",
+      available: this.data.chapterHasReadableDraft,
+      stale: Boolean(this.data.workspace?.draft_needs_rewrite),
+    };
+  },
+
+  openReadingSharePreview() {
+    this.openChapterPreview();
   },
 
   onHide() {
@@ -374,6 +397,9 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
+    const shareStateChanged = this.data.workspace?.draft_version_id !== workspace.draft_version_id
+      || this.data.workspace?.draft_needs_rewrite !== workspace.draft_needs_rewrite;
+
     const summary = workspace.completion_summary;
     const viewWorkspace = {
       ...workspace,
@@ -418,6 +444,12 @@ definePage<ChapterWorkspacePageData>()({
     );
     this.setData({
       workspace: viewWorkspace,
+      ...(shareStateChanged ? {
+        bookShareReady: false,
+        bookShareNeedsUpdate: false,
+        bookShareStale: workspace.draft_needs_rewrite,
+        bookShareStatusKnown: false,
+      } : {}),
       ...viewPatch,
       ...chapterCandidateViewPatch(
         viewWorkspace,
@@ -436,6 +468,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
+    if (this.data.bookSharePanelOpen) void this.refreshBookShareStatus();
     this.syncDraftSectionUnloadAlert();
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
@@ -557,6 +590,9 @@ definePage<ChapterWorkspacePageData>()({
             ? "停止朗读" : "朗读整章",
           run: () => this.playChapterAudio(),
         });
+      }
+      if (this.data.chapterHasReadableDraft) {
+        actions.push({ label: "分享本章", run: () => this.openBookSharePanel() });
       }
       const includeInBook = chapter.include_in_book === false;
       actions.push({

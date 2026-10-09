@@ -1,3 +1,4 @@
+import { INITIAL_READING_SHARE_DATA, readingShareMethods, type ReadingShareData } from "../../services/reading-share";
 import type {
   MemoirBookChapterDraft,
   MemoirBookOutput,
@@ -13,15 +14,11 @@ import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-v
 import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
-  createMemoirBookShare,
   memoirAudioPlanLoader,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
-  getMemoirBookShareStatus,
-  revokeMemoirBookShare,
-  updateMemoirBookShare,
 } from "../../services/memoir-book-api";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
@@ -42,7 +39,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { readBookTTSRequest } from "../../services/tts-settings";
-import { formatBeijingDateTimeShort, timestampMs } from "../../services/time";
+import { timestampMs } from "../../services/time";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -116,25 +113,9 @@ type DatasetEvent = PageDatasetEvent<BookDataset>;
 type TextInputEvent = PageTextInputEvent<BookDataset>;
 type PickerEvent = PagePickerEvent<BookDataset>;
 
-const BOOK_SHARE_INACTIVE_DESCRIPTION = "生成后 7 天有效；你可以决定何时更新家人看到的书稿。";
-
-function bookShareDescription(active: boolean, expiresAt: string | null): string {
-  if (!active) return BOOK_SHARE_INACTIVE_DESCRIPTION;
-  const expiresText = expiresAt ? formatBeijingDateTimeShort(expiresAt) : "";
-  return `${expiresText ? `链接有效至 ${expiresText}` : "链接有效"}；家人可阅读你确认分享的书稿。`;
-}
-
-type BookPageData = BookHomeData & {
+type BookPageData = BookHomeData & ReadingShareData & {
   pageClass: string;
   showingCachedBook: boolean;
-  bookSharePanelOpen: boolean;
-  bookShareActive: boolean;
-  bookShareReady: boolean;
-  bookShareNeedsUpdate: boolean;
-  bookShareStale: boolean;
-  bookShareBusy: boolean;
-  bookShareStatusKnown: boolean;
-  bookShareDescription: string;
   bookActivityNotice: string;
   bookCharCountText: string;
   planStructureBusyChapterId: string;
@@ -156,14 +137,7 @@ definePage<BookPageData>()({
   data: {
     pageClass: "book-page",
     showingCachedBook: false,
-    bookSharePanelOpen: false,
-    bookShareActive: false,
-    bookShareReady: false,
-    bookShareNeedsUpdate: false,
-    bookShareStale: false,
-    bookShareBusy: false,
-    bookShareStatusKnown: false,
-    bookShareDescription: BOOK_SHARE_INACTIVE_DESCRIPTION,
+    ...INITIAL_READING_SHARE_DATA,
     bookActivityNotice: "",
     bookCharCountText: "0",
     loading: false,
@@ -211,166 +185,19 @@ definePage<BookPageData>()({
     if (this.data.bookSharePanelOpen) await this.refreshBookShareStatus();
   },
 
-  onShareAppMessage() {
-    const canShare = this.data.bookShareReady && !this.data.bookStaleNotice && Boolean(this.bookShareToken);
+  ...readingShareMethods,
+
+  readingShareTarget() {
     return {
-      title: canShare ? `阅读《${this.data.bookPreviewTitle || "家庭回忆录"}》` : "老余口述",
-      path: canShare
-        ? pageUrl("/pages/book-reader/index", { shareToken: this.bookShareToken })
-        : "/pages/home/index",
+      projectId: this.data.projectId,
+      title: this.data.bookPreviewTitle,
+      available: this.data.bookContentAvailable,
+      stale: Boolean(this.data.bookStaleNotice),
     };
   },
 
-  async openBookSharePanel() {
-    if (!this.data.projectId || !this.data.bookContentAvailable) return;
-    if (this.data.bookSharePanelOpen) {
-      this.setData({ bookSharePanelOpen: false });
-      return;
-    }
-    this.setData({ bookSharePanelOpen: true });
-    await this.refreshBookShareStatus();
-  },
-
-  async refreshBookShareStatus() {
-    const projectId = this.data.projectId;
-    if (!projectId) return;
-    const sequence = ++this.bookShareStatusSequence;
-    this.setData({ bookShareBusy: true, bookShareStatusKnown: false, bookShareReady: false });
-    try {
-      const status = await getMemoirBookShareStatus(projectId);
-      if (projectId !== this.data.projectId || sequence !== this.bookShareStatusSequence) return;
-      this.bookShareToken = status.active ? status.token || "" : "";
-      const stale = status.stale || Boolean(this.data.bookStaleNotice);
-      const needsUpdate = status.active && !stale && !status.current;
-      this.setData({
-        bookShareActive: status.active,
-        bookShareReady: status.active && status.current && !stale && Boolean(this.bookShareToken),
-        bookShareNeedsUpdate: needsUpdate,
-        bookShareStale: stale,
-        bookShareStatusKnown: true,
-        bookShareDescription: stale
-          ? status.active
-            ? "书稿正在更新，阅读链接已暂停。更新完成后，你可以决定是否将新版发给家人。"
-            : "书稿正在更新，完成后即可生成阅读链接。"
-          : needsUpdate
-            ? "新版书稿已完成。确认更新后，之前收到链接的家人也能读到新版。"
-            : bookShareDescription(status.active, status.expires_at),
-      });
-    } catch (error) {
-      if (projectId === this.data.projectId && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
-        this.setData({ error: error instanceof Error ? error.message : "分享状态读取失败" });
-      }
-    } finally {
-      if (projectId === this.data.projectId && sequence === this.bookShareStatusSequence) this.setData({ bookShareBusy: false });
-    }
-  },
-
-  async createBookShare() {
-    const projectId = this.data.projectId;
-    if (!projectId || !this.data.bookShareStatusKnown || this.data.bookShareBusy || this.data.bookShareStale || this.data.bookStaleNotice) return;
-    this.setData({ bookShareBusy: true, error: "" });
-    try {
-      const share = await createMemoirBookShare(projectId);
-      if (projectId !== this.data.projectId) return;
-      this.bookShareToken = share.token;
-      this.setData({
-        bookShareActive: true,
-        bookShareReady: true,
-        bookShareNeedsUpdate: false,
-        bookShareStale: false,
-        bookShareStatusKnown: true,
-        bookShareDescription: bookShareDescription(true, share.expires_at),
-      });
-    } catch (error) {
-      if (projectId === this.data.projectId && !routeAuthError(error, "login")) {
-        this.setData({ error: error instanceof Error ? error.message : "生成分享链接失败" });
-      }
-    } finally {
-      if (projectId === this.data.projectId) this.setData({ bookShareBusy: false });
-    }
-  },
-
-  async updateBookShare() {
-    const projectId = this.data.projectId;
-    if (!projectId || !this.data.bookShareStatusKnown || !this.data.bookShareActive || !this.data.bookShareNeedsUpdate || this.data.bookShareBusy || this.data.bookStaleNotice) return;
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "更新家人阅读的书稿",
-        content: "确认后，之前收到阅读链接的家人也能看到新版书稿。链接和有效期不会改变。",
-        confirmText: "更新书稿",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (!confirmed || projectId !== this.data.projectId) return;
-    this.setData({ bookShareBusy: true, error: "" });
-    try {
-      const share = await updateMemoirBookShare(projectId);
-      if (projectId !== this.data.projectId) return;
-      this.bookShareToken = share.token;
-      this.setData({
-        bookShareReady: true,
-        bookShareNeedsUpdate: false,
-        bookShareDescription: bookShareDescription(true, share.expires_at),
-      });
-    } catch (error) {
-      if (projectId === this.data.projectId && !routeAuthError(error, "login")) {
-        this.setData({ error: error instanceof Error ? error.message : "更新分享书稿失败" });
-      }
-    } finally {
-      if (projectId === this.data.projectId) this.setData({ bookShareBusy: false });
-    }
-  },
-
-  async regenerateBookShare() {
-    if (!this.data.bookShareStatusKnown || !this.data.bookShareActive || this.data.bookShareBusy || this.data.bookShareStale || this.data.bookStaleNotice) return;
-    const projectId = this.data.projectId;
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "重新生成阅读链接",
-        content: "重新生成后，之前发出的链接会立即失效。请将新链接重新发送给家人。",
-        confirmText: "重新生成",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (confirmed && projectId === this.data.projectId) await this.createBookShare();
-  },
-
-  async revokeBookShare() {
-    if (!this.data.projectId || !this.data.bookShareStatusKnown || !this.data.bookShareActive || this.data.bookShareBusy) return;
-    const projectId = this.data.projectId;
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "撤销阅读链接",
-        content: "撤销后，家人将无法通过此前发送的链接继续阅读。",
-        confirmText: "撤销链接",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (!confirmed || projectId !== this.data.projectId) return;
-    this.setData({ bookShareBusy: true, error: "" });
-    try {
-      await revokeMemoirBookShare(projectId);
-      if (projectId !== this.data.projectId) return;
-      this.bookShareToken = "";
-      this.setData({
-        bookShareActive: false,
-        bookShareReady: false,
-        bookShareNeedsUpdate: false,
-        bookShareStatusKnown: true,
-        bookShareDescription: this.data.bookShareStale
-          ? "书稿正在更新，完成后即可生成阅读链接。"
-          : BOOK_SHARE_INACTIVE_DESCRIPTION,
-      });
-    } catch (error) {
-      if (projectId === this.data.projectId && !routeAuthError(error, "login")) {
-        this.setData({ error: error instanceof Error ? error.message : "撤销分享链接失败" });
-      }
-    } finally {
-      if (projectId === this.data.projectId) this.setData({ bookShareBusy: false });
-    }
+  openReadingSharePreview() {
+    this.openBookReader();
   },
 
   async loadBookHome() {
@@ -417,7 +244,7 @@ definePage<BookPageData>()({
           bookShareNeedsUpdate: false,
           bookShareStale: false,
           bookShareStatusKnown: false,
-          bookShareDescription: BOOK_SHARE_INACTIVE_DESCRIPTION,
+          bookShareDescription: INITIAL_READING_SHARE_DATA.bookShareDescription,
         });
         return;
       }
@@ -447,7 +274,7 @@ definePage<BookPageData>()({
         bookShareNeedsUpdate: false,
         bookShareStale: false,
         bookShareStatusKnown: false,
-        bookShareDescription: BOOK_SHARE_INACTIVE_DESCRIPTION,
+        bookShareDescription: INITIAL_READING_SHARE_DATA.bookShareDescription,
       });
     }
     this.setData({

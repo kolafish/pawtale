@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  clearModule,
   mockMemoirApiModules,
   flushAsyncWork,
   loadPageModule,
@@ -189,6 +190,7 @@ function loadBookPage({
     ...ttsExports,
   });
 
+  clearModule("../services/reading-share.ts");
   return loadPageModule("../pages/book/index.ts");
 }
 

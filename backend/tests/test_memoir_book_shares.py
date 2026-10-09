@@ -14,12 +14,16 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookShare,
+    MemoirChapterShare,
+    MemoirBookPlanChapter,
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_shares import readable_share_token
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
+    create_test_voice_transcript,
+    memoir_source_ref,
     ensure_mobile_memoir_project,
 )
 
@@ -197,3 +201,114 @@ async def test_book_share_pauses_during_unassembled_chapter_update(client, test_
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 409
     assert (await test_db.get(MemoirBookShare, output.id)).version_id == first.id
+
+
+@pytest.mark.asyncio
+async def test_chapter_share_without_book_is_scoped_versioned_and_independently_revocable(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapter = await create_test_book_plan(test_db, project_id=project_id)
+    draft = await create_test_chapter_draft(test_db, project_id=project_id, chapter_id=chapter.id, content="本章第一版")
+    first = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.draft_id == draft.id))
+    other = MemoirBookPlanChapter(project_id=project_id, plan_id=plan.id, title="不分享的另一章", sort_order=1)
+    test_db.add(other)
+    await test_db.commit()
+    share_path = f"/api/mobile/memoir/projects/{project_id}/book-output/share?chapter_id={chapter.id}"
+    status = await client.get(share_path)
+    assert status.status_code == 200
+    assert status.json()["active"] is False
+    created = await client.post(share_path)
+    assert created.status_code == 200, created.text
+    token = created.json()["token"]
+    assert token.startswith(f"c1.{chapter.id}.")
+    assert (await client.get(share_path)).json()["token"] == token
+    assert await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)) is None
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        async def read(link):
+            return await guest.post("/api/mobile/memoir/book-shares/read", json={"token": link})
+
+        assert (await guest.post(share_path)).status_code == 401
+        response = await read(token)
+        assert response.status_code == 200, response.text
+        assert response.headers["cache-control"] == "no-store"
+        body = response.json()
+        assert body["title"] == chapter.title
+        assert body["latest_version"]["manuscript"]["profile"]["title"] == chapter.title
+        assert body["latest_version"]["content"] == "本章第一版"
+        assert [item["chapter_id"] for item in body["latest_version"]["manuscript"]["chapters"]] == [chapter.id]
+        assert [item["chapter_id"] for item in body["latest_version"]["manuscript"]["table_of_contents"]] == [chapter.id]
+        assert other.id not in response.text
+        assert "不分享的另一章" not in response.text
+        assert (await read(token.replace("c1.", "v1.", 1))).status_code == 404
+        assert (await read(token.replace(chapter.id, other.id))).status_code == 404
+        missing_path = share_path.replace(chapter.id, "missing")
+        assert (await client.post(missing_path)).status_code == 404
+
+        second = MemoirBookChapterDraftVersion(
+            draft_id=draft.id, project_id=project_id, chapter_id=chapter.id, version=2,
+            content="本章第二版", created_by=first.created_by,
+            section_snapshot_json=[{**item, "content": "本章第二版"} for item in first.section_snapshot_json],
+            material_snapshot_json=first.material_snapshot_json,
+            used_material_ids_json=first.used_material_ids_json,
+        )
+        test_db.add(second)
+        await test_db.commit()
+        assert (await read(token)).status_code == 409
+        assert (await client.get(share_path)).json()["current"] is False
+        updated = await client.put(share_path)
+        assert updated.status_code == 200, updated.text
+        assert updated.json() == created.json()
+        assert (await read(token)).json()["latest_version"]["content"] == "本章第二版"
+
+        # A full-book link can coexist and has an independent lifetime.
+        output = MemoirBookOutput(project_id=project_id, plan_id=plan.id, title="全书")
+        test_db.add(output)
+        await test_db.flush()
+        test_db.add(MemoirBookOutputVersion(output_id=output.id, project_id=project_id, plan_id=plan.id, version=1,
+            content=second.content, chapter_snapshot_json=[chapter_snapshot(chapter, second, chapter_index=1)]))
+        await test_db.commit()
+        book_path = share_path.split("?")[0]
+        book_token = (await client.post(book_path)).json()["token"]
+        assert (await read(book_token)).status_code == 200
+        rotated = (await client.post(share_path)).json()["token"]
+        assert (await read(token)).status_code == 404
+        assert (await read(rotated)).status_code == 200
+        assert (await client.delete(share_path)).status_code == 204
+        assert (await read(rotated)).status_code == 404
+        assert (await read(book_token)).status_code == 200
+        renewed = (await client.post(share_path)).json()["token"]
+        share = await test_db.get(MemoirChapterShare, chapter.id)
+        share.expires_at = utcnow_naive() - timedelta(seconds=1)
+        await test_db.commit()
+        assert (await read(renewed)).status_code == 404
+        assert (await client.get(share_path)).json()["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_chapter_share_pauses_when_a_saved_source_is_excluded(client, test_db):
+    from app.models.memoir import MemoirSectionMaterial
+    from app.services.memoir import chapter_generation
+
+    project_id = await ensure_mobile_memoir_project(client)
+    source = await create_test_voice_transcript(client, test_db, project_id=project_id)
+    _, chapter = await create_test_book_plan(test_db, project_id=project_id, source_ref=memoir_source_ref(source))
+    draft = await create_test_chapter_draft(test_db, project_id=project_id, chapter_id=chapter.id, content="需要更新的章节")
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.draft_id == draft.id))
+    version.input_signature = context.input_signature
+    version.material_snapshot_json = chapter_generation._snapshot(context, used_material_ids={source["utterance_id"]})
+    version.section_snapshot_json = [
+        {**item, "input_signature": chapter_generation._section_input_signature(context, section)}
+        for item, section in zip(version.section_snapshot_json, context.sections, strict=True)
+    ]
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share?chapter_id={chapter.id}"
+    token = (await client.post(path)).json()["token"]
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == source["utterance_id"]))
+    material.include_in_book = False
+    await test_db.commit()
+    assert (await client.get(path)).json()["stale"] is True
+    assert (await client.post(path)).status_code == 409
+    assert (await client.put(path)).status_code == 409
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 409

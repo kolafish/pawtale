@@ -1351,6 +1351,16 @@ class MemoirBookShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
+class MemoirChapterShare(Base):
+    __tablename__ = "memoir_chapter_shares"
+
+    chapter_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), primary_key=True)
+    version_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+
+
 class MemoirBookRevisionProposal(Base):
     __tablename__ = "memoir_book_revision_proposals"
     __table_args__ = (

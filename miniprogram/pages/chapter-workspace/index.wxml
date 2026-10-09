@@ -1,3 +1,4 @@
+<import src="../../templates/reading-share.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
   <view wx:if="{{loading && !workspace}}" class="loading-state">正在读取本章</view>
@@ -69,6 +70,8 @@
         bindtap="openChapterPreview"
       ><text>阅读当前版本</text><text>›</text></view>
     </view>
+
+    <view wx:if="{{bookSharePanelOpen}}" class="ui-card"><template is="readingSharePanel" data="{{chapterShare: true, bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription}}" /></view>
 
     <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
       <text class="section-kicker">这次更新需要您判断</text>

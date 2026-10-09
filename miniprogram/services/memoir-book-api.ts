@@ -41,26 +41,31 @@ import {
 import { downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
 
-export function getMemoirBookShareStatus(projectId: string): Promise<MemoirBookShareStatus> {
-  return memoirRequest<MemoirBookShareStatus>(memoirProjectPath(projectId, "/book-output/share"));
+function memoirBookSharePath(projectId: string, chapterId: string): string {
+  const path = memoirProjectPath(projectId, "/book-output/share");
+  return chapterId ? `${path}?chapter_id=${encodeURIComponent(chapterId)}` : path;
 }
 
-export function createMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
-  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+export function getMemoirBookShareStatus(projectId: string, chapterId = ""): Promise<MemoirBookShareStatus> {
+  return memoirRequest<MemoirBookShareStatus>(memoirBookSharePath(projectId, chapterId));
+}
+
+export function createMemoirBookShare(projectId: string, chapterId = ""): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId), {
     method: "POST",
     invalidatesSnapshots: false,
   });
 }
 
-export function updateMemoirBookShare(projectId: string): Promise<MemoirBookShareCreated> {
-  return memoirRequest<MemoirBookShareCreated>(memoirProjectPath(projectId, "/book-output/share"), {
+export function updateMemoirBookShare(projectId: string, chapterId = ""): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId), {
     method: "PUT",
     invalidatesSnapshots: false,
   });
 }
 
-export async function revokeMemoirBookShare(projectId: string): Promise<void> {
-  await memoirRequest<unknown>(memoirProjectPath(projectId, "/book-output/share"), {
+export async function revokeMemoirBookShare(projectId: string, chapterId = ""): Promise<void> {
+  await memoirRequest<unknown>(memoirBookSharePath(projectId, chapterId), {
     method: "DELETE",
     invalidatesSnapshots: false,
   });

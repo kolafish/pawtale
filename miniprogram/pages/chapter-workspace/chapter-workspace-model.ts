@@ -1,3 +1,4 @@
+import type { ReadingShareData } from "../../services/reading-share";
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import { type MemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
@@ -231,7 +232,7 @@ export function scrollToSection(selector: string) {
   }
 }
 
-export interface ChapterWorkspacePageData {
+export interface ChapterWorkspacePageData extends ReadingShareData {
   pageClass: string;
   loading: boolean;
   error: string;
