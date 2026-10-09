@@ -6,7 +6,7 @@ import type {
   MemoirBookPlan,
   MemoirImageAssetListResponse,
 } from "./memoir-book";
-import type { MemoirVoiceTranscriptItem } from "./memoir-transcript";
+import type { MemoirSharedVideo, MemoirVoiceTranscriptItem } from "./memoir-transcript";
 
 export interface MemoirHomeSnapshot {
   server_revision: number;
@@ -98,4 +98,17 @@ export interface MemoirStorySnapshot extends MemoirHomeSnapshot {
   unassigned_video_count: number;
   automation_events: MemoirAutomationEventListResponse;
   growth_events: MemoirStoryGrowthEvent[];
+}
+
+export interface MemoirDemoVideo extends MemoirSharedVideo {
+  share_code: string;
+}
+
+/** A sample memoir visitors can browse before logging in. */
+export interface MemoirDemoStory {
+  title: string;
+  chapters: MemoirStoryChapter[];
+  book_chapter_count: number;
+  book_char_count: number;
+  videos: MemoirDemoVideo[];
 }

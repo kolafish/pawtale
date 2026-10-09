@@ -13,7 +13,7 @@ import type {
   MemoirShareVideoJob,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
-import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
+import type { MemoirDemoVideo, MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { memoirStoryTitle } from "../../services/memoir-display-copy";
@@ -21,13 +21,15 @@ import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
 } from "../../services/memoir-voice-session-api";
-import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import { getMemoirDemoStory, getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import { storyViewData } from "../../components/story-tree/story-view-adapter";
 import {
   dismissMemoirShareVideoCandidate,
   downloadMemoirShareVideoThumbnail,
   getMemoirShareVideoCandidate,
   getMemoirShareVideoJob,
   listMemoirShareVideos,
+  memoirShareVideoDownloadUrl,
 } from "../../services/memoir-transcript-api";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
@@ -42,7 +44,6 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
-import { DEMO_BOOK_SHARE_TOKEN } from "../../config";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   isAuthError,
@@ -87,7 +88,7 @@ interface HomeData extends HomeStoryData {
   creatingVoice: boolean;
   voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
-  demoBookAvailable: boolean;
+  demoVideos: MemoirDemoVideo[];
   error: string;
   userId: string;
   displayName: string;
@@ -185,7 +186,8 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     headerSubtitleText: state.loading ? "正在看看您的故事树。"
-      : state.needsLogin || !state.hasProject ? "每一个故事，都从一颗种子开始。"
+      : state.needsLogin ? "先看看这本示例回忆录，再种下您自己的故事。"
+      : !state.hasProject ? "每一个故事，都从一颗种子开始。"
       : state.hasStories ? ""
       : "从一段回忆开始，让故事慢慢发芽。",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
@@ -278,13 +280,14 @@ definePage<HomeData>()({
   growthAnimationTimer: pageRuntime(() => new PollingTimer(800)),
   homeScrollTop: 0,
   narrationBottom: Infinity,
+  demoReadableChapterIds: [] as string[],
 
   data: {
     loading: false,
     creatingVoice: false,
     voiceEntry: null,
     needsLogin: false,
-    demoBookAvailable: Boolean(DEMO_BOOK_SHARE_TOKEN),
+    demoVideos: [],
     error: "",
     userId: "",
     displayName: "",
@@ -461,6 +464,7 @@ definePage<HomeData>()({
           shareVideoActiveCount: 0,
           shareVideoFailedCount: 0,
         });
+        void this.loadDemoStory(loadSequence);
         return;
       }
       if (showedCachedData || background || this.data.storyLoaded) {
@@ -748,8 +752,32 @@ definePage<HomeData>()({
     wx.navigateTo({ url: pageUrl("/pages/story-voice-edit/index", { projectId: this.data.projectId, projectTitle: this.data.projectTitle }) });
   },
 
+  /** Visitors browse a sample memoir first and log in only when they start their own. */
+  async loadDemoStory(loadSequence: number) {
+    try {
+      const demo = await getMemoirDemoStory();
+      if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin || !demo.chapters.length) return;
+      this.demoReadableChapterIds = demo.chapters.filter(chapter => chapter.readable).map(chapter => chapter.id);
+      setHomeData(this, {
+        story: storyViewData({ ...demo, identity: { active_project: { title: demo.title } } }),
+        storyLoaded: true,
+        demoVideos: demo.videos.map(video => ({ ...video, poster_url: memoirShareVideoDownloadUrl(video.poster_url) })),
+      });
+    } catch (error) {
+      console.warn("load demo memoir failed", error);
+    }
+  },
+
   openChapter(event: StoryTreeChapterEvent) {
     const { chapterId } = event.detail;
+    if (this.data.needsLogin) {
+      if (this.demoReadableChapterIds.includes(chapterId)) {
+        wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
+      } else {
+        wx.showToast({ title: "示例只开放了部分章节", icon: "none" });
+      }
+      return;
+    }
     if (!this.data.projectId || !chapterId) {
       return;
     }
@@ -809,8 +837,9 @@ definePage<HomeData>()({
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
-  openDemoBook() {
-    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { shareToken: DEMO_BOOK_SHARE_TOKEN }) });
+  openDemoVideo(event: PageDatasetEvent) {
+    const code = datasetString(event, "code");
+    if (code) wx.navigateTo({ url: pageUrl("/pages/share-video-player/index", { code }) });
   },
 
   openProjects() {

@@ -39,6 +39,60 @@ from app.services.memoir.read_snapshots import _empty_automation_events
 from app.services.memoir.story_growth_projection import story_growth_events
 
 
+async def chapter_rows(db: AsyncSession, project_id: str):
+    """Chapter titles with the length of each chapter's latest draft."""
+    char_count = (
+        select(func.length(func.trim(MemoirBookChapterDraftVersion.content)))
+        .where(MemoirBookChapterDraftVersion.chapter_id == MemoirBookPlanChapter.id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    chapters = (
+        await db.execute(
+            select(
+                MemoirBookPlanChapter.id,
+                MemoirBookPlanChapter.title,
+                MemoirBookPlanChapter.include_in_book,
+                char_count.label("char_count"),
+            )
+            .where(MemoirBookPlanChapter.project_id == project_id)
+            .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
+        )
+    ).all()
+    return chapters
+
+
+async def attach_sections(
+    db: AsyncSession, project_id: str, chapter_views: dict[str, MemoirStoryChapterResponse]
+) -> tuple[dict[str, MemoirStorySectionResponse], dict[str, str]]:
+    """Add active sections and their material counts to the chapter views."""
+    section_views = {}
+    section_chapters = {}
+    for section in (
+        await db.execute(
+            select(MemoirSection.id, MemoirSection.chapter_id, MemoirSection.title)
+            .where(MemoirSection.project_id == project_id, MemoirSection.status == "active")
+            .order_by(MemoirSection.sort_order, MemoirSection.id)
+        )
+    ).all():
+        view = MemoirStorySectionResponse(id=section.id, title=section.title)
+        section_views[section.id] = view
+        section_chapters[section.id] = section.chapter_id
+        chapter_views[section.chapter_id].sections.append(view)
+    for section_id, count in (
+        await db.execute(
+            select(MemoirSectionMaterial.section_id, func.count())
+            .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+            .where(MemoirSectionMaterial.project_id == project_id, MemoirSection.status == "active")
+            .group_by(MemoirSectionMaterial.section_id)
+        )
+    ).all():
+        section_views[section_id].material_count = count
+        chapter_views[section_chapters[section_id]].material_count += count
+    return section_views, section_chapters
+
+
 async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotResponse:
     identity = await projects.memoir_identity_response(db, user)
     result = MemoirStorySnapshotResponse(
@@ -55,25 +109,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     result.progress = await draft_progress.read_draft_progress(db, project_id=project.id, jobs=jobs)
     parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
     progress = DraftProgress.model_validate(parent.result_json or {}) if parent else DraftProgress()
-    char_count = (
-        select(func.length(func.trim(MemoirBookChapterDraftVersion.content)))
-        .where(MemoirBookChapterDraftVersion.chapter_id == MemoirBookPlanChapter.id)
-        .order_by(MemoirBookChapterDraftVersion.version.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-    chapters = (
-        await db.execute(
-            select(
-                MemoirBookPlanChapter.id,
-                MemoirBookPlanChapter.title,
-                MemoirBookPlanChapter.include_in_book,
-                char_count.label("char_count"),
-            )
-            .where(MemoirBookPlanChapter.project_id == project.id)
-            .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
-        )
-    ).all()
+    chapters = await chapter_rows(db, project.id)
     # Match the canonical active issue queue. Book-level decisions are counted
     # once, never copied to every chapter they may temporarily keep out of a book.
     issue_counts = defaultdict(MemoirStoryIssueCounts)
@@ -146,29 +182,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         else:
             view.state, view.state_text = "draft", "待整理"
         chapter_views[chapter.id] = view
-    section_views = {}
-    section_chapters = {}
-    for section in (
-        await db.execute(
-            select(MemoirSection.id, MemoirSection.chapter_id, MemoirSection.title)
-            .where(MemoirSection.project_id == project.id, MemoirSection.status == "active")
-            .order_by(MemoirSection.sort_order, MemoirSection.id)
-        )
-    ).all():
-        view = MemoirStorySectionResponse(id=section.id, title=section.title)
-        section_views[section.id] = view
-        section_chapters[section.id] = section.chapter_id
-        chapter_views[section.chapter_id].sections.append(view)
-    for section_id, count in (
-        await db.execute(
-            select(MemoirSectionMaterial.section_id, func.count())
-            .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
-            .where(MemoirSectionMaterial.project_id == project.id, MemoirSection.status == "active")
-            .group_by(MemoirSectionMaterial.section_id)
-        )
-    ).all():
-        section_views[section_id].material_count = count
-        chapter_views[section_chapters[section_id]].material_count += count
+    section_views, section_chapters = await attach_sections(db, project.id, chapter_views)
     result.automation_events = await automation_events.list_automation_events(
         db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
     )

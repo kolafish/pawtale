@@ -173,6 +173,15 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     current_version, stale = await _current_version(db, user_id=owner_id, project_id=output.project_id)
     if stale or current_version is None or share.version_id != current_version.id:
         raise HTTPException(status_code=409, detail="书稿正在更新，暂时无法阅读分享内容")
+    return public_reading_response(output, version)
+
+
+def public_reading_response(
+    output: MemoirBookOutput,
+    version: MemoirBookOutputVersion,
+    chapter_ids: set[str] | None = None,
+) -> MemoirBookOutputResponse:
+    """A reader-only copy of a book version, optionally limited to some chapters."""
     reading_version = _output_version_response(version, fallback_title=output.title)
     manuscript = reading_version.manuscript
     if manuscript is not None:
@@ -187,12 +196,15 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
             "time_hint": "",
             "place_hint": "",
             "sections": [section.model_copy(update={"source_ref_ids": []}) for section in chapter.sections],
-        }) for chapter in manuscript.chapters]
+        }) for chapter in manuscript.chapters if chapter_ids is None or chapter.chapter_id in chapter_ids]
         back_matter = manuscript.back_matter.model_copy(update={
             key: getattr(manuscript.back_matter, key).model_copy(update={"content": ""})
             for key in ("afterword", "interview_records", "version_note", "unconfirmed_facts", "source_appendix")
         })
         reading_version = reading_version.model_copy(update={
+            **({} if chapter_ids is None else {
+                "content": "\n\n".join(chapter.content for chapter in chapters),
+            }),
             "manuscript": manuscript.model_copy(update={
                 "profile": manuscript.profile.model_copy(update={
                     "narrator_name": "", "prepared_by": "", "interview_date_range": "",
@@ -204,6 +216,9 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
                 "render_settings": manuscript.render_settings.model_copy(update={"back_cover_quote": ""}),
             }),
         })
+    elif chapter_ids is not None:
+        # Without chapter structure the text cannot be limited, so nothing is shown.
+        reading_version = reading_version.model_copy(update={"content": ""})
     return MemoirBookOutputResponse(
         id=output.id,
         project_id=output.project_id,

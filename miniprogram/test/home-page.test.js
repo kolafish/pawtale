@@ -1354,3 +1354,47 @@ test("home refreshes the saved project default for the current account and proje
   assert.equal(context.data.voiceEntry, null);
   context.onUnload();
 });
+
+test("visitors browse the sample memoir and open only its readable chapters", async () => {
+  const { ApiError } = require("../services/request.ts");
+  const chapter = (id, title, readable) => ({
+    id, title, readable, include_in_book: true, material_count: 1, image_count: 0, video_count: 0,
+    char_count: readable ? 120 : 80, candidate_job_id: null, state: readable ? "settled" : "draft",
+    state_text: "", issues: { review_count: 0, supplement_count: 0 }, sections: [],
+  });
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
+    getMemoirDemoStory: async () => ({
+      title: "余仲尤往事",
+      chapters: [chapter("family", "家里的人", true), chapter("closed", "下乡那几年", false)],
+      book_chapter_count: 2,
+      book_char_count: 200,
+      videos: [{ share_code: "code-1", title: "他端来半碗胡豆", poster_url: "/poster" }],
+    }),
+    memoirShareVideoDownloadUrl: (url) => `https://api.test${url}`,
+  } });
+  const opened = [];
+  const toasts = [];
+  global.wx = {
+    navigateTo: ({ url }) => opened.push(url),
+    showToast: ({ title }) => toasts.push(title),
+  };
+  const context = pageContext(page, {});
+
+  await page.loadHome.call(context);
+  await flushAsyncWork();
+
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.storyLoaded, true);
+  assert.deepEqual(context.data.story.chapters.map((item) => item.title), ["家里的人", "下乡那几年"]);
+  assert.equal(context.data.demoVideos[0].poster_url, "https://api.test/poster");
+
+  context.openChapter({ detail: { chapterId: "family" } });
+  context.openChapter({ detail: { chapterId: "closed" } });
+  context.openDemoVideo({ currentTarget: { dataset: { code: "code-1" } } });
+  assert.deepEqual(opened, [
+    "/pages/book-reader/index?demo=1",
+    "/pages/share-video-player/index?code=code-1",
+  ]);
+  assert.equal(toasts.length, 1);
+});

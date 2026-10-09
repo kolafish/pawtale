@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Mini program codes printed in share videos open this version: release, trial or develop.
     wechat_miniprogram_code_env_version: str = "release"
 
+    # Sample memoir that visitors can browse before logging in: comma-separated
+    # chapter ids readable in full (the story tree comes from their project) and
+    # share codes of videos from the same project.
+    memoir_demo_chapter_ids: str = ""
+    memoir_demo_video_codes: str = ""
+
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
