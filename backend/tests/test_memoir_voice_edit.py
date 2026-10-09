@@ -68,7 +68,7 @@ async def story(client, test_db):
     return {"pid": project.id, "uid": uid, "chapters": chapters, "sections": sections + [extra.id], "materials": materials}
 
 
-async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, supports_section_merge=True, supports_composed_chapter_edits=True, reply="请看看这些修改。"):
+async def preview(client, monkeypatch, story, operations, *, questions=None, instruction="帮我改一下", supports_chapter_split=False, supports_section_merge=True, supports_composed_chapter_edits=True, supports_multiple_chapter_splits=True, reply="请看看这些修改。"):
     fake = FakeAI({"operations": operations, "questions": questions or [], "reply": reply})
     requested = []
 
@@ -77,7 +77,7 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
         return fake
 
     monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", factory)
-    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split, "supports_section_merge": supports_section_merge, "supports_composed_chapter_edits": supports_composed_chapter_edits})
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/preview", json={"instruction": instruction, "ai_model": "deepseek-v4-flash", "supports_chapter_split": supports_chapter_split, "supports_section_merge": supports_section_merge, "supports_composed_chapter_edits": supports_composed_chapter_edits, "supports_multiple_chapter_splits": supports_multiple_chapter_splits})
     assert requested == ["deepseek-v4-flash"]
     return response, fake
 
@@ -432,6 +432,7 @@ async def test_split_chapter_moves_last_two_sections_without_collapsing_them(
         client, monkeypatch, story, [operation],
         instruction="把第三章最后两个小节里辞职后运动、做饭和羽毛球这些放到新章节。",
         supports_chapter_split=True,
+        supports_multiple_chapter_splits=False,
         reply="第三章有 11 个小节，请您逐条阅读这些讲述，再告诉我是否要移动；还请您想一个新章节名称。" * 5,
     )
     assert response.status_code == 200, response.text
@@ -470,6 +471,149 @@ async def test_split_chapter_moves_last_two_sections_without_collapsing_them(
     assert source_draft.status == "draft"
     assert output.status == "draft"
     assert (await apply(client, story, data)).status_code == 409
+
+
+@pytest_asyncio.fixture
+async def multiple_split_story(story, test_db):
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    operations = []
+    for group, title in enumerate(["婚后经历", "执教成就"]):
+        section_ids = []
+        for index in range(2):
+            section = MemoirSection(
+                project_id=story["pid"], chapter_id=story["chapters"][0],
+                title=f"{title}{index + 1}", sort_order=group * 2 + index + 1,
+            )
+            utterance = MemoirVoiceUtterance(
+                voice_session_id=session.id, transcript_raw=f"{title}的第{index + 1}条讲述。",
+            )
+            test_db.add_all([section, utterance])
+            await test_db.flush()
+            test_db.add(MemoirSectionMaterial(
+                project_id=story["pid"], section_id=section.id, utterance_id=utterance.id,
+            ))
+            section_ids.append(section.id)
+        operations.append({
+            "action": "split_chapter", "target_ref": story["chapters"][0],
+            "new_title": title, "section_ids": section_ids,
+        })
+    await test_db.commit()
+    return story, operations
+
+
+@pytest.mark.parametrize("selection", [[0, 1], [0], [1]])
+async def test_split_one_chapter_into_three_preserves_groups_and_independent_confirmation(
+    client, test_db, monkeypatch, multiple_split_story, selection,
+):
+    story, operations = multiple_split_story
+    before = await _story(test_db, story["pid"])
+    response, _ = await preview(
+        client, monkeypatch, story, operations, supports_chapter_split=True,
+        instruction="第一章内容太多了，拆一下章节。\n拆成三张吧。",
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert len(json.loads(data["signature"])) == 2
+    assert len((await _story(test_db, story["pid"]))["chapters"]) == len(before["chapters"])
+    chosen = [operations[index] for index in selection]
+    result = await apply(client, story, data, operations=chosen)
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    assert [chapter["title"] for chapter in after["chapters"]] == [
+        "测试录音", *[op["new_title"] for op in chosen], "童年回忆", "早晨日常",
+    ]
+    for op in chosen:
+        chapter = next(c for c in after["chapters"] if c["title"] == op["new_title"])
+        assert [s["ref"] for s in after["sections"] if s["chapter_ref"] == chapter["ref"]] == op["section_ids"]
+        item = next(item for item in data["operations"] if item["new_title"] == op["new_title"])
+        assert op["new_title"] in item["detail"]
+    assert after["memberships"] == before["memberships"]
+    assert after["materials"] == before["materials"]
+    assert (await apply(client, story, data, operations=chosen)).status_code == 409
+
+
+@pytest.mark.parametrize("conflict", ["overlap", "empty_source", "mixed_selection", "rename", "delete"])
+async def test_multiple_splits_reject_conflicting_batches(client, test_db, monkeypatch, multiple_split_story, conflict):
+    story, operations = multiple_split_story
+    if conflict == "overlap":
+        operations[1]["section_ids"].append(operations[0]["section_ids"][0])
+    elif conflict == "empty_source":
+        operations[1]["section_ids"].append(story["sections"][0])
+    elif conflict == "mixed_selection":
+        snapshot = await _story(test_db, story["pid"])
+        selected = set(operations[1].pop("section_ids"))
+        operations[1]["utterance_ids"] = [
+            link["material_ref"] for link in snapshot["memberships"] if link["section_ref"] in selected
+        ]
+    else:
+        operations.append({
+            "action": f"{conflict}_chapter", "target_ref": story["chapters"][0],
+            **({"new_title": "新的名字"} if conflict == "rename" else {}),
+        })
+    response, _ = await preview(client, monkeypatch, story, operations, supports_chapter_split=True)
+    assert response.status_code == 422, response.text
+    assert len((await _story(test_db, story["pid"]))["chapters"]) == 3
+
+
+async def test_multiple_splits_require_a_client_that_can_confirm_each_group(client, monkeypatch, multiple_split_story):
+    story, operations = multiple_split_story
+    response, fake = await preview(
+        client, monkeypatch, story, operations,
+        supports_chapter_split=True, supports_multiple_chapter_splits=False,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["operations"] == []
+    assert response.json()["questions"] == []
+    assert "更新小程序" in response.json()["reply"]
+    assert "不能分别确认同一章拆出的多个新章" in fake.system
+
+
+async def test_multiple_splits_roll_back_the_whole_batch_after_a_later_failure(
+    client, test_db, monkeypatch, multiple_split_story,
+):
+    from app.services.memoir.voice_edit import apply_book_plan_structure_command
+
+    story, operations = multiple_split_story
+    response, _ = await preview(client, monkeypatch, story, operations, supports_chapter_split=True)
+    assert response.status_code == 200, response.text
+    before = await _story(test_db, story["pid"])
+    calls = 0
+
+    async def fail_second_split(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise HTTPException(422, "第二组拆分失败")
+        return await apply_book_plan_structure_command(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.memoir.voice_edit.apply_book_plan_structure_command", fail_second_split)
+    result = await apply(client, story, response.json())
+    assert result.status_code == 422, result.text
+    assert calls == 2
+    assert await _story(test_db, story["pid"]) == before
+
+
+async def test_multiple_material_splits_keep_source_text_and_chapter_order(
+    client, test_db, monkeypatch, multiple_split_story,
+):
+    story, operations = multiple_split_story
+    before = await _story(test_db, story["pid"])
+    for op in operations:
+        selected = set(op.pop("section_ids"))
+        op["utterance_ids"] = [link["material_ref"] for link in before["memberships"] if link["section_ref"] in selected]
+    response, _ = await preview(client, monkeypatch, story, operations, supports_chapter_split=True)
+    assert response.status_code == 200, response.text
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    assert [c["title"] for c in after["chapters"]] == ["测试录音", "婚后经历", "执教成就", "童年回忆", "早晨日常"]
+    assert [(m["ref"], m["raw"], m["text"]) for m in after["materials"]] == [
+        (m["ref"], m["raw"], m["text"]) for m in before["materials"]
+    ]
+    for op in operations:
+        chapter_id = next(c["ref"] for c in after["chapters"] if c["title"] == op["new_title"])
+        section_ids = {s["ref"] for s in after["sections"] if s["chapter_ref"] == chapter_id}
+        assert {link["material_ref"] for link in after["memberships"] if link["section_ref"] in section_ids} == set(op["utterance_ids"])
 
 
 async def test_split_section_preview_rejects_changed_section(client, test_db, monkeypatch, story):
@@ -582,6 +726,19 @@ async def test_standalone_section_delete_preserves_material_and_other_sections(c
     assert await test_db.get(MemoirSection, story["sections"][3]) is not None
     assert await test_db.get(MemoirVoiceUtterance, story["materials"][1]) is not None
     assert await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == story["materials"][1])) is None
+
+
+async def test_standalone_chapter_delete_preserves_original_material(client, test_db, monkeypatch, story):
+    response, _ = await preview(client, monkeypatch, story, [{
+        "action": "delete_chapter", "target_ref": story["chapters"][0],
+    }])
+    assert response.status_code == 200, response.text
+    result = await apply(client, story, response.json())
+    assert result.status_code == 200, result.text
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][0]) is None
+    assert await test_db.get(MemoirSection, story["sections"][0]) is None
+    assert await test_db.get(MemoirVoiceUtterance, story["materials"][0]) is not None
+    assert await test_db.get(MemoirBookPlanChapter, story["chapters"][1]) is not None
 
 
 @pytest.mark.parametrize("singleton", [False, True])

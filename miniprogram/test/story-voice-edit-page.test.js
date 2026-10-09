@@ -282,6 +282,33 @@ test("section-based chapter split presents one confirmation and applies the chos
   assert.match(template, /\{\{splitConfirmation\.new_title\}\}/);
 });
 
+test("multiple splits of one chapter can be confirmed separately after the spoken clarification", async () => {
+  const operations = [
+    { action: "split_chapter", target_ref: "c1", new_title: "婚后经历", section_ids: ["s2", "s3"], label: "婚后经历", detail: "移入新章婚后经历。" },
+    { action: "split_chapter", target_ref: "c1", new_title: "执教成就", section_ids: ["s4", "s5"], label: "执教成就", detail: "移入新章执教成就。" },
+  ];
+  for (const selection of [[0, 1], [0], [1]]) {
+    const { context, calls } = setup({ preview: async (_projectId, instruction) => instruction.includes("三张")
+      ? { signature: "three-chapters", reply: "请确认各组内容和新章名。", questions: [], operations }
+      : { signature: "{}", reply: "", questions: ["是否要拆成三章？"], operations: [] },
+    });
+    const original = "第一章内容太多了，拆一下章节。";
+    await context.submitInstruction({ detail: { value: original } });
+    context.changeInstruction({ detail: { value: `${original}\n拆成三张吧。` } });
+    await context.submitInstruction();
+    assert.equal(context.data.splitConfirmation, null);
+    assert.equal(context.data.items.length, 2);
+    assert.equal(new Set(context.data.items.map(item => item.selectionKey)).size, 2);
+    assert.equal(calls.applies.length, 0);
+    context.selectOperations({ detail: { value: selection.map(index => context.data.items[index].selectionKey) } });
+    await context.apply();
+    assert.deepEqual(calls.applies, [["p1", "three-chapters", selection.map(index => {
+      const { action, target_ref, new_title, section_ids } = operations[index];
+      return { action, target_ref, new_title, section_ids };
+    })]]);
+  }
+});
+
 test("a specific clarification stays visible and can be answered with the original request", async () => {
   const { context, calls } = setup({ preview: async () => ({
     signature: "{}", reply: "还需要确定要修改的具体内容。", operations: [],
@@ -362,6 +389,7 @@ test("voice edit gives the model a generation deadline, uses mutation writes and
   assert.equal(calls[0][2].supports_chapter_split, true);
   assert.equal(calls[0][2].supports_section_merge, true);
   assert.equal(calls[0][2].supports_composed_chapter_edits, true);
+  assert.equal(calls[0][2].supports_multiple_chapter_splits, true);
   assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");
