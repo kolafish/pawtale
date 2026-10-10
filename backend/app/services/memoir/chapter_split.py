@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -78,9 +78,10 @@ def build_chapter_split_prompt(
         f"下面是回忆录中“{chapter.title}”这一章的全部小节。请判断这一章是否装了几个不同的人生阶段或长期主题，"
         "需要拆成几章。\n"
         "只在一章明显跨越不同人生阶段（例如童年、求学、工作、成家、晚年）或几个互不相干的长期主题时才拆；"
-        "同一段经历讲得再细，也保持一章。拆分后每章至少两个小节。\n"
-        "第一组保留在原章节，沿用原标题，放和原标题最贴近的小节；其余每组成为新章节，按人生先后排列，"
-        "标题简短具体、直接来自讲述内容，不和其他已有章节重名。每个小节只能出现一次。\n"
+        "同一段经历讲得再细，也保持一章。一般拆成 2 到 4 章，每章至少两个小节。\n"
+        "第一组保留在原章节，沿用原标题，放和原标题最贴近的小节；其余每组成为新章节，按人生先后排列。"
+        "新章节标题用 2 到 8 个字概括这一阶段或主题（例如“求学与教书”“成家以后”），"
+        "不要照抄小节标题，不和其他已有章节重名。每个小节只能出现一次。\n"
         "不需要拆分时只返回一组，包含全部小节。\n\n"
         f"其他已有章节：{json.dumps(other_chapter_titles, ensure_ascii=False)}\n\n"
         f"本章小节：\n{json.dumps(section_payload, ensure_ascii=False)}\n\n"
@@ -110,15 +111,20 @@ def normalize_split_groups(
                 used.add(section_id)
                 ids.append(section_id)
         if ids:
-            title = " ".join(raw.title.split())[:80]
-            groups.append(ChapterSplitGroup(title=title, section_ids=sorted(ids, key=order.__getitem__)))
+            groups.append(ChapterSplitGroup(title=" ".join(raw.title.split())[:80], section_ids=ids))
     if not groups:
         return []
     missing = [section.id for section in sections if section.id not in used]
-    first = groups[0]
-    groups[0] = ChapterSplitGroup(title=chapter.title, section_ids=sorted([*first.section_ids, *missing], key=order.__getitem__))
-    groups = [groups[0], *(group for group in groups[1:] if group.title and group.title != chapter.title)]
-    return groups if len(groups) > 1 else []
+    section_titles = {section.title for section in sections}
+    kept = [ChapterSplitGroup(title=chapter.title, section_ids=[*groups[0].section_ids, *missing])]
+    for group in groups[1:]:
+        if len(group.section_ids) >= 2 and group.title and group.title not in section_titles | {chapter.title}:
+            kept.append(group)
+        else:
+            # Too small or badly named to stand alone: it stays with the chapter before it.
+            kept[-1] = replace(kept[-1], section_ids=[*kept[-1].section_ids, *group.section_ids])
+    kept = [replace(group, section_ids=sorted(group.section_ids, key=order.__getitem__)) for group in kept]
+    return kept if len(kept) > 1 else []
 
 
 async def decide_chapter_split(
