@@ -60,7 +60,11 @@ def _usage_purpose(record: AIUsageRecord) -> str:
     if record.provider in {"volc_streaming_asr", "volc_streaming_asr_reprocess", "stepfun"}:
         return "语音识别"
     if record.provider == "volc_tts":
-        return "语音朗读"
+        return "访谈语音回复" if "/voice-sessions/" in operation else "语音朗读"
+    if operation == "memoir.job.evaluate_share_video_candidate":
+        return "分享片段筛选"
+    if operation == "memoir.job.evaluate_interview_policy_shadow":
+        return "访谈策略评测"
     if "share_video" in operation:
         return "分享视频生成"
     if record.image_count or "image_generation" in operation:
