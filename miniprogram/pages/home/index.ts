@@ -13,7 +13,7 @@ import type {
   MemoirShareVideoJob,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
-import type { MemoirDemoVideo, MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
+import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { memoirStoryTitle } from "../../services/memoir-display-copy";
@@ -29,7 +29,6 @@ import {
   getMemoirShareVideoCandidate,
   getMemoirShareVideoJob,
   listMemoirShareVideos,
-  memoirShareVideoDownloadUrl,
 } from "../../services/memoir-transcript-api";
 import { formatTranscriptDurationSeconds } from "../../services/transcript-view-model";
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
@@ -58,7 +57,7 @@ import {
   navigateToLogin,
   navigateToVideoClipPicker,
 } from "../../services/navigation";
-import { datasetString, pageUrl, type PageDatasetEvent } from "../../services/page-input";
+import { pageUrl } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -89,7 +88,6 @@ interface HomeData extends HomeStoryData {
   creatingVoice: boolean;
   voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
-  demoVideos: MemoirDemoVideo[];
   demoReadableChapterIds: string[];
   error: string;
   userId: string;
@@ -239,7 +237,6 @@ function applyHomeSnapshotData(
     loading: false,
     error: "",
     needsLogin: false,
-    demoVideos: [],
     demoReadableChapterIds: [],
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
@@ -294,7 +291,6 @@ definePage<HomeData>()({
     creatingVoice: false,
     voiceEntry: null,
     needsLogin: false,
-    demoVideos: [],
     demoReadableChapterIds: [],
     error: "",
     userId: "",
@@ -452,7 +448,6 @@ definePage<HomeData>()({
         setHomeData(this, {
           ...emptyHomeStoryData(),
           needsLogin: true,
-          demoVideos: [],
           demoReadableChapterIds: [],
           voiceEntry: null,
           showContinueNarration: false,
@@ -802,7 +797,6 @@ definePage<HomeData>()({
         demoReadableChapterIds: demo.chapters.filter(chapter => chapter.readable).map(chapter => chapter.id),
         story: storyViewData({ ...demo, identity: { active_project: { title: demo.title } } }),
         storyLoaded: true,
-        demoVideos: demo.videos.map(video => ({ ...video, poster_url: memoirShareVideoDownloadUrl(video.poster_url) })),
       });
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin) return;
@@ -878,11 +872,6 @@ definePage<HomeData>()({
 
   createProject() {
     wx.navigateTo({ url: "/pages/project-edit/index" });
-  },
-
-  openDemoVideo(event: PageDatasetEvent) {
-    const code = datasetString(event, "code");
-    if (code) wx.navigateTo({ url: pageUrl("/pages/share-video-player/index", { code }) });
   },
 
   openProjects() {

@@ -1373,7 +1373,6 @@ test("visitors browse the sample memoir and open only its readable chapters", as
       book_char_count: 200,
       videos: [{ share_code: "code-1", title: "他端来半碗胡豆", poster_url: "/poster" }],
     }),
-    memoirShareVideoDownloadUrl: (url) => `https://api.test${url}`,
   } });
   const opened = [];
   const toasts = [];
@@ -1389,16 +1388,13 @@ test("visitors browse the sample memoir and open only its readable chapters", as
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.storyLoaded, true);
   assert.deepEqual(context.data.story.chapters.map((item) => item.title), ["家里的人", "下乡那几年"]);
-  assert.equal(context.data.demoVideos[0].poster_url, "https://api.test/poster");
 
   context.openChapter({ detail: { chapterId: "family" } });
   context.openChapter({ detail: { chapterId: "closed" } });
   context.openBook();
-  context.openDemoVideo({ currentTarget: { dataset: { code: "code-1" } } });
   assert.deepEqual(opened, [
     "/pages/book-reader/index?demo=1",
     "/pages/book-reader/index?demo=1",
-    "/pages/share-video-player/index?code=code-1",
   ]);
   assert.equal(toasts.length, 1);
 });
@@ -1411,13 +1407,11 @@ test("a failed demo refresh clears old public links and remains retryable withou
   } });
   const context = pageContext(page, {
     needsLogin: true,
-    demoVideos: [{ share_code: "old-video" }],
     demoReadableChapterIds: ["old-chapter"],
   });
   await context.loadHome();
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.loading, false);
   assert.ok(context.data.storyError);
-  assert.deepEqual(context.data.demoVideos, []);
   assert.deepEqual(context.data.demoReadableChapterIds, []);
 });
