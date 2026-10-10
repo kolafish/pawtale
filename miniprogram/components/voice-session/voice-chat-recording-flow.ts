@@ -75,7 +75,6 @@ export function voiceRecordingStartedPatch(autoTriggered: boolean): VoiceChatPat
     liveText: "",
     liveCharCount: 0,
     ...resetLiveTranscriptScrollPatch(),
-    selectedOpeningTopicText: "",
     primaryActionText: "暂停收音",
     autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
   };
@@ -215,7 +214,6 @@ export function voiceFinalTranscriptResult(
       error: "",
       errorKindText: "",
       assistantPromptText: "",
-      selectedOpeningTopicText: "",
       followUpMessageId: "",
       followUpAudioFileId: "",
       followUpLoading: false,

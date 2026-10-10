@@ -192,7 +192,8 @@
   text-align: center;
 }
 
-.topic-item.already_shared .state-chip {
+.topic-item.touched .state-chip,
+.topic-item.covered .state-chip {
   background: var(--ui-success-surface);
   color: var(--ui-success-text);
 }

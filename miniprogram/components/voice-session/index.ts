@@ -82,11 +82,6 @@ interface CheckboxChangeEvent {
   };
 }
 
-interface OpeningTopicDataset {
-  promptText?: string;
-}
-
-type OpeningTopicTapEvent = PageDatasetEvent<OpeningTopicDataset>;
 type SpeakerRoleTapEvent = PageDatasetEvent<{ role?: string }>;
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
@@ -798,7 +793,6 @@ Component({
       ttsRemainingText: "",
       ttsProgressPercent: 0,
       canRequestFollowUp: false,
-      selectedOpeningTopicText: "",
       persistenceStateText: "小余正在回应",
     });
     try {
@@ -1073,31 +1067,6 @@ Component({
 
   async regenerateFollowUp() {
     await this.generateFollowUp(true);
-  },
-
-  chooseOpeningTopic(event: OpeningTopicTapEvent) {
-    if (this.data.interviewType === "human_interview") {
-      return;
-    }
-    const promptText = datasetString(event, "promptText");
-    if (!promptText || this.data.followUpLoading) {
-      return;
-    }
-    if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
-      this.cancelFollowUpTTS("opening_topic_selected");
-    }
-    applyVoiceChatDataPatch(this, {
-      selectedOpeningTopicText: promptText,
-      assistantPromptText: promptText,
-      followUpError: "",
-      followUpTTSLoading: false,
-      followUpTTSError: "",
-      followUpTTSStateText: "",
-      assistantExpectsAnswer: true,
-      canRequestFollowUp: false,
-      persistenceStateText: "等待回答",
-      autoListenStateText: "可以点按钮开始讲",
-    });
   },
 
   startRecordingAsSpeaker(event: SpeakerRoleTapEvent) {

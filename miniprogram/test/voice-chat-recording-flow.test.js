@@ -41,7 +41,6 @@ test("voice recording flow derives recording start and unavailable patches", () 
     liveScrollTop: 0,
     liveTranscriptFollowing: true,
     liveReviewStartCharCount: 0,
-    selectedOpeningTopicText: "",
     primaryActionText: "暂停收音",
     autoListenStateText: "小余说完，正在听您说",
   });

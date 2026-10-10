@@ -35,7 +35,7 @@ async def test_mobile_topic_map_is_not_a_completion_checklist(client):
         item["display_state"]
         for module in payload["modules"]
         for item in module["items"]
-    } == {"can_share"}
+    } == {"not_started"}
 
 
 async def test_user_resolution_survives_material_matching(client, test_db):
@@ -49,6 +49,7 @@ async def test_user_resolution_survives_material_matching(client, test_db):
         await client.get(f"/api/mobile/memoir/projects/{project_id}/topic-map")
     ).json()
     item = topic_map["modules"][0]["items"][0]
+    side_item = topic_map["modules"][0]["items"][1]
     response = await client.patch(
         (
             f"/api/mobile/memoir/projects/{project_id}/topic-map/items/"
@@ -77,6 +78,11 @@ async def test_user_resolution_survives_material_matching(client, test_db):
                 item_key=item["item_key"],
                 confidence=0.7,
             ),
+            frameworks.FrameworkMaterialMatch(
+                utterance_id=material.id,
+                item_key=side_item["item_key"],
+                confidence=0.3,
+            ),
         ),
         match_source=MemoirFrameworkMatchSource.EVALUATOR,
         matcher_version="topic-map-api-test",
@@ -94,7 +100,17 @@ async def test_user_resolution_survives_material_matching(client, test_db):
         json={"user_resolution": "none"},
     )
     assert cleared.status_code == 200
-    assert cleared.json()["display_state"] == "already_shared"
+    assert cleared.json()["display_state"] == "touched"
+    refreshed = (
+        await client.get(f"/api/mobile/memoir/projects/{project_id}/topic-map")
+    ).json()
+    states = {
+        topic["id"]: topic["display_state"]
+        for module in refreshed["modules"]
+        for topic in module["items"]
+    }
+    assert states[item["id"]] == "touched"
+    assert states[side_item["id"]] == "not_started"
 
 
 async def test_topic_map_resolution_rejects_cross_project_item(client):

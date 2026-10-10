@@ -244,7 +244,7 @@ definePage<OverviewData>()({
     projectTitle: "",
     progress: EMPTY_PROGRESS,
     sessions: [],
-    topicHeadline: "这些是聊过的人生话题",
+    topicHeadline: "人生话题",
     topicDetail: "它不是章节目录，也没有必须全部讲完。",
     topicModules: [],
     savingItemId: "",

@@ -16,7 +16,7 @@ function topicMapFixture() {
     project_id: "project-1",
     template_key: "memoir_life_topics",
     template_version: "1",
-    headline: "这些是聊过的人生话题",
+    headline: "人生话题",
     detail: "它不是章节目录，也没有必须全部讲完。",
     modules: [
       {
@@ -30,9 +30,9 @@ function topicMapFixture() {
             intent: "童年生活、家庭环境和成长经历",
             evidence_state: "has_material",
             user_resolution: "none",
-            display_state: "already_shared",
-            state_text: "已经聊过",
-            state_detail: "这里已经有相关讲述。",
+            display_state: "touched",
+            state_text: "聊过一点",
+            state_detail: "已经讲过一些，想起更多可以接着讲。",
             resolved_at: null,
           },
           {
@@ -359,7 +359,7 @@ test("narration overview keeps evidence and user decisions as separate topic sta
   } = loadOverviewPage().mod;
   const patch = topicMapViewPatch(topicMapFixture());
 
-  assert.equal(patch.topicModules[0].items[0].state_text, "已经聊过");
+  assert.equal(patch.topicModules[0].items[0].state_text, "聊过一点");
   assert.equal(patch.topicModules[0].items[0].actionText, "调整这个话题");
   assert.equal(patch.topicModules[0].items[0].startDisabled, false);
   assert.equal(patch.topicModules[0].items[1].state_text, "不想聊这个");

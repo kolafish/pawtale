@@ -790,44 +790,6 @@ def topic_offer_reply_instruction(brief: InterviewBrief) -> str:
     )
 
 
-async def anchored_opening_reply_instruction(
-    db: AsyncSession,
-    *,
-    session: MemoirVoiceSession,
-) -> str:
-    if (
-        not session.anchor_framework_item_id
-        or session.guidance_mode
-        != MemoirGuidanceMode.GUIDED_INTERVIEW.value
-        or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
-        or any(
-            message.role == MemoirChatMessageRole.USER.value
-            and message.content_status == MemoirChatContentStatus.FINAL.value
-            and message.content_text.strip()
-            for message in session.messages
-        )
-    ):
-        return ""
-    context = await build_current_policy_context(
-        db,
-        session=session,
-        completion_issue_id=None,
-        policy_version=ACTIVE_POLICY_VERSION,
-    )
-    if context is None or len(context.topic_candidates) != 1:
-        return ""
-    try:
-        brief = await interview_topics.brief_for_candidate(
-            db,
-            project_id=context.project_id,
-            base_brief=context.brief,
-            candidate=context.topic_candidates[0],
-        )
-    except interview_topics.InterviewTopicUnavailableError:
-        return ""
-    return topic_offer_reply_instruction(brief)
-
-
 async def persist_policy_turn_decision(
     db: AsyncSession,
     *,

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +29,47 @@ from app.models.memoir_narrative import (
     MemoirProjectFramework,
 )
 from app.models.projects import Project
+
+
+# Only primary matches count toward a topic: the matcher links one utterance to
+# several topics, and low-confidence side links made every topic look covered.
+PRIMARY_MATCH_CONFIDENCE = 0.6
+TOPIC_COVERED_MATERIAL_COUNT = 3
+
+
+class FrameworkTopicLevel(str, Enum):
+    NOT_STARTED = "not_started"
+    TOUCHED = "touched"
+    COVERED = "covered"
+
+
+async def primary_material_counts(
+    db: AsyncSession,
+    *,
+    project_framework_id: str,
+) -> dict[str, int]:
+    material = MemoirFrameworkItemMaterial
+    rows = await db.execute(
+        select(material.framework_item_id, func.count(material.utterance_id))
+        .join(MemoirFrameworkItem, MemoirFrameworkItem.id == material.framework_item_id)
+        .where(
+            MemoirFrameworkItem.project_framework_id == project_framework_id,
+            or_(
+                material.match_source == MemoirFrameworkMatchSource.MANUAL.value,
+                material.confidence >= PRIMARY_MATCH_CONFIDENCE,
+            ),
+        )
+        .group_by(material.framework_item_id)
+    )
+    return {item_id: int(count) for item_id, count in rows.all()}
+
+
+def topic_level(material_count: int) -> FrameworkTopicLevel:
+    if material_count >= TOPIC_COVERED_MATERIAL_COUNT:
+        return FrameworkTopicLevel.COVERED
+    if material_count:
+        return FrameworkTopicLevel.TOUCHED
+    return FrameworkTopicLevel.NOT_STARTED
 
 
 @dataclass(frozen=True, slots=True)

@@ -498,36 +498,6 @@
   text-wrap: balance;
 }
 
-.assistant-topic-options {
-  margin-top: 20rpx;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14rpx;
-}
-
-.voice-chat-page .assistant-topic-button {
-  width: 184rpx;
-  min-width: 0;
-  min-height: 80rpx;
-  margin: 0;
-  padding: 0 24rpx;
-  border: 0;
-  border-radius: 999rpx;
-  background: var(--ui-surface);
-  color: var(--ui-section-title);
-  box-shadow: 0 0 0 1rpx rgba(0, 0, 0, 0.08);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--ui-font-action);
-  font-weight: 700;
-  line-height: 38rpx;
-}
-
-.assistant-topic-button::after {
-  border: 0;
-}
-
 .assistant-tts-spoken {
   color: var(--ui-accent);
 }
@@ -1599,14 +1569,6 @@
 .voice-chat-page.large-text .assistant-tts-text {
   font-size: 52rpx;
   line-height: 78rpx;
-}
-
-.voice-chat-page.large-text .assistant-topic-button {
-  width: 190rpx;
-  min-height: 92rpx;
-  padding: 0 14rpx;
-  font-size: var(--ui-font-large-list-title);
-  line-height: 52rpx;
 }
 
 .voice-chat-page.large-text .assistant-button {
