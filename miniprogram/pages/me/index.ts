@@ -82,7 +82,6 @@ interface MeData {
   creditUsageError: string;
   creditUsageDays: CreditUsageDayGroup[];
   creditUsageHasMore: boolean;
-  rechargeQrVisible: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -251,7 +250,6 @@ function loggedOutData(): Partial<MeData> {
     creditUsageError: "",
     creditUsageDays: [],
     creditUsageHasMore: false,
-    rechargeQrVisible: false,
     displayName: "",
     nameDraft: "",
     avatarText: "作",
@@ -295,7 +293,6 @@ definePage<MeData>()({
     creditUsageError: "",
     creditUsageDays: [],
     creditUsageHasMore: false,
-    rechargeQrVisible: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -536,16 +533,6 @@ definePage<MeData>()({
       }
     }
   },
-
-  openRechargeQr() {
-    this.setData({ rechargeQrVisible: true });
-  },
-
-  closeRechargeQr() {
-    this.setData({ rechargeQrVisible: false });
-  },
-
-  stopRechargeQrTap() {},
 
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);

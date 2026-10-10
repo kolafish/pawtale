@@ -172,7 +172,7 @@ test("me shows server day totals and credit additions across pages", async () =>
               { purpose: "语音访谈", count: 1, cost_rmb: "0.020000" },
               { purpose: "语音朗读", count: 2, cost_rmb: "0.003001" },
             ],
-            credits: [{ id: "credit-1", kind: "recharge", label: "充值", amount_rmb: "20.000000", note: "微信转账", created_at: "2026-09-23T02:00:00Z" }],
+            credits: [{ id: "credit-1", kind: "grant", label: "赠送", amount_rmb: "20.000000", note: "活动赠送", created_at: "2026-09-23T02:00:00Z" }],
           }], has_more: true }
           : { days: [{
             day: "2026-09-22",
@@ -194,7 +194,7 @@ test("me shows server day totals and credit additions across pages", async () =>
     ["语音朗读", 2, "0.003001"],
   ]);
   assert.deepEqual(context.data.creditUsageDays[0].credits.map(({ label, note, amountText }) => [label, note, amountText]), [
-    ["充值", "微信转账", "+¥20.00"],
+    ["赠送", "活动赠送", "+¥20.00"],
   ]);
   assert.equal(context.data.creditUsageHasMore, true);
 
