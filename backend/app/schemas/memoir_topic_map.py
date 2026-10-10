@@ -10,8 +10,9 @@ from app.domain.memoir.narrative_types import (
 
 
 MemoirTopicMapDisplayState = Literal[
-    "already_shared",
-    "can_share",
+    "not_started",
+    "touched",
+    "covered",
     "enough_for_now",
     "not_applicable",
     "do_not_discuss",

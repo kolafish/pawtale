@@ -60,18 +60,6 @@ class InterviewerPersona:
     voice_gender: str
 
 
-MODULE_LABELS = {
-    "person": "人物",
-    "event": "事件",
-    "family": "家庭",
-    "work": "工作",
-    "place": "地点",
-    "period": "时间段",
-    "theme": "主题",
-    "chat": "闲聊",
-}
-
-
 def interviewer_persona_for_voice(voice: str | None) -> InterviewerPersona:
     normalized = (voice or "").strip().lower()
     if "female" in normalized or "xiaohe" in normalized:
@@ -83,64 +71,6 @@ def interviewer_persona_for_voice(voice: str | None) -> InterviewerPersona:
 
 def system_prompt_for_persona(persona: InterviewerPersona) -> str:
     return f"{SYSTEM_PROMPT}你在对话中自称“{persona.host_name}”。"
-
-
-GUIDED_TOPIC_MENU = "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊"
-
-GUIDED_TOPIC_KEYWORDS = {
-    "person": ("人物", "人", "朋友", "同学", "亲人", "老师"),
-    "event": ("事情", "事件", "经历", "事儿"),
-    "family": ("家庭", "家人", "家里", "父母", "外婆", "爷爷", "奶奶"),
-    "work": ("工作", "上班", "单位", "职场", "同事", "领导", "师傅", "升职"),
-    "place": ("地点", "地方", "老家", "院子", "学校"),
-    "period": ("人生阶段", "时间段", "小时候", "童年", "年轻时候"),
-    "chat": ("闲聊", "随便聊", "梦", "吃的"),
-}
-
-GUIDED_TOPIC_SWITCH_PATTERNS = (
-    r"(聊|聊聊|讲讲|说说|谈谈|换到|换成|换个|换一个|主题|方向).{0,8}{keyword}",
-    r"{keyword}.{0,4}(吧|主题|方向)",
-)
-
-
-def _module_label(module: str | None) -> str:
-    if not module:
-        return "主题"
-    return MODULE_LABELS.get(module, module)
-
-
-def _compact_text(value: str) -> str:
-    return re.sub(r"\s+", "", value.strip())
-
-
-def _latest_user_text(messages: list[MemoirChatMessage]) -> str:
-    for message in reversed(_ordered_messages(messages)):
-        if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
-            return message.content_text.strip()
-    return ""
-
-
-def _requested_guidance_topic(text: str) -> tuple[str, str] | None:
-    normalized = _compact_text(text)
-    if not normalized:
-        return None
-    for module, keywords in GUIDED_TOPIC_KEYWORDS.items():
-        for keyword in keywords:
-            escaped_keyword = re.escape(keyword)
-            if any(
-                re.search(pattern.replace("{keyword}", escaped_keyword), normalized)
-                for pattern in GUIDED_TOPIC_SWITCH_PATTERNS
-            ):
-                return module, _module_label(module)
-    return None
-
-
-def _requested_topic_hint(messages: list[MemoirChatMessage]) -> str:
-    requested = _requested_guidance_topic(_latest_user_text(messages))
-    if not requested:
-        return ""
-    _, label = requested
-    return f"叙述者最新一句是在明确选择或切换到“{label}”主题。下一轮必须围绕“{label}”展开，不要继续更早的旧话题。"
 
 
 def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotResponse) -> ProgressPromptContext:

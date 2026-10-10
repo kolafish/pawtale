@@ -106,18 +106,9 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.showHistoryLines, false);
   assert.deepEqual(first.transcriptLines, []);
   assert.deepEqual(first.transcriptLineViews, []);
-  assert.equal(first.openingTopicOptions.length, 5);
-  assert.deepEqual(first.openingTopicOptions.map((item) => item.label), [
-    "家人",
-    "工作",
-    "朋友",
-    "一个地方",
-    "随便聊聊",
-  ]);
   assert.notEqual(first.transcriptLines, second.transcriptLines);
   assert.notEqual(first.transcriptLineViews, second.transcriptLineViews);
   assert.notEqual(first.ttsAlignment, second.ttsAlignment);
-  assert.notEqual(first.openingTopicOptions, second.openingTopicOptions);
 });
 
 test("voice chat view patch derives simple fields for first assistant turn", () => {

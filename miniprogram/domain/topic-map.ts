@@ -7,8 +7,9 @@ export type MemoirTopicMapUserResolution =
   | "do_not_discuss";
 
 export type MemoirTopicMapDisplayState =
-  | "already_shared"
-  | "can_share"
+  | "not_started"
+  | "touched"
+  | "covered"
   | "enough_for_now"
   | "not_applicable"
   | "do_not_discuss";

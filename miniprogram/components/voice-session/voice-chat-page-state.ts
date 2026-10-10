@@ -29,12 +29,6 @@ import {
   type MemoirVoiceSessionSnapshot,
 } from "../../stores/memoir-cache";
 
-export interface OpeningTopicOption {
-  id: string;
-  label: string;
-  promptText: string;
-}
-
 export interface VoiceChatTranscriptLineView extends VoiceChatTranscriptLine {
   lineClass: string;
   roleText: string;
@@ -66,8 +60,6 @@ export interface VoiceChatData {
   assistantPromptText: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
-  openingTopicOptions: OpeningTopicOption[];
-  selectedOpeningTopicText: string;
   assistantExpectsAnswer: boolean;
   followUpLoading: boolean;
   followUpError: string;
@@ -133,7 +125,6 @@ export interface VoiceChatData {
   assistantLabelText: string;
   showAssistantOpening: boolean;
   assistantQuestionText: string;
-  showSelectedOpeningTopic: boolean;
   showAssistantTTS: boolean;
   assistantDisplayText: string;
   showTTSProgress: boolean;
@@ -210,14 +201,6 @@ export function initialVoiceChatData(): VoiceChatData {
     assistantPromptText: "",
     assistantLoadingText: "小余正在准备第一句话",
     assistantEmptyText: "小余会先问一句，帮您开始讲。",
-    openingTopicOptions: [
-      { id: "family", label: "家人", promptText: "那我们先讲家人。可以说一件您想到的家里的小事。" },
-      { id: "work", label: "工作", promptText: "那我们先讲工作。可以说说那时候每天最忙的一件事。" },
-      { id: "friends", label: "朋友", promptText: "那我们先讲朋友。可以说一个您现在还记得的人。" },
-      { id: "place", label: "一个地方", promptText: "那我们先讲一个地方。可以说说您最先想到的是哪里。" },
-      { id: "free", label: "随便聊聊", promptText: "那就想到哪儿说到哪儿。先说一件刚想起来的小事就好。" },
-    ],
-    selectedOpeningTopicText: "",
     assistantExpectsAnswer: true,
     followUpLoading: false,
     followUpError: "",
@@ -283,7 +266,6 @@ export function initialVoiceChatData(): VoiceChatData {
     assistantLabelText: "小余想听您讲讲",
     showAssistantOpening: true,
     assistantQuestionText: "今天想先讲哪一段？",
-    showSelectedOpeningTopic: false,
     showAssistantTTS: false,
     assistantDisplayText: "小余会先问一句，帮您开始讲。",
     showTTSProgress: false,
@@ -380,7 +362,6 @@ export type VoiceChatViewPatch = Pick<
   | "assistantLabelText"
   | "showAssistantOpening"
   | "assistantQuestionText"
-  | "showSelectedOpeningTopic"
   | "showAssistantTTS"
   | "assistantDisplayText"
   | "showTTSProgress"
@@ -586,8 +567,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     liveDisplayText = "小余正在准备第一句话";
   } else if (interactionPhase === "assistant_responding"
     || interactionPhase === "waiting_for_answer"
-    || interactionPhase === "assistant_error"
-    || state.selectedOpeningTopicText) {
+    || interactionPhase === "assistant_error") {
     liveDisplayText = "现在可以说了";
   } else {
     liveDisplayText = state.liveText
@@ -747,10 +727,8 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
       && !hasAssistantPrompt
       && !state.latestTranscriptText
       && !state.followUpLoading
-      && !state.followUpError
-      && !state.selectedOpeningTopicText,
+      && !state.followUpError,
     assistantQuestionText: state.assistantPromptText || "今天想先讲哪一段？",
-    showSelectedOpeningTopic: Boolean(state.selectedOpeningTopicText),
     showAssistantTTS: Boolean(state.followUpTTSPlaying && state.assistantPromptText),
     assistantDisplayText: state.assistantPromptText
       || (state.followUpLoading ? state.assistantLoadingText : (state.followUpError || state.assistantEmptyText)),

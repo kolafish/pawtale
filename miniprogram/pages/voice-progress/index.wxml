@@ -65,7 +65,7 @@
       <text class="map-note-text">“还可以聊”只是一个方向，不是欠着没完成。小余不会因为这里空着就打断您正在讲的故事。</text>
     </view>
 
-    <view wx:if="{{loading && !topicModules.length}}" class="empty-state">正在看看聊过的话题...</view>
+    <view wx:if="{{loading && !topicModules.length}}" class="empty-state">正在看看人生话题...</view>
     <view wx:else class="module-list">
       <view wx:for="{{topicModules}}" wx:key="module_key" class="topic-module">
         <text class="module-title">{{item.title}}</text>

@@ -37,7 +37,6 @@ from app.services.memoir.narrative.interview_policy_runtime import (
     InterviewPolicySelectionError,
     _active_rollout_selected,
     active_reply_instruction,
-    anchored_opening_reply_instruction,
     build_current_policy_context,
     persist_policy_turn_decision,
     prepare_active_policy_turn,
@@ -403,29 +402,6 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
         candidate.action
         for candidate in switch_context.brief.candidate_actions
     }
-
-    anchored_session = MemoirVoiceSession(
-        project_id=project.id,
-        guidance_mode="guided_interview",
-        session_goal="open_narration",
-        anchor_framework_item_id=selected_item.id,
-    )
-    test_db.add(anchored_session)
-    await test_db.commit()
-    await test_db.refresh(anchored_session, ["messages"])
-    fallback_instruction = await anchored_opening_reply_instruction(
-        test_db,
-        session=anchored_session,
-    )
-    selected_definition = next(
-        definition
-        for definition in frameworks.template_for_framework(
-            project_framework
-        ).items
-        if definition.item_key == selected_item.item_key
-    )
-    assert selected_definition.title in fallback_instruction
-    assert "必须完成" in fallback_instruction
 
 
 async def test_active_policy_only_executes_pause_when_safety_makes_it_mandatory(

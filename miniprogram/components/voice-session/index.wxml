@@ -148,19 +148,7 @@
     <view wx:if="{{showAssistantOpening}}" class="assistant-opening">
       <text class="assistant-context">今天可以接着讲，也可以换个方向。想不起来也没关系。</text>
       <text class="assistant-question">{{assistantQuestionText}}</text>
-      <view class="assistant-topic-options">
-        <button
-          wx:for="{{openingTopicOptions}}"
-          wx:key="id"
-          class="assistant-topic-button"
-          data-prompt-text="{{item.promptText}}"
-          bindtap="chooseOpeningTopic"
-        >
-          {{item.label}}
-        </button>
-      </view>
     </view>
-    <text wx:elif="{{showSelectedOpeningTopic}}" class="assistant-text">{{selectedOpeningTopicText}}</text>
     <view wx:elif="{{showAssistantTTS}}" class="assistant-tts-text">
       <text class="assistant-tts-spoken">{{ttsSpokenText}}</text>
       <text class="assistant-tts-current">{{ttsCurrentText}}</text>

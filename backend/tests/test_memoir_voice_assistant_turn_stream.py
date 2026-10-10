@@ -35,6 +35,7 @@ from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnSt
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
     create_test_book_plan,
+    ensure_mobile_memoir_project,
     create_test_voice_transcript,
     post_mobile_memoir_voice_session,
 )
@@ -110,8 +111,8 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert completed["text"] == "好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"
     assert completed["primary_intent"] == "follow_up"
     assert completed["audio_file_id"]
-    assert completed["progress_update_used"] is True
-    assert completed["progress_update"]["kind"] == "automation_event"
+    assert completed["progress_update_used"] is False
+    assert completed["progress_update"] is None
 
     text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
     assert text_deltas == ai_client.chunks
@@ -163,10 +164,11 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
     assert assistant_message.metadata_json["tts_duration_seconds"] == 0.4
     assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "好"
-    assert assistant_message.metadata_json["progress_prompt_version"] == "memoir_voice_progress_context_v4"
-    assert assistant_message.metadata_json["progress_update_used"] is True
-    assert assistant_message.metadata_json["progress_update"]["text"] == "这个项目已经留下 1 条讲述记录。"
-    assert "本轮进展：这个项目已经留下 1 条讲述记录。" in ai_client.calls[0]["user_prompt"]
+    assert assistant_message.metadata_json["progress_update_used"] is False
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "这个项目已经留下 1 条讲述记录" not in prompt
+    assert "叙述者：我想聊聊第一份工作，当时是在厂里学技术。" in prompt
+    assert "人生话题" in prompt
 
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
@@ -185,7 +187,7 @@ async def test_voice_assistant_turn_injects_retrieved_context_and_records_trace(
         client,
         test_db,
         text="我又想起她去医院前很害怕。",
-        guidance_mode="free_narration",
+        guidance_mode="guided_interview",
     )
     activated_context = (
         "以下是从同一回忆录过往讲述中检索到的候选原文。\n"
@@ -229,6 +231,7 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
         client,
         test_db,
         text="我继续讲刚才那件事。",
+        guidance_mode="guided_interview",
     )
 
     async def fail_activation(*args, **kwargs):
@@ -252,6 +255,48 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
     assert assistant_message is not None
     assert assistant_message.metadata_json["memory_activation_status"] == "failed"
     assert assistant_message.metadata_json["memory_activation_trace_id"] is None
+
+
+async def test_free_narration_follow_up_only_listens_to_the_conversation(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="那年我们全家搬进了县城的大杂院。",
+    )
+    await voice_progress_notices.enqueue_utterance_milestone_notice(
+        test_db,
+        project_id=created["session"]["project_id"],
+        utterance_id=created["utterance_id"],
+    )
+    await test_db.commit()
+
+    async def unexpected_activation(*args, **kwargs):
+        raise AssertionError("free narration must not retrieve earlier material")
+
+    monkeypatch.setattr(
+        "app.services.memoir.memory_activation.activate_memory_for_turn",
+        unexpected_activation,
+    )
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["搬进大杂院，日子一下子热闹起来了。后来呢？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert completed["state"] == "completed"
+    assert completed["progress_update"] is None
+    assert "叙述者：那年我们全家搬进了县城的大杂院。" in prompt
+    assert "这个项目已经留下 1 条讲述记录" not in prompt
+    assert "人生话题" not in prompt
+    assert "历史讲述候选" not in prompt
+    assert ai_client.calls[0]["kwargs"]["max_tokens"] == 260
 
 
 async def test_book_completion_acknowledgement_suppresses_global_progress_and_ends_round(
@@ -600,7 +645,7 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     assert assistant_count == 0
 
 
-async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
+async def test_voice_assistant_turn_guided_first_opening_offers_life_topics(
     client,
     test_db,
 ):
@@ -624,13 +669,11 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
     assert completed["progress_update_used"] is False
     assert completed["progress_update"] is None
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
-    assert "主题讲述首次开场" in prompt
-    assert "用“老余”做很短的自我介绍" in prompt
-    assert "不要念成长列表" in prompt
-    assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
-    assert "统一组织成一句或两句连贯口语" in prompt
-    assert "本轮没有可播报的结构化进度变化" in prompt
-    assert "问候、进度和问题都由你统一组织" in prompt
+    assert "“老余”" in prompt
+    assert "还没有章节" in prompt
+    assert "童年与成长（还没讲过）" in prompt
+    assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
+    assert "本轮没有可播报的结构化进度变化" not in prompt
 
 
 async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
@@ -657,7 +700,7 @@ async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
     assert completed["host_name"] == "小余"
     assert "你在对话中自称“小余”" in ai_client.calls[0]["system_prompt"]
     assert "下一句“小余”要说的话" in prompt
-    assert "用“小余”做很短的自我介绍" in prompt
+    assert "你自称“小余”" in prompt
 
 
 async def test_voice_assistant_turn_does_not_turn_project_snapshot_into_notice(
@@ -709,33 +752,33 @@ async def test_voice_assistant_turn_does_not_offer_same_progress_twice(
         utterance_id=created["utterance_id"],
     )
     await test_db.commit()
+    opening_session_id = await _opening_session(client, created["session"]["project_id"])
 
     _, first_ai, _, first = await _run_stream_turn(
         test_db,
-        voice_session_id=created["session"]["id"],
+        voice_session_id=opening_session_id,
         user_id=created["user_id"],
-        chunks=["这已经是第一条讲述了，外婆在院子里最常带您做什么？"],
+        chunks=["这已经是第一条讲述了，今天想接着讲外婆家的院子吗？"],
     )
     await automation_events.mark_automation_events_voice_played(
         test_db,
         user_id=created["user_id"],
         project_id=created["session"]["project_id"],
         event_ids=first["progress_voice_selected_event_ids"],
-        voice_session_id=created["session"]["id"],
+        voice_session_id=opening_session_id,
         message_id=first["message_id"],
     )
     _, second_ai, _, second = await _run_stream_turn(
         test_db,
-        voice_session_id=created["session"]["id"],
+        voice_session_id=opening_session_id,
         user_id=created["user_id"],
-        chunks=["换个问法，您和外婆在院子里一起做过什么？"],
+        chunks=["换个说法，今天想从哪儿讲起？"],
         regenerate=True,
     )
 
     assert first["progress_update_used"] is True
     assert "本轮进展：这个项目已经留下 1 条讲述记录。" in first_ai.calls[0]["user_prompt"]
     assert second["progress_update_used"] is False
-    assert "本轮没有可播报的结构化进度变化" in second_ai.calls[0]["user_prompt"]
     assert "这个项目已经留下 1 条讲述记录" not in second_ai.calls[0]["user_prompt"]
 
 
@@ -760,9 +803,21 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     )
     await test_db.commit()
 
-    _, ai_client, _, completed = await _run_stream_turn(
+    _, mid_story_ai, _, mid_story = await _run_stream_turn(
         test_db,
         voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["外婆在院子里最常做什么？"],
+    )
+    assert mid_story["progress_update"] is None
+    assert "外婆家的院子》。" not in mid_story_ai.calls[0]["user_prompt"]
+    await test_db.refresh(event)
+    assert automation_event_metadata.VOICE_SELECTED_SESSION_ID_KEY not in (event.metadata_json or {})
+
+    opening_session_id = await _opening_session(client, created["session"]["project_id"])
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=opening_session_id,
         user_id=created["user_id"],
         chunks=["刚才新增的一条讲述已经补进《外婆家的院子》，接下来想听听外婆在院子里最常做什么？"],
     )
@@ -785,7 +840,7 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     assert assistant_message.metadata_json["progress_voice_selected_event_ids"] == [event.id]
     assert assistant_message.metadata_json["progress_spoken_text"] == ""
     await test_db.refresh(event)
-    assert event.metadata_json[automation_event_metadata.VOICE_SELECTED_SESSION_ID_KEY] == created["session"]["id"]
+    assert event.metadata_json[automation_event_metadata.VOICE_SELECTED_SESSION_ID_KEY] == opening_session_id
     assert event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
     assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in event.metadata_json
 
@@ -857,10 +912,11 @@ async def test_voice_assistant_turn_progress_prompt_uses_failed_automation_event
         summary_text="章节自动补写失败，稍后可重试。",
     )
     await test_db.commit()
+    opening_session_id = await _opening_session(client, created["session"]["project_id"])
 
     _, ai_client, _, completed = await _run_stream_turn(
         test_db,
-        voice_session_id=created["session"]["id"],
+        voice_session_id=opening_session_id,
         user_id=created["user_id"],
         chunks=["章节自动补写暂时没有成功，稍后可以重试；咱们先继续聊外婆家的院子。"],
     )
@@ -946,16 +1002,12 @@ async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_sessio
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
-    assert "主题讲述继续开场" in prompt
-    assert "叙述者之前已有同模式讲述记录" in prompt
-    assert "清楚、轻松的开放入口" in prompt
-    assert "当前没有检索具体历史内容" in prompt
-    assert "想不起来也没关系" in prompt
-    assert "叙述者：上次讲到我第一次去上海找工作。" not in prompt
-    assert "本轮没有检索到历史讲述候选" in prompt
+    assert "以前讲过" in prompt
+    assert "待讲主题" in prompt
+    assert "上次讲到我第一次去上海找工作" not in prompt
 
 
-async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
+async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     client,
     test_db,
 ):
@@ -996,6 +1048,11 @@ async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
     ]
     test_db.add_all(messages)
     await test_db.commit()
+    await create_test_book_plan(
+        test_db,
+        project_id=voice_session["project_id"],
+        chapter_title="外婆家的童年",
+    )
     user_id = (await client.get("/api/auth/me")).json()["id"]
 
     _, ai_client, _, _ = await _run_stream_turn(
@@ -1007,10 +1064,71 @@ async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 320
-    assert "明确选择或切换到“工作”主题" in prompt
-    assert "如果用户最新一句明确要求换方向，必须尊重最新一句" in prompt
-    assert "下一句必须围绕新主题展开，不要继续旧话题" in prompt
     assert "叙述者：今天聊聊工作吧。" in prompt
+    assert "《外婆家的童年》" in prompt
+    assert "工作与事业：" in prompt
+    assert "主题线索" not in prompt
+
+
+async def test_returning_free_opening_mentions_last_chapter(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="小时候我总在外婆家的院子里摘菜。",
+    )
+    await create_test_book_plan(
+        test_db,
+        project_id=created["session"]["project_id"],
+        source_ref={"utterance_id": created["utterance_id"]},
+        chapter_title="外婆家的童年",
+    )
+    opening_session_id = await _opening_session(
+        client,
+        created["session"]["project_id"],
+        guidance_mode="free_narration",
+    )
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=opening_session_id,
+        user_id=created["user_id"],
+        chunks=["欢迎回来，上次讲到外婆家的童年，今天想接着讲吗？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert completed["primary_intent"] == "opening"
+    assert "“外婆家的童年”" in prompt
+    assert "人生话题" not in prompt
+
+
+async def test_guided_opening_from_life_topic_starts_with_that_topic(
+    client,
+    test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    topic_map = (await client.get(f"/api/mobile/memoir/projects/{project_id}/topic-map")).json()
+    topic = topic_map["modules"][0]["items"][1]
+    response = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={"guidance_mode": "guided_interview", "anchor_framework_item_id": topic["id"]},
+    )
+    assert response.status_code == 201
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db,
+        voice_session_id=response.json()["session"]["id"],
+        user_id=user_id,
+        chunks=["今天从上学说起，您最早是在哪儿念的书？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert f"叙述者选了“{topic['title']}”" in prompt
+    assert topic["intent"] in prompt
 
 
 async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message(
@@ -1055,6 +1173,15 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
         )
     )
     assert assistant_count == 0
+
+
+async def _opening_session(client, project_id: str, guidance_mode: str = "guided_interview") -> str:
+    response = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={"guidance_mode": guidance_mode},
+    )
+    return response.json()["session"]["id"]
 
 
 async def _run_stream_turn(
