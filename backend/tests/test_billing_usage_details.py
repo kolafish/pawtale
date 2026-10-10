@@ -3,13 +3,14 @@ from decimal import Decimal
 from uuid import uuid4
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.clock import utcnow_naive
 from app.main import app
 from app.models.ai_credits import AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
 from app.models.users import User
-from app.services.ai_costs import estimate_audio_cost
+from app.services.ai_costs import AICostEstimate, estimate_audio_cost
 from app.services.ai_credits import (
     USAGE_DEBIT, USAGE_REFUND, ensure_ai_credit_account, get_ai_credit_summary,
 )
@@ -55,7 +56,7 @@ async def test_usage_details_only_show_current_users_successful_charges(client, 
     assert Decimal(today["cost_rmb"]) == Decimal("0.023")
     assert [(item["purpose"], item["count"], Decimal(item["cost_rmb"])) for item in today["purposes"]] == [
         ("语音访谈", 1, Decimal("0.02")),
-        ("语音朗读", 1, Decimal("0.003")),
+        ("访谈语音回复", 1, Decimal("0.003")),
     ]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous:
@@ -101,6 +102,47 @@ async def test_usage_refund_and_recharge_correct_balance_and_billing_details(cli
     for debit in debits:
         await test_db.refresh(debit)
         assert debit.amount_rmb == Decimal("-0.25")
+
+
+async def test_usage_categories_distinguish_interview_audio_and_share_candidates_without_changing_charges(client, test_db):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    # The paths and job names come from the October 10 production investigation.
+    session_path = "/api/mobile/memoir/voice-sessions/session"
+    samples = [
+        (f"{session_path}/assistant-turn-stream", "volc_tts", "seed-tts-2.0", "0.021300"),
+        (f"{session_path}/messages/message/tts", "volc_tts", "seed-tts-2.0", "0.018900"),
+        ("memoir.job.generate_book_audio_chunk", "volc_tts", "seed-tts-2.0", "0.150000"),
+        ("memoir.job.evaluate_share_video_candidate", "deepseek", "deepseek-flash", "0.001984"),
+        ("memoir.share_video_generation", "volc_ark", "doubao-seedream-5-0-260128", "0.880000"),
+        ("memoir.share_video_title", "deepseek", "deepseek-flash", "0.000410"),
+        ("memoir.job.evaluate_interview_policy_shadow", "deepseek", "deepseek-flash", "0.000492"),
+    ]
+    for operation, provider, model, amount in samples:
+        await record_ai_usage(
+            provider=provider, model=model, status="succeeded",
+            cost=AICostEstimate(float(amount), "estimated", provider, model),
+            context=AIUsageContext(operation_id=str(uuid4()), operation=operation, user_id=user_id),
+        )
+    expected_cost = Decimal("1.073086")
+    [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
+    assert Decimal(day["cost_rmb"]) == expected_cost
+    assert {item["purpose"]: (item["count"], Decimal(item["cost_rmb"])) for item in day["purposes"]} == {
+        "访谈语音回复": (2, Decimal("0.040200")),
+        "语音朗读": (1, Decimal("0.150000")),
+        "分享片段筛选": (1, Decimal("0.001984")),
+        "分享视频生成": (2, Decimal("0.880410")),
+        "访谈策略评测": (1, Decimal("0.000492")),
+    }
+    summary = (await client.get("/api/billing/ai-credit-summary")).json()
+    assert Decimal(summary["used_rmb"]) == expected_cost
+    shadow_debit = await test_db.scalar(select(AICreditTransaction).join(
+        AIUsageRecord, AICreditTransaction.usage_record_id == AIUsageRecord.id,
+    ).where(
+        AIUsageRecord.user_id == user_id,
+        AIUsageRecord.operation == "memoir.job.evaluate_interview_policy_shadow",
+        AICreditTransaction.transaction_type == USAGE_DEBIT,
+    ))
+    assert shadow_debit.amount_rmb == Decimal("-0.000492")
 
 
 async def test_usage_details_paginate_whole_beijing_days(client, test_db):
