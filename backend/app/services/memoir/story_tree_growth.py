@@ -49,6 +49,7 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.book_plan_sources import load_plan_with_chapters
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
+from app.services.memoir.chapter_split import split_large_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import is_ready_story_material
@@ -698,6 +699,7 @@ async def grow_story_tree(
             },
         )
     await _save_progress(db, job, progress)
+    await split_large_chapters(db, user_id=project.user_id, project_id=job.project_id)
     return EditingJobResult(
         result_json={
             "voice_session_id": session.id,

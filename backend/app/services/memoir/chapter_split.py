@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
+import logging
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,10 +17,13 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_plan_write_workflow import apply_book_plan_structure_command
 from app.services.memoir.material_organization import material_organization_excerpt
+from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
 SPLIT_MIN_SECTIONS = 5
+SPLIT_CHECKED_KEY = "split_checked_section_count"
+logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = "你是一位有整体感的中文回忆录结构编辑，只调整章节划分，不改写任何内容。"
 
 
@@ -180,3 +184,34 @@ async def apply_chapter_split(
             ),
             commit=False,
         )
+
+
+async def split_large_chapters(db: AsyncSession, *, user_id: str, project_id: str) -> None:
+    """Offer each chapter that has grown to SPLIT_MIN_SECTIONS or more a split; a chapter is
+    checked again only after its section count changes."""
+    from app.services.memoir.story_tree_growth import _load_tree
+
+    ai_model = await load_project_ai_model(db, project_id, None)
+    _plan, chapters, sections = await _load_tree(db, project_id=project_id)
+    for chapter in chapters:
+        chapter_sections = [section for section in sections if section.chapter_id == chapter.id]
+        count = len(splittable_sections(chapter_sections))
+        if count < SPLIT_MIN_SECTIONS or (chapter.metadata_json or {}).get(SPLIT_CHECKED_KEY) == count:
+            continue
+        await db.commit()
+        try:
+            groups = await decide_chapter_split(
+                chapter=chapter,
+                sections=chapter_sections,
+                other_chapter_titles=[item.title for item in chapters if item.id != chapter.id],
+                ai_model=ai_model,
+            )
+        except Exception:
+            # The story has already grown; a failed split check is retried on the next growth run.
+            logger.warning("chapter split check failed project=%s chapter=%s", project_id, chapter.id, exc_info=True)
+            continue
+        chapter.metadata_json = {**(chapter.metadata_json or {}), SPLIT_CHECKED_KEY: count}
+        db.add(chapter)
+        if groups:
+            await apply_chapter_split(db, user_id=user_id, project_id=project_id, chapter_id=chapter.id, groups=groups)
+        await db.commit()
