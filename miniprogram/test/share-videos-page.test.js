@@ -208,7 +208,7 @@ test("a failed attempt can be deleted from the library after confirming", async 
 test("reopening the library after starting another video restores the earlier failure and polls only active tasks", async () => {
   const first = job("running", { id: "first-video", utterance_id: "first-story" });
   const second = job("pending", { id: "second-video", utterance_id: "second-story" });
-  const failure = { ...first, status: "failed", error_message: "AI 额度已用尽，请添加微信联系管理员" };
+  const failure = { ...first, status: "failed", error_message: "AI 额度已用尽" };
   const response = { items: [], active_jobs: [first], failed_jobs: [], total: 0, limit: 20, offset: 0 };
   const polled = [];
   const navigations = [];

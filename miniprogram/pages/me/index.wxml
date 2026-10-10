@@ -133,8 +133,7 @@
         <view class="credit-progress-track" aria-label="AI 额度已使用 {{creditProgressPercent}}%">
           <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
         </view>
-        <text class="credit-hint">额度按 AI 厂商公开价格原价扣除，不加价。余额用尽后，可添加微信联系管理员。</text>
-        <button class="credit-recharge-button support-action ui-pressable" bindtap="openRechargeQr">添加微信充值</button>
+        <text class="credit-hint">额度按 AI 厂商公开价格原价扣除，不加价。</text>
         <button class="credit-usage-toggle ui-pressable" bindtap="toggleCreditUsageDetails">
           {{creditUsageExpanded ? "收起使用明细" : "查看使用明细"}}
         </button>
@@ -268,18 +267,4 @@
     >注销账号</button>
   </block>
 
-  <view wx:if="{{rechargeQrVisible}}" class="recharge-qr-mask" catchtap="closeRechargeQr">
-    <view class="recharge-qr-sheet" catchtap="stopRechargeQrTap">
-      <text class="recharge-qr-title">添加微信充值</text>
-      <text class="recharge-qr-copy">长按二维码识别并添加微信，提供你在小程序中的账号信息。</text>
-      <image
-        class="recharge-qr-image"
-        src="/assets/recharge-wechat-qr.jpg"
-        mode="widthFix"
-        show-menu-by-longpress
-        aria-label="微信二维码"
-      />
-      <button class="credit-retry-button support-action ui-pressable" bindtap="closeRechargeQr">关闭</button>
-    </view>
-  </view>
 </view>

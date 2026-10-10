@@ -174,7 +174,7 @@ async def assert_ai_credit_available(user_id: str) -> None:
     async with async_session_maker() as db:
         summary = await get_ai_credit_summary(db, user_id=user_id)
     if summary.remaining_rmb <= 0:
-        raise InsufficientAICreditError("AI 额度已用尽，请添加微信联系管理员")
+        raise InsufficientAICreditError("AI 额度已用尽")
 
 
 async def assert_current_ai_credit_available() -> None:
