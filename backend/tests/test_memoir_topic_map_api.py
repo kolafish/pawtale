@@ -28,8 +28,8 @@ async def test_mobile_topic_map_is_not_a_completion_checklist(client):
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["modules"]) == 5
-    assert sum(len(module["items"]) for module in payload["modules"]) == 12
+    assert len(payload["modules"]) == 1
+    assert sum(len(module["items"]) for module in payload["modules"]) == 7
     assert "必须全部讲完" in payload["detail"]
     assert {
         item["display_state"]

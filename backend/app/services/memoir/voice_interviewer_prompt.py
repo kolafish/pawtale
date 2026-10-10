@@ -1,9 +1,9 @@
 """Prompt for the AI interviewer's next spoken line.
 
 Each mode gets a different context. Free narration only sees the conversation, and the
-AI just acknowledges and invites the narrator to go on. Guided interview also sees the
-book overview and the life topics, so it can move to another story or topic once one is
-told. Progress facts are only offered at an opening, never in the middle of a story.
+AI just acknowledges and invites the narrator to go on. Guided interview also sees who is
+narrating, the book overview and the life topics, so it can move to another story or topic
+once one is told. Progress facts are only offered at an opening, never in the middle of a story.
 """
 
 from __future__ import annotations
@@ -172,7 +172,8 @@ def _guided_follow_up_prompt(
 - 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
 - 优先顺着当前故事的势能继续听或只追一个自然方向，不要为了“完整”机械补齐时间、地点、人物、起因和结果
 - 只有确实影响理解时，才询问背景、人物关系、原因、结果、转场或感受
-- 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
+- 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级
+- 每段人生里都可以聊到重要的人、转折和难处"""
     moving_on = (
         "一个故事讲完了、叙述者说记不清，或者这个话题已经讲得差不多了，就别在原处接着问，"
         "可以换这个话题里的另一个人或另一件事，或者从“人生话题”里提一个可以拒绝的新方向，说成具体的入口。"
@@ -192,23 +193,20 @@ def _guided_follow_up_prompt(
 
 def _book_block(book: InterviewBookContext, *, opening: bool) -> str:
     chapters = "、".join(f"《{title}》{count} 段讲述" for title, count in book.chapters[:12]) or "还没有章节"
-    lines = ["书稿概况：", chapters]
+    lines = [f"讲述者：{book.narrator}"] if book.narrator else []
+    lines += ["书稿概况：", chapters]
     if opening and book.last_chapter_title:
         lines.append(f"上次讲到：《{book.last_chapter_title}》")
     return "\n".join(lines)
 
 
 def _topics_block(topics: tuple[LifeTopic, ...]) -> str:
-    lines = ["人生话题（不是必须讲完的清单，叙述者标过不想聊的已去掉）："]
-    for level in (FrameworkTopicLevel.COVERED, FrameworkTopicLevel.TOUCHED):
+    levels = []
+    for level in (FrameworkTopicLevel.COVERED, FrameworkTopicLevel.TOUCHED, FrameworkTopicLevel.NOT_STARTED):
         titles = "、".join(topic.title for topic in topics if topic.level == level)
         if titles:
-            lines.append(f"- {_LEVEL_LABELS[level]}：{titles}")
-    open_topics = [topic for topic in topics if topic.level == FrameworkTopicLevel.NOT_STARTED]
-    if open_topics:
-        lines.append("- 还没聊：")
-        lines.extend(f"  · {topic.title}：{topic.intent}" for topic in open_topics)
-    return "\n".join(lines)
+            levels.append(f"{_LEVEL_LABELS[level]}：{titles}")
+    return "人生话题（按人生先后，不是必须讲完的清单）：" + "；".join(levels) if levels else ""
 
 
 def _thin_topics_block(topics: tuple[LifeTopic, ...]) -> str:

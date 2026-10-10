@@ -62,13 +62,13 @@
     <text class="topic-detail">{{topicDetail}}</text>
     <view class="map-note">
       <text class="map-note-title">按自己的节奏来</text>
-      <text class="map-note-text">“还可以聊”只是一个方向，不是欠着没完成。小余不会因为这里空着就打断您正在讲的故事。</text>
+      <text class="map-note-text">“还没聊”只是一个方向，不是欠着没完成。小余不会因为这里空着就打断您正在讲的故事。</text>
     </view>
 
     <view wx:if="{{loading && !topicModules.length}}" class="empty-state">正在看看人生话题...</view>
     <view wx:else class="module-list">
       <view wx:for="{{topicModules}}" wx:key="module_key" class="topic-module">
-        <text class="module-title">{{item.title}}</text>
+        <text wx:if="{{topicModules.length > 1}}" class="module-title">{{item.title}}</text>
         <view class="topic-list">
           <view
             wx:for="{{item.items}}"

@@ -671,7 +671,7 @@ async def test_voice_assistant_turn_guided_first_opening_offers_life_topics(
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "“老余”" in prompt
     assert "还没有章节" in prompt
-    assert "童年与成长（还没讲过）" in prompt
+    assert "家世与出身（还没讲过）" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
     assert "本轮没有可播报的结构化进度变化" not in prompt
 
@@ -1053,6 +1053,11 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
         project_id=voice_session["project_id"],
         chapter_title="外婆家的童年",
     )
+    patched = await client.patch(
+        f"/api/mobile/memoir/projects/{voice_session['project_id']}",
+        json={"narrator_gender": "female", "narrator_age": 34, "narrator_origin": "成都"},
+    )
+    assert patched.status_code == 200, patched.text
     user_id = (await client.get("/api/auth/me")).json()["id"]
 
     _, ai_client, _, _ = await _run_stream_turn(
@@ -1066,7 +1071,8 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 320
     assert "叙述者：今天聊聊工作吧。" in prompt
     assert "《外婆家的童年》" in prompt
-    assert "工作与事业：" in prompt
+    assert "工作与闯荡" in prompt
+    assert "讲述者：女，34 岁，家乡成都" in prompt
     assert "主题线索" not in prompt
 
 

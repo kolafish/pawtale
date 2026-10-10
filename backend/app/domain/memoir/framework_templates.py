@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 DEFAULT_FRAMEWORK_TEMPLATE_KEY = "memoir_life_topics"
-DEFAULT_FRAMEWORK_TEMPLATE_VERSION = "1"
+DEFAULT_FRAMEWORK_TEMPLATE_VERSION = "2"
 
 
 class FrameworkTemplateModuleDefinition(BaseModel):
@@ -34,7 +34,6 @@ class FrameworkTemplateItemDefinition(BaseModel):
     module_key: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=160)
     intent: str = Field(min_length=1, max_length=500)
-    evidence_hints: tuple[str, ...] = Field(min_length=1)
     sort_order: int = Field(ge=0)
 
     @field_validator("item_key", "module_key", "title", "intent")
@@ -43,13 +42,6 @@ class FrameworkTemplateItemDefinition(BaseModel):
         if not value.strip():
             raise ValueError("framework template text must not be blank")
         return value
-
-    @field_validator("evidence_hints")
-    @classmethod
-    def validate_evidence_hints(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not value.strip() for value in values):
-            raise ValueError("framework evidence hints must not be blank")
-        return values
 
 
 class FrameworkTemplateDefinition(BaseModel):
@@ -109,7 +101,7 @@ def load_framework_template(
 ) -> FrameworkTemplateDefinition:
     filenames = {
         (DEFAULT_FRAMEWORK_TEMPLATE_KEY, DEFAULT_FRAMEWORK_TEMPLATE_VERSION):
-            "life_topics_v1.json",
+            "life_topics_v2.json",
     }
     filename = filenames.get((template_key, version))
     if filename is None:

@@ -1,0 +1,62 @@
+{
+  "template_key": "memoir_life_topics",
+  "version": "2",
+  "modules": [
+    {
+      "module_key": "life_story",
+      "title": "人生经历",
+      "sort_order": 10
+    }
+  ],
+  "items": [
+    {
+      "item_key": "family_and_origins",
+      "module_key": "life_story",
+      "title": "家世与出身",
+      "intent": "祖辈和父母是怎样的人，家从哪里来，自己出生时家里的光景",
+      "sort_order": 10
+    },
+    {
+      "item_key": "childhood_and_growth",
+      "module_key": "life_story",
+      "title": "童年",
+      "intent": "小时候住在哪、跟谁一起过，记得最清楚的人和事",
+      "sort_order": 20
+    },
+    {
+      "item_key": "school_and_learning",
+      "module_key": "life_story",
+      "title": "求学与少年",
+      "intent": "上学、学本事的那些年，遇到的老师和伙伴",
+      "sort_order": 30
+    },
+    {
+      "item_key": "work_and_career",
+      "module_key": "life_story",
+      "title": "工作与闯荡",
+      "intent": "离开家以后怎么谋生，做过哪些事，去过哪些地方",
+      "sort_order": 40
+    },
+    {
+      "item_key": "marriage_and_family_life",
+      "module_key": "life_story",
+      "title": "成家与儿女",
+      "intent": "怎么遇到另一半，成家过日子，把孩子拉扯大",
+      "sort_order": 50
+    },
+    {
+      "item_key": "later_life_and_present",
+      "module_key": "life_story",
+      "title": "如今的生活",
+      "intent": "现在的日子、身体和心境，回头看走过的路",
+      "sort_order": 60
+    },
+    {
+      "item_key": "values_interests_and_legacy",
+      "module_key": "life_story",
+      "title": "想留下的话",
+      "intent": "信的道理、攒下的经验，想对家人和后辈说的话",
+      "sort_order": 70
+    }
+  ]
+}

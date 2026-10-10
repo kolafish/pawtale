@@ -8,7 +8,6 @@ from sqlalchemy.orm import selectinload
 
 from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.framework_templates import (
-    FrameworkTemplateItemDefinition,
     canonical_template_snapshot,
     framework_template_hash,
     load_framework_template,
@@ -41,29 +40,17 @@ class FakeFrameworkAI(AITextServiceBase):
         return json.dumps(self.payload, ensure_ascii=False)
 
 
-def test_framework_template_v1_is_stable_and_self_contained():
+def test_framework_template_v2_is_stable_and_self_contained():
     template = load_framework_template()
     snapshot = canonical_template_snapshot(template)
 
     assert template.template_key == "memoir_life_topics"
-    assert template.version == "1"
-    assert len(template.modules) == 5
-    assert len(template.items) == 12
+    assert template.version == "2"
+    assert len(template.modules) == 1
+    assert len(template.items) == 7
     assert framework_template_hash(snapshot) == (
-        "76cf0ea635aa601ec5244d9c52454d14a44a4cd0af74ed22fdcccd19590d96d4"
+        "0c10256b4c30223caaef6276935475858207171f7a48f580386ff2c76aeb167d"
     )
-
-
-def test_framework_template_rejects_blank_evidence_hints():
-    with pytest.raises(ValueError, match="evidence hints must not be blank"):
-        FrameworkTemplateItemDefinition(
-            item_key="childhood",
-            module_key="life_stage",
-            title="童年",
-            intent="了解童年生活",
-            evidence_hints=("小时候", "  "),
-            sort_order=10,
-        )
 
 
 async def test_framework_initialization_is_idempotent(test_db):
@@ -81,7 +68,7 @@ async def test_framework_initialization_is_idempotent(test_db):
     )
 
     assert second.id == first.id
-    assert len(first.items) == 12
+    assert len(first.items) == 7
     assert all(
         item.evidence_state == MemoirFrameworkEvidenceState.NONE.value
         for item in first.items
@@ -111,7 +98,7 @@ async def test_material_matching_preserves_manual_relation(client, test_db):
     family = next(
         item
         for item in framework.items
-        if item.item_key == "important_family_members"
+        if item.item_key == "family_and_origins"
     )
     test_db.add(
         MemoirFrameworkItemMaterial(
