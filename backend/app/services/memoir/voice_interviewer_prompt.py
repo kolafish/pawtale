@@ -110,6 +110,7 @@ def build_stream_turn_prompt(
         _header(host_name, regenerate),
         mode,
         progress,
+        _narrator_block(book),
         _book_block(book, opening=True),
         topics,
         policy_section,
@@ -184,10 +185,20 @@ def _guided_follow_up_prompt(
         policy_section,
         dialogue,
         "历史讲述候选：\n" + (activation_context or "本轮没有检索到历史讲述候选。"),
+        _narrator_block(book),
         _book_block(book, opening=False),
         _topics_block(book.topics),
         moving_on,
     )
+
+
+def _narrator_block(book: InterviewBookContext) -> str:
+    if not book.narrator:
+        return ""
+    line = f"讲述者资料（用户自己填的）：{book.narrator}。"
+    if book.narrator_age_known:
+        line += "提方向、举例子时想想这个年纪的人经历过哪些年代，不同年纪的人生经历差别很大。"
+    return line
 
 
 def _book_block(book: InterviewBookContext, *, opening: bool) -> str:

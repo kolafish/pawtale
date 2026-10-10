@@ -1,4 +1,4 @@
-"""Whole-book context for the AI interviewer: chapters, the last chapter narrated and life topics."""
+"""Whole-book context for the AI interviewer: who is narrating, chapters, the last chapter and life topics."""
 
 from __future__ import annotations
 
@@ -20,8 +20,12 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
 from app.services.memoir.narrative import frameworks
+from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
+
+_NARRATOR_GENDERS = {"male": "男", "female": "女"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +46,9 @@ class InterviewBookContext:
     # Topics the narrator marked as enough / not applicable / do not discuss are left out.
     topics: tuple[LifeTopic, ...]
     anchor_topic: LifeTopic | None
+    # Age, gender and hometown the narrator set on the project, e.g. "男，72 岁，家乡山东".
+    narrator: str = ""
+    narrator_age_known: bool = False
 
 
 async def load_interview_book_context(
@@ -60,12 +67,32 @@ async def load_interview_book_context(
         project_id=voice_session.project_id,
         anchor_item_id=voice_session.anchor_framework_item_id,
     )
+    project = await db.get(Project, voice_session.project_id)
+    profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
+    narrator, narrator_age_known = _narrator(profile if isinstance(profile, dict) else {})
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
         topics=topics,
         anchor_topic=anchor_topic,
+        narrator=narrator,
+        narrator_age_known=narrator_age_known,
     )
+
+
+def _narrator(profile: dict) -> tuple[str, bool]:
+    parts = []
+    gender = _NARRATOR_GENDERS.get(str(profile.get("narrator_gender") or ""))
+    if gender:
+        parts.append(gender)
+    age = profile.get("narrator_age")
+    age_known = isinstance(age, int) and age > 0
+    if age_known:
+        parts.append(f"{age} 岁")
+    origin = str(profile.get("narrator_origin") or "").strip()
+    if origin:
+        parts.append(f"家乡{origin}")
+    return "，".join(parts), age_known
 
 
 async def _life_topics(

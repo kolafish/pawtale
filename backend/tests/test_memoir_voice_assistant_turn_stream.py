@@ -1053,6 +1053,11 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
         project_id=voice_session["project_id"],
         chapter_title="外婆家的童年",
     )
+    patched = await client.patch(
+        f"/api/mobile/memoir/projects/{voice_session['project_id']}",
+        json={"narrator_gender": "female", "narrator_age": 34, "narrator_origin": "成都"},
+    )
+    assert patched.status_code == 200, patched.text
     user_id = (await client.get("/api/auth/me")).json()["id"]
 
     _, ai_client, _, _ = await _run_stream_turn(
@@ -1067,6 +1072,7 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     assert "叙述者：今天聊聊工作吧。" in prompt
     assert "《外婆家的童年》" in prompt
     assert "工作与事业：" in prompt
+    assert "讲述者资料（用户自己填的）：女，34 岁，家乡成都。提方向、举例子时想想这个年纪" in prompt
     assert "主题线索" not in prompt
 
 
