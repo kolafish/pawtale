@@ -25,7 +25,7 @@ from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
-FRAMEWORK_MATCHER_VERSION = "memoir-topic-map-material-v1"
+FRAMEWORK_MATCHER_VERSION = "memoir-topic-map-material-v2"
 MAX_MATCH_MATERIALS = 20
 MAX_MATCHES_PER_MATERIAL = 4
 
@@ -68,7 +68,7 @@ def _matching_prompt(
     item_lines = "\n".join(
         (
             f"- {item_refs.encode(item['item_key'])} | {item['title']} | "
-            f"{item['intent']} | 提示：{'、'.join(item['evidence_hints'])}"
+            f"{item['intent']}"
         )
         for item in project_framework.template_snapshot_json["items"]
     )
@@ -82,7 +82,7 @@ def _matching_prompt(
 规则：
 - 一段讲述是一个完整素材，不要拆成 Claim 或逐句匹配。
 - 只匹配讲述的主要语义；顺带提到的人、地点或事情不算一个独立话题。
-- 每段素材通常只对应一两个话题，明确相关时才输出，无法判断时返回空。
+- 话题按人生先后排；每段素材通常只对应一个话题，明显跨两段人生时才给两个；无法判断时返回空。
 - 不判断事实真假、内容能否入书、隐私范围或用户决定。
 - confidence 是 0 到 1 的数值。
 - 只输出 JSON：

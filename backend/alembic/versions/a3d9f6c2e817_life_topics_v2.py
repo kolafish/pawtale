@@ -1,13 +1,13 @@
-"""Upgrade topic maps to life topics v2 and drop the unused topic defer columns.
+"""Move topic maps to the seven life-story topics and drop the unused topic defer columns.
 
-v2 adds "家族与出身", renames "晚年与现在" to "如今的生活" and widens a few
-evidence hints. Existing items, matches and user resolutions are kept; the new
-item starts with no material.
+Topics that continue in v2 keep their matches and user resolutions. The six
+cross-cutting v1 topics (family, mentors, turning points, hardship, everyday
+life, places) are removed with their matches, and "家世与出身" starts empty.
+Old narrations are not matched again.
 
 Revision ID: a3d9f6c2e817
 Revises: e4b7c2a9d815
 """
-import copy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -22,7 +22,6 @@ branch_labels = None
 depends_on = None
 
 TEMPLATE_KEY = "memoir_life_topics"
-NEW_ITEM_KEY = "family_and_origins"
 
 LIFE_TOPICS_V1 = {
     "template_key": "memoir_life_topics",
@@ -154,32 +153,68 @@ LIFE_TOPICS_V1 = {
     ]
 }
 
-
-def _life_topics_v2() -> dict:
-    template = copy.deepcopy(LIFE_TOPICS_V1)
-    template["version"] = "2"
-    items = {item["item_key"]: item for item in template["items"]}
-    items["work_and_career"]["evidence_hints"] = ["工作", "单位", "同事", "领导", "职业", "生意"]
-    items["later_life_and_present"].update(
-        title="如今的生活",
-        intent="现在的日常、身体和心境、和家人的相处，以及回望走过的路的感受",
-        evidence_hints=["现在", "如今", "这几年", "退休", "晚年", "日常", "身体", "回望"],
-    )
-    items["turning_points_and_choices"]["evidence_hints"] += [
-        "下乡", "参军", "高考", "进城打工", "外出闯荡",
-    ]
-    template["items"].insert(
-        0,
+LIFE_TOPICS_V2 = {
+    "template_key": "memoir_life_topics",
+    "version": "2",
+    "modules": [
         {
-            "item_key": NEW_ITEM_KEY,
-            "module_key": "life_stage",
-            "title": "家族与出身",
-            "intent": "祖辈和家族从哪里来、家里的境况、父母年轻时的事以及自己出生前后的家",
-            "evidence_hints": ["祖籍", "祖上", "家族", "祖辈", "爷爷", "外公", "家境", "出生"],
-            "sort_order": 5,
+            "module_key": "life_story",
+            "title": "人生经历",
+            "sort_order": 10
+        }
+    ],
+    "items": [
+        {
+            "item_key": "family_and_origins",
+            "module_key": "life_story",
+            "title": "家世与出身",
+            "intent": "祖辈和父母是怎样的人，家从哪里来，自己出生时家里的光景",
+            "sort_order": 10
         },
-    )
-    return template
+        {
+            "item_key": "childhood_and_growth",
+            "module_key": "life_story",
+            "title": "童年",
+            "intent": "小时候住在哪、跟谁一起过，记得最清楚的人和事",
+            "sort_order": 20
+        },
+        {
+            "item_key": "school_and_learning",
+            "module_key": "life_story",
+            "title": "求学与少年",
+            "intent": "上学、学本事的那些年，遇到的老师和伙伴",
+            "sort_order": 30
+        },
+        {
+            "item_key": "work_and_career",
+            "module_key": "life_story",
+            "title": "工作与闯荡",
+            "intent": "离开家以后怎么谋生，做过哪些事，去过哪些地方",
+            "sort_order": 40
+        },
+        {
+            "item_key": "marriage_and_family_life",
+            "module_key": "life_story",
+            "title": "成家与儿女",
+            "intent": "怎么遇到另一半，成家过日子，把孩子拉扯大",
+            "sort_order": 50
+        },
+        {
+            "item_key": "later_life_and_present",
+            "module_key": "life_story",
+            "title": "如今的生活",
+            "intent": "现在的日子、身体和心境，回头看走过的路",
+            "sort_order": 60
+        },
+        {
+            "item_key": "values_interests_and_legacy",
+            "module_key": "life_story",
+            "title": "想留下的话",
+            "intent": "信的道理、攒下的经验，想对家人和后辈说的话",
+            "sort_order": 70
+        }
+    ]
+}
 
 
 def _template_hash(snapshot: dict) -> str:
@@ -187,7 +222,8 @@ def _template_hash(snapshot: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _set_template(bind, *, from_version: str, template: dict) -> list[str]:
+def _move_frameworks(*, source: dict, target: dict) -> None:
+    bind = op.get_bind()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     framework_ids = list(
         bind.execute(
@@ -195,48 +231,69 @@ def _set_template(bind, *, from_version: str, template: dict) -> list[str]:
                 "SELECT id FROM memoir_project_frameworks "
                 "WHERE template_key = :key AND template_version = :version"
             ),
-            {"key": TEMPLATE_KEY, "version": from_version},
+            {"key": TEMPLATE_KEY, "version": source["version"]},
         ).scalars()
     )
-    if framework_ids:
-        bind.execute(
-            sa.text(
-                "UPDATE memoir_project_frameworks SET template_version = :version, "
-                "template_snapshot_json = CAST(:snapshot AS JSON), template_hash = :hash, "
-                "updated_at = :now WHERE id = ANY(:ids)"
-            ),
-            {
-                "version": template["version"],
-                "snapshot": json.dumps(template, ensure_ascii=False),
-                "hash": _template_hash(template),
-                "now": now,
-                "ids": framework_ids,
-            },
-        )
-    return framework_ids
+    if not framework_ids:
+        return
+    bind.execute(
+        sa.text(
+            "UPDATE memoir_project_frameworks SET template_version = :version, "
+            "template_snapshot_json = CAST(:snapshot AS JSON), template_hash = :hash, "
+            "updated_at = :now WHERE id = ANY(:ids)"
+        ),
+        {
+            "version": target["version"],
+            "snapshot": json.dumps(target, ensure_ascii=False),
+            "hash": _template_hash(target),
+            "now": now,
+            "ids": framework_ids,
+        },
+    )
+    target_items = {item["item_key"]: item for item in target["items"]}
+    removed = [item["item_key"] for item in source["items"] if item["item_key"] not in target_items]
+    # Item materials cascade; voice sessions and utterances anchored to a removed item are set to null.
+    bind.execute(
+        sa.text(
+            "DELETE FROM memoir_framework_items "
+            "WHERE project_framework_id = ANY(:ids) AND item_key = ANY(:keys)"
+        ),
+        {"ids": framework_ids, "keys": removed},
+    )
+    source_keys = {item["item_key"] for item in source["items"]}
+    for item in target["items"]:
+        if item["item_key"] in source_keys:
+            bind.execute(
+                sa.text(
+                    "UPDATE memoir_framework_items SET module_key = :module_key, sort_order = :sort_order "
+                    "WHERE project_framework_id = ANY(:ids) AND item_key = :item_key"
+                ),
+                {"module_key": item["module_key"], "sort_order": item["sort_order"], "ids": framework_ids,
+                  "item_key": item["item_key"]},
+            )
+            continue
+        for framework_id in framework_ids:
+            bind.execute(
+                sa.text(
+                    "INSERT INTO memoir_framework_items (id, project_framework_id, item_key, module_key, "
+                    "sort_order, evidence_state, user_resolution, assessment_summary, assessment_version, "
+                    "user_resolution_note, updated_at) VALUES (:id, :framework_id, :item_key, :module_key, "
+                    ":sort_order, 'none', 'none', '', '', '', :now)"
+                ),
+                {"id": str(uuid.uuid4()), "framework_id": framework_id, "item_key": item["item_key"],
+                  "module_key": item["module_key"], "sort_order": item["sort_order"], "now": now},
+            )
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    framework_ids = _set_template(bind, from_version="1", template=_life_topics_v2())
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    for framework_id in framework_ids:
-        bind.execute(
-            sa.text(
-                "INSERT INTO memoir_framework_items (id, project_framework_id, item_key, "
-                "module_key, sort_order, evidence_state, user_resolution, assessment_summary, "
-                "assessment_version, user_resolution_note, deferred_until, defer_reason, updated_at) "
-                "VALUES (:id, :framework_id, :item_key, 'life_stage', 5, 'none', 'none', '', '', '', "
-                "NULL, '', :now)"
-            ),
-            {"id": str(uuid.uuid4()), "framework_id": framework_id, "item_key": NEW_ITEM_KEY, "now": now},
-        )
     op.drop_constraint("ck_memoir_framework_items_defer_shape", "memoir_framework_items", type_="check")
     op.drop_column("memoir_framework_items", "deferred_until")
     op.drop_column("memoir_framework_items", "defer_reason")
+    _move_frameworks(source=LIFE_TOPICS_V1, target=LIFE_TOPICS_V2)
 
 
 def downgrade() -> None:
+    _move_frameworks(source=LIFE_TOPICS_V2, target=LIFE_TOPICS_V1)
     op.add_column(
         "memoir_framework_items",
         sa.Column("defer_reason", sa.Text(), server_default="", nullable=False),
@@ -249,13 +306,3 @@ def downgrade() -> None:
         "(deferred_until IS NULL AND length(trim(defer_reason)) = 0) OR "
         "(deferred_until IS NOT NULL AND length(trim(defer_reason)) > 0)",
     )
-    bind = op.get_bind()
-    framework_ids = _set_template(bind, from_version="2", template=LIFE_TOPICS_V1)
-    if framework_ids:
-        bind.execute(
-            sa.text(
-                "DELETE FROM memoir_framework_items "
-                "WHERE project_framework_id = ANY(:ids) AND item_key = :item_key"
-            ),
-            {"ids": framework_ids, "item_key": NEW_ITEM_KEY},
-        )

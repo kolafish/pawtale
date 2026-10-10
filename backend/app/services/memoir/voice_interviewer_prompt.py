@@ -1,9 +1,9 @@
 """Prompt for the AI interviewer's next spoken line.
 
 Each mode gets a different context. Free narration only sees the conversation, and the
-AI just acknowledges and invites the narrator to go on. Guided interview also sees the
-book overview and the life topics, so it can move to another story or topic once one is
-told. Progress facts are only offered at an opening, never in the middle of a story.
+AI just acknowledges and invites the narrator to go on. Guided interview also sees who is
+narrating, the book overview and the life topics, so it can move to another story or topic
+once one is told. Progress facts are only offered at an opening, never in the middle of a story.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from app.domain.memoir.types import MemoirGuidanceMode, MemoirSessionGoal
 from app.models.memoir import MemoirVoiceSession
 from app.services.memoir import completion_interviews
-from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic
+from app.services.memoir.interview_book_context import InterviewBookContext
 from app.services.memoir.narrative.frameworks import FrameworkTopicLevel
 from app.services.memoir.voice_followup_ai import (
     InterviewerPersona,
@@ -21,7 +21,6 @@ from app.services.memoir.voice_followup_ai import (
 )
 
 
-OPENING_TOPIC_COUNT = 3
 _LEVEL_LABELS = {
     FrameworkTopicLevel.COVERED: "聊了不少",
     FrameworkTopicLevel.TOUCHED: "聊过一点",
@@ -88,31 +87,26 @@ def build_stream_turn_prompt(
 
     if book.anchor_topic is not None:
         mode = (
-            f"当前是引导访谈开场，叙述者选了“{book.anchor_topic.title}”这个话题，它关心的是：{book.anchor_topic.intent}。\n"
-            "用一两句话从这个话题开个头，给一个具体、好回答的入口。"
+            f"这是引导访谈开场，他选了“{book.anchor_topic.title}”（{book.anchor_topic.intent}）。"
+            "用一两句从这里开个头，给一个具体好答的入口。"
         )
-        topics = _topics_block(book.topics)
     elif returning:
-        mode = f"""当前是引导访谈开场，叙述者以前讲过。
-- 自然地欢迎回来，用一句话说书里已经有了什么，只说一两个章节名，不报段数
-- 给两个具体方向让他选：
-  一是接着上次，围绕“{book.last_chapter_title or "上次那一段"}”这一段人生往下讲，说成一个具体的入口，不要重提上次最后一个细节；
-  二是书里还空着的，从“待讲主题”里取第一个，用它的提问方向说成一个具体的入口
-- 只问一个问题：今天想从哪个讲起，也可以讲别的"""
-        topics = _thin_topics_block(book.topics)
+        last = f"“{book.last_chapter_title}”" if book.last_chapter_title else "上次"
+        mode = (
+            "这是引导访谈开场，他以前讲过。欢迎回来，提一两个章节名；给两个方向让他选，"
+            f"一个是接着{last}那段往下讲，一个是人生话题里还没聊的一项；只问一个问题。"
+        )
     else:
-        mode = f"""当前是引导访谈首次开场，这本书还没有内容。
-- 用“{host_name}”很短地自我介绍，说明你会一路陪着问，想不起来也没关系
-- 从“待讲主题”里按人生时间顺序挑两个，说成具体的起点，比如小时候住的地方、印象最深的家人
-- 最后只问一个问题：想先从哪一个讲起，也可以讲别的"""
-        topics = _thin_topics_block(book.topics)
+        mode = (
+            "这是引导访谈的第一次开场，书里还没有内容。"
+            f"用“{host_name}”简短自我介绍，说你会一路陪着问，想不起来也没关系。"
+            "从人生话题里挑两个靠前的，说成具体好答的起点，问他想先讲哪个，也可以讲别的。"
+        )
     return _join(
         _header(host_name, regenerate),
         mode,
         progress,
-        _narrator_block(book),
-        _book_block(book, opening=True),
-        topics,
+        _background(book, opening=True),
         policy_section,
         dialogue,
     )
@@ -141,7 +135,7 @@ def _header(host_name: str, regenerate: bool) -> str:
 
 
 def _legacy_header(host_name: str, regenerate: bool) -> str:
-    """Output rules for book completion and guided follow-ups, whose wording tested best offline."""
+    """Output rules for book completion interviews."""
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
     return f"""请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。
 
@@ -168,67 +162,41 @@ def _guided_follow_up_prompt(
     activation_context: str,
     policy_section: str,
 ) -> str:
-    anchor = f"，本次话题是“{book.anchor_topic.title}”" if book.anchor_topic else ""
-    mode = f"""当前是主题讲述{anchor}；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
-- 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
-- 优先顺着当前故事的势能继续听或只追一个自然方向，不要为了“完整”机械补齐时间、地点、人物、起因和结果
-- 只有确实影响理解时，才询问背景、人物关系、原因、结果、转场或感受
-- 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
-    moving_on = (
-        "一个故事讲完了、叙述者说记不清，或者这个话题已经讲得差不多了，就别在原处接着问，"
-        "可以换这个话题里的另一个人或另一件事，或者从“人生话题”里提一个可以拒绝的新方向，说成具体的入口。"
-        "一次只问一个问题，不要用“是……还是……”。"
+    anchor = (
+        f"本次从“{book.anchor_topic.title}”开始，他在对话里选了别的方向就以对话为准。"
+        if book.anchor_topic
+        else ""
     )
+    mode = (
+        "这是引导访谈，你来把握节奏。顺着他正在讲的故事听，需要时追一个自然的问题，同一个细节不要连着问两轮以上。"
+        "一个故事讲完了、他说记不清了，或者这段人生讲得差不多了，就换一个人或一件事，"
+        "或者从“人生话题”里提一个他可以拒绝的新方向。每段人生里都可以聊到重要的人、转折和难处。"
+        + anchor
+    )
+    activation = f"以前讲过的相关原文：\n{activation_context}" if activation_context else ""
     return _join(
-        _legacy_header(host_name, regenerate),
+        _header(host_name, regenerate),
         mode,
         policy_section,
+        _background(book, opening=False),
+        activation,
         dialogue,
-        "历史讲述候选：\n" + (activation_context or "本轮没有检索到历史讲述候选。"),
-        _narrator_block(book),
-        _book_block(book, opening=False),
-        _topics_block(book.topics),
-        moving_on,
     )
 
 
-def _narrator_block(book: InterviewBookContext) -> str:
-    if not book.narrator:
-        return ""
-    line = f"讲述者资料（用户自己填的）：{book.narrator}。"
-    if book.narrator_age_known:
-        line += "提方向、举例子时想想这个年纪的人经历过哪些年代，不同年纪的人生经历差别很大。"
-    return line
-
-
-def _book_block(book: InterviewBookContext, *, opening: bool) -> str:
-    chapters = "、".join(f"《{title}》{count} 段讲述" for title, count in book.chapters[:12]) or "还没有章节"
-    lines = ["书稿概况：", chapters]
+def _background(book: InterviewBookContext, *, opening: bool) -> str:
+    chapters = "、".join(f"《{title}》{count} 段" for title, count in book.chapters[:12]) or "还没有章节"
+    lines = [f"讲述者：{book.narrator}"] if book.narrator else []
+    lines.append(f"书稿：{chapters}")
     if opening and book.last_chapter_title:
         lines.append(f"上次讲到：《{book.last_chapter_title}》")
-    return "\n".join(lines)
-
-
-def _topics_block(topics: tuple[LifeTopic, ...]) -> str:
-    lines = ["人生话题（不是必须讲完的清单，叙述者标过不想聊的已去掉）："]
-    for level in (FrameworkTopicLevel.COVERED, FrameworkTopicLevel.TOUCHED):
-        titles = "、".join(topic.title for topic in topics if topic.level == level)
+    levels = []
+    for level in (FrameworkTopicLevel.COVERED, FrameworkTopicLevel.TOUCHED, FrameworkTopicLevel.NOT_STARTED):
+        titles = "、".join(topic.title for topic in book.topics if topic.level == level)
         if titles:
-            lines.append(f"- {_LEVEL_LABELS[level]}：{titles}")
-    open_topics = [topic for topic in topics if topic.level == FrameworkTopicLevel.NOT_STARTED]
-    if open_topics:
-        lines.append("- 还没聊：")
-        lines.extend(f"  · {topic.title}：{topic.intent}" for topic in open_topics)
-    return "\n".join(lines)
-
-
-def _thin_topics_block(topics: tuple[LifeTopic, ...]) -> str:
-    # Topics are already in template (roughly life) order, so a stable sort keeps it among equals.
-    thinnest = sorted(topics, key=lambda topic: topic.material_count)[:OPENING_TOPIC_COUNT]
-    lines = ["待讲主题（书里最少的几项，可以从这里找新方向，不是必须完成的清单）："]
-    for topic in thinnest:
-        state = "还没讲过" if topic.material_count == 0 else f"讲过 {topic.material_count} 段"
-        lines.append(f"  · {topic.title}（{state}）：{topic.intent}")
+            levels.append(f"{_LEVEL_LABELS[level]}：{titles}")
+    if levels:
+        lines.append("人生话题：" + "；".join(levels))
     return "\n".join(lines)
 
 

@@ -1183,7 +1183,7 @@ BookImagePlacement，因此默认不收入书稿。用户在图片素材页编�
 - `memoir_framework_items`
 - `memoir_framework_item_materials`
 
-ProjectFramework 保存模板 key、版本、模板快照和 hash。当前模板是 `memoir_life_topics` v2（`backend/app/domain/memoir/framework_templates/life_topics_v2.json`），共 13 个话题；v1 的项目由迁移升级到 v2，原有关联和用户决定保留，新增的“家族与出身”从没有素材开始。以后改模板内容要新增版本文件，并用迁移升级已有项目的快照和话题项。
+ProjectFramework 保存模板 key、版本、模板快照和 hash。当前模板是 `memoir_life_topics` v2（`backend/app/domain/memoir/framework_templates/life_topics_v2.json`），按人生先后排 7 个话题，每项只有标题和一句说明。v1 的 12 项由迁移升级到 v2：能对上的 6 项保留关联和用户决定，6 个横向话题连同关联删除，新增的“家世与出身”从没有素材开始，老讲述不重新匹配。以后改模板内容要新增版本文件，并用迁移升级已有项目的快照和话题项。
 
 FrameworkItem 表示一个可聊的人生方向，当前只记录：
 

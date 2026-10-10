@@ -46,9 +46,8 @@ class InterviewBookContext:
     # Topics the narrator marked as enough / not applicable / do not discuss are left out.
     topics: tuple[LifeTopic, ...]
     anchor_topic: LifeTopic | None
-    # Age, gender and hometown the narrator set on the project, e.g. "男，72 岁，家乡山东".
+    # Gender, age and hometown the narrator set on the project, e.g. "男，72 岁，家乡山东".
     narrator: str = ""
-    narrator_age_known: bool = False
 
 
 async def load_interview_book_context(
@@ -69,30 +68,28 @@ async def load_interview_book_context(
     )
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
-    narrator, narrator_age_known = _narrator(profile if isinstance(profile, dict) else {})
+    narrator = _narrator(profile if isinstance(profile, dict) else {})
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
         topics=topics,
         anchor_topic=anchor_topic,
         narrator=narrator,
-        narrator_age_known=narrator_age_known,
     )
 
 
-def _narrator(profile: dict) -> tuple[str, bool]:
+def _narrator(profile: dict) -> str:
     parts = []
     gender = _NARRATOR_GENDERS.get(str(profile.get("narrator_gender") or ""))
     if gender:
         parts.append(gender)
     age = profile.get("narrator_age")
-    age_known = isinstance(age, int) and age > 0
-    if age_known:
+    if isinstance(age, int) and age > 0:
         parts.append(f"{age} 岁")
     origin = str(profile.get("narrator_origin") or "").strip()
     if origin:
         parts.append(f"家乡{origin}")
-    return "，".join(parts), age_known
+    return "，".join(parts)
 
 
 async def _life_topics(

@@ -250,7 +250,7 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
     )
 
     assert completed["state"] == "completed"
-    assert "本轮没有检索到历史讲述候选" in ai_client.calls[0]["user_prompt"]
+    assert "以前讲过的相关原文：\n" not in ai_client.calls[0]["user_prompt"]
     assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert assistant_message is not None
     assert assistant_message.metadata_json["memory_activation_status"] == "failed"
@@ -671,7 +671,7 @@ async def test_voice_assistant_turn_guided_first_opening_offers_life_topics(
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "“老余”" in prompt
     assert "还没有章节" in prompt
-    assert "童年与成长（还没讲过）" in prompt
+    assert "人生话题：还没聊：家世与出身、童年、求学与少年" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
     assert "本轮没有可播报的结构化进度变化" not in prompt
 
@@ -1003,7 +1003,7 @@ async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_sessio
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert "以前讲过" in prompt
-    assert "待讲主题" in prompt
+    assert "人生话题：还没聊" in prompt
     assert "上次讲到我第一次去上海找工作" not in prompt
 
 
@@ -1071,8 +1071,8 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 320
     assert "叙述者：今天聊聊工作吧。" in prompt
     assert "《外婆家的童年》" in prompt
-    assert "工作与事业：" in prompt
-    assert "讲述者资料（用户自己填的）：女，34 岁，家乡成都。提方向、举例子时想想这个年纪" in prompt
+    assert "工作与闯荡" in prompt
+    assert "讲述者：女，34 岁，家乡成都" in prompt
     assert "主题线索" not in prompt
 
 
@@ -1133,7 +1133,7 @@ async def test_guided_opening_from_life_topic_starts_with_that_topic(
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
-    assert f"叙述者选了“{topic['title']}”" in prompt
+    assert f"他选了“{topic['title']}”" in prompt
     assert topic["intent"] in prompt
 
 

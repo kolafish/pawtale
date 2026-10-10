@@ -34,7 +34,6 @@ class FrameworkTemplateItemDefinition(BaseModel):
     module_key: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=160)
     intent: str = Field(min_length=1, max_length=500)
-    evidence_hints: tuple[str, ...] = Field(min_length=1)
     sort_order: int = Field(ge=0)
 
     @field_validator("item_key", "module_key", "title", "intent")
@@ -43,13 +42,6 @@ class FrameworkTemplateItemDefinition(BaseModel):
         if not value.strip():
             raise ValueError("framework template text must not be blank")
         return value
-
-    @field_validator("evidence_hints")
-    @classmethod
-    def validate_evidence_hints(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not value.strip() for value in values):
-            raise ValueError("framework evidence hints must not be blank")
-        return values
 
 
 class FrameworkTemplateDefinition(BaseModel):
