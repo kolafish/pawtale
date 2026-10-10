@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 DEFAULT_FRAMEWORK_TEMPLATE_KEY = "memoir_life_topics"
-DEFAULT_FRAMEWORK_TEMPLATE_VERSION = "1"
+DEFAULT_FRAMEWORK_TEMPLATE_VERSION = "2"
 
 
 class FrameworkTemplateModuleDefinition(BaseModel):
@@ -109,7 +109,7 @@ def load_framework_template(
 ) -> FrameworkTemplateDefinition:
     filenames = {
         (DEFAULT_FRAMEWORK_TEMPLATE_KEY, DEFAULT_FRAMEWORK_TEMPLATE_VERSION):
-            "life_topics_v1.json",
+            "life_topics_v2.json",
     }
     filename = filenames.get((template_key, version))
     if filename is None:

@@ -1,6 +1,6 @@
 {
   "template_key": "memoir_life_topics",
-  "version": "1",
+  "version": "2",
   "modules": [
     {
       "module_key": "life_stage",
@@ -30,6 +30,14 @@
   ],
   "items": [
     {
+      "item_key": "family_and_origins",
+      "module_key": "life_stage",
+      "title": "家族与出身",
+      "intent": "祖辈和家族从哪里来、家里的境况、父母年轻时的事以及自己出生前后的家",
+      "evidence_hints": ["祖籍", "祖上", "家族", "祖辈", "爷爷", "外公", "家境", "出生"],
+      "sort_order": 5
+    },
+    {
       "item_key": "childhood_and_growth",
       "module_key": "life_stage",
       "title": "童年与成长",
@@ -50,7 +58,7 @@
       "module_key": "life_stage",
       "title": "工作与事业",
       "intent": "工作经历、职业变化、同事关系、成就和工作中的困难",
-      "evidence_hints": ["工作", "单位", "同事", "领导", "职业", "生意", "退休"],
+      "evidence_hints": ["工作", "单位", "同事", "领导", "职业", "生意"],
       "sort_order": 30
     },
     {
@@ -64,9 +72,9 @@
     {
       "item_key": "later_life_and_present",
       "module_key": "life_stage",
-      "title": "晚年与现在",
-      "intent": "晚年生活、退休以后、当下的日常以及回望人生的感受",
-      "evidence_hints": ["晚年", "退休", "现在", "如今", "老年", "回望"],
+      "title": "如今的生活",
+      "intent": "现在的日常、身体和心境、和家人的相处，以及回望走过的路的感受",
+      "evidence_hints": ["现在", "如今", "这几年", "退休", "晚年", "日常", "身体", "回望"],
       "sort_order": 50
     },
     {
@@ -90,7 +98,7 @@
       "module_key": "experience",
       "title": "人生转折与选择",
       "intent": "改变人生方向的重要事件、决定、相遇、迁移或机会",
-      "evidence_hints": ["转折", "决定", "选择", "搬家", "离开", "机会", "改变"],
+      "evidence_hints": ["转折", "决定", "选择", "搬家", "离开", "机会", "改变", "下乡", "参军", "高考", "进城打工", "外出闯荡"],
       "sort_order": 80
     },
     {

@@ -119,11 +119,6 @@ class MemoirFrameworkItem(Base):
             "AND resolved_at IS NOT NULL)",
             name="ck_memoir_framework_items_resolution_shape",
         ),
-        CheckConstraint(
-            "(deferred_until IS NULL AND length(trim(defer_reason)) = 0) OR "
-            "(deferred_until IS NOT NULL AND length(trim(defer_reason)) > 0)",
-            name="ck_memoir_framework_items_defer_shape",
-        ),
         Index(
             "ix_memoir_framework_items_framework_state",
             "project_framework_id",
@@ -166,8 +161,6 @@ class MemoirFrameworkItem(Base):
         nullable=True,
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    deferred_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    defer_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
     )

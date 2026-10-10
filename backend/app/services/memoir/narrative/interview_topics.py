@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 import hashlib
 
 from sqlalchemy import select
@@ -84,12 +83,10 @@ async def candidate_topics(
     definitions = {
         definition.item_key: definition for definition in template.items
     }
-    now = datetime.now(UTC).replace(tzinfo=None)
     eligible = [
         item
         for item in project_framework.items
         if item.user_resolution == MemoirFrameworkUserResolution.NONE.value
-        and (item.deferred_until is None or item.deferred_until <= now)
     ]
     if session.anchor_framework_item_id and latest_user_message is None:
         eligible = [
@@ -145,14 +142,9 @@ async def brief_for_candidate(
             MemoirProjectFramework.project_id == project_id,
         )
     )
-    now = datetime.now(UTC).replace(tzinfo=None)
     if (
         item is None
         or item.user_resolution != MemoirFrameworkUserResolution.NONE.value
-        or (
-            item.deferred_until is not None
-            and item.deferred_until > now
-        )
     ):
         raise InterviewTopicUnavailableError(
             "interview_policy_topic_candidate_unavailable"

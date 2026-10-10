@@ -104,11 +104,6 @@ async def create_voice_session(
         if (
             anchor_item.user_resolution
             != MemoirFrameworkUserResolution.NONE.value
-            or (
-                anchor_item.deferred_until is not None
-                and anchor_item.deferred_until
-                > datetime.now(UTC).replace(tzinfo=None)
-            )
         ):
             raise HTTPException(
                 status_code=409,

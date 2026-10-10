@@ -41,16 +41,16 @@ class FakeFrameworkAI(AITextServiceBase):
         return json.dumps(self.payload, ensure_ascii=False)
 
 
-def test_framework_template_v1_is_stable_and_self_contained():
+def test_framework_template_v2_is_stable_and_self_contained():
     template = load_framework_template()
     snapshot = canonical_template_snapshot(template)
 
     assert template.template_key == "memoir_life_topics"
-    assert template.version == "1"
+    assert template.version == "2"
     assert len(template.modules) == 5
-    assert len(template.items) == 12
+    assert len(template.items) == 13
     assert framework_template_hash(snapshot) == (
-        "76cf0ea635aa601ec5244d9c52454d14a44a4cd0af74ed22fdcccd19590d96d4"
+        "1af4d4edeac67f3c996ed68d6d7f3df57f552309b47f992fcc8bec5551c7bc72"
     )
 
 
@@ -81,7 +81,7 @@ async def test_framework_initialization_is_idempotent(test_db):
     )
 
     assert second.id == first.id
-    assert len(first.items) == 12
+    assert len(first.items) == 13
     assert all(
         item.evidence_state == MemoirFrameworkEvidenceState.NONE.value
         for item in first.items
