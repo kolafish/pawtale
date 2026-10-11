@@ -3,6 +3,7 @@ import base64
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import func, select
 
 from app.services.ai_base import AITextServiceBase
@@ -678,6 +679,54 @@ async def test_voice_assistant_turn_first_opening_asks_how_to_address_the_narrat
     assert "待讲主题" not in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
     assert "本轮没有可播报的结构化进度变化" not in prompt
+
+
+@pytest.mark.parametrize("age_answer", ["我一九五二年出生，今年七十四岁。", "我不想说年龄。"])
+async def test_first_narration_preserves_profile_answers_outside_recent_dialogue(
+    client, test_db, age_answer,
+):
+    created = await post_mobile_memoir_voice_session(client, json={"guidance_mode": "guided_interview"})
+    voice_session = created.json()["session"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    name_answer, origin_answer = "我叫王秀英。", "老家在四川成都。"
+    dialogue = [
+        ("assistant", "怎么称呼您？"), ("user", name_answer),
+        ("assistant", "您是哪年生的？"), ("user", age_answer),
+        ("assistant", "您老家是哪里的？"), ("user", origin_answer),
+    ]
+    for turn in range(7):
+        dialogue.extend([("assistant", "后来呢？"), ("user", f"小时候上学的第{turn + 1}件事。")])
+    dialogue[-1] = ("user", "上学这件事讲完了。")
+    test_db.add_all([
+        MemoirChatMessage(
+            project_id=voice_session["project_id"], voice_session_id=voice_session["id"],
+            role=role, content_text=text, content_status=MemoirChatContentStatus.FINAL.value,
+            turn_index=index,
+        )
+        for index, (role, text) in enumerate(dialogue)
+    ])
+    await test_db.commit()
+
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db, voice_session_id=voice_session["id"], user_id=user_id, chunks=["谢谢您分享这段回忆。"],
+    )
+    prompt = ai_client.calls[0]["user_prompt"]
+    for answer in (name_answer, age_answer, origin_answer):
+        assert prompt.count(answer) == 1
+    assert dialogue[-1][1] in prompt
+
+    # Once the profile is complete, regular replies only need the recent dialogue.
+    saved = await client.patch(
+        f"/api/mobile/memoir/projects/{voice_session['project_id']}",
+        json={"elder_name": "王秀英", "narrator_age": 74, "narrator_origin": "四川成都"},
+    )
+    assert saved.status_code == 200
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db, voice_session_id=voice_session["id"], user_id=user_id, chunks=["您可以接着讲。"],
+    )
+    prompt = ai_client.calls[0]["user_prompt"]
+    for answer in (name_answer, age_answer, origin_answer):
+        assert answer not in prompt
 
 
 async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(

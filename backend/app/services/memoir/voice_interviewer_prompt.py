@@ -9,14 +9,17 @@ the life topics. Progress facts are only offered at an opening, never in the mid
 from __future__ import annotations
 
 from app.domain.memoir.types import MemoirSessionGoal
-from app.models.memoir import MemoirVoiceSession
+from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.memoir import completion_interviews
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic
 from app.services.memoir.narrative.frameworks import FrameworkTopicLevel
 from app.services.memoir.voice_followup_ai import (
     InterviewerPersona,
+    MAX_CONTEXT_MESSAGES,
     ProgressPromptContext,
     _has_user_message,
+    _message_context,
+    _ordered_messages,
     _recent_context,
 )
 
@@ -62,7 +65,7 @@ def build_stream_turn_prompt(
         return _join(
             _header(host_name, regenerate),
             _FOLLOW_UP,
-            _profile_questions(book) if first_narration else "",
+            _profile_questions(book, voice_session.messages) if first_narration else "",
             policy_section,
             dialogue,
             _book_block(book, opening=False),
@@ -117,13 +120,20 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 - 他说想自己讲、不想被问时，这次后面只接住，不再提新方向"""
 
 
-def _profile_questions(book: InterviewBookContext) -> str:
+def _profile_questions(book: InterviewBookContext, messages: list[MemoirChatMessage]) -> str:
     if not book.unknown_profile:
         return ""
-    return f"""这本书第一次讲述，资料里还没有他的：{"、".join(book.unknown_profile)}（对话里说过的就算有了）。
+    earlier_dialogue = _message_context(_ordered_messages(list(messages))[:-MAX_CONTEXT_MESSAGES])
+    rules = f"""这本书第一次讲述，项目资料尚未填写的项：{"、".join(book.unknown_profile)}。
+- 合看本次讲述的较早对话和最近访谈上下文：对话里已经回答的就算有了，不再重复询问；明确说过不想提供这些资料，本次讲述后续都不再主动问
 - 按称呼、年龄、老家的顺序，每次接话只问一个还没有的，比如“您是哪年生的？”“您老家是哪里的？”
 - 他刚答完一个，接话时用他的称呼叫他一声（叫错了他会纠正），再问下一个
 - 他正讲着一件事时，先听他讲完再问；他说不想说，就不再问这些，按上面的方式听他讲"""
+    return _join(
+        rules,
+        f"本次讲述较早的对话（仅用于判断资料是否已回答或拒绝，不用于重新追问故事细节）：\n{earlier_dialogue}"
+        if earlier_dialogue else "",
+    )
 
 
 def _header(host_name: str, regenerate: bool) -> str:
