@@ -121,8 +121,9 @@ def _profile_questions(book: InterviewBookContext) -> str:
     if not book.unknown_profile:
         return ""
     return f"""这本书第一次讲述，资料里还没有他的：{"、".join(book.unknown_profile)}（对话里说过的就算有了）。
-- 他刚答完这类问题、话也说完了：接话时用他的称呼叫他一声，叫错了他会纠正；再顺口问一个还没有的，比如哪年生的、老家在哪
-- 他不想说，或者已经讲起事情来了：不再问这些，按上面的方式听他讲"""
+- 按称呼、年龄、老家的顺序，每次接话只问一个还没有的，比如“您是哪年生的？”“您老家是哪里的？”
+- 他刚答完一个，接话时用他的称呼叫他一声（叫错了他会纠正），再问下一个
+- 他正讲着一件事时，先听他讲完再问；他说不想说，就不再问这些，按上面的方式听他讲"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:
