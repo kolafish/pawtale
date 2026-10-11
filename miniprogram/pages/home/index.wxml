@@ -79,7 +79,7 @@
         <view
           wx:else
           id="primary-voice-action"
-          class="hero-voice-action {{voiceStartButtonClass}}"
+          class="hero-voice-action {{voiceStartButtonClass}} {{needsLogin || !hasProject ? 'is-inviting' : ''}}"
           bindtap="startPrimaryVoiceChat"
           hover-class="{{voiceStartButtonHoverClass}}"
           aria-role="button"

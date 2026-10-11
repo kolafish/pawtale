@@ -35,6 +35,7 @@ function loadHomePage({
   launchStateExports = {},
   accessibilityExports = {},
   cacheExports = {},
+  projectExports = {},
 } = {}) {
   const getMemoirIdentity = authExports.getMemoirIdentity || unmockedAsync("getMemoirIdentity");
   const listMemoirVoiceTranscripts = voiceApiExports.listMemoirVoiceTranscripts
@@ -70,6 +71,10 @@ function loadHomePage({
       };
     },
     ...voiceApiExports,
+  });
+  mockModule("../services/memoir.ts", {
+    createMemoirProject: unmockedAsync("createMemoirProject"),
+    ...projectExports,
   });
   mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", {
@@ -578,7 +583,7 @@ test("home start action follows account, project, story and completion states", 
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
 });
 
-test("home reveals voice consent only after a usable project requests it", () => {
+test("home reveals voice consent only after a start requests it", () => {
   const loaded = loadHomePage();
   const { homeViewPatch } = loaded.mod;
   const baseData = {
@@ -593,8 +598,8 @@ test("home reveals voice consent only after a usable project requests it", () =>
   assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, false);
   assert.equal(homeViewPatch({ ...baseData, voiceAuthorizationRequested: true }).showVoiceAuthorizationPanel, true);
   assert.equal(homeViewPatch({ ...baseData, loading: true }).showVoiceAuthorizationPanel, false);
-  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).showVoiceAuthorizationPanel, false);
-  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false, voiceAuthorizationRequested: true }).showVoiceAuthorizationPanel, true);
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true, voiceAuthorizationRequested: true }).showVoiceAuthorizationPanel, false);
 });
 
 test("home starts all three regular modes from the saved project default", async () => {
@@ -1100,40 +1105,118 @@ test("home does not create voice sessions when consent audit sync fails", async 
   assert.equal(context.data.creatingVoice, false);
 });
 
-test("home sends voice starts without a project to project creation", async () => {
-  let createCalls = 0;
+test("home creates the first memoir and starts narrating without the setup form", async () => {
   const navigations = [];
+  const createdProjects = [];
+  const sessionProjects = [];
+  let project = null;
   global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
+    navigateTo(options) { navigations.push(options.url); },
+    pageScrollTo() {},
   };
   const { page } = loadHomePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "u1", display_name: "", email: "",
+        active_project_id: project?.id || "", active_project: project, projects: project ? [project] : [],
+      }),
+    },
+    projectExports: {
+      createMemoirProject: async (input) => {
+        createdProjects.push(input);
+        project = { id: "p-first", title: input.title, metadata_json: {} };
+        return project;
+      },
+    },
     voiceApiExports: {
-      createMemoirVoiceSession: async () => {
-        createCalls += 1;
-        return { session: { id: "voice/skipped" } };
+      createMemoirVoiceSession: async (_input, { projectId }) => {
+        sessionProjects.push(projectId);
+        return { session: { id: "voice-first" } };
       },
     },
   });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      needsLogin: false,
-      projectId: "",
-      hasProject: false,
-      voiceAuthorizationAgreed: true,
+  const context = pageContext(page, {
+    userId: "u1", needsLogin: false, projectId: "", hasProject: false, voiceAuthorizationAgreed: true,
+  });
+  context.measureNarration = () => {};
+
+  await context.startPrimaryVoiceChat();
+
+  assert.deepEqual(createdProjects, [{ title: "我的回忆录" }]);
+  assert.deepEqual(sessionProjects, ["p-first"]);
+  assert.deepEqual(navigations, []);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "voice-first");
+  delete global.wx;
+});
+
+test("agreeing to voice consent carries on with the story the user tapped", async () => {
+  let storedConsent = false;
+  let creates = 0;
+  global.wx = { pageScrollTo() {} };
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => storedConsent,
+      syncVoiceAuthorizationConsent: async ({ consent } = {}) => {
+        if (consent) storedConsent = consent.agreed;
+        return { id: "consent-1" };
+      },
     },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        creates += 1;
+        return { session: { id: "s1" } };
+      },
     },
+  });
+  const context = pageContext(page, {
+    userId: "u1", needsLogin: false, projectId: "p1", hasProject: true, voiceAuthorizationAgreed: false,
+  });
+  context.measureNarration = () => {};
+
+  await context.startPrimaryVoiceChat();
+  assert.equal(creates, 0);
+  assert.equal(context.data.showVoiceAuthorizationPanel, true);
+
+  await context.changeVoiceAuthorization({ detail: { value: ["voice_authorization"] } });
+  assert.equal(creates, 1);
+  assert.equal(context.data.voiceEntry.voiceSessionId, "s1");
+  delete global.wx;
+});
+
+test("logging in from the story button carries on into narration", async () => {
+  const navigations = [];
+  let creates = 0;
+  global.wx = {
+    navigateTo(options) { navigations.push(options.url); },
+    pageScrollTo() {},
   };
+  const project = { id: "p1", title: "我的回忆录", metadata_json: {} };
+  const { page } = loadHomePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "u1", display_name: "", email: "", active_project_id: "p1", active_project: project, projects: [project],
+      }),
+    },
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        creates += 1;
+        return { session: { id: "s1" } };
+      },
+    },
+  });
+  const loggedOut = pageContext(page, { needsLogin: true, voiceAuthorizationAgreed: true });
+  await loggedOut.startPrimaryVoiceChat();
+  assert.deepEqual(navigations, ["/pages/login/index"]);
 
-  await page.startPrimaryVoiceChat.call(context);
+  const relaunched = pageContext(page, { needsLogin: true, voiceAuthorizationAgreed: true });
+  relaunched.measureNarration = () => {};
+  await relaunched.onShow();
+  assert.equal(creates, 1);
 
-  assert.equal(createCalls, 0);
-  assert.deepEqual(navigations, ["/pages/project-edit/index"]);
+  await relaunched.onHide();
+  await relaunched.onShow();
+  assert.equal(creates, 1);
+  delete global.wx;
 });
 
 test("home sends login-required voice starts to the dedicated login page", async () => {
@@ -1233,6 +1316,7 @@ test("home refreshes voice authorization consent from storage", () => {
     },
   });
   const context = {
+    ...page,
     data: { ...page.data, voiceAuthorizationAgreed: true },
     setData(patch) {
       this.data = { ...this.data, ...patch };

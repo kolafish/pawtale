@@ -80,9 +80,13 @@ def build_stream_turn_prompt(
                 f"自然地欢迎回来{last}，让他自己选是接着讲，还是讲一件最近想起来的事。不要列话题，不要问细节。"
             )
         else:
+            # "Tell me anything" is a blank page for a first-time narrator, so the first question is concrete.
+            known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
             mode = (
-                "当前是自由讲述开场，AI 只做弱引导。\n"
-                f"用“{host_name}”做很短的自我介绍，说明可以慢慢聊，给一个很小的开口，比如先说一件想起来的小事。不要连续提问。"
+                "当前是自由讲述的第一次开场，这本书还没有内容。\n"
+                f"{known}"
+                f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；"
+                "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
             )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 

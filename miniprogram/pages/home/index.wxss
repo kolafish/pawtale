@@ -120,8 +120,39 @@
   transition-timing-function: ease-out;
 }
 
+/* Before the first story, a slow glow and a nudging arrow invite the tap without flashing. */
+.hero-voice-action.is-inviting {
+  animation: hero-voice-invite 2.4s ease-in-out infinite;
+}
+
+.hero-voice-action.is-inviting .hero-voice-arrow {
+  animation: hero-voice-arrow-nudge 2.4s ease-in-out infinite;
+}
+
+@keyframes hero-voice-invite {
+  0%, 100% { box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.18), 0 0 0 0 rgba(182, 93, 73, 0.32); }
+  60% { box-shadow: 0 10rpx 24rpx rgba(148, 69, 53, 0.18), 0 0 0 18rpx rgba(182, 93, 73, 0); }
+}
+
+@keyframes hero-voice-arrow-nudge {
+  0%, 40%, 100% { transform: translateX(1rpx); }
+  60% { transform: translateX(9rpx); }
+}
+
 .hero-voice-action.button-blocked {
   opacity: 0.66;
+}
+
+.hero-voice-action.button-blocked,
+.hero-voice-action.button-blocked .hero-voice-arrow {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-voice-action.is-inviting,
+  .hero-voice-action.is-inviting .hero-voice-arrow {
+    animation: none;
+  }
 }
 
 .hero-voice-label {
