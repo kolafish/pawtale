@@ -8,10 +8,14 @@ import {
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
 import {
+  buyCreditPack,
+  creditPurchaseBlockedReason,
   getAICreditSummary,
   getAIUsageDetails,
+  getCreditPacks,
   type AICreditSummary,
   type AIUsageDay,
+  type CreditPack,
 } from "../../services/billing";
 import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
@@ -82,6 +86,8 @@ interface MeData {
   creditUsageError: string;
   creditUsageDays: CreditUsageDayGroup[];
   creditUsageHasMore: boolean;
+  creditPacks: CreditPack[];
+  creditPurchasing: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
@@ -250,6 +256,8 @@ function loggedOutData(): Partial<MeData> {
     creditUsageError: "",
     creditUsageDays: [],
     creditUsageHasMore: false,
+    creditPacks: [],
+    creditPurchasing: false,
     displayName: "",
     nameDraft: "",
     avatarText: "作",
@@ -293,6 +301,8 @@ definePage<MeData>()({
     creditUsageError: "",
     creditUsageDays: [],
     creditUsageHasMore: false,
+    creditPacks: [],
+    creditPurchasing: false,
     error: "",
     displayName: "",
     nameDraft: "",
@@ -473,6 +483,7 @@ definePage<MeData>()({
 
   async loadAICreditSummary() {
     this.setData({ creditLoading: true, creditError: "" });
+    void this.loadCreditPacks();
     try {
       const summary = await getAICreditSummary();
       this.setData(creditData(summary));
@@ -484,6 +495,63 @@ definePage<MeData>()({
       });
     } finally {
       this.setData({ creditLoading: false });
+    }
+  },
+
+  async loadCreditPacks() {
+    try {
+      const { enabled, packs } = await getCreditPacks();
+      this.setData({ creditPacks: enabled ? packs : [] });
+    } catch (error) {
+      console.warn("load credit packs failed", error);
+      this.setData({ creditPacks: [] });
+    }
+  },
+
+  openCreditPurchase() {
+    if (this.data.creditPurchasing || !this.data.creditPacks.length) {
+      return;
+    }
+    const blockedReason = creditPurchaseBlockedReason();
+    if (blockedReason) {
+      wx.showModal({ title: "暂时无法充值", content: blockedReason, showCancel: false });
+      return;
+    }
+    const packs = this.data.creditPacks;
+    wx.showActionSheet({
+      itemList: packs.map((pack) => `${pack.name}，支付 ¥${Number(pack.price_rmb)}`),
+      success: ({ tapIndex }) => {
+        const pack = packs[tapIndex];
+        if (pack) {
+          void this.purchaseCreditPack(pack.product_id);
+        }
+      },
+    });
+  },
+
+  async purchaseCreditPack(productId: string) {
+    this.setData({ creditPurchasing: true });
+    try {
+      const result = await buyCreditPack(productId);
+      if (result === "paid") {
+        wx.showToast({ title: "充值成功", icon: "success" });
+      } else if (result === "pending") {
+        wx.showModal({
+          title: "支付已完成",
+          content: "额度正在到账，请稍后重新打开本页查看。",
+          showCancel: false,
+        });
+      }
+      if (result !== "cancelled") {
+        await this.loadAICreditSummary();
+        if (this.data.creditUsageExpanded) {
+          await this.loadCreditUsageDetails(true);
+        }
+      }
+    } catch (error) {
+      wx.showToast({ title: error instanceof Error ? error.message : "充值失败，请稍后重试", icon: "none" });
+    } finally {
+      this.setData({ creditPurchasing: false });
     }
   },
 

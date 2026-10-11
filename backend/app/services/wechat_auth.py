@@ -15,6 +15,7 @@ class WeChatAuthError(Exception):
 class WeChatSession:
     openid: str
     unionid: str | None = None
+    session_key: str | None = None
 
 
 def _miniprogram_credentials(settings, miniprogram: str) -> tuple[str, str]:
@@ -66,7 +67,9 @@ async def exchange_wechat_login_code(
         raise WeChatAuthError(f"{error_message} ({error_code})")
 
     unionid = payload.get("unionid")
+    session_key = payload.get("session_key")
     return WeChatSession(
         openid=openid,
         unionid=unionid if isinstance(unionid, str) and unionid else None,
+        session_key=session_key if isinstance(session_key, str) and session_key else None,
     )

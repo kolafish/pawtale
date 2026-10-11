@@ -69,3 +69,37 @@ class AICreditGrantRequest(BaseModel):
 class AdminAICreditResponse(BaseModel):
     summary: AICreditSummaryResponse
     credits: list[AICreditEntry]
+
+
+class CreditPackResponse(BaseModel):
+    product_id: str
+    name: str
+    price_rmb: Decimal
+    credit_rmb: Decimal
+
+
+class CreditPacksResponse(BaseModel):
+    enabled: bool
+    packs: list[CreditPackResponse]
+
+
+class CreditOrderCreateRequest(BaseModel):
+    product_id: str = Field(..., max_length=64)
+    # A fresh wx.login code: its session_key signs the payment for this WeChat user.
+    code: str = Field(..., min_length=1, max_length=128)
+
+
+class CreditOrderPaymentResponse(BaseModel):
+    """Arguments for wx.requestVirtualPayment, passed through unchanged."""
+
+    order_no: str
+    mode: str
+    sign_data: str
+    pay_sig: str
+    signature: str
+
+
+class CreditOrderStatusResponse(BaseModel):
+    order_no: str
+    status: Literal["pending", "paid", "refunded"]
+    credit_rmb: Decimal

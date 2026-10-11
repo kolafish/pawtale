@@ -123,6 +123,9 @@ function loadMePage({
       remaining_rmb: 10,
     }),
     getAIUsageDetails: unmockedAsync("getAIUsageDetails"),
+    getCreditPacks: async () => ({ enabled: false, packs: [] }),
+    buyCreditPack: unmockedAsync("buyCreditPack"),
+    creditPurchaseBlockedReason: () => "",
     ...billingExports,
   });
 
@@ -222,6 +225,48 @@ test("me shows how far an overdrawn balance went past the credit", async () => {
   assert.equal(context.data.creditOverdrawn, true);
   assert.equal(context.data.creditRemainingText, "2.50");
   assert.equal(context.data.creditProgressPercent, "100.0");
+});
+
+test("me buys a picked credit pack and refreshes the balance", async () => {
+  const toasts = [];
+  global.wx = {
+    showActionSheet(options) {
+      assert.deepEqual(options.itemList, ["AI 额度 10 元，支付 ¥10", "AI 额度 30 元，支付 ¥30"]);
+      options.success({ tapIndex: 1 });
+    },
+    showToast(options) { toasts.push(options.title); },
+  };
+  const bought = [];
+  let remaining = 10;
+  const { page } = loadMePage({
+    billingExports: {
+      getCreditPacks: async () => ({
+        enabled: true,
+        packs: [
+          { product_id: "ai_credit_10", name: "AI 额度 10 元", price_rmb: "10.00", credit_rmb: "10" },
+          { product_id: "ai_credit_30", name: "AI 额度 30 元", price_rmb: "30.00", credit_rmb: "30" },
+        ],
+      }),
+      getAICreditSummary: async () => ({ total_credit_rmb: remaining, used_rmb: 0, remaining_rmb: remaining }),
+      buyCreditPack: async (productId) => {
+        bought.push(productId);
+        remaining = 40;
+        return "paid";
+      },
+    },
+  });
+  const context = { ...page, ...pageContext(page, { loggedIn: true }) };
+
+  await page.loadAICreditSummary.call(context);
+  await page.loadCreditPacks.call(context);
+  assert.equal(context.data.creditPacks.length, 2);
+  page.openCreditPurchase.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(bought, ["ai_credit_30"]);
+  assert.deepEqual(toasts, ["充值成功"]);
+  assert.equal(context.data.creditRemainingText, "40.00");
+  assert.equal(context.data.creditPurchasing, false);
 });
 
 test("me shows the single guest login entry when the session is missing", async () => {

@@ -324,6 +324,7 @@
   line-height: 1.45;
 }
 
+.credit-recharge-button,
 .credit-retry-button {
   width: 100%;
   min-height: 76rpx;

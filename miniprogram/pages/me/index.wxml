@@ -134,6 +134,12 @@
           <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
         </view>
         <text class="credit-hint">额度按 AI 厂商公开价格原价扣除，不加价。</text>
+        <button
+          wx:if="{{creditPacks.length}}"
+          class="credit-recharge-button support-action ui-pressable {{creditPurchasing ? 'is-disabled' : ''}}"
+          aria-disabled="{{creditPurchasing}}"
+          bindtap="openCreditPurchase"
+        >{{creditPurchasing ? "充值处理中" : "充值额度"}}</button>
         <button class="credit-usage-toggle ui-pressable" bindtap="toggleCreditUsageDetails">
           {{creditUsageExpanded ? "收起使用明细" : "查看使用明细"}}
         </button>

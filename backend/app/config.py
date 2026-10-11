@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     wechat_jscode2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
     # Mini program codes printed in share videos open this version: release, trial or develop.
     wechat_miniprogram_code_env_version: str = "release"
+    # Mini program virtual payment (虚拟支付) for AI credit packs, and the message push
+    # endpoint that receives its delivery and refund events (安全模式, JSON).
+    wechat_xpay_offer_id: str = ""
+    wechat_xpay_app_key: str = ""
+    wechat_message_token: str = ""
+    wechat_message_aes_key: str = ""
 
     # Sample memoir that visitors can browse before logging in: comma-separated
     # chapter ids readable in full (the story tree comes from their project) and

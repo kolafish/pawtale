@@ -21,6 +21,7 @@ from app.routers import (
     github_router,
     memoir_router,
     projects_router,
+    wechat_message_push_router,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop
@@ -91,6 +92,7 @@ app.include_router(billing_router)
 app.include_router(github_router)
 app.include_router(memoir_router)
 app.include_router(projects_router)
+app.include_router(wechat_message_push_router)
 
 
 @app.get("/")

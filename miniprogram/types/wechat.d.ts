@@ -495,6 +495,24 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface RequestVirtualPaymentOption {
+    signData: string;
+    paySig: string;
+    signature: string;
+    mode: string;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult & { errCode?: number }): void;
+  }
+
+  interface DeviceInfo {
+    platform: string;
+    system: string;
+  }
+
+  interface AppBaseInfo {
+    version: string;
+  }
+
   interface MemoryWarningResult {
     level?: number;
   }
@@ -504,6 +522,9 @@ declare namespace WechatMiniprogram {
       USER_DATA_PATH: string;
     };
     login(option?: LoginOption): void;
+    requestVirtualPayment?(option: RequestVirtualPaymentOption): void;
+    getDeviceInfo?(): DeviceInfo;
+    getAppBaseInfo?(): AppBaseInfo;
     request<T = unknown>(option: RequestOption<T>): void;
     downloadFile(option: DownloadFileOption): void;
     uploadFile(option: UploadFileOption): void;
