@@ -62,6 +62,8 @@ async def test_all_credit_and_usage_survive_repeated_account_deletion(
             assert await login(anonymous_client) == user_id
             assert (await get_ai_credit_summary(test_db, user_id=user_id)) == before
         assert (await ensure_ai_credit_account(test_db, user_id)).id == account.id
+        details = (await anonymous_client.get("/api/billing/ai-usage")).json()
+        assert sum(Decimal(day["cost_rmb"]) for day in details["days"]) == Decimal("0.25")
     other_user = await login(anonymous_client, "someone-else")
     assert (await get_ai_credit_summary(test_db, user_id=other_user)).remaining_rmb == Decimal("10")
 

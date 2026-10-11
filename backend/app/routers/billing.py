@@ -114,7 +114,13 @@ async def ai_usage_details(
 ) -> AIUsageDetailResponse:
     """Charges grouped by day and purpose, plus credit additions; paginated by day."""
     charged = (
-        AIUsageRecord.user_id == current_user.id,
+        or_(
+            AIUsageRecord.user_id == current_user.id,
+            exists(select(AICreditTransaction.id).where(
+                AICreditTransaction.user_id == current_user.id,
+                AICreditTransaction.usage_record_id == AIUsageRecord.id,
+            )),
+        ),
         AIUsageRecord.estimated_cost_rmb > 0,
         # Same rule as the balance: debited records, plus successful records
         # from before the ledger existed.
