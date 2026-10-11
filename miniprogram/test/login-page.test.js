@@ -10,18 +10,14 @@ const {
   pageContext,
   unmockedAsync,
 } = require("./page-harness");
-const { hasUsableDisplayName, needsWeChatProfileSetup } = require("../services/auth.ts");
 
 function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
   mockModule("../services/auth.ts", {
-    hasUsableDisplayName,
-    needsWeChatProfileSetup,
     loginWithWeChat: unmockedAsync("loginWithWeChat"),
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
   mockModule("../services/user-profile.ts", {
-    resolveBackendAvatarUrl: (avatarUrl) => avatarUrl || "",
     uploadBackendAvatar: unmockedAsync("uploadBackendAvatar"),
     ...profileExports,
   });
@@ -46,37 +42,7 @@ test("login page offers WeChat as its only sign-in action", () => {
   assert.doesNotMatch(template, /bindtap="submitAccount"|account-login-toggle/);
 });
 
-test("login page relaunches home when the wechat profile is already complete", async () => {
-  const relaunches = [];
-  global.wx = {
-    reLaunch(options) {
-      relaunches.push(options.url);
-    },
-  };
-  const { page } = loadLoginPage({
-    authExports: {
-      loginWithWeChat: async () => ({
-        user: {
-          id: "user-1",
-          email: "wechat_x@wechat.local",
-          password_login_enabled: false,
-          display_name: "微信昵称",
-          avatar_url: "https://avatar.example.com/wechat.png",
-          created_at: "2026-06-15T00:00:00",
-        },
-        needs_credentials: true,
-      }),
-    },
-  });
-  const context = pageContext(page);
-
-  await page.submitWeChat.call(context);
-
-  assert.deepEqual(relaunches, ["/pages/home/index"]);
-  assert.equal(context.data.wechatLoading, false);
-});
-
-test("login page asks a new wechat user to choose nickname and avatar", async () => {
+test("a new wechat user goes straight home without the avatar and nickname step", async () => {
   const relaunches = [];
   global.wx = {
     reLaunch(options) {
@@ -102,21 +68,17 @@ test("login page asks a new wechat user to choose nickname and avatar", async ()
 
   await page.submitWeChat.call(context);
 
-  assert.deepEqual(relaunches, []);
-  assert.equal(context.data.profileMode, true);
-  assert.equal(context.data.profileDisplayName, "");
-  assert.equal(context.data.profileAvatarPath, "");
+  assert.deepEqual(relaunches, ["/pages/home/index"]);
+  assert.equal(context.data.profileMode, false);
   assert.equal(context.data.wechatLoading, false);
 });
 
-test("login page saves selected wechat nickname and avatar before entering", async () => {
+test("after a first like the chosen nickname and avatar are saved before returning", async () => {
   const profileUpdates = [];
   const avatarUploads = [];
-  const relaunches = [];
+  const backs = [];
   global.wx = {
-    reLaunch(options) {
-      relaunches.push(options.url);
-    },
+    navigateBack: () => backs.push(true),
   };
   const { page } = loadLoginPage({
     authExports: {
@@ -155,7 +117,7 @@ test("login page saves selected wechat nickname and avatar before entering", asy
 
   assert.deepEqual(profileUpdates, [{ display_name: "微信昵称" }]);
   assert.deepEqual(avatarUploads, ["wxfile://chosen-avatar"]);
-  assert.deepEqual(relaunches, ["/pages/home/index"]);
+  assert.deepEqual(backs, [true]);
   assert.equal(context.data.profileSaving, false);
 });
 
@@ -171,7 +133,6 @@ test("a first like asks for avatar and nickname, then returns to what was liked"
 
   page.onLoad.call(context, { from: "like" });
   assert.equal(context.data.profileMode, true);
-  assert.equal(context.data.profileAfterLike, true);
 
   page.skipWeChatProfile.call(context);
   assert.deepEqual(backs, [true]);

@@ -1,7 +1,5 @@
 import {
-  hasUsableDisplayName,
   loginWithWeChat,
-  needsWeChatProfileSetup,
   updateBackendProfile,
 } from "../../services/auth";
 import {
@@ -11,10 +9,7 @@ import {
 import { relaunchHome } from "../../services/navigation";
 import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
-import {
-  resolveBackendAvatarUrl,
-  uploadBackendAvatar,
-} from "../../services/user-profile";
+import { uploadBackendAvatar } from "../../services/user-profile";
 
 const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
 
@@ -33,9 +28,9 @@ interface ChooseAvatarEvent {
 interface LoginData {
   pageClass: string;
   wechatLoading: boolean;
-  profileMode: boolean;
   // Opened right after a family member's first like; finishing returns to what they liked.
-  profileAfterLike: boolean;
+  // Logging in to tell a story never stops here: avatar and nickname only matter to likes.
+  profileMode: boolean;
   profileSaving: boolean;
   profileDisplayName: string;
   profileAvatarPath: string;
@@ -47,7 +42,6 @@ definePage<LoginData>()({
     pageClass: accessibilityPageClass(PAGE_CLASS),
     wechatLoading: false,
     profileMode: false,
-    profileAfterLike: false,
     profileSaving: false,
     profileDisplayName: "",
     profileAvatarPath: "",
@@ -56,7 +50,7 @@ definePage<LoginData>()({
 
   onLoad(query: PageQuery = {}) {
     if (queryParam(query, "from") === "like") {
-      this.setData({ profileMode: true, profileAfterLike: true });
+      this.setData({ profileMode: true });
     }
   },
 
@@ -65,11 +59,7 @@ definePage<LoginData>()({
   },
 
   finishProfile() {
-    if (this.data.profileAfterLike) {
-      wx.navigateBack();
-    } else {
-      relaunchHome();
-    }
+    wx.navigateBack();
   },
 
   changeProfileDisplayName(event: InputEvent) {
@@ -90,16 +80,8 @@ definePage<LoginData>()({
     }
     this.setData({ wechatLoading: true, error: "" });
     try {
-      const response = await loginWithWeChat();
-      if (needsWeChatProfileSetup(response.user)) {
-        this.setData({
-          profileMode: true,
-          profileDisplayName: hasUsableDisplayName(response.user) ? response.user.display_name.trim() : "",
-          profileAvatarPath: resolveBackendAvatarUrl(response.user.avatar_url),
-        });
-      } else {
-        relaunchHome();
-      }
+      await loginWithWeChat();
+      relaunchHome();
     } catch (error) {
       this.setData({
         error: error instanceof Error ? error.message : "微信登录失败",

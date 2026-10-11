@@ -138,6 +138,20 @@ export function navigateToLogin(): void {
   wx.navigateTo({ url: LOGIN_PAGE_URL });
 }
 
+// Tapping "种下我的故事" while logged out should carry on into narration once login finishes.
+let pendingNarrationAfterLogin = false;
+
+export function navigateToLoginThenNarrate(): void {
+  pendingNarrationAfterLogin = true;
+  navigateToLogin();
+}
+
+export function consumeNarrationAfterLogin(): boolean {
+  const pending = pendingNarrationAfterLogin;
+  pendingNarrationAfterLogin = false;
+  return pending;
+}
+
 export function relaunchLogin(): void {
   wx.reLaunch({ url: LOGIN_PAGE_URL });
 }

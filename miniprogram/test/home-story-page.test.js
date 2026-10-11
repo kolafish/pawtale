@@ -46,6 +46,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
   });
   mockModule("../services/navigation.ts", {
     consumeHomeVoiceTarget: () => null,
+    consumeNarrationAfterLogin: () => false,
     consumeHomeStoryTarget: () => { const target = navigationTarget; navigationTarget = null; return target; },
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => [401, 403].includes(error?.statusCode),
