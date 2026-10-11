@@ -13,14 +13,16 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utcnow_naive
+from app.clock import BEIJING_TIMEZONE, utcnow_naive
 from app.config import get_settings
 from app.models.ai_credits import AICreditOrder, AICreditTransaction
+from app.models.users import User
 from app.services.ai_credits import RECHARGE_REFUND, add_ai_credit, get_ai_credit_summary
 
 
@@ -251,3 +253,57 @@ async def handle_xpay_event(db: AsyncSession, event: dict) -> dict | None:
             "IosRefundQueryResponse": {"result_code": result_code, "evidence": evidence},
         }
     return None
+
+
+ADMIN_ORDER_LIMIT = 500
+
+
+def _beijing_day_start_utc(day: date) -> datetime:
+    return datetime.combine(day, time.min, BEIJING_TIMEZONE).astimezone(UTC).replace(tzinfo=None)
+
+
+@dataclass(frozen=True)
+class AdminCreditOrders:
+    rows: list[tuple[AICreditOrder, User]]
+    # product_id -> (paid order count, paid fen, refunded fen), over every paid or refunded order in range.
+    paid_by_product: dict[str, tuple[int, int, int]]
+    pending_count: int
+    truncated: bool
+
+
+async def admin_credit_orders(
+    db: AsyncSession, *, start: date, end: date, include_pending: bool
+) -> AdminCreditOrders:
+    """Orders created in the Beijing-date range, newest first, with paid totals per pack."""
+    in_range = (
+        AICreditOrder.created_at >= _beijing_day_start_utc(start),
+        AICreditOrder.created_at < _beijing_day_start_utc(end + timedelta(days=1)),
+    )
+    query = select(AICreditOrder, User).join(User, User.id == AICreditOrder.user_id).where(*in_range)
+    if not include_pending:
+        query = query.where(AICreditOrder.status != "pending")
+    rows = (
+        await db.execute(query.order_by(AICreditOrder.created_at.desc()).limit(ADMIN_ORDER_LIMIT + 1))
+    ).all()
+    totals = await db.execute(
+        select(
+            AICreditOrder.product_id,
+            func.count(),
+            func.sum(AICreditOrder.price_fen),
+            func.sum(AICreditOrder.refunded_fen),
+        )
+        .where(*in_range, AICreditOrder.status != "pending")
+        .group_by(AICreditOrder.product_id)
+    )
+    pending_count = await db.scalar(
+        select(func.count()).select_from(AICreditOrder).where(*in_range, AICreditOrder.status == "pending")
+    )
+    return AdminCreditOrders(
+        rows=[(order, user) for order, user in rows[:ADMIN_ORDER_LIMIT]],
+        paid_by_product={
+            product_id: (int(count), int(paid or 0), int(refunded or 0))
+            for product_id, count, paid, refunded in totals
+        },
+        pending_count=int(pending_count or 0),
+        truncated=len(rows) > ADMIN_ORDER_LIMIT,
+    )

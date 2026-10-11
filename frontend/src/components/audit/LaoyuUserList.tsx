@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Clock3, Mic, RefreshCw, Search, Users } from 'lucide-react';
 import { auditApi } from '../../api';
+import { AdminCreditPanel } from './AdminCreditPanel';
 import { Metric } from './AuditMetric';
 import { formatDateTime, formatDuration } from './auditFormat';
 import type { LaoyuUserUsage } from '../../types';
@@ -22,6 +23,7 @@ function matchesKeyword(row: LaoyuUserUsage, keyword: string): boolean {
 /** Lists everyone who signed in to or used 老余口述, with their memoir recording and app usage totals. */
 export function LaoyuUserList({ onOpenAudit }: { onOpenAudit: (userId: string) => void }) {
   const [keyword, setKeyword] = useState('');
+  const [creditUserId, setCreditUserId] = useState('');
   const usersQuery = useQuery({
     queryKey: ['audit', 'laoyu-users'],
     queryFn: () => auditApi.laoyuUsers(),
@@ -95,48 +97,67 @@ export function LaoyuUserList({ onOpenAudit }: { onOpenAudit: (userId: string) =
                   <th className="w-32 px-4 py-3 text-left font-medium">录音时长</th>
                   <th className="w-40 px-4 py-3 text-left font-medium">小程序活跃</th>
                   <th className="w-32 px-4 py-3 text-left font-medium">最近活跃</th>
-                  <th className="w-32 px-4 py-3 text-right font-medium">审计</th>
+                  <th className="w-48 px-4 py-3 text-right font-medium">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {visibleUsers.map((row) => (
-                  <tr
-                    key={row.user.id}
-                    className="cursor-pointer hover:bg-pink-50/40"
-                    title="点击查看小程序使用审计"
-                    onClick={() => onOpenAudit(row.user.id)}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{row.user.display_name || row.user.email}</div>
-                      <div className="text-xs text-gray-500">
-                        {row.wechat_bound ? '微信登录' : '邮箱账号'} · {row.user.email}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatBeijingDate(row.created_at) || '-'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{row.memoir_project_count}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">
-                      {row.voice_session_count} / {row.utterance_count}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-900">{formatDuration(row.recorded_seconds * 1000)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">
-                      <div>{formatDuration(row.miniprogram_active_ms)}</div>
-                      <div className="text-xs text-gray-500">{row.miniprogram_active_days} 天</div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDateTime(row.last_active_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenAudit(row.user.id);
-                        }}
-                        className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-sm text-pink-600 transition-colors hover:bg-pink-50"
-                      >
-                        查看审计
-                        <ChevronRight size={14} />
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={row.user.id}>
+                    <tr
+                      className="cursor-pointer hover:bg-pink-50/40"
+                      title="点击查看小程序使用审计"
+                      onClick={() => onOpenAudit(row.user.id)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{row.user.display_name || row.user.email}</div>
+                        <div className="text-xs text-gray-500">
+                          {row.wechat_bound ? '微信登录' : '邮箱账号'} · {row.user.email}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatBeijingDate(row.created_at) || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">{row.memoir_project_count}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                        {row.voice_session_count} / {row.utterance_count}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-900">{formatDuration(row.recorded_seconds * 1000)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                        <div>{formatDuration(row.miniprogram_active_ms)}</div>
+                        <div className="text-xs text-gray-500">{row.miniprogram_active_days} 天</div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDateTime(row.last_active_at)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          aria-expanded={creditUserId === row.user.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCreditUserId(creditUserId === row.user.id ? '' : row.user.id);
+                          }}
+                          className="mr-1 inline-flex items-center justify-center whitespace-nowrap rounded-md px-2 py-1 text-sm text-gray-600 transition-colors hover:bg-gray-100"
+                        >
+                          AI 额度
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenAudit(row.user.id);
+                          }}
+                          className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-sm text-pink-600 transition-colors hover:bg-pink-50"
+                        >
+                          查看审计
+                          <ChevronRight size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                    {creditUserId === row.user.id && (
+                      <tr>
+                        <td colSpan={8} className="bg-gray-50/60 p-0">
+                          <AdminCreditPanel userId={row.user.id} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
                 {!usersQuery.isLoading && visibleUsers.length === 0 && (
                   <tr>
