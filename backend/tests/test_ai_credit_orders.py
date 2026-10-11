@@ -81,7 +81,7 @@ async def _push(client, event: dict):
     )
 
 
-def _deliver_event(order_no: str, product_id: str = "ai_credit_30") -> dict:
+def _deliver_event(order_no: str, product_id: str = "29_9_0") -> dict:
     return {
         "MsgType": "event",
         "Event": "xpay_goods_deliver_notify",
@@ -89,7 +89,7 @@ def _deliver_event(order_no: str, product_id: str = "ai_credit_30") -> dict:
         "OutTradeNo": order_no,
         "Env": 0,
         "WeChatPayInfo": {"MchOrderNo": "wx-order-1", "TransactionId": "tx-1", "PaidTime": 1714112445},
-        "GoodsInfo": {"ProductId": product_id, "Quantity": 1, "OrigPrice": 3000, "ActualPrice": 3000,
+        "GoodsInfo": {"ProductId": product_id, "Quantity": 1, "OrigPrice": 2990, "ActualPrice": 2990,
                       "Attach": order_no},
     }
 
@@ -98,15 +98,15 @@ async def test_buying_a_pack_credits_once_and_refund_takes_it_back(client, test_
     user_id = (await client.get("/api/auth/me")).json()["id"]
     packs = (await client.get("/api/billing/credit-packs")).json()
     assert packs["enabled"] is True
-    assert [pack["product_id"] for pack in packs["packs"]] == ["ai_credit_10", "ai_credit_30", "ai_credit_100"]
+    assert [pack["product_id"] for pack in packs["packs"]] == ["9_9_0", "29_9_0", "198_0"]
 
-    response = await client.post("/api/billing/credit-orders", json={"product_id": "ai_credit_30", "code": "c"})
+    response = await client.post("/api/billing/credit-orders", json={"product_id": "29_9_0", "code": "c"})
     assert response.status_code == 200
     payment = response.json()
     sign_data = json.loads(payment["sign_data"])
     assert sign_data == {
         "offerId": "1450000000", "buyQuantity": 1, "env": 0, "currencyType": "CNY",
-        "productId": "ai_credit_30", "goodsPrice": 3000,
+        "productId": "29_9_0", "goodsPrice": 2990,
         "outTradeNo": payment["order_no"], "attach": payment["order_no"],
     }
     assert payment["mode"] == "short_series_goods"
@@ -122,14 +122,14 @@ async def test_buying_a_pack_credits_once_and_refund_takes_it_back(client, test_
         assert delivered.text == "success"
     assert (await client.get(status_url)).json()["status"] == "paid"
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
-    assert summary.recharged_credit_rmb == Decimal("30")
-    assert summary.remaining_rmb == Decimal("40")
+    assert summary.recharged_credit_rmb == Decimal("29.9")
+    assert summary.remaining_rmb == Decimal("39.9")
 
     refund = {
         "MsgType": "event", "Event": "xpay_refund_notify", "OpenId": "payer-openid",
         "WxRefundId": "wx-refund-1", "MchRefundId": "mch-refund-1",
         "WxOrderId": "wx-order-1", "MchOrderId": payment["order_no"],
-        "RefundFee": 3000, "RetCode": 0, "RetMsg": "", "RetryTimes": 0,
+        "RefundFee": 2990, "RetCode": 0, "RetMsg": "", "RetryTimes": 0,
     }
     for _ in range(2):
         assert (await _push(client, refund)).status_code == 200
@@ -141,18 +141,18 @@ async def test_buying_a_pack_credits_once_and_refund_takes_it_back(client, test_
 
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert sorted((entry["label"], Decimal(entry["amount_rmb"])) for entry in day["credits"]) == [
-        ("充值", Decimal("30")), ("充值退款", Decimal("-30")),
+        ("充值", Decimal("29.9")), ("充值退款", Decimal("-29.9")),
     ]
 
 
 async def test_delivery_for_unknown_order_or_wrong_pack_adds_nothing(client, test_db, xpay_settings):
     user_id = (await client.get("/api/auth/me")).json()["id"]
     payment = (await client.post(
-        "/api/billing/credit-orders", json={"product_id": "ai_credit_10", "code": "c"}
+        "/api/billing/credit-orders", json={"product_id": "9_9_0", "code": "c"}
     )).json()
 
     assert (await _push(client, _deliver_event("0" * 32))).status_code == 200
-    assert (await _push(client, _deliver_event(payment["order_no"], "ai_credit_100"))).status_code == 200
+    assert (await _push(client, _deliver_event(payment["order_no"], "198_0"))).status_code == 200
 
     order = await test_db.scalar(select(AICreditOrder).where(AICreditOrder.out_trade_no == payment["order_no"]))
     assert order.status == "pending"
@@ -162,13 +162,13 @@ async def test_delivery_for_unknown_order_or_wrong_pack_adds_nothing(client, tes
 async def test_ios_refund_query_refuses_once_the_credit_is_spent(client, test_db, xpay_settings):
     user_id = (await client.get("/api/auth/me")).json()["id"]
     payment = (await client.post(
-        "/api/billing/credit-orders", json={"product_id": "ai_credit_30", "code": "c"}
+        "/api/billing/credit-orders", json={"product_id": "29_9_0", "code": "c"}
     )).json()
     await _push(client, _deliver_event(payment["order_no"]))
     query = {
         "MsgType": "event", "Event": "xpay_subscribe_ios_refund_query_notify",
         "refund_time": "1714112445", "order_time": "1714112400", "channel_bill": "apple-1",
-        "bundleid": "com.tencent.xin", "product_id": "ai_credit_30", "p_count": "1",
+        "bundleid": "com.tencent.xin", "product_id": "29_9_0", "p_count": "1",
         "refund_request_reason": "1", "provide_status": "1", "pay_order_id": payment["order_no"],
     }
 

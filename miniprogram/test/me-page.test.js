@@ -231,7 +231,7 @@ test("me buys a picked credit pack and refreshes the balance", async () => {
   const toasts = [];
   global.wx = {
     showActionSheet(options) {
-      assert.deepEqual(options.itemList, ["AI 额度 10 元，支付 ¥10", "AI 额度 30 元，支付 ¥30"]);
+      assert.deepEqual(options.itemList, ["AI 额度 9.9 元，支付 ¥9.9", "AI 额度 29.9 元，支付 ¥29.9"]);
       options.success({ tapIndex: 1 });
     },
     showToast(options) { toasts.push(options.title); },
@@ -243,14 +243,14 @@ test("me buys a picked credit pack and refreshes the balance", async () => {
       getCreditPacks: async () => ({
         enabled: true,
         packs: [
-          { product_id: "ai_credit_10", name: "AI 额度 10 元", price_rmb: "10.00", credit_rmb: "10" },
-          { product_id: "ai_credit_30", name: "AI 额度 30 元", price_rmb: "30.00", credit_rmb: "30" },
+          { product_id: "9_9_0", name: "AI 额度 9.9 元", price_rmb: "9.90", credit_rmb: "9.9" },
+          { product_id: "29_9_0", name: "AI 额度 29.9 元", price_rmb: "29.90", credit_rmb: "29.9" },
         ],
       }),
       getAICreditSummary: async () => ({ total_credit_rmb: remaining, used_rmb: 0, remaining_rmb: remaining }),
       buyCreditPack: async (productId) => {
         bought.push(productId);
-        remaining = 40;
+        remaining = 39.9;
         return "paid";
       },
     },
@@ -263,9 +263,9 @@ test("me buys a picked credit pack and refreshes the balance", async () => {
   page.openCreditPurchase.call(context);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(bought, ["ai_credit_30"]);
+  assert.deepEqual(bought, ["29_9_0"]);
   assert.deepEqual(toasts, ["充值成功"]);
-  assert.equal(context.data.creditRemainingText, "40.00");
+  assert.equal(context.data.creditRemainingText, "39.90");
   assert.equal(context.data.creditPurchasing, false);
 });
 
