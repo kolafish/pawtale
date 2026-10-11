@@ -843,3 +843,36 @@ export interface AdminAICreditResponse {
 }
 
 export type AICreditKind = 'recharge' | 'grant';
+
+export type CreditOrderStatus = 'pending' | 'paid' | 'refunded';
+
+export interface AdminCreditOrder {
+  order_no: string;
+  user: { id: string; display_name: string; email: string };
+  product_id: string;
+  pack_name: string;
+  price_rmb: string;
+  credit_rmb: string;
+  refunded_rmb: string;
+  status: CreditOrderStatus;
+  wx_order_id: string | null;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export interface AdminCreditOrderTotals {
+  product_id: string;
+  pack_name: string;
+  paid_count: number;
+  paid_rmb: string;
+  refunded_rmb: string;
+  net_rmb: string;
+}
+
+export interface AdminCreditOrdersResponse {
+  totals: AdminCreditOrderTotals;
+  products: AdminCreditOrderTotals[];
+  pending_count: number;
+  orders: AdminCreditOrder[];
+  truncated: boolean;
+}

@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from app.clock import beijing_date, utcnow_naive
 from app.config import get_settings
 from app.models.ai_credits import AICreditOrder
 from app.models.ai_usage import AIUsageRecord
@@ -204,3 +205,40 @@ async def test_message_push_rejects_bad_signatures(client, xpay_settings):
         json={"Encrypt": encrypted},
     )
     assert forged.status_code == 403
+
+
+async def test_admin_lists_paid_orders_with_totals(admin_client, test_db, xpay_settings):
+    paid = (await admin_client.post(
+        "/api/billing/credit-orders", json={"product_id": "29_9_0", "code": "c"}
+    )).json()
+    await _push(admin_client, _deliver_event(paid["order_no"]))
+    await admin_client.post("/api/billing/credit-orders", json={"product_id": "9_9_0", "code": "c"})
+    refund = {
+        "MsgType": "event", "Event": "xpay_refund_notify", "WxRefundId": "wx-refund-2",
+        "WxOrderId": "wx-order-1", "MchOrderId": paid["order_no"], "RefundFee": 1000, "RetCode": 0,
+    }
+    await _push(admin_client, refund)
+    test_db.expire_all()
+
+    today = beijing_date(utcnow_naive()).isoformat()
+    body = (await admin_client.get(
+        "/api/billing/admin/credit-orders", params={"from": today, "to": today}
+    )).json()
+    assert body["pending_count"] == 1
+    assert [order["order_no"] for order in body["orders"]] == [paid["order_no"]]
+    order = body["orders"][0]
+    assert (order["status"], order["pack_name"], order["wx_order_id"]) == ("paid", "AI 额度 29.9 元", "wx-order-1")
+    assert (Decimal(order["price_rmb"]), Decimal(order["refunded_rmb"])) == (Decimal("29.9"), Decimal("10"))
+    assert body["totals"]["paid_count"] == 1
+    assert Decimal(body["totals"]["net_rmb"]) == Decimal("19.9")
+    assert [item["product_id"] for item in body["products"]] == ["29_9_0"]
+
+    with_pending = (await admin_client.get(
+        "/api/billing/admin/credit-orders", params={"from": today, "to": today, "include_pending": "true"}
+    )).json()
+    assert [order["status"] for order in with_pending["orders"]] == ["pending", "paid"]
+
+
+async def test_credit_order_list_is_admin_only(client):
+    response = await client.get("/api/billing/admin/credit-orders", params={"from": "2026-10-01", "to": "2026-10-11"})
+    assert response.status_code == 403

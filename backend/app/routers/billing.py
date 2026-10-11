@@ -22,10 +22,19 @@ from app.schemas.billing import (
     CreditOrderCreateRequest,
     CreditOrderPaymentResponse,
     CreditOrderStatusResponse,
+    AdminCreditOrderRow,
+    AdminCreditOrdersResponse,
+    AdminCreditOrderTotals,
+    AdminCreditOrderUser,
     CreditPackResponse,
     CreditPacksResponse,
 )
-from app.services.ai_credit_orders import CREDIT_PACKS, create_credit_order, xpay_configured
+from app.services.ai_credit_orders import (
+    CREDIT_PACKS,
+    admin_credit_orders,
+    create_credit_order,
+    xpay_configured,
+)
 from app.services.ai_credits import (
     CREDIT_TRANSACTION_TYPES,
     MANUAL_GRANT,
@@ -284,3 +293,63 @@ async def add_user_ai_credit(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await get_user_ai_credit(user_id, db, admin_user)
+
+
+def _fen_rmb(fen: int) -> Decimal:
+    return Decimal(fen) / 100
+
+
+def _pack_name(product_id: str) -> str:
+    pack = CREDIT_PACKS.get(product_id)
+    return pack.name if pack else product_id
+
+
+@router.get("/admin/credit-orders", response_model=AdminCreditOrdersResponse)
+async def list_credit_orders(
+    from_date: date = Query(alias="from"),
+    to_date: date = Query(alias="to"),
+    include_pending: bool = False,
+    db: AsyncSession = Depends(get_db),
+    _admin_user: User = Depends(get_current_admin_user),
+) -> AdminCreditOrdersResponse:
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="from 不能晚于 to")
+    result = await admin_credit_orders(db, start=from_date, end=to_date, include_pending=include_pending)
+    products = [
+        AdminCreditOrderTotals(
+            product_id=product_id,
+            pack_name=_pack_name(product_id),
+            paid_count=count,
+            paid_rmb=_fen_rmb(paid_fen),
+            refunded_rmb=_fen_rmb(refunded_fen),
+            net_rmb=_fen_rmb(paid_fen - refunded_fen),
+        )
+        for product_id, (count, paid_fen, refunded_fen) in sorted(result.paid_by_product.items())
+    ]
+    return AdminCreditOrdersResponse(
+        totals=AdminCreditOrderTotals(
+            paid_count=sum(item.paid_count for item in products),
+            paid_rmb=sum((item.paid_rmb for item in products), Decimal("0")),
+            refunded_rmb=sum((item.refunded_rmb for item in products), Decimal("0")),
+            net_rmb=sum((item.net_rmb for item in products), Decimal("0")),
+        ),
+        products=products,
+        pending_count=result.pending_count,
+        orders=[
+            AdminCreditOrderRow(
+                order_no=order.out_trade_no,
+                user=AdminCreditOrderUser(id=user.id, display_name=user.display_name, email=user.email),
+                product_id=order.product_id,
+                pack_name=_pack_name(order.product_id),
+                price_rmb=_fen_rmb(order.price_fen),
+                credit_rmb=order.credit_rmb,
+                refunded_rmb=_fen_rmb(order.refunded_fen),
+                status=order.status,
+                wx_order_id=order.wx_order_id,
+                created_at=order.created_at,
+                paid_at=order.paid_at,
+            )
+            for order, user in result.rows
+        ],
+        truncated=result.truncated,
+    )

@@ -103,3 +103,42 @@ class CreditOrderStatusResponse(BaseModel):
     order_no: str
     status: Literal["pending", "paid", "refunded"]
     credit_rmb: Decimal
+
+
+class AdminCreditOrderUser(BaseModel):
+    id: str
+    display_name: str
+    email: str
+
+
+class AdminCreditOrderRow(BaseModel):
+    order_no: str
+    user: AdminCreditOrderUser
+    product_id: str
+    pack_name: str
+    price_rmb: Decimal
+    credit_rmb: Decimal
+    refunded_rmb: Decimal
+    status: str
+    wx_order_id: str | None
+    created_at: datetime
+    paid_at: datetime | None
+
+
+class AdminCreditOrderTotals(BaseModel):
+    product_id: str = ""
+    pack_name: str = ""
+    paid_count: int = 0
+    paid_rmb: Decimal = Decimal("0")
+    refunded_rmb: Decimal = Decimal("0")
+    net_rmb: Decimal = Decimal("0")
+
+
+class AdminCreditOrdersResponse(BaseModel):
+    """Orders created in a Beijing-date range; refunds count against the order's own day."""
+
+    totals: AdminCreditOrderTotals
+    products: list[AdminCreditOrderTotals]
+    pending_count: int
+    orders: list[AdminCreditOrderRow]
+    truncated: bool

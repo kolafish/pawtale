@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { BarChart3, FolderOpen, LogOut, UserCircle, Users } from 'lucide-react';
+import { BarChart3, FolderOpen, LogOut, Receipt, UserCircle, Users } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
 import { UserAuditDashboard } from './audit/UserAuditDashboard';
 import { LaoyuUserList } from './audit/LaoyuUserList';
+import { CreditOrderList } from './audit/CreditOrderList';
 import { getAIModelOptions } from '../constants/aiModels';
 import type { User } from '../types';
 import { useDraftSaves } from '../hooks/project/draftSaves';
@@ -23,7 +24,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
     setIsAdmin(user.role === 'admin');
     if (user.role !== 'admin') setDefaultAiModel('deepseek-flash');
   }, [setDefaultAiModel, setIsAdmin, user.role]);
-  const [activeView, setActiveView] = useState<'workspace' | 'audit' | 'laoyu'>('workspace');
+  const [activeView, setActiveView] = useState<'workspace' | 'audit' | 'laoyu' | 'orders'>('workspace');
   const [auditUserId, setAuditUserId] = useState('');
   const canViewAudit = user.role === 'admin';
   const currentView = canViewAudit ? activeView : 'workspace';
@@ -107,6 +108,22 @@ export function Layout({ user, onLogout }: LayoutProps) {
                 <Users size={15} />
                 <span className="hidden md:inline">老余用户</span>
               </button>
+              <button
+                type="button"
+                onClick={() => leaveWorkspace(() => {
+                  closeProject();
+                  setActiveView('orders');
+                })}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                  currentView === 'orders'
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-gray-500 hover:bg-white/70 hover:text-gray-700'
+                }`}
+                title="充值订单"
+              >
+                <Receipt size={15} />
+                <span className="hidden md:inline">充值订单</span>
+              </button>
             </div>
           )}
         </div>
@@ -152,6 +169,14 @@ export function Layout({ user, onLogout }: LayoutProps) {
         )}
         {currentView === 'laoyu' && (
           <LaoyuUserList
+            onOpenAudit={(userId) => {
+              setAuditUserId(userId);
+              setActiveView('audit');
+            }}
+          />
+        )}
+        {currentView === 'orders' && (
+          <CreditOrderList
             onOpenAudit={(userId) => {
               setAuditUserId(userId);
               setActiveView('audit');

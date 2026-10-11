@@ -26,6 +26,7 @@ import type {
   AuditUserDayResponse,
   LaoyuUsersResponse,
   AdminAICreditResponse,
+  AdminCreditOrdersResponse,
   AICreditKind,
   MemoirBookPlan,
   MemoirBookChapterDraft,
@@ -76,6 +77,8 @@ export const billingAdminApi = {
     api.get<AdminAICreditResponse>(`/billing/admin/users/${encodeURIComponent(userId)}/ai-credit`).then(r => r.data),
   addCredit: (userId: string, data: { amount_rmb: string; kind: AICreditKind; note: string }) =>
     api.post<AdminAICreditResponse>(`/billing/admin/users/${encodeURIComponent(userId)}/ai-credit`, data).then(r => r.data),
+  creditOrders: (params: { from: string; to: string; include_pending: boolean }) =>
+    api.get<AdminCreditOrdersResponse>('/billing/admin/credit-orders', { params }).then(r => r.data),
 };
 
 // Projects API
