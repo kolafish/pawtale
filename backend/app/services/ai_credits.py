@@ -27,12 +27,14 @@ from app.schemas.billing import AICreditSummaryResponse
 MONEY_QUANTUM = Decimal("0.000001")
 USAGE_DEBIT = "usage_debit"
 USAGE_REFUND = "usage_refund"
-# Historical admin edits of the total credit; new additions use the two types below.
+# Historical admin edits of the total credit; new additions use the types below.
 MANUAL_ADJUSTMENT = "manual_adjustment"
 RECHARGE = "recharge"
+RECHARGE_REFUND = "recharge_refund"
 MANUAL_GRANT = "manual_grant"
-CREDIT_TRANSACTION_TYPES = (MANUAL_ADJUSTMENT, RECHARGE, MANUAL_GRANT)
-CreditKind = Literal["recharge", "grant"]
+CREDIT_TRANSACTION_TYPES = (MANUAL_ADJUSTMENT, RECHARGE, RECHARGE_REFUND, MANUAL_GRANT)
+CreditKind = Literal["recharge", "recharge_refund", "grant"]
+_CREDIT_KIND_TYPES = {"recharge": RECHARGE, "recharge_refund": RECHARGE_REFUND, "grant": MANUAL_GRANT}
 
 
 def _money(value: Decimal | int | float | None) -> Decimal:
@@ -194,8 +196,9 @@ async def add_ai_credit(
     kind: CreditKind,
     actor_user_id: str,
     note: str = "",
+    operation_id: str | None = None,
 ) -> None:
-    """Add (or, with a negative amount, correct) paid recharge or free grant credit."""
+    """Add (or, with a negative amount, correct or refund) paid recharge or free grant credit."""
     amount = _money(amount_rmb)
     if not amount:
         raise ValueError("amount_rmb must not be zero")
@@ -208,7 +211,7 @@ async def add_ai_credit(
     )
     if account is None:
         raise RuntimeError("AI credit account could not be initialized")
-    if kind == "recharge":
+    if kind != "grant":
         new_balance = _money(account.recharged_credit_rmb) + amount
         if new_balance < 0:
             raise ValueError("recharged credit cannot become negative")
@@ -222,8 +225,9 @@ async def add_ai_credit(
         AICreditTransaction(
             user_id=user_id,
             actor_user_id=actor_user_id,
-            transaction_type=RECHARGE if kind == "recharge" else MANUAL_GRANT,
+            transaction_type=_CREDIT_KIND_TYPES[kind],
             amount_rmb=amount,
+            operation_id=operation_id,
             note=note.strip(),
         )
     )

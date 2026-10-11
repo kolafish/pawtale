@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_admin_user, get_current_user
 from app.database import get_db
-from app.models.ai_credits import AICreditTransaction
+from app.models.ai_credits import AICreditOrder, AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
 from app.models.users import User
 from app.schemas.billing import (
@@ -19,23 +19,31 @@ from app.schemas.billing import (
     AIUsageDay,
     AIUsageDetailResponse,
     AIUsagePurposeTotal,
+    CreditOrderCreateRequest,
+    CreditOrderPaymentResponse,
+    CreditOrderStatusResponse,
+    CreditPackResponse,
+    CreditPacksResponse,
 )
+from app.services.ai_credit_orders import CREDIT_PACKS, create_credit_order, xpay_configured
 from app.services.ai_credits import (
     CREDIT_TRANSACTION_TYPES,
     MANUAL_GRANT,
     RECHARGE,
+    RECHARGE_REFUND,
     USAGE_DEBIT,
     add_ai_credit,
     get_ai_credit_summary,
     list_credit_transactions,
 )
+from app.services.wechat_auth import WeChatAuthError, exchange_wechat_login_code
 
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 # Users are in China, so ledger days follow Beijing time.
 BEIJING_OFFSET = timedelta(hours=8)
-_CREDIT_LABELS = {RECHARGE: "充值", MANUAL_GRANT: "赠送额度"}
+_CREDIT_LABELS = {RECHARGE: "充值", RECHARGE_REFUND: "充值退款", MANUAL_GRANT: "赠送额度"}
 
 
 def _beijing_day(column):
@@ -170,6 +178,64 @@ async def ai_usage_details(
             for day in days
         ],
         has_more=has_more,
+    )
+
+
+@router.get("/credit-packs", response_model=CreditPacksResponse)
+async def credit_packs(_current_user: User = Depends(get_current_user)) -> CreditPacksResponse:
+    return CreditPacksResponse(
+        enabled=xpay_configured(),
+        packs=[
+            CreditPackResponse(
+                product_id=pack.product_id,
+                name=pack.name,
+                price_rmb=Decimal(pack.price_fen) / 100,
+                credit_rmb=pack.credit_rmb,
+            )
+            for pack in CREDIT_PACKS.values()
+        ],
+    )
+
+
+@router.post("/credit-orders", response_model=CreditOrderPaymentResponse)
+async def create_credit_order_payment(
+    req: CreditOrderCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CreditOrderPaymentResponse:
+    if not xpay_configured():
+        raise HTTPException(status_code=503, detail="充值暂未开通")
+    pack = CREDIT_PACKS.get(req.product_id)
+    if pack is None:
+        raise HTTPException(status_code=422, detail="不支持的充值档位")
+    try:
+        session = await exchange_wechat_login_code(req.code.strip(), "laoyu")
+    except WeChatAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not session.session_key:
+        raise HTTPException(status_code=502, detail="微信登录响应缺少会话密钥")
+    payment = await create_credit_order(
+        db, user_id=current_user.id, pack=pack, session_key=session.session_key
+    )
+    return CreditOrderPaymentResponse(**payment.__dict__)
+
+
+@router.get("/credit-orders/{order_no}", response_model=CreditOrderStatusResponse)
+async def credit_order_status(
+    order_no: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CreditOrderStatusResponse:
+    order = await db.scalar(
+        select(AICreditOrder).where(
+            AICreditOrder.out_trade_no == order_no,
+            AICreditOrder.user_id == current_user.id,
+        )
+    )
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return CreditOrderStatusResponse(
+        order_no=order.out_trade_no, status=order.status, credit_rmb=order.credit_rmb
     )
 
 
