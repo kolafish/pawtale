@@ -116,8 +116,8 @@ async def fill_narrator_profile(
         # The profile is optional and the next narration of this book tries again.
         logger.warning("Narrator profile extraction failed for project %s", project.id, exc_info=True)
         return
-    # The user may have saved the project page during the call.
-    await db.refresh(project)
+    # Serialize the read/merge/write with manual saves after the provider call.
+    await db.refresh(project, with_for_update=True)
     profile, inferred = _profile(project)
     output = generated.value
     found = {
