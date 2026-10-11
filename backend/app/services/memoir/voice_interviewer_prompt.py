@@ -57,10 +57,12 @@ def build_stream_turn_prompt(
         )
     book = book_context or InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
     dialogue = "访谈上下文：\n" + _recent_context(voice_session.messages)
+    first_narration = not has_previous_project_narration and not book.chapters
     if has_user_message:
         return _join(
             _header(host_name, regenerate),
             _FOLLOW_UP,
+            _profile_questions(book) if first_narration else "",
             policy_section,
             dialogue,
             _book_block(book, opening=False),
@@ -68,15 +70,19 @@ def build_stream_turn_prompt(
         )
 
     progress = progress_context.prompt_text if progress_context.progress_update is not None else ""
-    returning = has_previous_project_narration or bool(book.chapters)
-    if book.anchor_topic is None and not returning:
+    if book.anchor_topic is None and first_narration:
         # "Tell me anything" is a blank page for a first-time narrator, so the first question is concrete.
+        # A new book has no profile form, so its first question is how to address the narrator.
         known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
+        question = (
+            "再问一句怎么称呼他。只问这一个问题。"
+            if "称呼" in book.unknown_profile
+            else "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
+        )
         mode = (
             "当前是第一次开场，这本书还没有内容。\n"
             f"{known}"
-            f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；"
-            "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
+            f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；{question}"
         )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 
@@ -109,6 +115,14 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 - 他还在讲（话没说完、故事没讲完），用一句话接住，请他接着说，比如“后来呢？”，不另起问题
 - 一件事讲完了、说记不清了，或者问讲什么好，可以从“人生话题”里提一个可以拒绝的新方向，说成具体的入口
 - 他说想自己讲、不想被问时，这次后面只接住，不再提新方向"""
+
+
+def _profile_questions(book: InterviewBookContext) -> str:
+    if not book.unknown_profile:
+        return ""
+    return f"""这本书第一次讲述，资料里还没有他的：{"、".join(book.unknown_profile)}（对话里说过的就算有了）。
+- 他刚答完这类问题、话也说完了：接话时用他的称呼叫他一声，叫错了他会纠正；再顺口问一个还没有的，比如哪年生的、老家在哪
+- 他不想说，或者已经讲起事情来了：不再问这些，按上面的方式听他讲"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:

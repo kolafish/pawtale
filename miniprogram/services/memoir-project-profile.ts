@@ -137,3 +137,14 @@ export function projectProfileSummary(project: Project): string {
   ].filter(Boolean);
   return parts.join(" · ");
 }
+
+/** What the narrator told 小余 about themselves, shown under the home title so a misheard name gets noticed. */
+export function narratorProfileLine(project: Project): string {
+  const profile = memoirProjectProfile(project);
+  return [
+    profile.narratorName && !project.title.includes(profile.narratorName) ? profile.narratorName : "",
+    profile.narratorGender === "unspecified" ? "" : narratorGenderLabel(profile.narratorGender),
+    profile.narratorAge !== null ? `${profile.narratorAge} 岁` : "",
+    profile.narratorOrigin,
+  ].filter(Boolean).join(" · ");
+}

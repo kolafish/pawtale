@@ -12,6 +12,7 @@ Component({
     largeText: { type: Boolean, value: false },
     canOpenBook: { type: Boolean, value: false },
     canSwitchProject: { type: Boolean, value: false },
+    profileText: { type: String, value: "" },
     canVoiceEdit: { type: Boolean, value: false },
     showBookHint: { type: Boolean, value: false },
     demoMode: { type: Boolean, value: false },
@@ -43,6 +44,10 @@ Component({
 
     openProjects() {
       if (this.properties.canSwitchProject) this.triggerEvent("openprojects");
+    },
+
+    openProfile() {
+      this.triggerEvent("openprofile");
     },
 
     openChapter(event: TreeTapEvent) {

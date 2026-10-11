@@ -648,7 +648,7 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     assert assistant_count == 0
 
 
-async def test_voice_assistant_turn_first_opening_asks_one_concrete_question(
+async def test_voice_assistant_turn_first_opening_asks_how_to_address_the_narrator(
     client,
     test_db,
 ):
@@ -674,7 +674,7 @@ async def test_voice_assistant_turn_first_opening_asks_one_concrete_question(
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "“老余”" in prompt
     assert "当前是第一次开场" in prompt
-    assert "只问一个问题" in prompt
+    assert "怎么称呼他" in prompt
     assert "待讲主题" not in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
     assert "本轮没有可播报的结构化进度变化" not in prompt

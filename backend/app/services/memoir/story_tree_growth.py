@@ -53,6 +53,7 @@ from app.services.memoir.chapter_split import split_large_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import is_ready_story_material
+from app.services.memoir.narrator_profile import fill_narrator_profile
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -749,4 +750,7 @@ async def run_story_tree_growth_job(
     result = await grow_story_tree(db, job=job, session=session)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=job.project_id)
+    project = await db.get(Project, job.project_id)
+    if project is not None:
+        await fill_narrator_profile(db, project=project, voice_session=session)
     return result

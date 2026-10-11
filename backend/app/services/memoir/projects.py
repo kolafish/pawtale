@@ -30,6 +30,10 @@ from app.services.projects.access import load_project
 
 
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
+# Profile fields filled from narration, mapped to the voice session they came from.
+INFERRED_PROFILE_FIELDS_KEY = "inferred_from_session"
+# The home page creates a first book under this title; it is renamed once the narrator's name is known.
+FIRST_PROJECT_TITLE = "我的回忆录"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 DEFAULT_INTERVIEW_TYPE = "ai_interview"
 DEFAULT_SESSION_GOAL = "open_narration"
@@ -80,6 +84,14 @@ def _profile_metadata(
         profile["narrator_origin"] = _clean_text(req.narrator_origin)
     if include_defaults or _field_was_set(req, "narrator_age"):
         profile["narrator_age"] = req.narrator_age
+    inferred = profile.get(INFERRED_PROFILE_FIELDS_KEY)
+    if isinstance(inferred, dict):
+        # A value the user saves is theirs, so narration no longer changes it.
+        profile[INFERRED_PROFILE_FIELDS_KEY] = {
+            key: session_id
+            for key, session_id in inferred.items()
+            if not _field_was_set(req, "elder_name" if key == "narrator_name" else key)
+        }
     if include_defaults or _field_was_set(req, "default_guidance_mode"):
         profile["default_guidance_mode"] = (
             req.default_guidance_mode.value
