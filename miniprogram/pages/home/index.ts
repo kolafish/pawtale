@@ -310,7 +310,7 @@ definePage<HomeData>()({
     launchVariant: "none",
     showBookHint: false,
     hasProject: false,
-    selectedMode: "free_narration",
+    selectedMode: "guided_interview",
     voiceAuthorizationAgreed: false,
     voiceAuthorizationRequested: false,
     voiceAuthorizationSaving: false,
@@ -480,7 +480,7 @@ definePage<HomeData>()({
           hasLastStoryHint: false,
           launchVariant: "none",
           hasProject: false,
-          selectedMode: "free_narration",
+          selectedMode: "guided_interview",
           voiceAuthorizationRequested: false,
           voiceAuthorizationSaving: false,
           shareCandidate: null,
@@ -1064,7 +1064,7 @@ definePage<HomeData>()({
     if (target.userId !== this.data.userId || target.projectId !== this.data.projectId || this.data.needsLogin) return;
     if (this.data.voiceEntry) return;
     setHomeData(this, { voiceEntry: target.entry, selectedMode: narrationModeForSession({
-      guidance_mode: target.entry.mode || "free_narration", interview_type: target.entry.interviewType || "ai_interview",
+      guidance_mode: target.entry.mode || "guided_interview", interview_type: target.entry.interviewType || "ai_interview",
       session_goal: target.entry.sessionGoal || "open_narration",
     }), showContinueNarration: false, narrationSaved: false }, () => {
       wx.pageScrollTo({ scrollTop: 0, duration: 250 });

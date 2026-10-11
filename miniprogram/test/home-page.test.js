@@ -1055,7 +1055,7 @@ test("home keeps new-story and resume actions distinct across narration modes", 
   context.data.selectedMode = "human_interview";
   await context.startPrimaryVoiceChat();
 
-  assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.equal(createdSessions[0].input.metadata_json.resume_hint, undefined);
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
@@ -1410,7 +1410,8 @@ test("home refreshes the saved project default for the current account and proje
   const context = pageContext(page);
   context.measureNarration = () => {};
   await context.onShow();
-  assert.equal(context.data.selectedMode, "free_narration");
+  // A project that stored free narration starts the one AI interview.
+  assert.equal(context.data.selectedMode, "guided_interview");
   identity = { ...identity, active_project: { ...identity.active_project, metadata_json: { memoir_profile: {
     default_guidance_mode: "guided_interview", default_interview_type: "ai_interview", default_session_goal: "open_narration",
   } } } };

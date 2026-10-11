@@ -189,6 +189,7 @@ async def test_voice_assistant_turn_injects_retrieved_context_and_records_trace(
         text="我又想起她去医院前很害怕。",
         guidance_mode="guided_interview",
     )
+    await _as_book_completion(test_db, created["session"]["id"])
     activated_context = (
         "以下是从同一回忆录过往讲述中检索到的候选原文。\n"
         "历史候选 1：李桂芳去华西医院做手术前很害怕，是姐姐陪她办的住院。"
@@ -233,6 +234,7 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
         text="我继续讲刚才那件事。",
         guidance_mode="guided_interview",
     )
+    await _as_book_completion(test_db, created["session"]["id"])
 
     async def fail_activation(*args, **kwargs):
         raise RuntimeError("trace database unavailable")
@@ -257,7 +259,7 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
     assert assistant_message.metadata_json["memory_activation_trace_id"] is None
 
 
-async def test_free_narration_follow_up_only_listens_to_the_conversation(
+async def test_follow_up_listens_with_life_topics_but_no_retrieval(
     client,
     test_db,
     monkeypatch,
@@ -275,7 +277,7 @@ async def test_free_narration_follow_up_only_listens_to_the_conversation(
     await test_db.commit()
 
     async def unexpected_activation(*args, **kwargs):
-        raise AssertionError("free narration must not retrieve earlier material")
+        raise AssertionError("the AI interview must not retrieve earlier material mid-story")
 
     monkeypatch.setattr(
         "app.services.memoir.memory_activation.activate_memory_for_turn",
@@ -294,7 +296,8 @@ async def test_free_narration_follow_up_only_listens_to_the_conversation(
     assert completed["progress_update"] is None
     assert "叙述者：那年我们全家搬进了县城的大杂院。" in prompt
     assert "这个项目已经留下 1 条讲述记录" not in prompt
-    assert "人生话题" not in prompt
+    assert "不另起问题" in prompt
+    assert "人生话题（按人生先后" in prompt
     assert "历史讲述候选" not in prompt
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 260
 
@@ -645,7 +648,7 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     assert assistant_count == 0
 
 
-async def test_voice_assistant_turn_guided_first_opening_offers_life_topics(
+async def test_voice_assistant_turn_first_opening_asks_one_concrete_question(
     client,
     test_db,
 ):
@@ -670,8 +673,9 @@ async def test_voice_assistant_turn_guided_first_opening_offers_life_topics(
     assert completed["progress_update"] is None
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "“老余”" in prompt
-    assert "还没有章节" in prompt
-    assert "家世与出身（还没讲过）" in prompt
+    assert "当前是第一次开场" in prompt
+    assert "只问一个问题" in prompt
+    assert "待讲主题" not in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" not in prompt
     assert "本轮没有可播报的结构化进度变化" not in prompt
 
@@ -1007,7 +1011,7 @@ async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_sessio
     assert "上次讲到我第一次去上海找工作" not in prompt
 
 
-async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
+async def test_voice_assistant_follow_up_sees_book_and_life_topics(
     client,
     test_db,
 ):
@@ -1068,7 +1072,7 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
-    assert ai_client.calls[0]["kwargs"]["max_tokens"] == 320
+    assert ai_client.calls[0]["kwargs"]["max_tokens"] == 260
     assert "叙述者：今天聊聊工作吧。" in prompt
     assert "《外婆家的童年》" in prompt
     assert "工作与闯荡" in prompt
@@ -1076,7 +1080,7 @@ async def test_voice_assistant_guided_follow_up_sees_book_and_life_topics(
     assert "主题线索" not in prompt
 
 
-async def test_returning_free_opening_mentions_last_chapter(
+async def test_returning_opening_offers_last_chapter_and_a_thin_topic(
     client,
     test_db,
 ):
@@ -1107,7 +1111,7 @@ async def test_returning_free_opening_mentions_last_chapter(
     prompt = ai_client.calls[0]["user_prompt"]
     assert completed["primary_intent"] == "opening"
     assert "“外婆家的童年”" in prompt
-    assert "人生话题" not in prompt
+    assert "待讲主题" in prompt
 
 
 async def test_guided_opening_from_life_topic_starts_with_that_topic(
@@ -1179,6 +1183,13 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
         )
     )
     assert assistant_count == 0
+
+
+async def _as_book_completion(test_db, voice_session_id: str) -> None:
+    session = await test_db.get(MemoirVoiceSession, voice_session_id)
+    assert session is not None
+    session.session_goal = "book_completion"
+    await test_db.commit()
 
 
 async def _opening_session(client, project_id: str, guidance_mode: str = "guided_interview") -> str:

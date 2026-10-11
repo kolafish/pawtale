@@ -154,7 +154,7 @@ Component({
   async onLoad(entry: VoiceSessionEntry) {
     if (this.data.voiceSessionId) return;
     this.refreshAccessibilitySettings();
-    const { voiceSessionId, mode: guidanceMode = "free_narration", interviewType = "ai_interview",
+    const { voiceSessionId, mode: guidanceMode = "guided_interview", interviewType = "ai_interview",
       sessionGoal = "open_narration", module: currentGuidanceModule = "", projectTitle = "" } = entry;
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
     applyVoiceChatDataPatch(this, voiceChatSessionEntryPatch({

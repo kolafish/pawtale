@@ -56,10 +56,6 @@ function ageValue(value: unknown): number | null {
   return age >= 0 && age <= 130 ? age : null;
 }
 
-function guidanceModeValue(value: unknown): MemoirGuidanceMode {
-  return value === "guided_interview" ? "guided_interview" : "free_narration";
-}
-
 function interviewTypeValue(value: unknown): MemoirInterviewType {
   return value === "human_interview" ? "human_interview" : "ai_interview";
 }
@@ -70,7 +66,8 @@ function sessionGoalValue(value: unknown): MemoirSessionGoal {
 
 export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | null): MemoirProjectProfile {
   const profile = metadataProfile(project);
-  const defaultGuidanceMode = guidanceModeValue(profile.default_guidance_mode);
+  // Free narration and guided interview are one AI interview now, whatever older projects stored.
+  const defaultGuidanceMode: MemoirGuidanceMode = "guided_interview";
   const defaultInterviewType = interviewTypeValue(profile.default_interview_type);
   const defaultSessionGoal = sessionGoalValue(profile.default_session_goal);
   return {
@@ -103,7 +100,7 @@ export function defaultNarrationSessionFields(mode: DefaultNarrationMode): {
   }
   return mode === "human_interview"
     ? { guidanceMode: "free_narration", interviewType: "human_interview", sessionGoal: "open_narration" }
-    : { guidanceMode: mode, interviewType: "ai_interview", sessionGoal: "open_narration" };
+    : { guidanceMode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration" };
 }
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
