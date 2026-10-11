@@ -6,7 +6,7 @@ import re
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirChatMessageRole,
-    MemoirGuidanceMode,
+    MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressSnapshotResponse
@@ -21,8 +21,7 @@ SYSTEM_PROMPT = (
 MAX_CONTEXT_MESSAGES = 12
 FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
-FREE_OPENING_MAX_TOKENS = 360
-GUIDED_OPENING_MAX_TOKENS = 420
+OPENING_MAX_TOKENS = 420
 PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v4"
 SPEAKER_LABELS = ("小余", "老余", "AI", "Ai", "ai", "助手", "主持人")
 
@@ -242,12 +241,9 @@ def _llm_max_tokens(
     has_user_message: bool,
     regenerate: bool,
 ) -> int:
-    guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
     if not has_user_message:
-        if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
-            return GUIDED_OPENING_MAX_TOKENS
-        return FREE_OPENING_MAX_TOKENS
-    if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW or regenerate:
+        return OPENING_MAX_TOKENS
+    if regenerate or voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
         return GUIDED_FOLLOW_UP_MAX_TOKENS
     return FOLLOW_UP_MAX_TOKENS
 

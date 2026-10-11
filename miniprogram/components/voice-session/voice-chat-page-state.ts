@@ -179,7 +179,7 @@ export function initialVoiceChatData(): VoiceChatData {
     voiceSessionId: "",
     projectId: "",
     projectTitle: "",
-    guidanceMode: "free_narration",
+    guidanceMode: "guided_interview",
     currentGuidanceModule: "",
     interviewType: "ai_interview",
     sessionGoal: "open_narration",
@@ -241,9 +241,9 @@ export function initialVoiceChatData(): VoiceChatData {
     storyGrowthNoticeActionText: "",
     progressNoticeTitle: "",
     progressNoticeDetail: "",
-    narrationMode: "free_narration",
-    topModeLabel: NARRATION_MODES.free_narration.label,
-    topSubtitle: "按自己的节奏讲述",
+    narrationMode: "guided_interview",
+    topModeLabel: NARRATION_MODES.guided_interview.label,
+    topSubtitle: "想讲什么就讲什么，小余在旁边听",
     topicTitleText: "这段回忆",
     showHumanRecordActions: false,
     showControlBar: true,
@@ -688,7 +688,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
       ? "一次只补一个重点"
       : (isHumanInterview
         ? "实时记录采访者和被访者"
-        : (state.guidanceMode === "guided_interview" ? "AI 按话题提问，帮助您展开回忆" : "按自己的节奏讲述")),
+        : "想讲什么就讲什么，小余在旁边听"),
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,

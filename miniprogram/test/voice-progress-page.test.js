@@ -193,8 +193,8 @@ test("narration overview gives each session one clear title", () => {
   assert.equal(sessionTitle(sampleSession("free", "stopped", {
     guidance_mode: "free_narration",
     current_guidance_module: "free_narration",
-  })), "自由讲述");
-  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "引导访谈 · 人物");
+  })), "AI 访谈");
+  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "AI 访谈 · 人物");
   assert.equal(sessionTitle(sampleSession("human", "stopped", {
     interview_type: "human_interview",
   })), "真人访谈");

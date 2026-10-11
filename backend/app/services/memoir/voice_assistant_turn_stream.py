@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
-    MemoirGuidanceMode,
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
@@ -69,7 +68,7 @@ from app.services.memoir.voice_tts_types import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v6"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v7"
 STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
@@ -322,7 +321,6 @@ class VoiceAssistantTurnStreamSession:
             regenerate=req.regenerate,
         )
         book_completion = voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
-        guided = voice_session.guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW.value
         book_context = None
         # Progress is only offered at an opening; mid-story turns leave events unannounced.
         project_progress_context = ProgressPromptContext(prompt_text="")
@@ -335,7 +333,7 @@ class VoiceAssistantTurnStreamSession:
                 automation_event_ids=[],
                 voice_announcement_event_ids=[],
             )
-        elif guided or not has_user_message:
+        else:
             snapshot = await progress_snapshot.get_project_progress_snapshot(
                 self.db,
                 user_id=self.user_id,
@@ -392,8 +390,8 @@ class VoiceAssistantTurnStreamSession:
             None,
         )
         activation_context = ""
-        # Free narration keeps the AI a listener, so it gets no earlier material to ask about.
-        if current_user_message is not None and (book_completion or guided):
+        # The AI interview mostly listens, so only book completion gets earlier material to ask about.
+        if current_user_message is not None and book_completion:
             try:
                 activation = await memory_activation.activate_memory_for_turn(
                     self.db,

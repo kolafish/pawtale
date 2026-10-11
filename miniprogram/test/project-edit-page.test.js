@@ -73,7 +73,6 @@ test("project edit loads and saves memoir-level interview and polish settings", 
   assert.equal(context.data.transcriptPolishLevel, "high");
   assert.equal(context.data.shareVideoStyle, "uploaded");
   assert.deepEqual(context.data.narrationOptions.map(option => option.value), [
-    "free_narration",
     "guided_interview",
     "book_completion",
     "human_interview",

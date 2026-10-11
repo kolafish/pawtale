@@ -1,14 +1,14 @@
 """Prompt for the AI interviewer's next spoken line.
 
-Each mode gets a different context. Free narration only sees the conversation, and the
-AI just acknowledges and invites the narrator to go on. Guided interview also sees who is
-narrating, the book overview and the life topics, so it can move to another story or topic
-once one is told. Progress facts are only offered at an opening, never in the middle of a story.
+Free narration and guided interview share one AI interview. The AI mostly listens: while the
+narrator is still telling a story it acknowledges and invites them to go on; once a story is told,
+they can't remember, or they ask what to talk about, it may offer one declinable direction from
+the life topics. Progress facts are only offered at an opening, never in the middle of a story.
 """
 
 from __future__ import annotations
 
-from app.domain.memoir.types import MemoirGuidanceMode, MemoirSessionGoal
+from app.domain.memoir.types import MemoirSessionGoal
 from app.models.memoir import MemoirVoiceSession
 from app.services.memoir import completion_interviews
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic
@@ -57,58 +57,42 @@ def build_stream_turn_prompt(
         )
     book = book_context or InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
     dialogue = "访谈上下文：\n" + _recent_context(voice_session.messages)
-    guided = voice_session.guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW.value
     if has_user_message:
-        if guided:
-            return _guided_follow_up_prompt(
-                host_name=host_name,
-                regenerate=regenerate,
-                book=book,
-                dialogue=dialogue,
-                activation_context=activation_context,
-                policy_section=policy_section,
-            )
-        return _join(_header(host_name, regenerate), _FREE_FOLLOW_UP, policy_section, dialogue)
+        return _join(
+            _header(host_name, regenerate),
+            _FOLLOW_UP,
+            policy_section,
+            dialogue,
+            _book_block(book, opening=False),
+            _topics_block(book.topics),
+        )
 
     progress = progress_context.prompt_text if progress_context.progress_update is not None else ""
     returning = has_previous_project_narration or bool(book.chapters)
-    if not guided:
-        if returning:
-            last = f"，可以提一句上次讲到“{book.last_chapter_title}”那一段" if book.last_chapter_title else ""
-            mode = (
-                "当前是自由讲述开场，叙述者以前讲过。\n"
-                f"自然地欢迎回来{last}，让他自己选是接着讲，还是讲一件最近想起来的事。不要列话题，不要问细节。"
-            )
-        else:
-            # "Tell me anything" is a blank page for a first-time narrator, so the first question is concrete.
-            known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
-            mode = (
-                "当前是自由讲述的第一次开场，这本书还没有内容。\n"
-                f"{known}"
-                f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；"
-                "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
-            )
+    if book.anchor_topic is None and not returning:
+        # "Tell me anything" is a blank page for a first-time narrator, so the first question is concrete.
+        known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
+        mode = (
+            "当前是第一次开场，这本书还没有内容。\n"
+            f"{known}"
+            f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；"
+            "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
+        )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 
     if book.anchor_topic is not None:
         mode = (
-            f"当前是引导访谈开场，叙述者选了“{book.anchor_topic.title}”这个话题，它关心的是：{book.anchor_topic.intent}。\n"
+            f"当前是开场，叙述者选了“{book.anchor_topic.title}”这个话题，它关心的是：{book.anchor_topic.intent}。\n"
             "用一两句话从这个话题开个头，给一个具体、好回答的入口。"
         )
         topics = _topics_block(book.topics)
-    elif returning:
-        mode = f"""当前是引导访谈开场，叙述者以前讲过。
+    else:
+        mode = f"""当前是开场，叙述者以前讲过。
 - 自然地欢迎回来，用一句话说书里已经有了什么，只说一两个章节名，不报段数
 - 给两个具体方向让他选：
   一是接着上次，围绕“{book.last_chapter_title or "上次那一段"}”这一段人生往下讲，说成一个具体的入口，不要重提上次最后一个细节；
   二是书里还空着的，从“待讲主题”里取第一个，用它的提问方向说成一个具体的入口
 - 只问一个问题：今天想从哪个讲起，也可以讲别的"""
-        topics = _thin_topics_block(book.topics)
-    else:
-        mode = f"""当前是引导访谈首次开场，这本书还没有内容。
-- 用“{host_name}”很短地自我介绍，说明你会一路陪着问，想不起来也没关系
-- 从“待讲主题”里按人生时间顺序挑两个，说成具体的起点，比如小时候住的地方、印象最深的家人
-- 最后只问一个问题：想先从哪一个讲起，也可以讲别的"""
         topics = _thin_topics_block(book.topics)
     return _join(
         _header(host_name, regenerate),
@@ -121,9 +105,10 @@ def build_stream_turn_prompt(
     )
 
 
-_FREE_FOLLOW_UP = """当前是自由讲述：叙述者自己决定讲什么，你是安静的听众，不主导方向。
-用一句话接住刚才的内容。他还在讲，就请他接着说，比如“后来呢？”；这件事已经讲完了，就轻轻留个口子，让他想讲什么接着讲。
-不问具体细节，不推荐话题。"""
+_FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
+- 他还在讲（话没说完、故事没讲完），用一句话接住，请他接着说，比如“后来呢？”，不另起问题
+- 一件事讲完了、说记不清了，或者问讲什么好，可以从“人生话题”里提一个可以拒绝的新方向，说成具体的入口
+- 他说想自己讲、不想被问时，这次后面只接住，不再提新方向"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:
@@ -144,7 +129,7 @@ def _header(host_name: str, regenerate: bool) -> str:
 
 
 def _legacy_header(host_name: str, regenerate: bool) -> str:
-    """Output rules for book completion and guided follow-ups, whose wording tested best offline."""
+    """Output rules for book completion, whose wording tested best offline."""
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
     return f"""请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。
 
@@ -160,39 +145,6 @@ def _legacy_header(host_name: str, regenerate: bool) -> str:
 - 不要编造上下文没有的信息；只有“历史讲述候选”中出现的内容才能作为跨会话事实使用
 - 如果用户最新一句明确要求换方向，必须尊重最新一句
 {regenerate_instruction}""".rstrip()
-
-
-def _guided_follow_up_prompt(
-    *,
-    host_name: str,
-    regenerate: bool,
-    book: InterviewBookContext,
-    dialogue: str,
-    activation_context: str,
-    policy_section: str,
-) -> str:
-    anchor = f"，本次话题是“{book.anchor_topic.title}”" if book.anchor_topic else ""
-    mode = f"""当前是主题讲述{anchor}；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
-- 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
-- 优先顺着当前故事的势能继续听或只追一个自然方向，不要为了“完整”机械补齐时间、地点、人物、起因和结果
-- 只有确实影响理解时，才询问背景、人物关系、原因、结果、转场或感受
-- 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级
-- 每段人生里都可以聊到重要的人、转折和难处"""
-    moving_on = (
-        "一个故事讲完了、叙述者说记不清，或者这个话题已经讲得差不多了，就别在原处接着问，"
-        "可以换这个话题里的另一个人或另一件事，或者从“人生话题”里提一个可以拒绝的新方向，说成具体的入口。"
-        "一次只问一个问题，不要用“是……还是……”。"
-    )
-    return _join(
-        _legacy_header(host_name, regenerate),
-        mode,
-        policy_section,
-        dialogue,
-        "历史讲述候选：\n" + (activation_context or "本轮没有检索到历史讲述候选。"),
-        _book_block(book, opening=False),
-        _topics_block(book.topics),
-        moving_on,
-    )
 
 
 def _book_block(book: InterviewBookContext, *, opening: bool) -> str:

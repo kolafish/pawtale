@@ -52,7 +52,8 @@ test("formats memoir project profile labels", () => {
   };
 
   assert.equal(narratorGenderLabel("male"), "男");
-  assert.equal(guidanceModeLabel("guided_interview"), "引导访谈");
+  assert.equal(guidanceModeLabel("guided_interview"), "AI 访谈");
+  assert.equal(guidanceModeLabel("free_narration"), "AI 访谈");
   assert.equal(projectProfileSummary(project), "男 · 重庆 · 68 岁 · 真人访谈");
   assert.deepEqual(defaultNarrationSessionFields("human_interview"), {
     guidanceMode: "free_narration",

@@ -81,7 +81,6 @@ interface ProjectEditData {
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
 const NARRATION_VALUES: readonly DefaultNarrationMode[] = [
-  "free_narration",
   "guided_interview",
   "book_completion",
   "human_interview",
@@ -114,7 +113,7 @@ definePage<ProjectEditData>()({
     narratorGender: "unspecified",
     narratorOrigin: "",
     narratorAgeText: "",
-    defaultNarrationMode: "free_narration",
+    defaultNarrationMode: "guided_interview",
     transcriptPolishLevel: "medium",
     shareVideoStyle: "illustrated",
     genderOptions: [
@@ -148,7 +147,7 @@ definePage<ProjectEditData>()({
       narratorGender: "unspecified",
       narratorOrigin: "",
       narratorAgeText: "",
-      defaultNarrationMode: "free_narration",
+      defaultNarrationMode: "guided_interview",
       transcriptPolishLevel: "medium",
       shareVideoStyle: "illustrated",
     });

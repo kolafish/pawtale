@@ -11,7 +11,7 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
       projectId: queryParam(query, "projectId"),
       projectTitle: queryParam(query, "projectTitle"),
       module: queryParam(query, "module"),
-      mode: queryChoice(query, "mode", ["free_narration", "guided_interview"] as const, "free_narration"),
+      mode: queryChoice(query, "mode", ["free_narration", "guided_interview"] as const, "guided_interview"),
       interviewType: queryChoice(query, "interviewType", ["ai_interview", "human_interview"] as const, "ai_interview"),
       sessionGoal: queryChoice(query, "sessionGoal", ["open_narration", "book_completion"] as const, "open_narration"),
     } });
