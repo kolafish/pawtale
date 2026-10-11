@@ -137,6 +137,7 @@ async def record_ai_usage(
                     raise RuntimeError("AI credit account could not be initialized")
                 db.add(
                     AICreditTransaction(
+                        account_id=account.id,
                         user_id=resolved_context.user_id,
                         transaction_type=USAGE_DEBIT,
                         amount_rmb=-Decimal(str(cost.amount_rmb)),

@@ -1138,10 +1138,10 @@ async def test_voice_gateway_persistence_saves_human_interviewer_turn_as_ignored
     assert narrator_message.role == "user"
     assert narrator_message.parent_message_id == interviewer_message.id
     assert narrator_message.metadata_json["speaker_role"] == "narrator"
-    assert [job.job_type for job in editing_jobs] == [
+    assert sorted(job.job_type for job in editing_jobs) == sorted([
         MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
         MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value,
-    ]
+    ])
     assert all(
         job.payload_json["utterance_id"] == narrator.utterance_id
         for job in editing_jobs

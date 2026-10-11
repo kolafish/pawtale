@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DATA_DIR
+from app.models.ai_credits import AICreditOrder
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
 from app.models.git_sync import GitHubInstallation, GitHubSetupState, ProjectGitSync
 from app.models.memoir import MemoirImageAsset, MemoirMaterialShareVideo, MemoirVoiceAuthorizationConsent
@@ -16,7 +17,7 @@ from app.models.memoir_common import AudioFile
 from app.models.projects import Project
 from app.models.users import AuthIdentity, AuthSession, User
 from app.services import user_avatars
-from app.services.ai_credits import record_free_credit_claims
+from app.services.ai_credits import retain_ai_credit_account
 from app.services import content_storage
 from app.services.project_documents import PostCommitCleanup
 from app.services.projects import core as project_core
@@ -33,6 +34,10 @@ async def delete_account(db: AsyncSession, user: User) -> None:
     post_commit_cleanups: list[PostCommitCleanup] = []
     async with AsyncExitStack() as project_locks:
         try:
+            # Serialize pending payment callbacks before detaching the wallet.
+            await db.execute(select(AICreditOrder.out_trade_no).where(
+                AICreditOrder.user_id == user_id,
+            ).order_by(AICreditOrder.out_trade_no).with_for_update())
             # Prevent new projects from being attached while ownership is enumerated.
             await db.scalar(select(User.id).where(User.id == user_id).with_for_update())
             project_ids = sorted((await db.scalars(select(Project.id).where(Project.user_id == user_id))).all())
@@ -59,7 +64,7 @@ async def delete_account(db: AsyncSession, user: User) -> None:
             await db.execute(delete(GitHubInstallation).where(GitHubInstallation.user_id == user_id))
             await db.execute(delete(AudioFile).where(AudioFile.user_id == user_id))
             await db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
-            await record_free_credit_claims(db, user_id)
+            await retain_ai_credit_account(db, user_id)
             await db.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user_id))
             await db.delete(user)
             await db.commit()

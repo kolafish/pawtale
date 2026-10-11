@@ -36,7 +36,7 @@ from app.schemas.auth import (
 )
 from app.services import user_avatars
 from app.services import account_deletion
-from app.services.ai_credits import withhold_claimed_free_credit
+from app.services.ai_credits import reconnect_ai_credit_account
 from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_wechat_login_code
 
 
@@ -234,7 +234,7 @@ async def wechat_login(
         db.add_all([user, identity])
 
     await db.flush()
-    await withhold_claimed_free_credit(
+    await reconnect_ai_credit_account(
         db,
         user.id,
         provider=provider,

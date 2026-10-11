@@ -21,9 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import BEIJING_TIMEZONE, utcnow_naive
 from app.config import get_settings
-from app.models.ai_credits import AICreditOrder, AICreditTransaction
+from app.models.ai_credits import AICreditAccount, AICreditOrder, AICreditTransaction
 from app.models.users import User
-from app.services.ai_credits import RECHARGE_REFUND, add_ai_credit, get_ai_credit_summary
+from app.services.ai_credits import (
+    RECHARGE_REFUND, add_credit_to_account, credit_account_summary, ensure_ai_credit_account,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -101,7 +103,9 @@ async def create_credit_order(
     session_key: str,
 ) -> CreditOrderPayment:
     settings = get_settings()
+    account = await ensure_ai_credit_account(db, user_id, commit=False)
     order = AICreditOrder(
+        account_id=account.id,
         out_trade_no=uuid.uuid4().hex,
         user_id=user_id,
         product_id=pack.product_id,
@@ -161,10 +165,10 @@ async def deliver_credit_order(
     order.wx_order_id = wx_order_id
     order.paid_at = utcnow_naive()
     pack = CREDIT_PACKS.get(order.product_id)
-    # add_ai_credit commits the order update together with the credit.
-    await add_ai_credit(
+    # add_credit_to_account commits the order update together with the credit.
+    await add_credit_to_account(
         db,
-        user_id=order.user_id,
+        account_id=order.account_id,
         amount_rmb=order.credit_rmb,
         kind="recharge",
         actor_user_id=order.user_id,
@@ -210,9 +214,9 @@ async def refund_credit_order(
         order.status = "refunded"
     try:
         # A user who already spent the credit can go below zero; the balance shows it.
-        await add_ai_credit(
+        await add_credit_to_account(
             db,
-            user_id=order.user_id,
+            account_id=order.account_id,
             amount_rmb=-(order.credit_rmb * refund_fen / order.price_fen),
             kind="recharge_refund",
             actor_user_id=order.user_id,
@@ -237,7 +241,8 @@ async def ios_refund_decision(db: AsyncSession, *, pay_order_id: str) -> tuple[i
     if order is None:
         push_logger.info("event=ios_refund_query order=%s outcome=order_not_found", pay_order_id)
         return 0, "未找到对应订单"
-    remaining = (await get_ai_credit_summary(db, user_id=order.user_id)).remaining_rmb
+    account = await db.get(AICreditAccount, order.account_id)
+    remaining = (await credit_account_summary(db, account)).remaining_rmb
     if remaining >= order.credit_rmb:
         return 0, f"本单额度 {order.credit_rmb:.2f} 元尚未使用，当前余额 {remaining:.2f} 元"
     return 1, f"本单额度 {order.credit_rmb:.2f} 元已被使用，当前余额 {remaining:.2f} 元"
