@@ -44,7 +44,7 @@ import {
   resolveHomeLaunch,
   type HomeLaunchVariant,
 } from "../../services/home-launch-state";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import { memoirProjectProfile, narratorProfileLine } from "../../services/memoir-project-profile";
 import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
@@ -100,6 +100,7 @@ interface HomeData extends HomeStoryData {
   projectId: string;
   projectTitle: string;
   projectDisplayTitle: string;
+  narratorProfileText: string;
   lastStoryHint: string;
   hasLastStoryHint: boolean;
   launchVariant: HomeLaunchVariant;
@@ -248,6 +249,7 @@ function applyHomeSnapshotData(
     projectId: identity.active_project_id,
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
+    narratorProfileText: hasProject && identity.active_project ? narratorProfileLine(identity.active_project) : "",
     ...(changedProject ? {
       ...emptyHomeStoryData(),
       showContinueNarration: false,
@@ -305,6 +307,7 @@ definePage<HomeData>()({
     projectId: "",
     projectTitle: "",
     projectDisplayTitle: "",
+    narratorProfileText: "",
     lastStoryHint: "",
     hasLastStoryHint: false,
     launchVariant: "none",
@@ -476,6 +479,7 @@ definePage<HomeData>()({
           projectId: "",
           projectTitle: "",
           projectDisplayTitle: "",
+          narratorProfileText: "",
           lastStoryHint: "",
           hasLastStoryHint: false,
           launchVariant: "none",
@@ -895,6 +899,10 @@ definePage<HomeData>()({
 
   createProject() {
     wx.navigateTo({ url: "/pages/project-edit/index" });
+  },
+
+  openNarratorProfile() {
+    wx.navigateTo({ url: pageUrl("/pages/project-edit/index", { projectId: this.data.projectId }) });
   },
 
   openProjects() {

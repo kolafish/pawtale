@@ -11,6 +11,17 @@
       <text class="hero-title">{{story.overview.title}}</text>
       <text wx:if="{{canSwitchProject}}" class="hero-title-arrow" aria-hidden="true">›</text>
     </view>
+    <view
+      wx:if="{{profileText}}"
+      id="narrator-profile-action"
+      class="hero-profile ui-pressable"
+      bindtap="openProfile"
+      hover-class="ui-subtle-action-hover"
+      aria-role="button"
+      aria-label="{{'讲述者资料，' + profileText + '，点击修改'}}"
+    >
+      <text class="hero-profile-text">{{profileText}}</text>
+    </view>
 
     <view class="hero-visual">
       <view

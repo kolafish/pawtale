@@ -46,6 +46,25 @@
   transform: translateY(-1rpx);
 }
 
+.hero-profile {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  margin: -6rpx 0 8rpx -8rpx;
+  padding: 4rpx 8rpx;
+  border-radius: 14rpx;
+}
+
+.hero-profile-text {
+  display: block;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hero-visual {
   position: relative;
   height: 390rpx;
@@ -464,6 +483,7 @@
 }
 
 .large-text .hero-title { font-size: 42rpx; }
+.large-text .hero-profile-text { font-size: var(--ui-font-large-caption); }
 .large-text .hero-visual { height: 430rpx; }
 .large-text .has-book-hint .hero-visual { height: 390rpx; }
 .large-text .hero-book-badge,

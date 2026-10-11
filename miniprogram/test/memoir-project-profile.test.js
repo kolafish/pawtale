@@ -8,6 +8,7 @@ const {
   defaultNarrationSessionFields,
   memoirProjectProfile,
   narratorGenderLabel,
+  narratorProfileLine,
   projectProfileSummary,
 } = require("../services/memoir-project-profile.ts");
 
@@ -96,4 +97,18 @@ test("project edit validates age text", () => {
   assert.equal(ageFromText(""), null);
   assert.equal(ageFromText("72"), 72);
   assert.throws(() => ageFromText("131"), /年龄需要填写/);
+});
+
+test("home profile line leaves out the name already in the title", () => {
+  const profile = { narrator_name: "王秀英", narrator_gender: "female", narrator_age: 74, narrator_origin: "四川成都" };
+
+  assert.equal(
+    narratorProfileLine({ title: "王秀英的回忆录", metadata_json: { memoir_profile: profile } }),
+    "女 · 74 岁 · 四川成都",
+  );
+  assert.equal(
+    narratorProfileLine({ title: "妈妈的一生", metadata_json: { memoir_profile: profile } }),
+    "王秀英 · 女 · 74 岁 · 四川成都",
+  );
+  assert.equal(narratorProfileLine({ title: "我的回忆录", metadata_json: {} }), "");
 });
