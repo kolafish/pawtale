@@ -179,6 +179,7 @@ async def test_ios_refund_query_refuses_once_the_credit_is_spent(client, test_db
                                                        reply["Encrypt"])
         body = json.loads(decrypt_message(AES_KEY, reply["Encrypt"], APPID))
         assert body["ErrCode"] == 0
+        assert body["IosRefundQueryResponse"]["result_info"]
         return body["IosRefundQueryResponse"]["result_code"]
 
     assert await decision() == 0

@@ -28,6 +28,16 @@ from app.services.ai_credits import RECHARGE_REFUND, add_ai_credit, get_ai_credi
 
 logger = logging.getLogger(__name__)
 
+# One line per WeChat payment push, so deliveries and refunds can be traced in the PM2 logs.
+# The app configures no logging, so this logger carries its own handler to show INFO lines.
+push_logger = logging.getLogger("app.payments.push")
+if not push_logger.handlers:
+    _push_handler = logging.StreamHandler()
+    _push_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    push_logger.addHandler(_push_handler)
+    push_logger.setLevel(logging.INFO)
+    push_logger.propagate = False
+
 XPAY_MODE = "short_series_goods"
 # Production; Apple payments have no sandbox.
 XPAY_ENV = 0
@@ -135,16 +145,18 @@ async def deliver_credit_order(
     out_trade_no: str,
     product_id: str,
     wx_order_id: str | None,
-) -> None:
-    """Credit a paid order once; repeated delivery pushes are no-ops."""
+) -> str:
+    """Credit a paid order once; repeated delivery pushes are no-ops. Returns the outcome."""
     order = await _lock_order(db, AICreditOrder.out_trade_no == out_trade_no)
     if order is None or order.product_id != product_id:
         logger.error("WeChat delivery for unknown order %s (%s)", out_trade_no, product_id)
+        outcome = "unknown_order" if order is None else "product_mismatch"
         await db.rollback()
-        return
+        return outcome
     if order.status != "pending":
+        status = order.status
         await db.rollback()
-        return
+        return f"already_{status}"
     order.status = "paid"
     order.wx_order_id = wx_order_id
     order.paid_at = utcnow_naive()
@@ -159,6 +171,7 @@ async def deliver_credit_order(
         note=pack.name if pack else order.product_id,
         operation_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"wechat-xpay-order:{order.out_trade_no}")),
     )
+    return "credited"
 
 
 async def refund_credit_order(
@@ -168,8 +181,8 @@ async def refund_credit_order(
     wx_order_id: str,
     refund_id: str,
     refund_fen: int,
-) -> None:
-    """Take back the refunded share of an order's credit once per WeChat refund."""
+) -> str:
+    """Take back the refunded share of an order's credit once per WeChat refund. Returns the outcome."""
     order = await _lock_order(
         db,
         AICreditOrder.out_trade_no == out_trade_no,
@@ -185,8 +198,13 @@ async def refund_credit_order(
     if order is None or order.status == "pending" or already_refunded or refund_fen <= 0:
         if order is None:
             logger.error("WeChat refund %s for unknown order %s", refund_id, out_trade_no)
+        outcome = (
+            "unknown_order" if order is None
+            else "already_refunded" if already_refunded
+            else f"skipped_{order.status}"
+        )
         await db.rollback()
-        return
+        return outcome
     order.refunded_fen += refund_fen
     if order.refunded_fen >= order.price_fen:
         order.status = "refunded"
@@ -205,6 +223,8 @@ async def refund_credit_order(
         # Only an earlier manual correction of recharged credit can cause this.
         logger.exception("WeChat refund %s exceeds recharged credit of user %s", refund_id, order.user_id)
         await db.rollback()
+        return "refund_exceeds_recharge"
+    return "credit_taken_back"
 
 
 async def ios_refund_decision(db: AsyncSession, *, pay_order_id: str) -> tuple[int, str]:
@@ -215,6 +235,7 @@ async def ios_refund_decision(db: AsyncSession, *, pay_order_id: str) -> tuple[i
         )
     )
     if order is None:
+        push_logger.info("event=ios_refund_query order=%s outcome=order_not_found", pay_order_id)
         return 0, "未找到对应订单"
     remaining = (await get_ai_credit_summary(db, user_id=order.user_id)).remaining_rmb
     if remaining >= order.credit_rmb:
@@ -226,32 +247,51 @@ async def handle_xpay_event(db: AsyncSession, event: dict) -> dict | None:
     """Process one decrypted push; return a reply body, or None for a plain success."""
     name = event.get("Event")
     if name == "xpay_goods_deliver_notify":
-        if event.get("Env", XPAY_ENV) != XPAY_ENV:
-            return None
         goods = event.get("GoodsInfo") or {}
-        await deliver_credit_order(
+        order_no = str(event.get("OutTradeNo") or "")
+        if event.get("Env", XPAY_ENV) != XPAY_ENV:
+            push_logger.info("event=%s order=%s outcome=ignored_env_%s", name, order_no, event.get("Env"))
+            return None
+        outcome = await deliver_credit_order(
             db,
-            out_trade_no=str(event.get("OutTradeNo") or ""),
+            out_trade_no=order_no,
             product_id=str(goods.get("ProductId") or ""),
             wx_order_id=(event.get("WeChatPayInfo") or {}).get("MchOrderNo"),
         )
+        push_logger.info("event=%s order=%s product=%s outcome=%s", name, order_no, goods.get("ProductId"), outcome)
     elif name == "xpay_refund_notify":
+        order_no = str(event.get("MchOrderId") or "")
         if event.get("RetCode") != 0:
+            push_logger.info("event=%s order=%s outcome=ignored_retcode_%s", name, order_no, event.get("RetCode"))
             return None
-        await refund_credit_order(
+        refund_fen = int(event.get("RefundFee") or 0)
+        outcome = await refund_credit_order(
             db,
-            out_trade_no=str(event.get("MchOrderId") or ""),
+            out_trade_no=order_no,
             wx_order_id=str(event.get("WxOrderId") or ""),
             refund_id=str(event.get("WxRefundId") or event.get("MchRefundId") or ""),
-            refund_fen=int(event.get("RefundFee") or 0),
+            refund_fen=refund_fen,
         )
+        push_logger.info("event=%s order=%s refund_fen=%s outcome=%s", name, order_no, refund_fen, outcome)
     elif name == "xpay_subscribe_ios_refund_query_notify":
-        result_code, evidence = await ios_refund_decision(db, pay_order_id=str(event.get("pay_order_id") or ""))
+        order_no = str(event.get("pay_order_id") or "")
+        result_code, evidence = await ios_refund_decision(db, pay_order_id=order_no)
+        # Key names only (no values): the query's field layout is not yet confirmed against a live push.
+        push_logger.info(
+            "event=%s order=%s outcome=%s keys=%s",
+            name, order_no, "suggest_refund" if result_code == 0 else "suggest_decline", ",".join(sorted(event)),
+        )
         return {
             "ErrCode": 0,
             "ErrMsg": "success",
-            "IosRefundQueryResponse": {"result_code": result_code, "evidence": evidence},
+            "IosRefundQueryResponse": {
+                "result_code": result_code,
+                "result_info": "建议退款" if result_code == 0 else "额度已使用，建议拒绝退款",
+                "evidence": evidence,
+            },
         }
+    else:
+        push_logger.info("event=%s outcome=ignored", name)
     return None
 
 
