@@ -48,9 +48,9 @@ class CreditPack:
 CREDIT_PACKS = {
     pack.product_id: pack
     for pack in (
-        CreditPack("ai_credit_10", "AI 额度 10 元", 1000),
-        CreditPack("ai_credit_30", "AI 额度 30 元", 3000),
-        CreditPack("ai_credit_100", "AI 额度 100 元", 10000),
+        CreditPack("9_9_0", "AI 额度 9.9 元", 990),
+        CreditPack("29_9_0", "AI 额度 29.9 元", 2990),
+        CreditPack("198_0", "AI 额度 198 元", 19800),
     )
 }
 
