@@ -154,7 +154,7 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     asr_provider_invalid_credentials: "语音识别 API Key 无效",
     asr_provider_resource_not_granted: "ASR 资源未开通或 API Key 无权限",
     voice_gateway_auth_failed: "登录状态已失效，请重新登录后再进入",
-    ai_credit_insufficient: "AI 额度已用尽",
+    ai_credit_insufficient: "AI 额度已用尽，可在「我的」页充值",
     voice_authorization_required: "请先同意语音采集与处理授权，再使用录音功能",
     voice_authorization_revoked: "语音授权已撤回，本次录音已停止",
     voice_gateway_connection_closed: "语音连接已关闭，请重新连接",

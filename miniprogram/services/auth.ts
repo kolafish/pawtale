@@ -43,7 +43,7 @@ function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   return identity;
 }
 
-function wxLoginCode(): Promise<string> {
+export function wxLoginCode(): Promise<string> {
   return new Promise((resolve, reject) => {
     wx.login({
       success(result) {
