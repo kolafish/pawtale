@@ -18,8 +18,9 @@ DEFAULT_FREE_CREDIT_RMB = Decimal("10.000000")
 class AICreditAccount(Base):
     __tablename__ = "ai_credit_accounts"
 
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True
     )
     free_credit_rmb: Mapped[Decimal] = mapped_column(
         Numeric(14, 6), nullable=False, default=DEFAULT_FREE_CREDIT_RMB, server_default=text("10")
@@ -43,8 +44,11 @@ class AICreditTransaction(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_credit_accounts.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     actor_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -62,12 +66,16 @@ class AICreditTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive, index=True)
 
 
-class AIFreeCreditClaim(Base):
-    """Keyed hash of a WeChat identity whose account was deleted after receiving free credit."""
+class AICreditIdentity(Base):
+    """Reconnect retained credit using a keyed hash, without retaining the WeChat ID itself."""
 
-    __tablename__ = "ai_free_credit_claims"
+    __tablename__ = "ai_credit_identities"
 
     key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # NULL only for legacy deletion markers whose balance was already erased.
+    account_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("ai_credit_accounts.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
 
 
@@ -82,8 +90,11 @@ class AICreditOrder(Base):
     )
 
     out_trade_no: Mapped[str] = mapped_column(String(32), primary_key=True)
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ai_credit_accounts.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     product_id: Mapped[str] = mapped_column(String(64), nullable=False)
     price_fen: Mapped[int] = mapped_column(Integer, nullable=False)

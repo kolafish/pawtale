@@ -237,8 +237,8 @@ async def test_account_deletion_removes_projects_sessions_consents_and_personal_
     assert new_login.status_code == 200
     assert new_login.json()["user"]["id"] != user_id
     credit = (await anonymous_client.get("/api/billing/ai-credit-summary")).json()
-    assert float(credit["free_credit_rmb"]) == 0
-    assert float(credit["total_credit_rmb"]) == 0
+    assert float(credit["free_credit_rmb"]) == 10
+    assert float(credit["total_credit_rmb"]) == 10
 
     anonymous_client.cookies.clear()
     other_login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "someone-else"})

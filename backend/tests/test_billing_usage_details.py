@@ -80,14 +80,14 @@ async def test_usage_refund_and_recharge_correct_balance_and_billing_details(cli
     test_db.add_all([*charges, legacy])
     await test_db.flush()
     debits = [AICreditTransaction(
-        user_id=user_id, transaction_type=USAGE_DEBIT, amount_rmb=Decimal("-0.25"),
+        account_id=account.id, user_id=user_id, transaction_type=USAGE_DEBIT, amount_rmb=Decimal("-0.25"),
         usage_record_id=record.id, operation_id=record.operation_id,
     ) for record in charges]
     test_db.add_all([
         *debits,
-        AICreditTransaction(user_id=user_id, transaction_type=USAGE_REFUND,
+        AICreditTransaction(account_id=account.id, user_id=user_id, transaction_type=USAGE_REFUND,
                             amount_rmb=Decimal("0.35"), note="Correct rate and duplicate generation"),
-        AICreditTransaction(user_id=user_id, transaction_type="recharge", amount_rmb=Decimal("10")),
+        AICreditTransaction(account_id=account.id, user_id=user_id, transaction_type="recharge", amount_rmb=Decimal("10")),
     ])
     await test_db.commit()
 
