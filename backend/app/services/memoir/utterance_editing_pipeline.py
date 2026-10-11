@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.memoir import (
     MemoirChatMessage,
     MemoirSectionMaterial,
+    MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.services.memoir import sections, story_tree_growth
+from app.services.memoir.narrator_profile import schedule_narrator_profile
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.narrative.framework_matching import (
     schedule_framework_matching_job,
@@ -141,3 +143,6 @@ async def schedule_ready_utterance_background_work(
     await story_tree_growth.schedule_story_tree_growth(
         db, project_id=project_id, voice_session_id=utterance.voice_session_id, source=source,
     )
+    voice_session = await db.get(MemoirVoiceSession, utterance.voice_session_id)
+    if voice_session is not None:
+        await schedule_narrator_profile(db, voice_session=voice_session)

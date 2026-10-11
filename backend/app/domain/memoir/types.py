@@ -129,6 +129,7 @@ class MemoirEditingJobType(str, Enum):
     GENERATE_CHAPTER_SECTION_REVISION = "generate_chapter_section_revision"
     PREPARE_CHAPTER = "prepare_chapter"
     UPDATE_BOOK_DRAFT = "update_book_draft"
+    FILL_NARRATOR_PROFILE = "fill_narrator_profile"
 
 
 class MemoirRetrievalEntryKind(str, Enum):

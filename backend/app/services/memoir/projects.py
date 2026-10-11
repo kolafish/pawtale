@@ -32,12 +32,24 @@ from app.services.projects.access import load_project
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 # Profile fields filled from narration, mapped to the voice session they came from.
 INFERRED_PROFILE_FIELDS_KEY = "inferred_from_session"
+# Profile fields the narrator declined, or left unanswered twice, mapped to that voice session.
+SKIPPED_PROFILE_FIELDS_KEY = "skipped_in_session"
 # The home page creates a first book under this title; it is renamed once the narrator's name is known.
 FIRST_PROJECT_TITLE = "我的回忆录"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 DEFAULT_INTERVIEW_TYPE = "ai_interview"
 DEFAULT_SESSION_GOAL = "open_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
+
+
+# Asked for by voice in a new book's first narration; gender is only inferred.
+ASKED_PROFILE_FIELDS = ("narrator_name", "narrator_age", "narrator_origin")
+
+
+def profile_items_to_ask(profile: dict) -> list[str]:
+    """Asked fields still empty that the narrator has not declined or left unanswered twice."""
+    skipped = profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {}
+    return [key for key in ASKED_PROFILE_FIELDS if profile.get(key) in (None, "") and key not in skipped]
 
 
 def _clean_text(value: str | None) -> str:

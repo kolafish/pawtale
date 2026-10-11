@@ -9,6 +9,7 @@ from app.services.memoir import book_revision_jobs
 from app.services.memoir import chapter_preparation_jobs
 from app.services.memoir import material_offline_asr_jobs
 from app.services.memoir import material_image_generation
+from app.services.memoir import narrator_profile
 from app.services.memoir import story_tree_growth
 from app.services.memoir import retrieval_source_index
 from app.services.memoir import section_regeneration
@@ -66,6 +67,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.ORGANIZE_MATERIAL,
         story_tree_growth.run_story_tree_growth_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.FILL_NARRATOR_PROFILE,
+        narrator_profile.run_narrator_profile_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.UPDATE_TOPIC_MAP,
