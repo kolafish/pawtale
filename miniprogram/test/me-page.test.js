@@ -230,10 +230,6 @@ test("me shows how far an overdrawn balance went past the credit", async () => {
 test("me buys a picked credit pack and refreshes the balance", async () => {
   const toasts = [];
   global.wx = {
-    showActionSheet(options) {
-      assert.deepEqual(options.itemList, ["AI 额度 9.9 元，支付 ¥9.9", "AI 额度 29.9 元，支付 ¥29.9"]);
-      options.success({ tapIndex: 1 });
-    },
     showToast(options) { toasts.push(options.title); },
   };
   const bought = [];
@@ -245,12 +241,13 @@ test("me buys a picked credit pack and refreshes the balance", async () => {
         packs: [
           { product_id: "9_9_0", name: "AI 额度 9.9 元", price_rmb: "9.90", credit_rmb: "9.9" },
           { product_id: "29_9_0", name: "AI 额度 29.9 元", price_rmb: "29.90", credit_rmb: "29.9" },
+          { product_id: "198_0", name: "AI 额度 198 元", price_rmb: "198.00", credit_rmb: "198" },
         ],
       }),
       getAICreditSummary: async () => ({ total_credit_rmb: remaining, used_rmb: 0, remaining_rmb: remaining }),
       buyCreditPack: async (productId) => {
         bought.push(productId);
-        remaining = 39.9;
+        remaining = 19.9;
         return "paid";
       },
     },
@@ -259,13 +256,29 @@ test("me buys a picked credit pack and refreshes the balance", async () => {
 
   await page.loadAICreditSummary.call(context);
   await page.loadCreditPacks.call(context);
-  assert.equal(context.data.creditPacks.length, 2);
+  assert.deepEqual(
+    context.data.creditPacks.map((pack) => [pack.title, pack.description, pack.priceText, pack.iconPath]),
+    [
+      ["体验包", "增加 9.9 元 AI 使用额度", "9.9", "/assets/credit-packs/9_9_0.jpg"],
+      ["进阶包", "增加 29.9 元 AI 使用额度", "29.9", "/assets/credit-packs/29_9_0.jpg"],
+      ["典藏包", "增加 198 元 AI 使用额度", "198", "/assets/credit-packs/198_0.jpg"],
+    ],
+  );
+  for (const pack of context.data.creditPacks) {
+    assert.ok(fs.existsSync(path.join(__dirname, "..", pack.iconPath)), pack.iconPath);
+  }
+
   page.openCreditPurchase.call(context);
+  assert.equal(context.data.creditSheetVisible, true);
+  assert.equal(context.data.creditSelectedPackId, "29_9_0");
+  page.selectCreditPack.call(context, { currentTarget: { dataset: { productId: "9_9_0" } } });
+  page.confirmCreditPurchase.call(context);
+  assert.equal(context.data.creditSheetVisible, false);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(bought, ["29_9_0"]);
+  assert.deepEqual(bought, ["9_9_0"]);
   assert.deepEqual(toasts, ["充值成功"]);
-  assert.equal(context.data.creditRemainingText, "39.90");
+  assert.equal(context.data.creditRemainingText, "19.90");
   assert.equal(context.data.creditPurchasing, false);
 });
 

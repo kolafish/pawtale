@@ -86,7 +86,9 @@ interface MeData {
   creditUsageError: string;
   creditUsageDays: CreditUsageDayGroup[];
   creditUsageHasMore: boolean;
-  creditPacks: CreditPack[];
+  creditPacks: CreditPackOption[];
+  creditSheetVisible: boolean;
+  creditSelectedPackId: string;
   creditPurchasing: boolean;
   error: string;
   displayName: string;
@@ -229,6 +231,33 @@ function voiceAuthorizationSettingsData(): Pick<
   };
 }
 
+interface CreditPackOption extends CreditPack {
+  title: string;
+  description: string;
+  note: string;
+  priceText: string;
+  iconPath: string;
+}
+
+// Titles and artwork for the 道具 configured in the mini program admin.
+const CREDIT_PACK_DISPLAY: Record<string, { title: string; note: string; iconPath: string }> = {
+  "9_9_0": { title: "体验包", note: "先试试讲述和配图", iconPath: "/assets/credit-packs/9_9_0.jpg" },
+  "29_9_0": { title: "进阶包", note: "持续讲述，整理成书", iconPath: "/assets/credit-packs/29_9_0.jpg" },
+  "198_0": { title: "典藏包", note: "长期讲述，做视频和书稿", iconPath: "/assets/credit-packs/198_0.jpg" },
+};
+
+function creditPackOption(pack: CreditPack): CreditPackOption {
+  const display = CREDIT_PACK_DISPLAY[pack.product_id];
+  return {
+    ...pack,
+    title: display?.title || pack.name,
+    description: `增加 ${Number(pack.credit_rmb)} 元 AI 使用额度`,
+    note: display?.note || "",
+    priceText: String(Number(pack.price_rmb)),
+    iconPath: display?.iconPath || "",
+  };
+}
+
 function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabled"> {
   const settings = readAccessibilitySettings();
   return {
@@ -257,6 +286,8 @@ function loggedOutData(): Partial<MeData> {
     creditUsageDays: [],
     creditUsageHasMore: false,
     creditPacks: [],
+    creditSheetVisible: false,
+    creditSelectedPackId: "",
     creditPurchasing: false,
     displayName: "",
     nameDraft: "",
@@ -302,6 +333,8 @@ definePage<MeData>()({
     creditUsageDays: [],
     creditUsageHasMore: false,
     creditPacks: [],
+    creditSheetVisible: false,
+    creditSelectedPackId: "",
     creditPurchasing: false,
     error: "",
     displayName: "",
@@ -501,7 +534,7 @@ definePage<MeData>()({
   async loadCreditPacks() {
     try {
       const { enabled, packs } = await getCreditPacks();
-      this.setData({ creditPacks: enabled ? packs : [] });
+      this.setData({ creditPacks: enabled ? packs.map(creditPackOption) : [] });
     } catch (error) {
       console.warn("load credit packs failed", error);
       this.setData({ creditPacks: [] });
@@ -518,15 +551,32 @@ definePage<MeData>()({
       return;
     }
     const packs = this.data.creditPacks;
-    wx.showActionSheet({
-      itemList: packs.map((pack) => `${pack.name}，支付 ¥${Number(pack.price_rmb)}`),
-      success: ({ tapIndex }) => {
-        const pack = packs[tapIndex];
-        if (pack) {
-          void this.purchaseCreditPack(pack.product_id);
-        }
-      },
-    });
+    const selected = packs.some((pack) => pack.product_id === this.data.creditSelectedPackId)
+      ? this.data.creditSelectedPackId
+      : packs[Math.min(1, packs.length - 1)].product_id;
+    this.setData({ creditSheetVisible: true, creditSelectedPackId: selected });
+  },
+
+  noop() {},
+
+  closeCreditPurchase() {
+    this.setData({ creditSheetVisible: false });
+  },
+
+  selectCreditPack(event: { currentTarget: { dataset: { productId?: string } } }) {
+    const productId = event.currentTarget.dataset.productId || "";
+    if (productId) {
+      this.setData({ creditSelectedPackId: productId });
+    }
+  },
+
+  confirmCreditPurchase() {
+    const productId = this.data.creditSelectedPackId;
+    if (this.data.creditPurchasing || !productId) {
+      return;
+    }
+    this.setData({ creditSheetVisible: false });
+    void this.purchaseCreditPack(productId);
   },
 
   async purchaseCreditPack(productId: string) {

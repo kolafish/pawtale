@@ -273,4 +273,54 @@
     >注销账号</button>
   </block>
 
+  <view
+    wx:if="{{creditSheetVisible}}"
+    class="credit-sheet-mask"
+    bindtap="closeCreditPurchase"
+    catchtouchmove="noop"
+  >
+    <view class="credit-sheet" catchtap="noop" aria-role="dialog" aria-label="充值 AI 额度">
+      <view class="credit-sheet-grabber"></view>
+      <view class="credit-sheet-head">
+        <view class="credit-sheet-heading">
+          <text class="credit-sheet-title">充值 AI 额度</text>
+          <text class="credit-sheet-subtitle">付多少到账多少，按 AI 厂商原价扣除，不加价</text>
+        </view>
+        <view class="credit-sheet-close ui-pressable" aria-role="button" aria-label="关闭" bindtap="closeCreditPurchase">×</view>
+      </view>
+      <view class="credit-pack-list">
+        <view
+          wx:for="{{creditPacks}}"
+          wx:for-item="pack"
+          wx:key="product_id"
+          class="credit-pack ui-pressable {{pack.product_id === creditSelectedPackId ? 'is-selected' : ''}}"
+          aria-role="radio"
+          aria-checked="{{pack.product_id === creditSelectedPackId}}"
+          aria-label="{{pack.title}}，{{pack.description}}，支付 {{pack.priceText}} 元"
+          data-product-id="{{pack.product_id}}"
+          bindtap="selectCreditPack"
+        >
+          <image wx:if="{{pack.iconPath}}" class="credit-pack-icon" src="{{pack.iconPath}}" mode="aspectFill"></image>
+          <view class="credit-pack-copy">
+            <text class="credit-pack-title">{{pack.title}}</text>
+            <text class="credit-pack-description">{{pack.description}}</text>
+            <text wx:if="{{pack.note}}" class="credit-pack-note">{{pack.note}}</text>
+          </view>
+          <view class="credit-pack-price">
+            <text class="credit-pack-currency">¥</text><text class="credit-pack-amount ui-tabular">{{pack.priceText}}</text>
+          </view>
+        </view>
+      </view>
+      <view
+        class="credit-sheet-confirm support-action ui-block-action ui-pressable"
+        aria-role="button"
+        bindtap="confirmCreditPurchase"
+      >
+        <block wx:for="{{creditPacks}}" wx:for-item="pack" wx:key="product_id">
+          <text wx:if="{{pack.product_id === creditSelectedPackId}}">支付 ¥{{pack.priceText}}，购买{{pack.title}}</text>
+        </block>
+      </view>
+      <text class="credit-sheet-footnote">额度仅用于本小程序的 AI 功能，不可提现</text>
+    </view>
+  </view>
 </view>
