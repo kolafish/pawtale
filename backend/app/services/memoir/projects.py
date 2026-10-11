@@ -296,6 +296,9 @@ async def update_mobile_memoir_project(
     project = await load_project(db, project_id, user_id)
     if project.type != ProjectType.MEMOIR.value:
         raise HTTPException(status_code=400, detail="项目不是回忆录")
+    # Automatic profile completion may have committed since load_project.
+    # Read the current values under the same row lock before merging this save.
+    await db.refresh(project, with_for_update=True)
     if req.title is not None:
         title = req.title.strip()
         if not title:
