@@ -49,8 +49,8 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # The one profile field the interviewer may ask for now, only in the book's profile session.
-    profile_question: str | None = None
+    # Eligible fields in order, only in the first narration. Recent answers may not be saved yet.
+    profile_questions: tuple[str, ...] = ()
 
 
 async def load_interview_book_context(
@@ -72,10 +72,10 @@ async def load_interview_book_context(
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
-    profile_question = (
-        narrator_profile.next_profile_question(profile, list(voice_session.messages))
+    profile_questions = (
+        narrator_profile.profile_questions_to_ask(profile, list(voice_session.messages))
         if await narrator_profile.is_profile_session(db, voice_session, project)
-        else None
+        else ()
     )
     return InterviewBookContext(
         chapters=chapters,
@@ -83,7 +83,7 @@ async def load_interview_book_context(
         topics=topics,
         anchor_topic=anchor_topic,
         narrator=_narrator(profile),
-        profile_question=profile_question,
+        profile_questions=profile_questions,
     )
 
 
