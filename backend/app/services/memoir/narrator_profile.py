@@ -453,8 +453,11 @@ async def fill_narrator_profile(
             return True
         source = inferred.get(key)
         # A heard value may be replaced by the same segment or a later one; a saved value never.
-        source_time = source_times.get(source.get("utterance_id")) if isinstance(source, dict) else None
-        return source_time is not None and source_time <= segment_created_at
+        if not isinstance(source, dict):
+            return False
+        source_time = source_times.get(source.get("utterance_id"))
+        # Deleting the source recording must not turn a heard value into a manually saved one.
+        return source_time is None or source_time <= segment_created_at
 
     changed = {
         key: value

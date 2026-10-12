@@ -267,6 +267,41 @@ async def test_rereading_an_earlier_segment_does_not_undo_a_later_correction(cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("manually_saved", [False, True])
+async def test_deleting_a_source_segment_keeps_heard_values_correctable_but_saved_values_protected(
+    client, test_db, fake_ai, manually_saved,
+):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    first = await _narrate(client, test_db, session_id, "我叫王秀音。")
+    fake_ai.payload = {"name": "王秀音"}
+    await _run(test_db, first.utterance_id)
+    if manually_saved:
+        saved = await client.patch(f"/api/mobile/memoir/projects/{project_id}", json={"elder_name": "王秀音"})
+        assert saved.status_code == 200
+
+    deleted = await client.delete(f"/api/mobile/memoir/voice-transcripts/{first.utterance_id}")
+    assert deleted.status_code == 204
+    assert await test_db.scalar(select(MemoirVoiceUtterance.id).where(
+        MemoirVoiceUtterance.id == first.utterance_id,
+    )) is None
+
+    later = await _narrate(client, test_db, session_id, "我叫王秀英，英雄的英。")
+    fake_ai.payload = {"name": "王秀英"}
+    await _run(test_db, later.utterance_id)
+    project, profile = await _profile(test_db, project_id)
+    expected_name = "王秀音" if manually_saved else "王秀英"
+    assert profile["narrator_name"] == expected_name
+    assert project.title == f"{expected_name}的回忆录"
+    inferred = profile[projects.INFERRED_PROFILE_FIELDS_KEY]
+    if manually_saved:
+        assert "narrator_name" not in inferred
+    else:
+        assert inferred["narrator_name"]["utterance_id"] == later.utterance_id
+        assert inferred["narrator_name"]["transcript_version_id"] == later.transcript_version_id
+
+
+@pytest.mark.asyncio
 async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kept(client, test_db, fake_ai):
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     session_id = await _session(client, project_id)
