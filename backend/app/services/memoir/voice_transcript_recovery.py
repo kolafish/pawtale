@@ -21,7 +21,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirVoiceTranscriptItemResponse
-from app.services.memoir import voice_transcript_correction
+from app.services.memoir import narrator_profile, voice_transcript_correction
 from app.services.ai_credits import assert_ai_credit_available
 from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.memoir.audio_files import audio_file_duration_seconds, audio_file_path
@@ -406,6 +406,8 @@ async def _apply_recovered_transcript(
             utterance=utterance,
             source="transcript_recovery",
         )
+        await narrator_profile.pin_profile_session(db, voice_session=voice_session)
+        await narrator_profile.schedule_narrator_profile(db, utterance=utterance)
         from app.services.memoir.share_video_candidate_scheduling import schedule_share_video_candidate_evaluation
 
         await db.flush()

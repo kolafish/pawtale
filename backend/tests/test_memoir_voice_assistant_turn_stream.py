@@ -681,7 +681,7 @@ async def test_voice_assistant_turn_first_opening_asks_how_to_address_the_narrat
     assert "本轮没有可播报的结构化进度变化" not in prompt
 
 
-async def test_first_narration_stops_asking_profile_items_the_narrator_skipped(client, test_db):
+async def test_first_narration_offers_one_profile_item_and_records_the_ask(client, test_db):
     created = await post_mobile_memoir_voice_session(client, json={"guidance_mode": "guided_interview"})
     voice_session = created.json()["session"]
     user_id = (await client.get("/api/auth/me")).json()["id"]
@@ -700,7 +700,7 @@ async def test_first_narration_stops_asking_profile_items_the_narrator_skipped(c
         "memoir_profile": {
             **profile,
             "narrator_name": "王秀英",
-            "skipped_in_session": {"narrator_age": voice_session["id"]},
+            "declined_in": {"narrator_age": "utterance-1"},
         },
     }
     await test_db.commit()
@@ -709,7 +709,18 @@ async def test_first_narration_stops_asking_profile_items_the_narrator_skipped(c
         test_db, voice_session_id=voice_session["id"], user_id=user_id, chunks=["好的，您老家是哪里的？"],
     )
 
-    assert "资料里还要问的：老家（" in ai_client.calls[0]["user_prompt"]
+    assert "还想知道他的老家" in ai_client.calls[0]["user_prompt"]
+    reply = await test_db.scalar(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.voice_session_id == voice_session["id"],
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+        )
+        .order_by(MemoirChatMessage.turn_index.desc())
+        .limit(1)
+    )
+    assert reply.metadata_json["profile_question"] == "narrator_origin"
+    assert reply.metadata_json["profile_asked"] == "narrator_origin"
 
 
 async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(

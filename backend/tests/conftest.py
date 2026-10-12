@@ -75,13 +75,13 @@ def _postgres_alembic_config() -> Config:
 
 @pytest.fixture(autouse=True)
 def skip_narrator_profile_extraction(monkeypatch):
-    """Each narration segment queues an AI call for the narrator's profile; other tests don't need it."""
-    from app.services.memoir import utterance_editing_pipeline
+    """Each segment of a first narration queues an AI call for the narrator's profile; other tests don't need it."""
+    from app.services.memoir import narrator_profile
 
     async def skip(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(utterance_editing_pipeline, "schedule_narrator_profile", skip)
+    monkeypatch.setattr(narrator_profile, "schedule_narrator_profile", skip)
 
 
 @pytest.fixture(scope="session")

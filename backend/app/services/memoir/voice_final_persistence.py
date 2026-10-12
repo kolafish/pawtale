@@ -20,7 +20,7 @@ from app.models.memoir_narrative import MemoirFrameworkItem
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import completion_interviews, completion_issues
-from app.services.memoir import voice_transcript_correction
+from app.services.memoir import narrator_profile, voice_transcript_correction
 from app.services.memoir import share_video_candidate_scheduling
 from app.services.memoir import voice_progress_notices
 from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
@@ -223,6 +223,8 @@ class VoiceFinalPersistenceService:
                     utterance=utterance,
                     source="asr_final",
                 )
+                await narrator_profile.pin_profile_session(self.db, voice_session=voice_session)
+                await narrator_profile.schedule_narrator_profile(self.db, utterance=utterance)
                 await voice_progress_notices.enqueue_utterance_milestone_notice(
                     self.db,
                     project_id=voice_session.project_id,

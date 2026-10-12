@@ -23,10 +23,10 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
 from app.services.memoir.narrative import frameworks
-from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY, profile_items_to_ask
+from app.services.memoir import narrator_profile
+from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
 
 _NARRATOR_GENDERS = {"male": "男", "female": "女"}
-_PROFILE_LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +49,8 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # Which of 称呼/年龄/老家 to still ask for in a new book's first narration.
-    unknown_profile: tuple[str, ...] = ()
+    # The one profile field the interviewer may ask for now, only in the book's profile session.
+    profile_question: str | None = None
 
 
 async def load_interview_book_context(
@@ -72,13 +72,18 @@ async def load_interview_book_context(
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
+    profile_question = (
+        narrator_profile.next_profile_question(profile, list(voice_session.messages))
+        if await narrator_profile.is_profile_session(db, voice_session, project)
+        else None
+    )
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
         topics=topics,
         anchor_topic=anchor_topic,
         narrator=_narrator(profile),
-        unknown_profile=tuple(_PROFILE_LABELS[key] for key in profile_items_to_ask(profile)),
+        profile_question=profile_question,
     )
 
 
