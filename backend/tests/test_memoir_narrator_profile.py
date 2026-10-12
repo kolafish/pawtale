@@ -700,6 +700,7 @@ async def test_people_are_read_from_the_corrected_version_and_folded_into_the_ro
     ])
 
     async def answer(_system_prompt, user_prompt, **_kwargs):
+        fake_ai.prompts.append(user_prompt)
         return json.dumps(next(readings) if "记住书里出现的人" in user_prompt else {}, ensure_ascii=False)
 
     fake_ai._call_llm = answer
