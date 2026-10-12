@@ -23,10 +23,10 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
 from app.services.memoir.narrative import frameworks
-from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
+from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY, profile_items_to_ask
 
 _NARRATOR_GENDERS = {"male": "男", "female": "女"}
-_ASKED_PROFILE_ITEMS = (("narrator_name", "称呼"), ("narrator_age", "年龄"), ("narrator_origin", "老家"))
+_PROFILE_LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +49,7 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # Which of 称呼/年龄/老家 the profile lacks; a new book asks for them in its first narration.
+    # Which of 称呼/年龄/老家 to still ask for in a new book's first narration.
     unknown_profile: tuple[str, ...] = ()
 
 
@@ -78,9 +78,7 @@ async def load_interview_book_context(
         topics=topics,
         anchor_topic=anchor_topic,
         narrator=_narrator(profile),
-        unknown_profile=tuple(
-            label for key, label in _ASKED_PROFILE_ITEMS if profile.get(key) in (None, "")
-        ),
+        unknown_profile=tuple(_PROFILE_LABELS[key] for key in profile_items_to_ask(profile)),
     )
 
 

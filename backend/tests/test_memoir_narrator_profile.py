@@ -2,9 +2,10 @@ import asyncio
 import json
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.memoir import MemoirVoiceSession
+from app.models.memoir import MemoirEditingJob, MemoirVoiceSession
 from app.models.projects import Project
 from app.services.ai_base import AITextServiceBase
 from app.services.memoir import narrator_profile, projects
@@ -115,3 +116,39 @@ async def test_manual_save_overlapping_profile_completion_preserves_both_updates
     inferred = profile[projects.INFERRED_PROFILE_FIELDS_KEY]
     assert "narrator_name" not in inferred
     assert inferred["narrator_age"] == voice_session.id
+
+
+@pytest.mark.asyncio
+async def test_profile_job_is_queued_only_while_the_first_narration_lacks_it(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    first = await create_test_voice_transcript(
+        client, test_db, "我叫王秀英，老家四川成都。", project_id=project_id, question_text="怎么称呼您？",
+    )
+    voice_session = await test_db.get(MemoirVoiceSession, first["session"]["id"])
+    await narrator_profile.schedule_narrator_profile(test_db, voice_session=voice_session)
+    await test_db.commit()
+    job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.job_type == "fill_narrator_profile"))
+    assert job is not None
+
+    fake = FakeProfileAI({"name": "王秀英", "gender": "female", "age": None, "origin": "四川成都", "skip": []})
+    monkeypatch.setattr(narrator_profile, "get_ai_service", lambda _model=None: fake)
+    await narrator_profile.run_narrator_profile_job(test_db, job)
+    project = await test_db.get(Project, project_id)
+    await test_db.refresh(project)
+    assert project.title == "王秀英的回忆录"
+
+    # Declining age is remembered, so the interviewer stops asking for it.
+    fake.payload = {**fake.payload, "skip": ["age"]}
+    await narrator_profile.run_narrator_profile_job(test_db, job)
+    await test_db.refresh(project)
+    assert projects.profile_items_to_ask(project.metadata_json["memoir_profile"]) == []
+
+    # A later narration no longer extracts anything.
+    later = await create_test_voice_transcript(client, test_db, "后来我去了重庆。", project_id=project_id)
+    later_session = await test_db.get(MemoirVoiceSession, later["session"]["id"])
+    await narrator_profile.schedule_narrator_profile(test_db, voice_session=later_session)
+    await test_db.commit()
+    jobs = (await test_db.scalars(
+        select(MemoirEditingJob).where(MemoirEditingJob.job_type == "fill_narrator_profile")
+    )).all()
+    assert [item.id for item in jobs] == [job.id]
