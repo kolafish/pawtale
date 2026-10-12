@@ -83,6 +83,12 @@ def skip_narrator_profile_extraction(monkeypatch):
 
     monkeypatch.setattr(narrator_profile, "schedule_narrator_profile", skip)
 
+    def no_ai(_model=None):
+        raise RuntimeError("the narrator profile makes no AI calls in tests")
+
+    # Replies that offer a profile item check whether they asked it; without AI the wording decides.
+    monkeypatch.setattr(narrator_profile, "get_ai_service", no_ai)
+
 
 @pytest.fixture(scope="session")
 def postgres_schema():

@@ -10,12 +10,13 @@ answer is still kept. A value the user saved on the project page is never overwr
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+import logging
 import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,9 +31,10 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_jobs import MemoirEditingJob
 from app.models.projects import Project
+from app.clock import utcnow_naive
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import book_outputs, editing_jobs
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
@@ -46,17 +48,32 @@ from app.services.memoir.projects import (
 )
 
 
+logger = logging.getLogger(__name__)
+
 # Each item is asked at most this many times; an answer given later is still kept.
 MAX_ASKS = 2
+# A failed reading is tried again after these delays, then left failed.
+RETRY_DELAYS = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
 SYSTEM_PROMPT = "你从回忆录访谈里记下讲述者本人的基本资料，只记他说出来或能明确看出的内容。"
 _LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家"}
 _SKIP_FIELDS = {"name": "narrator_name", "age": "narrator_age", "origin": "narrator_origin"}
-# Words an interviewer line uses when it asks for each item.
+_ASK_TOPICS = {
+    "narrator_name": "他本人怎么称呼、叫什么名字",
+    "narrator_age": "他本人现在的年纪，或者哪年出生",
+    "narrator_origin": "他本人的老家、籍贯或是哪里人",
+}
+# Only when the check call fails: wording that plainly asks for each item.
 _ASK_PATTERNS = {
-    "narrator_name": re.compile(r"称呼|贵姓|叫您|叫什么|名字"),
-    "narrator_age": re.compile(r"哪年|哪一年|出生|多大|年纪|高寿|岁数|几岁|属什么|属相"),
+    "narrator_name": re.compile(r"怎么称呼|贵姓|叫什么名字|您的名字"),
+    "narrator_age": re.compile(r"多少岁|几岁|多大岁数|多大年纪|年纪多大|高寿|贵庚|哪一?年(出)?生|出生年|属什么|属相"),
     "narrator_origin": re.compile(r"老家|哪里人|哪儿人|家乡|籍贯|祖籍"),
 }
+
+
+class _AskOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asked: bool
 
 
 class _ProfileOutput(BaseModel):
@@ -157,11 +174,35 @@ def next_profile_question(profile: dict, messages: list[MemoirChatMessage]) -> s
     return next((key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS), None)
 
 
-def asked_profile_field(field: str | None, text: str) -> str | None:
-    """The offered item, if this interviewer line asks for it."""
-    if field not in _ASK_PATTERNS or not re.search(r"[？?]", text):
+async def asked_profile_field(field: str | None, text: str, *, ai_model: str | None) -> str | None:
+    """The offered item, if this interviewer line asks the narrator for it.
+
+    Runs when the line is saved, so the next reply already sees the count.
+    """
+    if field not in _ASK_TOPICS or not re.search(r"[？?]", text):
         return None
-    return field if _ASK_PATTERNS[field].search(text) else None
+    prompt = (
+        f"访谈主持人对讲述者说了这句话：\n{text}\n\n"
+        f"这句话有没有在问{_ASK_TOPICS[field]}？问过去某个时候的事、问家人的情况、问别的事，都不算。"
+        '只返回 JSON：{"asked":true} 或 {"asked":false}'
+    )
+    try:
+        generated = await generate_structured_with_client(
+            get_ai_service(ai_model),
+            "你判断访谈主持人的一句话问的是什么。",
+            prompt,
+            output_model=_AskOutput,
+            requested_model=ai_model,
+            temperature=0,
+            max_tokens=20,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            max_attempts=1,
+        )
+        asked = generated.value.asked
+    except Exception:
+        logger.warning("Profile ask check failed; falling back to wording", exc_info=True)
+        asked = bool(_ASK_PATTERNS[field].search(text))
+    return field if asked else None
 
 
 async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceUtterance) -> None:
@@ -220,18 +261,31 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="讲述片段或回忆录不存在",
         )
-    if not await fill_narrator_profile(
-        db,
-        project=project,
-        utterance=utterance,
-        transcript_version_id=str(payload.get("transcript_version_id") or ""),
-        previous_message_id=payload.get("previous_message_id"),
-    ):
-        return editing_jobs.EditingJobResult(
-            status=MemoirEditingJobStatus.SKIPPED,
-            error_message="转写版本已更新",
+    try:
+        current = await fill_narrator_profile(
+            db,
+            project=project,
+            utterance=utterance,
+            transcript_version_id=str(payload.get("transcript_version_id") or ""),
+            previous_message_id=payload.get("previous_message_id"),
         )
-    return editing_jobs.EditingJobResult(result_json={"utterance_id": utterance.id})
+    except Exception as exc:
+        await db.rollback()
+        failures = int((job.result_json or {}).get("failures") or 0)
+        if failures >= len(RETRY_DELAYS):
+            raise
+        logger.warning("Narrator profile reading failed for job %s; retrying", job.id, exc_info=True)
+        # Ask the queue to run this job again later; it keeps any newer transcript version queued meanwhile.
+        await db.execute(
+            update(MemoirEditingJob)
+            .where(MemoirEditingJob.id == job.id)
+            .values(rerun_requested=True, run_after=utcnow_naive() + RETRY_DELAYS[failures])
+        )
+        return editing_jobs.EditingJobResult(result_json={"failures": failures + 1, "last_error": str(exc)[:200]})
+    # When the transcript changed meanwhile, its new version is queued as a rerun, which only follows a success.
+    return editing_jobs.EditingJobResult(
+        result_json={"utterance_id": utterance.id, **({} if current else {"superseded": True})}
+    )
 
 
 async def _load_utterance(db: AsyncSession, utterance_id: object) -> MemoirVoiceUtterance | None:
