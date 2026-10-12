@@ -16,7 +16,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
-from app.services.memoir import completion_interviews, editing_jobs, sections
+from app.services.memoir import completion_interviews, editing_jobs, narrator_profile, sections
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.project_ai_preferences import (
     load_project_ai_model,
@@ -259,6 +259,8 @@ async def run_transcript_correction_job(
             source="transcript_correction_succeeded",
             ai_model=ai_model,
         )
+    # Layered material skips the shared scheduling above, but the profile reads every new version.
+    await narrator_profile.schedule_narrator_profile(db, utterance=utterance)
     from app.services.memoir.share_video_candidate_scheduling import schedule_share_video_candidate_evaluation
 
     await db.flush()

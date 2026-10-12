@@ -62,7 +62,7 @@ def build_stream_turn_prompt(
         return _join(
             _header(host_name, regenerate),
             _FOLLOW_UP,
-            _profile_questions(book) if first_narration else "",
+            _profile_question(book),
             policy_section,
             dialogue,
             _book_block(book, opening=False),
@@ -76,7 +76,7 @@ def build_stream_turn_prompt(
         known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
         question = (
             "再问一句怎么称呼他。只问这一个问题。"
-            if "称呼" in book.unknown_profile
+            if book.profile_question == "narrator_name"
             else "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
         )
         mode = (
@@ -117,14 +117,21 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 - 他说想自己讲、不想被问时，这次后面只接住，不再提新方向"""
 
 
-def _profile_questions(book: InterviewBookContext) -> str:
-    if not book.unknown_profile:
+_PROFILE_QUESTIONS = {
+    "narrator_name": ("怎么称呼他", "您怎么称呼？"),
+    "narrator_age": ("他的年纪", "您是哪年生的？"),
+    "narrator_origin": ("他的老家", "您老家是哪里的？"),
+}
+
+
+def _profile_question(book: InterviewBookContext) -> str:
+    if book.profile_question not in _PROFILE_QUESTIONS:
         return ""
-    return f"""这本书第一次讲述，资料里还要问的：{"、".join(book.unknown_profile)}（对话里说过的就算有了）。
-- 按称呼、年龄、老家的顺序，每次接话只问一个还没有的，比如“您是哪年生的？”“您老家是哪里的？”
-- 他刚答完一个，接话时用他的称呼叫他一声（叫错了他会纠正），再问下一个
-- 他正讲着一件事时，先听他讲完再问；同一项问过两次他都没回答，就不再问这一项
-- 他说不想说，就不再问这些，按上面的方式听他讲"""
+    topic, example = _PROFILE_QUESTIONS[book.profile_question]
+    return f"""这本书第一次讲述，还想知道{topic}。
+- 他正讲着一件事时，先听他讲完，这次不问；一件事讲完了，再自然地问一句，比如“{example}”
+- 他刚才的话里已经说了，或者说了不想说，就不问
+- 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:

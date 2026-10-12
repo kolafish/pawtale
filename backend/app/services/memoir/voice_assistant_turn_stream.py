@@ -27,6 +27,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
 from app.services.memoir import memory_activation
+from app.services.memoir import narrator_profile
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
@@ -482,6 +483,7 @@ class VoiceAssistantTurnStreamSession:
             req=req,
             progress_context=project_progress_context,
             completion_prompt_context=completion_prompt_context,
+            profile_question=book_context.profile_question if book_context else None,
         )
         await automation_events.mark_automation_events_voice_selected(
             self.db,
@@ -770,6 +772,7 @@ class VoiceAssistantTurnStreamSession:
         req: AssistantTurnStartRequest,
         progress_context: ProgressPromptContext,
         completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
+        profile_question: str | None = None,
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -809,6 +812,10 @@ class VoiceAssistantTurnStreamSession:
                     "current_completion_issue_id": (
                         completion_prompt_context.issue_id if completion_prompt_context else None
                     ),
+                    # The profile field offered to this line and, if the line asks for it, that field;
+                    # each item is asked at most twice, counted from these.
+                    "profile_question": profile_question,
+                    "profile_asked": narrator_profile.asked_profile_field(profile_question, turn.speech_text),
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,
                     "memory_activation_status": artifacts.memory_activation_status,
                     "memory_activation_injected_count": artifacts.memory_activation_injected_count,

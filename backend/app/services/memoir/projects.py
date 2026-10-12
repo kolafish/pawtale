@@ -30,10 +30,12 @@ from app.services.projects.access import load_project
 
 
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
-# Profile fields filled from narration, mapped to the voice session they came from.
-INFERRED_PROFILE_FIELDS_KEY = "inferred_from_session"
-# Profile fields the narrator declined, or left unanswered twice, mapped to that voice session.
-SKIPPED_PROFILE_FIELDS_KEY = "skipped_in_session"
+# The voice session that collects the profile: the book's first one where the narrator spoke.
+PROFILE_SESSION_KEY = "profile_session_id"
+# Profile fields filled from narration, mapped to the segment (utterance, transcript version, turn) they came from.
+INFERRED_PROFILE_FIELDS_KEY = "inferred_from"
+# Profile fields the narrator declined to give, mapped to the utterance where they said so.
+SKIPPED_PROFILE_FIELDS_KEY = "declined_in"
 # The home page creates a first book under this title; it is renamed once the narrator's name is known.
 FIRST_PROJECT_TITLE = "我的回忆录"
 DEFAULT_GUIDANCE_MODE = "free_narration"
@@ -47,7 +49,7 @@ ASKED_PROFILE_FIELDS = ("narrator_name", "narrator_age", "narrator_origin")
 
 
 def profile_items_to_ask(profile: dict) -> list[str]:
-    """Asked fields still empty that the narrator has not declined or left unanswered twice."""
+    """Asked fields still empty that the narrator has not declined."""
     skipped = profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {}
     return [key for key in ASKED_PROFILE_FIELDS if profile.get(key) in (None, "") and key not in skipped]
 
@@ -100,8 +102,8 @@ def _profile_metadata(
     if isinstance(inferred, dict):
         # A value the user saves is theirs, so narration no longer changes it.
         profile[INFERRED_PROFILE_FIELDS_KEY] = {
-            key: session_id
-            for key, session_id in inferred.items()
+            key: source
+            for key, source in inferred.items()
             if not _field_was_set(req, "elder_name" if key == "narrator_name" else key)
         }
     if include_defaults or _field_was_set(req, "default_guidance_mode"):
