@@ -45,6 +45,7 @@ from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import automation_events
+from app.services.memoir import narration_people
 from app.services.memoir.material_roles import interviewer_lines
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
@@ -113,6 +114,8 @@ class ChapterGenerationContext:
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
     polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
+    # People cards for those mentioned in this chapter's narration; not part of the input signature.
+    people: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -510,15 +513,7 @@ def chapter_draft_generation_plan(
         for material in section.materials
     )
     return ChapterDraftGenerationPlan(
-        target_context=ChapterGenerationContext(
-            project_id=context.project_id,
-            chapter_id=context.chapter_id,
-            chapter_title=context.chapter_title,
-            sections=tuple(target_sections),
-            materials=target_materials,
-            input_signature=context.input_signature,
-            polish_level=context.polish_level,
-        ),
+        target_context=replace(context, sections=tuple(target_sections), materials=target_materials),
         preserved_sections=tuple(preserved_sections),
         previous_sections=tuple(previous_sections),
         protected_target_section_ids=tuple(protected_target_section_ids),
@@ -865,14 +860,13 @@ async def load_chapter_generation_context(
     )
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
-    return chapter_generation_context(
+    message_ids = [material.utterance.chat_message_id for section in chapter.sections for material in section.materials]
+    context = chapter_generation_context(
         chapter,
         polish_level=await load_project_transcript_polish_level(db, project_id),
-        interviewer_lines=await interviewer_lines(
-            db,
-            (material.utterance.chat_message_id for section in chapter.sections for material in section.materials),
-        ),
+        interviewer_lines=await interviewer_lines(db, message_ids),
     )
+    return replace(context, people=await narration_people.people_lines_for(db, project_id, message_ids))
 
 
 def build_chapter_generation_prompt(
@@ -924,6 +918,13 @@ def build_chapter_generation_prompt(
             ]
         )
         for section in context.sections
+    )
+    people = (
+        "书中人物（讲述者讲过的人，只用来统一称呼、看懂“他”“她”指谁，不据此增加情节）：\n"
+        + "\n".join(f"- {line}" for line in context.people)
+        + "\n\n"
+        if context.people
+        else ""
     )
     guidance = "\n".join(
         f"- {' '.join(item.split())[:240]}"
@@ -997,7 +998,7 @@ def build_chapter_generation_prompt(
 前一小节衔接参考：
 {previous_section_context or "（这是本章第一个小节）"}
 
-按既定顺序排列的允许素材：
+{people}按既定顺序排列的允许素材：
 {blocks}
 
 输出严格 JSON：
@@ -1031,15 +1032,7 @@ def _single_section_context(
     context: ChapterGenerationContext,
     section: ChapterSectionInput,
 ) -> ChapterGenerationContext:
-    return ChapterGenerationContext(
-        project_id=context.project_id,
-        chapter_id=context.chapter_id,
-        chapter_title=context.chapter_title,
-        sections=(section,),
-        materials=section.materials,
-        input_signature=context.input_signature,
-        polish_level=context.polish_level,
-    )
+    return replace(context, sections=(section,), materials=section.materials)
 
 
 def _deduplicated_strings(

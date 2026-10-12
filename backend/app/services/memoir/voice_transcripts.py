@@ -47,6 +47,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir import narration_people
 from app.services.memoir.memory_activation import delete_source_memory_traces
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
@@ -369,7 +370,8 @@ async def load_voice_transcript_cleanup_context(
         scene="voice_chat",
         guidance_mode=voice_session.guidance_mode,
         current_guidance_module=voice_session.current_guidance_module,
-        dialect_glossary=dialect_glossary,
+        # Names the narrator has said help pick the right characters for 同音字.
+        dialect_glossary=(*dialect_glossary, *await narration_people.names(db, voice_session.project_id)),
         recent_user_utterances=tuple(recent_user[-5:]),
         recent_assistant_messages=tuple(recent_assistant[-3:]),
     )

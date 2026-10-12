@@ -1,4 +1,4 @@
-"""Whole-book context for the AI interviewer: who is narrating, chapters, the last chapter and life topics."""
+"""Whole-book context for the AI interviewer: who is narrating, people, chapters, the last chapter and life topics."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
 from app.services.memoir.narrative import frameworks
-from app.services.memoir import narrator_profile
+from app.services.memoir import narration_people, narrator_profile
 from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
 
 _NARRATOR_GENDERS = {"male": "男", "female": "女"}
@@ -51,6 +51,8 @@ class InterviewBookContext:
     narrator: str = ""
     # Eligible fields in order, only in the first narration. Recent answers may not be saved yet.
     profile_questions: tuple[str, ...] = ()
+    # People the narrator has talked about, most recently mentioned first.
+    people: tuple[str, ...] = ()
 
 
 async def load_interview_book_context(
@@ -84,6 +86,7 @@ async def load_interview_book_context(
         anchor_topic=anchor_topic,
         narrator=_narrator(profile),
         profile_questions=profile_questions,
+        people=await narration_people.recent_people_lines(db, voice_session.project_id),
     )
 
 

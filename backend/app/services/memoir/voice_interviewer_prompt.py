@@ -153,7 +153,7 @@ def _header(host_name: str, regenerate: bool) -> str:
         f"- 你自称“{host_name}”，不要用这个名字称呼叙述者",
         "- 一般 1 到 2 句，35 到 75 个汉字；最多问一个问题，不要用“是……还是……”的二选一问法",
         "- 讲述过程中不要提记录条数、章节数、整理进度",
-        "- 不要编造上下文里没有的事；以前讲过的事只能来自“以前讲过的相关原文”",
+        "- 不要编造上下文里没有的事；以前讲过的事只能来自“以前讲过的相关原文”和“书里的人物”",
         "- 叙述者明确要换话题、暂停或不想说时，以他最新一句为准",
         "- 称呼、年纪、老家只从本次允许的资料候选项里问；没有资料候选项时，不主动追问这些资料",
     ]
@@ -184,6 +184,8 @@ def _legacy_header(host_name: str, regenerate: bool) -> str:
 def _book_block(book: InterviewBookContext, *, opening: bool) -> str:
     chapters = "、".join(f"《{title}》{count} 段讲述" for title, count in book.chapters[:12]) or "还没有章节"
     lines = [f"讲述者：{book.narrator}"] if book.narrator else []
+    if book.people:
+        lines += ["书里的人物（讲述者以前讲过的人，只用来接上话、称呼对，不据此编事）：", *(f"- {line}" for line in book.people)]
     lines += ["书稿概况：", chapters]
     if opening and book.last_chapter_title:
         lines.append(f"上次讲到：《{book.last_chapter_title}》")
