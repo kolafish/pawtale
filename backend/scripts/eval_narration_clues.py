@@ -4,8 +4,10 @@ Replays a project's AI interview segments in order. Each narrator segment is rea
 interviewer line before it, the people noted so far and the questions still open, exactly as the
 proposed background job would. Calls the server's default AI model; never writes to the database.
 
-  --owner-email E --list-projects             E's memoir projects with AI interview counts (no narration text)
-  --owner-email E --project-id ID --output F  replay one of E's projects, one JSON line per segment to F
+  --find-owner NAME                     accounts whose display name contains NAME (id, name, role only)
+  --owner U --list-projects             U's memoir projects with AI interview counts (no narration text)
+  --owner U --project-id ID --output F  replay one of U's projects, one JSON line per segment to F
+U is the account's user id or email.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirChatMessageRole, MemoirInterviewType
@@ -140,7 +142,25 @@ def merge(state: dict, output: _Output, segment: str) -> list[str]:
     return dropped
 
 
-async def list_projects(owner_email: str) -> None:
+async def find_owner(name: str) -> None:
+    async with async_session_maker() as db:
+        await db.execute(text("SET TRANSACTION READ ONLY"))
+        rows = (await db.execute(
+            select(User.id, User.display_name, User.role, func.count(Project.id))
+            .outerjoin(Project, Project.user_id == User.id)
+            .where(User.display_name.ilike(f"%{name}%"))
+            .group_by(User.id, User.display_name, User.role)
+        )).all()
+        await db.rollback()
+    for row in rows:
+        print(json.dumps({"user_id": row[0], "display_name": row[1], "role": row[2], "projects": row[3]}, ensure_ascii=False))
+
+
+def _is_owner(owner: str):
+    return or_(User.id == owner, User.email == owner)
+
+
+async def list_projects(owner: str) -> None:
     async with async_session_maker() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
         user_messages = (
@@ -159,7 +179,7 @@ async def list_projects(owner_email: str) -> None:
             select(Project.id, Project.title, User.display_name, user_messages.c.sessions, user_messages.c.segments)
             .join(user_messages, user_messages.c.project_id == Project.id)
             .join(User, User.id == Project.user_id)
-            .where(User.email == owner_email)
+            .where(_is_owner(owner))
             .order_by(user_messages.c.segments.desc())
         )).all()
         await db.rollback()
@@ -167,16 +187,16 @@ async def list_projects(owner_email: str) -> None:
         print(json.dumps({"project_id": row[0], "title": row[1], "owner": row[2], "ai_sessions": row[3], "segments": row[4]}, ensure_ascii=False))
 
 
-async def replay(project_id: str, owner_email: str, output_path: Path, max_segments: int) -> None:
+async def replay(project_id: str, owner: str, output_path: Path, max_segments: int) -> None:
     async with async_session_maker() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
         owned = await db.scalar(
             select(Project.id).join(User, User.id == Project.user_id)
-            .where(Project.id == project_id, User.email == owner_email)
+            .where(Project.id == project_id, _is_owner(owner))
         )
         if owned is None:
             await db.rollback()
-            raise SystemExit(f"project {project_id} is not owned by {owner_email}")
+            raise SystemExit(f"project {project_id} is not owned by {owner}")
         rows = (await db.execute(
             select(MemoirChatMessage.voice_session_id, MemoirChatMessage.turn_index, MemoirChatMessage.role,
                    MemoirChatMessage.content_text)
@@ -233,18 +253,24 @@ async def replay(project_id: str, owner_email: str, output_path: Path, max_segme
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--owner-email", required=True, help="only this account's projects are read")
+    parser.add_argument("--owner", help="user id or email; only this account's projects are read")
+    parser.add_argument("--find-owner")
     parser.add_argument("--list-projects", action="store_true")
     parser.add_argument("--project-id")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-segments", type=int, default=80)
     args = parser.parse_args()
+    if args.find_owner:
+        asyncio.run(find_owner(args.find_owner))
+        return 0
+    if not args.owner:
+        parser.error("--owner is required")
     if args.list_projects:
-        asyncio.run(list_projects(args.owner_email))
+        asyncio.run(list_projects(args.owner))
         return 0
     if not args.project_id or not args.output:
         parser.error("--project-id and --output are required unless --list-projects")
-    asyncio.run(replay(args.project_id, args.owner_email, args.output, args.max_segments))
+    asyncio.run(replay(args.project_id, args.owner, args.output, args.max_segments))
     return 0
 
 
