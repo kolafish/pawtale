@@ -539,6 +539,33 @@ async def test_a_failed_reading_is_retried_by_the_worker_then_left_failed(
     await test_db.refresh(job)
     assert job.status == "failed"
 
+    # When the transcript is corrected during the last failing try, the new version still runs.
+    last = await _narrate(client, test_db, session_id, "我是五二年生的。")
+    corrected: list[str] = []
+
+    async def fail_while_corrected(*_args, **_kwargs):
+        if not corrected:
+            async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+                corrected.append(await _new_version(other, last.utterance_id, "我是一九五二年生的。"))
+                await narrator_profile.schedule_narrator_profile(
+                    other, utterance=await other.get(MemoirVoiceUtterance, last.utterance_id),
+                )
+                await other.commit()
+            raise RuntimeError("provider down")
+        return json.dumps({"age": 74}, ensure_ascii=False)
+
+    job = await _profile_job(test_db, last.utterance_id)
+    job.result_json = {"failures": len(narrator_profile.RETRY_DELAYS)}
+    await test_db.commit()
+    fake_ai._call_llm = fail_while_corrected
+    await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    assert job.payload_json["transcript_version_id"] == corrected[0]
+    await run_test_editing_job(test_db, job.id)
+    _project, profile = await _profile(test_db, project_id)
+    assert profile["narrator_age"] == 74
+
 
 @pytest.mark.asyncio
 async def test_a_book_whose_profile_was_all_saved_is_not_read(client, test_db, fake_ai):
