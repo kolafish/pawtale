@@ -719,7 +719,7 @@ async def test_first_narration_offers_one_profile_item_and_records_the_ask(clien
         test_db, voice_session_id=voice_session["id"], user_id=user_id, chunks=["好的，您老家是哪里的？"],
     )
 
-    assert "还想知道他的老家" in ai_client.calls[0]["user_prompt"]
+    assert "他的老家" in ai_client.calls[0]["user_prompt"]
     saved = await test_db.scalar(
         select(MemoirChatMessage)
         .where(
@@ -745,7 +745,7 @@ async def test_first_narration_offers_one_profile_item_and_records_the_ask(clien
         .order_by(MemoirChatMessage.turn_index.desc())
         .limit(1)
     )
-    assert reply.metadata_json["profile_question"] == "narrator_origin"
+    assert reply.metadata_json["profile_questions"] == ["narrator_origin"]
     assert reply.metadata_json["profile_asked"] == "narrator_origin"
 
 

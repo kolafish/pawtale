@@ -238,15 +238,21 @@ async def test_a_corrected_transcript_is_read_again_and_a_stale_version_writes_n
 
 
 @pytest.mark.asyncio
-async def test_rereading_an_earlier_segment_does_not_undo_a_later_correction(client, test_db, fake_ai):
+@pytest.mark.parametrize("later_session", [False, True])
+async def test_rereading_an_earlier_segment_does_not_undo_a_later_correction(client, test_db, fake_ai, later_session):
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     session_id = await _session(client, project_id)
+    await _ask(test_db, session_id, "您怎么称呼？", offered="narrator_name")
     first = await _narrate(client, test_db, session_id, "我叫王秀音。")
     fake_ai.payload = {"name": "王秀音"}
     await _run(test_db, first.utterance_id)
+    if later_session:
+        session_id = await _session(client, project_id)
     later = await _narrate(client, test_db, session_id, "大家都叫我老王。")
     fake_ai.payload = {"name": "老王"}
     await _run(test_db, later.utterance_id)
+    _project, profile = await _profile(test_db, project_id)
+    assert profile["narrator_name"] == "老王"
 
     await _new_version(test_db, first.utterance_id, "我叫王秀英。")
     await narrator_profile.schedule_narrator_profile(test_db, utterance=await test_db.get(
@@ -269,13 +275,13 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     await _narrate(client, test_db, session_id, "那时候我们家在河边，有一棵大槐树。")
     session = await test_db.get(MemoirVoiceSession, session_id)
     await test_db.refresh(session, ["messages"])
-    assert narrator_profile.next_profile_question(profile, list(session.messages)) == "narrator_age"
+    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_age", "narrator_origin")
 
     # A line offered age but asking about something else does not count.
     await _ask(test_db, session_id, "那棵槐树后来还在吗？", offered="narrator_age", asked=False)
     await _ask(test_db, session_id, "王阿姨，您今年多大年纪了？", offered="narrator_age")
     await test_db.refresh(session, ["messages"])
-    assert narrator_profile.next_profile_question(profile, list(session.messages)) == "narrator_origin"
+    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_origin",)
 
     # After the second ask the answer still comes, much later.
     late = await _narrate(client, test_db, session_id, "我是五二年生的，属龙。")
@@ -294,18 +300,22 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
 
 @pytest.mark.asyncio
 async def test_a_reply_counts_as_an_ask_only_when_the_check_says_it_asks_for_the_offered_item(fake_ai):
-    fake_ai.payload = {"asked": True}
+    fake_ai.payload = {"field": "narrator_age"}
     assert await narrator_profile.asked_profile_field(
-        "narrator_age", "王阿姨，您今年多少岁了？", ai_model=None,
+        ("narrator_name", "narrator_age", "narrator_origin"), "王阿姨，您今年多少岁了？", ai_model=None,
     ) == "narrator_age"
     assert "他本人现在的年纪，或者哪年出生" in fake_ai.prompts[-1]
-    fake_ai.payload = {"asked": False}
-    assert await narrator_profile.asked_profile_field("narrator_age", "您是哪年参加工作的？", ai_model=None) is None
+    fake_ai.payload = {"field": None}
+    assert await narrator_profile.asked_profile_field(("narrator_age",), "您是哪年参加工作的？", ai_model=None) is None
+
+    # A classifier cannot count a field whose two asks are already exhausted.
+    fake_ai.payload = {"field": "narrator_age"}
+    assert await narrator_profile.asked_profile_field(("narrator_origin",), "您老家是哪里的？", ai_model=None) is None
 
     # No question, or nothing offered: no check call.
     calls = len(fake_ai.prompts)
-    assert await narrator_profile.asked_profile_field("narrator_origin", "后来呢，您接着说。", ai_model=None) is None
-    assert await narrator_profile.asked_profile_field(None, "您老家是哪里的？", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field(("narrator_origin",), "后来呢，您接着说。", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field((), "您老家是哪里的？", ai_model=None) is None
     assert len(fake_ai.prompts) == calls
 
 
@@ -315,28 +325,68 @@ async def test_when_the_check_fails_plain_wording_decides(monkeypatch):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(narrator_profile, "generate_structured_with_client", fail)
-    field = "narrator_age"
-    assert await narrator_profile.asked_profile_field(field, "您今年多少岁了？", ai_model=None) == field
-    assert await narrator_profile.asked_profile_field(field, "您是哪年生的呀？", ai_model=None) == field
-    assert await narrator_profile.asked_profile_field(field, "您是哪年参加工作的？", ai_model=None) is None
-    assert await narrator_profile.asked_profile_field(field, "那年您多大，还记得吗？", ai_model=None) is None
-    assert await narrator_profile.asked_profile_field("narrator_name", "您怎么称呼？", ai_model=None) == "narrator_name"
+    fields = ("narrator_name", "narrator_age", "narrator_origin")
+    assert await narrator_profile.asked_profile_field(fields, "您今年多少岁了？", ai_model=None) == "narrator_age"
+    assert await narrator_profile.asked_profile_field(fields, "您是哪年生的呀？", ai_model=None) == "narrator_age"
+    assert await narrator_profile.asked_profile_field(fields, "您是哪年参加工作的？", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field(fields, "那年您多大，还记得吗？", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field(fields, "您怎么称呼？", ai_model=None) == "narrator_name"
+
+
+def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
+    fields = ("narrator_name", "narrator_age", "narrator_origin")
+    replies = [SimpleNamespace(role="assistant", metadata_json={"profile_questions": list(fields)}) for _ in range(2)]
+    assert narrator_profile.profile_questions_to_ask({}, replies) == ()
+    for reply in replies:
+        reply.metadata_json["profile_asked"] = "narrator_age"
+    assert narrator_profile.profile_asks(replies) == {"narrator_age": 2}
+    assert narrator_profile.profile_questions_to_ask({}, replies) == ("narrator_name", "narrator_origin")
+    declined = {"declined_in": {field: "segment" for field in fields}}
+    assert narrator_profile.profile_questions_to_ask(declined, replies) == ()
 
 
 @pytest.mark.asyncio
-async def test_only_the_books_first_spoken_ai_session_collects_the_profile(client, test_db, fake_ai):
+async def test_reply_can_ask_age_after_a_name_answer_while_the_profile_job_is_pending(client, test_db, fake_ai):
+    from tests.test_memoir_voice_assistant_turn_stream import _run_stream_turn
+
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    await _ask(test_db, session_id, "您怎么称呼？", offered="narrator_name")
+    segment = await _narrate(client, test_db, session_id, "你叫我余大姐吧，年年有余的余。")
+    _project, profile = await _profile(test_db, project_id)
+    assert not profile["narrator_name"]
+    assert (await _profile_job(test_db, segment.utterance_id)).status == "pending"
+
+    fake_ai.payload = {"field": "narrator_age"}
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db, voice_session_id=session_id, user_id=user_id, chunks=["余大姐，您是哪年出生的？"],
+    )
+    await narrator_profile.wait_for_profile_ask_checks()
+    assert "如果年纪仍没说，就接着问年纪" in ai_client.calls[0]["user_prompt"]
+    test_db.expire_all()
+    reply = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert reply.metadata_json["profile_asked"] == "narrator_age"
+    assert narrator_profile.profile_asks([reply]) == {"narrator_age": 1}
+
+
+@pytest.mark.asyncio
+async def test_only_the_first_spoken_ai_session_asks_but_later_ai_sessions_still_collect(client, test_db, fake_ai):
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     empty = await _session(client, project_id)
     human = await _session(client, project_id, interview_type="human_interview")
-    await _narrate(client, test_db, human, "我叫王秀英。")
+    human_segment = await _narrate(client, test_db, human, "我叫王秀英。")
     _project, profile = await _profile(test_db, project_id)
     assert projects.PROFILE_SESSION_KEY not in profile
+    assert await _profile_job(test_db, human_segment.utterance_id) is None
 
-    # The human interview already narrated, so this book no longer collects by voice.
+    # An old book does not start asking, but can fill its profile from later AI narration.
     first = await _narrate(client, test_db, empty, "我叫王秀英。")
     _project, profile = await _profile(test_db, project_id)
     assert projects.PROFILE_SESSION_KEY not in profile
-    assert await _profile_job(test_db, first.utterance_id) is None
+    assert await _profile_job(test_db, first.utterance_id) is not None
+    session = await test_db.get(MemoirVoiceSession, empty)
+    assert not await narrator_profile.is_profile_session(test_db, session, await test_db.get(Project, project_id))
 
     # A fresh book: a session opened without speaking is skipped, the next one is pinned.
     created = await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})
@@ -350,10 +400,18 @@ async def test_only_the_books_first_spoken_ai_session_collects_the_profile(clien
     assert profile[projects.PROFILE_SESSION_KEY] == spoken
     assert not await narrator_profile.is_profile_session(test_db, session, await test_db.get(Project, other_id))
 
-    # Later sessions neither ask nor read.
+    # Reproduce the device test: stop after answering the name, then give the hometown next session.
+    stopped = await client.post(f"/api/mobile/memoir/voice-sessions/{spoken}/stop", json={})
+    assert stopped.status_code == 200
     later = await _session(client, other_id)
-    segment = await _narrate(client, test_db, later, "后来我去了重庆。")
-    assert await _profile_job(test_db, segment.utterance_id) is None
+    segment = await _narrate(client, test_db, later, "我小时候住在四川省成都市新都县。")
+    assert await _profile_job(test_db, segment.utterance_id) is not None
+    fake_ai.payload = {"origin": "四川省成都市新都县"}
+    await _run(test_db, segment.utterance_id)
+    project, profile = await _profile(test_db, other_id)
+    assert profile["narrator_origin"] == "四川省成都市新都县"
+    session = await test_db.get(MemoirVoiceSession, later)
+    assert not await narrator_profile.is_profile_session(test_db, session, project)
 
 
 @pytest.mark.asyncio
@@ -431,25 +489,34 @@ def _prompt(session_id: str, messages: list[MemoirChatMessage], book: InterviewB
     )
 
 
-def test_the_interviewer_sees_only_the_one_item_to_ask_even_after_a_chapter_grows():
+def test_the_interviewer_can_advance_past_a_recent_answer_even_before_it_is_saved():
     narrator = SimpleNamespace(
         id="m1", role=MemoirChatMessageRole.USER.value, content_text="我叫王秀英。", turn_index=1, created_at=None,
         metadata_json={},
     )
     book = InterviewBookContext(
         chapters=(("童年", 2),), last_chapter_title="童年", topics=(), anchor_topic=None,
-        narrator="王秀英", profile_question="narrator_age",
+        profile_questions=narrator_profile.profile_questions_to_ask({}, []),
     )
     prompt = _prompt("s1", [narrator], book)
-    assert "还想知道他的年纪" in prompt
+    assert "他的年纪" in prompt
     assert "您是哪年生的？" in prompt
-    assert "老家" not in prompt.split("还想知道")[1].split("\n\n")[0]
+    assert "如果年纪仍没说，就接着问年纪" in prompt
+    assert "我叫王秀英。" in prompt
+    assert "最多问一项" in prompt
+
+    capped = InterviewBookContext(
+        chapters=(), last_chapter_title="", topics=(), anchor_topic=None,
+        profile_questions=("narrator_name", "narrator_origin"),
+    )
+    assert "接着问年纪" not in _prompt("s1", [narrator], capped)
+    assert "您是哪年生的？" not in _prompt("s1", [narrator], capped)
 
     done = InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
-    assert "还想知道" not in _prompt("s1", [narrator], done)
+    assert "还可以问的资料" not in _prompt("s1", [narrator], done)
 
     opening = InterviewBookContext(
-        chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_question="narrator_name",
+        chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_name",),
     )
     assert "再问一句怎么称呼他" in _prompt("s1", [], opening)
 

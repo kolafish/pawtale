@@ -1,8 +1,8 @@
-"""Fill the narrator's profile from what they say in a book's first AI interview.
+"""Fill the narrator's profile from what they say in AI interviews.
 
 A new book has no profile form. The book's first voice session where the narrator speaks becomes its
-profile session: there the interviewer asks for 称呼, age and hometown, and every narrator segment
-(one recording) is read once, together with the interviewer's line before it and what is already
+profile session: only there does the interviewer ask for 称呼, age and hometown. In every AI interview,
+each narrator segment (one recording) is read with the interviewer's line before it and what is already
 known, for anything the narrator newly says or corrects about themselves. A segment is read again
 when its transcript changes. Asking stops after two asks or a refusal; reading does not, so a late
 answer is still kept. A value the user saved on the project page is never overwritten.
@@ -75,7 +75,7 @@ _ASK_PATTERNS = {
 class _AskOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    asked: bool
+    field: Literal["narrator_name", "narrator_age", "narrator_origin"] | None
 
 
 class _ProfileOutput(BaseModel):
@@ -168,32 +168,41 @@ def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for message in messages:
         metadata = message.metadata_json or {}
-        field = metadata["profile_asked"] if "profile_asked" in metadata else metadata.get("profile_question")
-        if message.role == MemoirChatMessageRole.ASSISTANT.value and field in _LABELS:
-            counts[field] = counts.get(field, 0) + 1
+        if message.role != MemoirChatMessageRole.ASSISTANT.value:
+            continue
+        fields = (
+            [metadata["profile_asked"]]
+            if "profile_asked" in metadata
+            else metadata.get("profile_questions", [metadata.get("profile_question")])
+        )
+        # Until classification finishes, reserve an ask for every offered item. The reply may skip
+        # one already answered in the latest segment, but no item may exceed the cap meanwhile.
+        for field in fields:
+            if field in _LABELS:
+                counts[field] = counts.get(field, 0) + 1
     return counts
 
 
-def next_profile_question(profile: dict, messages: list[MemoirChatMessage]) -> str | None:
-    """The one item the interviewer may ask for now, in the order 称呼, 年龄, 老家."""
+def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -> tuple[str, ...]:
+    """Eligible items in order; the reply skips answers not yet persisted by the background reader."""
     asks = profile_asks(messages)
-    return next((key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS), None)
+    return tuple(key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS)
 
 
-def ask_needs_check(field: str | None, text: str) -> bool:
+def ask_needs_check(fields: tuple[str, ...], text: str) -> bool:
     """Whether a saved interviewer line may have asked for the offered item; only a question can."""
-    return field in _ASK_TOPICS and bool(re.search(r"[？?]", text))
+    return bool(fields) and bool(re.search(r"[？?]", text))
 
 
 _ask_checks: set[asyncio.Task] = set()
 
 
-def check_profile_ask_later(*, message_id: str, field: str, text: str, ai_model: str | None) -> None:
+def check_profile_ask_later(*, message_id: str, fields: tuple[str, ...], text: str, ai_model: str | None) -> None:
     """Record on a saved interviewer line whether it asked for the offered item.
 
     Runs apart from the reply turn, so a narrator who starts talking right away cannot cancel it.
     """
-    task = asyncio.create_task(_record_profile_ask(message_id=message_id, field=field, text=text, ai_model=ai_model))
+    task = asyncio.create_task(_record_profile_ask(message_id=message_id, fields=fields, text=text, ai_model=ai_model))
     _ask_checks.add(task)
     task.add_done_callback(_ask_checks.discard)
 
@@ -202,9 +211,9 @@ async def wait_for_profile_ask_checks() -> None:
     await asyncio.gather(*list(_ask_checks), return_exceptions=True)
 
 
-async def _record_profile_ask(*, message_id: str, field: str, text: str, ai_model: str | None) -> None:
+async def _record_profile_ask(*, message_id: str, fields: tuple[str, ...], text: str, ai_model: str | None) -> None:
     try:
-        asked = await asked_profile_field(field, text, ai_model=ai_model)
+        asked = await asked_profile_field(fields, text, ai_model=ai_model)
         async with async_session_maker() as db:
             message = await db.get(MemoirChatMessage, message_id)
             if message is None:
@@ -217,14 +226,16 @@ async def _record_profile_ask(*, message_id: str, field: str, text: str, ai_mode
         logger.warning("Recording the profile ask failed for message %s", message_id, exc_info=True)
 
 
-async def asked_profile_field(field: str | None, text: str, *, ai_model: str | None) -> str | None:
+async def asked_profile_field(fields: tuple[str, ...], text: str, *, ai_model: str | None) -> str | None:
     """The offered item, if this interviewer line asks the narrator for it."""
-    if not ask_needs_check(field, text):
+    if not ask_needs_check(fields, text):
         return None
+    topics = "\n".join(f"- {field}：{_ASK_TOPICS[field]}" for field in fields)
     prompt = (
         f"访谈主持人对讲述者说了这句话：\n{text}\n\n"
-        f"这句话有没有在问{_ASK_TOPICS[field]}？问过去某个时候的事、问家人的情况、问别的事，都不算。"
-        '只返回 JSON：{"asked":true} 或 {"asked":false}'
+        f"这句话问的是下面哪一项？\n{topics}\n"
+        "只选实际问到的一项。问过去某个时候的事、问家人的情况、问别的事，都不算。"
+        '只返回 JSON：{"field":"narrator_age"}（用选中的字段名）或 {"field":null}'
     )
     try:
         generated = await generate_structured_with_client(
@@ -238,15 +249,15 @@ async def asked_profile_field(field: str | None, text: str, *, ai_model: str | N
             timeout=min(ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE), 15),
             max_attempts=1,
         )
-        asked = generated.value.asked
+        asked = generated.value.field
     except Exception:
         logger.warning("Profile ask check failed; falling back to wording", exc_info=True)
-        asked = bool(_ASK_PATTERNS[field].search(text))
-    return field if asked else None
+        asked = next((field for field in fields if _ASK_PATTERNS[field].search(text)), None)
+    return asked if asked in fields else None
 
 
 async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceUtterance) -> None:
-    """Queue reading this segment, once per transcript version, if it belongs to the profile session."""
+    """Queue reading each AI narration segment once per transcript version, even in later sessions."""
     # Callers load the utterance differently; read its message by id rather than through the relationship.
     message = await db.get(MemoirChatMessage, utterance.chat_message_id) if utterance.chat_message_id else None
     if message is None or message.role != MemoirChatMessageRole.USER.value or not message.content_text.strip():
@@ -256,7 +267,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
     if voice_session is None or project is None:
         return
     profile = _profile(project)
-    if profile.get(PROFILE_SESSION_KEY) != voice_session.id or not _has_open_fields(profile):
+    if not _collects_profile(voice_session) or not _has_open_fields(profile):
         return
     version_id = message.transcript_version_id or ""
     dedupe_key = f"narrator_profile:{utterance.id}"
@@ -359,12 +370,18 @@ def build_profile_prompt(*, previous_line: str, segment: str, known: str, today:
         f"{previous}叙述者：{segment}\n\n"
         "只看叙述者这一段，记下他本人这次新说出的资料，或者明确纠正已经记下的资料：\n"
         "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”\n"
-        "- gender：male 或 female，只在他讲的内容能明确看出时填写\n"
+        "- gender：male 或 female；他明确自称或让人称呼自己为大姐、女士、阿姨、奶奶等，可记 female；"
+        "大哥、先生、叔叔、爷爷等可记 male。不能只凭普通姓名猜，家人的称呼不算\n"
         "- age：周岁；他说的是出生年份就按今年算\n"
-        "- origin：老家或籍贯，写成地名，比如“四川成都”\n"
+        "- origin：本产品记录的是家乡，不要求他明确说出“老家”或“籍贯”二字。"
+        "老家、籍贯、本人小时候住的地方或长大的地方都算。还不知道家乡时，"
+        "他说“我小时候住在X”或“我在X长大”，origin 必须填写地名 X，不能因为没说籍贯而填 null，"
+        "保留他说出的省、市、县。临时住处、工作地和家人的老家不算。"
+        "已经记下家乡时，提到其他居住地不算纠正\n"
         "- skip：name、age、origin 里他这段明确说不想说的；他说想自己讲、不想被问，三项都填\n"
         "只记他自己的情况，家人的名字、年龄、老家不算。和已经记下的一样，或者这段没说到的，都填 null。\n"
-        '只返回 JSON：{"name":null,"gender":null,"age":null,"origin":null,"skip":[]}'
+        "只返回包含 name、gender、age、origin、skip 五个字段的 JSON。"
+        "name 和 origin 是字符串或 null，gender 是 male、female 或 null，age 是整数或 null，skip 是数组。"
     )
 
 
@@ -391,6 +408,7 @@ async def fill_narrator_profile(
         today=date.today(),
     )
     turn_index = message.turn_index
+    segment_created_at = utterance.created_at
     await db.commit()
     # A failure propagates so the job is marked failed; the segment is read again when its transcript changes.
     generated = await generate_structured_with_client(
@@ -414,6 +432,14 @@ async def fill_narrator_profile(
     profile = _profile(project)
     inferred = dict(profile.get(INFERRED_PROFILE_FIELDS_KEY) or {})
     declined = dict(profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {})
+    source_ids = {
+        source["utterance_id"] for source in inferred.values()
+        if isinstance(source, dict) and source.get("utterance_id")
+    }
+    source_times = dict((await db.execute(
+        select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at)
+        .where(MemoirVoiceUtterance.id.in_(source_ids))
+    )).all()) if source_ids else {}
     output = generated.value
     found = {
         "narrator_name": _clean(output.name, limit=40),
@@ -427,7 +453,8 @@ async def fill_narrator_profile(
             return True
         source = inferred.get(key)
         # A heard value may be replaced by the same segment or a later one; a saved value never.
-        return isinstance(source, dict) and int(source.get("turn_index", -1)) <= turn_index
+        source_time = source_times.get(source.get("utterance_id")) if isinstance(source, dict) else None
+        return source_time is not None and source_time <= segment_created_at
 
     changed = {
         key: value

@@ -474,7 +474,7 @@ class VoiceAssistantTurnStreamSession:
             turn = replace(turn, expects_answer=False)
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
-        profile_question = book_context.profile_question if book_context else None
+        profile_questions = book_context.profile_questions if book_context else ()
         message, audio_file_id = await self._persist_completed_turn(
             voice_session=voice_session,
             turn=turn,
@@ -484,11 +484,11 @@ class VoiceAssistantTurnStreamSession:
             req=req,
             progress_context=project_progress_context,
             completion_prompt_context=completion_prompt_context,
-            profile_question=profile_question,
+            profile_questions=profile_questions,
         )
-        if narrator_profile.ask_needs_check(profile_question, turn.speech_text):
+        if narrator_profile.ask_needs_check(profile_questions, turn.speech_text):
             narrator_profile.check_profile_ask_later(
-                message_id=message.id, field=profile_question, text=turn.speech_text, ai_model=req.ai_model,
+                message_id=message.id, fields=profile_questions, text=turn.speech_text, ai_model=req.ai_model,
             )
         await automation_events.mark_automation_events_voice_selected(
             self.db,
@@ -777,7 +777,7 @@ class VoiceAssistantTurnStreamSession:
         req: AssistantTurnStartRequest,
         progress_context: ProgressPromptContext,
         completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
-        profile_question: str | None = None,
+        profile_questions: tuple[str, ...] = (),
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -817,12 +817,12 @@ class VoiceAssistantTurnStreamSession:
                     "current_completion_issue_id": (
                         completion_prompt_context.issue_id if completion_prompt_context else None
                     ),
-                    # The profile field offered to this line. A question is checked after saving and
+                    # The eligible fields offered to this line. A question is checked after saving and
                     # "profile_asked" added; each item is asked at most twice, counted from these.
-                    "profile_question": profile_question,
+                    "profile_questions": list(profile_questions),
                     **(
                         {}
-                        if narrator_profile.ask_needs_check(profile_question, turn.speech_text)
+                        if narrator_profile.ask_needs_check(profile_questions, turn.speech_text)
                         else {"profile_asked": None}
                     ),
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,

@@ -76,7 +76,7 @@ def build_stream_turn_prompt(
         known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
         question = (
             "再问一句怎么称呼他。只问这一个问题。"
-            if book.profile_question == "narrator_name"
+            if book.profile_questions and book.profile_questions[0] == "narrator_name"
             else "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
         )
         mode = (
@@ -125,12 +125,22 @@ _PROFILE_QUESTIONS = {
 
 
 def _profile_question(book: InterviewBookContext) -> str:
-    if book.profile_question not in _PROFILE_QUESTIONS:
+    if not book.profile_questions:
         return ""
-    topic, example = _PROFILE_QUESTIONS[book.profile_question]
-    return f"""这本书第一次讲述，还想知道{topic}。
-- 他正讲着一件事时，先听他讲完，这次不问；一件事讲完了，再自然地问一句，比如“{example}”
-- 他刚才的话里已经说了，或者说了不想说，就不问
+    questions = "\n".join(
+        f"- {topic}，比如“{example}”" for topic, example in (_PROFILE_QUESTIONS[field] for field in book.profile_questions)
+    )
+    after_name = (
+        "如果年纪仍没说，就接着问年纪"
+        if "narrator_age" in book.profile_questions
+        else "继续补问上述剩下的第一项"
+    )
+    return f"""这本书第一次讲述，还可以问的资料按顺序是：
+{questions}
+- 后台资料可能还没记下他刚才的答案：先排除上下文里他本人已经回答或明确不想说的项，只选剩下的第一项，最多问一项
+- 他正讲着一件事时，先听他讲完，这次不问；一件事讲完了，优先问上述剩下的第一项，再开启新故事
+- 他刚才只答了称呼时，这个回答已经结束，不要重复问称呼；{after_name}
+- 候选项都已经答了或拒绝了，就不再问资料
 - 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
 
 
@@ -145,6 +155,7 @@ def _header(host_name: str, regenerate: bool) -> str:
         "- 讲述过程中不要提记录条数、章节数、整理进度",
         "- 不要编造上下文里没有的事；以前讲过的事只能来自“以前讲过的相关原文”",
         "- 叙述者明确要换话题、暂停或不想说时，以他最新一句为准",
+        "- 称呼、年纪、老家只从本次允许的资料候选项里问；没有资料候选项时，不主动追问这些资料",
     ]
     if regenerate:
         lines.append("- 这次是在替换上一句回应，请换一个角度，不要重复上一句")
