@@ -474,6 +474,10 @@ class VoiceAssistantTurnStreamSession:
             turn = replace(turn, expects_answer=False)
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
+        profile_question = book_context.profile_question if book_context else None
+        profile_asked = await narrator_profile.asked_profile_field(
+            profile_question, turn.speech_text, ai_model=req.ai_model,
+        )
         message, audio_file_id = await self._persist_completed_turn(
             voice_session=voice_session,
             turn=turn,
@@ -483,7 +487,8 @@ class VoiceAssistantTurnStreamSession:
             req=req,
             progress_context=project_progress_context,
             completion_prompt_context=completion_prompt_context,
-            profile_question=book_context.profile_question if book_context else None,
+            profile_question=profile_question,
+            profile_asked=profile_asked,
         )
         await automation_events.mark_automation_events_voice_selected(
             self.db,
@@ -773,6 +778,7 @@ class VoiceAssistantTurnStreamSession:
         progress_context: ProgressPromptContext,
         completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
         profile_question: str | None = None,
+        profile_asked: str | None = None,
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -815,7 +821,7 @@ class VoiceAssistantTurnStreamSession:
                     # The profile field offered to this line and, if the line asks for it, that field;
                     # each item is asked at most twice, counted from these.
                     "profile_question": profile_question,
-                    "profile_asked": narrator_profile.asked_profile_field(profile_question, turn.speech_text),
+                    "profile_asked": profile_asked,
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,
                     "memory_activation_status": artifacts.memory_activation_status,
                     "memory_activation_injected_count": artifacts.memory_activation_injected_count,

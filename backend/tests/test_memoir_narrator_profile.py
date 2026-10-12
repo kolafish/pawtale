@@ -24,7 +24,11 @@ from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceSer
 from app.services.memoir.voice_followup_ai import InterviewerPersona, ProgressPromptContext
 from app.services.memoir.voice_interviewer_prompt import build_stream_turn_prompt
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
-from tests.memoir_helpers import ensure_mobile_memoir_project, post_mobile_memoir_voice_session
+from tests.memoir_helpers import (
+    ensure_mobile_memoir_project,
+    post_mobile_memoir_voice_session,
+    run_test_editing_job,
+)
 
 REAL_SCHEDULE = narrator_profile.schedule_narrator_profile
 TODAY = date.today()
@@ -69,7 +73,9 @@ async def _narrate(client, test_db, session_id: str, text: str):
     return await service.persist_final(StreamingASREvent(type="final", text=text, raw={}))
 
 
-async def _ask(test_db, session_id: str, text: str, *, offered: str | None = None) -> MemoirChatMessage:
+async def _ask(
+    test_db, session_id: str, text: str, *, offered: str | None = None, asked: bool = True,
+) -> MemoirChatMessage:
     session = await test_db.get(MemoirVoiceSession, session_id)
     turn = await test_db.scalar(
         select(func.coalesce(func.max(MemoirChatMessage.turn_index), -1)).where(
@@ -85,7 +91,7 @@ async def _ask(test_db, session_id: str, text: str, *, offered: str | None = Non
         turn_index=turn + 1,
         metadata_json={
             "profile_question": offered,
-            "profile_asked": narrator_profile.asked_profile_field(offered, text),
+            "profile_asked": offered if asked else None,
         },
     )
     test_db.add(message)
@@ -266,7 +272,7 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     assert narrator_profile.next_profile_question(profile, list(session.messages)) == "narrator_age"
 
     # A line offered age but asking about something else does not count.
-    await _ask(test_db, session_id, "那棵槐树后来还在吗？", offered="narrator_age")
+    await _ask(test_db, session_id, "那棵槐树后来还在吗？", offered="narrator_age", asked=False)
     await _ask(test_db, session_id, "王阿姨，您今年多大年纪了？", offered="narrator_age")
     await test_db.refresh(session, ["messages"])
     assert narrator_profile.next_profile_question(profile, list(session.messages)) == "narrator_origin"
@@ -286,13 +292,35 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     assert projects.profile_items_to_ask(saved) == ["narrator_name"]
 
 
-def test_an_interviewer_line_counts_as_an_ask_only_when_it_asks_for_the_offered_item():
-    assert narrator_profile.asked_profile_field("narrator_name", "您好，我是小余。您怎么称呼？") == "narrator_name"
-    assert narrator_profile.asked_profile_field("narrator_age", "您是哪年生的呀？") == "narrator_age"
-    assert narrator_profile.asked_profile_field("narrator_origin", "您老家是哪里的？") == "narrator_origin"
-    assert narrator_profile.asked_profile_field("narrator_origin", "后来呢？") is None
-    assert narrator_profile.asked_profile_field("narrator_age", "那年您多大，还记得那天的情形。") is None
-    assert narrator_profile.asked_profile_field(None, "您老家是哪里的？") is None
+@pytest.mark.asyncio
+async def test_a_reply_counts_as_an_ask_only_when_the_check_says_it_asks_for_the_offered_item(fake_ai):
+    fake_ai.payload = {"asked": True}
+    assert await narrator_profile.asked_profile_field(
+        "narrator_age", "王阿姨，您今年多少岁了？", ai_model=None,
+    ) == "narrator_age"
+    assert "他本人现在的年纪，或者哪年出生" in fake_ai.prompts[-1]
+    fake_ai.payload = {"asked": False}
+    assert await narrator_profile.asked_profile_field("narrator_age", "您是哪年参加工作的？", ai_model=None) is None
+
+    # No question, or nothing offered: no check call.
+    calls = len(fake_ai.prompts)
+    assert await narrator_profile.asked_profile_field("narrator_origin", "后来呢，您接着说。", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field(None, "您老家是哪里的？", ai_model=None) is None
+    assert len(fake_ai.prompts) == calls
+
+
+@pytest.mark.asyncio
+async def test_when_the_check_fails_plain_wording_decides(monkeypatch):
+    async def fail(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(narrator_profile, "generate_structured_with_client", fail)
+    field = "narrator_age"
+    assert await narrator_profile.asked_profile_field(field, "您今年多少岁了？", ai_model=None) == field
+    assert await narrator_profile.asked_profile_field(field, "您是哪年生的呀？", ai_model=None) == field
+    assert await narrator_profile.asked_profile_field(field, "您是哪年参加工作的？", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field(field, "那年您多大，还记得吗？", ai_model=None) is None
+    assert await narrator_profile.asked_profile_field("narrator_name", "您怎么称呼？", ai_model=None) == "narrator_name"
 
 
 @pytest.mark.asyncio
@@ -426,30 +454,90 @@ def test_the_interviewer_sees_only_the_one_item_to_ask_even_after_a_chapter_grow
     assert "再问一句怎么称呼他" in _prompt("s1", [], opening)
 
 
+@pytest.fixture
+def job_handlers():
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+
+    register_memoir_editing_job_handlers()
+
+
 @pytest.mark.asyncio
-async def test_a_failed_reading_is_marked_failed_and_retried_on_the_next_version(client, test_db, fake_ai, monkeypatch):
+async def test_a_version_corrected_while_reading_is_read_by_the_worker_afterwards(
+    client, test_db, fake_ai, job_handlers,
+):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    segment = await _narrate(client, test_db, session_id, "我叫王秀音。")
+    corrected: list[str] = []
+
+    async def correct_during_call(_system_prompt, _user_prompt, **_kwargs):
+        if not corrected:
+            async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+                corrected.append(await _new_version(other, segment.utterance_id, "我叫王秀英。"))
+                await narrator_profile.schedule_narrator_profile(
+                    other, utterance=await other.get(MemoirVoiceUtterance, segment.utterance_id),
+                )
+                await other.commit()
+            return json.dumps({"name": "王秀音"}, ensure_ascii=False)
+        return json.dumps({"name": "王秀英"}, ensure_ascii=False)
+
+    fake_ai._call_llm = correct_during_call
+    job = await _profile_job(test_db, segment.utterance_id)
+    await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    assert job.payload_json["transcript_version_id"] == corrected[0]
+    _project, profile = await _profile(test_db, project_id)
+    assert not profile.get("narrator_name")
+
+    await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.status == "succeeded"
+    _project, profile = await _profile(test_db, project_id)
+    assert profile["narrator_name"] == "王秀英"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reading_is_retried_by_the_worker_then_left_failed(
+    client, test_db, fake_ai, job_handlers,
+):
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     session_id = await _session(client, project_id)
     segment = await _narrate(client, test_db, session_id, "我叫王秀英。")
+    failures = 0
 
-    async def fail(*_args, **_kwargs):
-        raise RuntimeError("provider down")
+    async def fail_once(_system_prompt, _user_prompt, **_kwargs):
+        nonlocal failures
+        failures += 1
+        if failures == 1:
+            raise RuntimeError("provider down")
+        return json.dumps({"name": "王秀英"}, ensure_ascii=False)
 
-    monkeypatch.setattr(narrator_profile, "generate_structured_with_client", fail)
-    with pytest.raises(RuntimeError):
-        await _run(test_db, segment.utterance_id)
-    await test_db.rollback()
+    fake_ai._call_llm = fail_once
     job = await _profile_job(test_db, segment.utterance_id)
-    job.status = "failed"
-    await test_db.commit()
-
-    # The same version is queued again when the segment is scheduled again.
-    await narrator_profile.schedule_narrator_profile(
-        test_db, utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id),
-    )
-    await test_db.commit()
+    await run_test_editing_job(test_db, job.id)
     await test_db.refresh(job)
     assert job.status == "pending"
+    assert job.result_json["failures"] == 1
+    await run_test_editing_job(test_db, job.id)
+    _project, profile = await _profile(test_db, project_id)
+    assert profile["narrator_name"] == "王秀英"
+
+    # A segment that keeps failing is tried a bounded number of times.
+    later = await _narrate(client, test_db, session_id, "我老家在四川。")
+
+    async def always_fail(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    fake_ai._call_llm = always_fail
+    job = await _profile_job(test_db, later.utterance_id)
+    for _ in narrator_profile.RETRY_DELAYS:
+        await run_test_editing_job(test_db, job.id)
+        await test_db.refresh(job)
+        assert job.status == "pending"
+    await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.status == "failed"
 
 
 @pytest.mark.asyncio
