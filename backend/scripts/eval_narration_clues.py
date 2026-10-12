@@ -4,8 +4,8 @@ Replays a project's AI interview segments in order. Each narrator segment is rea
 interviewer line before it, the people noted so far and the questions still open, exactly as the
 proposed background job would. Calls the server's default AI model; never writes to the database.
 
-  --list-projects              memoir projects with AI interview counts (no narration text)
-  --project-id ID --output F   replay one project and write one JSON line per segment to F
+  --owner-email E --list-projects             E's memoir projects with AI interview counts (no narration text)
+  --owner-email E --project-id ID --output F  replay one of E's projects, one JSON line per segment to F
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def merge(state: dict, output: _Output, segment: str) -> list[str]:
     return dropped
 
 
-async def list_projects() -> None:
+async def list_projects(owner_email: str) -> None:
     async with async_session_maker() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
         user_messages = (
@@ -158,7 +158,8 @@ async def list_projects() -> None:
         rows = (await db.execute(
             select(Project.id, Project.title, User.display_name, user_messages.c.sessions, user_messages.c.segments)
             .join(user_messages, user_messages.c.project_id == Project.id)
-            .outerjoin(User, User.id == Project.user_id)
+            .join(User, User.id == Project.user_id)
+            .where(User.email == owner_email)
             .order_by(user_messages.c.segments.desc())
         )).all()
         await db.rollback()
@@ -166,9 +167,16 @@ async def list_projects() -> None:
         print(json.dumps({"project_id": row[0], "title": row[1], "owner": row[2], "ai_sessions": row[3], "segments": row[4]}, ensure_ascii=False))
 
 
-async def replay(project_id: str, output_path: Path, max_segments: int) -> None:
+async def replay(project_id: str, owner_email: str, output_path: Path, max_segments: int) -> None:
     async with async_session_maker() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
+        owned = await db.scalar(
+            select(Project.id).join(User, User.id == Project.user_id)
+            .where(Project.id == project_id, User.email == owner_email)
+        )
+        if owned is None:
+            await db.rollback()
+            raise SystemExit(f"project {project_id} is not owned by {owner_email}")
         rows = (await db.execute(
             select(MemoirChatMessage.voice_session_id, MemoirChatMessage.turn_index, MemoirChatMessage.role,
                    MemoirChatMessage.content_text)
@@ -225,17 +233,18 @@ async def replay(project_id: str, output_path: Path, max_segments: int) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--owner-email", required=True, help="only this account's projects are read")
     parser.add_argument("--list-projects", action="store_true")
     parser.add_argument("--project-id")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-segments", type=int, default=80)
     args = parser.parse_args()
     if args.list_projects:
-        asyncio.run(list_projects())
+        asyncio.run(list_projects(args.owner_email))
         return 0
     if not args.project_id or not args.output:
         parser.error("--project-id and --output are required unless --list-projects")
-    asyncio.run(replay(args.project_id, args.output, args.max_segments))
+    asyncio.run(replay(args.project_id, args.owner_email, args.output, args.max_segments))
     return 0
 
 
