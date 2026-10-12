@@ -83,11 +83,15 @@ def _compact_text(value: str, max_chars: int) -> str:
     return f"{text[: max_chars - 3].rstrip()}..."
 
 
-def build_plan_prompt(project_title: str, sources: list[SourceSegment]) -> str:
+def build_plan_prompt(
+    project_title: str, sources: list[SourceSegment], interviewer_lines: dict[str, str] | None = None
+) -> str:
+    lines = interviewer_lines or {}
     source_text = "\n\n".join(
         (
             f"source_index: {source.source_index}\n"
-            f"text: {source.text}"
+            + (f"interviewer_line: {line}\n" if (line := lines.get(source.message_id or "")) else "")
+            + f"text: {source.text}"
         )
         for source in sources
     )
@@ -115,6 +119,7 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment]) -> str:
 - 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，只返回必要的少量章节。
+- interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，不要放进任何章节；只要有一点经历或感受就照常放进章节。
 
 口述内容：
 {source_text}
@@ -233,10 +238,11 @@ async def generate_book_plan_from_sources(
     *,
     project_title: str,
     sources: list[SourceSegment],
+    interviewer_lines: dict[str, str],
     ai_model: str | None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedBookPlan:
-    prompt = build_plan_prompt(project_title, sources)
+    prompt = build_plan_prompt(project_title, sources, interviewer_lines)
     client = ai_client
     try:
         if client is None:

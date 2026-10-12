@@ -45,6 +45,7 @@ from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import automation_events
+from app.services.memoir.material_roles import interviewer_lines
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
@@ -90,6 +91,7 @@ class ChapterMaterialInput:
     transcript_version_id: str | None
     text: str
     assigned_at: datetime | None = None
+    interviewer_line: str = ""
 
 
 @dataclass(frozen=True)
@@ -748,6 +750,7 @@ def chapter_generation_context(
     chapter: MemoirBookPlanChapter,
     *,
     polish_level: MemoirTranscriptPolishLevel,
+    interviewer_lines: dict[str, str] | None = None,
 ) -> ChapterGenerationContext:
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=409, detail="请先确认章节规划")
@@ -783,6 +786,7 @@ def chapter_generation_context(
                 transcript_version_id=material.transcript_version_id,
                 text=text,
                 assigned_at=material.created_at,
+                interviewer_line=(interviewer_lines or {}).get(material.utterance.chat_message_id or "", ""),
             )
             section_materials.append(item)
             materials.append(item)
@@ -864,6 +868,10 @@ async def load_chapter_generation_context(
     return chapter_generation_context(
         chapter,
         polish_level=await load_project_transcript_polish_level(db, project_id),
+        interviewer_lines=await interviewer_lines(
+            db,
+            (material.utterance.chat_message_id for section in chapter.sections for material in section.materials),
+        ),
     )
 
 
@@ -908,7 +916,8 @@ def build_chapter_generation_prompt(
                 *[
                     (
                         f"material_id: {material_refs.encode(material.material_id)}\n"
-                        f"原始讲述: {material.text}"
+                        + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
+                        + f"原始讲述: {material.text}"
                     )
                     for material in section.materials
                 ],
@@ -1013,6 +1022,7 @@ def build_chapter_generation_prompt(
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
 - 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
 {writing_rules}- 不要为了完整而虚构时间、地点、人物、因果或心理活动。
+- “小余刚才说”是访谈员的话，只用来理解原始讲述在回答什么，事实以讲述者说的为准；小余的话，以及只是在回应小余、没有经历或感受的话（比如怎么称呼、寒暄、不想聊），都不写进正文。
 - 不在正文中{"新增" if revision_instruction else "出现"} section_id、material_id、编辑指令、“叙述者”等后台术语。
 """
 

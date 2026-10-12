@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import and_, func, or_
+from collections.abc import Iterable
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole, MemoirSpeakerRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
@@ -56,3 +59,32 @@ def is_ready_story_material(utterance: MemoirVoiceUtterance) -> bool:
             MemoirChatContentStatus.FINAL.value, MemoirChatContentStatus.CORRECTED.value,
         }
     )
+
+
+async def interviewer_lines(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+    """For each narrator message, the AI interviewer's line right before it, if it was answering one."""
+    ids = {message_id for message_id in message_ids if message_id}
+    if not ids:
+        return {}
+    window = {
+        "partition_by": MemoirChatMessage.voice_session_id,
+        "order_by": (MemoirChatMessage.turn_index, MemoirChatMessage.created_at),
+    }
+    ordered = (
+        select(
+            MemoirChatMessage.id,
+            func.lag(MemoirChatMessage.role).over(**window).label("previous_role"),
+            func.lag(MemoirChatMessage.content_text).over(**window).label("previous_text"),
+        )
+        .where(MemoirChatMessage.voice_session_id.in_(
+            select(MemoirChatMessage.voice_session_id).where(MemoirChatMessage.id.in_(ids))
+        ))
+        .subquery()
+    )
+    rows = await db.execute(
+        select(ordered.c.id, ordered.c.previous_text).where(
+            ordered.c.id.in_(ids),
+            ordered.c.previous_role == MemoirChatMessageRole.ASSISTANT.value,
+        )
+    )
+    return {message_id: text.strip() for message_id, text in rows if (text or "").strip()}
