@@ -10,6 +10,7 @@ answer is still kept. A value the user saved on the project page is never overwr
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 import logging
 import re
@@ -32,6 +33,7 @@ from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoice
 from app.models.memoir_jobs import MemoirEditingJob
 from app.models.projects import Project
 from app.clock import utcnow_naive
+from app.database import async_session_maker
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
@@ -159,10 +161,14 @@ def _has_open_fields(profile: dict) -> bool:
 
 
 def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
-    """How many interviewer lines in a session asked for each item."""
+    """How many interviewer lines in a session asked for each item.
+
+    A line whose check is still running counts as an ask, so the cap holds however late the check finishes.
+    """
     counts: dict[str, int] = {}
     for message in messages:
-        field = (message.metadata_json or {}).get("profile_asked")
+        metadata = message.metadata_json or {}
+        field = metadata["profile_asked"] if "profile_asked" in metadata else metadata.get("profile_question")
         if message.role == MemoirChatMessageRole.ASSISTANT.value and field in _LABELS:
             counts[field] = counts.get(field, 0) + 1
     return counts
@@ -174,12 +180,46 @@ def next_profile_question(profile: dict, messages: list[MemoirChatMessage]) -> s
     return next((key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS), None)
 
 
-async def asked_profile_field(field: str | None, text: str, *, ai_model: str | None) -> str | None:
-    """The offered item, if this interviewer line asks the narrator for it.
+def ask_needs_check(field: str | None, text: str) -> bool:
+    """Whether a saved interviewer line may have asked for the offered item; only a question can."""
+    return field in _ASK_TOPICS and bool(re.search(r"[？?]", text))
 
-    Runs when the line is saved, so the next reply already sees the count.
+
+_ask_checks: set[asyncio.Task] = set()
+
+
+def check_profile_ask_later(*, message_id: str, field: str, text: str, ai_model: str | None) -> None:
+    """Record on a saved interviewer line whether it asked for the offered item.
+
+    Runs apart from the reply turn, so a narrator who starts talking right away cannot cancel it.
     """
-    if field not in _ASK_TOPICS or not re.search(r"[？?]", text):
+    task = asyncio.create_task(_record_profile_ask(message_id=message_id, field=field, text=text, ai_model=ai_model))
+    _ask_checks.add(task)
+    task.add_done_callback(_ask_checks.discard)
+
+
+async def wait_for_profile_ask_checks() -> None:
+    await asyncio.gather(*list(_ask_checks), return_exceptions=True)
+
+
+async def _record_profile_ask(*, message_id: str, field: str, text: str, ai_model: str | None) -> None:
+    try:
+        asked = await asked_profile_field(field, text, ai_model=ai_model)
+        async with async_session_maker() as db:
+            message = await db.get(MemoirChatMessage, message_id)
+            if message is None:
+                return
+            message.metadata_json = {**(message.metadata_json or {}), "profile_asked": asked}
+            db.add(message)
+            await db.commit()
+    except Exception:
+        # The line keeps counting as an ask.
+        logger.warning("Recording the profile ask failed for message %s", message_id, exc_info=True)
+
+
+async def asked_profile_field(field: str | None, text: str, *, ai_model: str | None) -> str | None:
+    """The offered item, if this interviewer line asks the narrator for it."""
+    if not ask_needs_check(field, text):
         return None
     prompt = (
         f"访谈主持人对讲述者说了这句话：\n{text}\n\n"
@@ -195,7 +235,7 @@ async def asked_profile_field(field: str | None, text: str, *, ai_model: str | N
             requested_model=ai_model,
             temperature=0,
             max_tokens=20,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            timeout=min(ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE), 15),
             max_attempts=1,
         )
         asked = generated.value.asked
@@ -271,6 +311,11 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
         )
     except Exception as exc:
         await db.rollback()
+        queued = await db.scalar(select(MemoirEditingJob.payload_json).where(MemoirEditingJob.id == job.id))
+        if (queued or {}).get("transcript_version_id") != payload.get("transcript_version_id"):
+            # A newer transcript was queued while this one failed; finish so the queue runs it with fresh retries.
+            logger.warning("Narrator profile reading failed for job %s; a newer version is queued", job.id, exc_info=True)
+            return editing_jobs.EditingJobResult(result_json={"superseded": True})
         failures = int((job.result_json or {}).get("failures") or 0)
         if failures >= len(RETRY_DELAYS):
             raise
