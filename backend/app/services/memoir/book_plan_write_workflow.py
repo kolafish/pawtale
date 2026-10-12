@@ -63,6 +63,7 @@ from app.services.memoir.book_plan_sources import (
     sorted_chapters as _sorted_plan_chapters,
     text_or_empty as _text_or_empty,
 )
+from app.services.memoir.material_roles import interviewer_lines
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
@@ -309,10 +310,12 @@ async def generate_book_plan(
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
     project_title = project.title
     selected_ai_model = select_project_ai_model(project, req.ai_model)
+    lines = await interviewer_lines(db, (source.message_id for source in sources))
     await db.commit()
     generated = await _generate_book_plan_from_sources(
         project_title=project_title,
         sources=sources,
+        interviewer_lines=lines,
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )

@@ -90,7 +90,12 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
     deferred_value = cast(deferred.c.value, JSON)
     rows = (
         await db.execute(
-            select(deferred.c.key, deferred_value["text_hash"].as_string(), sources.c.text)
+            select(
+                deferred.c.key,
+                deferred_value["status"].as_string(),
+                deferred_value["text_hash"].as_string(),
+                sources.c.text,
+            )
             .select_from(MemoirEditingJob)
             .join(deferred, true())
             .join(sources, sources.c.id == deferred.c.key)
@@ -98,13 +103,16 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
             .where(
                 MemoirEditingJob.project_id == project_id,
                 MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
-                deferred_value["status"].as_string() == "needs_user",
+                deferred_value["status"].as_string().in_(("needs_user", "not_story")),
                 assigned.c.utterance_id.is_(None),
             )
+            .order_by(MemoirEditingJob.updated_at)
         )
     ).all()
-    needs_user = {key for key, text_hash, text in rows if text_hash == source_text_hash(text)}
-    return material_count, pending_count, len(needs_user)
+    current = {key: status for key, status, text_hash, text in rows if text_hash == source_text_hash(text)}
+    statuses = list(current.values())
+    # Answers to the interviewer that are not story stay out of the book; they are not pending.
+    return material_count, pending_count - statuses.count("not_story"), statuses.count("needs_user")
 
 
 async def read_draft_progress(
@@ -175,7 +183,7 @@ async def read_draft_progress(
         voice_session_id
         and growth
         and not (growth.result_json or {}).get("organized_utterance_ids")
-        and not story_tree_growth._progress(growth).deferred
+        and all(item.status == "not_story" for item in story_tree_growth._progress(growth).deferred.values())
     ):
         result.status, result.title, result.detail = "no_change", "讲述已保存，故事结构没有新增", "已有草稿可以继续阅读"
     elif ready:

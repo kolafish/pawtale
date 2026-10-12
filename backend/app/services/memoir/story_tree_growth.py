@@ -52,7 +52,7 @@ from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.chapter_split import split_large_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import is_ready_story_material
+from app.services.memoir.material_roles import interviewer_lines, is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -81,6 +81,7 @@ ALLOWED_ACTIONS = {
     "create_section",
     "create_chapter",
     "leave_unassigned",
+    "not_story",
 }
 
 
@@ -117,7 +118,8 @@ class GrowthGroup:
 
 class DeferredSource(BaseModel):
     text_hash: str
-    status: Literal["pending", "needs_user"]
+    # not_story: answered the interviewer without any story; kept out of the book until its text changes.
+    status: Literal["pending", "needs_user", "not_story"]
     reason: str
     attempts: int = 0
 
@@ -177,6 +179,7 @@ def build_story_growth_prompt(
     utterances: list[MemoirVoiceUtterance],
     chapters: list[MemoirBookPlanChapter],
     sections: list[MemoirSection],
+    interviewer_lines: dict[str, str],
 ) -> tuple[str, ModelReferenceMap, ModelReferenceMap]:
     chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
@@ -186,7 +189,11 @@ def build_story_growth_prompt(
         sections=sections,
     )
     source_payload = [
-        {"source_index": index, "text": current_utterance_text(utterance)}
+        {
+            "source_index": index,
+            **({"interviewer_line": line} if (line := interviewer_lines.get(utterance.chat_message_id or "")) else {}),
+            "text": current_utterance_text(utterance),
+        }
         for index, utterance in enumerate(utterances, start=1)
     ]
     chapter_payload = [
@@ -210,18 +217,21 @@ def build_story_growth_prompt(
         "请整理本次新增的全部讲述。可以把多条讲述作为一组，但每条讲述只能出现一次。\n"
         "优先归入已有小节；已有章节下出现明确的新事件或新主题时才新建小节；"
         "只有出现无法归入任何已有章节的人生阶段或长期主题时才新建章节；"
-        "不确定时暂不归类。标题应具体、自然、直接来自讲述含义，不使用“相关经历”等空泛表达。\n\n"
+        "不确定时暂不归类。标题应具体、自然、直接来自讲述含义，不使用“相关经历”等空泛表达。\n"
+        "interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。"
+        "整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，"
+        "用 not_story，它不进书；只要有一点经历或感受就照常归类。\n\n"
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
         f"已有章节：\n{json.dumps(chapter_payload, ensure_ascii=False)}\n\n"
         f"已有小节：\n{json.dumps(section_payload, ensure_ascii=False)}\n\n"
         "只返回 JSON："
         '{"groups":[{"source_indices":[1],'
-        '"action":"assign_existing|create_section|create_chapter|leave_unassigned",'
+        '"action":"assign_existing|create_section|create_chapter|leave_unassigned|not_story",'
         '"section_id":null,"chapter_id":null,'
         '"new_chapter_title":null,"new_section_title":null,'
         '"confidence":0.0,"reason":""}]}\n'
         "assign_existing 填 section_id；create_section 填 chapter_id 和 new_section_title；"
-        "create_chapter 填 new_chapter_title 和 new_section_title；leave_unassigned 不创建结构。"
+        "create_chapter 填 new_chapter_title 和 new_section_title；leave_unassigned 和 not_story 不创建结构。"
     )
     return prompt, chapter_refs, section_refs
 
@@ -274,12 +284,14 @@ async def decide_story_growth(
     utterances: list[MemoirVoiceUtterance],
     chapters: list[MemoirBookPlanChapter],
     sections: list[MemoirSection],
+    interviewer_lines: dict[str, str],
     ai_model: str | None,
 ) -> list[GrowthGroup]:
     prompt, chapter_refs, section_refs = build_story_growth_prompt(
         utterances=utterances,
         chapters=chapters,
         sections=sections,
+        interviewer_lines=interviewer_lines,
     )
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     generated = await generate_structured_with_client(
@@ -480,7 +492,7 @@ async def _place_groups(
     plan = await load_plan_with_chapters(db, project_id)
     chapter_by_title = {chapter.title: chapter.id for chapter in (plan.chapters if plan else [])}
     for group_index, group in enumerate(batch.groups):
-        if group.action == "leave_unassigned":
+        if group.action in {"leave_unassigned", "not_story"}:
             continue
         target_section_id = group.section_id
         for utterance_id in group.utterance_ids:
@@ -618,11 +630,13 @@ async def grow_story_tree(
             chapter_updated_at={item.id: item.updated_at for item in chapters},
         )
         ai_model = await load_project_ai_model(db, job.project_id, None)
+        lines = await interviewer_lines(db, (item.chat_message_id for item in utterances))
         await db.commit()
         batch.groups = await decide_story_growth(
             utterances=utterances,
             chapters=chapters,
             sections=sections,
+            interviewer_lines=lines,
             ai_model=ai_model,
         )
         progress.batch = batch
@@ -652,6 +666,11 @@ async def grow_story_tree(
                 text_hash = batch.sources[source_id][0]
                 previous = deferred.get(source_id)
                 attempts = previous.attempts if previous and previous.text_hash == text_hash else 0
+                if group.action == "not_story":
+                    progress.deferred[source_id] = DeferredSource(
+                        text_hash=text_hash, status="not_story", reason=group.reason, attempts=MAX_UNASSIGNED_ATTEMPTS,
+                    )
+                    continue
                 if group.action == "leave_unassigned" and group.reason:
                     attempts += 1
                 needs_user = attempts >= MAX_UNASSIGNED_ATTEMPTS
