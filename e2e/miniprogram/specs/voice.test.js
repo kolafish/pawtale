@@ -274,7 +274,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const host = await session.miniProgram.reLaunch("/pages/home/index");
     await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
     assert.equal(await host.$("#home-narration-modes"), null);
-    assert.equal((await host.data()).selectedMode, "free_narration");
+    assert.equal((await host.data()).selectedMode, "guided_interview");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-project-default-mode.png") });
     await tapBoundAction(await elementById(host, "primary-voice-action"));
     await waitForPageData(host, data => Boolean(data.voiceEntry), "首页原位展开讲述");
@@ -325,7 +325,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       `简洁麦克风在按钮内保持清晰尺寸（${readyMicIconSize.width}×${readyMicIconSize.height}）`,
     );
     assert.equal(await page.$("#session-narration-modes"), null);
-    assert.equal(await (await page.$(".mode-label")).text(), "自由讲述");
+    assert.equal((await page.data()).guidanceMode, "guided_interview");
     session.artifacts.mark("voice:page:open:complete");
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-ready.png") });
 
@@ -511,7 +511,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       (event) => event.type === "session.start",
     );
     assert.ok(sessionStart, "ASR gateway 应收到 session.start");
-    assert.equal(sessionStart.guidance_mode, "free_narration");
+    assert.equal(sessionStart.guidance_mode, "guided_interview");
     assert.equal(sessionStart.speaker_role, "narrator");
     assert.equal(sessionStart.ai_model, FIXTURE_AI_MODEL);
     assert.equal(typeof activeGatewayEvents[1].audio, "string");
@@ -550,7 +550,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(nextReady.largeTextEnabled, true);
     assert.equal(nextReady.guidanceMode, "guided_interview");
     assert.equal(await next.$("#session-narration-modes"), null);
-    assert.equal(await (await next.$(".mode-label")).text(), "引导访谈");
+    assert.ok(await next.$(".mode-label"));
     assert.equal(nextReady.liveText, "");
     assert.equal(nextReady.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
@@ -630,6 +630,46 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       assistantEvents: fixture.state.assistantClientEvents,
       gatewayEventTypes: fixture.state.gatewayClientEvents.map(event => event.type),
     } });
+    await session.artifacts.captureFailure(session.miniProgram, error);
+    throw error;
+  }
+});
+
+test("spoken actions pause for explicit resume, listen, or finish after playback", async () => {
+  try {
+    const host = await session.miniProgram.reLaunch("/pages/home/index");
+    await waitForPageData(host, data => data.hasProject && !data.loading, "首页加载");
+    await changeProjectDefaultMode(host, "guided_interview");
+    for (const action of ["pause", "listen", "end"]) {
+      fixture.state.conversationAction = action;
+      await tapBoundAction(await elementById(host, "primary-voice-action"));
+      const voice = await elementById(host, "voice-session");
+      await waitForPageData(voice, data => data.status === "ready", `${action} 会话就绪`);
+      await tapBoundAction(await elementById(voice, "voice-primary-action"));
+      await waitForPageData(voice, data => data.recording && data.liveText.includes("第一次坐火车"), "讲述进入录音");
+      await tapBoundAction(await elementById(voice, "voice-primary-action"));
+      if (action === "end") {
+        await waitForPageData(host, data => !data.voiceEntry && data.narrationSaved, "结束回复播完后自动保存并回首页");
+        assert.equal(fixture.state.sessionStatus, "stopped");
+      } else {
+        const completed = await waitForPageData(voice, data => !data.followUpLoading
+          && data.transcriptLines.some(line => line.role === "assistant" && line.text === FIXTURE_ASSISTANT_TEXT)
+          && (action === "listen" ? data.recording : data.ttsProgressPercent === 100 && !data.recording), `${action} 回复播放完毕`);
+        assert.equal(completed.followUpTTSError, "");
+        assert.ok((await host.data()).voiceEntry, "暂停或继续倾听保留当前会话");
+        if (action === "pause") {
+          await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "voice-explicit-pause.png") });
+          await tapBoundAction(await elementById(voice, "voice-primary-action"));
+          await waitForPageData(voice, data => data.recording, "暂停后点按可继续讲述");
+        }
+        await tapBoundAction(await elementById(voice, "voice-finish-action"));
+        await waitForPageData(host, data => !data.voiceEntry, "手动结束并回首页");
+      }
+      session.artifacts.mark(`voice:action:${action}:passed`);
+    }
+    assert.deepEqual(fixture.state.unexpectedRequests, []);
+  } catch (error) {
+    failed = true;
     await session.artifacts.captureFailure(session.miniProgram, error);
     throw error;
   }

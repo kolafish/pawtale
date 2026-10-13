@@ -63,13 +63,14 @@ function createVoiceFixtureServer() {
     sessionId: sessionPrefix,
     sessionStatus: "created",
     sessionConfig: {},
+    conversationAction: "pause",
     projectTitle: "E2E 回忆录",
     projectProfile: {
       narrator_name: "",
       narrator_gender: "unspecified",
       narrator_origin: "",
       narrator_age: null,
-      default_guidance_mode: "free_narration",
+      default_guidance_mode: "guided_interview",
       default_interview_type: "ai_interview",
       default_session_goal: "open_narration",
     },
@@ -110,7 +111,7 @@ function createVoiceFixtureServer() {
         id: state.sessionId,
         project_id: FIXTURE_PROJECT_ID,
         status: state.sessionStatus,
-        guidance_mode: state.sessionConfig.guidance_mode || "free_narration",
+        guidance_mode: state.sessionConfig.guidance_mode || "guided_interview",
         interview_type: state.sessionConfig.interview_type || "ai_interview",
         session_goal: state.sessionConfig.session_goal || "open_narration",
         current_completion_issue_id: null,
@@ -170,6 +171,10 @@ function createVoiceFixtureServer() {
     }
     if (request.method === "GET" && url.pathname === "/api/mobile/memoir/me") {
       respond(response, 200, identity());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === `/api/mobile/memoir/projects/${FIXTURE_PROJECT_ID}/share-likes`) {
+      respond(response, 200, { items: [] });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/mobile/memoir/projects") {
@@ -457,7 +462,8 @@ function createVoiceFixtureServer() {
         text: FIXTURE_ASSISTANT_TEXT,
         primary_intent: "acknowledge",
         intent_tags: ["e2e"],
-        expects_answer: false,
+        expects_answer: state.conversationAction === "listen",
+        conversation_action: state.conversationAction,
         requested_ai_model: event.ai_model || null,
         resolved_ai_model: event.ai_model || "e2e-model",
         progress_voice_selected_event_ids: [],
@@ -497,6 +503,7 @@ function createVoiceFixtureServer() {
       state.createdSessions = 0;
       state.sessionId = sessionPrefix;
       state.sessionConfig = {};
+      state.conversationAction = "pause";
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";
       state.messages = [initialAssistantMessage(state.sessionId)];
