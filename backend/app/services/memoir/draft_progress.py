@@ -190,7 +190,7 @@ async def read_draft_progress(
         result.status = (
             "ready" if ready == len(progress.chapters) and not result.pending_material_count else "partial_ready"
         )
-        result.title = "可读草稿已更新" if result.status == "ready" else "已有部分草稿可阅读"
+        result.title = "书稿可阅读" if result.status == "ready" else "已有部分草稿可阅读"
         result.detail = progress.review_error or (
             "全书检查已完成" if progress.review_status == "succeeded" else "草稿尚未完成全书检查"
         )
