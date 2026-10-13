@@ -9,6 +9,7 @@ from app.models.projects import Project
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import draft_progress, story_tree_growth
 from app.services.memoir.narrative import book_completion
+from app.services.memoir.transcript_projection import source_text_hash
 from tests.test_memoir_book_completion import _book
 from tests.test_memoir_section_organization import _stopped_growth_job
 
@@ -91,3 +92,38 @@ def test_invalid_model_placement_is_a_retryable_system_error_not_user_confirmati
             section_refs=ModelReferenceMap("S", ["section-1"]),
         )
     assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize("fact_blocked", [False, True])
+async def test_unassigned_material_offers_recovery_without_hiding_fact_confirmation(client, test_db, fact_blocked):
+    from app.services.memoir import automatic_book_draft
+    project_id, chapters, _ = await _book(client, test_db)
+    text = "那一年他带我去城里，我记得很清楚。"
+    source, growth = await _stopped_growth_job(client, test_db, project_id, text)
+    growth.status = "succeeded"
+    growth.result_json = {"growth": story_tree_growth.StoryGrowthProgress(deferred={
+        source["utterance_id"]: story_tree_growth.DeferredSource(
+            text_hash=source_text_hash(text), status="needs_user", attempts=2, reason="人物尚不明确",
+        ),
+    }).model_dump(mode="json")}
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    parent.status = "succeeded"
+    parent.result_json = automatic_book_draft.DraftProgress(chapters={
+        chapters[0].id: automatic_book_draft.ChapterProgress(status="needs_input" if fact_blocked else "ready"),
+    }).model_dump(mode="json")
+    await test_db.commit()
+    progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
+    assert progress.status == ("needs_input" if fact_blocked else "partial_ready")
+    assert progress.can_retry is not fact_blocked
+    assert progress.pending_material_count >= 1
+
+
+async def test_archived_or_excluded_placements_are_not_unassigned_work(client, test_db):
+    project_id, chapters, _ = await _book(client, test_db)
+    user_id = (await test_db.get(Project, project_id)).user_id
+    await book_completion.ensure_chapter_sections(test_db, project_id=project_id, chapter_id=chapters[0].id, user_id=user_id)
+    section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapters[0].id))
+    section.status, section.include_in_book = "archived", False
+    await test_db.commit()
+    _, pending, needs_user = await draft_progress._source_counts_and_needs_user(test_db, project_id)
+    assert pending == 0 and needs_user == 0

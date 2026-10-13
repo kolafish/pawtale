@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirEditingJob,
-    MemoirSection,
     MemoirSectionMaterial,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -74,8 +73,7 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
     )
     assigned = (
         select(MemoirSectionMaterial.utterance_id)
-        .join(MemoirSection, MemoirSectionMaterial.section_id == MemoirSection.id)
-        .where(MemoirSectionMaterial.project_id == project_id, MemoirSection.status == "active")
+        .where(MemoirSectionMaterial.project_id == project_id)
         .distinct()
         .cte("assigned")
     )
