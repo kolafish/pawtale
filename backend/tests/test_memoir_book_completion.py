@@ -841,6 +841,7 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
         fingerprint=old_fingerprint,
         related_material_ids_json=[source_id],
         related_chapter_ids_json=[chapter_id],
+        resolution="user_decision",
         input_signature="same-review-input",
         status="closed",
         outcome="confirmed",
