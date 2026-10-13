@@ -806,6 +806,20 @@ async def regenerate_chapter_sections(
         section for section in chapter.sections
         if section.status == "active" and section.include_in_book
     ]
+    if (
+        structure_updated_by == MemoirCreatedBy.AI
+        and len(materials) == len(included_sections) == 1
+        and materials[0].include_in_book
+        and materials[0].source_section_id == included_sections[0].id
+    ):
+        # Initial book planning already placed this indivisible utterance.
+        # There is no finer partition to make: replanning semantic subtopics
+        # and then assigning the whole utterance can reject every candidate.
+        # Keep that valid placement; explicit user regrouping still runs below.
+        return {
+            "material_count": 1, "assigned_count": 1, "unassigned_count": 0,
+            "section_count": 1, "ai_model": None,
+        }
 
     # LLM calls may take minutes. Release the read transaction and defer every
     # mutation until all decisions are ready, then apply the structure atomically.
