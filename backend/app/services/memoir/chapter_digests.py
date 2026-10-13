@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application_errors import InsufficientAICreditError
 from app.domain.memoir.types import (
     MemoirSectionStatus,
     MemoirSemanticCacheStatus,
@@ -622,7 +623,7 @@ async def generate_or_reuse_chapter_digest(
             await db.refresh(existing)
         status = MemoirSemanticCacheStatus.READY
         error = ""
-    except HTTPException:
+    except (HTTPException, InsufficientAICreditError):
         raise
     except Exception as exc:
         logger.exception(

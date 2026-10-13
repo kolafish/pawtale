@@ -23,6 +23,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application_errors import InsufficientAICreditError
 from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -339,6 +340,8 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
                 previous_line=previous_message.content_text.strip() if previous_message else "",
                 transcript_version_id=version_id,
             )
+    except InsufficientAICreditError:
+        raise
     except Exception as exc:
         await db.rollback()
         queued = await db.scalar(select(MemoirEditingJob.payload_json).where(MemoirEditingJob.id == job.id))

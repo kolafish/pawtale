@@ -10,6 +10,7 @@ from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application_errors import InsufficientAICreditError
 from app.clock import utcnow_naive
 from app.config import get_settings
 from app.services.ai_timeouts import ai_error_metadata, ai_user_error_message
@@ -21,6 +22,8 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.models.projects import Project
+from app.models.ai_credits import AICreditAccount
+from app.services.ai_credits import credit_account_summary
 from app.services.ai_usage_records import reset_ai_usage_context, set_ai_usage_context
 from app.services.memoir.job_leases import (
     JobLease,
@@ -764,6 +767,78 @@ async def run_available_editing_jobs(
             return succeeded
 
 
+# Only the narration-to-book chain resumes automatically. Interactive generation
+# requests and media jobs retain their existing explicit retry/cancellation policy.
+_CREDIT_RESUMABLE_TYPES = (
+    MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
+    MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+    MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    MemoirEditingJobType.PREPARE_CHAPTER.value,
+    MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+    MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
+    MemoirEditingJobType.FILL_NARRATOR_PROFILE.value,
+    MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
+)
+
+
+async def resume_credit_blocked_editing_jobs(db: AsyncSession) -> int:
+    """Reconcile durable credit failures with the wallet, including late failure writes.
+
+    Keeping recovery in the worker avoids coupling payment delivery to memoir jobs
+    and covers grants, repeated callbacks, restarts, and payment-before-failure races.
+    """
+    blocked = (
+        MemoirEditingJob.status == MemoirEditingJobStatus.FAILED.value,
+        MemoirEditingJob.job_type.in_(_CREDIT_RESUMABLE_TYPES),
+        MemoirEditingJob.dedupe_key.is_not(None),  # Superseded jobs lose their key.
+        or_(MemoirEditingJob.job_type != MemoirEditingJobType.PREPARE_CHAPTER.value,
+            MemoirEditingJob.payload_json["automatic"].as_boolean().is_(True)),
+        or_(MemoirEditingJob.job_type != MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
+            MemoirEditingJob.payload_json["input_signature"].as_string().is_not(None)),
+        MemoirEditingJob.result_json["failure"]["error_type"].as_string() == InsufficientAICreditError.__name__,
+    )
+    user_ids = (await db.scalars(select(Project.user_id).join(MemoirEditingJob).where(
+        *blocked, Project.user_id.is_not(None),
+    ).distinct())).all()
+    resumed = 0
+    affected_projects: set[str] = set()
+    for user_id in user_ids:
+        account = await db.scalar(select(AICreditAccount).where(AICreditAccount.user_id == user_id))
+        if account is None or (await credit_account_summary(db, account)).remaining_rmb <= 0:
+            continue
+        jobs = (await db.scalars(select(MemoirEditingJob).join(Project).where(
+            *blocked, Project.user_id == user_id,
+        ).order_by(MemoirEditingJob.id).with_for_update(of=MemoirEditingJob, skip_locked=True)
+            .execution_options(populate_existing=True))).all()
+        for job in jobs:
+            if (job.result_json or {}).get("cancelled"):
+                continue
+            progress = dict(job.result_json or {})
+            progress.pop("failure", None)
+            # The typed credit guard fails BEFORE sending the next provider request.
+            # Earlier completed checkpoints remain valid; uncertain timeouts never enter here.
+            progress["provider_request_pending"] = False
+            job.result_json = progress
+            job.status, job.error_message = MemoirEditingJobStatus.PENDING.value, ""
+            job.run_after, job.first_started_at, job.attempts = utcnow_naive(), None, 0
+            job.locked_at = job.lease_token = job.lease_expires_at = None
+            job.rerun_requested = False
+            affected_projects.add(job.project_id)
+            resumed += 1
+    await db.flush()
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    for project_id in sorted(affected_projects):
+        # A parent may have completed with a failed child before credit arrived.
+        # Wake that parent without retrying unrelated failed children or failed parents.
+        parent = await db.scalar(select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"update-book-draft:{project_id}",
+        ).with_for_update().execution_options(populate_existing=True))
+        if parent and parent.status in {*ACTIVE_EDITING_JOB_STATUSES, MemoirEditingJobStatus.SUCCEEDED.value}:
+            await schedule_book_draft(db, project_id=project_id, source="credit_restored", settled=True)
+    await db.commit()
+    return resumed
+
+
 async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     settings = get_settings()
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
@@ -777,6 +852,7 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
                     await reconcile_books_omitted_by_editorial_review(db)
                 book_policy_reconciled = True
             async with async_session_maker() as db:
+                await resume_credit_blocked_editing_jobs(db)
                 await advance_book_completion_jobs(db)
             await run_available_editing_jobs(should_stop=stop_event.is_set)
         except Exception:
