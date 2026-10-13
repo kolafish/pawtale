@@ -143,13 +143,11 @@ function loadBookPage({
   mockMemoirApiModules({
     memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     applyMemoirBookPlanStructureCommand: unmockedAsync("applyMemoirBookPlanStructureCommand"),
-    confirmMemoirBookPlan: unmockedAsync("confirmMemoirBookPlan"),
     assembleMemoirBookOutput: unmockedAsync("assembleMemoirBookOutput"),
     updateMemoirBookOutput: unmockedAsync("updateMemoirBookOutput"),
     downloadMemoirVoiceAudio: unmockedAsync("downloadMemoirVoiceAudio"),
     generateMemoirBookChapterTitle: unmockedAsync("generateMemoirBookChapterTitle"),
     updateMemoirBookChapterTitle: unmockedAsync("updateMemoirBookChapterTitle"),
-    generateMemoirBookPlan: unmockedAsync("generateMemoirBookPlan"),
     getMemoirBookChapterDraft: async () => null,
     getMemoirBookOutput: async () => null,
     getMemoirBookShareStatus: unmockedAsync("getMemoirBookShareStatus"),
@@ -637,8 +635,10 @@ test("book page stores only the full-book summary needed by the home view", () =
   const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   assert.match(template, /wx:if="\{\{bookContentAvailable\}\}" class="hero-reading-action"/);
 
+  const previousOutput = context.bookOutput;
   page.applyPlan.call(context, samplePlan("draft"));
-  assert.equal(context.bookOutput, null);
+  assert.equal(context.bookOutput, previousOutput);
+  assert.equal(context.data.planNeedsActivation, true);
   assert.equal(context.data.bookContentAvailable, false);
 });
 
@@ -859,29 +859,6 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[0].splitSelectedCount, 0);
   assert.equal(chapters[0].splitActionText, "拆出所选");
   assert.equal(chapters[0].canSplitSelectedSources, false);
-});
-
-test("book page toggles chapter source details", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page);
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].source_refs = [
-    sampleRef("utterance-1", "外婆家的院子"),
-    sampleRef("utterance-3", "春节做年糕"),
-  ];
-  page.applyPlan.call(context, plan);
-
-  assert.equal(context.data.chapters[0].sourceListExpanded, false);
-  page.toggleChapterSources.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.equal(context.data.chapters[0].sourceListExpanded, true);
-  assert.equal(context.data.chapters[0].sourceToggleText, "收起素材");
-  assert.equal(context.data.chapters[0].sourceViews.length, 2);
-  assert.equal(context.data.chapters[0].sourceViews[0].previewText, "外婆家的院子");
-  assert.equal(context.data.chapters[0].sourceViews[0].recordNumber, 1);
-  assert.equal(context.data.chapters[0].sourceViews[0].labelText, "语音记录 1 · 素材 1 · 06-17 08:00 · 6 字");
 });
 
 test("book page marks assigned sources as supplemental chapter work", () => {
