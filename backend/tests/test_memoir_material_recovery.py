@@ -78,11 +78,10 @@ async def test_not_story_is_not_reintroduced_by_new_context_or_retry(client, tes
 
 @pytest.mark.parametrize("payload", [
     {},
-    {"non_story_indices": [1, 1]},
-    {"non_story_indices": [2]},
-    {"sections": [{"source_indices": [1], "section_id": "S99"}]},
-    {"new_chapters": [{"chapter_ref": "N1", "title": "童年"}],
-     "sections": [{"source_indices": [1], "chapter_ref": "N1"}]},
+    {'placements': {'1': {'kind': 'not_story'}, '2': {'kind': 'not_story'}}},
+    {'placements': {'2': {'kind': 'not_story'}}},
+    {'placements': {'1': {'kind': 'story', 'section_id': 'S99'}}},
+    {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年'}], 'placements': {'1': {'kind': 'story', 'chapter_ref': 'N1'}}},
 ])
 def test_invalid_model_placement_is_a_retryable_system_error_not_user_confirmation(payload):
     with pytest.raises(HTTPException) as exc:

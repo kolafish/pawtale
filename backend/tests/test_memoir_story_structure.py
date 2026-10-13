@@ -21,16 +21,27 @@ def _normalize(payload, texts):
 
 
 @pytest.mark.parametrize('payload', [
-    {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年'}], 'non_story_indices': [1]},
-    {'sections': [{'source_indices': [1], 'chapter_ref': 'N9', 'new_section_title': '渡河'}]},
-    {'sections': [{'source_indices': [1], 'section_id': 'S1', 'chapter_ref': 'C1'}]},
-    {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年', 'insert_before_chapter_id': 'C1', 'time_evidence': '八岁那年'}],
-     'sections': [{'source_indices': [1], 'chapter_ref': 'N1', 'new_section_title': '渡河'}]},
+    {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年'}], 'placements': {'1': {'kind': 'not_story'}}},
+    {'placements': {'1': {'kind': 'story', 'chapter_ref': 'N9', 'new_section_title': '渡河'}}},
+    {'placements': {'1': {'kind': 'story', 'section_id': 'S1', 'chapter_ref': 'C1'}}},
 ])
-def test_invalid_new_chapter_reference_or_invented_time_never_places_material(payload):
+def test_invalid_new_chapter_reference_never_places_material(payload):
     with pytest.raises(HTTPException) as exc:
         _normalize(payload, ['有一次坐船去岛上吃了面。'])
     assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize('anchor,evidence', [('C1', '八岁那年'), ('C99', '有一次')])
+def test_unverifiable_optional_chronology_appends_without_rejecting_complete_material(anchor, evidence):
+    groups = _normalize({
+        'new_chapters': [{'chapter_ref': 'N1', 'title': '渡河',
+                          'insert_before_chapter_id': anchor, 'time_evidence': evidence}],
+        'placements': {'1': {'chapter_ref': 'N1', 'new_section_title': '岛上的面'}},
+    }, ['有一次坐船去岛上吃了面。'])
+    assert len(groups) == 1
+    assert groups[0].utterance_ids == ['0']
+    assert groups[0].action == 'create_chapter'
+    assert groups[0].insert_before_chapter_id is None
 
 
 async def test_one_new_chapter_keeps_distinct_events_and_places_before_existing_without_moving_old_order(client, test_db, monkeypatch):
@@ -41,11 +52,11 @@ async def test_one_new_chapter_keeps_distinct_events_and_places_before_existing_
         created.append(source)
     fake = FakeStoryGrowthAI({
         'new_chapters': [{'chapter_ref': 'N1', 'title': '乡下的童年', 'insert_before_chapter_id': 'C1', 'time_evidence': '我小时候在乡下'}],
-        'sections': [
-            {'source_indices': [1], 'chapter_ref': 'N1', 'new_section_title': '河边的家'},
-            {'source_indices': [2], 'chapter_ref': 'N1', 'new_section_title': '辍学那年'},
-        ],
-        'non_story_indices': [3],
+        'placements': {
+            '1': {'kind': 'story', 'chapter_ref': 'N1', 'new_section_title': '河边的家'},
+            '2': {'kind': 'story', 'chapter_ref': 'N1', 'new_section_title': '辍学那年'},
+            '3': {'kind': 'not_story'},
+        },
     })
     monkeypatch.setattr(growth, 'get_ai_service', lambda _model=None: fake)
     result = await growth.run_story_tree_growth_job(test_db, job)
@@ -98,3 +109,26 @@ async def test_automatic_position_preserves_a_newer_directory_edit(client, test_
     before = await order()
     await growth._position_new_chapters(test_db, project_id=project_id, batch=batch)
     assert await order() == before
+
+
+def test_each_whole_source_has_one_destination_and_shared_destinations_form_one_group():
+    payload = {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年往事'}], 'placements': {
+        '1': {'chapter_ref': 'N1', 'new_section_title': '放学与复学'},
+        '2': {'chapter_ref': 'N1', 'new_section_title': '放学与复学'},
+        '3': {'kind': 'not_story'},
+    }}
+    groups = _normalize(payload, ['父亲接我放学。后来李老师劝我复学。', '父亲接我的那天下雨了。', '我想想。'])
+    assert [(g.action, g.utterance_ids) for g in groups] == [('not_story', ['2']), ('create_chapter', ['0', '1'])]
+    assert groups[1].new_section_title == '放学与复学'
+
+
+@pytest.mark.parametrize('placements', [
+    {'1': {'kind': 'not_story'}, '2': {'kind': 'not_story'}},
+    {'01': {'kind': 'not_story'}},
+    {'1': {'kind': 'not_story', 'section_id': 'S1'}},
+    {'1': {'kind': 'unassigned', 'reason': ''}},
+])
+def test_source_map_rejects_invented_keys_and_ambiguous_nonstory_destinations(placements):
+    with pytest.raises(HTTPException) as error:
+        _normalize({'placements': placements}, ['父亲接我放学。后来李老师劝我复学。'])
+    assert error.value.status_code == 422

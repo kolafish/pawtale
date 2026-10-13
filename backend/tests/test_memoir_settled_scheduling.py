@@ -45,8 +45,10 @@ async def test_immediate_book_job_still_waits_for_active_dependencies(client, te
 async def test_growth_completion_advances_the_existing_debounced_book_job(client, test_db, monkeypatch):
     project_id, _, _ = await _book(client, test_db)
     source, growth = await _stopped_growth_job(client, test_db, project_id, '小时候我住在河边。')
-    fake = FakeStoryGrowthAI({'new_chapters': [{'chapter_ref': 'N1', 'title': '河边的家'}],
-        'sections': [{'source_indices': [1], 'chapter_ref': 'N1', 'new_section_title': '童年的住处'}]})
+    fake = FakeStoryGrowthAI({
+        'new_chapters': [{'chapter_ref': 'N1', 'title': '河边的家'}],
+        'placements': {'1': {'kind': 'story', 'chapter_ref': 'N1', 'new_section_title': '童年的住处'}},
+    })
     monkeypatch.setattr(story_tree_growth, 'get_ai_service', lambda _model=None: fake)
     now = datetime(2026, 10, 13, 12)
     monkeypatch.setattr(automatic_book_draft, 'utcnow_naive', lambda: now)

@@ -553,17 +553,10 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     test_db.add(session)
     await test_db.commit()
     fake = FakeStoryGrowthAI(
-        {
-            "sections": [
-                {
-                    "source_indices": [1],
-                                        "section_id": None,
-                    "chapter_ref": "C1",
-                    "new_section_title": "后来一起爬香山",
-                    "reason": "同属爬山经历，但形成了新的具体事件",
-                }
-            ]
-        }
+        {'placements': {'1': {
+            'kind': 'story', 'section_id': None, 'chapter_ref': 'C1',
+            'new_section_title': '后来一起爬香山', 'reason': '同属爬山经历，但形成了新的具体事件',
+        }}}
     )
     monkeypatch.setattr(story_tree_growth, "get_ai_service", lambda _model=None: fake)
     job = MemoirEditingJob(
@@ -611,7 +604,7 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     message.turn_index = 2
     session.status = "listening"
     job.result_json = result.result_json
-    fake.payload["sections"][0]["new_section_title"] = "后来一起爬黄山"
+    fake.payload["placements"]["1"]["new_section_title"] = "后来一起爬黄山"
     await test_db.commit()
     result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
     events = (await test_db.scalars(select(MemoirAutomationEvent).where(
