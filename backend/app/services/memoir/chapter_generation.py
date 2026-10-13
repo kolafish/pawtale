@@ -355,49 +355,10 @@ def _previous_draft_section(
     )
 
 
-def _legacy_source_snapshot_matches(
-    section: ChapterSectionInput,
-    snapshot: dict[str, object],
-    latest: MemoirBookChapterDraftVersion | None,
-) -> bool:
-    """Old signatures also included chapter title, style, and section order.
-
-    Only recover from a change to those fields when every current material was
-    cited and its recorded transcript/hash/order still matches. A partially
-    cited old section cannot prove that an uncited source is unchanged.
-    """
-    raw_materials = getattr(latest, "material_snapshot_json", None)
-    if not isinstance(raw_materials, list):
-        return False
-    saved = [
-        item for item in raw_materials
-        if isinstance(item, dict) and item.get("section_id") == section.section_id
-    ]
-    used = snapshot.get("used_material_ids")
-    if (
-        not isinstance(used, list)
-        or len(saved) != len(section.materials)
-        or set(used) != {material.material_id for material in section.materials}
-        or len(used) != len(section.materials)
-    ):
-        return False
-    saved_by_id = {str(item.get("material_id") or ""): item for item in saved}
-    if len(saved_by_id) != len(saved):
-        return False
-    return all(
-        (record := saved_by_id.get(material.material_id)) is not None
-        and record.get("transcript_version_id") == material.transcript_version_id
-        and record.get("text_hash") == semantic_text_hash(material.text)
-        and record.get("material_order") == material.material_order
-        for material in section.materials
-    )
-
-
 def _preserved_draft_section(
     context: ChapterGenerationContext,
     section: ChapterSectionInput,
     snapshot: object,
-    latest: MemoirBookChapterDraftVersion | None,
 ) -> GeneratedChapterSection | None:
     if not isinstance(snapshot, dict):
         return None
@@ -411,11 +372,7 @@ def _preserved_draft_section(
     if previous is None:
         return None
     signature = snapshot.get("input_signature")
-    if signature not in {
-        _section_input_signature(context, section),
-        _legacy_section_input_signature(context, section, engine="v2"),
-        _legacy_section_input_signature(context, section, engine="v3"),
-    } and not _legacy_source_snapshot_matches(section, snapshot, latest):
+    if signature != _section_input_signature(context, section):
         return None
     return previous
 
@@ -485,7 +442,6 @@ def chapter_draft_generation_plan(
                 context,
                 section,
                 snapshots_by_id.get(section.section_id),
-                latest,
             )
         )
         if preserved is None:
@@ -674,31 +630,7 @@ def chapter_draft_render_policy_current(
     if prompt_snapshot.startswith(f"{CHAPTER_GENERATION_ENGINE}:polish="):
         recorded = prompt_snapshot.split(":polish=", 1)[1].split(":", 1)[0]
         return recorded == context.polish_level.value
-    if prompt_snapshot.startswith("llm_layered_sectioned_chapter_draft_v2"):
-        return context.polish_level == MemoirTranscriptPolishLevel.MEDIUM
-    if prompt_snapshot.startswith(CHAPTER_GENERATION_ENGINE):
-        snapshots = {
-            str(item.get("section_id")): item
-            for item in (latest.section_snapshot_json or [])
-            if isinstance(item, dict) and item.get("section_id")
-        }
-        matched_levels: list[MemoirTranscriptPolishLevel] = []
-        for section in context.sections:
-            snapshot = snapshots.get(section.section_id)
-            if not isinstance(snapshot, dict):
-                continue
-            for level in MemoirTranscriptPolishLevel:
-                prior_context = replace(context, polish_level=level)
-                if snapshot.get("input_signature") == _legacy_section_input_signature(
-                    prior_context, section, engine="v3"
-                ):
-                    matched_levels.append(level)
-                    break
-        if matched_levels:
-            return all(level == context.polish_level for level in matched_levels)
-    # Older imported or manually assembled drafts may not record a render
-    # policy. Unknown provenance alone is not evidence to rewrite every story.
-    return True
+    return False
 
 
 def chapter_draft_sources_still_included(
@@ -1584,37 +1516,6 @@ def _section_input_signature(
             ],
         }
     )
-
-
-def _legacy_section_input_signature(
-    context: ChapterGenerationContext,
-    section: ChapterSectionInput,
-    *,
-    engine: str,
-) -> str:
-    payload: dict[str, object] = {
-        "engine": f"llm_layered_sectioned_chapter_draft_{engine}",
-        "chapter": {"id": context.chapter_id, "title": context.chapter_title},
-        "section": {
-            "id": section.section_id,
-            "title": section.title,
-            "type": section.section_type,
-            "version": section.section_version,
-            "sort_order": section.sort_order,
-        },
-        "materials": [
-            {
-                "material_id": material.material_id,
-                "transcript_version_id": material.transcript_version_id,
-                "text_hash": semantic_text_hash(material.text),
-                "material_order": material.material_order,
-            }
-            for material in section.materials
-        ],
-    }
-    if engine == "v3":
-        payload["polish_level"] = context.polish_level.value
-    return semantic_json_signature(payload)
 
 
 def _section_snapshot(
