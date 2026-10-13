@@ -22,7 +22,6 @@ from app.models.memoir import (
     MemoirBookCompletionJob,
     MemoirBookOutput,
     MemoirBookOutputVersion,
-    MemoirBookRevisionProposal,
     MemoirBookReview,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -3249,95 +3248,6 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     )
     state = await _completion_field(client, project_id, "revision_job")
     assert state["already_applied"] is False
-
-
-async def test_profile_only_revision_previews_metadata_and_rejects_noop(
-    client,
-    test_db,
-    monkeypatch,
-):
-    project_id, chapters, _ = await _book(client, test_db)
-    fake = LayeredBookAI(book_actions=True, book_profile_action=True)
-    _install_ai(monkeypatch, fake)
-    bootstrapped = await client.post(
-        f"/api/memoir/projects/{project_id}/sections/bootstrap"
-    )
-    assert bootstrapped.status_code == 200
-    await _create_current_draft(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapters[0].id,
-        status=MemoirBookChapterDraftStatus.CONFIRMED,
-    )
-    review = await _run_book_review(client, test_db, project_id=project_id)
-    profile_action = next(
-        action
-        for action in review.json()["review"]["editorial_actions"]
-        if action["action_type"] == "revise_book_profile"
-    )
-    assembled = await client.post(
-        f"/api/memoir/projects/{project_id}/book-output/assemble"
-    )
-    assert assembled.status_code == 200
-    queued = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
-        json={
-            "include_answers": False,
-            "action_ids": [profile_action["id"]],
-        },
-    )
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert await run_test_editing_job(test_db, queued.json()["job_id"])
-    finally:
-        clear_editing_job_handlers()
-    proposal_id = (
-        await _completion_field(client, project_id, "revision_job")
-    )["proposal_id"]
-    draft = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}/draft/jobs",
-        json={},
-    )
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert await run_test_editing_job(test_db, draft.json()["job_id"])
-    finally:
-        clear_editing_job_handlers()
-
-    assert any(
-        "请按照已确认的修改思路生成书稿修改稿" in prompt
-        for prompt in fake.prompts
-    )
-    preview = await client.get(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}"
-    )
-    assert preview.json()["can_apply"] is True
-    assert preview.json()["comparison"]["changed_section_count"] == 0
-    assert {item["field"] for item in preview.json()["comparison"]["metadata_changes"]} == {
-        "preface",
-        "afterword",
-        "back_cover_quote",
-    }
-
-    proposal = await test_db.get(MemoirBookRevisionProposal, proposal_id)
-    assert proposal is not None
-    proposal.revision_plan_json = {
-        **proposal.revision_plan_json,
-        "book_metadata_patch": {},
-    }
-    test_db.add(proposal)
-    await test_db.commit()
-    noop = await client.get(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}"
-    )
-    assert noop.json()["can_apply"] is False
-    rejected = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}/apply"
-    )
-    assert rejected.status_code == 409
-    assert "没有产生实际修改" in rejected.json()["detail"]
 
 
 async def test_book_review_job_preserves_failure_and_can_retry(

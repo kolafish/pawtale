@@ -63,7 +63,7 @@
         >
           <text class="review-group-title">选择这次要处理的内容</text>
           <text class="editorial-actions-detail">
-            已保存的回答可以整组选择，编辑建议可以逐条选择，最后只生成一份统一的修改思路。
+            已保存的回答可以整组选择，编辑建议可以逐条选择。只改成书信息时直接预览，涉及正文或结构时先查看修改思路。
           </text>
           <view
             wx:if="{{revisionJob && revisionJob.answer_count && !revisionJob.already_applied}}"
@@ -128,7 +128,7 @@
             aria-disabled="{{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling}}"
             bindtap="generateBookRevision"
           >
-            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</text>
+            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "处理已选内容" : "请先选择要处理的内容"}}</text>
             <text class="row-action-mark">›</text>
           </view>
         </view>

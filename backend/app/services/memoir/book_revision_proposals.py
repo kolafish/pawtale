@@ -40,6 +40,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response,
     stored_cover_style,
     stored_manuscript_design,
+    updated_manuscript_payload,
 )
 from app.services.memoir.book_output_snapshots import (
     book_content_from_chapter_snapshots,
@@ -322,6 +323,13 @@ def _candidate_manuscript(
     title: str,
     metadata_patch: dict[str, str],
 ) -> dict[str, Any]:
+    if snapshots == baseline.chapter_snapshot_json:
+        # Same body: reuse the normal metadata editor so hand-edited intros,
+        # quotations, images and layouts survive both preview and apply.
+        return updated_manuscript_payload(
+            title=title, stored=baseline.manuscript_json, content=content,
+            snapshot=snapshots, cover_style_value=None, metadata_patch=metadata_patch,
+        )
     illustrations, image_appendix = _stored_illustrations(baseline.manuscript_json)
     template, custom_layout = stored_manuscript_design(baseline.manuscript_json)
     manuscript = manuscript_from_snapshot(
