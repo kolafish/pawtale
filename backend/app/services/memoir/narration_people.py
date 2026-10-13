@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 import logging
+import re
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
@@ -279,6 +280,12 @@ def build_people_prompt(*, people: list[Person], narrator: str, previous_line: s
     )
 
 
+def _ref(value: str | None) -> str:
+    """The model sometimes writes "P2 李老师" for "P2"."""
+    match = re.match(r"\s*(P\d+)", value or "")
+    return match.group(1) if match else ""
+
+
 async def read_people(
     db: AsyncSession,
     *,
@@ -335,8 +342,8 @@ async def read_people(
 
     stored = [
         {
-            "id": refs.get(item.ref.strip()) or f"{message_id}:{transcript_version_id}:{index}",
-            "same_as": refs.get((item.same_as or "").strip()),
+            "id": refs.get(_ref(item.ref)) or f"{message_id}:{transcript_version_id}:{index}",
+            "same_as": refs.get(_ref(item.same_as)),
             **{key: text(getattr(item, key)) for key in _FIELDS},
         }
         for index, item in enumerate(generated.value.people, start=1)
