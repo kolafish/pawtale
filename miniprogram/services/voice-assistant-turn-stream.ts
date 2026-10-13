@@ -95,6 +95,7 @@ export interface VoiceAssistantTurnCompletedEvent {
   primary_intent: string;
   intent_tags: string[];
   expects_answer: boolean;
+  conversation_action?: "listen" | "pause" | "end";
   finish_reason?: string | null;
   usage?: Record<string, unknown>;
   requested_ai_model?: string | null;
