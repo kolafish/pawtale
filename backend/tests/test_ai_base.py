@@ -537,14 +537,15 @@ class TestCallLlmContract:
         assert text_format["schema"]["properties"]["ok"]["type"] == "boolean"
 
     @pytest.mark.asyncio
-    async def test_deepseek_uses_text_provider_concurrency_limit(self, monkeypatch):
-        service = DeepSeekTextService()
+    @pytest.mark.parametrize("service_type", [DeepSeekTextService, VolcArkTextService])
+    async def test_provider_uses_text_concurrency_limit(self, monkeypatch, service_type):
+        service = service_type()
         service.max_concurrent_requests = 7
         limiter = RecordingLimiter()
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": "world"}}]}
         mock_resp.raise_for_status = MagicMock()
-        monkeypatch.setattr("app.services.ai_text.provider_concurrency_limiter", limiter)
+        monkeypatch.setattr("app.services.ai_base.provider_concurrency_limiter", limiter)
 
         with patch("httpx.AsyncClient") as mock_client:
             inst = AsyncMock()
@@ -556,27 +557,6 @@ class TestCallLlmContract:
             await service._call_llm("sys", "user")
 
         assert limiter.calls == [("ai_text", 7)]
-
-    @pytest.mark.asyncio
-    async def test_volc_uses_text_provider_concurrency_limit(self, monkeypatch):
-        service = VolcArkTextService()
-        service.max_concurrent_requests = 4
-        limiter = RecordingLimiter()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "doubao"}}]}
-        mock_resp.raise_for_status = MagicMock()
-        monkeypatch.setattr("app.services.ai_volc.provider_concurrency_limiter", limiter)
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            await service._call_llm("sys", "user")
-
-        assert limiter.calls == [("ai_text", 4)]
 
     @pytest.mark.asyncio
     async def test_provider_and_model_properties(self):
