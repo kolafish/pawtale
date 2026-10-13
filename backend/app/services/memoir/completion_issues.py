@@ -815,7 +815,7 @@ async def close_issue(
             db.add(output)
     db.add(issue)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="decision")
+    await schedule_book_draft(db, project_id=project_id, source="decision", settled=True)
     await db.flush()
     return issue
 

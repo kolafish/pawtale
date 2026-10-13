@@ -868,5 +868,5 @@ async def run_story_tree_growth_job(
         )
     result = await grow_story_tree(db, job=job, session=session)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=job.project_id)
+    await schedule_book_draft(db, project_id=job.project_id, source="organized", settled=True)
     return result

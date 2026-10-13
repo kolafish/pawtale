@@ -218,5 +218,5 @@ async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
                 db, project_id=project_id, voice_session_id=session.id, source="retry",
             ) is not None:
                 break
-    await automatic_book_draft.schedule_book_draft(db, project_id=project_id, source="retry")
+    await automatic_book_draft.schedule_book_draft(db, project_id=project_id, source="retry", settled=True)
     await db.commit()

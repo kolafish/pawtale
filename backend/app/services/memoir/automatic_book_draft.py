@@ -63,14 +63,18 @@ class DraftProgress(BaseModel):
     review_error: str = ""
 
 
-async def schedule_book_draft(db: AsyncSession, *, project_id: str, source: str = "materials") -> MemoirEditingJob:
+async def schedule_book_draft(
+    db: AsyncSession, *, project_id: str, source: str = "materials", settled: bool = False,
+) -> MemoirEditingJob:
+    # Incoming source changes retain their debounce. A completed upstream step or
+    # explicit user decision can advance immediately; the worker still checks dependencies.
     return await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.UPDATE_BOOK_DRAFT,
         dedupe_key=f"update-book-draft:{project_id}",
         payload_json={"source": source},
-        run_after=utcnow_naive() + timedelta(seconds=get_settings().memoir_story_settle_seconds),
+        run_after=utcnow_naive() + timedelta(seconds=0 if settled else get_settings().memoir_story_settle_seconds),
         replace_completed=True,
         preserve_progress=True,
         reschedule_running=True,
