@@ -6,7 +6,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
-    MemoirCompletionIssueChannel,
     MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
@@ -96,21 +95,10 @@ async def prepare_chapter(
         # the API returns an error instead of losing them to the route rollback.
         await db.commit()
         raise ValueError(digest.error_message or "章节审阅失败")
-    issues = await completion_issues.list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
+    blocking = await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
     )
-    active_issue = next(
-        (
-            issue
-            for issue in issues
-            if issue.channel
-            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
-        ),
-        None,
-    )
-    if active_issue is None:
+    if not blocking:
         context = await chapter_generation.load_chapter_generation_context(
             db,
             project_id=project_id,
@@ -176,14 +164,8 @@ async def rewrite_chapter(
         chapter_id=chapter_id,
         user_id=user_id,
     )
-    issues = await completion_issues.list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if any(
-        issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
-        for issue in issues
+    if await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
     ):
         raise ValueError("本章还有一项需要您先确认")
     digest = await chapter_digests.get_current_chapter_digest(

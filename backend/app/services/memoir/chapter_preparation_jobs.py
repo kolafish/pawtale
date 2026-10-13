@@ -219,18 +219,15 @@ async def enqueue_chapter_preparation_job(
     previous_result = dict(existing.result_json or {}) if existing else {}
     previous_payload = dict(existing.payload_json or {}) if existing else {}
     from app.services.memoir import completion_issues
-    manual_review_pending = any(
-        issue.channel == "manual_review"
-        for issue in await completion_issues.list_issues(
-            db, project_id=project_id, chapter_id=chapter_id,
-        )
-    )
-    decision_resolved = previous_result.get("outcome") == "needs_input" and not manual_review_pending
+    blocking_pending = bool(await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
+    ))
+    decision_resolved = previous_result.get("outcome") == "needs_input" and not blocking_pending
     obsolete_approval_candidate = bool(
         previous_result.get("outcome") == "needs_review"
         and latest is not None
         and latest.created_by != MemoirCreatedBy.USER.value
-        and not manual_review_pending
+        and not blocking_pending
         and not any(
             isinstance(section, dict) and section.get("user_edited") is True
             for section in (latest.section_snapshot_json or [])
@@ -545,10 +542,10 @@ async def accept_chapter_candidate(
     if job is None or job.status != "succeeded" or (job.result_json or {}).get("outcome") != "needs_review":
         raise HTTPException(status_code=409, detail="没有可采纳的候选稿")
     from app.services.memoir import completion_issues
-    if any(issue.channel == "manual_review" for issue in await completion_issues.list_issues(
-        db, project_id=project_id, chapter_id=chapter_id,
-    )):
-        raise HTTPException(status_code=409, detail="本章还有事实或隐私事项需要先确认")
+    if await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
+    ):
+        raise HTTPException(status_code=409, detail="本章还有事实冲突需要先确认")
     await chapter_generation.save_chapter_draft_candidate(
         db, project_id=project_id, chapter_id=chapter_id, checkpoint=job.result_json,
     )

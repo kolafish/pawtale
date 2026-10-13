@@ -77,19 +77,30 @@ def blocking_book_chapter_ids(
     return blocked
 
 
-async def open_blocking_book_chapter_ids(
+async def open_blocking_book_issues(
     db: AsyncSession,
     *,
     project_id: str,
     all_chapter_ids: Iterable[str],
-) -> set[str]:
+) -> list[MemoirCompletionIssue]:
     issues = (await db.scalars(select(MemoirCompletionIssue).where(
         MemoirCompletionIssue.project_id == project_id,
         MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
         MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
         MemoirCompletionIssue.issue_type.in_(BLOCKING_BOOK_ISSUE_TYPES),
     ))).all()
-    return blocking_book_chapter_ids(issues, all_chapter_ids)
+    return sorted(blocking_book_issues(issues, all_chapter_ids), key=_sort_key)
+
+
+async def open_blocking_book_chapter_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    all_chapter_ids: Iterable[str],
+) -> set[str]:
+    chapter_ids = set(all_chapter_ids)
+    issues = await open_blocking_book_issues(db, project_id=project_id, all_chapter_ids=chapter_ids)
+    return blocking_book_chapter_ids(issues, chapter_ids) & chapter_ids
 
 
 def _issue_fingerprint(
