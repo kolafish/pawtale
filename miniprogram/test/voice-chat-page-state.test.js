@@ -642,3 +642,12 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
     recorderSettingsRequired: true,
   }).recorderSettingsRequired, false);
 });
+
+test("opening completion offer disappears as soon as ordinary narration starts", () => {
+  const base = { ...initialVoiceChatData(), openingCompletionOffer: { issue_id: "i1", question: "谁陪您去的？" } };
+  assert.equal(voiceChatViewPatch(base).showOpeningCompletionOffer, true);
+  for (const patch of [{liveCharCount: 1}, {transcriptLines: [{id:"u1", role:"user", text:"好"}]},
+    {sessionGoal:"book_completion"}, {interviewType:"human_interview"}, {status:"closed"}, {openingCompletionOffer:null}]) {
+    assert.equal(voiceChatViewPatch({...base,...patch}).showOpeningCompletionOffer, false);
+  }
+});

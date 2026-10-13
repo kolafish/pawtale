@@ -1,3 +1,4 @@
+import { openOfferedCompletionInterview } from "../../services/memoir-completion-interview";
 import { definePage } from "../../services/page-definition";
 import { queryParam, queryChoice, type PageQuery } from "../../services/page-input";
 import { redirectToTranscripts, returnToStory } from "../../services/navigation";
@@ -16,8 +17,11 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
       sessionGoal: queryChoice(query, "sessionGoal", ["open_narration", "book_completion"] as const, "open_narration"),
     } });
   },
-  exitSession({ detail }: VoiceSessionExitEvent) {
-    if (detail.destination === "story") {
+  async exitSession({ detail }: VoiceSessionExitEvent) {
+    if (detail.destination === "completion_issue") {
+      try { await openOfferedCompletionInterview({ ...detail, replacePage: true }); }
+      catch (error) { wx.showToast({ title: error instanceof Error ? error.message : "补充问题暂时不可用", icon: "none" }); }
+    } else if (detail.destination === "story") {
       returnToStory(detail.projectId, detail.narrationSaved);
     } else if (detail.destination === "transcripts") {
       redirectToTranscripts();

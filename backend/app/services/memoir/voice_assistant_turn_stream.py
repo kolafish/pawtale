@@ -351,6 +351,7 @@ class VoiceAssistantTurnStreamSession:
                 voice_session=voice_session,
                 snapshot=snapshot,
             )
+        opening_offer = book_context.completion_offer if book_context else None
         completion_prompt_context = await completion_interviews.prompt_context_for_session(
             self.db,
             voice_session=voice_session,
@@ -367,6 +368,8 @@ class VoiceAssistantTurnStreamSession:
         await self.client.send_json(
             {
                 "type": "turn.started",
+                "opening_completion_offer": {"issue_id": opening_offer.issue_id, "question": opening_offer.question}
+                if opening_offer else None,
                 "turn_id": turn_id,
                 "voice_session_id": self.voice_session_id,
                 "state": "streaming",
@@ -385,6 +388,10 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
+        if opening_offer:
+            # Mark the offer only after its card was sent, and release the
+            # session row before model streaming or concurrent audio capture.
+            await self.db.commit()
         current_user_message = next(
             (
                 message

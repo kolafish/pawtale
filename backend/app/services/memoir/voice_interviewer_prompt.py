@@ -88,6 +88,16 @@ def build_stream_turn_prompt(
         )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 
+    if book.completion_offer is not None:
+        return _join(
+            _header(host_name, regenerate),
+            "当前是开场，可以邀请补充一个旧故事，也允许直接讲别的。先简短欢迎，再说清下面这一个补充方向。"
+            "只作邀请：愿意补充可以点‘补充这段’，也可以直接讲别的。不把讲述者当成已经同意，不催促，不要求口头回答同意，"
+            "不声称问题已经解决，不再提出其他问题。保持 [listen]。",
+            f"可选补充问题：{book.completion_offer.question}",
+            _book_block(book, opening=True),
+        )
+
     if book.anchor_topic is not None:
         mode = (
             f"当前是开场，叙述者选了“{book.anchor_topic.title}”这个话题，它关心的是：{book.anchor_topic.intent}。\n"

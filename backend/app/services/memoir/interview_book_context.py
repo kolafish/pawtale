@@ -23,7 +23,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
 from app.services.memoir.narrative import frameworks
-from app.services.memoir import narration_people, narrator_profile
+from app.services.memoir import completion_interviews, narration_people, narrator_profile
 from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
 
 _NARRATOR_GENDERS = {"male": "男", "female": "女"}
@@ -55,6 +55,7 @@ class InterviewBookContext:
     people: tuple[str, ...] = ()
     # One gap about a person 小余 may ask once a story is told; never while profile items are left.
     person_question: narration_people.Question | None = None
+    completion_offer: completion_interviews.OpeningCompletionOffer | None = None
 
 
 async def load_interview_book_context(
@@ -90,6 +91,12 @@ async def load_interview_book_context(
         profile_questions=profile_questions,
         people=await narration_people.recent_people_lines(db, voice_session.project_id),
         person_question=None if profile_questions else await narration_people.question_for(db, voice_session),
+        completion_offer=(await completion_interviews.offer_for_opening(db, voice_session=voice_session))
+        if chapters and not profile_questions and anchor_topic is None
+        and voice_session.session_goal == "open_narration"
+        and voice_session.interview_type == "ai_interview"
+        and not any(message.role == "user" and message.content_text.strip() for message in voice_session.messages)
+        else None,
     )
 
 

@@ -1,3 +1,4 @@
+import { openOfferedCompletionInterview } from "../../services/memoir-completion-interview";
 import { narrationModeForSession, NARRATION_MODES, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   VoiceSessionEntry,
@@ -1081,12 +1082,17 @@ definePage<HomeData>()({
 
   async exitVoiceSession({ detail }: VoiceSessionExitEvent) {
     if (this.data.voiceEntry?.voiceSessionId !== detail.voiceSessionId || !this.homeVisible) return;
-    if (detail.destination === "story" && detail.projectId !== this.data.projectId) return;
+    if ((detail.destination === "story" || detail.destination === "completion_issue") && detail.projectId !== this.data.projectId) return;
     if (detail.destination === "story" && !detail.finished) {
       this.openStoryProgress();
       return;
     }
     setHomeData(this, { voiceEntry: null }, () => this.measureNarration());
+    if (detail.destination === "completion_issue") {
+      try { await openOfferedCompletionInterview(detail); }
+      catch (error) { wx.showToast({ title: error instanceof Error ? error.message : "补充问题暂时不可用", icon: "none" }); }
+      return;
+    }
     if (detail.destination === "transcripts") {
       navigateToTranscripts();
       return;

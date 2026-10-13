@@ -18,6 +18,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookPlanChapter,
     MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
@@ -26,6 +27,45 @@ from app.models.memoir import (
 )
 from app.services.memoir import completion_issues, sections
 from app.services.memoir.transcript_projection import current_utterance_text
+
+
+@dataclass(frozen=True)
+class OpeningCompletionOffer:
+    issue_id: str
+    question: str
+
+
+OPENING_OFFER_KEY = "opening_completion_issue_id"
+
+
+async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> OpeningCompletionOffer | None:
+    """Recommend once, without starting an issue or binding any narration."""
+    previously_offered = set((await db.scalars(select(
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
+    ).where(
+        MemoirVoiceSession.project_id == voice_session.project_id,
+        MemoirVoiceSession.id != voice_session.id,
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
+    ).distinct())).all())
+    eligible_sections = set((await db.scalars(select(MemoirSection.id).join(MemoirBookPlanChapter).where(
+        MemoirSection.project_id == voice_session.project_id,
+        MemoirSection.status == "active", MemoirSection.include_in_book.is_(True),
+        MemoirBookPlanChapter.include_in_book.is_(True),
+    ))).all())
+    for issue in await completion_issues.list_issues(db, project_id=voice_session.project_id):
+        if issue.channel != "interview" or issue.status != "open" or issue.id in previously_offered:
+            continue
+        try:
+            if await _target_section_id(db, issue=issue) not in eligible_sections:
+                continue
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                continue
+            raise
+        voice_session.metadata_json = {**(voice_session.metadata_json or {}), OPENING_OFFER_KEY: issue.id}
+        await db.flush()
+        return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
+    return None
 
 
 @dataclass(frozen=True)

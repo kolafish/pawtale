@@ -421,7 +421,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
-      this.exitSession(this.data.sessionGoal === "book_completion"
+      this.exitSession(this.runtime().requestedExit || (this.data.sessionGoal === "book_completion"
         ? { destination: "completion", explainSaved: true }
         : {
           destination: "story",
@@ -430,7 +430,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
             utterance.transcript_edited.trim() || utterance.transcript_raw.trim(),
           )),
           finished: true,
-        });
+        }));
     } catch (error) {
       const saved = await this.refreshVoiceSessionSnapshot();
       if (saved?.session.status === "failed") {
