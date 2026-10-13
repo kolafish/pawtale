@@ -3,7 +3,7 @@
 Each narrator segment is read once per corrected (or hand-edited) transcript version, inside the narrator
 profile job. The reading is stored on the narrator message. The roster is never stored: it is folded from
 the readings in narration order whenever it is needed, so a deleted or re-read segment needs no override
-rules. A person keeps a stable id; the model sees P1, P2… and a new person gets "<message id>:<n>".
+rules. A person keeps a stable id; the model sees P1, P2… and a new person gets "<message id>:<how they are called>".
 Once a story is told, 小余 may ask about one gap in someone the narrator keeps mentioning; the next reading
 takes the answer from 小余's question and the narrator's reply.
 """
@@ -117,8 +117,9 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
     return people
 
 
-_RELATION_CUES = ("关系", "什么人", "怎么认识", "是您的", "是你的")
-_NAME_CUES = ("名字", "叫什么", "姓")
+# Every group must appear: "梁老师和校长关系怎么样？" names the person and 关系 but not the narrator.
+_RELATION_CUES = (("关系", "什么人", "怎么认识", "是您的", "是你的"), ("您", "你"))
+_NAME_CUES = (("名字", "叫什么", "姓"),)
 
 
 @dataclass(frozen=True)
@@ -127,18 +128,18 @@ class Question:
     text: str
     # How the narrator refers to the person, and words that only a question about the gap would use.
     words: tuple[str, ...]
-    cues: tuple[str, ...]
+    cues: tuple[tuple[str, ...], ...]
 
     def asked_in(self, line: str) -> bool:
         """A follow-up like "梁老师后来怎么样了？" names the person but does not ask about the gap."""
         return (
             bool(re.search(r"[？?]", line))
             and any(word in line for word in self.words)
-            and any(cue in line for cue in self.cues)
+            and all(any(cue in line for cue in group) for group in self.cues)
         )
 
 
-def _gap(person: Person) -> tuple[str, tuple[str, ...]]:
+def _gap(person: Person) -> tuple[str, tuple[tuple[str, ...], ...]]:
     """What a reader would miss about someone the narrator keeps mentioning: the relation, else a name."""
     label = person.name or ("" if person.call in _PRONOUNS else person.call)
     if not person.relation:
@@ -285,14 +286,18 @@ async def read_people(
         value = (value or "").strip()
         return value[:80] if value and value.lower() != "null" else None
 
-    stored = [
-        {
-            "id": refs.get(item.ref.strip()) or f"{message_id}:{index}",
+    stored = []
+    for index, item in enumerate(generated.value.people, start=1):
+        # A new person's id comes from how they are called, not their position in the output, so a re-read
+        # that lists people in another order (or drops one) cannot hand later segments' facts to someone else.
+        new_id = f"{message_id}:{text(item.call) or text(item.name) or index}"
+        if any(person["id"] == new_id for person in stored):
+            new_id = f"{new_id}:{index}"
+        stored.append({
+            "id": refs.get(item.ref.strip()) or new_id,
             "same_as": refs.get((item.same_as or "").strip()),
             **{key: text(getattr(item, key)) for key in _FIELDS},
-        }
-        for index, item in enumerate(generated.value.people, start=1)
-    ]
+        })
     current.metadata_json = {
         **(current.metadata_json or {}),
         READING_KEY: {"transcript_version_id": transcript_version_id, "people": stored},
