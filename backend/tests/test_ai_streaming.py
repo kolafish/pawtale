@@ -1,8 +1,12 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import httpx
 import pytest
 
+from app.services.ai_text import DeepSeekTextService
+from app.services.ai_volc import VolcArkTextService
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_streaming import (
     iter_sse_json_events,
     openai_chat_stream_chunk,
@@ -122,3 +126,39 @@ async def test_provider_concurrency_limiter_slot_holds_until_context_exits():
     assert await first_task == "first"
     assert await second_task == "second"
     assert second_entered
+
+
+@pytest.mark.parametrize("service_type", [DeepSeekTextService, VolcArkTextService])
+@pytest.mark.parametrize("stop", ["close", "timeout"])
+async def test_provider_stream_releases_http_connection_and_slot(monkeypatch, service_type, stop):
+    service = service_type()
+    service.max_concurrent_requests = 1
+    limiter = ProviderConcurrencyLimiter()
+    monkeypatch.setattr("app.services.ai_base.provider_concurrency_limiter", limiter)
+    closed = False
+
+    class ResponseStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'
+            raise httpx.ReadTimeout("stream interrupted")
+
+        async def aclose(self):
+            nonlocal closed
+            closed = True
+
+    client_type = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=ResponseStream()))
+    monkeypatch.setattr("httpx.AsyncClient", lambda: client_type(transport=transport))
+    stream = service.stream_llm("system", "user", timeout=12)
+    assert (await anext(stream)).text_delta == "hello"
+    if stop == "close":
+        await stream.aclose()
+    else:
+        with pytest.raises(AIProviderTimeoutError) as error:
+            await anext(stream)
+        assert error.value.provider == service.provider_name
+        assert error.value.model == service.model_name
+        assert error.value.timeout_seconds == 12
+    assert closed
+    # A new call must not remain blocked after cancellation or a network timeout.
+    assert await asyncio.wait_for(limiter.run("ai_text", 1, lambda: asyncio.sleep(0, result=True)), 1)

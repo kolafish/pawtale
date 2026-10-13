@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 import time
 
+import httpx
 from pydantic import BaseModel
 
 from app.services.ai_calls import (
@@ -14,11 +15,76 @@ from app.services.ai_calls import (
     with_attempt_totals,
 )
 from app.services.ai_debug import build_debug_info
-from app.services.ai_streaming import AITextStreamChunk
+from app.services.ai_streaming import AITextStreamChunk, iter_sse_json_events
+from app.services.ai_timeouts import AIProviderTimeoutError, effective_ai_text_timeout_seconds
+from app.services.provider_limits import provider_concurrency_limiter
 
 
 class AITextServiceBase(ABC):
     """Provider transport contract for AI text generation."""
+
+    api_key: str
+    max_concurrent_requests: int
+
+    async def _request_json(self, url: str, payload: dict, timeout: float | None) -> dict:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
+
+        async def request() -> dict:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=request_timeout,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.TimeoutException as exc:
+                raise AIProviderTimeoutError(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    timeout_seconds=request_timeout,
+                ) from exc
+
+        return await provider_concurrency_limiter.run(
+            "ai_text",
+            self.max_concurrent_requests,
+            request,
+        )
+
+    async def _stream_request(
+        self, url: str, payload: dict, timeout: float | None,
+        parse_event: Callable[[dict], AITextStreamChunk | None],
+    ) -> AsyncIterator[AITextStreamChunk]:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
+        try:
+            async with provider_concurrency_limiter.slot("ai_text", self.max_concurrent_requests):
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=request_timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for event in iter_sse_json_events(response.aiter_lines()):
+                            chunk = parse_event(event)
+                            if chunk:
+                                yield chunk
+        except httpx.TimeoutException as exc:
+            raise AIProviderTimeoutError(
+                provider=self.provider_name,
+                model=self.model_name,
+                timeout_seconds=request_timeout,
+            ) from exc
 
     def _normalize_message_content(self, raw_content: str | list | dict | None) -> str:
         if isinstance(raw_content, str):
