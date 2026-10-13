@@ -216,11 +216,6 @@ async def chunk_text_for_tts(
         yield chunk
 
 
-async def single_text_chunk(text: str) -> AsyncIterator[str]:
-    if text:
-        yield text
-
-
 def normalize_audio_protocol(value: object) -> str:
     text = str(value or "").strip().lower()
     if text in {"pcm_frame", "audio_frame", "frame", "pcm"}:

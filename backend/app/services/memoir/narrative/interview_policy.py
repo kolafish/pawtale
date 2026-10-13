@@ -417,21 +417,3 @@ async def assign_utterance(
     db.add(utterance)
     await db.flush()
     return utterance
-
-
-async def answer_belongs_to_creation_assignment(
-    db: AsyncSession,
-    *,
-    utterance_id: str,
-    completion_issue_id: str,
-) -> bool:
-    return (
-        await db.scalar(
-            select(MemoirVoiceUtterance.id).where(
-                MemoirVoiceUtterance.id == utterance_id,
-                MemoirVoiceUtterance.completion_issue_id
-                == completion_issue_id,
-            )
-        )
-        is not None
-    )

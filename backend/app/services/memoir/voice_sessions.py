@@ -233,10 +233,6 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
     )
 
 
-def _is_effective_session(summary: MemoirVoiceSessionSummaryResponse) -> bool:
-    return summary.utterance_count > 0
-
-
 async def list_voice_sessions(
     db: AsyncSession,
     user_id: str,

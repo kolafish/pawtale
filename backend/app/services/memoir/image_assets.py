@@ -1066,24 +1066,6 @@ async def sync_latest_book_output_image_snapshots(
     return True
 
 
-async def resync_all_latest_book_output_image_snapshots(db: AsyncSession) -> int:
-    project_ids = (
-        await db.execute(
-            select(MemoirBookOutput.project_id)
-            .where(MemoirBookOutput.versions.any())
-            .distinct()
-        )
-    ).scalars().all()
-    changed_count = 0
-    for project_id in project_ids:
-        if await sync_latest_book_output_image_snapshots(
-            db,
-            project_id=str(project_id),
-        ):
-            changed_count += 1
-    return changed_count
-
-
 async def register_share_video_background_asset(
     db: AsyncSession,
     *,

@@ -1247,17 +1247,3 @@ def _render_pdf_pages(
         pdf.showPage()
     pdf.save()
     return output.getvalue()
-
-
-def _truncate_units(text: str, max_units: float) -> str:
-    if _text_units(text) <= max_units:
-        return text
-    current = ""
-    current_units = 0.0
-    for char in text:
-        char_units = _char_units(char)
-        if current and current_units + char_units > max_units:
-            return f"{current}..."
-        current += char
-        current_units += char_units
-    return current
