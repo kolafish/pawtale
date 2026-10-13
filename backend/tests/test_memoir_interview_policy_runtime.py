@@ -404,7 +404,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     }
 
 
-async def test_active_policy_only_executes_pause_when_safety_makes_it_mandatory(
+async def test_keyword_pause_is_only_a_suggestion_for_the_semantic_streamed_turn(
     test_db,
 ):
     _, session, _, _ = await _free_narration_turn(
@@ -424,11 +424,11 @@ async def test_active_policy_only_executes_pause_when_safety_makes_it_mandatory(
     )
 
     assert policy_turn is not None
-    assert policy_turn.execution_mode == MemoirInterviewPolicyExecutionMode.ACTIVE
+    assert policy_turn.execution_mode == MemoirInterviewPolicyExecutionMode.SUGGEST
     assert [item.action for item in policy_turn.context.brief.candidate_actions] == [
         MemoirInterviewAction.PAUSE_OR_END
     ]
-    assert "自然收尾" in active_reply_instruction(policy_turn)
+    assert active_reply_instruction(policy_turn) == ""
 
 
 def test_active_reply_instruction_is_empty_without_an_active_turn():
