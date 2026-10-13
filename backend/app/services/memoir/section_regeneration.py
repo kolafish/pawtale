@@ -8,7 +8,7 @@ import uuid
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -151,10 +151,6 @@ class SectionRegenerationNeedsMaterial(HTTPException):
 
     def __init__(self) -> None:
         super().__init__(status_code=422, detail="本章没有可用于生成小节的讲述")
-
-
-class _SectionRegenerationCancelled(RuntimeError):
-    pass
 
 
 async def _report_progress(
@@ -1010,45 +1006,9 @@ def _job_state(
     chapter_id: str,
     job: MemoirEditingJob | None,
 ) -> dict[str, object]:
-    if job is None:
-        return {
-            "project_id": project_id,
-            "chapter_id": chapter_id,
-            "status": "idle",
-        }
-    result = dict(job.result_json or {})
-    cancelled = result.get("cancelled") is True
-    status = (
-        "cancelled"
-        if cancelled
-        else (
-            job.status
-            if job.status
-            in {
-                MemoirEditingJobStatus.PENDING.value,
-                MemoirEditingJobStatus.RUNNING.value,
-                MemoirEditingJobStatus.SUCCEEDED.value,
-                MemoirEditingJobStatus.FAILED.value,
-            }
-            else "failed"
-        )
-    )
     return {
-        **result,
-        "job_id": job.id,
-        "project_id": project_id,
+        **editing_jobs.project_editing_job_state(project_id=project_id, job=job),
         "chapter_id": chapter_id,
-        "status": status,
-        "can_cancel": status
-        in {
-            MemoirEditingJobStatus.PENDING.value,
-            MemoirEditingJobStatus.RUNNING.value,
-        },
-        "error_message": (
-            job.error_message
-            if status == MemoirEditingJobStatus.FAILED.value
-            else ""
-        ),
     }
 
 
@@ -1140,20 +1100,14 @@ async def _load_regeneration_job(
     chapter_id: str,
     job_id: str | None = None,
 ) -> MemoirEditingJob | None:
-    statement = select(MemoirEditingJob).where(
-        MemoirEditingJob.project_id == project_id,
-        MemoirEditingJob.chapter_id == chapter_id,
-        MemoirEditingJob.job_type
-        == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    return await editing_jobs.load_project_editing_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_type=MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS,
+        dedupe_key=_regeneration_job_dedupe_key(chapter_id),
+        job_id=job_id,
     )
-    if job_id:
-        statement = statement.where(MemoirEditingJob.id == job_id)
-    else:
-        statement = statement.where(
-            MemoirEditingJob.dedupe_key
-            == _regeneration_job_dedupe_key(chapter_id)
-        )
-    return await db.scalar(statement)
 
 
 async def get_chapter_section_regeneration_job(
@@ -1205,29 +1159,7 @@ async def cancel_chapter_section_regeneration_job(
     )
     if job is None:
         raise HTTPException(status_code=404, detail="小节整理任务不存在")
-    result_json = dict(job.result_json or {})
-    result_json.update({"stage": "cancelled", "cancelled": True})
-    await db.execute(
-        update(MemoirEditingJob)
-        .where(
-            MemoirEditingJob.id == job.id,
-            MemoirEditingJob.status.in_(
-                {
-                    MemoirEditingJobStatus.PENDING.value,
-                    MemoirEditingJobStatus.RUNNING.value,
-                }
-            ),
-        )
-        .values(
-            status=MemoirEditingJobStatus.SKIPPED.value,
-            locked_at=None,
-            lease_token=None,
-            lease_expires_at=None,
-            result_json=result_json,
-        )
-    )
-    await db.commit()
-    await db.refresh(job)
+    await editing_jobs.cancel_project_editing_job(db, job=job)
     return _job_state(
         project_id=project_id,
         chapter_id=chapter_id,
@@ -1243,14 +1175,7 @@ async def run_chapter_section_regeneration_job(
     req = MemoirSectionRegenerateRequest.model_validate(payload.get("request"))
     progress = dict(job.result_json or {})
 
-    async def update_progress(patch: dict[str, object]) -> None:
-        progress.update(patch)
-        if not await editing_jobs.update_editing_job_progress(
-            db,
-            job,
-            progress,
-        ):
-            raise _SectionRegenerationCancelled
+    update_progress = editing_jobs.editing_job_progress_callback(db, job=job, progress=progress)
 
     try:
         result = await regenerate_chapter_sections(
@@ -1262,7 +1187,7 @@ async def run_chapter_section_regeneration_job(
             allow_admin=payload.get("allow_admin") is True,
             progress_callback=update_progress,
         )
-    except _SectionRegenerationCancelled:
+    except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={**progress, "stage": "cancelled", "cancelled": True},

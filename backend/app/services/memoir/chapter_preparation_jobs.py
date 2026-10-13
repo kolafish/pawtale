@@ -147,18 +147,14 @@ async def _load_job(
     chapter_id: str,
     job_id: str | None = None,
 ) -> MemoirEditingJob | None:
-    statement = select(MemoirEditingJob).where(
-        MemoirEditingJob.project_id == project_id,
-        MemoirEditingJob.chapter_id == chapter_id,
-        MemoirEditingJob.job_type == MemoirEditingJobType.PREPARE_CHAPTER.value,
+    return await editing_jobs.load_project_editing_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_type=MemoirEditingJobType.PREPARE_CHAPTER,
+        dedupe_key=_job_dedupe_key(chapter_id),
+        job_id=job_id,
     )
-    if job_id:
-        statement = statement.where(MemoirEditingJob.id == job_id)
-    else:
-        statement = statement.where(
-            MemoirEditingJob.dedupe_key == _job_dedupe_key(chapter_id)
-        )
-    return await db.scalar(statement)
 
 
 async def enqueue_chapter_preparation_job(

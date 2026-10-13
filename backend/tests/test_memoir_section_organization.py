@@ -717,6 +717,11 @@ async def test_section_regeneration_job_can_be_cancelled_before_run(
     )
     job_id = queued.json()["job_id"]
 
+    wrong_chapter = await client.delete(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/section-regeneration-jobs/{job_id}"
+    )
+    assert wrong_chapter.status_code == 404
+
     cancelled = await client.delete(f"{url}/{job_id}")
 
     assert cancelled.status_code == 200, cancelled.text

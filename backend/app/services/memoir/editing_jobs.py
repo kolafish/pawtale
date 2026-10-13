@@ -86,11 +86,14 @@ async def load_project_editing_job(
     job_type: MemoirEditingJobType,
     dedupe_key: str,
     job_id: str | None = None,
+    chapter_id: str | None = None,
 ) -> MemoirEditingJob | None:
     statement = select(MemoirEditingJob).where(
         MemoirEditingJob.project_id == project_id,
         MemoirEditingJob.job_type == job_type.value,
     )
+    if chapter_id is not None:
+        statement = statement.where(MemoirEditingJob.chapter_id == chapter_id)
     if job_id:
         statement = statement.where(MemoirEditingJob.id == job_id)
     else:
