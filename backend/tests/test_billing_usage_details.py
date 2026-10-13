@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
@@ -10,11 +11,34 @@ from app.main import app
 from app.models.ai_credits import AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
 from app.models.users import User
-from app.services.ai_costs import AICostEstimate, estimate_audio_cost
+from app.services.ai_costs import AICostEstimate, estimate_ai_cost, estimate_audio_cost, normalize_ai_usage
 from app.services.ai_credits import (
     USAGE_DEBIT, USAGE_REFUND, ensure_ai_credit_account, get_ai_credit_summary,
 )
 from app.services.ai_usage_records import AIUsageContext, record_ai_usage
+
+
+@pytest.mark.parametrize(("at", "expected_used", "unpriced"), [
+    (datetime(2026, 10, 7, 2, 0, tzinfo=UTC), Decimal("0.001408"), 0),
+    (datetime(2027, 1, 4, 2, 0, tzinfo=UTC), Decimal("0"), 1),
+])
+async def test_deepseek_holiday_or_unknown_calendar_charges_no_peak_price(client, test_db, at, expected_used, unpriced):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    usage = normalize_ai_usage({"prompt_tokens": 1_000, "prompt_cache_hit_tokens": 400, "completion_tokens": 200})
+    cost = estimate_ai_cost(provider="deepseek", model="deepseek-flash", usage=usage, at=at)
+    await record_ai_usage(
+        provider="deepseek", model="deepseek-flash", status="succeeded", cost=cost, usage=usage,
+        context=AIUsageContext(operation_id=str(uuid4()), operation="voice", user_id=user_id),
+    )
+    summary = await get_ai_credit_summary(test_db, user_id=user_id)
+    assert summary.used_rmb == expected_used
+    assert summary.remaining_rmb == Decimal("10") - expected_used
+    assert summary.unpriced_success_count == unpriced
+    [record] = (await test_db.scalars(select(AIUsageRecord).where(AIUsageRecord.user_id == user_id))).all()
+    assert record.input_tokens == 1_000
+    assert record.cached_input_tokens == 400
+    assert record.output_tokens == 200
+    assert record.estimated_cost_rmb == (None if unpriced else expected_used)
 
 
 async def test_usage_details_only_show_current_users_successful_charges(client, test_db):

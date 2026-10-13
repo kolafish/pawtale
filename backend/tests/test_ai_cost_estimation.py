@@ -40,7 +40,7 @@ def test_normalizes_provider_usage_and_estimates_deepseek_cost():
             "total_tokens": 1_200,
         },
         # Wednesday 10:00 Beijing time, inside DeepSeek peak hours.
-        completed_at=datetime(2026, 10, 7, 2, 0, tzinfo=UTC),
+        completed_at=datetime(2026, 10, 14, 2, 0, tzinfo=UTC),
     )
     assert result.cost_estimate.status == "estimated"
     # 600 uncached * 2 + 400 cached * 0.04 + 200 output * 8 (RMB per million)
@@ -192,16 +192,59 @@ def test_deepseek_off_peak_hours_cost_half_of_list_price():
     def cost(at: datetime) -> float | None:
         return estimate_ai_cost(provider="deepseek", model="deepseek-flash", usage=usage, at=at).amount_rmb
 
-    # Wednesday 2026-10-07, Beijing time = UTC + 8.
-    assert cost(datetime(2026, 10, 7, 3, 59, tzinfo=UTC)) == 10.0  # 11:59 peak
-    assert cost(datetime(2026, 10, 7, 4, 0, tzinfo=UTC)) == 5.0  # 12:00 lunch break
-    assert cost(datetime(2026, 10, 7, 6, 0, tzinfo=UTC)) == 10.0  # 14:00 peak
-    assert cost(datetime(2026, 10, 7, 10, 0, tzinfo=UTC)) == 5.0  # 18:00 evening
-    assert cost(datetime(2026, 10, 10, 2, 0, tzinfo=UTC)) == 5.0  # Saturday 10:00
+    # Wednesday 2026-10-14 (not National Day), Beijing time = UTC + 8.
+    assert cost(datetime(2026, 10, 14, 0, 59, tzinfo=UTC)) == 5.0  # 08:59
+    assert cost(datetime(2026, 10, 14, 1, 0, tzinfo=UTC)) == 10.0  # 09:00 peak
+    assert cost(datetime(2026, 10, 14, 3, 59, tzinfo=UTC)) == 10.0  # 11:59 peak
+    assert cost(datetime(2026, 10, 14, 4, 0, tzinfo=UTC)) == 5.0  # 12:00 lunch break
+    assert cost(datetime(2026, 10, 14, 5, 59, tzinfo=UTC)) == 5.0  # 13:59
+    assert cost(datetime(2026, 10, 14, 6, 0, tzinfo=UTC)) == 10.0  # 14:00 peak
+    assert cost(datetime(2026, 10, 14, 9, 59, tzinfo=UTC)) == 10.0  # 17:59 peak
+    assert cost(datetime(2026, 10, 14, 10, 0, tzinfo=UTC)) == 5.0  # 18:00 evening
     assert estimate_ai_cost(
         provider="deepseek", model="deepseek-v4-pro", usage=usage,
-        at=datetime(2026, 10, 7, 2, 0, tzinfo=UTC),
+        at=datetime(2026, 10, 14, 2, 0, tzinfo=UTC),
     ).amount_rmb == 36.0
+
+
+@pytest.mark.parametrize("at", [
+    datetime(2026, 10, 7, 2, 0, tzinfo=UTC),  # National Day weekday, Beijing 10:00
+    datetime(2026, 2, 23, 6, 0, tzinfo=UTC),  # Spring Festival weekday, Beijing 14:00
+    datetime(2026, 10, 10, 2, 0, tzinfo=UTC),  # Saturday make-up workday stays off-peak
+    datetime(2026, 10, 7, 2, 0),  # Naive stored timestamps are UTC
+])
+@pytest.mark.parametrize(("model", "expected_cost"), [
+    ("deepseek-flash", 0.001408),
+    ("deepseek-v4-pro", 0.00546),
+])
+def test_deepseek_holidays_and_weekends_discount_input_cache_and_output(at, model, expected_cost):
+    cost = estimate_ai_cost(
+        provider="deepseek", model=model, at=at,
+        usage={"prompt_tokens": 1_000, "prompt_cache_hit_tokens": 400, "completion_tokens": 200},
+    )
+    assert cost.status == "estimated"
+    assert cost.amount_rmb == expected_cost
+
+
+def test_deepseek_missing_calendar_does_not_guess_peak_pricing():
+    # The pinned calendar covers through 2026; January 4, 2027 is a Monday.
+    cost = estimate_ai_cost(
+        provider="deepseek", model="deepseek-flash",
+        at=datetime(2027, 1, 4, 2, 0, tzinfo=UTC),
+        usage={"prompt_tokens": 1_000, "completion_tokens": 200},
+    )
+    assert cost.status == "unknown"
+    assert cost.amount_rmb is None
+    assert "holiday calendar" in cost.reason
+
+    # Even without a holiday calendar, evening and weekend prices are known.
+    for at in (datetime(2027, 1, 4, 10, 0, tzinfo=UTC), datetime(2027, 1, 9, 2, 0, tzinfo=UTC)):
+        off_peak = estimate_ai_cost(
+            provider="deepseek", model="deepseek-flash", at=at,
+            usage={"prompt_tokens": 1_000, "completion_tokens": 200},
+        )
+        assert off_peak.status == "estimated"
+        assert off_peak.amount_rmb == 0.0018
 
 
 def test_retried_structured_output_prices_each_attempt_on_its_own_tier():
