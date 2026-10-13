@@ -620,8 +620,11 @@ class PDFBookBuilder:
             self.y -= spacing_after
 
     def add_body_text(self, text: str, *, spacing_after: int = 0) -> None:
+        # Paragraph spacing is handled below; blank separator lines must not
+        # add a second gap or create an otherwise empty continuation page.
+        paragraphs = "\n".join(line for line in text.splitlines() if line.strip())
         self.add_text(
-            text,
+            paragraphs,
             first_line_indent=self.layout.font_size * 2,
             paragraph_spacing_after=max(3, self.layout.line_height // 5),
             spacing_after=spacing_after,

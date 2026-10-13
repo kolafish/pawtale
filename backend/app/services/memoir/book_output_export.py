@@ -1165,7 +1165,14 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         opening_spacer = (
             1.5 if layout.mirror_body_pages else 2.5
         ) if long_title else (5 if layout.mirror_body_pages else 3)
-        builder.add_spacer(opening_spacer)
+    elif template in {"warm_journal", "modern_minimal"}:
+        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
+    else:
+        opening_spacer = 4.0 if layout.mirror_body_pages else 2.5
+    # Reading pages keep the chapter design without a print-sized top void.
+    # Print editions retain their opening space and right-page alignment.
+    builder.add_spacer(min(opening_spacer, 1) if layout.reading_edition else opening_spacer)
+    if template == "heritage_classic":
         builder.add_centered(
             label,
             font_size=layout.small_font_size + 2,
@@ -1186,8 +1193,6 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         _add_chapter_artwork(builder, template=template, centered=True)
         return
     if template == "warm_journal":
-        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
-        builder.add_spacer(opening_spacer)
         builder.add_text(
             label, font_size=layout.small_font_size + 1,
             line_height=layout.line_height, spacing_after=9,
@@ -1204,8 +1209,6 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         _add_chapter_artwork(builder, template=template, centered=False)
         return
     if template == "modern_minimal":
-        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
-        builder.add_spacer(opening_spacer)
         builder.add_text(
             f"{index:02}", font_size=layout.small_font_size + 2,
             line_height=layout.line_height, spacing_after=13,
@@ -1229,7 +1232,6 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         )
         return
 
-    builder.add_spacer(4.0 if layout.mirror_body_pages else 2.5)
     builder.add_text(
         label,
         font_size=layout.small_font_size + 1,
