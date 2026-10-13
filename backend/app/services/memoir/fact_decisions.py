@@ -19,6 +19,14 @@ from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import TranscriptEdit, transcript_edits_prompt
 
 
+# Exact value emitted by the pre-answer chapter workbench; never user evidence.
+LEGACY_CONFIRMATION_NOTE = "用户已确认按当前建议处理"
+
+
+def has_explicit_answer(note: str) -> bool:
+    return bool(note.strip()) and note.strip() != LEGACY_CONFIRMATION_NOTE
+
+
 @dataclass(frozen=True)
 class FactDecision:
     issue_id: str
@@ -43,7 +51,7 @@ def is_confirmed_fact(issue: MemoirCompletionIssue) -> bool:
         and issue.issue_type == MemoirCompletionIssueType.CONFLICT.value
         and issue.status == MemoirCompletionIssueStatus.CLOSED.value
         and issue.outcome == MemoirCompletionIssueOutcome.CONFIRMED.value
-        and bool(issue.outcome_note.strip())
+        and has_explicit_answer(issue.outcome_note)
     )
 
 

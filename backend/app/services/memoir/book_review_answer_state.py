@@ -19,7 +19,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
 )
 from app.services.memoir.semantic_state import semantic_json_signature
-from app.services.memoir.fact_decisions import is_confirmed_fact
+from app.services.memoir.fact_decisions import has_explicit_answer, is_confirmed_fact
 
 
 BOOK_REVIEW_ANSWER_APPLICATION_KEY = "book_review_answer_application"
@@ -104,7 +104,7 @@ async def load_answer_context(
             continue
         if (
             issue.outcome != MemoirCompletionIssueOutcome.CONFIRMED.value
-            or not issue.outcome_note.strip()
+            or not has_explicit_answer(issue.outcome_note)
             or is_confirmed_fact(issue)
         ):
             continue
