@@ -39,7 +39,7 @@ class MemoirChapterAIRequest(BaseModel):
 
 
 class MemoirChapterSectionRevisionJobRequest(MemoirChapterAIRequest):
-    operation: Literal["plan", "feedback", "draft"] = "plan"
+    operation: Literal["plan", "feedback", "draft", "revise"] = "plan"
     proposal_id: str | None = Field(default=None, max_length=36)
     feedback: str | None = Field(default=None, max_length=1000)
 
@@ -47,7 +47,7 @@ class MemoirChapterSectionRevisionJobRequest(MemoirChapterAIRequest):
     def _validate_operation_input(self):
         self.proposal_id = (self.proposal_id or "").strip() or None
         self.feedback = (self.feedback or "").strip() or None
-        if self.operation in {"plan", "feedback"} and not self.feedback:
+        if self.operation in {"plan", "feedback", "revise"} and not self.feedback:
             raise ValueError("请先输入或说出修改意见")
         if self.operation in {"feedback", "draft"} and not self.proposal_id:
             raise ValueError("缺少要继续处理的修改方案")
@@ -57,7 +57,7 @@ class MemoirChapterSectionRevisionJobRequest(MemoirChapterAIRequest):
 class MemoirChapterSectionRevisionJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
-    operation: Literal["plan", "feedback", "draft"] = "plan"
+    operation: Literal["plan", "feedback", "draft", "revise"] = "plan"
     status: Literal[
         "idle",
         "pending",

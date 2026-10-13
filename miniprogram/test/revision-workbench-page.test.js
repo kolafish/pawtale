@@ -188,22 +188,6 @@ function loadRevisionPage({ api = {} } = {}) {
   return loadPageModule("../pages/revision-workbench/index.ts");
 }
 
-test("section revision keeps one automatic voice editor for initial and follow-up feedback", () => {
-  const template = fs.readFileSync(
-    path.join(__dirname, "../pages/revision-workbench/index.wxml"),
-    "utf8",
-  );
-
-  assert.equal(template.match(/<voice-text-editor/g)?.length, 1);
-  assert.equal(
-    template.match(/automatic-voice-command="\{\{true\}\}"/g)?.length,
-    1,
-  );
-  assert.match(template, /voice-session-id="\{\{proposalId \|\| sectionId\}\}"/);
-  assert.match(template, /\{\{proposal \? "继续调整" : "小节修改"\}\}/);
-  assert.match(template, /进入页面后直接说修改要求，停顿后会自动生成修改思路/);
-});
-
 test("section revision resolves an existing proposal before mounting its voice editor", async () => {
   let resolveJob;
   const job = new Promise((resolve) => {
@@ -534,39 +518,35 @@ test("book revision keeps submit error when polling only finds an older success"
   assert.equal(context.data.error, "network unavailable");
 });
 
-test("section revision uses the shared plan, preview, and apply workbench", async () => {
+test("direct section preview generates, refines, and saves with one confirmation", async () => {
   const calls = [];
-  let draftReady = false;
-  let initialPlanReady = false;
+  let previewReady = false;
   let scheduledFeedbackPoll = null;
   global.wx = {
     setNavigationBarTitle() {},
     showToast() {},
     showModal(options) {
-      options.success({ confirm: true, cancel: false });
+      assert.fail("A section preview must not ask for confirmation twice");
     },
     navigateBack() {},
   };
   const { page } = loadRevisionPage({
     api: {
       getMemoirChapterSectionRevisionJob: async () => ({
-        ...revisionFeedbackJob(initialPlanReady ? "succeeded" : "idle"),
-        operation: "plan",
-        proposal_id: initialPlanReady ? "proposal-1" : null,
+        ...revisionFeedbackJob(previewReady ? "succeeded" : "idle"),
+        operation: "revise",
+        proposal_id: previewReady ? "proposal-1" : null,
       }),
       enqueueMemoirChapterSectionRevision: async (...args) => {
         calls.push(args);
-        if (args[3] === "plan") {
-          initialPlanReady = true;
+        if (!args[4]) {
+          previewReady = true;
           return revisionFeedbackJob("pending");
-        }
-        if (args[3] === "draft") {
-          draftReady = true;
         }
         return revisionFeedbackJob("succeeded");
       },
       getMemoirChapterSectionRevisionProposal: async () => (
-        draftReady ? revisionProposalMetadata() : revisionPlanProposal()
+        revisionProposalMetadata()
       ),
       applyMemoirChapterSectionRevision: async (...args) => {
         calls.push(["apply", ...args]);
@@ -603,8 +583,8 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
   assert.ok(scheduledFeedbackPoll);
   scheduledFeedbackPoll();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(context.data.proposal.phase, "plan_ready");
-  await page.generateDraft.call(context);
+  assert.equal(context.data.proposal.phase, "draft_ready");
+  await page.submitFeedback.call(context, { detail: { value: "把最后一句再精简一点。" } });
   assert.equal(context.data.proposal.phase, "draft_ready");
   assert.equal(
     context.data.changedChapters[0].sections[0].display_content,
@@ -617,7 +597,7 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
       "project-1",
       "chapter-1",
       "section-1",
-      "plan",
+      "revise",
       null,
       "保留事实，把语气写得更平实。",
     ],
@@ -625,9 +605,9 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
       "project-1",
       "chapter-1",
       "section-1",
-      "draft",
+      "revise",
       "proposal-1",
-      null,
+      "把最后一句再精简一点。",
     ],
     [
       "apply",
@@ -638,3 +618,33 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
     ],
   ]);
 });
+
+for (const status of ["running", "failed", "succeeded"]) {
+  test(`direct section preview restores ${status} work without submitting again`, async () => {
+    global.wx = { setNavigationBarTitle() {}, showToast() {} };
+    let enqueued = 0;
+    const { page } = loadRevisionPage({ api: {
+      enqueueMemoirChapterSectionRevision: async () => { enqueued += 1; },
+      getMemoirChapterSectionRevisionJob: async () => ({
+        ...revisionFeedbackJob(status), operation: "revise", proposal_id: "proposal-1",
+        error_message: status === "failed" ? "本次生成失败，预览仍保留" : "",
+      }),
+      getMemoirChapterSectionRevisionProposal: async () => revisionProposalMetadata({
+        can_apply: status === "succeeded", can_dismiss: status !== "running",
+      }),
+    } });
+    const context = pageContext(page);
+    await page.onLoad.call(context, {
+      scope: "chapter_section", projectId: "project-1", chapterId: "chapter-1", sectionId: "section-1",
+    });
+    assert.equal(context.data.proposal.phase, "draft_ready");
+    assert.equal(context.data.proposalId, "proposal-1");
+    assert.equal(context.data.feedbackBusy, status === "running");
+    assert.equal(context.data.draftBusy, false);
+    assert.equal(context.data.proposal.can_apply, status === "succeeded");
+    assert.equal(context.data.changedChapters[0].sections[0].display_content, "修改后正文");
+    if (status === "failed") assert.match(context.data.error, /本次生成失败/);
+    assert.equal(enqueued, 0);
+    page.onUnload.call(context);
+  });
+}
