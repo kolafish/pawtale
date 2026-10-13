@@ -48,7 +48,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.book_plan_ai import NO_STORY_YET
-from app.services.memoir.book_plan_sources import load_plan_with_chapters
+from app.services.memoir.book_plan_sources import load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.chapter_split import split_large_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -60,7 +60,7 @@ from app.services.memoir.section_regeneration import (
     SectionRegenerationNeedsMaterial,
     regenerate_chapter_sections,
 )
-from app.services.memoir.sections import place_material
+from app.services.memoir.sections import lock_plan_structure, place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -78,23 +78,39 @@ SYSTEM_PROMPT = (
 SETTLE_SECONDS = 3
 MAX_UNASSIGNED_ATTEMPTS = 2
 
-class _GrowthGroup(BaseModel):
+class _NewChapter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_indices: list[int] = Field(default_factory=list)
-    action: Literal["assign_existing", "create_section", "create_chapter", "leave_unassigned", "not_story"]
+    chapter_ref: str = Field(pattern=r"^N[1-9][0-9]*$")
+    title: str
+    insert_before_chapter_id: str | None = None
+    time_evidence: str | None = None
+
+
+class _StorySection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_indices: list[int]
     section_id: str | None = None
-    chapter_id: str | None = None
-    new_chapter_title: str | None = None
+    chapter_ref: str | None = None
     new_section_title: str | None = None
-    confidence: float | None = None
     reason: str = ""
+
+
+class _UnassignedStory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_indices: list[int]
+    reason: str
 
 
 class _GrowthOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    groups: list[_GrowthGroup] = Field(default_factory=list)
+    new_chapters: list[_NewChapter] = Field(default_factory=list)
+    sections: list[_StorySection] = Field(default_factory=list)
+    non_story_indices: list[int] = Field(default_factory=list)
+    unassigned: list[_UnassignedStory] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -104,6 +120,7 @@ class GrowthGroup:
     section_id: str | None = None
     chapter_id: str | None = None
     new_chapter_title: str | None = None
+    insert_before_chapter_id: str | None = None
     new_section_title: str | None = None
     confidence: float | None = None
     reason: str = ""
@@ -119,6 +136,8 @@ class DeferredSource(BaseModel):
 
 
 class GrowthBatch(BaseModel):
+    original_chapter_ids: list[str] = Field(default_factory=list)
+    created_chapters: dict[str, str | None] = Field(default_factory=dict)
     context_signature: str = ""
     groups: list[GrowthGroup] = Field(default_factory=list)
     sources: dict[str, tuple[str, str | None]]
@@ -152,12 +171,6 @@ async def _save_progress(db: AsyncSession, job: MemoirEditingJob, progress: Stor
 
 def _clean_text(value: object, *, limit: int) -> str:
     return " ".join(str(value or "").split()).strip()[:limit]
-
-
-def _confidence(value: float | None) -> float | None:
-    if value is None:
-        return None
-    return min(1.0, max(0.0, value))
 
 
 def _decode_reference(reference_map: ModelReferenceMap, value: str | None) -> str | None:
@@ -209,24 +222,21 @@ def build_story_growth_prompt(
         for section in section_candidates
     ]
     prompt = (
-        "请整理本次新增的全部讲述。可以把多条讲述作为一组，但每条讲述只能出现一次。\n"
-        "优先归入已有小节；已有章节下出现明确的新事件或新主题时才新建小节；"
-        "只有出现无法归入任何已有章节的人生阶段或长期主题时才新建章节；"
-        "不确定时暂不归类。标题应具体、自然、直接来自讲述含义，不使用“相关经历”等空泛表达。\n"
-        "interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。"
-        "整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，"
-        "用 not_story，它不进书；只要有一点经历或感受就照常归类。\n\n"
+        '请将本次全部讲述安排到故事目录中。先判断哪些是故事，再安排故事的章节和小节。\n'
+        '1. 只有整条没有亲历事情、经历或感受（纯称呼、寒暄、停顿、请求暂停）才放 non_story_indices，不能和故事放进同一小节。\n'
+        '2. 小节对应一件事或相连场景：同一事件的断续讲述合组；不同事件分组。章节对应人生阶段或持续主题，不因同属一个阶段就把所有事件放在一个小节。\n'
+        '章节的主题由章节标题决定，已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
+        '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让各小节用 chapter_ref 引用它，不需要重复定义章节。\n'
+        '4. 只要有明确的亲历事件或感受，就安排已有位置或建立适当的新位置；篇幅短、没有年份或与现有章节不同，均不是暂不归类的理由。不为迁就现有目录强行添加时间或人生阶段。不编造人物关系、时间或事件。\n'
+        '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才填 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
+        '6. 新章可用 insert_before_chapter_id 指定插在某个现有章节前。只有明确的人生先后且现有目录按人生阶段组织时才指定；主题目录或时间不明填 null。不重排已有章节。不同新章节按拟收录先后顺序列出。time_evidence 必须是本次讲述中能支持插入位置的原文片段；没有明确时间证据时 time_evidence 和 insert_before_chapter_id 都填 null。\n'
+        '标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
+        '7. 每个 source_index 必须且只能在 sections、non_story_indices、unassigned 中出现一次。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。\n'
+        '\n'
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
         f"已有章节：\n{json.dumps(chapter_payload, ensure_ascii=False)}\n\n"
         f"已有小节：\n{json.dumps(section_payload, ensure_ascii=False)}\n\n"
-        "只返回 JSON："
-        '{"groups":[{"source_indices":[1],'
-        '"action":"assign_existing|create_section|create_chapter|leave_unassigned|not_story",'
-        '"section_id":null,"chapter_id":null,'
-        '"new_chapter_title":null,"new_section_title":null,'
-        '"confidence":0.0,"reason":""}]}\n'
-        "assign_existing 填 section_id；create_section 填 chapter_id 和 new_section_title；"
-        "create_chapter 填 new_chapter_title 和 new_section_title；leave_unassigned 和 not_story 不创建结构。"
+        '只返回 JSON：{"new_chapters":[{"chapter_ref":"N1","title":"新章节标题","insert_before_chapter_id":null,"time_evidence":null}],"sections":[{"source_indices":[1,2],"section_id":null,"chapter_ref":"N1","new_section_title":"一个具体事件","reason":"归类依据"}],"non_story_indices":[3],"unassigned":[{"source_indices":[4],"reason":"缺少何种信息"}]}\nsections 的已有 section_id 和新建小节的 chapter_ref/new_section_title 二者只能选一个。chapter_ref 只能是给出的 C 引用或本次声明的 N 引用；各数组没有对应内容时填空数组。'
     )
     return prompt, chapter_refs, section_refs
 
@@ -238,37 +248,67 @@ def _normalize_groups(
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
 ) -> list[GrowthGroup]:
-    indices = [index for group in output.groups for index in group.source_indices]
+    invalid = HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
+    indices = [index for group in [*output.sections, *output.unassigned] for index in group.source_indices]
+    indices.extend(output.non_story_indices)
     if sorted(indices) != list(range(1, len(utterances) + 1)):
         raise HTTPException(status_code=422, detail="AI 归类结果遗漏或重复了讲述，原始讲述已保留，请继续整理")
+    declared = {chapter.chapter_ref: chapter for chapter in output.new_chapters}
+    if len(declared) != len(output.new_chapters) or len({_clean_text(item.title, limit=80) for item in output.new_chapters}) != len(declared):
+        raise invalid
+    used_new_refs = {item.chapter_ref for item in output.sections if item.chapter_ref in declared}
+    if used_new_refs != set(declared):
+        raise invalid
+    anchors = {}
+    for ref, chapter in declared.items():
+        if not chapter.title.strip():
+            raise invalid
+        anchor = _decode_reference(chapter_refs, chapter.insert_before_chapter_id)
+        if chapter.insert_before_chapter_id:
+            source_indices = sorted(index for item in output.sections if item.chapter_ref == ref for index in item.source_indices)
+            source_text = "".join(current_utterance_text(utterances[index - 1]) for index in source_indices)
+            if not anchor or not chapter.time_evidence or chapter.time_evidence not in source_text:
+                raise invalid
+        anchors[ref] = anchor
     groups: list[GrowthGroup] = []
-    for raw in output.groups:
-        indices = raw.source_indices
-        if not indices:
-            continue
-        action = raw.action
-        chapter_id = _decode_reference(chapter_refs, raw.chapter_id)
+    new_order = {ref: index for index, ref in enumerate(declared)}
+    for raw in sorted(output.sections, key=lambda item: new_order.get(item.chapter_ref, -1)):
         section_id = _decode_reference(section_refs, raw.section_id)
-        new_chapter_title = _clean_text(raw.new_chapter_title, limit=80) or None
-        new_section_title = _clean_text(raw.new_section_title, limit=200) or None
-        if action == "assign_existing" and section_id is None:
-            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
-        if action == "create_section" and (chapter_id is None or not new_section_title):
-            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
-        if action == "create_chapter" and (not new_chapter_title or not new_section_title):
-            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
-        groups.append(
-            GrowthGroup(
-                utterance_ids=[utterances[index - 1].id for index in indices],
-                action=action,
-                section_id=section_id if action == "assign_existing" else None,
-                chapter_id=chapter_id if action == "create_section" else None,
-                new_chapter_title=(new_chapter_title if action == "create_chapter" else None),
-                new_section_title=(new_section_title if action in {"create_section", "create_chapter"} else None),
-                confidence=_confidence(raw.confidence),
-                reason=_clean_text(raw.reason, limit=300) or "暂时无法确定素材归属",
-            )
-        )
+        chapter_id = _decode_reference(chapter_refs, raw.chapter_ref)
+        new_chapter = declared.get(raw.chapter_ref)
+        title = _clean_text(raw.new_section_title, limit=200) or None
+        if not raw.source_indices:
+            raise invalid
+        if raw.section_id:
+            if not section_id or raw.chapter_ref or title:
+                raise invalid
+            action = "assign_existing"
+        else:
+            if not title or not (chapter_id or new_chapter):
+                raise invalid
+            action = "create_chapter" if new_chapter else "create_section"
+        groups.append(GrowthGroup(
+            utterance_ids=[utterances[index - 1].id for index in raw.source_indices],
+            action=action,
+            section_id=section_id,
+            chapter_id=chapter_id,
+            new_chapter_title=_clean_text(new_chapter.title, limit=80) if new_chapter else None,
+            insert_before_chapter_id=anchors.get(raw.chapter_ref),
+            new_section_title=title,
+            reason=_clean_text(raw.reason, limit=300),
+        ))
+    for raw in output.unassigned:
+        if not raw.source_indices or not raw.reason.strip():
+            raise invalid
+        groups.append(GrowthGroup(
+            utterance_ids=[utterances[index - 1].id for index in raw.source_indices],
+            action="leave_unassigned", reason=_clean_text(raw.reason, limit=300),
+        ))
+    if output.non_story_indices:
+        groups.append(GrowthGroup(
+            utterance_ids=[utterances[index - 1].id for index in output.non_story_indices],
+            action="not_story", reason="仅回应访谈员，没有讲述经历或感受",
+        ))
     return groups
 
 
@@ -519,7 +559,7 @@ async def _place_groups(
                     expected_source=batch.sources[utterance_id],
                     expected_section_version=batch.section_versions.get(target_section_id),
                     expected_chapter_updated_at=batch.chapter_updated_at.get(
-                        batch.section_chapters.get(target_section_id) or group.chapter_id
+                        batch.section_chapters.get(target_section_id) or group.chapter_id or same_title_chapter_id
                     ),
                     commit=False,
                 )
@@ -534,6 +574,8 @@ async def _place_groups(
             batch.section_chapters[target_section_id] = placement.chapter_id
             if group.action == "create_chapter":
                 chapter_by_title.setdefault(group.new_chapter_title, placement.chapter_id)
+            if placement.created_chapter:
+                batch.created_chapters[placement.chapter_id] = group.insert_before_chapter_id
             if placement.chapter_id not in batch.chapter_updated_at:
                 batch.chapter_updated_at[placement.chapter_id] = await db.scalar(
                     select(MemoirBookPlanChapter.updated_at).where(MemoirBookPlanChapter.id == placement.chapter_id)
@@ -542,6 +584,35 @@ async def _place_groups(
             await on_placed(utterance_id)
             placed.append(utterance_id)
     return placed
+
+
+async def _position_new_chapters(db: AsyncSession, *, project_id: str, batch: GrowthBatch) -> None:
+    if not batch.created_chapters or not batch.original_chapter_ids:
+        return
+    plan = await lock_plan_structure(db, project_id=project_id)
+    chapters = list((await db.scalars(select(MemoirBookPlanChapter).where(
+        MemoirBookPlanChapter.plan_id == plan.id,
+    ).order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
+      .with_for_update().execution_options(populate_existing=True))).all())
+    # Place only chapters created by this batch. A changed directory belongs to
+    # its newer writer; keep our stories at the end instead of undoing that edit.
+    if [item.id for item in chapters] != [*batch.original_chapter_ids, *batch.created_chapters]:
+        return
+    if any(item.updated_at != batch.chapter_updated_at.get(item.id) for item in chapters):
+        return
+    ordered = [item for item in chapters if item.id not in batch.created_chapters]
+    for chapter in chapters:
+        if chapter.id not in batch.created_chapters:
+            continue
+        anchor = batch.created_chapters[chapter.id]
+        position = next((index for index, item in enumerate(ordered) if item.id == anchor), len(ordered))
+        ordered.insert(position, chapter)
+    if [item.id for item in ordered] == [item.id for item in chapters]:
+        return
+    set_temporary_chapter_orders(chapters)
+    await db.flush()
+    renumber_chapters(ordered)
+    await db.flush()
 
 
 async def grow_story_tree(
@@ -643,6 +714,7 @@ async def grow_story_tree(
     if progress.batch is None and utterances:
         _plan, chapters, sections = await _load_tree(db, project_id=job.project_id)
         batch = GrowthBatch(
+            original_chapter_ids=[item.id for item in chapters],
             context_signature=context_signature,
             sources={
                 item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
@@ -672,6 +744,7 @@ async def grow_story_tree(
             await _save_progress(db, job, progress)
 
         await _place_groups(db, user_id=project.user_id, project_id=job.project_id, batch=batch, on_placed=on_placed)
+        await _position_new_chapters(db, project_id=job.project_id, batch=batch)
         assigned_ids = set(
             (
                 await db.scalars(
