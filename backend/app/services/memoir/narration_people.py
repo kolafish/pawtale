@@ -3,7 +3,7 @@
 Each narrator segment is read once per corrected (or hand-edited) transcript version, inside the narrator
 profile job. The reading is stored on the narrator message. The roster is never stored: it is folded from
 the readings in narration order whenever it is needed, so a deleted or re-read segment needs no override
-rules. A person keeps a stable id; the model sees P1, P2… and a new person gets "<message id>:<how they are called>".
+rules. A person keeps a stable id; the model sees P1, P2… and a new person gets "<message id>:<version>:<n>".
 Once a story is told, 小余 may ask about one gap in someone the narrator keeps mentioning; the next reading
 takes the answer from 小余's question and the narrator's reply.
 """
@@ -117,36 +117,28 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
     return people
 
 
-# Every group must appear: "梁老师和校长关系怎么样？" names the person and 关系 but not the narrator.
-_RELATION_CUES = (("关系", "什么人", "怎么认识", "是您的", "是你的"), ("您", "你"))
-_NAME_CUES = (("名字", "叫什么", "姓"),)
-
-
 @dataclass(frozen=True)
 class Question:
     person_id: str
+    # Written by code; 小余 is told to say it as is, so whether it was asked is a plain text check.
     text: str
-    # How the narrator refers to the person, and words that only a question about the gap would use.
-    words: tuple[str, ...]
-    cues: tuple[tuple[str, ...], ...]
 
     def asked_in(self, line: str) -> bool:
-        """A follow-up like "梁老师后来怎么样了？" names the person but does not ask about the gap."""
-        return (
-            bool(re.search(r"[？?]", line))
-            and any(word in line for word in self.words)
-            and all(any(cue in line for cue in group) for group in self.cues)
-        )
+        return _plain(self.text).rstrip("呀吗呢") in _plain(line)
 
 
-def _gap(person: Person) -> tuple[str, tuple[tuple[str, ...], ...]]:
-    """What a reader would miss about someone the narrator keeps mentioning: the relation, else a name."""
+def _plain(text: str) -> str:
+    return re.sub(r"[\s，。！？、,.!?“”\"'：:；;…]", "", text)
+
+
+def _ask(person: Person) -> str:
+    """The question for what a reader would miss about someone the narrator keeps mentioning, if anything."""
     label = person.name or ("" if person.call in _PRONOUNS else person.call)
     if not person.relation:
-        return (f"{label}和他是什么关系", _RELATION_CUES) if label else ("", ())
+        return f"{label}跟您是什么关系呀？" if label else ""
     if not person.name and person.call in _PRONOUNS:
-        return f"这位{person.relation}叫什么名字", _NAME_CUES
-    return "", ()
+        return f"那位{person.relation}，您还记得{person.call}叫什么名字吗？"
+    return ""
 
 
 async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Question | None:
@@ -164,10 +156,9 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
     session_ids = {message.id for message in voice_session.messages}
     people = sorted((await load_people(db, voice_session.project_id)).values(), key=lambda person: -person.last_seen)
     for person in people:
-        text, cues = _gap(person)
+        text = _ask(person)
         if text and person.id not in asked and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
-            words = tuple(word for word in (person.call, person.name, person.relation) if word and word not in _PRONOUNS)
-            return Question(person_id=person.id, text=text, words=words, cues=cues)
+            return Question(person_id=person.id, text=text)
     return None
 
 
@@ -230,9 +221,9 @@ def build_people_prompt(*, people: list[Person], narrator: str, previous_line: s
         "同一个称呼就是已经记下的那位，除非他说明是另一位。别的人确定是同一个才写编号，拿不准就当新人物："
         "分开记最多称呼不统一，并错人会把两个人的事写到一起\n"
         "- 讲述者说明两个称呼是同一个人时，在其中一条的 same_as 写另一个人的编号\n"
-        "- 每个人只填这段新说出或纠正的，没有新内容的填 null：call 讲述者怎么叫他（只用“他”“她”指代的，"
-        "已经记下的人填 null，新人物填“他”或“她”），name 名字（说了才填），"
-        "relation 和讲述者的关系（用他自己的说法），note 一句话说他是谁、在讲述者的事里做了什么（30 字以内）\n"
+        "- 每个人填这段里讲述者说到的，这段没说到的项填 null，不照抄已经记下的：call 讲述者在这段里怎么叫他"
+        "（只用“他”“她”指代的，已经记下的人填 null，新人物填“他”或“她”），name 名字（这段说了才填），"
+        "relation 和讲述者的关系（这段说了才填，用他自己的说法），note 一句话说他在这段里是谁、做了什么（30 字以内）\n"
         "- unclear：如果某一个具体的人有一件事不问清楚，读者就看不懂他是谁，而且讲述者一定知道答案，"
         "写成一句小余能直接问讲述者的话，用称呼不用编号；大多数段落没有\n\n"
         "只返回 JSON：\n"
@@ -249,8 +240,17 @@ async def read_people(
     previous_line: str,
     transcript_version_id: str,
 ) -> bool:
-    """Read one segment and store what it says about people. Returns False when its transcript changed since."""
-    people = list((await load_people(db, project.id)).values())
+    """Read one segment and store what it says about people. Returns False when its transcript changed since.
+
+    Each reading stands on its own, so nothing is lost when it is replaced. A person keeps their id only by the
+    model naming it: on a re-read, the people this segment recorded before are offered again with their ids,
+    so a reorder, a renamed call or two people with one call keep their ids; anyone it no longer names is
+    simply not defined here any more, and a new person gets an id no earlier version used.
+    """
+    roster = await load_people(db, project.id)
+    previous = (message.metadata_json or {}).get(READING_KEY)
+    earlier = fold([(message.id, previous)]) if isinstance(previous, dict) else {}
+    people = [*roster.values(), *(person for person_id, person in earlier.items() if person_id not in roster)]
     prompt = build_people_prompt(
         people=people,
         narrator=narrator,
@@ -286,18 +286,14 @@ async def read_people(
         value = (value or "").strip()
         return value[:80] if value and value.lower() != "null" else None
 
-    stored = []
-    for index, item in enumerate(generated.value.people, start=1):
-        # A new person's id comes from how they are called, not their position in the output, so a re-read
-        # that lists people in another order (or drops one) cannot hand later segments' facts to someone else.
-        new_id = f"{message_id}:{text(item.call) or text(item.name) or index}"
-        if any(person["id"] == new_id for person in stored):
-            new_id = f"{new_id}:{index}"
-        stored.append({
-            "id": refs.get(item.ref.strip()) or new_id,
+    stored = [
+        {
+            "id": refs.get(item.ref.strip()) or f"{message_id}:{transcript_version_id}:{index}",
             "same_as": refs.get((item.same_as or "").strip()),
             **{key: text(getattr(item, key)) for key in _FIELDS},
-        })
+        }
+        for index, item in enumerate(generated.value.people, start=1)
+    ]
     current.metadata_json = {
         **(current.metadata_json or {}),
         READING_KEY: {"transcript_version_id": transcript_version_id, "people": stored},
