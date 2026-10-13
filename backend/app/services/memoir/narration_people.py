@@ -212,7 +212,10 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
 
 
 async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = None) -> dict[str, Person]:
-    """The roster; `keep` names a segment being re-read, whose last reading still counts for who is who."""
+    """The roster; `keep` names a segment being re-read, whose last reading still says who is who.
+
+    Its merges are left out: the re-read may be correcting one, and both people must stay offered.
+    """
     rows = await db.execute(
         select(MemoirChatMessage.id, MemoirChatMessage.metadata_json, MemoirChatMessage.transcript_version_id)
         .join(MemoirVoiceSession, MemoirChatMessage.voice_session_id == MemoirVoiceSession.id)
@@ -226,7 +229,12 @@ async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = N
     )
     # A reading of an older transcript version is dropped: what it said may have been corrected.
     return fold(
-        (message_id, metadata[READING_KEY])
+        (
+            message_id,
+            {"people": [{**item, "same_as": None} for item in metadata[READING_KEY].get("people") or []]}
+            if message_id == keep
+            else metadata[READING_KEY],
+        )
         for message_id, metadata, version in rows
         if isinstance((metadata or {}).get(READING_KEY), dict)
         and (message_id == keep or metadata[READING_KEY].get("transcript_version_id") == (version or ""))
