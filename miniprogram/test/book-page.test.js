@@ -518,6 +518,7 @@ test("book page routes reading and export actions to their focused pages", () =>
 
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1",
+    "/pages/book-reader/index?projectId=project%2F1",
     "/pages/book-export/index?projectId=project%2F1&action=files",
   ]);
 });
@@ -634,7 +635,7 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(context.data.bookContentAvailable, false);
   assert.equal(context.data.bookCharCount, 0);
   const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-  assert.match(template, /bookContentAvailable && !bookStaleNotice/);
+  assert.match(template, /wx:if="\{\{bookContentAvailable\}\}" class="hero-reading-action"/);
 
   page.applyPlan.call(context, samplePlan("draft"));
   assert.equal(context.bookOutput, null);

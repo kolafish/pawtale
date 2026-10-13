@@ -447,10 +447,12 @@ test("home keeps interview-engine notices out of the story overview", () => {
   assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
 
-test("home only surfaces failed draft progress that the reader can act on", () => {
+test("home surfaces each non-idle progress state with the existing recovery and reading actions", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(pageWxml, /wx:if="\{\{progress && progress\.status === 'failed'\}\}"/);
+  assert.match(pageWxml, /wx:if="\{\{progress && progress\.status !== 'idle'\}\}"/);
+  assert.match(pageWxml, /progress\.status === 'needs_input'[\s\S]*bindtap="openReviewIssues"/);
+  assert.match(pageWxml, /progress\.status === 'partial_ready'[\s\S]*bindtap="openBook"/);
   assert.match(pageWxml, /bindtap="retryDraft"/);
 });
 

@@ -303,7 +303,7 @@ test("book reader expands stories and jumps from the table of contents to the te
   assert.equal(context.data.readerChapterIndex, 1);
 });
 
-test("book reader presents chapter updates as reading context", async () => {
+test("book reader identifies the saved version when chapters have newer changes", async () => {
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: async () => sampleBookOutput(
       3,
@@ -318,7 +318,8 @@ test("book reader presents chapter updates as reading context", async () => {
 
   await page.onLoad.call(context, { projectId: "project-1" });
 
-  assert.equal(context.data.readerUpdateNotice, "《工作与创业经历》等章节刚刚更新");
+  assert.equal(context.readerAudioVersionId, "book-output-version-3");
+  assert.match(context.data.readerUpdateNotice, /已保存书稿.*尚未包含.*工作与创业经历/);
   assert.equal(context.data.readerMetaText, "2章 · 6字");
 });
 

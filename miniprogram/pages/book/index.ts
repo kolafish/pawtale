@@ -290,7 +290,7 @@ definePage<BookPageData>()({
     const events = snapshot.automation_events.items || [];
     const progress = snapshot.progress;
     this.setData({
-      bookActivityNotice: progress?.status === "processing" || progress?.status === "failed"
+      bookActivityNotice: progress && progress.status !== "idle" && progress.status !== "ready"
         ? progress.title || progress.detail : "",
       chapters: this.data.chapters.map((chapter) => {
         const latest = events.filter((event) => (
@@ -492,7 +492,7 @@ definePage<BookPageData>()({
   },
 
   openBookReader() {
-    if (!this.data.projectId || !this.data.bookContentAvailable || this.data.bookStaleNotice) {
+    if (!this.data.projectId || !this.data.bookContentAvailable) {
       return;
     }
     this.stopPlayback();

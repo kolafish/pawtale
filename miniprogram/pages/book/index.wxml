@@ -43,8 +43,8 @@
       />
     </view>
     <view class="progress-actions">
-      <button wx:if="{{bookContentAvailable && !bookStaleNotice}}" class="hero-reading-action" bindtap="openBookReader">
-        <text>阅读全书</text><text aria-hidden="true">→</text>
+      <button wx:if="{{bookContentAvailable}}" class="hero-reading-action" bindtap="openBookReader">
+        <text>{{bookStaleNotice ? '阅读已保存书稿' : '阅读全书'}}</text><text aria-hidden="true">→</text>
       </button>
       <button wx:if="{{bookContentAvailable}}" class="hero-share-action" bindtap="openBookSharePanel">分享阅读页</button>
     </view>

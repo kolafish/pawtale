@@ -224,10 +224,12 @@ function readerData(
       ? "根据口述访谈整理而成"
       : subtitle,
     readerMetaText: `${chapterCount}章 · ${data.bookCharCount || 0}字`,
-    readerUpdateNotice: output?.is_stale
+    readerUpdateNotice: data.bookViewingHistoricalVersion
+      ? "正在阅读历史版本。"
+      : output?.is_stale
       ? (staleTitles.length
-        ? `《${staleTitles[0]}》${staleTitles.length > 1 ? "等章节" : ""}刚刚更新`
-        : "这本书刚刚更新")
+        ? `正在阅读已保存书稿，尚未包含《${staleTitles[0]}》${staleTitles.length > 1 ? "等章节" : ""}的最新变化。`
+        : "正在阅读已保存书稿，尚未包含最新变化。")
       : "",
   };
 }
@@ -283,7 +285,7 @@ function chapterReaderData(
     readerTitle: chapter.title,
     readerSubtitle: chapter.metaText,
     readerMetaText: "",
-    readerUpdateNotice: workspace.draft_needs_rewrite ? "这篇故事刚刚更新" : "",
+    readerUpdateNotice: workspace.draft_needs_rewrite ? "正在阅读已保存正文，尚未包含最新变化。" : "",
   };
 }
 
