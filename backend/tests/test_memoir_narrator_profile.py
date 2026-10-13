@@ -18,7 +18,7 @@ from app.models.memoir_jobs import MemoirEditingJob
 from app.models.projects import Project
 from app.services.ai_base import AITextServiceBase
 from app.services.asr.streaming import StreamingASREvent
-from app.services.memoir import narrator_profile, projects, voice_transcript_correction
+from app.services.memoir import narration_people, narrator_profile, projects, voice_transcript_correction
 from app.services.memoir.interview_book_context import InterviewBookContext
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_followup_ai import InterviewerPersona, ProgressPromptContext
@@ -56,6 +56,7 @@ class FakeProfileAI(AITextServiceBase):
 def fake_ai(monkeypatch):
     fake = FakeProfileAI()
     monkeypatch.setattr(narrator_profile, "get_ai_service", lambda _model=None: fake)
+    monkeypatch.setattr(narration_people, "get_ai_service", lambda _model=None: fake)
     return fake
 
 
@@ -232,7 +233,9 @@ async def test_a_corrected_transcript_is_read_again_and_a_stale_version_writes_n
 
     fake_ai.payload = {"name": "王秀英"}
     await _run(test_db, first.utterance_id)
-    assert "叙述者：我叫王秀英。" in fake_ai.prompts[-1]
+    # The corrected version is also read for people, after the profile.
+    assert "叙述者：我叫王秀英。" in fake_ai.prompts[-2]
+    assert "讲述者：我叫王秀英。" in fake_ai.prompts[-1]
     _project, profile = await _profile(test_db, project_id)
     assert profile["narrator_name"] == "王秀英"
 
@@ -681,3 +684,35 @@ async def test_a_book_whose_profile_was_all_saved_is_not_read(client, test_db, f
     _project, profile = await _profile(test_db, project_id)
     assert profile[projects.PROFILE_SESSION_KEY] == session_id
     assert await _profile_job(test_db, segment.utterance_id) is None
+
+
+@pytest.mark.asyncio
+async def test_people_are_read_from_the_corrected_version_and_folded_into_the_roster(
+    client, test_db, fake_ai, job_handlers,
+):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    first = await _narrate(client, test_db, session_id, "我二舅叫李建国。")
+    second = await _narrate(client, test_db, session_id, "建国舅带我第一次进城。")
+    readings = iter([
+        {"people": [{"ref": "new", "call": "二舅", "name": "李建国", "relation": "我妈的弟弟"}]},
+        {"people": [{"ref": "P1", "call": "他", "note": "带我第一次进城"}]},
+    ])
+
+    async def answer(_system_prompt, user_prompt, **_kwargs):
+        fake_ai.prompts.append(user_prompt)
+        return json.dumps(next(readings) if "记住书里出现的人" in user_prompt else {}, ensure_ascii=False)
+
+    fake_ai._call_llm = answer
+    for segment, text in ((first, "我二舅叫李建国，是我妈的弟弟。"), (second, "建国舅带我第一次进城。")):
+        # Only a corrected or edited version is read for people.
+        await _new_version(test_db, segment.utterance_id, text)
+        await narrator_profile.schedule_narrator_profile(
+            test_db, utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id),
+        )
+        await test_db.commit()
+        await run_test_editing_job(test_db, (await _profile_job(test_db, segment.utterance_id)).id)
+
+    assert "P1 二舅｜名字：李建国" in fake_ai.prompts[-1]
+    people = await narration_people.load_people(test_db, project_id)
+    assert [person.line for person in people.values()] == ["二舅（李建国），我妈的弟弟：带我第一次进城"]

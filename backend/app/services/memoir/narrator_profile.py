@@ -6,6 +6,7 @@ each narrator segment (one recording) is read with the interviewer's line before
 known, for anything the narrator newly says or corrects about themselves. A segment is read again
 when its transcript changes. Asking stops after two asks or a refusal; reading does not, so a late
 answer is still kept. A value the user saved on the project page is never overwritten.
+The same job reads the people in a corrected segment (see narration_people).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir import book_outputs, editing_jobs
+from app.services.memoir import book_outputs, editing_jobs, narration_people
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
 from app.services.memoir.projects import (
     FIRST_PROJECT_TITLE,
@@ -267,7 +268,9 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
     if voice_session is None or project is None:
         return
     profile = _profile(project)
-    if not _collects_profile(voice_session) or not _has_open_fields(profile):
+    if not _collects_profile(voice_session) or not (
+        _has_open_fields(profile) or narration_people.ready(utterance, message)
+    ):
         return
     version_id = message.transcript_version_id or ""
     dedupe_key = f"narrator_profile:{utterance.id}"
@@ -312,14 +315,26 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="讲述片段或回忆录不存在",
         )
+    version_id = str(payload.get("transcript_version_id") or "")
     try:
-        current = await fill_narrator_profile(
+        current = not _has_open_fields(_profile(project)) or await fill_narrator_profile(
             db,
             project=project,
             utterance=utterance,
-            transcript_version_id=str(payload.get("transcript_version_id") or ""),
+            transcript_version_id=version_id,
             previous_message_id=payload.get("previous_message_id"),
         )
+        if current and narration_people.ready(utterance, utterance.chat_message):
+            previous = payload.get("previous_message_id")
+            previous_message = await db.get(MemoirChatMessage, previous) if isinstance(previous, str) else None
+            current = await narration_people.read_people(
+                db,
+                project=project,
+                narrator=str(_profile(project).get("narrator_name") or ""),
+                message=utterance.chat_message,
+                previous_line=previous_message.content_text.strip() if previous_message else "",
+                transcript_version_id=version_id,
+            )
     except Exception as exc:
         await db.rollback()
         queued = await db.scalar(select(MemoirEditingJob.payload_json).where(MemoirEditingJob.id == job.id))

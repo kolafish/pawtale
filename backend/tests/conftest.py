@@ -76,7 +76,7 @@ def _postgres_alembic_config() -> Config:
 @pytest.fixture(autouse=True)
 def skip_narrator_profile_extraction(monkeypatch):
     """Each AI narration segment may queue a profile reading; other tests don't need provider calls."""
-    from app.services.memoir import narrator_profile
+    from app.services.memoir import narration_people, narrator_profile
 
     async def skip(*_args, **_kwargs):
         return None
@@ -88,6 +88,7 @@ def skip_narrator_profile_extraction(monkeypatch):
 
     # Replies that offer a profile item check whether they asked it; without AI the wording decides.
     monkeypatch.setattr(narrator_profile, "get_ai_service", no_ai)
+    monkeypatch.setattr(narration_people, "get_ai_service", no_ai)
 
 
 @pytest.fixture(scope="session")
