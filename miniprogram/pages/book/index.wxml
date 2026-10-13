@@ -87,186 +87,19 @@
 
   <view wx:elif="{{stage === 'empty'}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
-    <text class="empty-title">从讲述记录生成章节</text>
-    <text class="empty-copy">系统会先把当前回忆录里的讲述内容划分为若干章节。你确认章节后，再逐章生成正文。</text>
+    <text class="empty-title">讲述会自动整理成书</text>
+    <text class="empty-copy">讲完后，小余会在后台整理章节和正文。您可以先离开，稍后回来阅读。</text>
     <view class="actions-row">
-      <button
-        class="primary-button"
-        loading="{{generatingPlan}}"
-        disabled="{{loading || generatingPlan || !projectId}}"
-        bindtap="generatePlan"
-      >
-        {{generatingPlan ? "正在规划章节…" : "生成章节规划"}}
-      </button>
-      <button class="ghost-button" disabled="{{generatingPlan}}" bindtap="openTranscripts">
-        查看记录
-      </button>
-    </view>
-  </view>
-
-  <view wx:elif="{{stage === 'plan_draft'}}" class="section">
-    <view class="field-block">
-      <text class="field-label">目录名称</text>
-      <input
-        class="title-input"
-        value="{{planTitle}}"
-        bindinput="changePlanTitle"
-        maxlength="120"
-      />
-    </view>
-
-    <view class="section-head">
-      <text class="section-title">确认章节</text>
-      <view class="section-head-tools">
-        <text class="section-count">{{chapters.length}} 章</text>
-        <button
-          class="section-head-action outline-read-action"
-          loading="{{ttsBusyTarget === 'outline'}}"
-          disabled="{{confirmingPlan || updatingPlanStructure || (ttsBusyTarget && ttsBusyTarget !== 'outline') || (playingTarget && playingTarget !== 'outline')}}"
-          bindtap="playBookOutlineAudio"
-        >
-          {{ttsBusyTarget === "outline" ? "准备中" : (playingTarget === "outline" ? "停止朗读" : "朗读目录")}}
-        </button>
-      </view>
-    </view>
-
-    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card ui-card">
-      <view class="chapter-head">
-        <text class="chapter-index">第 {{index + 1}} 章</text>
-        <text class="source-count">{{item.sourceCount}} 条原始讲述</text>
-      </view>
-
-      <input
-        class="chapter-title-input"
-        value="{{item.editingTitle}}"
-        data-id="{{item.id}}"
-        bindinput="changeChapterTitle"
-        maxlength="80"
-      />
-
-      <view class="source-summary-row">
-        <text class="source-preview">{{item.sourceSummary}}</text>
-        <button
-          wx:if="{{item.sourceCount}}"
-          class="source-toggle-button"
-          data-id="{{item.id}}"
-          bindtap="toggleChapterSources"
-        >
-          {{item.sourceToggleText}}
-        </button>
-      </view>
-
-      <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
-        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row {{source.splitSelected ? 'selected' : ''}}">
-          <view
-            class="source-ref-main"
-            data-id="{{source.utterance_id}}"
-            bindtap="openTranscripts"
-            hover-class="source-ref-main-active"
-          >
-            <text class="source-ref-label">{{source.labelText}}</text>
-            <text class="source-ref-text">{{source.previewText}}</text>
-          </view>
-          <button
-            wx:if="{{item.sourceViews.length > 1}}"
-            class="source-split-toggle {{source.splitSelected ? 'selected' : ''}}"
-            data-id="{{item.id}}"
-            data-utterance-id="{{source.utterance_id}}"
-            bindtap="toggleSplitSource"
-            disabled="{{confirmingPlan || updatingPlanStructure}}"
-          >
-            {{source.splitSelected ? "已选" : "选择"}}
-          </button>
-        </view>
-      </view>
-
-      <view class="structure-actions">
-        <view class="structure-action-row">
-          <button
-            class="structure-button"
-            data-id="{{item.id}}"
-            data-direction="up"
-            bindtap="moveChapter"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveUp}}"
-          >
-            上移
-          </button>
-          <button
-            class="structure-button"
-            data-id="{{item.id}}"
-            data-direction="down"
-            bindtap="moveChapter"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveDown}}"
-          >
-            下移
-          </button>
-        </view>
-        <view class="structure-action-row">
-          <picker
-            class="structure-picker"
-            range="{{item.mergeTargetOptions}}"
-            range-key="label"
-            data-id="{{item.id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length}}"
-            bindchange="mergeChapterInto"
-          >
-            <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
-              合并到
-            </view>
-          </picker>
-          <button
-            class="structure-button picker-button"
-            data-id="{{item.id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.canSplitSelectedSources}}"
-            bindtap="splitSelectedChapterSources"
-          >
-            {{item.splitActionText}}
-          </button>
-        </view>
-      </view>
-
-      <view class="actions-row compact">
-        <button
-          class="ghost-button"
-          data-id="{{item.id}}"
-          loading="{{titleBusyTarget === item.id}}"
-          bindtap="generateChapterTitle"
-          disabled="{{confirmingPlan || generatingPlan || titleBusyTarget || updatingPlanStructure}}"
-        >
-            {{titleBusyTarget === item.id ? "起名中" : "小余起名"}}
-        </button>
-        <button
-          class="danger-button"
-          data-id="{{item.id}}"
-          bindtap="removeChapter"
-          disabled="{{confirmingPlan || updatingPlanStructure || chapters.length <= 1}}"
-        >
-          删除本章，保留讲述
-        </button>
-      </view>
-    </view>
-
-    <view class="sticky-actions">
-      <button
-        class="ghost-button"
-        loading="{{generatingPlan}}"
-        disabled="{{generatingPlan || confirmingPlan}}"
-        bindtap="generatePlan"
-      >
-        {{generatingPlan ? "正在重新规划…" : "重新规划"}}
-      </button>
-      <button
-        class="primary-button"
-        loading="{{confirmingPlan}}"
-        disabled="{{generatingPlan || confirmingPlan || !chapters.length}}"
-        bindtap="confirmPlan"
-      >
-        确认章节
-      </button>
+      <button class="primary-button" bindtap="openHome">去讲述</button>
+      <button class="ghost-button" bindtap="continueBookDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft || !projectId}}">继续整理已有讲述</button>
     </view>
   </view>
 
   <view wx:else class="section">
+    <view wx:if="{{planNeedsActivation}}" class="empty-panel ui-card">
+      <text class="empty-copy">已有目录会原样保留，小余可以继续整理正文。</text>
+      <button class="primary-button" bindtap="continueBookDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理成书</button>
+    </view>
     <view class="section-head chapter-section-head">
       <view class="section-head-copy">
         <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节"}}</text>

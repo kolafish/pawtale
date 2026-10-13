@@ -207,5 +207,15 @@ async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
         await story_tree_growth.schedule_story_tree_growth(
             db, project_id=project_id, voice_session_id=growth.payload_json["voice_session_id"], source="retry"
         )
+    elif growth is None:
+        sessions = (await db.scalars(select(MemoirVoiceSession).where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceSession.session_goal == "open_narration",
+        ).order_by(MemoirVoiceSession.created_at.desc()))).all()
+        for session in sessions:
+            if await story_tree_growth.schedule_story_tree_growth(
+                db, project_id=project_id, voice_session_id=session.id, source="retry",
+            ) is not None:
+                break
     await automatic_book_draft.schedule_book_draft(db, project_id=project_id, source="retry")
     await db.commit()

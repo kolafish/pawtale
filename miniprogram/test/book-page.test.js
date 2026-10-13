@@ -949,48 +949,6 @@ test("book page marks deleted chapter sources for review", () => {
   assert.match(changedChapter.chapterGuidanceText, /1 条讲述已删除，1 条新增讲述尚未写入正文/);
 });
 
-test("book page confirms chapters with trimmed user edits and original source refs", async () => {
-  const submissions = [];
-  const confirmedPlan = samplePlan("confirmed");
-  global.wx = { showToast() {} };
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      confirmMemoirBookPlan: async (projectId, data) => {
-        submissions.push({ projectId, data });
-        return confirmedPlan;
-      },
-      getMemoirBookChapterDraft: async () => null,
-    },
-  });
-  const plan = samplePlan("draft");
-  const chapters = mod.buildChapterViews(plan);
-  chapters[0].editingTitle = "  童年院子  ";
-  chapters[1].include_in_book = false;
-  const context = pageContext(page, {
-    projectId: "project/1",
-    projectTitle: "外婆回忆录",
-    planTitle: "  用户确认目录  ",
-    chapters,
-  });
-  context.bookPlan = plan;
-  context.bookChapterSources = Object.fromEntries(
-    plan.chapters.map((chapter) => [chapter.id, chapter.source_refs]),
-  );
-
-  await page.confirmPlan.call(context);
-
-  assert.equal(submissions.length, 1);
-  assert.equal(submissions[0].projectId, "project/1");
-  assert.equal(submissions[0].data.title, "用户确认目录");
-  assert.equal(submissions[0].data.chapters[0].title, "童年院子");
-  assert.equal(submissions[0].data.chapters[0].include_in_book, true);
-  assert.equal(submissions[0].data.chapters[1].include_in_book, false);
-  assert.equal("summary" in submissions[0].data.chapters[0], false);
-  assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
-  assert.equal(context.data.stage, "drafting");
-});
-
-
 test("book page reorders chapters through structure command", async () => {
   const calls = [];
   let draftReads = 0;
@@ -1066,103 +1024,6 @@ test("book page restores chapter order when structure save fails", async () => {
   assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
   assert.equal(context.data.error, "保存顺序失败");
   assert.equal(context.data.updatingPlanStructure, false);
-});
-
-test("book page splits selected chapter sources into a new chapter", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].source_refs = [
-    sampleRef("utterance-1", "外婆家的院子"),
-    sampleRef("utterance-3", "春节做年糕"),
-  ];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return planFromStructureCommand("confirmed", data);
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, plan);
-
-  page.toggleSplitSource.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  assert.equal(context.data.chapters[0].splitSelectedCount, 0);
-
-  page.toggleChapterSources.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  page.toggleSplitSource.call(context, {
-    currentTarget: { dataset: { id: "chapter-1", utteranceId: "utterance-3" } },
-  });
-
-  assert.equal(context.data.chapters[0].sourceViews[1].splitSelected, true);
-  assert.equal(context.data.chapters[0].splitSelectedCount, 1);
-  assert.equal(context.data.chapters[0].canSplitSelectedSources, true);
-
-  await page.splitSelectedChapterSources.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].data, {
-    type: "split_chapter",
-    chapter_id: "chapter-1",
-    title: "外婆家的童年（拆出）",
-    utterance_ids: ["utterance-3"],
-  });
-  assert.equal(context.data.splitSourceSelections["chapter-1"], undefined);
-});
-
-test("book page merges chapters and directs the user back to the workspace", async () => {
-  const calls = [];
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-    showToast() {},
-    switchTab() {},
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ kind: "update", projectId, data });
-        return planFromStructureCommand("confirmed", data);
-      },
-      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        calls.push({ kind: "title", projectId, chapterId, data });
-        const updated = planFromStructureCommand("confirmed", calls[0].data);
-        updated.chapters[0].title = "童年里的离别";
-        return updated;
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed", "童年正文"),
-    "chapter-2": sampleDraft(1, "confirmed", "离家正文"),
-  });
-
-  await page.mergeChapterInto.call(context, {
-    currentTarget: { dataset: { id: "chapter-2" } },
-    detail: { value: 0 },
-  });
-
-  assert.deepEqual(calls.map((call) => call.kind), ["update", "title"]);
-  assert.deepEqual(calls[0].data, {
-    type: "merge_chapters",
-    chapter_id: "chapter-2",
-    target_chapter_id: "chapter-1",
-  });
-  assert.equal(context.data.chapters[0].title, "童年里的离别");
-  assert.equal(context.data.chapters[0].draftError, "章节已合并，请进入章节工作台重新整理正文");
 });
 
 test("book page opens automatically assembled drafts without chapter confirmation", () => {
@@ -1241,4 +1102,36 @@ test("book overview preserves processing and failure notices without marking set
   snapshot.progress = { status: "processing", title: "正在整理新版书稿" };
   page.applyBookSnapshot.call(context, snapshot);
   assert.equal(context.data.bookActivityNotice, "正在整理新版书稿");
+});
+
+
+test("legacy outline continues through automatic writing without replacing its structure", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookPage({ voiceApiExports: {
+    retryMemoirDraftProgress: async (projectId) => { calls.push(projectId); return {}; },
+  } });
+  const context = pageContext(page, { projectId: "project/1" });
+  const plan = samplePlan("draft");
+  plan.chapters[0].title = "用户保留的标题";
+  plan.chapters[1].include_in_book = false;
+  page.applyPlan.call(context, plan);
+  context.loadBookHome = async () => {};
+  assert.equal(context.data.stage, "drafting");
+  assert.equal(context.data.planNeedsActivation, true);
+  await page.continueBookDraft.call(context);
+  assert.deepEqual(calls, ["project/1"]);
+  assert.equal(context.data.chapters[0].title, "用户保留的标题");
+  assert.equal(context.data.chapters[1].include_in_book, false);
+  assert.equal(context.data.retryingDraft, false);
+});
+
+test("continue automatic writing reports failure and permits retry", async () => {
+  const { page } = loadBookPage({ voiceApiExports: {
+    retryMemoirDraftProgress: async () => { throw new Error("网络暂时不可用"); },
+  } });
+  const context = pageContext(page, { projectId: "project/1" });
+  await page.continueBookDraft.call(context);
+  assert.equal(context.data.error, "网络暂时不可用");
+  assert.equal(context.data.retryingDraft, false);
 });

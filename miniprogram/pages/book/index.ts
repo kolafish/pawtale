@@ -8,19 +8,15 @@ import type {
 import type { MemoirBookSnapshot, MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
 
 import {
   applyMemoirBookPlanStructureCommand,
-  confirmMemoirBookPlan,
   memoirAudioPlanLoader,
-  generateMemoirBookChapterTitle,
-  generateMemoirBookPlan,
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
 } from "../../services/memoir-book-api";
-import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
+import { getMemoirBookSnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
 import {
   isAuthError,
@@ -33,10 +29,7 @@ import {
   datasetChoice,
   datasetString,
   pageUrl,
-  pickerIndex,
   type PageDatasetEvent,
-  type PagePickerEvent,
-  type PageTextInputEvent,
 } from "../../services/page-input";
 import { readBookTTSRequest } from "../../services/tts-settings";
 import { timestampMs } from "../../services/time";
@@ -59,10 +52,6 @@ import {
   bookExportPageUrl,
   chapterMoveCommand,
   findBookChapter,
-  removeLocalChapterPatch,
-  splitSelectedChapterSourcesPlan,
-  toggleBookChapterSourcesPatch,
-  toggleBookSplitSourcePatch,
 } from "./book-page-plan-helpers";
 import {
   bookChapterInclusionData,
@@ -72,8 +61,6 @@ import {
   guestBookData,
   planStage,
   stageText,
-  toPlanInput,
-  trimText,
   bookOutlineNarrationText,
 } from "./book-view-model";
 import {
@@ -110,8 +97,6 @@ interface BookDataset {
 }
 
 type DatasetEvent = PageDatasetEvent<BookDataset>;
-type TextInputEvent = PageTextInputEvent<BookDataset>;
-type PickerEvent = PagePickerEvent<BookDataset>;
 
 type BookPageData = BookHomeData & ReadingShareData & {
   pageClass: string;
@@ -142,8 +127,8 @@ definePage<BookPageData>()({
     bookCharCountText: "0",
     loading: false,
     needsLogin: false,
-    generatingPlan: false,
-    confirmingPlan: false,
+    retryingDraft: false,
+    planNeedsActivation: false,
     updatingPlanStructure: false,
     planStructureBusyChapterId: "",
     planStructureBusyDirection: "",
@@ -332,6 +317,7 @@ definePage<BookPageData>()({
 
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
     this.bookPlan = plan;
+    this.setData({ planNeedsActivation: plan?.status === "draft" });
     this.bookChapterSources = Object.fromEntries(
       (plan?.chapters || []).map((chapter) => [chapter.id, chapter.source_refs]),
     );
@@ -399,62 +385,20 @@ definePage<BookPageData>()({
     wx.showToast({ title: toastTitle, icon: "success" });
   },
 
-  async generatePlan() {
-    if (!this.data.projectId || this.data.generatingPlan || this.data.loading) {
-      return;
-    }
-    this.setData({ generatingPlan: true, error: "" });
+  async continueBookDraft() {
+    if (!this.data.projectId || this.data.retryingDraft) return;
+    this.setData({ retryingDraft: true, error: "" });
     try {
-      const plan = await generateMemoirBookPlan(this.data.projectId);
-      this.applyPlan(plan);
-      trackAuditAction("book.plan_generate", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
-      wx.showToast({ title: "已生成章节", icon: "success" });
+      await retryMemoirDraftProgress(this.data.projectId);
+      await this.loadBookHome();
+      wx.showToast({ title: "已开始后台整理", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
+      if (!routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "暂时无法继续整理" });
       }
-      this.setData({ error: error instanceof Error ? error.message : "章节生成失败" });
     } finally {
-      this.setData({ generatingPlan: false });
+      this.setData({ retryingDraft: false });
     }
-  },
-
-  async confirmPlan() {
-    if (!this.data.projectId || this.data.confirmingPlan || !this.bookPlan) {
-      return;
-    }
-    const chapters = toPlanInput(this.data.chapters, this.bookChapterSources);
-    if (!chapters.length) {
-      this.setData({ error: "至少保留一个章节" });
-      return;
-    }
-    const invalid = chapters.find((chapter) => !chapter.title || !chapter.source_refs.length);
-    if (invalid) {
-      this.setData({ error: "每个章节都需要标题和收录讲述" });
-      return;
-    }
-    this.setData({ confirmingPlan: true, error: "" });
-    try {
-      const plan = await confirmMemoirBookPlan(this.data.projectId, {
-        title: trimText(this.data.planTitle) || `${this.data.projectTitle}章节规划`,
-        chapters,
-      });
-      const draftsByChapterId = await this.loadDraftsForPlan(plan);
-      this.applyPlan(plan, draftsByChapterId);
-      trackAuditAction("book.plan_confirm", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
-      wx.showToast({ title: "章节已确认", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "章节确认失败" });
-    } finally {
-      this.setData({ confirmingPlan: false });
-    }
-  },
-
-  changePlanTitle(event: TextInputEvent) {
-    this.setData({ planTitle: event.detail.value });
   },
 
   openChapterEditor(event: DatasetEvent) {
@@ -512,65 +456,6 @@ definePage<BookPageData>()({
     });
   },
 
-  changeChapterTitle(event: TextInputEvent) {
-    const id = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, id);
-    this.patchChapter(id, {
-      editingTitle: event.detail.value,
-      titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
-    });
-  },
-
-  async generateChapterTitle(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    await this.generateChapterTitleById(chapterId, "已重新起名");
-  },
-
-  async generateChapterTitleById(chapterId: string, toastTitle: string = "已重新起名") {
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
-      return false;
-    }
-    this.stopPlayback();
-    this.setData({ titleBusyTarget: chapterId, error: "" });
-    this.patchChapter(chapterId, { draftError: "" });
-    try {
-      const plan = await generateMemoirBookChapterTitle(this.data.projectId, chapterId, {});
-      await this.applyUpdatedPlan(plan, toastTitle);
-      trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
-      return true;
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return false;
-      }
-      const message = error instanceof Error ? error.message : "小余起名失败";
-      this.patchChapter(chapterId, {
-        draftError: message,
-      });
-      if (this.data.stage === "plan_draft") {
-        this.setData({ error: message });
-      }
-      return false;
-    } finally {
-      this.setData({ titleBusyTarget: "" });
-    }
-  },
-
-  async removeChapter(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
-      return;
-    }
-    if (this.data.projectId && this.bookPlan) {
-      await this.applyPlanStructureCommand({ type: "delete_chapter", chapter_id: id }, "章节已删除");
-      return;
-    }
-    const patch = removeLocalChapterPatch(this.data, this.bookChapterSources, id);
-    if (patch) {
-      this.setData(patch);
-    }
-  },
-
   async moveChapter(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
@@ -591,88 +476,6 @@ definePage<BookPageData>()({
     if (!plan) {
       this.setData(chapterCollectionData(previousChapters, this.bookChapterSources, this.data.splitSourceSelections));
     }
-  },
-
-  async mergeChapterInto(event: PickerEvent) {
-    const sourceChapterId = datasetString(event, "id");
-    const optionIndex = pickerIndex(event);
-    const sourceChapter = findBookChapter(this.data.chapters, sourceChapterId);
-    const option = sourceChapter?.mergeTargetOptions[optionIndex];
-    const targetChapter = option
-      ? findBookChapter(this.data.chapters, option.value)
-      : null;
-    if (!sourceChapter || !targetChapter || this.data.updatingPlanStructure) {
-      return;
-    }
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "合并章节",
-        content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，本章素材会保留在合并后的章节中。`,
-        confirmText: "合并",
-        confirmColor: "#b65d49",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (!confirmed) {
-      return;
-    }
-    const plan = await this.applyPlanStructureCommand({
-      type: "merge_chapters",
-      chapter_id: sourceChapter.id,
-      target_chapter_id: targetChapter.id,
-    }, "章节已合并");
-    if (plan?.status === "confirmed") {
-      await this.generateChapterTitleById(targetChapter.id, "已重写章名");
-      this.patchChapter(targetChapter.id, {
-        draftError: "章节已合并，请进入章节工作台重新整理正文",
-      });
-    } else if (plan) {
-      await this.generateChapterTitleById(targetChapter.id, "已重写章名");
-    }
-  },
-
-  toggleSplitSource(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const utteranceId = datasetString(event, "utteranceId");
-    if (this.data.updatingPlanStructure) {
-      return;
-    }
-    const patch = toggleBookSplitSourcePatch(
-      this.data,
-      this.bookChapterSources,
-      chapterId,
-      utteranceId,
-    );
-    if (patch) {
-      this.setData(patch);
-    }
-  },
-
-  async splitSelectedChapterSources(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (this.data.updatingPlanStructure) {
-      return;
-    }
-    const plan = splitSelectedChapterSourcesPlan(this.data, chapterId);
-    if (!plan) {
-      return;
-    }
-    if (plan.error) {
-      this.setData({ error: plan.error });
-      return;
-    }
-    if (plan.patch) {
-      this.setData(plan.patch);
-    }
-    if (plan.command) {
-      await this.applyPlanStructureCommand(plan.command, "章节已拆分");
-    }
-  },
-
-  toggleChapterSources(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    this.setData(toggleBookChapterSourcesPatch(this.data, this.bookChapterSources, chapterId));
   },
 
   async applyPlanStructureCommand(command: MemoirBookPlanStructureCommandRequest, toastTitle: string) {

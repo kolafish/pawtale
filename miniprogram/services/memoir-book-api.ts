@@ -22,8 +22,6 @@ import type {
   MemoirBookOutputUpdateRequest,
   MemoirBookOutputVersion,
   MemoirBookPlan,
-  MemoirBookPlanConfirmRequest,
-  MemoirBookPlanGenerateRequest,
   MemoirBookPlanStructureCommandRequest,
   MemoirBookTitleSuggestionRequest,
   MemoirBookTitleSuggestionResponse,
@@ -97,29 +95,6 @@ function imageAssetPath(projectId: string, assetId = "", suffix = ""): string {
 
 export function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
   return memoirRequest<MemoirBookPlan>(bookPlanPath(projectId));
-}
-
-export function generateMemoirBookPlan(
-  projectId: string,
-  data: MemoirBookPlanGenerateRequest = {},
-): Promise<MemoirBookPlan> {
-  return memoirAIRequest<MemoirBookPlan, MemoirBookPlanGenerateRequest>(
-    bookPlanPath(projectId, "/generate"),
-    data,
-  );
-}
-
-export function confirmMemoirBookPlan(
-  projectId: string,
-  data: MemoirBookPlanConfirmRequest,
-): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
-    bookPlanPath(projectId),
-    {
-      method: "PUT",
-      data,
-    },
-  );
 }
 
 export function applyMemoirBookPlanStructureCommand(

@@ -20,6 +20,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookOutput,
+    MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -86,13 +87,22 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
         )
         .distinct()
     )).all()
+    draft_projects = (await db.scalars(select(MemoirBookPlan.project_id).where(
+        MemoirBookPlan.status == MemoirBookPlanStatus.DRAFT.value,
+    ))).all()
     scheduled = 0
-    for project_id in project_ids:
+    for project_id in set(project_ids) | set(draft_projects):
         job = await db.scalar(select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == project_id,
             MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
         ).order_by(MemoirEditingJob.updated_at.desc()).limit(1))
-        if job is None or job.status != MemoirEditingJobStatus.SUCCEEDED.value:
+        if job is None or job.status not in {MemoirEditingJobStatus.SUCCEEDED.value, MemoirEditingJobStatus.FAILED.value}:
+            continue
+        if project_id in draft_projects:
+            await schedule_book_draft(db, project_id=project_id, source="plan_activation")
+            scheduled += 1
+            continue
+        if job.status != MemoirEditingJobStatus.SUCCEEDED.value:
             continue
         plan = await load_book_plan_drafts(db, project_id=project_id)
         if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
@@ -154,6 +164,8 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     if dependency:
         progress.stage = "organizing"
         return _waiting(job, progress)
+    from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
+    await activate_existing_plan_for_automatic_book(db, project_id=project_id)
     project = await db.get(Project, project_id)
     chapters = (
         await db.scalars(
