@@ -87,30 +87,21 @@ class _NewChapter(BaseModel):
     time_evidence: str | None = None
 
 
-class _StorySection(BaseModel):
+class _SourcePlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_indices: list[int]
+    kind: Literal["story", "not_story", "unassigned"] = "story"
     section_id: str | None = None
     chapter_ref: str | None = None
     new_section_title: str | None = None
     reason: str = ""
 
 
-class _UnassignedStory(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    source_indices: list[int]
-    reason: str
-
-
 class _GrowthOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     new_chapters: list[_NewChapter] = Field(default_factory=list)
-    sections: list[_StorySection] = Field(default_factory=list)
-    non_story_indices: list[int] = Field(default_factory=list)
-    unassigned: list[_UnassignedStory] = Field(default_factory=list)
+    placements: dict[str, _SourcePlacement] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -223,20 +214,24 @@ def build_story_growth_prompt(
     ]
     prompt = (
         '请将本次全部讲述安排到故事目录中。先判断哪些是故事，再安排故事的章节和小节。\n'
-        '1. 只有整条没有亲历事情、经历或感受（纯称呼、寒暄、停顿、请求暂停）才放 non_story_indices，不能和故事放进同一小节。\n'
-        '2. 小节对应一件事或相连场景：同一事件的断续讲述合组；不同事件分组。章节对应人生阶段或持续主题，不因同属一个阶段就把所有事件放在一个小节。\n'
+        '1. 只有整条没有亲历事情、经历或感受（纯称呼、寒暄、停顿、请求暂停）才标为 not_story，不能和故事放进同一小节。\n'
+        '2. source_index 是不可拆分的一整条原始讲述，不是事件编号；不能复制、分割或自编 source_index。优先保证每条讲述完整且只收录一次。在能按整条讲述分组的前提下，同一事件的断续讲述合组，不同事件分组。如果同一条讲述包含多个事件，必须整体放在一个小节，使用能覆盖这些事件的共同主题标题，不能拆成多个小节重复引用该条，也不能只保留第一个事件。章节对应人生阶段或持续主题；不同原始讲述能分开的事件仍分小节，不因同属一个阶段就全部合并。\n'
         '章节的主题由章节标题决定，已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
-        '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让各小节用 chapter_ref 引用它，不需要重复定义章节。\n'
+        '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让相应讲述用 chapter_ref 引用它，不需要重复定义章节。\n'
         '4. 只要有明确的亲历事件或感受，就安排已有位置或建立适当的新位置；篇幅短、没有年份或与现有章节不同，均不是暂不归类的理由。不为迁就现有目录强行添加时间或人生阶段。不编造人物关系、时间或事件。\n'
-        '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才填 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
+        '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才标为 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
         '6. 新章可用 insert_before_chapter_id 指定插在某个现有章节前。只有明确的人生先后且现有目录按人生阶段组织时才指定；主题目录或时间不明填 null。不重排已有章节。不同新章节按拟收录先后顺序列出。time_evidence 必须是本次讲述中能支持插入位置的原文片段；没有明确时间证据时 time_evidence 和 insert_before_chapter_id 都填 null。\n'
         '标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
-        '7. 每个 source_index 必须且只能在 sections、non_story_indices、unassigned 中出现一次。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。\n'
+        '7. placements 必须以本次给出的 source_index 字符串为键，每个键对应一个对象且只有一个归属。不能将一个 source_index 解释成多个事件编号，也不能添加本次未给出的键。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。\n'
         '\n'
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
         f"已有章节：\n{json.dumps(chapter_payload, ensure_ascii=False)}\n\n"
         f"已有小节：\n{json.dumps(section_payload, ensure_ascii=False)}\n\n"
-        '只返回 JSON：{"new_chapters":[{"chapter_ref":"N1","title":"新章节标题","insert_before_chapter_id":null,"time_evidence":null}],"sections":[{"source_indices":[1,2],"section_id":null,"chapter_ref":"N1","new_section_title":"一个具体事件","reason":"归类依据"}],"non_story_indices":[3],"unassigned":[{"source_indices":[4],"reason":"缺少何种信息"}]}\nsections 的已有 section_id 和新建小节的 chapter_ref/new_section_title 二者只能选一个。chapter_ref 只能是给出的 C 引用或本次声明的 N 引用；各数组没有对应内容时填空数组。'
+        f"本次 placements 的全部键（不能增减）：{json.dumps([str(i) for i in range(1, len(utterances) + 1)])}。"
+        '同一小节的多条讲述填相同的 section_id，或相同的 chapter_ref 和 new_section_title；不同事件能分开时填不同的小节。每个归属都收录该条讲述全文。\n'
+        '只返回 JSON：{"new_chapters":[{"chapter_ref":"N1","title":"新章节标题","insert_before_chapter_id":null,"time_evidence":null}],"placements":{"1":{"kind":"story","section_id":null,"chapter_ref":"N1","new_section_title":"覆盖整条讲述的主题","reason":"归类依据"}}}。'
+        '示例仅示意单条讲述；实际 placements 必须包含上面全部键。kind 只能是 story、not_story、unassigned。后两者 section_id、chapter_ref、new_section_title 均填 null。'
+        'story 的已有 section_id 和新建小节的 chapter_ref/new_section_title 二者只能选一个。chapter_ref 只能是给出的 C 引用或本次声明的 N 引用；new_chapters 没有新增章时填空数组。'
     )
     return prompt, chapter_refs, section_refs
 
@@ -249,14 +244,12 @@ def _normalize_groups(
     section_refs: ModelReferenceMap,
 ) -> list[GrowthGroup]:
     invalid = HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
-    indices = [index for group in [*output.sections, *output.unassigned] for index in group.source_indices]
-    indices.extend(output.non_story_indices)
-    if sorted(indices) != list(range(1, len(utterances) + 1)):
-        raise HTTPException(status_code=422, detail="AI 归类结果遗漏或重复了讲述，原始讲述已保留，请继续整理")
+    if set(output.placements) != {str(index) for index in range(1, len(utterances) + 1)}:
+        raise HTTPException(status_code=422, detail="AI 归类结果遗漏或添加了讲述，原始讲述已保留，请继续整理")
     declared = {chapter.chapter_ref: chapter for chapter in output.new_chapters}
     if len(declared) != len(output.new_chapters) or len({_clean_text(item.title, limit=80) for item in output.new_chapters}) != len(declared):
         raise invalid
-    used_new_refs = {item.chapter_ref for item in output.sections if item.chapter_ref in declared}
+    used_new_refs = {item.chapter_ref for item in output.placements.values() if item.kind == "story" and item.chapter_ref in declared}
     if used_new_refs != set(declared):
         raise invalid
     anchors = {}
@@ -265,21 +258,26 @@ def _normalize_groups(
             raise invalid
         anchor = _decode_reference(chapter_refs, chapter.insert_before_chapter_id)
         if chapter.insert_before_chapter_id:
-            source_indices = sorted(index for item in output.sections if item.chapter_ref == ref for index in item.source_indices)
+            source_indices = sorted(int(index) for index, item in output.placements.items() if item.kind == "story" and item.chapter_ref == ref)
             source_text = "".join(current_utterance_text(utterances[index - 1]) for index in source_indices)
             if not anchor or not chapter.time_evidence or chapter.time_evidence not in source_text:
-                raise invalid
+                # Positioning is optional: uncertain evidence appends the chapter without
+                # preventing complete, uniquely owned source material from being saved.
+                anchor = None
         anchors[ref] = anchor
-    groups: list[GrowthGroup] = []
+    groups: dict[tuple, GrowthGroup] = {}
     new_order = {ref: index for index, ref in enumerate(declared)}
-    for raw in sorted(output.sections, key=lambda item: new_order.get(item.chapter_ref, -1)):
+    placements = sorted(output.placements.items(), key=lambda pair: (new_order.get(pair[1].chapter_ref, -1), int(pair[0])))
+    for index, raw in placements:
         section_id = _decode_reference(section_refs, raw.section_id)
         chapter_id = _decode_reference(chapter_refs, raw.chapter_ref)
         new_chapter = declared.get(raw.chapter_ref)
         title = _clean_text(raw.new_section_title, limit=200) or None
-        if not raw.source_indices:
-            raise invalid
-        if raw.section_id:
+        if raw.kind != "story":
+            if raw.section_id or raw.chapter_ref or title or (raw.kind == "unassigned" and not raw.reason.strip()):
+                raise invalid
+            action = "not_story" if raw.kind == "not_story" else "leave_unassigned"
+        elif raw.section_id:
             if not section_id or raw.chapter_ref or title:
                 raise invalid
             action = "assign_existing"
@@ -287,29 +285,16 @@ def _normalize_groups(
             if not title or not (chapter_id or new_chapter):
                 raise invalid
             action = "create_chapter" if new_chapter else "create_section"
-        groups.append(GrowthGroup(
-            utterance_ids=[utterances[index - 1].id for index in raw.source_indices],
-            action=action,
-            section_id=section_id,
-            chapter_id=chapter_id,
-            new_chapter_title=_clean_text(new_chapter.title, limit=80) if new_chapter else None,
-            insert_before_chapter_id=anchors.get(raw.chapter_ref),
-            new_section_title=title,
-            reason=_clean_text(raw.reason, limit=300),
-        ))
-    for raw in output.unassigned:
-        if not raw.source_indices or not raw.reason.strip():
-            raise invalid
-        groups.append(GrowthGroup(
-            utterance_ids=[utterances[index - 1].id for index in raw.source_indices],
-            action="leave_unassigned", reason=_clean_text(raw.reason, limit=300),
-        ))
-    if output.non_story_indices:
-        groups.append(GrowthGroup(
-            utterance_ids=[utterances[index - 1].id for index in output.non_story_indices],
-            action="not_story", reason="仅回应访谈员，没有讲述经历或感受",
-        ))
-    return groups
+        key = (action, raw.section_id, raw.chapter_ref, title, raw.reason if action == "leave_unassigned" else None)
+        if key not in groups:
+            groups[key] = GrowthGroup(
+                utterance_ids=[], action=action, section_id=section_id, chapter_id=chapter_id,
+                new_chapter_title=_clean_text(new_chapter.title, limit=80) if new_chapter else None,
+                insert_before_chapter_id=anchors.get(raw.chapter_ref), new_section_title=title,
+                reason=_clean_text(raw.reason, limit=300),
+            )
+        groups[key].utterance_ids.append(utterances[int(index) - 1].id)
+    return list(groups.values())
 
 
 async def decide_story_growth(
