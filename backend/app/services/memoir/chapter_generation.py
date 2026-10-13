@@ -1748,7 +1748,9 @@ async def generate_and_save_chapter_draft(
     from app.services.memoir import completion_issues
     blocking_issue = await completion_issues.open_blocking_book_chapter_ids(
         db, project_id=project_id, all_chapter_ids=[chapter_id],
-    ) if automatic else set()
+    )
+    if blocking_issue and not automatic:
+        raise HTTPException(status_code=409, detail="本章还有事实冲突需要先确认")
     if changed:
         if automatic:
             raise ChapterGenerationStale("生成期间章节正文已变化")

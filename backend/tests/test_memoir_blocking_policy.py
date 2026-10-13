@@ -77,6 +77,10 @@ async def test_save_and_confirm_share_the_scoped_book_blocking_policy(client, te
     if blocking:
         with pytest.raises(HTTPException, match="需要确认"):
             await chapter_generation.confirm_chapter_draft(test_db, project_id=project_id, chapter_id=chapter_id)
+        with pytest.raises(HTTPException, match="事实冲突"):
+            await chapter_generation.generate_and_save_chapter_draft(
+                test_db, project_id=project_id, chapter_id=chapter_id, editorial_guidance=[], force_refresh=True,
+            )
         with pytest.raises(chapter_generation.ChapterDraftCandidateReady):
             await chapter_generation.generate_and_save_chapter_draft(
                 test_db, project_id=project_id, chapter_id=chapter_id, automatic=True, force_refresh=True, editorial_guidance=[],
