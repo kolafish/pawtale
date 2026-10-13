@@ -493,6 +493,12 @@ class VoiceAssistantTurnStreamSession:
             narrator_profile.check_profile_ask_later(
                 message_id=message.id, fields=profile_questions, text=turn.speech_text, ai_model=req.ai_model,
             )
+        if person_question and narrator_profile.ask_needs_check((person_question.topic,), turn.speech_text):
+            narrator_profile.run_ask_check_later(
+                narration_people.drop_ask_unless_asked(
+                    message_id=message.id, question=person_question, line=turn.speech_text, ai_model=req.ai_model,
+                )
+            )
         await automation_events.mark_automation_events_voice_selected(
             self.db,
             user_id=self.user_id,
@@ -831,7 +837,8 @@ class VoiceAssistantTurnStreamSession:
                     ),
                     **(
                         {narration_people.ASKED_KEY: person_question.person_id}
-                        if person_question and person_question.asked_in(turn.speech_text)
+                        if person_question
+                        and narrator_profile.ask_needs_check((person_question.topic,), turn.speech_text)
                         else {}
                     ),
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,
