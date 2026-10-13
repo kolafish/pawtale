@@ -314,7 +314,8 @@ test("book export waits only for active draft processing and preserves failed or
   for (const [status, needsMaterial, expected] of [
     ["processing", 0, /正在整理新版全书/],
     ["failed", 0, /遇到问题.*重试/],
-    ["needs_input", 1, /需要补充讲述.*首页.*回忆/],
+    ["partial_ready", 1, /尚未归类.*首页.*继续整理/],
+    ["needs_input", 1, /书稿建议.*尚未更新/],
     ["needs_input", 0, /书稿建议.*尚未更新/],
     ["idle", 0, /尚未更新.*当前步骤/],
   ]) {
@@ -323,7 +324,7 @@ test("book export waits only for active draft processing and preserves failed or
       getMemoirBookOutput: async () => output,
       getMemoirDraftProgress: async (projectId) => {
         calls.push(projectId);
-        return { status, needs_user_material_count: needsMaterial };
+        return { status, needs_user_material_count: needsMaterial, pending_material_count: needsMaterial };
       },
     });
     const context = pageContext(page);

@@ -726,10 +726,13 @@ export function bookOutputStaleNotice(
     return `${subject}有变更。请到「书稿建议」处理，全书尚未更新。`;
   }
   if (progress?.status === "failed") {
-    return `${subject}有变更，后台整理遇到问题。请到「书稿建议」查看原因并重试。`;
+    return `${subject}有变更，后台整理遇到问题。请回到首页重试整理。`;
   }
   if (progress?.status === "processing") {
     return `${subject}有变更，后台正在整理新版全书。`;
+  }
+  if ((progress?.pending_material_count || 0) > 0) {
+    return `${subject}有变更，部分讲述尚未归类。请回到首页继续整理，已有正文仍可阅读。`;
   }
   return `${subject}有变更，全书尚未更新。请到「书稿建议」查看当前步骤。`;
 }
@@ -841,10 +844,13 @@ function bookOmissionFollowUp(
     return "请查看书稿建议，处理后书稿会继续更新。";
   }
   if (progress?.status === "failed") {
-    return "后台整理遇到问题，请查看书稿建议并重试。";
+    return "后台整理遇到问题，请回到首页重试整理。";
   }
   if (progress?.status === "processing") {
     return "后台正在整理，完成后请再查看。";
+  }
+  if ((progress?.pending_material_count || 0) > 0) {
+    return "部分讲述尚未归类，请回到首页继续整理。";
   }
   if (omittedChapters.some((chapter) => !chapter.draftAvailable)) {
     return omittedChapters.some((chapter) => !chapter.sourceCount)
