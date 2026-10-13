@@ -496,7 +496,11 @@ class VoiceAssistantTurnStreamSession:
         if person_question and narrator_profile.ask_needs_check((person_question.topic,), turn.speech_text):
             narrator_profile.run_ask_check_later(
                 narration_people.drop_ask_unless_asked(
-                    message_id=message.id, question=person_question, line=turn.speech_text, ai_model=req.ai_model,
+                    message_id=message.id,
+                    question=person_question,
+                    line=turn.speech_text,
+                    narration=current_user_message.content_text if current_user_message else "",
+                    ai_model=req.ai_model,
                 )
             )
         await automation_events.mark_automation_events_voice_selected(

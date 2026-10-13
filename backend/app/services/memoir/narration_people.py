@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 import logging
+import re
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
@@ -125,6 +126,7 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
 class Question:
     person_id: str
     topic: str  # "他" is the narrator, as in the interviewer prompt
+    who: str  # the person's card, so a check knows the other names 小余 may use
 
 
 class _AskOutput(BaseModel):
@@ -143,11 +145,14 @@ def _topic(person: Person) -> str:
     return ""
 
 
-async def asked(question: Question, line: str, *, ai_model: str | None) -> bool:
+async def asked(question: Question, line: str, *, narration: str, ai_model: str | None) -> bool:
     """小余 words the question freely, so a small call judges whether a line asked it."""
     prompt = (
-        f"访谈主持人对讲述者说了这句话：\n{line}\n\n"
-        f"这句话有没有问讲述者这件事：{question.topic}（“他”指讲述者）？"
+        f"书里记下的这个人：{question.who}\n\n"
+        f"讲述者刚才说：\n{narration}\n\n"
+        f"访谈主持人接着说：\n{line}\n\n"
+        f"主持人这句话有没有问讲述者这件事：{question.topic}（“他”指讲述者）？"
+        "用别的称呼、名字或者“他”“那位”指这个人也算。"
         "只是提到这个人、问这个人别的事、问别人之间的关系，都不算。"
         '只返回 JSON：{"asked":true} 或 {"asked":false}'
     )
@@ -165,10 +170,12 @@ async def asked(question: Question, line: str, *, ai_model: str | None) -> bool:
     return generated.value.asked
 
 
-async def drop_ask_unless_asked(*, message_id: str, question: Question, line: str, ai_model: str | None) -> None:
+async def drop_ask_unless_asked(
+    *, message_id: str, question: Question, line: str, narration: str, ai_model: str | None
+) -> None:
     """The saved line counts as asked until the check answers, or if it fails."""
     try:
-        if await asked(question, line, ai_model=ai_model):
+        if await asked(question, line, narration=narration, ai_model=ai_model):
             return
         async with async_session_maker() as db:
             message = await db.get(MemoirChatMessage, message_id)
@@ -200,11 +207,15 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
     for person in people:
         topic = _topic(person)
         if topic and person.id not in asked_ids and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
-            return Question(person_id=person.id, topic=topic)
+            return Question(person_id=person.id, topic=topic, who=person.line)
     return None
 
 
-async def load_people(db: AsyncSession, project_id: str) -> dict[str, Person]:
+async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = None) -> dict[str, Person]:
+    """The roster; `keep` names a segment being re-read, whose last reading still says who is who.
+
+    Its merges are left out: the re-read may be correcting one, and both people must stay offered.
+    """
     rows = await db.execute(
         select(MemoirChatMessage.id, MemoirChatMessage.metadata_json, MemoirChatMessage.transcript_version_id)
         .join(MemoirVoiceSession, MemoirChatMessage.voice_session_id == MemoirVoiceSession.id)
@@ -216,13 +227,17 @@ async def load_people(db: AsyncSession, project_id: str) -> dict[str, Person]:
         )
         .order_by(MemoirVoiceSession.created_at, MemoirChatMessage.turn_index, MemoirChatMessage.created_at)
     )
-    # A reading of an older transcript version is dropped: what it said may have been corrected, and a
-    # re-read of that segment must not see its own old result as already known.
+    # A reading of an older transcript version is dropped: what it said may have been corrected.
     return fold(
-        (message_id, metadata[READING_KEY])
+        (
+            message_id,
+            {"people": [{**item, "same_as": None} for item in metadata[READING_KEY].get("people") or []]}
+            if message_id == keep
+            else metadata[READING_KEY],
+        )
         for message_id, metadata, version in rows
         if isinstance((metadata or {}).get(READING_KEY), dict)
-        and metadata[READING_KEY].get("transcript_version_id") == (version or "")
+        and (message_id == keep or metadata[READING_KEY].get("transcript_version_id") == (version or ""))
     )
 
 
@@ -273,6 +288,12 @@ def build_people_prompt(*, people: list[Person], narrator: str, previous_line: s
     )
 
 
+def _ref(value: str | None) -> str:
+    """The model sometimes writes "P2 李老师" for "P2"."""
+    match = re.match(r"\s*(P\d+)", value or "")
+    return match.group(1) if match else ""
+
+
 async def read_people(
     db: AsyncSession,
     *,
@@ -289,10 +310,9 @@ async def read_people(
     so a reorder, a renamed call or two people with one call keep their ids; anyone it no longer names is
     simply not defined here any more, and a new person gets an id no earlier version used.
     """
-    roster = await load_people(db, project.id)
-    previous = (message.metadata_json or {}).get(READING_KEY)
-    earlier = fold([(message.id, previous)]) if isinstance(previous, dict) else {}
-    people = [*roster.values(), *(person for person_id, person in earlier.items() if person_id not in roster)]
+    # The segment's last reading is folded in its own place, so the people it named keep how they were
+    # introduced there even when later segments only say "他".
+    people = list((await load_people(db, project.id, keep=message.id)).values())
     prompt = build_people_prompt(
         people=people,
         narrator=narrator,
@@ -330,8 +350,8 @@ async def read_people(
 
     stored = [
         {
-            "id": refs.get(item.ref.strip()) or f"{message_id}:{transcript_version_id}:{index}",
-            "same_as": refs.get((item.same_as or "").strip()),
+            "id": refs.get(_ref(item.ref)) or f"{message_id}:{transcript_version_id}:{index}",
+            "same_as": refs.get(_ref(item.same_as)),
             **{key: text(getattr(item, key)) for key in _FIELDS},
         }
         for index, item in enumerate(generated.value.people, start=1)
