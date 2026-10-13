@@ -14,6 +14,7 @@ from app.services.memoir import completion_interviews
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic
 from app.services.memoir.narrative.frameworks import FrameworkTopicLevel
 from app.services.memoir.voice_followup_ai import (
+    INTERVIEWER_TURN_OUTPUT_RULES,
     InterviewerPersona,
     ProgressPromptContext,
     _has_user_message,
@@ -159,7 +160,7 @@ def _header(host_name: str, regenerate: bool) -> str:
         f"请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。",
         "",
         "输出要求：",
-        "- 只输出要播放的中文口语正文，不要 JSON、Markdown 或解释，不要加说话人标签",
+        INTERVIEWER_TURN_OUTPUT_RULES,
         f"- 你自称“{host_name}”，不要用这个名字称呼叙述者",
         "- 一般 1 到 2 句，35 到 75 个汉字；最多问一个问题，不要用“是……还是……”的二选一问法",
         "- 讲述过程中不要提记录条数、章节数、整理进度",
@@ -178,7 +179,7 @@ def _legacy_header(host_name: str, regenerate: bool) -> str:
     return f"""请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。
 
 输出要求：
-- 只输出要播放的中文口语正文，不要 JSON，不要 Markdown，不要解释
+{INTERVIEWER_TURN_OUTPUT_RULES}
 - 不要在正文前加“{host_name}：”“老余：”“小余：”“AI：”等说话人标签；自称只能出现在自然句子里，标签不属于可播放内容
 - 你可以自主组合动作：承接认可、鼓励继续讲、小结、自然换方向、继续追问，或没听清/太短时温和接住
 - 普通回应 1 到 2 句，建议 35 到 75 个汉字

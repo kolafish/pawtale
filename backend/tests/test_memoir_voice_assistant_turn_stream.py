@@ -3,6 +3,8 @@ import base64
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from sqlalchemy import func, select
 
 from app.services.ai_base import AITextServiceBase
@@ -33,7 +35,11 @@ from app.services.memoir import narrator_profile
 from app.services.memoir import voice_progress_notices
 from app.services.memoir.memory_activation import MemoryActivationResult
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
+from app.services.memoir.voice_assistant_turn_stream import (
+    AssistantTurnArtifacts,
+    AssistantTurnStartRequest,
+    VoiceAssistantTurnStreamSession,
+)
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
     create_test_book_plan,
@@ -178,6 +184,45 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
+
+
+@pytest.mark.parametrize("action", ["listen", "pause", "end"])
+async def test_conversation_action_survives_split_stream_without_becoming_speech(
+    action, client, test_db, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    created = await create_test_voice_transcript(client, test_db, text="今天先聊到这里吧。")
+    speech = {"listen": "您接着讲，我在听。", "pause": "好，您慢慢想。", "end": "好，今天就聊到这里。"}[action]
+    stream, _, tts, completed = await _run_stream_turn(
+        test_db, voice_session_id=created["session"]["id"], user_id=created["user_id"],
+        chunks=["小", "余：", speech], control_chunks=tuple(f"[{action}]\n"),
+    )
+    assert completed["conversation_action"] == action
+    assert completed["expects_answer"] is (action == "listen")
+    assert completed["text"] == speech
+    assert "".join(event["text_delta"] for event in stream.sent if event["type"] == "text.delta") == speech
+    assert "".join(tts.calls[0]["text_chunks"]) == speech
+    message = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert message.metadata_json["conversation_action"] == action
+    assert message.metadata_json["expects_answer"] is (action == "listen")
+
+
+@pytest.mark.parametrize("raw", ["", "[en", "今天先到这里。", "[unknown]\n不应播放"])
+async def test_invalid_conversation_control_never_reaches_speech(raw):
+    client = FakeTurnClient()
+    artifacts = AssistantTurnArtifacts()
+    speech = asyncio.Queue()
+    session = VoiceAssistantTurnStreamSession(db=None, client=client, voice_session_id="synthetic", user_id="synthetic")
+    with pytest.raises(ValueError, match="会话动作"):
+        await session._stream_text(
+            ai_client=FakeStreamingAI(list(raw), control_chunks=()), system_prompt="", prompt="",
+            req=AssistantTurnStartRequest(), max_tokens=100, turn_id="synthetic", artifacts=artifacts,
+            cancel_event=asyncio.Event(), text_queue=speech,
+        )
+    assert artifacts.conversation_action is None
+    assert artifacts.text == ""
+    assert speech.empty()
+    assert client.sent == []
 
 
 async def test_voice_assistant_turn_injects_retrieved_context_and_records_trace(
@@ -1279,9 +1324,10 @@ async def _run_stream_turn(
     regenerate: bool = False,
     voice: str | None = None,
     policy_ai_client=None,
+    control_chunks: tuple[str, ...] = ("[listen]\n",),
 ) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
     stream_client = FakeTurnClient()
-    ai_client = FakeStreamingAI(chunks)
+    ai_client = FakeStreamingAI(chunks, control_chunks=control_chunks)
     tts_client = FakeStreamingTTS()
     session = VoiceAssistantTurnStreamSession(
         db=test_db,
@@ -1333,8 +1379,9 @@ class FakeStreamingAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-stream-model"
 
-    def __init__(self, chunks: list[str]) -> None:
+    def __init__(self, chunks: list[str], *, control_chunks: tuple[str, ...] = ("[listen]\n",)) -> None:
         self.chunks = chunks
+        self.control_chunks = control_chunks
         self.calls: list[dict[str, Any]] = []
 
     async def _call_llm(self, *args, **kwargs):
@@ -1352,7 +1399,7 @@ class FakeStreamingAI(AITextServiceBase):
             usage={"input_tokens": 10},
             response_model=self.model_name,
         )
-        for chunk in self.chunks:
+        for chunk in (*self.control_chunks, *self.chunks):
             yield AITextStreamChunk(
                 text_delta=chunk,
                 response_model=self.model_name,

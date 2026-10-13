@@ -3705,3 +3705,69 @@ test("late final transcript during finish must not start another assistant conne
   assert.equal(context.data.transcriptLines[0].text, "最后一句已保存。");
   assert.equal(context.data.transcriptLines[0].message_id, "last-message");
 });
+
+for (const scenario of [
+  { action: "listen", listens: 1, finishes: 0 },
+  { action: "pause", listens: 0, finishes: 0 },
+  { action: "end", listens: 0, finishes: 1 },
+  { action: "end", playbackFails: true, listens: 0, finishes: 0 },
+  { action: "end", interrupted: true, listens: 0, finishes: 0 },
+  { action: "end", suspended: true, listens: 0, finishes: 0 },
+]) {
+  test(`spoken action waits for audio and respects cancellation: ${JSON.stringify(scenario)}`, async () => {
+    let drain;
+    const playback = new Promise(resolve => { drain = resolve; });
+    const completed = {
+      type: "turn.completed", voice_session_id: "voice-1", project_id: "project-1",
+      message_id: "assistant-1", text: "好，今天就聊到这里。", primary_intent: "acknowledge",
+      intent_tags: [], conversation_action: scenario.action, expects_answer: scenario.action === "listen",
+    };
+    const page = loadVoiceChatPage({
+      assistantTurnStreamExports: {
+        VoiceAssistantTurnStreamClient: class {
+          constructor(_, callbacks) { this.callbacks = callbacks; }
+          async start() {
+            this.callbacks.onAudioFrame({});
+            this.callbacks.onAudioDone({ duration_seconds: 1 });
+            this.callbacks.onCompleted(completed);
+            return completed;
+          }
+          cancel() {}
+          close() {}
+        },
+      },
+      streamingSpeechPlaybackExports: {
+        StreamingSpeechPlaybackController: class {
+          async appendFrame() { return null; }
+          async waitForDrain() { await playback; if (scenario.playbackFails) throw Error("播放失败"); }
+          stop() {}
+          async destroy() {}
+        },
+      },
+    });
+    let listens = 0, finishes = 0;
+    const context = {
+      ...page, data: { ...page.data, voiceSessionId: "voice-1" },
+      followUpRequestSerial: 1, autoListenPendingAfterPlayback: true,
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      prepareStreamingAudioPlayback() {}, stopAssistantBargeInMonitor() {}, stopFollowUpProgressTimer() {},
+      markStreamingPlaybackError() {},
+      async tryStartAutoListenAfterTTS() { listens += 1; },
+      async finishSession() { finishes += 1; },
+    };
+    const pending = page.generateStreamingFollowUp.call(context, "user-1", false, 1);
+    await flushAsyncWork();
+    assert.equal(finishes, 0);
+    assert.equal(listens, 0);
+    if (scenario.interrupted) context.followUpRequestSerial += 1;
+    if (scenario.suspended) context.pageSuspended = true;
+    drain();
+    await pending;
+    assert.equal(finishes, scenario.finishes);
+    assert.equal(listens, scenario.listens);
+    if (!scenario.interrupted) {
+      assert.equal(context.autoListenPendingAfterPlayback, scenario.action === "listen");
+      assert.equal(context.data.transcriptLines.at(-1).metadata_json.conversation_action, scenario.action);
+    }
+  });
+}

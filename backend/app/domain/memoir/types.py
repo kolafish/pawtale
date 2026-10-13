@@ -35,6 +35,12 @@ class MemoirSessionGoal(str, Enum):
     BOOK_COMPLETION = "book_completion"
 
 
+class MemoirConversationAction(str, Enum):
+    LISTEN = "listen"
+    PAUSE = "pause"
+    END = "end"
+
+
 class MemoirChatMessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"

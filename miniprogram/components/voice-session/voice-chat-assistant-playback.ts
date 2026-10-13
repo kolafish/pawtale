@@ -218,7 +218,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       messageId,
       text: line.text,
       expectsAnswer: line.metadata_json?.expects_answer !== false,
-      autoListenAfterPlayback,
+      autoListenAfterPlayback: autoListenAfterPlayback && line.metadata_json?.expects_answer !== false,
       forceRegenerate,
       line,
     });

@@ -681,13 +681,8 @@ def _execution_mode_for_selection(
         and context.brief.target_id is not None
     ):
         return MemoirInterviewPolicyExecutionMode.ACTIVE
-    if (
-        selected_action == MemoirInterviewAction.PAUSE_OR_END
-        and len(context.brief.candidate_actions) == 1
-        and context.brief.candidate_actions[0].action
-        == MemoirInterviewAction.PAUSE_OR_END
-    ):
-        return MemoirInterviewPolicyExecutionMode.ACTIVE
+    # Keyword-derived pause constraints remain suggestions. The streamed turn
+    # decides listen/pause/end from context together with the spoken response.
     return MemoirInterviewPolicyExecutionMode.SUGGEST
 
 
@@ -770,10 +765,6 @@ def active_reply_instruction(policy_turn: ActivePolicyTurn | None) -> str:
         MemoirInterviewAction.SUMMARIZE_AND_CONFIRM: (
             "本轮策略是“总结确认”：只做简短、忠实的总结并请叙述者确认，"
             "不得添加新事实，不继续索取事件细节。"
-        ),
-        MemoirInterviewAction.PAUSE_OR_END: (
-            "叙述者已明确要求暂停、结束或不愿讨论；本轮只尊重这一决定并自然收尾，"
-            "不得继续提问或换一个话题追问。"
         ),
         MemoirInterviewAction.OFFER_NEW_TOPIC:
             topic_offer_reply_instruction(policy_turn.context.brief),

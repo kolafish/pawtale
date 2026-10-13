@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirConversationAction,
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
@@ -42,11 +43,11 @@ from app.services.memoir.voice_followup_ai import (
     build_progress_prompt_context,
     _has_user_message,
     _llm_max_tokens,
-    _parse_interviewer_turn,
     _question_mark_count,
     recent_context_messages,
     interviewer_persona_for_voice,
     strip_streaming_speaker_label_prefix,
+    split_interviewer_control_prefix,
     system_prompt_for_persona,
 )
 from app.services.memoir.streaming_tts_events import (
@@ -70,7 +71,7 @@ from app.services.memoir.voice_tts_types import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v7"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v8"
 STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ class AssistantTurnStartRequest:
 @dataclass
 class AssistantTurnArtifacts:
     text: str = ""
+    conversation_action: MemoirConversationAction | None = None
     finish_reason: str | None = None
     usage: dict = field(default_factory=dict)
     ai_provider: str | None = None
@@ -466,13 +468,18 @@ class VoiceAssistantTurnStreamSession:
         )
         if cancel_event.is_set():
             return
-        turn = _parse_interviewer_turn(artifacts.text, fallback_intent=fallback_intent)
-        if (
-            voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
-            and has_user_message
-            and turn.expects_answer
-        ):
-            turn = replace(turn, expects_answer=False)
+        action = artifacts.conversation_action
+        if action is None:
+            raise HTTPException(status_code=502, detail="AI 未返回有效的会话动作，请重试")
+        if book_completion and has_user_message and action == MemoirConversationAction.LISTEN:
+            action = MemoirConversationAction.PAUSE
+        intent = fallback_intent if action == MemoirConversationAction.LISTEN else "acknowledge"
+        turn = InterviewerTurn(
+            primary_intent=intent,
+            intent_tags=[intent],
+            speech_text=artifacts.text.strip(),
+            conversation_action=action,
+        )
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
         profile_questions = book_context.profile_questions if book_context else ()
@@ -578,6 +585,7 @@ class VoiceAssistantTurnStreamSession:
                 "primary_intent": turn.primary_intent,
                 "intent_tags": turn.intent_tags,
                 "expects_answer": turn.expects_answer,
+                "conversation_action": turn.conversation_action.value,
                 "host_name": persona.host_name,
                 "finish_reason": artifacts.finish_reason,
                 "usage": artifacts.usage,
@@ -659,6 +667,7 @@ class VoiceAssistantTurnStreamSession:
         cancel_event: asyncio.Event,
         text_queue: asyncio.Queue[str | None],
     ) -> None:
+        control_buffer = ""
         initial_text_buffer = ""
         initial_text_resolved = False
         async for chunk in stream_text_with_client(
@@ -682,6 +691,11 @@ class VoiceAssistantTurnStreamSession:
             if not chunk.text_delta:
                 continue
             text_delta = chunk.text_delta
+            if artifacts.conversation_action is None:
+                control_buffer += text_delta
+                text_delta, artifacts.conversation_action = split_interviewer_control_prefix(control_buffer)
+                if artifacts.conversation_action is None:
+                    continue
             if not initial_text_resolved:
                 initial_text_buffer += text_delta
                 text_delta, initial_text_resolved = strip_streaming_speaker_label_prefix(initial_text_buffer)
@@ -700,6 +714,9 @@ class VoiceAssistantTurnStreamSession:
                     "text": artifacts.text,
                 }
             )
+
+        if artifacts.conversation_action is None:
+            raise ValueError("AI 访谈回复的会话动作不完整，请重试")
 
     async def _stream_audio_from_text_queue(
         self,
@@ -851,7 +868,7 @@ class VoiceAssistantTurnStreamSession:
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
-                    "parsed_json": turn.parsed_json,
+                    "conversation_action": turn.conversation_action.value,
                     "provider": artifacts.ai_provider or ai_client.provider_name,
                     "model": (artifacts.resolved_ai_model or ai_client.model_name),
                     "requested_model": artifacts.requested_ai_model,

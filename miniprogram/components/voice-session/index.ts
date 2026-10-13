@@ -861,9 +861,7 @@ Component({
       return;
     }
     this.runtime().assistantTurnRuntime = null;
-    if (!playbackError && completed.expects_answer !== false) {
-      this.runtime().autoListenPendingAfterPlayback = true;
-    }
+    this.runtime().autoListenPendingAfterPlayback = !playbackError && completed.expects_answer !== false;
     if (!playbackError) {
       void this.markStreamingAutomationEventsVoicePlayed(completed);
     }
@@ -884,8 +882,14 @@ Component({
       persistenceStateText: playbackError
         ? "语音播放失败"
         : (completed.expects_answer === false ? "小余已回应" : "等待回答"),
+      ...(completed.conversation_action === "pause" ? { autoListenStateText: "已暂停，可点继续说话" } : {}),
       lastFollowUpSourceMessageId: sourceMessageId,
     });
+    if (!playbackError && completed.conversation_action === "end"
+      && !this.runtime().pageSuspended && !this.runtime().disposed) {
+      await this.finishSession();
+      return;
+    }
     if (!playbackError && completed.expects_answer !== false) {
       await this.tryStartAutoListenAfterTTS();
     }
@@ -989,6 +993,7 @@ Component({
       primary_intent: event.primary_intent,
       intent_tags: event.intent_tags || [],
       expects_answer: event.expects_answer,
+      conversation_action: event.conversation_action,
       usage: event.usage || {},
       finish_reason: event.finish_reason || "",
       progress_update: event.progress_update || null,

@@ -6,11 +6,11 @@ import re
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirChatMessageRole,
+    MemoirConversationAction,
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressSnapshotResponse
-from app.services.json_utils import extract_json_payload
 
 
 SYSTEM_PROMPT = (
@@ -26,15 +26,13 @@ PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v4"
 SPEAKER_LABELS = ("小余", "老余", "AI", "Ai", "ai", "助手", "主持人")
 
 
-PRIMARY_INTENTS = {
-    "opening",
-    "follow_up",
-    "acknowledge",
-    "encourage_continue",
-    "reflect_summary",
-    "transition",
-    "repair",
-}
+INTERVIEWER_TURN_OUTPUT_RULES = """输出协议：第一行只输出 [listen]、[pause] 或 [end] 中的一个标记，第二行起输出中文口语正文。标记不播放。
+先判断用户最新一句对“本次讲述”的意图，再生成与之相符的回应，判断顺序如下：
+1. 用户表示本次不再讲、今天不讲了、下次/改天再聊、要离开，选 [end]。不要求出现“结束”两个字；没有说稍等就回来继续的“不说了”也属于结束。正文简短告别，不再提问或邀请立即继续，不提前宣称保存成功。
+2. 用户要在本次中暂时停一下、等他想想/处理别的事/稍后回来继续，选 [pause]。明确的“等一下”优先于通常鼓励继续的策略。正文简短回应暂停，不提问、不催促，可说明准备好后点继续说话。
+3. 其余选 [listen]：故事讲完、换话题、记不清某事、只拒绝某话题，或让你少问而他继续讲。正文顺着他的意愿接话。
+以上只判断用户对当前对话的意图：过去发生的结束、引用别人说话、否定的结束或已改口为继续，都不是要停止本次访谈。只说故事讲完或“就这些”没有要求停止访谈时仍为 [listen]。
+暂停与结束优先于资料补问、人物问题、话题建议和其他访谈策略。标记必须与口语一致；正文中不得出现控制标记、JSON、Markdown 或说话人标签。"""
 
 
 @dataclass(frozen=True)
@@ -42,8 +40,11 @@ class InterviewerTurn:
     primary_intent: str
     intent_tags: list[str]
     speech_text: str
-    expects_answer: bool
-    parsed_json: bool
+    conversation_action: MemoirConversationAction
+
+    @property
+    def expects_answer(self) -> bool:
+        return self.conversation_action == MemoirConversationAction.LISTEN
 
 
 @dataclass(frozen=True)
@@ -284,57 +285,13 @@ def strip_streaming_speaker_label_prefix(text: str) -> tuple[str, bool]:
     return raw, True
 
 
-def _clean_speech_text(value: object) -> str:
-    text = str(value or "").strip().strip('"“”').strip()
-    return _strip_speaker_label_prefix(text)
-
-
-def _normalize_primary_intent(value: object, fallback: str) -> str:
-    normalized = str(value or "").strip()
-    return normalized if normalized in PRIMARY_INTENTS else fallback
-
-
-def _normalize_intent_tags(value: object, primary_intent: str) -> list[str]:
-    raw_tags = value if isinstance(value, list) else []
-    tags: list[str] = []
-    for item in raw_tags:
-        tag = str(item or "").strip()
-        if tag in PRIMARY_INTENTS and tag not in tags:
-            tags.append(tag)
-    if primary_intent not in tags:
-        tags.append(primary_intent)
-    return tags[:5]
-
-
-def _parse_interviewer_turn(
-    content: object,
-    *,
-    fallback_intent: str,
-    default_expects_answer: bool = True,
-) -> InterviewerTurn:
-    raw_text = _clean_speech_text(content)
-    payload = extract_json_payload(raw_text)
-    if isinstance(payload, dict):
-        speech_text = _clean_speech_text(
-            payload.get("speech_text") or payload.get("text") or payload.get("follow_up_text") or payload.get("message")
-        )
-        if speech_text:
-            primary_intent = _normalize_primary_intent(
-                payload.get("primary_intent") or payload.get("intent"),
-                fallback_intent,
-            )
-            expects_answer = payload.get("expects_answer")
-            return InterviewerTurn(
-                primary_intent=primary_intent,
-                intent_tags=_normalize_intent_tags(payload.get("intent_tags"), primary_intent),
-                speech_text=speech_text,
-                expects_answer=expects_answer if isinstance(expects_answer, bool) else default_expects_answer,
-                parsed_json=True,
-            )
-    return InterviewerTurn(
-        primary_intent=fallback_intent,
-        intent_tags=[fallback_intent],
-        speech_text=raw_text,
-        expects_answer=default_expects_answer,
-        parsed_json=False,
-    )
+def split_interviewer_control_prefix(text: str) -> tuple[str, MemoirConversationAction | None]:
+    """Buffer only the control prefix; never send it to TTS or the transcript."""
+    text = text.lstrip()
+    for action in MemoirConversationAction:
+        prefix = f"[{action.value}]"
+        if text.startswith(prefix):
+            return text[len(prefix):].lstrip(), action
+        if prefix.startswith(text):
+            return "", None
+    raise ValueError("AI 访谈回复缺少有效的会话动作，请重试")
