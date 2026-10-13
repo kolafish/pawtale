@@ -10,6 +10,7 @@ from sqlalchemy import delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from app.application_errors import InsufficientAICreditError
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
@@ -292,6 +293,8 @@ async def generate_cleaned_transcript_text(
             max_tokens=policy.max_tokens,
             timeout=ai_text_timeout_seconds(policy.timeout_profile),
         )
+    except InsufficientAICreditError:
+        raise
     except HTTPException as exc:
         if strict and exc.status_code < 500:
             raise

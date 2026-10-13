@@ -12,6 +12,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.application_errors import InsufficientAICreditError
 from app.domain.memoir.types import (
     MemoirSemanticCacheStatus,
 )
@@ -827,7 +828,7 @@ async def generate_or_reuse_book_review(
             "engine": BOOK_REVIEW_ENGINE,
             "timeout_seconds": timeout_seconds,
         }
-    except HTTPException:
+    except (HTTPException, InsufficientAICreditError):
         raise
     except Exception as exc:
         logger.exception("memoir book review generation failed project_id=%s", project_id)
