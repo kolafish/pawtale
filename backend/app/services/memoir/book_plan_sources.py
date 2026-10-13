@@ -19,8 +19,6 @@ from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookPlanChapterResponse,
     MemoirBookPlanResponse,
-    MemoirBookSourceCoverageItem,
-    MemoirBookSourceIncludedChapter,
 )
 from app.schemas.memoir_sections import MemoirChapterSectionSummary
 from app.services.memoir import sections as memoir_sections
@@ -34,7 +32,6 @@ from app.services.memoir.transcript_projection import current_utterance_text
 
 
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
-SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at"
 SOURCE_REFS_UPDATED_AT_KEY = "source_refs_updated_at"
 REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
 SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
@@ -43,15 +40,6 @@ DRAFT_STATUS_REASON_KEY = "status_reason"
 NEW_SOURCES_ASSIGNED_STATUS_REASON = "new_sources_assigned"
 SOURCES_CHANGED_STATUS_REASON = "sources_changed"
 SOURCES_DELETED_STATUS_REASON = "sources_deleted"
-
-SOURCE_CHANGE_METADATA_KEYS = {
-    PENDING_SOURCE_UTTERANCE_IDS_KEY,
-    SOURCE_ASSIGNMENT_UPDATED_AT_KEY,
-    SOURCE_REFS_UPDATED_AT_KEY,
-    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
-    SOURCE_REFS_REMOVED_AT_KEY,
-}
-
 
 @dataclass(frozen=True)
 class SourceSegment:
@@ -138,17 +126,6 @@ def merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict
     return {**(metadata_json or {}), **patch}
 
 
-def metadata_without_keys(metadata_json: dict | None, keys: set[str]) -> dict[str, object]:
-    metadata = dict(metadata_json or {})
-    for key in keys:
-        metadata.pop(key, None)
-    return metadata
-
-
-def source_change_metadata_keys() -> set[str]:
-    return set(SOURCE_CHANGE_METADATA_KEYS)
-
-
 def draft_status_metadata(metadata_json: dict | None, reason: str) -> dict[str, object]:
     return merge_metadata(metadata_json, {DRAFT_STATUS_REASON_KEY: reason})
 
@@ -199,17 +176,6 @@ def source_change_counts(metadata_json: dict | None) -> tuple[int, int]:
     return len(pending_source_ids(metadata_json)), len(removed_source_ids(metadata_json))
 
 
-def set_source_assignment_metadata(metadata_json: dict | None, pending_ids: set[str]) -> dict[str, object]:
-    metadata = dict(metadata_json or {})
-    if pending_ids:
-        metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
-        metadata[SOURCE_ASSIGNMENT_UPDATED_AT_KEY] = datetime.now(UTC).isoformat()
-    else:
-        metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
-        metadata.pop(SOURCE_ASSIGNMENT_UPDATED_AT_KEY, None)
-    return metadata
-
-
 def set_source_change_metadata(
     metadata_json: dict | None,
     *,
@@ -226,27 +192,6 @@ def set_source_change_metadata(
     else:
         metadata.pop(REMOVED_SOURCE_UTTERANCE_IDS_KEY, None)
     metadata[SOURCE_REFS_UPDATED_AT_KEY] = datetime.now(UTC).isoformat()
-    return metadata
-
-
-def set_deleted_source_metadata(
-    metadata_json: dict | None,
-    *,
-    pending_ids: set[str],
-    removed_ids: set[str],
-    removed_at: str,
-) -> dict[str, object]:
-    metadata = dict(metadata_json or {})
-    if pending_ids:
-        metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
-    else:
-        metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
-    if removed_ids:
-        metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(removed_ids)
-        metadata[SOURCE_REFS_REMOVED_AT_KEY] = removed_at
-    else:
-        metadata.pop(REMOVED_SOURCE_UTTERANCE_IDS_KEY, None)
-        metadata.pop(SOURCE_REFS_REMOVED_AT_KEY, None)
     return metadata
 
 
@@ -383,24 +328,3 @@ async def source_segments(
             )
         )
     return segments
-
-
-def source_coverage_item(
-    source: SourceSegment,
-    included_chapters: list[MemoirBookSourceIncludedChapter] | None = None,
-) -> MemoirBookSourceCoverageItem:
-    included = included_chapters or []
-    return MemoirBookSourceCoverageItem(
-        source_index=source.source_index,
-        voice_session_id=source.voice_session_id,
-        message_id=source.message_id,
-        utterance_id=source.utterance_id,
-        transcript_version_id=source.transcript_version_id,
-        audio_file_id=source.audio_file_id,
-        start_ms=source.start_ms,
-        end_ms=source.end_ms,
-        text=source.text,
-        created_at=source.created_at,
-        is_included=bool(included),
-        included_in_chapters=included,
-    )

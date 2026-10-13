@@ -149,27 +149,6 @@ async def plan_source_ref_dicts_by_chapter(
     return grouped
 
 
-async def chapter_source_ref_dicts(
-    db: AsyncSession,
-    *,
-    chapter: MemoirBookPlanChapter,
-) -> list[dict[str, object]]:
-    plan = await db.get(MemoirBookPlan, chapter.plan_id)
-    return (await plan_source_ref_dicts_by_chapter(db, plan)).get(chapter.id, [])
-
-
-async def covered_utterance_ids(
-    db: AsyncSession,
-    plan: MemoirBookPlan | None,
-) -> set[str]:
-    refs = await plan_source_ref_dicts_by_chapter(db, plan)
-    return {
-        utterance_id
-        for chapter_refs in refs.values()
-        for utterance_id in source_ref_utterance_ids(chapter_refs)
-    }
-
-
 async def included_chapters_by_utterance(
     db: AsyncSession,
     plan: MemoirBookPlan | None,
@@ -187,22 +166,6 @@ async def included_chapters_by_utterance(
         )
         for utterance_id in source_ref_utterance_ids(refs.get(chapter.id, [])):
             result.setdefault(utterance_id, []).append(summary)
-    return result
-
-
-async def source_count_by_chapter(
-    db: AsyncSession,
-    plan: MemoirBookPlan | None,
-    *,
-    valid_utterance_ids: set[str] | None = None,
-) -> dict[str, int]:
-    refs = await plan_source_ref_dicts_by_chapter(db, plan)
-    result: dict[str, int] = {}
-    for chapter_id, chapter_refs in refs.items():
-        ids = set(source_ref_utterance_ids(chapter_refs))
-        if valid_utterance_ids is not None:
-            ids &= valid_utterance_ids
-        result[chapter_id] = len(ids)
     return result
 
 
