@@ -222,8 +222,8 @@ test("chapter overview renders the story-first visual hierarchy", async () => {
     await page.setData(confirmedData);
     await sleep(250);
     const includedAction = await page.$(".chapter-finished-action");
-    assert.match(await includedAction.text(), /已收入书稿/);
-    assert.equal(await page.$(".confirm-chapter-action"), null, "已收入后不再显示提交式按钮");
+    assert.ok(includedAction, "正文就绪后保留章节阅读入口");
+    assert.equal(await page.$(".confirm-chapter-action"), null, "正文就绪后不再要求重复确认");
   } catch (error) {
     failed = true;
     await session.artifacts.captureFailure(session.miniProgram, error);

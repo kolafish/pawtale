@@ -62,7 +62,11 @@ async function createArtifactRecorder(config) {
       });
     },
     attach(miniProgram) {
-      miniProgram.on("console", (message) => {
+      // SDK 0.12.1's on("console") fires an unawaited App.enableLog request.
+      // Tools 2.02 never acknowledges that method (confirmed by a direct probe).
+      // Observe delivered logs without issuing that unsupported request; page
+      // exceptions, screenshots and state snapshots remain the failure evidence.
+      miniProgram.connection.on("App.logAdded", (message) => {
         events.push({
           at: new Date().toISOString(),
           kind: "console",
