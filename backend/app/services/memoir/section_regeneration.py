@@ -880,16 +880,27 @@ async def regenerate_chapter_sections(
         progress_callback=progress_callback,
         max_sections=req.max_sections,
     )
-    if not planned_sections:
-        raise HTTPException(
-            status_code=409,
-            detail="AI 未能为本章生成任何小节，请重试",
-        )
     _validate_planned_coverage(
         materials=materials,
         planned_sections=planned_sections,
         pending_assignments=pending_assignments,
     )
+    uncertain_initial_assignment = (
+        structure_updated_by == MemoirCreatedBy.AI
+        and any(assignment.material.include_in_book for assignment in pending_assignments)
+    )
+    preserve_initial_structure = (
+        uncertain_initial_assignment
+        and req.max_sections is None
+        and all(material.source_section_id for material in materials)
+    )
+    if uncertain_initial_assignment and not preserve_initial_structure:
+        raise HTTPException(409, "AI 未能保留原有收录的讲述，原小节保持不变，请重试")
+    if not planned_sections and not preserve_initial_structure:
+        raise HTTPException(
+            status_code=409,
+            detail="AI 未能为本章生成任何小节，请重试",
+        )
 
     # The expensive model work runs without a transaction. Lock only for the
     # final revalidation and atomic structure replacement.
@@ -909,6 +920,16 @@ async def regenerate_chapter_sections(
     )
     _validate_expected_sections(chapter, req)
     _validate_material_snapshots(_material_snapshots(chapter), materials)
+    if preserve_initial_structure:
+        # Initial placement is already complete. An uncertain finer partition
+        # must not remove included sources from the book. Keep the whole valid
+        # structure instead of splicing incompatible old/new groups together.
+        # Revalidate above even for this no-op: a concurrent edit wins.
+        return {
+            "material_count": len(materials), "assigned_count": len(materials),
+            "unassigned_count": 0, "section_count": len(included_sections),
+            "ai_model": generated_model,
+        }
     await db.execute(
         delete(MemoirSection)
         .where(
