@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, timedelta, timezone
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -32,6 +35,7 @@ from app.schemas.memoir_book import (
     MemoirBookAudioPlanRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
+    MemoirBookLevelEditorialCopyTarget,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookManuscriptTemplate,
@@ -60,6 +64,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
+    stored_manuscript_metadata,
     template_cover_style as _template_cover_style,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
@@ -546,6 +551,46 @@ async def update_book_output(
     return _output_response(refreshed)
 
 
+class AutomaticEditorialCopyState(BaseModel):
+    input_signature: str = ""
+    processed_version: int = 0
+    status: Literal["succeeded", "failed", "not_started"] = "not_started"
+    manual_targets: list[MemoirBookLevelEditorialCopyTarget] = Field(default_factory=list)
+    manual_chapter_fields: dict[str, list[Literal["intro", "pull_quotes"]]] = Field(default_factory=dict)
+
+
+AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
+
+
+def _automatic_copy_state(output: MemoirBookOutput) -> AutomaticEditorialCopyState:
+    from app.services.memoir.narrative.book_output_assembly import _manuscript_chapters
+
+    state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
+    if not state.processed_version and output.versions and output.versions[0].created_by in {"user", "ai"}:
+        state.manual_targets = ["preface", "afterword", "back_cover_quote"]
+        state.manual_chapter_fields = {
+            chapter_id: ["intro", "pull_quotes"] for chapter_id in _manuscript_chapters(output.versions[0])
+        }
+    # Before the first automatic pass, every AI copy change was explicitly
+    # requested. Thereafter inspect only versions after our last saved pass.
+    for before, after in zip(output.versions, output.versions[1:]):
+        if after.version <= state.processed_version or after.created_by not in {"user", "ai"}:
+            continue
+        old = stored_manuscript_metadata(before.manuscript_json)
+        new = stored_manuscript_metadata(after.manuscript_json)
+        for target in ("preface", "afterword", "back_cover_quote"):
+            if old.get(target) != new.get(target) and target not in state.manual_targets:
+                state.manual_targets.append(target)
+        old_chapters, new_chapters = _manuscript_chapters(before), _manuscript_chapters(after)
+        for chapter_id, chapter in new_chapters.items():
+            for field in ("intro", "pull_quotes"):
+                if old_chapters.get(chapter_id, {}).get(field) != chapter.get(field):
+                    fields = state.manual_chapter_fields.setdefault(chapter_id, [])
+                    if field not in fields:
+                        fields.append(field)
+    return state
+
+
 async def regenerate_book_output_editorial_copy(
     db: AsyncSession,
     *,
@@ -553,6 +598,8 @@ async def regenerate_book_output_editorial_copy(
     project_id: str,
     req: MemoirBookOutputEditorialCopyRegenerateRequest,
     allow_admin: bool = False,
+    automatic: bool = False,
+    retry: bool = False,
 ) -> MemoirBookOutputResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
@@ -579,6 +626,18 @@ async def regenerate_book_output_editorial_copy(
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
+    state = _automatic_copy_state(output) if automatic else None
+    if state is not None:
+        from app.services.memoir.semantic_state import semantic_json_signature
+        signature = semantic_json_signature({"title": output_title, "snapshot": snapshot})
+        if state.input_signature == signature and not retry:
+            return _output_response(output)
+        state.input_signature = signature
+        targets -= set(state.manual_targets)
+        for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes")):
+            if all(field in state.manual_chapter_fields.get(chapter.chapter_id, []) for chapter in manuscript.chapters):
+                targets.discard(target)
+    protected_chapter_copy = {chapter.chapter_id: chapter.model_copy(deep=True) for chapter in manuscript.chapters}
     # Persist a changed model preference and release all locks before the
     # provider call. The output row is locked and the base version revalidated
     # immediately before appending the generated version.
@@ -590,17 +649,22 @@ async def regenerate_book_output_editorial_copy(
         targets=sorted(targets),
         chapter_ids=sorted(chapter_ids),
         feedback=req.feedback,
-    )
-    if not editorial_copy:
+    ) if targets else None
+    if not editorial_copy and not automatic:
         raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")
 
-    _apply_editorial_copy(
-        manuscript,
-        editorial_copy,
-        targets=targets,
-        chapter_ids=chapter_ids,
-    )
-    manuscript_json = manuscript.model_dump(mode="json")
+    if editorial_copy:
+        _apply_editorial_copy(manuscript, editorial_copy, targets=targets, chapter_ids=chapter_ids)
+    if state is not None:
+        for chapter in manuscript.chapters:
+            original = protected_chapter_copy[chapter.chapter_id]
+            fields = state.manual_chapter_fields.get(chapter.chapter_id, [])
+            if "intro" in fields:
+                chapter.intro = original.intro
+            if "pull_quotes" in fields:
+                chapter.pull_quotes = original.pull_quotes
+        state.status = "succeeded" if editorial_copy or not targets else "failed"
+    manuscript_json = manuscript.model_dump(mode="json") if editorial_copy else latest.manuscript_json
     await db.execute(
         select(MemoirBookOutput.id)
         .where(MemoirBookOutput.id == output.id)
@@ -612,10 +676,12 @@ async def regenerate_book_output_editorial_copy(
         or not output.versions
         or output.versions[-1].id != base_version_id
     ):
+        if automatic and output is not None and output.versions:
+            return _output_response(output)
         raise HTTPException(status_code=409, detail="生成期间全书稿已更新，请重试")
     latest = output.versions[-1]
     if manuscript_json != latest.manuscript_json:
-        await append_book_output_version(
+        latest = await append_book_output_version(
             db,
             output=output,
             content=latest.content,
@@ -623,7 +689,10 @@ async def regenerate_book_output_editorial_copy(
             manuscript_json=manuscript_json,
             created_by=MemoirCreatedBy.AI,
         )
-    invalidate_book_output(output)
+        invalidate_book_output(output)
+    if state is not None:
+        state.processed_version = latest.version
+        output.metadata_json = {**(output.metadata_json or {}), AUTOMATIC_EDITORIAL_COPY_KEY: state.model_dump(mode="json")}
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:

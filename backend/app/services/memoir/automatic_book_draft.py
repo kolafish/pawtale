@@ -27,6 +27,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
+from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
 from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, completion_issues, editing_jobs
 from app.services.memoir.book_output_snapshots import (
@@ -265,6 +266,14 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     if any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
+    if readable and progress.output_id and not progress.preserved_manual:
+        from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
+        polished = await regenerate_book_output_editorial_copy(
+            db, user_id=project.user_id, project_id=project_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True, retry=retry,
+        )
+        if polished.latest_version:
+            progress.output_version_id = polished.latest_version.id
     progress.stage = "partial_ready" if readable else "needs_attention"
     if current and len(current) == len(progress.chapters):
         policy_only = source == "assembly_policy" and all(
