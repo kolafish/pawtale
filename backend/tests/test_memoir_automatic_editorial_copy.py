@@ -138,3 +138,50 @@ async def test_first_historical_user_version_is_preserved_without_spending_model
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', unexpected)
     result = await _automatic(test_db, project)
     assert result.latest_version.id == version.id
+
+
+@pytest.mark.parametrize('edit_kind', ['user', 'requested_ai'])
+async def test_saved_copy_and_supplement_finish_automatic_book_together(client, test_db, monkeypatch, edit_kind):
+    from app.services.memoir import draft_progress
+    from tests.test_memoir_continuous_book import _add_narration, _ready_book
+
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs['snapshot'], len(calls))
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
+    parent_id = parent.id
+    user_id = (await test_db.get(Project, project_id)).user_id
+    await book_outputs.update_book_output(test_db, user_id=user_id, project_id=project_id,
+        req=MemoirBookOutputUpdateRequest(preface='留给家人的前言'))
+    if edit_kind == 'user':
+        saved = await book_outputs.update_book_output_chapter_editorial_copy(
+            test_db, user_id=user_id, project_id=project_id, chapter_id=chapter_id,
+            req=MemoirBookOutputChapterEditorialCopyUpdateRequest(intro='我的学徒岁月', pull_quote=''))
+    else:
+        saved = await book_outputs.regenerate_book_output_editorial_copy(
+            test_db, user_id=user_id, project_id=project_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=['chapter_intros']))
+    original = saved.latest_version.manuscript.chapters[0]
+    await _add_narration(client, test_db, project_id, section_id, fake)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['chapters'][chapter_id]['job_id'])
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
+    assert await run_test_editing_job(test_db, parent_id)
+    progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
+    assert progress.status == 'ready'
+    current = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
+    assert not current.is_stale
+    assert current.latest_version.id != saved.latest_version.id
+    manuscript = current.latest_version.manuscript
+    assert manuscript.chapters[0].intro == original.intro
+    if edit_kind == 'user':
+        assert manuscript.chapters[0].pull_quotes == []
+    assert next(s.content for s in manuscript.front_matter if s.kind == 'preface') == '留给家人的前言'
+    before_ids = {ref.utterance_id for ref in original.source_refs}
+    after_ids = {ref.utterance_id for ref in manuscript.chapters[0].source_refs}
+    assert before_ids < after_ids

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
+from app.schemas.memoir_book import MemoirBookLevelEditorialCopyTarget
+from app.services.memoir.book_output_manuscript import stored_manuscript_metadata
 from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
 
 
@@ -64,11 +69,11 @@ def _same_book_body(left: MemoirBookOutputVersion, right: MemoirBookOutputVersio
         for version in (left, right)
     ):
         return False
-    # Design fields and image placement may change without revising the book.
-    # Chapter introductions and quotations, however, are editorial content.
+    # Intro/quotes have field ownership; they do not make the assembled body
+    # a manual rewrite. Continue tracing through them to protect real body edits.
     def chapters(version: MemoirBookOutputVersion) -> list[dict]:
         return [
-            {key: value for key, value in chapter.items() if key != "illustrations"}
+            {key: value for key, value in chapter.items() if key not in {"intro", "pull_quotes", "illustrations"}}
             for chapter in version.manuscript_json.get("chapters", [])
         ]
     return chapters(left) == chapters(right)
@@ -119,3 +124,53 @@ def book_output_version_title(
         if title:
             return title
     return fallback
+
+
+def manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str, object]]:
+    manuscript = version.manuscript_json if isinstance(version.manuscript_json, dict) else {}
+    chapters = manuscript.get("chapters")
+    return {
+        chapter["chapter_id"]: chapter
+        for chapter in (chapters if isinstance(chapters, list) else [])
+        if isinstance(chapter, dict) and isinstance(chapter.get("chapter_id"), str)
+    }
+
+
+class AutomaticEditorialCopyState(BaseModel):
+    input_signature: str = ""
+    processed_version: int = 0
+    status: Literal["succeeded", "failed", "not_started"] = "not_started"
+    manual_targets: list[MemoirBookLevelEditorialCopyTarget] = Field(default_factory=list)
+    manual_chapter_fields: dict[str, list[Literal["intro", "pull_quotes"]]] = Field(default_factory=dict)
+
+
+AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
+
+
+def automatic_editorial_copy_state(
+    output: MemoirBookOutput, versions: list[MemoirBookOutputVersion],
+) -> AutomaticEditorialCopyState:
+    state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
+    if not state.processed_version and versions and versions[0].created_by in {"user", "ai"}:
+        state.manual_targets = ["preface", "afterword", "back_cover_quote"]
+        state.manual_chapter_fields = {
+            chapter_id: ["intro", "pull_quotes"] for chapter_id in manuscript_chapters(versions[0])
+        }
+    # Before the first automatic pass, every AI copy change was explicitly
+    # requested. Thereafter inspect only versions after our last saved pass.
+    for before, after in zip(versions, versions[1:]):
+        if after.version <= state.processed_version or after.created_by not in {"user", "ai"}:
+            continue
+        old = stored_manuscript_metadata(before.manuscript_json)
+        new = stored_manuscript_metadata(after.manuscript_json)
+        for target in ("preface", "afterword", "back_cover_quote"):
+            if old.get(target) != new.get(target) and target not in state.manual_targets:
+                state.manual_targets.append(target)
+        old_chapters, new_chapters = manuscript_chapters(before), manuscript_chapters(after)
+        for chapter_id, chapter in new_chapters.items():
+            for field in ("intro", "pull_quotes"):
+                if old_chapters.get(chapter_id, {}).get(field) != chapter.get(field):
+                    fields = state.manual_chapter_fields.setdefault(chapter_id, [])
+                    if field not in fields:
+                        fields.append(field)
+    return state
