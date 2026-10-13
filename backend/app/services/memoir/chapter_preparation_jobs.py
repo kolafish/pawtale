@@ -551,6 +551,6 @@ async def accept_chapter_candidate(
     )
     job.result_json = {**_public_result(job.result_json), "outcome": "ready", "candidate_content": None}
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="candidate_accepted")
+    await schedule_book_draft(db, project_id=project_id, source="candidate_accepted", settled=True)
     await db.commit()
     return _job_state(project_id=project_id, chapter_id=chapter_id, job=job)
