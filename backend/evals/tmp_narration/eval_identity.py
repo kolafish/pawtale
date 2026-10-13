@@ -118,7 +118,7 @@ async def reread_case(client, model, case, semaphore):
             await book.read(client, model, mid, text, line)
         before = {pid: p.line for pid, p in book.roster().items()}
         mid, text = case["edit"]
-        await book.read(client, model, mid, text, previous[mid], version="v2")
+        raw = await book.read(client, model, mid, text, previous[mid], version="v2")
         ordered(book, order)
         roster = book.roster()
     fact, must, must_not = case["check"]
@@ -128,7 +128,7 @@ async def reread_case(client, model, case, semaphore):
     passed = (owner is None and not must) or bool(
         owner and (not must or must in label) and (not must_not or must_not not in label))
     return {"key": case["key"], "passed": passed, "before": before,
-            "after": {pid: p.line for pid, p in roster.items()}, "owner": label}
+            "after": {pid: p.line for pid, p in roster.items()}, "owner": label, "raw": raw}
 
 
 async def books_rerun(client, model, export, limit, semaphore):
