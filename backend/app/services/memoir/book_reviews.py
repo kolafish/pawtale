@@ -42,6 +42,7 @@ from app.services.memoir import (
     book_output_versions,
     chapter_digests,
     completion_issues,
+    fact_decisions,
 )
 from app.services.memoir.book_output_manuscript import (
     book_information_text,
@@ -49,7 +50,8 @@ from app.services.memoir.book_output_manuscript import (
     stored_manuscript_metadata,
 )
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
-from app.services.memoir.chapter_generation import latest_chapter_draft_version
+from app.services.memoir.chapter_generation import latest_chapter_draft_version, load_chapter_generation_context
+from app.services.memoir.transcript_projection import TranscriptEdit
 from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -95,6 +97,8 @@ class BookReviewChapter:
     draft_hash: str
     material_ids: frozenset[str]
     draft_content: str = ""
+    decisions: tuple[fact_decisions.FactDecision, ...] = ()
+    edits: tuple[TranscriptEdit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -297,6 +301,7 @@ async def load_book_review_context(
         ),
     }
     chapters: list[BookReviewChapter] = []
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     for chapter in plan_chapters:
         digest_context = await chapter_digests.load_chapter_digest_context(
             db,
@@ -327,6 +332,9 @@ async def load_book_review_context(
                 status_code=409,
                 detail=f"章节“{chapter.title}”还没有可读正文",
             )
+        source_context = await load_chapter_generation_context(
+            db, project_id=project_id, chapter_id=chapter.id,
+        ) if decisions else None
         chapters.append(
             BookReviewChapter(
                 chapter_id=chapter.id,
@@ -339,6 +347,10 @@ async def load_book_review_context(
                 draft_hash=semantic_text_hash(confirmed.content),
                 draft_content=confirmed.content,
                 material_ids=digest_context.allowed_material_ids,
+                decisions=fact_decisions.for_sources(
+                    decisions, chapter_id=chapter.id, material_ids=digest_context.allowed_material_ids,
+                ),
+                edits=tuple(edit for material in source_context.materials for edit in material.edits) if source_context else (),
             )
         )
     signature = semantic_json_signature(
@@ -351,6 +363,10 @@ async def load_book_review_context(
                     "title": chapter.title,
                     "sort_order": chapter.sort_order,
                     "draft_hash": chapter.draft_hash,
+                    **({"fact_decisions": fact_decisions.signature(chapter.decisions)} if chapter.decisions else {}),
+                    **({"transcript_edits": [
+                        [edit.edited_at, edit.before, edit.after] for edit in chapter.edits
+                    ]} if chapter.edits else {}),
                 }
                 for chapter in chapters
             ],
@@ -384,7 +400,8 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         (
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
-            f"当前正文:\n{chapter.draft_content}"
+            f"当前正文:\n{chapter.draft_content}\n"
+            f"{fact_decisions.prompt(chapter.decisions, edits=chapter.edits)}"
         )
         for chapter in context.chapters
     )

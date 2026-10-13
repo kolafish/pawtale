@@ -502,6 +502,7 @@
     >
       <text class="friendly-section-title">还想听您讲讲</text>
       <completion-issue-list
+        id="chapter-issues"
         project-id="{{projectId}}"
         project-title="{{workspace.chapter_title}}"
         chapter-id="{{chapterId}}"

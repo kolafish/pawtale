@@ -120,9 +120,12 @@ Component({
     },
 
     beginRequiredAnswer(event: IssueEvent) {
-      const issue = this.issue(
-        this.properties.requiredIssues as MemoirCompletionIssue[],
-        event,
+      this.openRequiredAnswer(String(event.currentTarget.dataset.issueId || ""));
+    },
+
+    openRequiredAnswer(issueId: string) {
+      const issue = (this.properties.requiredIssues as MemoirCompletionIssue[]).find(
+        (item) => item.id === issueId,
       );
       if (
         !issue
@@ -280,7 +283,7 @@ Component({
           });
         }
         this.triggerEvent("refresh");
-        wx.showToast({ title: outcome === "declined" ? "已跳过" : "已处理", icon: "success" });
+        wx.showToast({ title: outcome === "declined" ? "已跳过" : "回答已保存", icon: "success" });
       } catch (error) {
         if (!routeAuthError(error, "login")) {
           wx.showToast({

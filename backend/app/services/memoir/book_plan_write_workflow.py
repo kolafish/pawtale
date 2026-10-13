@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirCompletionIssueScope,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirSectionMaterialAssignedBy,
@@ -25,6 +26,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirImageAsset,
     MemoirSection,
@@ -76,6 +78,8 @@ from app.services.memoir.book_structure_commands import (
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.sections import sync_materials_to_chapters
 from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir import fact_decisions
+from app.services.memoir.completion_issues import lock_project_chapters
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,21 @@ async def _detach_chapter_operational_references(
     chapter_ids = {chapter.id for chapter in chapters}
     if not chapter_ids:
         return
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id.in_({chapter.project_id for chapter in chapters}),
+    ).order_by(MemoirCompletionIssue.id).with_for_update()
+        .execution_options(populate_existing=True))).all()
+    for issue in issues:
+        if not fact_decisions.is_confirmed_fact(issue):
+            continue
+        # A chapter can disappear after its stories move elsewhere. Preserve
+        # the user's answer and its source anchors before the FK cascades.
+        await fact_decisions.bind_sources(db, issue)
+        if issue.chapter_id in chapter_ids:
+            issue.related_chapter_ids_json = [issue.chapter_id]
+            issue.chapter_id = None
+            issue.scope = MemoirCompletionIssueScope.BOOK.value
+        db.add(issue)
     chapter_titles = {chapter.id: chapter.title for chapter in chapters}
     detached_at = datetime.now(UTC).isoformat()
 
@@ -241,6 +260,7 @@ async def _replace_plan(
             status_code=400,
             detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
         )
+    await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
     if not plan:
         plan = MemoirBookPlan(project_id=project_id)
@@ -589,6 +609,7 @@ async def update_book_plan(
     allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -781,6 +802,7 @@ async def apply_book_plan_structure_command(
         raise HTTPException(status_code=400, detail="只有拆分章节可以选择小节")
     if req.section_ids and req.utterance_ids:
         raise HTTPException(status_code=400, detail="拆分章节不能同时选择小节和讲述")
+    await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")

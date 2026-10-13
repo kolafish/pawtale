@@ -23,6 +23,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookPlanChapter,
+    MemoirBookOutput,
     MemoirCompletionIssue,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -32,6 +33,8 @@ from app.schemas.memoir_completion_issues import (
     MemoirCompletionIssueResponse,
 )
 from app.services.memoir.chapter_generation import latest_chapter_draft_version
+from app.services.memoir import fact_decisions
+from app.services.memoir.book_output_state import invalidate_book_output
 _PRIORITY_ORDER = {
     MemoirCompletionIssuePriority.HIGH.value: 0,
     MemoirCompletionIssuePriority.MEDIUM.value: 1,
@@ -418,7 +421,8 @@ async def sync_chapter_digest_issues(
                     MemoirCompletionIssue.chapter_id == chapter_id,
                     MemoirCompletionIssue.scope
                     == MemoirCompletionIssueScope.CHAPTER.value,
-                )
+                ).order_by(MemoirCompletionIssue.id).with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).all()
     )
@@ -495,7 +499,8 @@ async def sync_book_review_issues(
                     MemoirCompletionIssue.project_id == project_id,
                     MemoirCompletionIssue.scope
                     == MemoirCompletionIssueScope.BOOK.value,
-                )
+                ).order_by(MemoirCompletionIssue.id).with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).all()
     )
@@ -570,7 +575,7 @@ async def sync_book_review_issues(
                 if field not in {"project_id", "fingerprint", "evidence_quote"}:
                     setattr(issue, field, field_value)
             db.add(issue)
-        else:
+        elif not fact_decisions.is_confirmed_fact(issue):
             issue.related_chapter_ids_json = value["related_chapter_ids_json"]
             issue.related_material_ids_json = []
             issue.resolution = value["resolution"]
@@ -747,15 +752,29 @@ async def close_issue(
     note: str,
     answered_material_id: str | None,
 ) -> MemoirCompletionIssue:
-    issue = await get_issue(
-        db,
-        project_id=project_id,
-        issue_id=issue_id,
-    )
+    # Serialize answers with chapter writes/assembly so an in-flight generation
+    # either sees this decision or is invalidated by it after its save.
+    await lock_project_chapters(db, project_id=project_id)
+    issue = await db.scalar(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.id == issue_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if issue is None:
+        raise HTTPException(status_code=404, detail="补全问题不存在")
     if issue.status == MemoirCompletionIssueStatus.CLOSED.value:
-        if issue.outcome == outcome.value:
+        if (
+            issue.outcome == outcome.value
+            and issue.outcome_note == note.strip()
+            and issue.answered_material_id == answered_material_id
+        ):
             return issue
-        raise HTTPException(status_code=409, detail="补全问题已经结束")
+        raise HTTPException(status_code=409, detail="该问题已保存其他回答，请刷新后核对")
+    if (
+        outcome == MemoirCompletionIssueOutcome.CONFIRMED
+        and issue.issue_type == MemoirCompletionIssueType.CONFLICT.value
+        and not note.strip()
+    ):
+        raise HTTPException(status_code=422, detail="请说明需要采用的事实")
     if outcome == MemoirCompletionIssueOutcome.ANSWERED:
         material = await db.scalar(
             select(MemoirVoiceUtterance)
@@ -775,11 +794,25 @@ async def close_issue(
     issue.outcome_note = note.strip()
     issue.answered_material_id = answered_material_id
     issue.closed_at = utcnow_naive()
+    if fact_decisions.is_confirmed_fact(issue):
+        # Keep stable source anchors, including for book-level decisions. They
+        # survive later moves/merges and do not turn an answer into a recording.
+        await fact_decisions.bind_sources(db, issue)
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+        if output is not None:
+            invalidate_book_output(output)
+            db.add(output)
     db.add(issue)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="decision")
     await db.flush()
     return issue
+
+
+async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
+    await db.execute(select(MemoirBookPlanChapter.id).where(
+        MemoirBookPlanChapter.project_id == project_id,
+    ).order_by(MemoirBookPlanChapter.id).with_for_update())
 
 
 def issue_response(issue: MemoirCompletionIssue) -> MemoirCompletionIssueResponse:

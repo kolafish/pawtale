@@ -1143,7 +1143,7 @@ test("chapter workspace creates a small section while assigning pending material
   assert.equal(toasts.at(-1).title, "已新建故事");
 });
 
-test("chapter workspace confirms the current completion issue then prepares again", async () => {
+test("chapter workspace opens the shared answer editor before confirming a fact", async () => {
   installWx();
   const calls = [];
   const confirmationSummary = summary({
@@ -1180,16 +1180,13 @@ test("chapter workspace confirms the current completion issue then prepares agai
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
+  const opened = [];
+  context.selectComponent = () => ({ openRequiredAnswer: (issueId) => opened.push(issueId) });
   page.confirmCurrentIssue.call(context);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(calls, [
-    ["confirm", "project-1", "issue-1", {
-      outcome: "confirmed",
-      note: "用户已确认按当前建议处理",
-    }],
-    ["prepare", "project-1", "chapter-1", "prepare"],
-  ]);
+  assert.deepEqual(opened, ["issue-1"]);
+  assert.deepEqual(calls, []);
 });
 
 test("chapter workspace separates optional suggestions from required decisions", async () => {

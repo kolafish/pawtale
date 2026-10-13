@@ -28,6 +28,7 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirTranscriptVersion,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
@@ -609,7 +610,8 @@ async def test_book_review_reuses_quoted_conflict_issue_across_reworded_reviews(
     assert current[0].id == old_id
     assert current[0].status == "closed"
     assert current[0].outcome_note == "以九月为准。"
-    assert current[0].input_signature == "later-review"
+    assert current[0].input_signature == "new-review"
+    assert current[0].question == candidate["question"]
 
 
 @pytest.mark.ci_smoke
@@ -814,18 +816,20 @@ def test_book_review_does_not_invent_material_provenance():
 async def test_book_review_regeneration_preserves_confirmed_answer(
     client, test_db,
 ):
-    project_id = await ensure_mobile_memoir_project(client)
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    source_id = sources[0]["utterance_id"]
     candidate = {
         "issue_type": "conflict",
         "channel": "manual_review",
         "question": "比赛的时间以哪一个说法为准？",
         "reason": "需要用户决定。",
         "priority": "high",
-        "chapter_ids": ["chapter-1"],
+        "chapter_ids": [chapter_id],
         "material_ids": ["arbitrary-old-material"],
         "resolution": "user_decision",
     }
-    old_fingerprint = completion_issues.book_review_candidate_fingerprints([candidate])[0][0]
+    old_fingerprint = completion_issues.stable_book_issue_fingerprint(candidate)
     issue = MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
@@ -835,7 +839,9 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
         reason=candidate["reason"],
         priority="high",
         fingerprint=old_fingerprint,
-        related_material_ids_json=["arbitrary-old-material"],
+        related_material_ids_json=[source_id],
+        related_chapter_ids_json=[chapter_id],
+        resolution="user_decision",
         input_signature="same-review-input",
         status="closed",
         outcome="confirmed",
@@ -850,15 +856,16 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
     current = await completion_issues.sync_book_review_issues(
         test_db,
         project_id=project_id,
-        input_signature="same-review-input",
+        input_signature="new-review-input",
         candidates=[candidate],
     )
     assert len(current) == 1
     assert current[0].id == issue_id
     assert current[0].fingerprint == candidate["fingerprint"]
     assert current[0].outcome_note == "以九月为准。"
-    assert current[0].related_chapter_ids_json == ["chapter-1"]
-    assert current[0].related_material_ids_json == []
+    assert current[0].input_signature == "same-review-input"
+    assert current[0].related_chapter_ids_json == [chapter_id]
+    assert current[0].related_material_ids_json == [source_id]
     assert current[0].resolution == "user_decision"
 
 
@@ -3484,3 +3491,61 @@ async def test_background_batch_recovers_after_child_dispatch_without_client_rea
     assert batch.status == "succeeded"
     assert batch.active_key is None
     assert batch.chapter_job_ids_json == {chapter_id: child_id}
+
+
+@pytest.mark.parametrize("scope", ["chapter", "book"])
+async def test_confirmed_fact_invalidates_chapter_and_blocks_old_book_assembly(client, test_db, scope):
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    _, version = await _create_current_draft(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.DRAFT,
+    )
+    issue = MemoirCompletionIssue(
+        project_id=project_id, scope=scope,
+        chapter_id=chapter_id if scope == "chapter" else None,
+        issue_type="conflict", channel="manual_review", question="比赛是哪一年？",
+        reason="年份需要核对", priority="high", fingerprint="f" * 64,
+        related_material_ids_json=[sources[0]["utterance_id"]] if scope == "chapter" else [],
+        related_chapter_ids_json=[chapter_id] if scope == "book" else [],
+        input_signature="fact-regression", resolution="user_decision",
+    )
+    test_db.add(issue)
+    await test_db.commit()
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
+        json={"outcome": "confirmed", "note": "是1978年，之前记错了。"},
+    )
+    assert response.status_code == 200, response.text
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+    )
+    assert chapter_generation.chapter_draft_generation_plan(context, version).target_context.sections
+    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[])
+    assert "是1978年，之前记错了。" in prompt
+    assert "学校比赛" in prompt
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert assembled.omitted_chapter_ids == [chapter_id]
+
+    edited_text = "1982年，我参加了学校比赛。"
+    edited = MemoirTranscriptVersion(
+        voice_session_id=sources[0]["session"]["id"],
+        source_artifact_id=sources[0]["utterance_id"],
+        version_type="user_edited", created_by="user", content=edited_text,
+    )
+    test_db.add(edited)
+    await test_db.flush()
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == sources[0]["utterance_id"],
+    ))
+    material.transcript_version_id = edited.id
+    await test_db.flush()
+    updated = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+    )
+    assert updated.materials[0].text == edited_text
+    assert updated.materials[0].edits[-1].before == context.materials[0].text
+    assert updated.materials[0].edits[-1].after == edited_text
+    assert updated.sections[0].decisions == context.sections[0].decisions

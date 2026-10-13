@@ -47,6 +47,7 @@ from app.services.memoir import (
     book_review_answer_state,
     book_reviews,
     completion_issues,
+    chapter_generation,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_output_manuscript import (
@@ -460,16 +461,19 @@ async def book_output_response_or_none(
                 answers_signature=answer_context.answers_signature,
             )
         )
+    pending_facts = await chapter_generation.pending_fact_chapter_ids(
+        db, project_id=project_id, chapter_versions=readable_chapter_versions(plan, allow_partial=True),
+    )
     return _output_response(
         output,
         stale_chapter_titles=(
             []
-            if answer_application_current or editorial_revision_current
+            if not pending_facts and (answer_application_current or editorial_revision_current)
             else _output_stale_chapter_titles(
                 output,
                 plan,
                 source_refs_by_chapter=refs_by_chapter,
-                blocked_chapter_ids=await completion_issues.open_blocking_book_chapter_ids(
+                blocked_chapter_ids=pending_facts | await completion_issues.open_blocking_book_chapter_ids(
                     db,
                     project_id=project_id,
                     all_chapter_ids=(chapter.id for chapter in included_book_chapters(plan)),

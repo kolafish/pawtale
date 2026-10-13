@@ -19,9 +19,9 @@ import {
 } from "./memoir-cache-store";
 import { readMemoirStore } from "./session";
 
-const HOME_CACHE_SCHEMA_VERSION = 2;
-const BOOK_CACHE_SCHEMA_VERSION = 7;
-const CHAPTER_WORKSPACE_CACHE_SCHEMA_VERSION = 2;
+const HOME_CACHE_SCHEMA_VERSION = 3;
+const BOOK_CACHE_SCHEMA_VERSION = 8;
+const CHAPTER_WORKSPACE_CACHE_SCHEMA_VERSION = 3;
 const HOME_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 const BOOK_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 const CHAPTER_WORKSPACE_CACHE_MAX_AGE_MS = 10 * 60 * 1000;

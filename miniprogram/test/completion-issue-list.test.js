@@ -147,7 +147,7 @@ test("required book issue saves the user's exact trimmed explanation", async () 
   assert.equal(context.data.requiredAnswer, "");
   assert.equal(context.data.requiredAnswerReady, false);
   assert.deepEqual(context.events, [{ name: "refresh", detail: undefined }]);
-  assert.equal(toasts.at(-1).title, "已处理");
+  assert.equal(toasts.at(-1).icon, "success");
 });
 
 test("required book issue rejects an empty explanation without closing", async () => {
