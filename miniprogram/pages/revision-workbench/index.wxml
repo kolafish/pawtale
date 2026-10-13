@@ -180,12 +180,12 @@
       <text class="revision-title">
         {{proposal
           ? (proposal.revision_plan ? "修改思路还需要怎么调整？" : "这版还需要怎么改？")
-          : "先说怎么改，再看修改思路"}}
+          : "说出修改要求，直接看修改前后"}}
       </text>
       <text wx:if="{{!proposal && sectionTitle}}" class="chapter-title">{{sectionTitle}}</text>
       <text class="revision-summary">
         {{!proposal
-          ? "进入页面后直接说修改要求，停顿后会自动生成修改思路；也可以输入。确认思路后才生成候选稿，最终确认前不会改动当前正文。"
+          ? "说出或输入修改要求，AI 会直接生成修改预览。看过前后对照后确认保存，修改前版本仍会保留。"
           : (proposal.revision_plan
             ? (proposal.phase === "draft_ready"
               ? (scope === "chapter_section"
@@ -200,8 +200,8 @@
         voice-session-id="{{proposalId || sectionId}}"
         maxlength="1000"
         placeholder="{{proposal ? '请输入希望保留或继续调整的内容' : '例如：保留事情经过，把语气写得更平实；删掉重复表达，但不要增加新事实。'}}"
-        submit-text="{{proposal ? (proposal.revision_plan ? '更新修改思路' : '按意见调整') : '生成修改思路'}}"
-        busy-text="{{proposal ? '正在调整…' : '正在整理修改思路…'}}"
+        submit-text="{{proposal ? (proposal.revision_plan ? '更新修改思路' : '按意见调整') : '生成修改预览'}}"
+        busy-text="{{proposal ? '正在调整…' : '正在生成修改预览…'}}"
         disabled="{{busy || draftBusy}}"
         busy="{{feedbackBusy}}"
         automatic-voice-command="{{true}}"
@@ -211,14 +211,14 @@
       <text wx:if="{{feedbackBusy}}" class="revision-meta">
         {{proposal
           ? "AI 正在更新" + (proposal.revision_plan ? "修改思路" : "修改预览") + "，离开页面后任务也会继续。"
-          : "AI 正在整理修改思路，离开页面后任务也会继续。"}}
+          : "AI 正在生成修改预览，离开页面后任务也会继续。"}}
       </text>
     </view>
 
     <view wx:if="{{feedbackBusy && !proposal}}" class="revision-progress">
       <ai-task-progress
-        title="正在整理小节修改思路"
-        detail="不会直接改写正文，完成后可继续反馈调整。"
+        title="正在生成小节修改预览"
+        detail="离开页面后任务也会继续，确认保存前当前正文不会改变。"
         mode="indeterminate"
       />
     </view>

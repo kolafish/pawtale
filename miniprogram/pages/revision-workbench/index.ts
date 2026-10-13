@@ -229,7 +229,8 @@ function matchesSectionOperation(
   job: object,
   operation: "feedback" | "draft",
 ): boolean {
-  return !("operation" in job) || job.operation === operation;
+  return !("operation" in job) || job.operation === operation
+    || (job.operation === "revise" && operation === "feedback");
 }
 
 function loadTargetProposal(
@@ -270,7 +271,9 @@ function enqueueTargetRevision(
       data.projectId,
       data.chapterId,
       data.sectionId,
-      operation,
+      operation === "plan" || (operation === "feedback" && !data.proposal?.revision_plan)
+        ? "revise"
+        : operation,
       data.proposalId || null,
       feedback,
     );
@@ -517,7 +520,7 @@ definePage<RevisionWorkbenchData>()({
       this.setData({
         feedbackBusy: active,
         ...(job.status === "failed"
-          ? { error: job.error_message || "生成修改思路失败" }
+          ? { error: job.error_message || "生成修改预览失败" }
           : {}),
       });
       if (active) {
@@ -750,11 +753,9 @@ definePage<RevisionWorkbenchData>()({
     ) {
       return;
     }
-    if (!await confirmAction(
+    if (this.data.scope === "book" && !await confirmAction(
       "确认使用这版修改？",
-      this.data.scope === "chapter_section"
-        ? "确认后会生成新的章节正文版本，修改前版本仍会保留。"
-        : "确认后会生成新的正式书稿版本，原版本仍会保留。",
+      "确认后会生成新的正式书稿版本，原版本仍会保留。",
     )) {
       return;
     }

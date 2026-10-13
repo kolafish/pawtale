@@ -147,7 +147,7 @@ export function cancelMemoirChapterSectionRegenerationJob(
   );
 }
 
-export type MemoirChapterSectionRevisionOperation = "plan" | "feedback" | "draft";
+export type MemoirChapterSectionRevisionOperation = "plan" | "feedback" | "draft" | "revise";
 
 export interface MemoirChapterSectionRevisionJob {
   job_id: string | null;

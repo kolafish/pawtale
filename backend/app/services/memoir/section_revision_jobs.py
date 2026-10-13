@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Literal
 
 from fastapi import HTTPException
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
@@ -38,7 +39,7 @@ from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-SectionRevisionOperation = Literal["plan", "feedback", "draft"]
+SectionRevisionOperation = Literal["plan", "feedback", "draft", "revise"]
 _JOB_TYPE = MemoirEditingJobType.GENERATE_CHAPTER_SECTION_REVISION
 
 
@@ -106,10 +107,10 @@ async def _target(
 def _state(job: MemoirEditingJob | None, *, required: bool = True) -> dict[str, object]:
     if job is not None:
         result = dict(job.result_json or {})
-        if result.get("revision_plan"):
+        if result.get("base_version_id") and result.get("proposal_phase"):
             return result
         value = (job.payload_json or {}).get("proposal_state")
-        if isinstance(value, dict) and value.get("revision_plan"):
+        if isinstance(value, dict) and value.get("base_version_id") and value.get("proposal_phase"):
             return dict(value)
     if required:
         raise ValueError("修改方案还没有准备好")
@@ -232,8 +233,11 @@ async def _generate_plan(
 async def _generate_candidate(
     db: AsyncSession,
     target: _Target,
-    plan: MemoirBookRevisionPlan,
+    instruction: str,
     ai_model: str | None,
+    *,
+    current_content: str | None = None,
+    current_title: str | None = None,
 ) -> chapter_generation.GeneratedChapter:
     previous = target.context.sections[target.index - 1] if target.index else None
     previous_content = (
@@ -250,13 +254,9 @@ async def _generate_candidate(
     guidance = list(digest.digest_json.get("structure_guidance", [])) if (
         digest is not None and digest.status == MemoirSemanticCacheStatus.READY.value
     ) else []
-    instruction = (
-        "请严格按以下已确认的修改思路调整当前小节：\n"
-        + json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
-    )
     return await chapter_generation.generate_chapter_section(
         target.context,
-        section=target.section,
+        section=replace(target.section, title=current_title or target.section.title),
         editorial_guidance=guidance,
         chapter_sections=target.context.sections,
         previous_section_content=previous_content,
@@ -265,7 +265,10 @@ async def _generate_candidate(
             content=previous_content,
             continuity=(continuity.get(previous.section_id) if previous else None),
         ),
-        current_section_content=str(target.snapshot.get("content") or "").strip(),
+        current_section_content=(
+            current_content if current_content is not None
+            else str(target.snapshot.get("content") or "").strip()
+        ),
         revision_instruction=instruction,
         allow_title_revision=True,
         ai_model=ai_model,
@@ -295,7 +298,7 @@ async def enqueue_section_revision_job(
         "section_id": section_id,
         "requested_ai_model": model,
     }
-    if operation == "plan":
+    if operation == "plan" or (operation == "revise" and not proposal_id):
         previous = _state(existing, required=False)
         if (
             existing is not None
@@ -324,9 +327,13 @@ async def enqueue_section_revision_job(
             raise ValueError("这个修改方案已经不能继续处理")
         if operation == "draft" and response.phase != MemoirBookRevisionProposalPhase.PLAN_READY:
             raise ValueError("当前修改思路不能生成修改稿")
+        if operation == "revise" and response.phase != MemoirBookRevisionProposalPhase.DRAFT_READY:
+            raise ValueError("请先生成修改预览")
+        if operation in {"feedback", "draft"} and not state.get("revision_plan"):
+            raise ValueError("请直接提交修改意见更新预览")
         payload.update(
             proposal_state=state,
-            plan_signature=semantic_json_signature(state["revision_plan"]),
+            plan_signature=semantic_json_signature(state.get("revision_plan")),
             feedback=(feedback or "").strip(),
         )
     job = await editing_jobs.enqueue_editing_job(
@@ -376,11 +383,71 @@ async def run_section_revision_job(
         operation = str(payload.get("source") or "")
         project_id, chapter_id = job.project_id, str(job.chapter_id or "")
         section_id = str(payload.get("section_id") or "")
-        if operation not in {"plan", "feedback", "draft"}:
+        if operation not in {"plan", "feedback", "draft", "revise"}:
             raise ValueError("不支持的小节修改任务")
         await load_memoir_project(db, project_id, str(payload.get("user_id") or ""))
         ai_model = str(payload["requested_ai_model"]) if payload.get("requested_ai_model") else None
-        if operation == "plan":
+        if operation == "revise":
+            previous = dict(payload.get("proposal_state") or {})
+            if previous and (
+                previous.get("proposal_status") != "ready"
+                or previous.get("proposal_phase") != "draft_ready"
+            ):
+                raise ValueError("这版修改预览已经不能继续调整")
+            baseline = previous or payload
+            version_id = str(baseline.get("base_version_id") or "")
+            signature = str(baseline.get("input_signature") or "")
+            target = await _target(
+                db, project_id, chapter_id, section_id,
+                version_id=version_id, input_signature=signature,
+            )
+            feedback = str(payload.get("feedback") or "").strip()
+            if not feedback:
+                raise ValueError("请先输入或说出修改意见")
+            prior_instructions = TypeAdapter(list[str]).validate_python(
+                previous.get("revision_instructions", [])
+            )
+            instruction = feedback
+            if prior_instructions:
+                instruction = (
+                    "先前用户要求（按时间排列，仅用于理解当前预览及保留用户给出的事实更正，"
+                    "不重新执行旧的编辑范围）：\n"
+                    + "\n".join(f"{i + 1}. {text}" for i, text in enumerate(prior_instructions))
+                    + "\n本次用户要求（本次唯一编辑范围；与先前要求冲突时以本次为准）：\n"
+                    + feedback
+                )
+            await update({"stage": "revising"})
+            await db.commit()
+            generated = await _generate_candidate(
+                db, target, instruction, ai_model,
+                current_content=str(previous["candidate_content"]) if previous else None,
+                current_title=str(previous["candidate_title"]) if previous else None,
+            )
+            db.expire_all()
+            await _target(
+                db, project_id, chapter_id, section_id,
+                version_id=version_id, input_signature=signature,
+            )
+            await update({"stage": "saving"})
+            candidate = generated.sections[0]
+            result = {
+                "proposal_status": "ready",
+                "proposal_phase": "draft_ready",
+                "base_version_id": version_id,
+                "input_signature": signature,
+                "chapter_title": target.context.chapter_title,
+                "section_title": target.section.title,
+                "revision_plan": None,
+                "revision_instructions": [*prior_instructions, feedback],
+                "candidate_title": candidate.title,
+                "candidate_content": candidate.content,
+                "summary": f"已按要求生成修改预览：{feedback}",
+                "requested_ai_model": ai_model,
+                "resolved_ai_model": generated.model,
+                "generation": {"engine": "llm_chapter_section_revision_direct_v1", "model": generated.model},
+                "result_version_id": None,
+            }
+        elif operation == "plan":
             target = await _target(
                 db, project_id, chapter_id, section_id,
                 version_id=str(payload.get("base_version_id") or ""),
@@ -445,7 +512,12 @@ async def run_section_revision_job(
                     "generation": generated.generation,
                 }
             else:
-                generated = await _generate_candidate(db, target, plan, ai_model)
+                generated = await _generate_candidate(
+                    db, target,
+                    "请严格按以下已确认的修改思路调整当前小节：\n"
+                    + json.dumps(plan.model_dump(mode="json"), ensure_ascii=False),
+                    ai_model,
+                )
                 candidate = generated.sections[0]
                 patch = {
                     "proposal_phase": "draft_ready",
@@ -541,7 +613,10 @@ async def section_revision_proposal_response(
         project_id=project_id,
         status=status,
         phase=phase,
-        revision_plan=MemoirBookRevisionPlan.model_validate(values["revision_plan"]),
+        revision_plan=(
+            MemoirBookRevisionPlan.model_validate(values["revision_plan"])
+            if values.get("revision_plan") else None
+        ),
         summary=str(values.get("summary") or ""),
         base_output_version_id=baseline.id,
         result_output_version_id=(
