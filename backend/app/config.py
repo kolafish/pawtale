@@ -77,10 +77,6 @@ class Settings(BaseSettings):
     memoir_share_video_scene_planner_enabled: bool = True
     memoir_share_video_scene_planner_model: str = "doubao-seed-2-0-pro-260215"
 
-    # Claude API Keys
-    anthropic_auth_token: str = ""
-    anthropic_base_url: str = "https://blankapi.com"
-
     # Default AI Model
     default_ai_model: str = DEFAULT_AI_TEXT_MODEL
     ai_text_max_concurrent_requests: int = 3

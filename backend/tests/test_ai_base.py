@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_calls import (
     generate_structured_with_client,
     generate_text_with_client,
-    AIInvalidStructuredOutputError,
     AIOutputTruncatedError,
 )
 import app.services.ai_story as ai_story
@@ -15,7 +14,6 @@ import app.services.ai_revision as ai_revision
 from app.services.ai_project_analysis import normalize_project_analysis
 from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_text import DeepSeekTextService
-from app.services.ai_claude import ClaudeTextService
 from app.services.ai_volc import VolcArkTextService
 
 
@@ -202,10 +200,8 @@ def _make_mock_response_raw(content: str, raw: dict):
 class TestTemplateMethodBothServices:
     """Verify public methods work on all text provider implementations."""
 
-    @pytest.fixture(params=["claude", "deepseek", "volc"])
+    @pytest.fixture(params=["deepseek", "volc"])
     def service(self, request):
-        if request.param == "claude":
-            return ClaudeTextService()
         if request.param == "volc":
             return VolcArkTextService()
         return DeepSeekTextService()
@@ -266,7 +262,6 @@ class TestCallLlmContract:
     @pytest.mark.parametrize(
         "service",
         [
-            ClaudeTextService(),
             DeepSeekTextService(),
             VolcArkTextService(),
         ],
@@ -285,279 +280,6 @@ class TestCallLlmContract:
         assert error.value.provider == service.provider_name
         assert error.value.model == service.model_name
         assert error.value.timeout_seconds == 12
-
-    @pytest.mark.asyncio
-    async def test_claude_returns_string(self):
-        service = ClaudeTextService()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "hello"}}]}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            result = await service._call_llm("sys", "user")
-        assert isinstance(result, str)
-        assert result == "hello"
-        args, kwargs = inst.post.call_args
-        assert args[0] == "https://blankapi.com/v1/chat/completions"
-        assert kwargs["json"]["model"] == "claude-opus-4-8"
-        assert kwargs["timeout"] == 60.0
-
-    def test_claude_accepts_base_url_with_or_without_v1(self):
-        service = ClaudeTextService()
-        service.base_url = "https://blankapi.com/"
-        assert service._chat_completions_url() == "https://blankapi.com/v1/chat/completions"
-
-        service.base_url = "https://blankapi.com/v1/"
-        assert service._chat_completions_url() == "https://blankapi.com/v1/chat/completions"
-
-    @pytest.mark.asyncio
-    async def test_claude_returns_tuple_with_raw(self):
-        service = ClaudeTextService()
-        raw = {"choices": [{"message": {"content": "hello"}}]}
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = raw
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            result = await service._call_llm("sys", "user", return_raw=True)
-        assert isinstance(result, tuple)
-        assert result[0] == "hello"
-        assert isinstance(result[1], dict)
-
-    @pytest.mark.asyncio
-    async def test_claude_structured_generation_uses_forced_function_call(self):
-        service = ClaudeTextService(model="claude-opus-4-8")
-        raw = {
-            "model": "claude-opus-4-8",
-            "choices": [{
-                "finish_reason": "tool_calls",
-                "message": {
-                    "tool_calls": [{
-                        "type": "function",
-                        "function": {
-                            "name": "emit_structured_result",
-                            "arguments": '{"ok": true}',
-                        },
-                    }],
-                },
-            }],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            },
-        }
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = raw
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            result = await service.generate_structured(
-                "system",
-                "user",
-                output_model=_StructuredProbe,
-                requested_model="claude-opus-4-8",
-                max_tokens=4000,
-                timeout=180,
-                max_attempts=2,
-            )
-
-        assert result.value.ok is True
-        assert result.response.finish_reason == "tool_calls"
-        assert result.response.response_model == "claude-opus-4-8"
-        assert result.response.usage["completion_tokens"] == 5
-        args, kwargs = inst.post.call_args
-        assert args[0] == "https://blankapi.com/v1/chat/completions"
-        assert kwargs["json"]["messages"] == [{
-            "role": "user",
-            "content": "system\n\nuser",
-        }]
-        assert kwargs["json"]["stream"] is False
-        assert kwargs["json"]["max_tokens"] == 4000
-        assert kwargs["json"]["tool_choice"] == {
-            "type": "function",
-            "function": {"name": "emit_structured_result"},
-        }
-        tool = kwargs["json"]["tools"][0]
-        assert tool["type"] == "function"
-        assert tool["function"]["strict"] is True
-        assert (
-            tool["function"]["parameters"]["properties"]["ok"]["type"]
-            == "boolean"
-        )
-
-    @pytest.mark.asyncio
-    async def test_claude_structured_generation_retries_invalid_function_arguments(
-        self,
-    ):
-        service = ClaudeTextService(model="claude-opus-4-8")
-
-        def response(arguments: str):
-            mock = MagicMock()
-            mock.json.return_value = {
-                "model": "claude-opus-4-8",
-                "choices": [{
-                    "finish_reason": "tool_calls",
-                    "message": {
-                        "tool_calls": [{
-                            "type": "function",
-                            "function": {
-                                "name": "emit_structured_result",
-                                "arguments": arguments,
-                            },
-                        }],
-                    },
-                }],
-            }
-            mock.raise_for_status = MagicMock()
-            return mock
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(side_effect=[
-                response('{"candidate_issues": "不是数组"}'),
-                response(
-                    '{"candidate_issues": [{'
-                    '"question": "测试问题", "reason": "测试原因"'
-                    '}]}'
-                ),
-            ])
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            result = await service.generate_structured(
-                "system",
-                "user",
-                output_model=_StructuredListProbe,
-                requested_model="claude-opus-4-8",
-                max_attempts=2,
-            )
-
-        assert result.value.candidate_issues[0].question == "测试问题"
-        assert result.response.attempt_count == 2
-        first_payload = inst.post.await_args_list[0].kwargs["json"]
-        parameters = first_payload["tools"][0]["function"]["parameters"]
-        assert "_StructuredIssueProbe" in parameters["$defs"]
-        assert parameters["properties"]["candidate_issues"]["items"] == {
-            "$ref": "#/$defs/_StructuredIssueProbe",
-        }
-        second_payload = inst.post.await_args_list[1].kwargs["json"]
-        assert "上次输出未通过结构校验" in (
-            second_payload["messages"][0]["content"]
-        )
-
-    @pytest.mark.asyncio
-    async def test_claude_structured_generation_rejects_plain_message_json(self):
-        service = ClaudeTextService(model="claude-opus-4-8")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "model": "claude-opus-4-8",
-            "choices": [{
-                "finish_reason": "stop",
-                "message": {"content": '{"ok": true}'},
-            }],
-        }
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            with pytest.raises(AIInvalidStructuredOutputError):
-                await service.generate_structured(
-                    "system",
-                    "user",
-                    output_model=_StructuredProbe,
-                    requested_model="claude-opus-4-8",
-                    max_attempts=1,
-                )
-
-
-    @pytest.mark.asyncio
-    async def test_claude_streaming_uses_native_messages_endpoint(self):
-        service = ClaudeTextService(model="claude-opus-4-8")
-
-        async def response_lines():
-            yield (
-                'data: {"type":"message_start","message":'
-                '{"model":"claude-opus-4-8","usage":{"input_tokens":8}}}'
-            )
-            yield ""
-            yield (
-                'data: {"type":"content_block_delta","delta":'
-                '{"type":"thinking_delta","thinking":"分析中"}}'
-            )
-            yield ""
-            yield (
-                'data: {"type":"content_block_delta","delta":'
-                '{"type":"text_delta","text":"你好"}}'
-            )
-            yield ""
-            yield (
-                'data: {"type":"message_delta","delta":'
-                '{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}'
-            )
-            yield ""
-
-        response = MagicMock()
-        response.raise_for_status = MagicMock()
-        response.aiter_lines = response_lines
-        stream_context = MagicMock()
-        stream_context.__aenter__ = AsyncMock(return_value=response)
-        stream_context.__aexit__ = AsyncMock(return_value=None)
-
-        with patch("httpx.AsyncClient") as mock_client:
-            client = MagicMock()
-            client.stream = MagicMock(return_value=stream_context)
-            client.__aenter__ = AsyncMock(return_value=client)
-            client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = client
-
-            chunks = [
-                chunk
-                async for chunk in service.stream_llm(
-                    "system",
-                    "user",
-                    max_tokens=512,
-                    timeout=120,
-                )
-            ]
-
-        assert [chunk.text_delta for chunk in chunks] == ["", "你好", ""]
-        assert chunks[-1].finish_reason == "end_turn"
-        assert chunks[0].response_model == "claude-opus-4-8"
-        assert chunks[0].usage == {"input_tokens": 8}
-        assert chunks[-1].usage == {"output_tokens": 4}
-        args, kwargs = client.stream.call_args
-        assert args == ("POST", "https://blankapi.com/v1/messages")
-        assert kwargs["json"]["model"] == "claude-opus-4-8"
-        assert kwargs["json"]["stream"] is True
-        assert kwargs["json"]["messages"] == [
-            {"role": "user", "content": "user"}
-        ]
-        assert kwargs["json"]["system"] == "system"
 
     @pytest.mark.asyncio
     async def test_structured_generation_retries_truncated_response(self):
@@ -836,27 +558,6 @@ class TestCallLlmContract:
         assert limiter.calls == [("ai_text", 7)]
 
     @pytest.mark.asyncio
-    async def test_claude_uses_text_provider_concurrency_limit(self, monkeypatch):
-        service = ClaudeTextService()
-        service.max_concurrent_requests = 5
-        limiter = RecordingLimiter()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "hello"}}]}
-        mock_resp.raise_for_status = MagicMock()
-        monkeypatch.setattr("app.services.ai_claude.provider_concurrency_limiter", limiter)
-
-        with patch("httpx.AsyncClient") as mock_client:
-            inst = AsyncMock()
-            inst.post = AsyncMock(return_value=mock_resp)
-            inst.__aenter__ = AsyncMock(return_value=inst)
-            inst.__aexit__ = AsyncMock(return_value=None)
-            mock_client.return_value = inst
-
-            await service._call_llm("sys", "user")
-
-        assert limiter.calls == [("ai_text", 5)]
-
-    @pytest.mark.asyncio
     async def test_volc_uses_text_provider_concurrency_limit(self, monkeypatch):
         service = VolcArkTextService()
         service.max_concurrent_requests = 4
@@ -879,10 +580,6 @@ class TestCallLlmContract:
 
     @pytest.mark.asyncio
     async def test_provider_and_model_properties(self):
-        claude = ClaudeTextService()
-        assert claude.provider_name == "claude"
-        assert "claude" in claude.model_name
-
         deepseek = DeepSeekTextService()
         assert deepseek.provider_name == "deepseek"
         assert deepseek.model_name == "deepseek-flash"
@@ -901,7 +598,7 @@ class RecordingLimiter:
         return await operation()
 
 
-@pytest.mark.parametrize("service_type", [ClaudeTextService, VolcArkTextService])
+@pytest.mark.parametrize("service_type", [VolcArkTextService])
 @pytest.mark.parametrize("payload,expected", [
     (" 正文 ", "正文"),
     ([{"type": "text", "text": " 第一段 "}, {"type": "image", "url": "unused"}, "第二段", {"text": "  "}], "第一段\n第二段"),

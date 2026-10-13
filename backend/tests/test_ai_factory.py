@@ -2,7 +2,6 @@ import pytest
 
 from app.services import ai_factory
 from app.services.ai_access import reset_request_ai_model_scope, set_request_ai_model_scope
-from app.services.ai_claude import ClaudeTextService
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_volc import VolcArkTextService
 
@@ -61,7 +60,7 @@ def test_public_request_scope_forces_the_default_model():
         reset_request_ai_model_scope(token)
 
 
-def test_admin_request_scope_keeps_selected_model():
+def test_retired_model_is_rejected_for_admins():
     token = set_request_ai_model_scope(is_admin=True)
     try:
         with pytest.raises(ai_factory.UnsupportedAIModelError):
@@ -70,29 +69,12 @@ def test_admin_request_scope_keeps_selected_model():
         reset_request_ai_model_scope(token)
 
 
-@pytest.mark.parametrize(
-    ("payload", "expected_text"),
-    [
-        (
-            {"choices": [{"message": {"content": '```json\n{"characters": [{"name": "林晚"}]}\n```'}}]},
-            "characters",
-        ),
-        (
-            {"choices": [{"message": {"content": [{"type": "text", "text": '{"characters": [{"name": "周彻"}]}'}]}}]},
-            "周彻",
-        ),
-        (
-            {
-                "content": [
-                    {"type": "thinking", "text": "分析中"},
-                    {"type": "text", "text": '{"characters": [{"name": "顾言"}]}'},
-                ]
-            },
-            "顾言",
-        ),
-    ],
-)
-def test_claude_extract_response_text_accepts_proxy_shapes(payload, expected_text):
-    service = ClaudeTextService(model="claude-fable-5")
+@pytest.mark.parametrize("saved_model", ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4", "claude-sonnet-4-6"])
+def test_retired_project_model_moves_to_default(saved_model):
+    from app.config import DEFAULT_AI_TEXT_MODEL
+    from app.models.projects import Project
+    from app.services.memoir.project_ai_preferences import select_project_ai_model
 
-    assert expected_text in service._extract_response_text(payload)
+    project = Project(metadata_json={"ai_model": saved_model})
+    assert select_project_ai_model(project, None) == DEFAULT_AI_TEXT_MODEL
+    assert project.metadata_json["ai_model"] == DEFAULT_AI_TEXT_MODEL

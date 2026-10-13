@@ -1502,7 +1502,7 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
         json={
-            "ai_model": "claude-opus-4-8",
+            "ai_model": "deepseek-v4-pro",
         },
     )
 
@@ -1512,7 +1512,7 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert queued_body["total_chapter_count"] == 2
     assert queued_body["processed_chapter_count"] == 0
     assert queued_body["current_chapter_id"] == chapters[0].id
-    assert queued_body["requested_ai_model"] == "claude-opus-4-8"
+    assert queued_body["requested_ai_model"] == "deepseek-v4-pro"
     assert queued_body["can_cancel"] is True
     child_job_ids = [item["job_id"] for item in queued_body["chapters"]]
     assert all(child_job_ids)
