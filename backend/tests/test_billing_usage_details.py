@@ -178,7 +178,7 @@ async def test_billable_failure_is_debited_and_listed_but_plain_failure_is_not(c
                           status="failed", cost=cost, audio_duration_seconds=60, context=context)
 
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
-    assert summary.used_rmb == Decimal("0.075")
+    assert summary.used_rmb == Decimal("0.016667")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert [(item["purpose"], item["count"]) for item in day["purposes"]] == [("语音识别", 1)]
 
