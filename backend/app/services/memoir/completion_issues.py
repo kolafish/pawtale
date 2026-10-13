@@ -772,7 +772,7 @@ async def close_issue(
     if (
         outcome == MemoirCompletionIssueOutcome.CONFIRMED
         and issue.issue_type == MemoirCompletionIssueType.CONFLICT.value
-        and not note.strip()
+        and not fact_decisions.has_explicit_answer(note)
     ):
         raise HTTPException(status_code=422, detail="请说明需要采用的事实")
     if outcome == MemoirCompletionIssueOutcome.ANSWERED:

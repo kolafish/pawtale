@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.domain.memoir.types import (
     MemoirSemanticCacheStatus,
@@ -21,6 +22,8 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookRevisionProposal,
     MemoirBookReview,
+    MemoirSection,
+    MemoirSectionMaterial,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book_review import (
@@ -50,8 +53,8 @@ from app.services.memoir.book_output_manuscript import (
     stored_manuscript_metadata,
 )
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
-from app.services.memoir.chapter_generation import latest_chapter_draft_version, load_chapter_generation_context
-from app.services.memoir.transcript_projection import TranscriptEdit
+from app.services.memoir.chapter_generation import latest_chapter_draft_version
+from app.services.memoir.transcript_projection import TranscriptEdit, current_material_text, load_transcript_edits
 from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -302,6 +305,24 @@ async def load_book_review_context(
     }
     chapters: list[BookReviewChapter] = []
     decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
+    edits_by_chapter: dict[str, list[TranscriptEdit]] = {}
+    if decisions:
+        rows = (await db.execute(select(MemoirSectionMaterial, MemoirSection.chapter_id).join(
+            MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id,
+        ).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id.in_([chapter.id for chapter in plan_chapters]),
+            MemoirSection.status == "active", MemoirSection.include_in_book.is_(True),
+            MemoirSectionMaterial.include_in_book.is_(True),
+        ).options(
+            joinedload(MemoirSectionMaterial.utterance),
+            joinedload(MemoirSectionMaterial.transcript_version),
+        ).order_by(MemoirSection.sort_order, MemoirSection.id,
+                   MemoirSectionMaterial.sort_order, MemoirSectionMaterial.id))).all()
+        edits = await load_transcript_edits(db, [material for material, _ in rows])
+        for material, chapter_id in rows:
+            if current_material_text(material):
+                edits_by_chapter.setdefault(chapter_id, []).extend(edits.get(material.transcript_version_id, ()))
     for chapter in plan_chapters:
         digest_context = await chapter_digests.load_chapter_digest_context(
             db,
@@ -332,9 +353,6 @@ async def load_book_review_context(
                 status_code=409,
                 detail=f"章节“{chapter.title}”还没有可读正文",
             )
-        source_context = await load_chapter_generation_context(
-            db, project_id=project_id, chapter_id=chapter.id,
-        ) if decisions else None
         chapters.append(
             BookReviewChapter(
                 chapter_id=chapter.id,
@@ -350,7 +368,7 @@ async def load_book_review_context(
                 decisions=fact_decisions.for_sources(
                     decisions, chapter_id=chapter.id, material_ids=digest_context.allowed_material_ids,
                 ),
-                edits=tuple(edit for material in source_context.materials for edit in material.edits) if source_context else (),
+                edits=tuple(edits_by_chapter.get(chapter.id, ())),
             )
         )
     signature = semantic_json_signature(

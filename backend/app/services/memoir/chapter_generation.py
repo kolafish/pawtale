@@ -11,7 +11,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
@@ -376,7 +376,7 @@ def _preserved_draft_section(
     previous = _previous_draft_section(section, snapshot)
     if previous is None:
         return None
-    if snapshot.get("fact_decision_signature", "") != fact_decisions.signature(section.decisions):
+    if not _section_facts_current(context, section, snapshot):
         return None
     signature = snapshot.get("input_signature")
     if signature != _section_input_signature(context, section):
@@ -668,9 +668,21 @@ def chapter_draft_facts_current(
         for snapshot in (version.section_snapshot_json if version else [])
     }
     return all(
-        snapshots.get(section.section_id, {}).get("fact_decision_signature", "")
-        == fact_decisions.signature(section.decisions)
+        _section_facts_current(context, section, snapshots.get(section.section_id, {}))
         for section in context.sections
+    )
+
+
+def _section_facts_current(
+    context: ChapterGenerationContext, section: ChapterSectionInput, snapshot: dict,
+) -> bool:
+    if snapshot.get("fact_decision_signature", "") == fact_decisions.signature(section.decisions):
+        return True
+    # #1387 omitted the fact stamp, but its input signature includes the exact
+    # source AND facts. This proof recovers that version without rewriting it.
+    return (
+        "fact_decision_signature" not in snapshot
+        and snapshot.get("input_signature") == _section_input_signature(context, section)
     )
 
 
@@ -679,21 +691,54 @@ async def pending_fact_chapter_ids(
     chapter_versions: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]],
 ) -> set[str]:
     decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
-    if not decisions:
+    if not decisions or not chapter_versions:
         return set()
+    # Facts depend on source membership, not the expensive writing context
+    # (speaker history, people, transcript edits or polish preferences).
+    rows = (await db.execute(select(
+        MemoirSectionMaterial, MemoirSection.chapter_id, MemoirBookPlan.status,
+    ).join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+      .join(MemoirBookPlanChapter, MemoirBookPlanChapter.id == MemoirSection.chapter_id)
+      .join(MemoirBookPlan, MemoirBookPlan.id == MemoirBookPlanChapter.plan_id).where(
+        MemoirSection.project_id == project_id,
+        MemoirSection.chapter_id.in_([chapter.id for chapter, _ in chapter_versions]),
+        MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+        MemoirSection.include_in_book.is_(True),
+        MemoirSectionMaterial.include_in_book.is_(True),
+    ).options(joinedload(MemoirSectionMaterial.utterance),
+              joinedload(MemoirSectionMaterial.transcript_version)))).all()
+    sources: dict[str, dict[str, set[str]]] = {}
+    unconfirmed = set()
+    for material, chapter_id, plan_status in rows:
+        if plan_status != MemoirBookPlanStatus.CONFIRMED.value:
+            unconfirmed.add(chapter_id)
+        if current_material_text(material):
+            sources.setdefault(chapter_id, {}).setdefault(material.section_id, set()).add(material.utterance_id)
     pending = set()
     for chapter, version in chapter_versions:
+        snapshots = {item["section_id"]: item for item in version.section_snapshot_json}
+        if chapter.id in unconfirmed or not sources.get(chapter.id):
+            if fact_decisions.for_sources(
+                decisions, chapter_id=chapter.id, material_ids=version.used_material_ids_json,
+            ) or any(chapter.id in decision.chapter_ids for decision in decisions):
+                pending.add(chapter.id)
+            continue
+        mismatches = [section_id for section_id, material_ids in sources.get(chapter.id, {}).items()
+            if snapshots.get(section_id, {}).get("fact_decision_signature", "") != fact_decisions.signature(
+                fact_decisions.for_sources(decisions, chapter_id=chapter.id, material_ids=material_ids)
+            )]
+        if not mismatches:
+            continue
+        if any("fact_decision_signature" in snapshots.get(section_id, {}) for section_id in mismatches):
+            pending.add(chapter.id)
+            continue
+        # Only old workbench snapshots need the source-signature recovery path.
         try:
             context = await load_chapter_generation_context(db, project_id=project_id, chapter_id=chapter.id)
         except HTTPException as exc:
             if exc.status_code not in {409, 422}:
                 raise
-            # Keep old books readable even while their plan is being edited,
-            # but do not present an unverified factual version as current.
-            if fact_decisions.for_sources(
-                decisions, chapter_id=chapter.id, material_ids=version.used_material_ids_json,
-            ) or any(chapter.id in decision.chapter_ids for decision in decisions):
-                pending.add(chapter.id)
+            pending.add(chapter.id)
             continue
         if not chapter_draft_facts_current(context, version):
             pending.add(chapter.id)
@@ -1590,11 +1635,10 @@ def _section_input_signature(
 def _section_snapshot(
     context: ChapterGenerationContext,
     *,
-    generated: GeneratedChapter,
+    sections: tuple[GeneratedChapterSection, ...],
 ) -> list[dict]:
-    inputs = {
-        section.section_id: section for section in context.sections
-    }
+    """One snapshot contract for automatic writing and user-approved edits."""
+    inputs = {section.section_id: section for section in context.sections}
     return [
         {
             "section_id": section.section_id,
@@ -1602,19 +1646,15 @@ def _section_snapshot(
             "section_type": inputs[section.section_id].section_type,
             "section_version": inputs[section.section_id].section_version,
             "sort_order": inputs[section.section_id].sort_order,
-            "input_signature": _section_input_signature(
-                context,
-                inputs[section.section_id]
-            ),
+            "input_signature": _section_input_signature(context, inputs[section.section_id]),
             "content": section.content,
-            **({"fact_decision_signature": fact_decisions.signature(inputs[section.section_id].decisions)}
-               if inputs[section.section_id].decisions else {}),
-            **({"fact_decision_ids": [decision.issue_id for decision in inputs[section.section_id].decisions]}
+            **({"fact_decision_signature": fact_decisions.signature(inputs[section.section_id].decisions),
+                "fact_decision_ids": [decision.issue_id for decision in inputs[section.section_id].decisions]}
                if inputs[section.section_id].decisions else {}),
             "used_material_ids": list(section.used_material_ids),
             **({"user_edited": True} if section.user_edited else {}),
         }
-        for section in generated.sections
+        for section in sections
     ]
 
 
@@ -1775,7 +1815,7 @@ async def _save_generated_draft(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    section_snapshot = _section_snapshot(before, generated=generated)
+    section_snapshot = _section_snapshot(before, sections=generated.sections)
     if (
         latest is not None
         and latest.input_signature == before.input_signature
@@ -1960,19 +2000,13 @@ async def apply_chapter_section_candidate(
             if item.section_id == section_id
         )
         target_input = context.sections[target_index]
-    replacement = {
-        "section_id": target_input.section_id,
-        "title": target_input.title,
-        "section_type": target_input.section_type,
-        "section_version": target_input.section_version,
-        "sort_order": target_input.sort_order,
-        "input_signature": _section_input_signature(context, target_input),
-        "content": content,
-        "user_edited": True,
-        "used_material_ids": list(
-            latest_sections[target_index].get("used_material_ids", [])
-        ),
-    }
+    replacement = _section_snapshot(context, sections=(GeneratedChapterSection(
+        section_id=target_input.section_id,
+        title=target_input.title,
+        content=content,
+        used_material_ids=tuple(latest_sections[target_index].get("used_material_ids", [])),
+        user_edited=True,
+    ),))[0]
     revised_sections = [
         replacement if index == target_index else section
         for index, section in enumerate(latest_sections)
