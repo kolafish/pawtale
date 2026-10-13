@@ -14,7 +14,6 @@ from app.schemas.memoir_book import MemoirBookAudioResponse
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import (
     TTSAlignmentSegment,
-    alignment_segments_from_json,
     alignment_segments_to_json,
 )
 from app.services.tts_stepfun import StepFunTTSClient
@@ -84,51 +83,7 @@ def split_tts_text(
     return positioned_chunks
 
 
-def cached_audio_response(
-    metadata_json: dict,
-    *,
-    cache_key: str,
-    text_hash: str,
-    voice: str | None,
-    speed_ratio: float,
-    force_regenerate: bool,
-    tts_client: TTSClient | None = None,
-) -> MemoirBookAudioResponse | None:
-    cache = metadata_json.get(cache_key)
-    if force_regenerate or not isinstance(cache, dict):
-        return None
-    client = tts_client or get_tts_client()
-    audio_file_ids = cache.get("audio_file_ids")
-    if (
-        cache.get("provider") == client.provider_name
-        and cache.get("model") == client.model_name
-        and cache.get("source_text_hash") == text_hash
-        and (cache.get("voice") or None) == (voice or None)
-        and _cache_speed_ratio(cache.get("speed_ratio")) == speed_ratio
-        and isinstance(audio_file_ids, list)
-        and all(isinstance(item, str) for item in audio_file_ids)
-        and audio_file_ids
-    ):
-        alignment = alignment_segments_to_json(alignment_segments_from_json(cache.get("alignment")))
-        return MemoirBookAudioResponse(
-            audio_file_ids=audio_file_ids,
-            audio_file_durations_seconds=_cache_audio_file_durations_seconds(
-                cache.get("audio_file_durations_seconds"),
-                len(audio_file_ids),
-            ),
-            provider=str(cache.get("provider") or "stored"),
-            model=str(cache.get("model") or ""),
-            mime_type=str(cache.get("mime_type") or "audio/mpeg"),
-            chunk_count=int(cache.get("chunk_count") or len(audio_file_ids)),
-            source_text_hash=text_hash,
-            duration_seconds=_cache_duration_seconds(cache.get("duration_seconds")),
-            alignment_provider=str(cache.get("alignment_provider") or "") or None,
-            alignment=alignment,
-        )
-    return None
-
-
-def _cache_speed_ratio(value: object) -> float:
+def effective_tts_speed_ratio(value: object) -> float:
     try:
         ratio = float(value)
     except (TypeError, ValueError):
@@ -136,51 +91,6 @@ def _cache_speed_ratio(value: object) -> float:
     if not math.isfinite(ratio):
         return 1.0
     return max(0.5, min(2.0, round(ratio, 2)))
-
-
-def effective_tts_speed_ratio(value: object) -> float:
-    return _cache_speed_ratio(value)
-
-
-def _cache_duration_seconds(value: object) -> float | None:
-    try:
-        duration = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(duration) or duration <= 0:
-        return None
-    return duration
-
-
-def _cache_audio_file_durations_seconds(value: object, count: int) -> list[float | None]:
-    if not isinstance(value, list):
-        return []
-    durations = [_cache_duration_seconds(item) for item in value[:count]]
-    if len(durations) != count:
-        return []
-    return durations
-
-
-def audio_cache_payload(
-    synthesis: BookAudioSynthesis,
-    *,
-    voice: str | None,
-    speed_ratio: float,
-) -> dict[str, object]:
-    return {
-        "audio_file_ids": [audio_file.id for audio_file in synthesis.audio_files],
-        "audio_file_durations_seconds": synthesis.audio_file_durations_seconds,
-        "provider": synthesis.provider,
-        "model": synthesis.model,
-        "mime_type": synthesis.mime_type,
-        "chunk_count": len(synthesis.audio_files),
-        "source_text_hash": synthesis.source_text_hash,
-        "voice": voice,
-        "speed_ratio": speed_ratio,
-        "duration_seconds": synthesis.duration_seconds,
-        "alignment_provider": synthesis.provider if synthesis.alignment else None,
-        "alignment": alignment_segments_to_json(synthesis.alignment),
-    }
 
 
 def audio_response(synthesis: BookAudioSynthesis) -> MemoirBookAudioResponse:

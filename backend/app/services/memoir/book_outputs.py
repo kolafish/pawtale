@@ -92,7 +92,6 @@ from app.services.memoir.project_ai_preferences import (
 )
 
 
-BOOK_TTS_CACHE_KEY = "book_tts"
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -267,10 +266,6 @@ async def synchronize_book_output_title(
         output.updated_at = utcnow_naive()
     if version_changed or title_changed:
         invalidate_book_output(output)
-        output.metadata_json = {
-            **(output.metadata_json or {}),
-            BOOK_TTS_CACHE_KEY: None,
-        }
         db.add(output)
     return True
 
@@ -540,10 +535,6 @@ async def update_book_output(
         output.title = title
     if version_changed or title_changed:
         invalidate_book_output(output)
-        output.metadata_json = {
-            **(output.metadata_json or {}),
-            BOOK_TTS_CACHE_KEY: None,
-        }
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:
@@ -629,10 +620,6 @@ async def regenerate_book_output_editorial_copy(
             created_by=MemoirCreatedBy.AI,
         )
     invalidate_book_output(output)
-    output.metadata_json = {
-        **(output.metadata_json or {}),
-        BOOK_TTS_CACHE_KEY: None,
-    }
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:
@@ -683,10 +670,6 @@ async def update_book_output_chapter_editorial_copy(
             created_by=MemoirCreatedBy.USER,
         )
     invalidate_book_output(output)
-    output.metadata_json = {
-        **(output.metadata_json or {}),
-        BOOK_TTS_CACHE_KEY: None,
-    }
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:

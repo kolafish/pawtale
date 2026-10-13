@@ -38,10 +38,6 @@ from app.services.memoir.book_output_snapshots import (
 from app.services.memoir import chapter_generation
 
 
-CHAPTER_TTS_CACHE_KEY = "chapter_tts"
-CHAPTER_SECTION_TTS_CACHE_KEY_PREFIX = "chapter_section_tts"
-
-
 def _version_response(
     version: MemoirBookChapterDraftVersion,
 ) -> MemoirBookChapterDraftVersionResponse:
@@ -348,7 +344,6 @@ async def _chapter_audio_source(
     else:
         version = max(draft.versions, key=lambda v: (v.version, v.created_at, v.id))
     sections = normalized_section_snapshots(version.section_snapshot_json)
-    cache_key = CHAPTER_TTS_CACHE_KEY
     if section_id is None:
         text = sectioned_chapter_content(sections) or version.content.strip()
     else:
@@ -356,8 +351,7 @@ async def _chapter_audio_source(
         if section is None:
             raise HTTPException(404, "小节正文不存在")
         text = f"{section['title']}\n\n{section['content']}".strip()
-        cache_key = f"{CHAPTER_SECTION_TTS_CACHE_KEY_PREFIX}:{section_id}"
-    return AudioSource(version.id, text, draft.metadata_json or {}, cache_key)
+    return AudioSource(version.id, text)
 
 
 async def prepare_chapter_draft_audio(

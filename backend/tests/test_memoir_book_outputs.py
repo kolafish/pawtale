@@ -1237,7 +1237,7 @@ async def test_project_title_update_replaces_existing_book_output_title(client, 
     assert output["latest_version"]["manuscript"]["profile"]["title"] == "我的故事"
 
 
-async def test_unchanged_titles_keep_book_audio_cache_and_version(client, test_db):
+async def test_unchanged_titles_keep_book_version(client, test_db):
     title = formal_book_title("外婆回忆录章节规划")
     project_id = await ensure_mobile_memoir_project(client, title=title)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -1254,9 +1254,6 @@ async def test_unchanged_titles_keep_book_audio_cache_and_version(client, test_d
         .order_by(MemoirBookOutputVersion.version.desc())
         .limit(1)
     )
-    cache = {"cached_audio_file_id": "existing-audio"}
-    output.metadata_json = {**output.metadata_json, "book_tts": cache}
-    await test_db.commit()
 
     project_update = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}", json={"title": title}
@@ -1266,8 +1263,6 @@ async def test_unchanged_titles_keep_book_audio_cache_and_version(client, test_d
         f"/api/mobile/memoir/projects/{project_id}/book-output", json={"title": title}
     )
     assert book_update.status_code == 200, book_update.text
-    await test_db.refresh(output)
-    assert output.metadata_json["book_tts"] == cache
     current_id = await test_db.scalar(
         select(MemoirBookOutputVersion.id)
         .where(MemoirBookOutputVersion.output_id == output.id)

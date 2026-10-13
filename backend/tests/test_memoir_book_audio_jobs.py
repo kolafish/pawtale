@@ -180,38 +180,31 @@ async def test_missing_audio_file_is_regenerated(client, test_db, tts):
     assert (await prepare(test_db, project_id, user_id, version)).segments[-1].audio_file_id != audio.id
 
 
-async def test_legacy_recording_stays_available_after_book_metadata_changes(client, test_db, tts):
-    project_id, user_id, version = await seed(client, test_db)
+async def test_old_metadata_audio_is_ignored_and_old_playlist_requires_restart(client, test_db, tts):
+    project_id, user_id, version = await seed(client, test_db, FIRST_PARAGRAPH)
     synthesis = await book_audio.synthesize_text_audio(test_db, user_id=user_id, text=version.content)
+    retired_audio_id = synthesis.audio_files[0].id
     output = await test_db.get(MemoirBookOutput, version.output_id)
-    output.metadata_json = {"book_tts": book_audio.audio_cache_payload(synthesis, voice=None, speed_ratio=1)}
+    output.metadata_json = {"book_tts": {
+        "source_text_hash": book_audio.source_text_hash(version.content),
+        "provider": tts.provider_name, "model": tts.model_name,
+        "voice": None, "speed_ratio": 1, "audio_file_ids": [retired_audio_id],
+        "mime_type": synthesis.mime_type,
+    }}
     await test_db.commit()
-    count = len(tts.calls)
-    legacy = await prepare(test_db, project_id, user_id, version)
-    assert legacy.ready_count == len(legacy.segments)
-    assert [s.audio_file_id for s in legacy.segments] == [a.id for a in synthesis.audio_files]
-    output.metadata_json = {}
-    await test_db.commit()
-    assert (await prepare(test_db, project_id, user_id, version, profile_key=legacy.profile_key)) == legacy
-    assert len(tts.calls) == count
-    design_version = MemoirBookOutputVersion(
-        output_id=version.output_id, project_id=project_id, plan_id=version.plan_id,
-        version=version.version + 1, content=version.content, created_by=version.created_by,
-        manuscript_json={"render_settings": {"cover_style": "warm_gray"}},
+    plan = await prepare(test_db, project_id, user_id, version)
+    assert plan.ready_count == 0
+    assert plan.segments[0].status == "pending"
+    assert await run_test_editing_job(test_db, plan.segments[0].job_id)
+    current = await prepare(test_db, project_id, user_id, version)
+    assert current.ready_count == 1
+    assert current.segments[0].audio_file_id != retired_audio_id
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/tts/plan",
+        json={"version_id": version.id, "profile_key": book_audio.source_text_hash(f"legacy:{current.source_text_hash}:{current.profile_key}")},
     )
-    test_db.add(design_version)
-    await test_db.commit()
-    unchanged = await prepare(test_db, project_id, user_id, design_version)
-    assert unchanged.version_id == design_version.id
-    assert [s.audio_file_id for s in unchanged.segments] == [s.audio_file_id for s in legacy.segments]
-    assert unchanged.ready_count == legacy.ready_count
-    assert len(tts.calls) == count
-    output.metadata_json = {"book_tts": book_audio.audio_cache_payload(synthesis, voice=None, speed_ratio=1)}
-    tts.default_voice = "changed-default"
-    await test_db.commit()
-    changed = await prepare(test_db, project_id, user_id, version)
-    assert changed.ready_count == 0
-    assert changed.profile_key != legacy.profile_key
+    assert response.status_code == 409
+    assert len(tts.calls) == 2
 
 
 async def test_plan_rejects_missing_version_and_changed_profile(client, test_db, tts):
@@ -224,24 +217,6 @@ async def test_plan_rejects_missing_version_and_changed_profile(client, test_db,
     assert changed.status_code == 409
     invalid = await client.post(url, json={"version_id": version.id, "start_index": 500})
     assert invalid.status_code == 400
-
-
-async def test_forced_regeneration_replaces_new_requests_but_keeps_playing_legacy_audio(client, test_db, tts):
-    project_id, user_id, version = await seed(client, test_db)
-    synthesis = await book_audio.synthesize_text_audio(test_db, user_id=user_id, text=version.content)
-    output = await test_db.get(MemoirBookOutput, version.output_id)
-    output.metadata_json = {"book_tts": book_audio.audio_cache_payload(synthesis, voice=None, speed_ratio=1)}
-    await test_db.commit()
-    legacy = await prepare(test_db, project_id, user_id, version)
-    forced = await book_audio_jobs.complete_book_audio(
-        test_db, project_id=project_id, user_id=user_id,
-        req=MemoirBookAudioPlanRequest(version_id=version.id, force_regenerate=True),
-    )
-    current = await prepare(test_db, project_id, user_id, version)
-    assert [s.audio_file_id for s in current.segments] == forced.audio_file_ids
-    assert current.profile_key != legacy.profile_key
-    pinned = await prepare(test_db, project_id, user_id, version, profile_key=legacy.profile_key)
-    assert pinned == legacy
 
 
 async def test_committed_audio_checkpoint_survives_worker_restart(client, test_db, tts):
@@ -271,7 +246,7 @@ async def test_interrupted_provider_call_requires_explicit_retry(client, test_db
 
 
 @pytest.mark.parametrize("target", ["chapter", "section", "outline"])
-async def test_narration_entries_prepare_immediately_and_share_legacy_playback(client, test_db, tts, target):
+async def test_narration_entries_prepare_immediately_and_share_chunk_playback(client, test_db, tts, target):
     from app.models.memoir import MemoirSection
 
     project_id = await ensure_mobile_memoir_project(client)

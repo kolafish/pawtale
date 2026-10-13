@@ -167,17 +167,6 @@ async def test_invalid_input_is_rejected_without_paid_request(monkeypatch, text,
     assert not calls
 
 
-def test_chapter_cache_rejects_previous_provider_and_accepts_step_audio():
-    cache = {
-        "source_text_hash": "text-hash", "voice": None, "speed_ratio": 1,
-        "provider": "volc_tts", "model": "seed-tts-2.0", "audio_file_ids": ["audio-1"],
-    }
-    kwargs = dict(cache_key="chapter_tts", text_hash="text-hash", voice=None, speed_ratio=1, force_regenerate=False)
-    assert book_audio.cached_audio_response({"chapter_tts": cache}, **kwargs) is None
-    cache.update(provider="stepfun", model="step-tts-mini")
-    assert book_audio.cached_audio_response({"chapter_tts": cache}, **kwargs).audio_file_ids == ["audio-1"]
-
-
 async def test_narration_usage_prices_the_actual_step_result(monkeypatch):
     mock_provider(monkeypatch)
     record = AsyncMock()
