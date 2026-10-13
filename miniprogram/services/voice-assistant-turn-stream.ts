@@ -21,7 +21,10 @@ export interface VoiceAssistantTurnStreamClientOptions {
   streamUrl?: string;
 }
 
+export interface OpeningCompletionOffer { issue_id: string; question: string }
+
 export interface VoiceAssistantTurnStartedEvent {
+  opening_completion_offer?: OpeningCompletionOffer | null;
   type: "turn.started";
   turn_id: string;
   voice_session_id: string;

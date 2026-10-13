@@ -590,6 +590,27 @@ Component({
     await this.completionIssues().close(outcome);
   },
 
+  dismissOpeningCompletionOffer() {
+    if (this.data.finishingSession) return;
+    applyVoiceChatDataPatch(this, { openingCompletionOffer: null });
+    if (!this.data.recording) this.startRecording();
+  },
+
+  async acceptOpeningCompletionOffer() {
+    const offer = this.data.openingCompletionOffer;
+    if (!offer || !this.data.showOpeningCompletionOffer || this.data.finishingSession) return;
+    const runtime = this.runtime();
+    runtime.requestedExit = {
+      destination: "completion_issue", projectId: this.data.projectId,
+      projectTitle: this.data.projectTitle, issueId: offer.issue_id,
+    };
+    try {
+      await this.finishSession();
+    } finally {
+      runtime.requestedExit = null;
+    }
+  },
+
   async finishCompletionRound() {
     if (
       this.data.completionIssueControlsDisabled
@@ -820,8 +841,9 @@ Component({
 
   async generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number) {
     const runtime = new VoiceAssistantTurnRuntime(this.data.voiceSessionId, {
-      onStarted: () => {
+      onStarted: (event) => {
         applyVoiceChatDataPatch(this, {
+          openingCompletionOffer: event.opening_completion_offer || null,
           followUpTTSStateText: "小余正在说",
           persistenceStateText: "小余正在回应",
         });

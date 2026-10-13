@@ -3771,3 +3771,42 @@ for (const scenario of [
     }
   });
 }
+
+test("opening completion accept saves the original session before offering the bound interview", async () => {
+  for (const saved of [true, false]) {
+    global.wx = { showToast() {} };
+    const page = loadVoiceChatPage();
+    const errors = [];
+    const context = { ...page,
+      data: { ...page.data, projectId:"project-1", projectTitle:"回忆录", voiceSessionId:"voice-1",
+        openingCompletionOffer:{issue_id:"issue-1",question:"谁陪您去的？"}, showOpeningCompletionOffer:true },
+      setData(patch) { this.data = {...this.data, ...patch}; },
+      voiceStreaming: {hasClient:()=>true, finishSession:async()=>{}, isBargeInMonitoring:()=>false},
+      refreshVoiceSessionSnapshot:async()=>({session:{status:saved?"stopped":"listening"},utterances:[]}),
+      stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {}, handleError:message=>errors.push(message),
+    };
+    await context.acceptOpeningCompletionOffer();
+    assert.equal(context.requestedExit, null);
+    if (saved) {
+      assert.equal(context.events.length, 1);
+      assert.equal(context.events[0].detail.destination,"completion_issue");
+      assert.equal(context.events[0].detail.issueId,"issue-1");
+      assert.equal(context.data.persistenceStateText,"已保存");
+    } else {
+      assert.deepEqual(context.events,[]);
+      assert.equal(errors.length,1);
+    }
+  }
+});
+
+test("declining an opening completion offer keeps the ordinary session and starts shared recording", () => {
+  const page = loadVoiceChatPage();
+  let starts = 0;
+  const context = {...page, data:{...page.data, openingCompletionOffer:{issue_id:"i1",question:"谁陪您去的？"}},
+    setData(patch) {this.data={...this.data,...patch};}, startRecording() {starts+=1;}};
+  context.dismissOpeningCompletionOffer();
+  assert.equal(context.data.openingCompletionOffer,null);
+  assert.equal(context.data.sessionGoal,"open_narration");
+  assert.equal(starts,1);
+  assert.deepEqual(context.events,[]);
+});
