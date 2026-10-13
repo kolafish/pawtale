@@ -609,7 +609,8 @@ async def test_book_review_reuses_quoted_conflict_issue_across_reworded_reviews(
     assert current[0].id == old_id
     assert current[0].status == "closed"
     assert current[0].outcome_note == "以九月为准。"
-    assert current[0].input_signature == "later-review"
+    assert current[0].input_signature == "new-review"
+    assert current[0].question == candidate["question"]
 
 
 @pytest.mark.ci_smoke
@@ -814,14 +815,16 @@ def test_book_review_does_not_invent_material_provenance():
 async def test_book_review_regeneration_preserves_confirmed_answer(
     client, test_db,
 ):
-    project_id = await ensure_mobile_memoir_project(client)
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    source_id = sources[0]["utterance_id"]
     candidate = {
         "issue_type": "conflict",
         "channel": "manual_review",
         "question": "比赛的时间以哪一个说法为准？",
         "reason": "需要用户决定。",
         "priority": "high",
-        "chapter_ids": ["chapter-1"],
+        "chapter_ids": [chapter_id],
         "material_ids": ["arbitrary-old-material"],
         "resolution": "user_decision",
     }
@@ -835,7 +838,8 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
         reason=candidate["reason"],
         priority="high",
         fingerprint=old_fingerprint,
-        related_material_ids_json=["arbitrary-old-material"],
+        related_material_ids_json=[source_id],
+        related_chapter_ids_json=[chapter_id],
         input_signature="same-review-input",
         status="closed",
         outcome="confirmed",
@@ -850,15 +854,16 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
     current = await completion_issues.sync_book_review_issues(
         test_db,
         project_id=project_id,
-        input_signature="same-review-input",
+        input_signature="new-review-input",
         candidates=[candidate],
     )
     assert len(current) == 1
     assert current[0].id == issue_id
     assert current[0].fingerprint == candidate["fingerprint"]
     assert current[0].outcome_note == "以九月为准。"
-    assert current[0].related_chapter_ids_json == ["chapter-1"]
-    assert current[0].related_material_ids_json == []
+    assert current[0].input_signature == "same-review-input"
+    assert current[0].related_chapter_ids_json == [chapter_id]
+    assert current[0].related_material_ids_json == [source_id]
     assert current[0].resolution == "user_decision"
 
 
