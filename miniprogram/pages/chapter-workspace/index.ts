@@ -8,7 +8,6 @@ import {
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
-  closeMemoirCompletionIssue,
   listMemoirCompletionIssues,
 } from "../../services/memoir-completion-issue-api";
 import { enqueueMemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
@@ -882,47 +881,13 @@ definePage<ChapterWorkspacePageData>()({
     ) {
       return;
     }
-    wx.showModal({
-      title: "请确认这一点",
-      content: issue.question,
-      confirmText: "确认",
-      cancelText: "先不处理",
-      success: (result) => {
-        if (result.confirm) {
-          void this.applyCurrentIssueConfirmation(issue.id);
-        }
-      },
-    });
-  },
-
-  async applyCurrentIssueConfirmation(
-    issueId: string,
-    note = "用户已确认按当前建议处理",
-  ) {
-    if (
-      !issueId
-      || !this.beginOperation("confirm_issue", issueId)
-    ) {
+    const list = this.selectComponent<{ openRequiredAnswer(issueId: string): void }>("#chapter-issues");
+    if (!list) {
+      this.setData({ error: "核对问题尚未加载，请刷新后重试" });
       return;
     }
-    try {
-      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
-        outcome: "confirmed",
-        note,
-      });
-      const job = await enqueueMemoirChapterPreparationJob(
-        this.data.projectId,
-        this.data.chapterId,
-        "prepare",
-      );
-      await this.applyChapterPreparationJob(job);
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.finishOperation("confirm_issue", issueId);
-      this.setData({ error: error instanceof Error ? error.message : "确认失败" });
-    }
+    list.openRequiredAnswer(issue.id);
+    scrollToSection("#chapter-suggestions");
   },
 
   ...chapterWorkspaceDraftMethods,

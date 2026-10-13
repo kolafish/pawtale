@@ -62,7 +62,6 @@ export type ChapterWorkspaceOperationKind =
   | "rename_section"
   | "chapter_settings"
   | "move_material"
-  | "confirm_issue"
   | "save_draft_section"
   | "rewrite_chapter";
 
