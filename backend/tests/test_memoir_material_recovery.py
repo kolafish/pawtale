@@ -76,17 +76,18 @@ async def test_not_story_is_not_reintroduced_by_new_context_or_retry(client, tes
     assert old["utterance_id"] not in seen[-1]
 
 
-@pytest.mark.parametrize("groups", [
-    [],
-    [{"source_indices": [1, 1], "action": "not_story"}],
-    [{"source_indices": [2], "action": "not_story"}],
-    [{"source_indices": [1], "action": "assign_existing", "section_id": "S99"}],
-    [{"source_indices": [1], "action": "create_chapter", "new_chapter_title": "童年"}],
+@pytest.mark.parametrize("payload", [
+    {},
+    {"non_story_indices": [1, 1]},
+    {"non_story_indices": [2]},
+    {"sections": [{"source_indices": [1], "section_id": "S99"}]},
+    {"new_chapters": [{"chapter_ref": "N1", "title": "童年"}],
+     "sections": [{"source_indices": [1], "chapter_ref": "N1"}]},
 ])
-def test_invalid_model_placement_is_a_retryable_system_error_not_user_confirmation(groups):
+def test_invalid_model_placement_is_a_retryable_system_error_not_user_confirmation(payload):
     with pytest.raises(HTTPException) as exc:
         story_tree_growth._normalize_groups(
-            story_tree_growth._GrowthOutput(groups=groups),
+            story_tree_growth._GrowthOutput(**payload),
             utterances=[SimpleNamespace(id="source-1")],
             chapter_refs=ModelReferenceMap("C", ["chapter-1"]),
             section_refs=ModelReferenceMap("S", ["section-1"]),

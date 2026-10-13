@@ -554,15 +554,12 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     await test_db.commit()
     fake = FakeStoryGrowthAI(
         {
-            "groups": [
+            "sections": [
                 {
                     "source_indices": [1],
-                    "action": "create_section",
-                    "section_id": None,
-                    "chapter_id": "C1",
-                    "new_chapter_title": None,
+                                        "section_id": None,
+                    "chapter_ref": "C1",
                     "new_section_title": "后来一起爬香山",
-                    "confidence": 0.91,
                     "reason": "同属爬山经历，但形成了新的具体事件",
                 }
             ]
@@ -599,7 +596,7 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     assert event is not None
     assert event.metadata_json["new_section_ids"] == [created_section.id]
     assert fake.calls == 1
-    assert "create_section" in fake.prompts[0]
+    assert "chapter_ref" in fake.prompts[0]
     assert chapters[0].id not in fake.prompts[0]
 
     acknowledged = await client.post(
@@ -614,7 +611,7 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     message.turn_index = 2
     session.status = "listening"
     job.result_json = result.result_json
-    fake.payload["groups"][0]["new_section_title"] = "后来一起爬黄山"
+    fake.payload["sections"][0]["new_section_title"] = "后来一起爬黄山"
     await test_db.commit()
     result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
     events = (await test_db.scalars(select(MemoirAutomationEvent).where(
