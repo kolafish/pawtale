@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
-    MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -218,19 +217,15 @@ async def chapter_summary(
             chapter_id=chapter.id,
         )
     )
-    issue = next(
-        (
-            issue
-            for issue in issues
-            if issue.channel
-            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
-        ),
-        None,
+    blocking = (
+        completion_issues.blocking_book_issues(issues, [chapter.id])
+        if snapshot is not None else await completion_issues.open_blocking_book_issues(
+            db, project_id=project_id, all_chapter_ids=[chapter.id],
+        )
     )
-    optional_count = sum(
-        issue.channel == MemoirCompletionIssueChannel.INTERVIEW.value
-        for issue in issues
-    )
+    issue = next(iter(blocking), None)
+    blocking_ids = {item.id for item in blocking}
+    optional_count = sum(item.id not in blocking_ids for item in issues)
     optional_note = (
         f"另有 {optional_count} 条可选补充建议。"
         if optional_count
@@ -512,8 +507,14 @@ async def _chapter_summary_snapshots(
         if issues is not None
         else await completion_issues.list_issues(db, project_id=project_id)
     ):
-        if issue.chapter_id in chapter_ids:
-            issues_by_chapter.setdefault(issue.chapter_id, []).append(issue)
+        affected = (
+            {issue.chapter_id} if issue.chapter_id in chapter_ids
+            else completion_issues.blocking_book_chapter_ids(
+                completion_issues.blocking_book_issues([issue], chapter_ids), chapter_ids,
+            ) & set(chapter_ids)
+        )
+        for chapter_id in affected:
+            issues_by_chapter.setdefault(chapter_id, []).append(issue)
     drafts = {
         draft.chapter_id: draft
         for draft in (
@@ -708,15 +709,9 @@ async def chapter_workspace(
             or source_changes.removed_source_count
         )
     )
-    active_issues = await completion_issues.list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    has_manual_review = any(
-        issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
-        for issue in active_issues
-    )
+    has_blocking_issue = bool(await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
+    ))
     sections_by_chapter = await sections.section_summaries_by_chapter(
         db,
         project_id=project_id,
@@ -737,7 +732,7 @@ async def chapter_workspace(
         draft_needs_rewrite=draft_needs_rewrite,
         can_rewrite_draft=(
             draft_needs_rewrite
-            and not has_manual_review
+            and not has_blocking_issue
         ),
         pending_assignment_material_count=pending_assignment_count,
         pending_completion_source_count=(

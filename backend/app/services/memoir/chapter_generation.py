@@ -17,9 +17,6 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirCompletionIssueChannel,
-    MemoirCompletionIssueStatus,
-    MemoirCompletionIssueType,
     MemoirCreatedBy,
     MemoirSectionStatus,
     MemoirTranscriptPolishLevel,
@@ -30,7 +27,6 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
 )
@@ -1749,13 +1745,12 @@ async def generate_and_save_chapter_draft(
         raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
     latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
     changed = (latest.id if latest else None) != base_version_id
-    blocking_issue = await db.scalar(select(MemoirCompletionIssue.id).where(
-        MemoirCompletionIssue.project_id == project_id,
-        MemoirCompletionIssue.chapter_id == chapter_id,
-        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
-        MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value,
-        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
-    ).limit(1)) if automatic else None
+    from app.services.memoir import completion_issues
+    blocking_issue = await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
+    )
+    if blocking_issue and not automatic:
+        raise HTTPException(status_code=409, detail="本章还有事实冲突需要先确认")
     if changed:
         if automatic:
             raise ChapterGenerationStale("生成期间章节正文已变化")
@@ -2100,20 +2095,10 @@ async def confirm_chapter_draft(
         )
     if not chapter_draft_is_current(context, latest):
         raise HTTPException(status_code=409, detail="章节素材已变化，请重新生成正文")
-    blocking_issue = await db.scalar(
-        select(MemoirCompletionIssue.id)
-        .where(
-            MemoirCompletionIssue.project_id == project_id,
-            MemoirCompletionIssue.chapter_id == chapter_id,
-            MemoirCompletionIssue.channel
-            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
-            MemoirCompletionIssue.issue_type != MemoirCompletionIssueType.PRIVACY.value,
-            MemoirCompletionIssue.status
-            != MemoirCompletionIssueStatus.CLOSED.value,
-        )
-        .limit(1)
-    )
-    if blocking_issue is not None:
+    from app.services.memoir import completion_issues
+    if await completion_issues.open_blocking_book_chapter_ids(
+        db, project_id=project_id, all_chapter_ids=[chapter_id],
+    ):
         raise HTTPException(status_code=409, detail="本章还有一项需要确认")
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
     draft.metadata_json = {**(draft.metadata_json or {}), "confirmed_version_id": latest.id}

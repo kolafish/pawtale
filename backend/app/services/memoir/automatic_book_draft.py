@@ -88,11 +88,11 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
     )).all()
     scheduled = 0
     for project_id in project_ids:
-        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-        if output is None:
-            continue
-        latest = await load_latest_book_output_version(db, output_id=output.id)
-        if latest is None:
+        job = await db.scalar(select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        ).order_by(MemoirEditingJob.updated_at.desc()).limit(1))
+        if job is None or job.status != MemoirEditingJobStatus.SUCCEEDED.value:
             continue
         plan = await load_book_plan_drafts(db, project_id=project_id)
         if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
@@ -101,6 +101,22 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
         blocked = await completion_issues.open_blocking_book_chapter_ids(
             db, project_id=project_id, all_chapter_ids=(chapter.id for chapter in included),
         )
+        previous = DraftProgress.model_validate(job.result_json or {})
+        unblocked = any(
+            previous.chapters.get(chapter.id, ChapterProgress()).status == "needs_input"
+            and chapter.id not in blocked
+            for chapter in included
+        )
+        if unblocked:
+            await schedule_book_draft(db, project_id=project_id, source="assembly_policy")
+            scheduled += 1
+            continue
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+        if output is None:
+            continue
+        latest = await load_latest_book_output_version(db, output_id=output.id)
+        if latest is None:
+            continue
         safe_readable = {
             chapter.id for chapter, _ in readable_chapter_versions(plan, allow_partial=True)
             if chapter.id not in blocked
@@ -110,12 +126,6 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
             if isinstance(item, dict)
         }
         if not (safe_readable - stored or stored & blocked):
-            continue
-        job = await db.scalar(select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
-        ).order_by(MemoirEditingJob.updated_at.desc()).limit(1))
-        if job is None or job.status != MemoirEditingJobStatus.SUCCEEDED.value:
             continue
         await schedule_book_draft(db, project_id=project_id, source="assembly_policy")
         scheduled += 1
