@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirCompletionIssueScope,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirSectionMaterialAssignedBy,
@@ -25,6 +26,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirImageAsset,
     MemoirSection,
@@ -76,6 +78,7 @@ from app.services.memoir.book_structure_commands import (
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.sections import sync_materials_to_chapters
 from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir import fact_decisions
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,20 @@ async def _detach_chapter_operational_references(
     chapter_ids = {chapter.id for chapter in chapters}
     if not chapter_ids:
         return
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id.in_({chapter.project_id for chapter in chapters}),
+    ))).all()
+    for issue in issues:
+        if not fact_decisions.is_confirmed_fact(issue):
+            continue
+        # A chapter can disappear after its stories move elsewhere. Preserve
+        # the user's answer and its source anchors before the FK cascades.
+        await fact_decisions.bind_sources(db, issue)
+        if issue.chapter_id in chapter_ids:
+            issue.related_chapter_ids_json = [issue.chapter_id]
+            issue.chapter_id = None
+            issue.scope = MemoirCompletionIssueScope.BOOK.value
+        db.add(issue)
     chapter_titles = {chapter.id: chapter.title for chapter in chapters}
     detached_at = datetime.now(UTC).isoformat()
 

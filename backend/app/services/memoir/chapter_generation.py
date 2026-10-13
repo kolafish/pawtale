@@ -46,6 +46,7 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import automation_events
 from app.services.memoir import narration_people
+from app.services.memoir import fact_decisions
 from app.services.memoir.material_roles import interviewer_lines
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
@@ -59,13 +60,13 @@ from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
-from app.services.memoir.transcript_projection import current_material_text
+from app.services.memoir.transcript_projection import current_material_text, material_user_edit_time
 
 
 CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v3"
 CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
-    "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
+    "只使用允许的原始讲述及用户明确确认的事实更正整理成第一人称完整章节，不创造事实。"
 )
 CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
     "你是一位谨慎的中文回忆录编辑。"
@@ -93,6 +94,7 @@ class ChapterMaterialInput:
     text: str
     assigned_at: datetime | None = None
     interviewer_line: str = ""
+    user_edited_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ class ChapterSectionInput:
     section_version: int
     sort_order: int
     materials: tuple[ChapterMaterialInput, ...]
+    decisions: tuple[fact_decisions.FactDecision, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -370,6 +373,8 @@ def _preserved_draft_section(
         return None
     previous = _previous_draft_section(section, snapshot)
     if previous is None:
+        return None
+    if snapshot.get("fact_decision_signature", "") != fact_decisions.signature(section.decisions):
         return None
     signature = snapshot.get("input_signature")
     if signature != _section_input_signature(context, section):
@@ -644,11 +649,53 @@ def chapter_draft_sources_still_included(
         section.section_id: {material.material_id for material in section.materials}
         for section in context.sections
     }
+    if not chapter_draft_facts_current(context, version):
+        return False
     return all(
         section.get("section_id") in allowed
         and set(section.get("used_material_ids", [])).issubset(allowed[section["section_id"]])
         for section in version.section_snapshot_json
     )
+
+
+def chapter_draft_facts_current(
+    context: ChapterGenerationContext, version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    snapshots = {
+        snapshot["section_id"]: snapshot
+        for snapshot in (version.section_snapshot_json if version else [])
+    }
+    return all(
+        snapshots.get(section.section_id, {}).get("fact_decision_signature", "")
+        == fact_decisions.signature(section.decisions)
+        for section in context.sections
+    )
+
+
+async def pending_fact_chapter_ids(
+    db: AsyncSession, *, project_id: str,
+    chapter_versions: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]],
+) -> set[str]:
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
+    if not decisions:
+        return set()
+    pending = set()
+    for chapter, version in chapter_versions:
+        try:
+            context = await load_chapter_generation_context(db, project_id=project_id, chapter_id=chapter.id)
+        except HTTPException as exc:
+            if exc.status_code not in {409, 422}:
+                raise
+            # Keep old books readable even while their plan is being edited,
+            # but do not present an unverified factual version as current.
+            if fact_decisions.for_sources(
+                decisions, chapter_id=chapter.id, material_ids=version.used_material_ids_json,
+            ) or any(chapter.id in decision.chapter_ids for decision in decisions):
+                pending.add(chapter.id)
+            continue
+        if not chapter_draft_facts_current(context, version):
+            pending.add(chapter.id)
+    return pending
 
 
 async def load_chapter_draft_generation_plan(
@@ -678,6 +725,7 @@ def chapter_generation_context(
     *,
     polish_level: MemoirTranscriptPolishLevel,
     interviewer_lines: dict[str, str] | None = None,
+    decisions: tuple[fact_decisions.FactDecision, ...] = (),
 ) -> ChapterGenerationContext:
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=409, detail="请先确认章节规划")
@@ -713,6 +761,7 @@ def chapter_generation_context(
                 transcript_version_id=material.transcript_version_id,
                 text=text,
                 assigned_at=material.created_at,
+                user_edited_at=material_user_edit_time(material),
                 interviewer_line=(interviewer_lines or {}).get(material.utterance.chat_message_id or "", ""),
             )
             section_materials.append(item)
@@ -726,6 +775,10 @@ def chapter_generation_context(
                     section_version=section.version,
                     sort_order=section.sort_order,
                     materials=tuple(section_materials),
+                    decisions=fact_decisions.for_sources(
+                        decisions, chapter_id=chapter.id,
+                        material_ids=(item.material_id for item in section_materials),
+                    ),
                 )
             )
     if not materials:
@@ -753,6 +806,10 @@ def chapter_generation_context(
             ],
             "engine": CHAPTER_GENERATION_ENGINE,
             "polish_level": polish_level.value,
+            **({"fact_decisions": [
+                [section.section_id, fact_decisions.signature(section.decisions)]
+                for section in sections
+            ]} if any(section.decisions for section in sections) else {}),
         }
     )
     return ChapterGenerationContext(
@@ -797,6 +854,7 @@ async def load_chapter_generation_context(
         chapter,
         polish_level=await load_project_transcript_polish_level(db, project_id),
         interviewer_lines=await interviewer_lines(db, message_ids),
+        decisions=await fact_decisions.load_fact_decisions(db, project_id=project_id),
     )
     return replace(context, people=await narration_people.people_lines_for(db, project_id, message_ids))
 
@@ -838,11 +896,13 @@ def build_chapter_generation_prompt(
                 f"section_id: {section_refs.encode(section.section_id)}",
                 f"小节标题: {section.title}",
                 f"小节类型: {section.section_type}",
+                fact_decisions.prompt(section.decisions),
                 "允许素材：",
                 *[
                     (
                         f"material_id: {material_refs.encode(material.material_id)}\n"
                         + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
+                        + (f"用户编辑讲述时间（UTC）：{material.user_edited_at.isoformat()}\n" if material.user_edited_at else "")
                         + f"原始讲述: {material.text}"
                     )
                     for material in section.materials
@@ -1514,6 +1574,7 @@ def _section_input_signature(
                 }
                 for material in section.materials
             ],
+            **({"fact_decisions": fact_decisions.signature(section.decisions)} if section.decisions else {}),
         }
     )
 
@@ -1538,6 +1599,10 @@ def _section_snapshot(
                 inputs[section.section_id]
             ),
             "content": section.content,
+            **({"fact_decision_signature": fact_decisions.signature(inputs[section.section_id].decisions)}
+               if inputs[section.section_id].decisions else {}),
+            **({"fact_decision_ids": [decision.issue_id for decision in inputs[section.section_id].decisions]}
+               if inputs[section.section_id].decisions else {}),
             "used_material_ids": list(section.used_material_ids),
             **({"user_edited": True} if section.user_edited else {}),
         }

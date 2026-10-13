@@ -744,7 +744,7 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 | `input_signature` | 生成时的结构和素材签名 |
 | `used_material_ids_json` | 正文实际使用的 Material |
 | `material_snapshot_json` | Material、TranscriptVersion、文字 hash 和顺序快照 |
-| `section_snapshot_json` | 每个小节标题、类型、版本、正文和 used Material 快照 |
+| `section_snapshot_json` | 每个小节标题、类型、版本、正文、used Material；有事实更正时记录 `fact_decision_ids` 与 `fact_decision_signature` |
 
 ### 7.3 正文是怎么来的
 
@@ -885,7 +885,21 @@ CompletionIssue
   → 章节正文提示更新
 ```
 
-全书 `manual_review` 文字回答采用另一条简化链路：
+章节与全书的 `manual_review/conflict` 确认回答统一成为可追溯的事实更正：
+
+```text
+CompletionIssue.outcome_note + 原有讲述 ID
+  → 相关 SectionDigest / ChapterDraft 输入签名失效
+  → update_book_draft 自动推进原有章节生成任务
+  → 新 ChapterDraftVersion（人工改稿保留为候选）
+  → 组书；未使用当前更正的旧章节不进入新书稿
+```
+
+事实更正只补充原始讲述的解释，不覆盖音频或 TranscriptVersion。章节合并或删除前将
+已确认的章节事实记录解除章节外键，保留素材关联；全书审阅刷新不改写已确认回答的范围。
+没有更正的历史小节快照不需要迁移；前端按新的缓存 schema 失效旧状态。
+
+全书其他 `manual_review` 编辑决定继续采用原有链路：
 
 ```text
 CompletionIssue.outcome_note

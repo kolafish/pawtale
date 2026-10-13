@@ -3484,3 +3484,40 @@ async def test_background_batch_recovers_after_child_dispatch_without_client_rea
     assert batch.status == "succeeded"
     assert batch.active_key is None
     assert batch.chapter_job_ids_json == {chapter_id: child_id}
+
+
+@pytest.mark.parametrize("scope", ["chapter", "book"])
+async def test_confirmed_fact_invalidates_chapter_and_blocks_old_book_assembly(client, test_db, scope):
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter_id = chapters[0].id
+    _, version = await _create_current_draft(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.DRAFT,
+    )
+    issue = MemoirCompletionIssue(
+        project_id=project_id, scope=scope,
+        chapter_id=chapter_id if scope == "chapter" else None,
+        issue_type="conflict", channel="manual_review", question="比赛是哪一年？",
+        reason="年份需要核对", priority="high", fingerprint="f" * 64,
+        related_material_ids_json=[sources[0]["utterance_id"]] if scope == "chapter" else [],
+        related_chapter_ids_json=[chapter_id] if scope == "book" else [],
+        input_signature="fact-regression", resolution="user_decision",
+    )
+    test_db.add(issue)
+    await test_db.commit()
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
+        json={"outcome": "confirmed", "note": "是1978年，之前记错了。"},
+    )
+    assert response.status_code == 200, response.text
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+    )
+    assert chapter_generation.chapter_draft_generation_plan(context, version).target_context.sections
+    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[])
+    assert "是1978年，之前记错了。" in prompt
+    assert "学校比赛" in prompt
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert assembled.omitted_chapter_ids == [chapter_id]

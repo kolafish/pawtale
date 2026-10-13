@@ -41,6 +41,7 @@ from app.services.memoir import (
     chapter_digests,
     chapter_generation,
     completion_issues,
+    fact_decisions,
     section_digests,
     sections,
 )
@@ -404,8 +405,9 @@ async def _current_chapter_digests(
     project_id: str,
     chapters: list[MemoirBookPlanChapter],
 ) -> dict[str, MemoirChapterDigest]:
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     section_contexts = {
-        section.id: section_digests.section_digest_context(section)
+        section.id: section_digests.section_digest_context(section, decisions=decisions)
         for chapter in chapters
         for section in chapter.sections
         if (
@@ -559,6 +561,7 @@ async def _chapter_summary_snapshots(
         chapters=chapters,
     )
     polish_level = await load_project_transcript_polish_level(db, project_id)
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     snapshots: dict[str, _ChapterSummarySnapshot] = {}
     for chapter in chapters:
         issues = issues_by_chapter.get(chapter.id, [])
@@ -569,6 +572,7 @@ async def _chapter_summary_snapshots(
                 context = chapter_generation.chapter_generation_context(
                     chapter,
                     polish_level=polish_level,
+                    decisions=decisions,
                 )
             except chapter_generation.ChapterGenerationNeedsMaterial:
                 needs_material = True

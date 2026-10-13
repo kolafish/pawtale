@@ -26,6 +26,7 @@ from app.services.memoir import (
     book_review_answer_state,
     book_reviews,
     completion_issues,
+    chapter_generation,
 )
 from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes
 from app.services.memoir.book_output_manuscript import (
@@ -203,6 +204,7 @@ async def assemble_book_output(
     eligible_chapter_ids: set[str] | None = None,
     automatic: bool = False,
 ) -> MemoirBookAssemblyResponse:
+    await completion_issues.lock_project_chapters(db, project_id=project_id)
     plan = await load_book_plan_drafts(db, project_id=project_id)
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("请先确认章节规划")
@@ -227,6 +229,10 @@ async def assemble_book_output(
         blocking_decisions, (chapter.id for chapter in chapters),
     )
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
+    pending_facts = await chapter_generation.pending_fact_chapter_ids(
+        db, project_id=project_id, chapter_versions=chapter_versions,
+    )
+    chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in pending_facts]
     if not chapter_versions and not automatic:
         raise ValueError("还没有可收录的章节正文，请先处理相关章节的待确认事项")
     omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]

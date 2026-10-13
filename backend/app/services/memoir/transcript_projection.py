@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 
 from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance
+from app.domain.memoir.types import MemoirCreatedBy
 
 
 _NON_STORY_RE = re.compile(r"[\W_]|嗯|啊|呃|额|哦|那个|这个|就是")
@@ -46,6 +48,11 @@ def current_material_text(
         if version_text:
             return version_text
     return current_utterance_text(utterance or material.utterance)
+
+
+def material_user_edit_time(material: MemoirSectionMaterial) -> datetime | None:
+    version = material.transcript_version
+    return version.created_at if version is not None and version.created_by == MemoirCreatedBy.USER.value else None
 
 
 def source_text_hash(text: str) -> str:

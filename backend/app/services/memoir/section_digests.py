@@ -39,17 +39,18 @@ from app.services.ai_workloads import (
     ai_text_workload_policy,
 )
 from app.services.memoir.prompt_budget import checked_review_prompt
+from app.services.memoir import fact_decisions
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
-from app.services.memoir.transcript_projection import current_material_text
+from app.services.memoir.transcript_projection import current_material_text, material_user_edit_time
 
 
 SECTION_DIGEST_ENGINE = "llm_section_digest_v3"
 SECTION_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制、敏锐的中文回忆录编辑。"
-    "你只根据给定小章节和原始讲述判断读者是否容易理解，不补写事实。"
+    "你只根据给定小章节、原始讲述及用户明确确认的事实更正判断读者是否容易理解，不补写事实。"
 )
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ class SectionDigestMaterial:
     sort_order: int
     text: str
     include_in_book: bool
+    user_edited_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class SectionDigestContext:
     include_in_book: bool
     materials: tuple[SectionDigestMaterial, ...]
     input_signature: str
+    decisions: tuple[fact_decisions.FactDecision, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,7 +132,9 @@ def _string_list(
     return result
 
 
-def section_digest_context(section: MemoirSection) -> SectionDigestContext:
+def section_digest_context(
+    section: MemoirSection, *, decisions: tuple[fact_decisions.FactDecision, ...] = (),
+) -> SectionDigestContext:
     ordered = sorted(
         section.materials,
         key=lambda item: (item.sort_order, item.id),
@@ -142,8 +147,13 @@ def section_digest_context(section: MemoirSection) -> SectionDigestContext:
             sort_order=material.sort_order,
             text=_compact_text(current_material_text(material)),
             include_in_book=material.include_in_book,
+            user_edited_at=material_user_edit_time(material),
         )
         for material in ordered
+    )
+    relevant_decisions = fact_decisions.for_sources(
+        decisions, chapter_id=section.chapter_id,
+        material_ids=(material.material_id for material in materials if material.include_in_book),
     )
     signature_payload = {
         "section": {
@@ -170,6 +180,7 @@ def section_digest_context(section: MemoirSection) -> SectionDigestContext:
             for material in materials
         ],
         "engine": SECTION_DIGEST_ENGINE,
+        **({"fact_decisions": fact_decisions.signature(relevant_decisions)} if relevant_decisions else {}),
     }
     return SectionDigestContext(
         project_id=section.project_id,
@@ -180,6 +191,7 @@ def section_digest_context(section: MemoirSection) -> SectionDigestContext:
         include_in_book=section.include_in_book,
         materials=materials,
         input_signature=semantic_json_signature(signature_payload),
+        decisions=relevant_decisions,
     )
 
 
@@ -206,7 +218,9 @@ async def load_section_digest_context(
     )
     if section is None:
         raise HTTPException(status_code=404, detail="小章节不存在")
-    return section_digest_context(section)
+    return section_digest_context(
+        section, decisions=await fact_decisions.load_fact_decisions(db, project_id=project_id),
+    )
 
 
 _TYPE_GUIDANCE = {
@@ -236,7 +250,8 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
     materials = "\n\n".join(
         (
             f"material_id: {references.encode(material.material_id)}\n"
-            f"原始讲述: {material.text}"
+            + (f"用户编辑讲述时间（UTC）：{material.user_edited_at.isoformat()}\n" if material.user_edited_at else "")
+            + f"原始讲述: {material.text}"
         )
         for material in context.materials
         if material.include_in_book
@@ -253,6 +268,8 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 
 有序讲述素材：
 {materials}
+
+{fact_decisions.prompt(context.decisions)}
 
 请输出严格 JSON，不要 Markdown，不要解释：
 {{

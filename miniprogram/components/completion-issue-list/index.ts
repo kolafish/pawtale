@@ -280,7 +280,7 @@ Component({
           });
         }
         this.triggerEvent("refresh");
-        wx.showToast({ title: outcome === "declined" ? "已跳过" : "已处理", icon: "success" });
+        wx.showToast({ title: outcome === "declined" ? "已跳过" : "回答已保存", icon: "success" });
       } catch (error) {
         if (!routeAuthError(error, "login")) {
           wx.showToast({
