@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirEditingJob,
-    MemoirSection,
     MemoirSectionMaterial,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -74,8 +73,7 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
     )
     assigned = (
         select(MemoirSectionMaterial.utterance_id)
-        .join(MemoirSection, MemoirSectionMaterial.section_id == MemoirSection.id)
-        .where(MemoirSectionMaterial.project_id == project_id, MemoirSection.status == "active")
+        .where(MemoirSectionMaterial.project_id == project_id)
         .distinct()
         .cte("assigned")
     )
@@ -103,7 +101,6 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
             .where(
                 MemoirEditingJob.project_id == project_id,
                 MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
-                deferred_value["status"].as_string().in_(("needs_user", "not_story")),
                 assigned.c.utterance_id.is_(None),
             )
             .order_by(MemoirEditingJob.updated_at)
@@ -156,7 +153,7 @@ async def read_draft_progress(
     )
     failures = [job.error_message for job in (growth, parent) if job and job.status in {"failed", "cancelled"}]
     failures += [item.error_message for item in progress.chapters.values() if item.status in {"failed", "cancelled"}]
-    result.can_retry = bool(failures or progress.review_status in {"failed", "cancelled"})
+    result.can_retry = bool(failures or pending_material_count or progress.review_status in {"failed", "cancelled"})
     if any(job.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for job in jobs):
         result.can_retry = False
         result.status, result.title = "processing", "正在后台整理书稿"
@@ -172,13 +169,17 @@ async def read_draft_progress(
             failures[0] or "后台处理失败，已保存的讲述和草稿会保留",
         )
     elif (
-        needs_user_count
-        or progress.preserved_manual
+        progress.preserved_manual
         or progress.omitted_chapter_ids
         or any(item.status in {"needs_input", "needs_review"} for item in progress.chapters.values())
     ):
+        result.can_retry = False
         result.status, result.title = "needs_input", "有内容需要您确认"
         result.detail = "人工修订和已保存的稿件会保留，请查看章节中的待确认事项"
+    elif pending_material_count:
+        result.status = "partial_ready" if ready else "no_change"
+        result.title = "部分讲述还没整理进书稿"
+        result.detail = "讲述已经保存，可以继续整理；已有正文仍可阅读。"
     elif (
         voice_session_id
         and growth
@@ -203,7 +204,7 @@ async def read_draft_progress(
 async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
     jobs = await project_jobs(db, project_id)
     growth = next((job for job in jobs if job.job_type == "organize_material"), None)
-    if growth and growth.status in {"failed", "cancelled"}:
+    if growth and growth.status not in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
         await story_tree_growth.schedule_story_tree_growth(
             db, project_id=project_id, voice_session_id=growth.payload_json["voice_session_id"], source="retry"
         )
