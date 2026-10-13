@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 
 from app.domain.memoir.types import (
@@ -11,6 +12,9 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressSnapshotResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = (
@@ -294,4 +298,9 @@ def split_interviewer_control_prefix(text: str) -> tuple[str, MemoirConversation
             return text[len(prefix):].lstrip(), action
         if prefix.startswith(text):
             return "", None
+    if not text.startswith(("[", "{", "`")):
+        # A usable reply without an action is a protocol omission, not an end
+        # signal. Preserve speech, then wait for the user's explicit resumption.
+        logger.warning("Interviewer reply omitted control prefix; defaulting to pause")
+        return text, MemoirConversationAction.PAUSE
     raise ValueError("AI 访谈回复缺少有效的会话动作，请重试")

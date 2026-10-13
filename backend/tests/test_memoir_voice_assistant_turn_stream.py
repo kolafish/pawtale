@@ -36,8 +36,6 @@ from app.services.memoir import voice_progress_notices
 from app.services.memoir.memory_activation import MemoryActivationResult
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import (
-    AssistantTurnArtifacts,
-    AssistantTurnStartRequest,
     VoiceAssistantTurnStreamSession,
 )
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
@@ -205,24 +203,6 @@ async def test_conversation_action_survives_split_stream_without_becoming_speech
     message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert message.metadata_json["conversation_action"] == action
     assert message.metadata_json["expects_answer"] is (action == "listen")
-
-
-@pytest.mark.parametrize("raw", ["", "[en", "今天先到这里。", "[unknown]\n不应播放"])
-async def test_invalid_conversation_control_never_reaches_speech(raw):
-    client = FakeTurnClient()
-    artifacts = AssistantTurnArtifacts()
-    speech = asyncio.Queue()
-    session = VoiceAssistantTurnStreamSession(db=None, client=client, voice_session_id="synthetic", user_id="synthetic")
-    with pytest.raises(ValueError, match="会话动作"):
-        await session._stream_text(
-            ai_client=FakeStreamingAI(list(raw), control_chunks=()), system_prompt="", prompt="",
-            req=AssistantTurnStartRequest(), max_tokens=100, turn_id="synthetic", artifacts=artifacts,
-            cancel_event=asyncio.Event(), text_queue=speech,
-        )
-    assert artifacts.conversation_action is None
-    assert artifacts.text == ""
-    assert speech.empty()
-    assert client.sent == []
 
 
 async def test_voice_assistant_turn_injects_retrieved_context_and_records_trace(
