@@ -276,8 +276,10 @@ def _add_watercolor_cover_label(builder: PDFBookBuilder, *, style: PDFCoverStyle
     )
 
 
-def _add_watercolor_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int, width: int = 116) -> None:
-    gap = 18
+def _add_illustrated_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int, width: int = 116) -> None:
+    navy = style.image_layout == "navy_gilt"
+    line_color = style.line if navy else style.subtle_line
+    gap = 30 if navy else 18
     left_width = (width - gap) / 2
     center_x = builder.layout.page_width / 2
     builder.add_decoration(
@@ -286,8 +288,8 @@ def _add_watercolor_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, 
         y=y,
         width=left_width,
         height=0,
-        color=style.subtle_line,
-        line_width=0.35,
+        color=line_color,
+        line_width=0.45 if navy else 0.35,
     )
     builder.add_decoration(
         kind="line",
@@ -295,20 +297,20 @@ def _add_watercolor_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, 
         y=y,
         width=left_width,
         height=0,
-        color=style.subtle_line,
-        line_width=0.35,
+        color=line_color,
+        line_width=0.45 if navy else 0.35,
     )
     builder.add_centered_at(
         "◇",
         y=y - 5,
-        font_size=max(7, builder.layout.small_font_size - 2),
+        font_size=max(8, builder.layout.small_font_size - 1) if navy else max(7, builder.layout.small_font_size - 2),
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
-        color=style.subtle_line,
+        color=style.text if navy else line_color,
     )
 
 
-def _add_watercolor_cover_page(
+def _add_illustrated_cover_page(
     builder: PDFBookBuilder,
     *,
     title: str,
@@ -325,182 +327,78 @@ def _add_watercolor_cover_page(
         text_color=style.text,
     )
     layout = builder.layout
-    _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
-    title_next_y = builder.add_centered_at(
-        title,
-        y=layout.page_height - 218,
-        font_size=layout.title_font_size + 15,
-        line_height=layout.line_height + 28,
-        max_units=max(6, layout.max_line_units - 12),
-        color=style.text,
-        font_name=PDF_SERIF_FONT_NAME,
-        char_spacing=2.1,
-        spacing_after=12,
-    )
-    separator_y = min(title_next_y + 24, layout.page_height - 250)
-    _add_watercolor_separator(builder, style=style, y=separator_y, width=132)
-    if subtitle:
+    navy = style.image_layout == "navy_gilt"
+    font_name = PDF_SERIF_BOLD_FONT_NAME if navy else PDF_SERIF_FONT_NAME
+    if navy:
         builder.add_centered_at(
-            subtitle,
-            y=separator_y - 31,
-            font_size=layout.font_size + 4,
-            line_height=layout.line_height + 6,
-            max_units=max(10, layout.max_line_units - 6),
-            color=style.text,
-            font_name=PDF_SERIF_FONT_NAME,
-            char_spacing=2.4,
-        )
-
-    credit_y = layout.margin_bottom + 64
-    if narrator_name:
-        builder.add_centered_at(
-            f"口述：{narrator_name}",
-            y=credit_y + 20,
-            font_size=layout.small_font_size + 1,
-            line_height=layout.line_height,
-            max_units=layout.max_line_units,
-            color=style.text,
-            font_name=PDF_SERIF_FONT_NAME,
-            char_spacing=0.8,
-        )
-    builder.add_centered_at(
-        f"整理：{prepared_by or '家人'}",
-        y=credit_y,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_FONT_NAME,
-        char_spacing=0.8,
-    )
-    _add_watercolor_separator(builder, style=style, y=layout.margin_bottom - 7, width=86)
-    builder.add_centered_at(
-        _today_date_text()[:4],
-        y=layout.margin_bottom - 37,
-        font_size=layout.small_font_size + 3,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_FONT_NAME,
-        char_spacing=3.0,
-    )
-
-
-def _add_navy_gilt_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int, width: int = 160) -> None:
-    gap = 30
-    left_width = (width - gap) / 2
-    center_x = builder.layout.page_width / 2
-    builder.add_decoration(
-        kind="line",
-        x=center_x - width / 2,
-        y=y,
-        width=left_width,
-        height=0,
-        color=style.line,
-        line_width=0.45,
-    )
-    builder.add_decoration(
-        kind="line",
-        x=center_x + gap / 2,
-        y=y,
-        width=left_width,
-        height=0,
-        color=style.line,
-        line_width=0.45,
-    )
-    builder.add_centered_at(
-        "◇",
-        y=y - 5,
-        font_size=max(8, builder.layout.small_font_size - 1),
-        line_height=builder.layout.line_height,
-        max_units=builder.layout.max_line_units,
-        color=style.text,
-    )
-
-
-def _add_navy_gilt_cover_page(
-    builder: PDFBookBuilder,
-    *,
-    title: str,
-    subtitle: str,
-    narrator_name: str,
-    prepared_by: str,
-    style: PDFCoverStyle,
-) -> None:
-    builder.new_page(
-        show_header=False,
-        show_footer=False,
-        background_color=style.background,
-        background_image_path=style.cover_background_image,
-        text_color=style.text,
-    )
-    layout = builder.layout
-    builder.add_centered_at(
-        "家庭回忆录",
-        y=layout.page_height - 176,
-        font_size=layout.small_font_size + 5,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=2.8,
-    )
-    title_next_y = builder.add_centered_at(
-        title,
-        y=layout.page_height - 248,
-        font_size=layout.title_font_size + 28,
-        line_height=layout.line_height + 38,
-        max_units=max(5, layout.max_line_units - 15),
-        color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=4.6,
-        spacing_after=8,
-    )
-    _add_navy_gilt_separator(builder, style=style, y=title_next_y + 20, width=190)
-    if subtitle:
-        builder.add_centered_at(
-            subtitle,
-            y=title_next_y - 22,
-            font_size=layout.font_size + 5,
-            line_height=layout.line_height + 7,
-            max_units=max(10, layout.max_line_units - 6),
-            color=style.text,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
-            char_spacing=3.1,
-        )
-
-    credit_y = layout.margin_bottom + 74
-    if narrator_name:
-        builder.add_centered_at(
-            f"口述：{narrator_name}",
-            y=credit_y + 24,
-            font_size=layout.small_font_size + 2,
+            "家庭回忆录",
+            y=layout.page_height - 176,
+            font_size=layout.small_font_size + 5,
             line_height=layout.line_height,
             max_units=layout.max_line_units,
             color=style.text,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
-            char_spacing=1.3,
+            char_spacing=2.8,
+        )
+    else:
+        _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
+    title_next_y = builder.add_centered_at(
+        title,
+        y=layout.page_height - (248 if navy else 218),
+        font_size=layout.title_font_size + (28 if navy else 15),
+        line_height=layout.line_height + (38 if navy else 28),
+        max_units=max(5, layout.max_line_units - 15) if navy else max(6, layout.max_line_units - 12),
+        color=style.text,
+        font_name=font_name,
+        char_spacing=4.6 if navy else 2.1,
+        spacing_after=8 if navy else 12,
+    )
+    separator_y = title_next_y + 20 if navy else min(title_next_y + 24, layout.page_height - 250)
+    _add_illustrated_separator(builder, style=style, y=separator_y, width=190 if navy else 132)
+    if subtitle:
+        builder.add_centered_at(
+            subtitle,
+            y=separator_y - (42 if navy else 31),
+            font_size=layout.font_size + (5 if navy else 4),
+            line_height=layout.line_height + (7 if navy else 6),
+            max_units=max(10, layout.max_line_units - 6),
+            color=style.text,
+            font_name=font_name,
+            char_spacing=3.1 if navy else 2.4,
+        )
+
+    credit_y = layout.margin_bottom + (74 if navy else 64)
+    if narrator_name:
+        builder.add_centered_at(
+            f"口述：{narrator_name}",
+            y=credit_y + (24 if navy else 20),
+            font_size=layout.small_font_size + (2 if navy else 1),
+            line_height=layout.line_height,
+            max_units=layout.max_line_units,
+            color=style.text,
+            font_name=font_name,
+            char_spacing=1.3 if navy else 0.8,
         )
     builder.add_centered_at(
         f"整理：{prepared_by or '家人'}",
         y=credit_y,
-        font_size=layout.small_font_size + 2,
+        font_size=layout.small_font_size + (2 if navy else 1),
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=1.3,
+        font_name=font_name,
+        char_spacing=1.3 if navy else 0.8,
     )
-    _add_navy_gilt_separator(builder, style=style, y=layout.margin_bottom + 2, width=92)
+    _add_illustrated_separator(builder, style=style, y=layout.margin_bottom + (2 if navy else -7), width=92 if navy else 86)
     builder.add_centered_at(
         _today_date_text()[:4],
-        y=layout.margin_bottom - 29,
-        font_size=layout.small_font_size + 4,
+        y=layout.margin_bottom - (29 if navy else 37),
+        font_size=layout.small_font_size + (4 if navy else 3),
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=6.0,
+        font_name=font_name,
+        char_spacing=6.0 if navy else 3.0,
     )
 
 
@@ -899,18 +797,8 @@ def _add_preset_cover_page(
             cover_style=cover_style,
         )
         return
-    if style.cover_background_image and style.image_layout == "navy_gilt":
-        _add_navy_gilt_cover_page(
-            builder,
-            title=title,
-            subtitle=subtitle,
-            narrator_name=narrator_name,
-            prepared_by=prepared_by,
-            style=style,
-        )
-        return
     if style.cover_background_image:
-        _add_watercolor_cover_page(
+        _add_illustrated_cover_page(
             builder,
             title=title,
             subtitle=subtitle,
@@ -1604,7 +1492,7 @@ def _add_back_cover_brand_signature(
     )
 
 
-def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
+def _add_illustrated_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
     builder.new_page(
         show_header=False,
         show_footer=False,
@@ -1613,45 +1501,23 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
         text_color=style.text,
     )
     layout = builder.layout
-    _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
-    quote_next_y = layout.page_height - 214
+    navy = style.image_layout == "navy_gilt"
+    if not navy:
+        _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
+    quote_next_y = layout.page_height - (154 if navy else 214)
     for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10)):
         quote_next_y = builder.add_centered_at(
             line,
             y=quote_next_y,
-            font_size=layout.font_size + 6,
-            line_height=layout.line_height + 17,
+            font_size=layout.font_size + (10 if navy else 6),
+            line_height=layout.line_height + (20 if navy else 17),
             max_units=layout.max_line_units,
             color=style.text,
-            font_name=PDF_SERIF_FONT_NAME,
-            char_spacing=1.3,
+            font_name=PDF_SERIF_BOLD_FONT_NAME if navy else PDF_SERIF_FONT_NAME,
+            char_spacing=2.5 if navy else 1.3,
         )
-    quote_next_y -= 28
-    _add_watercolor_separator(builder, style=style, y=quote_next_y + 8, width=92)
-    _add_back_cover_brand_signature(builder, style=style)
-
-
-def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
-    builder.new_page(
-        show_header=False,
-        show_footer=False,
-        background_color=style.background,
-        background_image_path=style.back_cover_background_image or style.cover_background_image,
-        text_color=style.text,
-    )
-    layout = builder.layout
-    quote_next_y = layout.page_height - 154
-    for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10)):
-        quote_next_y = builder.add_centered_at(
-            line,
-            y=quote_next_y,
-            font_size=layout.font_size + 10,
-            line_height=layout.line_height + 20,
-            max_units=layout.max_line_units,
-            color=style.text,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
-            char_spacing=2.5,
-        )
+    if not navy:
+        _add_illustrated_separator(builder, style=style, y=quote_next_y - 20, width=92)
     _add_back_cover_brand_signature(builder, style=style)
 
 
@@ -1705,11 +1571,8 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
     if style.back_cover_background_image and style.image_layout == "artwork":
         _add_artwork_back_cover(builder, quote=quote, style=style, cover_style=cover_style)
         return
-    if style.back_cover_background_image and style.image_layout == "navy_gilt":
-        _add_navy_gilt_back_cover(builder, quote=quote, style=style)
-        return
     if style.back_cover_background_image:
-        _add_watercolor_back_cover(builder, quote=quote, style=style)
+        _add_illustrated_back_cover(builder, quote=quote, style=style)
         return
 
     subtle_line_color = style.subtle_line
