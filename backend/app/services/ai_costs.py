@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 import unicodedata
 
+from chinese_calendar import is_holiday
+
 
 def _count(value: object) -> int | None:
     if isinstance(value, bool):
@@ -142,9 +144,9 @@ class AITokenPricing:
 
 
 _BEIJING = timezone(timedelta(hours=8))
-# DeepSeek peak hours, Beijing time, Monday-Friday. Statutory holidays are
-# off-peak upstream too, but they are not modelled here, so holiday calls are
-# charged at the peak rate.
+# DeepSeek excludes Chinese public holidays and all weekends from peak pricing,
+# even when a weekend is a make-up workday. Update chinesecalendar each year
+# after the State Council publishes the next holiday schedule.
 _DEEPSEEK_PEAK_HOURS = ((9, 12), (14, 18))
 
 
@@ -153,9 +155,9 @@ def is_deepseek_peak_time(at: datetime | None = None) -> bool:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     local = moment.astimezone(_BEIJING)
-    if local.weekday() >= 5:
+    if local.weekday() >= 5 or not any(start <= local.hour < end for start, end in _DEEPSEEK_PEAK_HOURS):
         return False
-    return any(start <= local.hour < end for start, end in _DEEPSEEK_PEAK_HOURS)
+    return not is_holiday(local.date())
 
 
 CostStatus = Literal["estimated", "unknown"]
@@ -302,10 +304,19 @@ def estimate_ai_cost(
         return AICostEstimate(None, "unknown", provider, model, "no pricing configured for provider/model")
     if normalized.input_tokens is None or normalized.output_tokens is None:
         return AICostEstimate(None, "unknown", provider, model, "provider returned incomplete token usage", pricing.source)
-    input_rate, output_rate, cache_hit_rate, cache_write_rate = pricing.rates_for_input_tokens(
-        normalized.input_tokens,
-        at=at,
-    )
+    try:
+        input_rate, output_rate, cache_hit_rate, cache_write_rate = pricing.rates_for_input_tokens(
+            normalized.input_tokens,
+            at=at,
+        )
+    except NotImplementedError:
+        # A missing calendar year must remain visibly unpriced, not silently
+        # charge the peak rate or discard an otherwise successful AI response.
+        return AICostEstimate(
+            None, "unknown", provider, model,
+            "DeepSeek holiday calendar does not cover this date; update chinesecalendar",
+            pricing.source,
+        )
     cached = normalized.cached_input_tokens
     cache_write = normalized.cache_write_input_tokens
     uncached = normalized.input_tokens - cached - cache_write

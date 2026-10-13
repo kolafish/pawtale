@@ -177,6 +177,8 @@ APP_SECRET_KEY=<至少 32 字符的非默认随机值>
 
 微信 AppSecret、AI/ASR/TTS key 和 GitHub App private key 只能放在部署环境的 `backend/.env`，不得进入小程序或 tracked 文件。
 
+DeepSeek 按[官方高峰/闲时规则](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)估算费用：中国法定节假日和所有周末全天半价，周末调休上班也不切换为高峰。节假日历来自 `chinesecalendar`，当前固定版本覆盖至 2026 年；国务院公布次年安排后，应升级依赖并验证节假日、调休和时段边界。日历未覆盖年份的工作日高峰候选时段会保留调用用量、记录未知费用并告警，不猜测单价扣款；已知的晚间和周末闲时仍正常计价。
+
 ## 语音网关容量检查
 
 只验证多个登录用户的 WebSocket 容量、不触发真实 provider：
