@@ -153,39 +153,57 @@ async def books_rerun(client, model, export, limit, semaphore):
 
 
 SCENES = [
-    ("mid_story", "梁老师跟您是什么关系呀？", [
+    ("mid_story", "梁老师和他是什么关系", [
         ("ai", "您刚才说那年去了老掌沟，是跟谁一起去的？"),
         ("user", "跟梁老师一起去的。那天一早出发，走到半山腰突然下起雨来，我们俩就躲在一个山洞里，"),
     ], False),
-    ("story_done", "梁老师跟您是什么关系呀？", [
+    ("story_done", "梁老师和他是什么关系", [
         ("ai", "您刚才说那年去了老掌沟，是跟谁一起去的？"),
         ("user", "跟梁老师一起去的。走到半山腰下起雨，我们躲在山洞里等了两个钟头。下山的时候路过一个镇子，"
                  "一人买了一个卤羊头带回家，那天虽然淋得透湿，回想起来特别开心。"),
     ], True),
-    ("already_said", "梁老师跟您是什么关系呀？", [
+    ("already_said", "梁老师和他是什么关系", [
         ("ai", "您刚才说那年去了老掌沟，是跟谁一起去的？"),
         ("user", "跟梁老师，他是我研究生时候的导师。那天我们淋了一身雨，下山各买了一个卤羊头，就这么回来了。"),
     ], False),
-    ("declined", "梁老师跟您是什么关系呀？", [
+    ("declined", "梁老师和他是什么关系", [
         ("user", "那年我跟梁老师去了老掌沟。他的事我不太想多说。"),
         ("ai", "好的，那就不说他。老掌沟那趟，路上有什么印象深的吗？"),
         ("user", "路上下了大雨，我们在山洞里躲了很久，下山以后才找到车回城，这一趟就是这样。"),
     ], False),
-    ("already_asked", "梁老师跟您是什么关系呀？", [
+    ("already_asked", "梁老师和他是什么关系", [
         ("user", "那年我跟梁老师去了老掌沟，淋了一身雨。"),
         ("ai", "淋成那样也挺难忘。梁老师跟您是什么关系呀？"),
         ("user", "嗯，这个以后再说吧。下山以后我们各买了一个卤羊头，就回城了。"),
     ], False),
-    ("name_story_done", "那位好朋友，您还记得她叫什么名字吗？", [
+    ("name_story_done", "这位好朋友叫什么名字", [
         ("ai", "初中那会儿，有没有特别要好的朋友？"),
         ("user", "有一个好朋友，那年我生病住院，她每天放学都来给我送笔记，一直送了一个月。从那以后我也开始学着关心别人。"),
     ], True),
-    ("no_questions", "梁老师跟您是什么关系呀？", [
+    ("no_questions", "梁老师和他是什么关系", [
         ("user", "我想自己讲，你别问我问题，听着就行。那年我跟梁老师去老掌沟，下了大雨。"),
         ("ai", "好，您慢慢讲，我听着。"),
         ("user", "我们在山洞里躲了两个钟头，下山各买了一个卤羊头，就回来了。"),
     ], False),
 ]
+
+
+# The ask check alone: (line, topic, asked?).
+CHECKS = [
+    ("您觉得梁老师和校长关系怎么样？", "梁老师和他是什么关系", False),
+    ("梁老师后来还跟您联系吗？", "梁老师和他是什么关系", False),
+    ("您跟梁老师躲在山洞里，那场雨下了多久？", "梁老师和他是什么关系", False),
+    ("这位梁老师，是您什么人呀？", "梁老师和他是什么关系", True),
+    ("您和梁老师是怎么认识的？是同事还是老师？", "梁老师和他是什么关系", True),
+    ("那位好朋友后来还常联系吗？", "这位好朋友叫什么名字", False),
+    ("您还记得那位好朋友叫啥吗？", "这位好朋友叫什么名字", True),
+]
+
+
+async def check(model, line, topic, expect, semaphore):
+    async with semaphore:
+        got = await np.asked(np.Question(person_id="p", topic=topic), line, ai_model=model)
+    return {"line": line, "expect": expect, "asked": got}
 
 
 async def interviewer(client, model, scene, runs, semaphore):
@@ -196,7 +214,7 @@ async def interviewer(client, model, scene, runs, semaphore):
                           content_text=line, turn_index=i, created_at=start + timedelta(minutes=i))
         for i, (role, line) in enumerate(lines)
     ])
-    question = np.Question(person_id="p", text=text)
+    question = np.Question(person_id="p", topic=text)
     persona = InterviewerPersona(host_name="小余", voice_gender="female")
     prompt = voice_interviewer_prompt.build_stream_turn_prompt(
         session, has_previous_project_narration=True, activation_context="", regenerate=False,
@@ -215,7 +233,9 @@ async def interviewer(client, model, scene, runs, semaphore):
             result = await client.generate_text(system_prompt_for_persona(persona), prompt, requested_model=model,
                                                 temperature=0.72, max_tokens=FOLLOW_UP_MAX_TOKENS, timeout=60)
         line = result.content.strip()
-        return {"line": line, "asked": question.asked_in(line)}
+        async with semaphore:
+            asked = "？" in line and await np.asked(question, line, ai_model=model)
+        return {"line": line, "asked": asked}
 
     outputs = await asyncio.gather(*(one() for _ in range(runs)))
     return {"key": key, "expect": expect, "outputs": outputs}
@@ -228,23 +248,29 @@ async def main() -> None:
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--out", type=Path, default=Path("identity.json"))
+    parser.add_argument("--scenes-only", action="store_true")
     args = parser.parse_args()
     client = get_ai_service(args.model)
     semaphore = asyncio.Semaphore(6)
     export = json.loads(args.export.read_text(encoding="utf-8"))
+    async def none():
+        return []
+
     books, rereads, scenes = await asyncio.gather(
-        books_rerun(client, args.model, export, args.limit, semaphore),
-        asyncio.gather(*(reread_case(client, args.model, case, semaphore)
-                         for case in REREAD_CASES for _ in range(args.runs))),
+        none() if args.scenes_only else books_rerun(client, args.model, export, args.limit, semaphore),
+        none() if args.scenes_only else asyncio.gather(*(reread_case(client, args.model, case, semaphore)
+                                                         for case in REREAD_CASES for _ in range(args.runs))),
         asyncio.gather(*(interviewer(client, args.model, scene, args.runs, semaphore) for scene in SCENES)),
     )
-    args.out.write_text(json.dumps({"books": books, "rereads": rereads, "scenes": scenes}, ensure_ascii=False,
-                                   indent=1), encoding="utf-8")
+    checks = await asyncio.gather(*(check(args.model, *case, semaphore) for case in CHECKS))
+    args.out.write_text(json.dumps({"books": books, "rereads": rereads, "scenes": scenes, "checks": checks},
+                                   ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({
         "segments": sum(b["segments"] for b in books), "people": sum(len(b["people"]) for b in books),
         "rereads_passed": f"{sum(r['passed'] for r in rereads)}/{len(rereads)}",
         "asks_right": f"{sum(o['asked'] == s['expect'] for s in scenes for o in s['outputs'])}"
                       f"/{sum(len(s['outputs']) for s in scenes)}",
+        "checks_right": f"{sum(c['asked'] == c['expect'] for c in checks)}/{len(checks)}",
     }))
 
 

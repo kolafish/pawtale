@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-import re
+import logging
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
@@ -21,17 +21,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole, MemoirInterviewType
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
+from app.database import async_session_maker
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
+
+logger = logging.getLogger(__name__)
 
 READING_KEY = "people_reading"
 SYSTEM_PROMPT = "你帮一本口述回忆录记住书里出现的人，只记讲述者亲口说出的内容。"
 _FIELDS = ("call", "name", "relation", "note", "unclear")
 _PRONOUNS = {"他", "她", "它", "ta", "TA"}
-# Set on a 小余 line that asked about a person; each person is asked once per book, at most twice per session.
+# Set on a 小余 question offered a person question, and dropped again if a check finds it asked something else;
+# each person is asked once per book, at most twice per session.
 ASKED_KEY = "person_asked"
 MAX_ASKS_PER_SESSION = 2
 
@@ -120,25 +124,63 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
 @dataclass(frozen=True)
 class Question:
     person_id: str
-    # Written by code; 小余 is told to say it as is, so whether it was asked is a plain text check.
-    text: str
-
-    def asked_in(self, line: str) -> bool:
-        return _plain(self.text).rstrip("呀吗呢") in _plain(line)
+    topic: str  # "他" is the narrator, as in the interviewer prompt
 
 
-def _plain(text: str) -> str:
-    return re.sub(r"[\s，。！？、,.!?“”\"'：:；;…]", "", text)
+class _AskOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asked: bool
 
 
-def _ask(person: Person) -> str:
-    """The question for what a reader would miss about someone the narrator keeps mentioning, if anything."""
+def _topic(person: Person) -> str:
+    """What a reader would miss about someone the narrator keeps mentioning, if anything."""
     label = person.name or ("" if person.call in _PRONOUNS else person.call)
     if not person.relation:
-        return f"{label}跟您是什么关系呀？" if label else ""
+        return f"{label}和他是什么关系" if label else ""
     if not person.name and person.call in _PRONOUNS:
-        return f"那位{person.relation}，您还记得{person.call}叫什么名字吗？"
+        return f"这位{person.relation}叫什么名字"
     return ""
+
+
+async def asked(question: Question, line: str, *, ai_model: str | None) -> bool:
+    """小余 words the question freely, so a small call judges whether a line asked it."""
+    prompt = (
+        f"访谈主持人对讲述者说了这句话：\n{line}\n\n"
+        f"这句话有没有问讲述者这件事：{question.topic}（“他”指讲述者）？"
+        "只是提到这个人、问这个人别的事、问别人之间的关系，都不算。"
+        '只返回 JSON：{"asked":true} 或 {"asked":false}'
+    )
+    generated = await generate_structured_with_client(
+        get_ai_service(ai_model),
+        "你判断访谈主持人的一句话问的是什么。",
+        prompt,
+        output_model=_AskOutput,
+        requested_model=ai_model,
+        temperature=0,
+        max_tokens=20,
+        timeout=min(ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE), 15),
+        max_attempts=1,
+    )
+    return generated.value.asked
+
+
+async def drop_ask_unless_asked(*, message_id: str, question: Question, line: str, ai_model: str | None) -> None:
+    """The saved line counts as asked until the check answers, or if it fails."""
+    try:
+        if await asked(question, line, ai_model=ai_model):
+            return
+        async with async_session_maker() as db:
+            message = await db.get(MemoirChatMessage, message_id)
+            if message is None:
+                return
+            message.metadata_json = {
+                key: value for key, value in (message.metadata_json or {}).items() if key != ASKED_KEY
+            }
+            db.add(message)
+            await db.commit()
+    except Exception:
+        logger.warning("Person ask check failed for message %s", message_id, exc_info=True)
 
 
 async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Question | None:
@@ -146,7 +188,7 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
     if sum(ASKED_KEY in (message.metadata_json or {}) for message in voice_session.messages) >= MAX_ASKS_PER_SESSION:
         return None
     asked_column = MemoirChatMessage.metadata_json[ASKED_KEY].as_string()
-    asked = set(await db.scalars(
+    asked_ids = set(await db.scalars(
         select(asked_column).where(
             MemoirChatMessage.project_id == voice_session.project_id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
@@ -156,9 +198,9 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
     session_ids = {message.id for message in voice_session.messages}
     people = sorted((await load_people(db, voice_session.project_id)).values(), key=lambda person: -person.last_seen)
     for person in people:
-        text = _ask(person)
-        if text and person.id not in asked and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
-            return Question(person_id=person.id, text=text)
+        topic = _topic(person)
+        if topic and person.id not in asked_ids and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
+            return Question(person_id=person.id, topic=topic)
     return None
 
 

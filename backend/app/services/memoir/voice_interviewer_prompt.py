@@ -148,12 +148,10 @@ def _profile_question(book: InterviewBookContext) -> str:
 def _person_question(book: InterviewBookContext) -> str:
     if book.person_question is None:
         return ""
-    return f"""书里有个人还缺一件事，合适时可以顺口问一句，问话已经写好：「{book.person_question.text}」
-先看这次能不能问，下面有一条成立就不问：
-- 他正讲着一件事，还没讲完
-- 上下文里已经有这句问话的答案，或者已经问过这件事
-- 他说过不记得、不想聊这个人，或者说过只想自己讲、不要问他问题
-都不成立、一件事刚讲完时，先用一句话接住，再原样说这句问话，不改字；问了这句，这次就不再提新方向"""
+    return f"""还可以顺口问清书里一个人的一件事：{book.person_question.topic}
+- 他正讲着一件事时，先听他讲完，这次不问
+- 一件事讲完了，就用一句自然的话问这件事，像聊天时顺口问起，不说为什么问；问了这个，这次就不再提新方向
+- 上下文里已经问过、他已经说清了，或者说过不记得、不想聊这个人，就不问"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:

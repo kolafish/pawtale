@@ -12,10 +12,11 @@ The same job reads the people in a corrected segment (see narration_people).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from datetime import date, timedelta
 import logging
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, update
@@ -198,14 +199,17 @@ def ask_needs_check(fields: tuple[str, ...], text: str) -> bool:
 _ask_checks: set[asyncio.Task] = set()
 
 
-def check_profile_ask_later(*, message_id: str, fields: tuple[str, ...], text: str, ai_model: str | None) -> None:
-    """Record on a saved interviewer line whether it asked for the offered item.
-
-    Runs apart from the reply turn, so a narrator who starts talking right away cannot cancel it.
-    """
-    task = asyncio.create_task(_record_profile_ask(message_id=message_id, fields=fields, text=text, ai_model=ai_model))
+def run_ask_check_later(check: Coroutine[Any, Any, None]) -> None:
+    """Run a check on a saved interviewer line apart from the reply turn, so a narrator who starts talking
+    right away cannot cancel it."""
+    task = asyncio.create_task(check)
     _ask_checks.add(task)
     task.add_done_callback(_ask_checks.discard)
+
+
+def check_profile_ask_later(*, message_id: str, fields: tuple[str, ...], text: str, ai_model: str | None) -> None:
+    """Record on a saved interviewer line whether it asked for the offered item."""
+    run_ask_check_later(_record_profile_ask(message_id=message_id, fields=fields, text=text, ai_model=ai_model))
 
 
 async def wait_for_profile_ask_checks() -> None:
