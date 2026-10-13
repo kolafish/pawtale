@@ -122,7 +122,6 @@ app/
     ├── ai_base.py
     ├── ai_factory.py
     ├── ai_text.py
-    ├── ai_claude.py
     └── ai_volc.py
 ```
 
@@ -162,7 +161,7 @@ app/
 
 - 应用与 PostgreSQL；
 - 微信小程序登录；
-- Claude、DeepSeek、Doubao 文本模型；
+- DeepSeek、Doubao 文本模型；
 - 火山流式 ASR 和 TTS；
 - StepFun 批量 ASR；
 - 回忆录 editing/share-video worker；

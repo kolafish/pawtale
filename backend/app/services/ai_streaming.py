@@ -113,53 +113,6 @@ def openai_chat_stream_chunk(event: dict) -> AITextStreamChunk | None:
     )
 
 
-def anthropic_messages_stream_chunk(event: dict) -> AITextStreamChunk | None:
-    event_type = event.get("type")
-    if event_type == "message_start":
-        message = event.get("message")
-        if not isinstance(message, dict):
-            return None
-        response_model = message.get("model")
-        usage = message.get("usage")
-        return AITextStreamChunk(
-            usage=usage if isinstance(usage, dict) else {},
-            raw=event,
-            response_model=(
-                response_model if isinstance(response_model, str) else None
-            ),
-        )
-
-    if event_type == "content_block_delta":
-        delta = event.get("delta")
-        if not isinstance(delta, dict) or delta.get("type") != "text_delta":
-            return None
-        text = delta.get("text")
-        return AITextStreamChunk(
-            text_delta=text if isinstance(text, str) else "",
-            raw=event,
-        )
-
-    if event_type == "message_delta":
-        delta = event.get("delta")
-        usage = event.get("usage")
-        finish_reason = (
-            delta.get("stop_reason") if isinstance(delta, dict) else None
-        )
-        return AITextStreamChunk(
-            finish_reason=(
-                finish_reason if isinstance(finish_reason, str) else None
-            ),
-            usage=usage if isinstance(usage, dict) else {},
-            raw=event,
-        )
-
-    if event_type == "error":
-        error = event.get("error")
-        message = error.get("message") if isinstance(error, dict) else None
-        raise RuntimeError(message or "Claude streaming response failed")
-    return None
-
-
 def volc_responses_stream_chunk(event: dict) -> AITextStreamChunk | None:
     openai_chunk = openai_chat_stream_chunk(event)
     if openai_chunk:

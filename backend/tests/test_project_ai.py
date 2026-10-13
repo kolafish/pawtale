@@ -51,7 +51,7 @@ class TestAIContinue:
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-continue",
                 json={
-                    "ai_model": "claude-fable-5",
+                    "ai_model": "deepseek-v4-pro",
                     "expected_content_revision": 1,
                 },
             )
@@ -60,7 +60,7 @@ class TestAIContinue:
         data = response.json()
         assert data["document_id"] == document_id
         assert "他走过来" in data["content"]
-        assert data["ai_model"] == "claude-fable-5"
+        assert data["ai_model"] == "deepseek-v4-pro"
         assert data["content_revision"] == 2
 
     async def test_ai_continue_rejects_stale_content_revision(self, client):
@@ -142,7 +142,7 @@ class TestAIRevise:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise",
-                json={"instruction": "增加环境描写", "ai_model": "claude-opus-4-8"},
+                json={"instruction": "增加环境描写", "ai_model": "deepseek-v4-pro"},
             )
 
         assert response.status_code == 200
@@ -150,7 +150,7 @@ class TestAIRevise:
         assert data["document_id"] == document_id
         assert data["scope"] == "full"
         assert "玻璃门" in data["revised_text"]
-        assert data["ai_model"] == "claude-opus-4-8"
+        assert data["ai_model"] == "deepseek-v4-pro"
 
     async def test_ai_revise_selection(self, client):
         project_id, document_id = await create_document_with_content(
@@ -216,8 +216,8 @@ class TestAIRevise:
                     "content": "修改后的内容",
                     "debug_info": {
                         "request": {
-                            "provider": "claude",
-                            "model": "claude-fable-5",
+                            "provider": "deepseek",
+                            "model": "deepseek-v4-pro",
                         },
                         "response": {"raw_text": "原始响应"},
                         "meta": {"truncated": False},
@@ -226,7 +226,7 @@ class TestAIRevise:
             ),
         ):
             mock_service = AsyncMock()
-            mock_service.model_name = "claude-opus-4-8"
+            mock_service.model_name = "deepseek-v4-pro"
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -237,7 +237,7 @@ class TestAIRevise:
         assert response.status_code == 200
         data = response.json()
         assert data["debug_info"] is not None
-        assert data["debug_info"]["request"]["provider"] == "claude"
+        assert data["debug_info"]["request"]["provider"] == "deepseek"
 
 
 @pytest.mark.asyncio
@@ -257,7 +257,7 @@ class TestAIReviseMulti:
 
             response = await admin_client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
-                json={"instruction": "改得更好", "models": ["claude-fable-5", "deepseek"]},
+                json={"instruction": "改得更好", "models": ["deepseek-v4-pro", "deepseek"]},
             )
 
         assert response.status_code == 200
@@ -293,15 +293,15 @@ class TestAIReviseMulti:
 
             response = await admin_client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
-                json={"instruction": "改", "models": ["claude-fable-5", "deepseek"]},
+                json={"instruction": "改", "models": ["deepseek-v4-pro", "deepseek"]},
             )
 
         assert response.status_code == 200
         data = response.json()
-        claude_result = next(r for r in data["results"] if r["ai_model"] == "claude-fable-5")
+        pro_result = next(r for r in data["results"] if r["ai_model"] == "deepseek-v4-pro")
         deepseek_result = next(r for r in data["results"] if r["ai_model"] == "deepseek")
-        assert claude_result["error"] is not None
-        assert claude_result.get("revised_text") is None
+        assert pro_result["error"] is not None
+        assert pro_result.get("revised_text") is None
         assert deepseek_result["revised_text"] == "好的内容"
 
     async def test_multi_with_selection(self, client):

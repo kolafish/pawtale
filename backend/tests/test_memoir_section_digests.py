@@ -197,7 +197,7 @@ async def test_section_digest_timeout_persists_model_and_deadline(client, test_d
         test_db,
         project_id=project_id,
         section_id=section["id"],
-        ai_model="claude-opus-4-8",
+        ai_model="deepseek-v4-pro",
         ai_client=fake,
     )
     await test_db.commit()
@@ -205,7 +205,7 @@ async def test_section_digest_timeout_persists_model_and_deadline(client, test_d
     generation = digest.digest_json["generation"]
     assert digest.status == MemoirSemanticCacheStatus.FAILED.value
     assert digest.error_message == "模型处理超过 180 秒，请稍后重试"
-    assert generation["requested_model"] == "claude-opus-4-8"
+    assert generation["requested_model"] == "deepseek-v4-pro"
     assert generation["provider"] == "test"
     assert generation["model"] == "test-section-digest"
     assert generation["timeout_seconds"] == 180.0
