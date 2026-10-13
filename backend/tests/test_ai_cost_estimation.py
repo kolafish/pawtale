@@ -111,13 +111,6 @@ def test_estimates_audio_and_tts_costs_and_removes_claude_pricing():
     )
     assert asr.amount_rmb == 0.07
 
-    realtime_asr = estimate_audio_cost(
-        provider="volc_streaming_asr",
-        model="volc.seedasr.sauc.duration",
-        duration_seconds=60,
-    )
-    assert realtime_asr.amount_rmb == 0.075
-
     tts = estimate_text_cost(
         provider="volc_tts",
         model="seed-tts-2.0",
@@ -134,6 +127,24 @@ def test_estimates_audio_and_tts_costs_and_removes_claude_pricing():
     assert claude.status == "unknown"
 
 
+@pytest.mark.parametrize("provider", ["volc_streaming_asr", "volc_streaming_asr_reprocess"])
+@pytest.mark.parametrize(("duration_seconds", "expected_cost"), [
+    (60, 0.016667),
+    # A real 4m18s recording was charged 0.322499 RMB at legacy ASR 1.0's 4.5 RMB/hour.
+    (257.998875, 0.071666),
+])
+def test_seed_asr_2_prices_realtime_and_reprocessing_at_one_rmb_per_hour(
+    provider, duration_seconds, expected_cost,
+):
+    cost = estimate_audio_cost(
+        provider=provider,
+        model="volc.seedasr.sauc.duration",
+        duration_seconds=duration_seconds,
+    )
+    assert cost.status == "estimated"
+    assert cost.amount_rmb == expected_cost
+
+
 def test_volc_seed_2_pro_uses_input_context_pricing_tiers():
     short = estimate_ai_cost(
         provider="volc_ark",
@@ -147,6 +158,25 @@ def test_volc_seed_2_pro_uses_input_context_pricing_tiers():
     )
     assert short.amount_rmb == 0.0192
     assert long.amount_rmb == 0.216
+
+
+@pytest.mark.parametrize(("input_tokens", "expected_cost"), [
+    (20_000, 0.0544),
+    (40_000, 0.1776),
+    (200_000, 1.8912),
+])
+def test_volc_seed_2_pro_charges_cached_input_at_its_tier_discount(input_tokens, expected_cost):
+    cost = estimate_ai_cost(
+        provider="volc_ark",
+        model="doubao-seed-2-0-pro-260215",
+        usage={
+            "input_tokens": input_tokens,
+            "input_tokens_details": {"cached_tokens": 10_000},
+            "output_tokens": 1_000,
+        },
+    )
+    assert cost.status == "estimated"
+    assert cost.amount_rmb == expected_cost
 
 
 @pytest.mark.parametrize("text, expected", [("字" * 10000, 0.9), ("你好，Hi!", 0.00036)])
