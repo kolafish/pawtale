@@ -1231,6 +1231,7 @@ async def _create_current_draft(
     assert version is not None
     used_ids = {item.material_id for item in context.materials}
     version.input_signature = context.input_signature
+    version.prompt_snapshot = chapter_generation._render_policy_tag(context)
     version.used_material_ids_json = [item.material_id for item in context.materials]
     version.material_snapshot_json = chapter_generation._snapshot(
         context,
@@ -1277,7 +1278,6 @@ async def test_completion_requires_material_before_checking_empty_chapters(
         chapter_id=chapters[0].id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
-    version.prompt_snapshot = chapter_generation.CHAPTER_GENERATION_ENGINE
     if not empty_sections_present:
         for section in (await test_db.scalars(
             select(MemoirSection).where(MemoirSection.chapter_id.in_([c.id for c in chapters[1:]]))
@@ -1336,12 +1336,15 @@ async def test_existing_current_draft_still_requires_a_real_completion_check(
     test_db,
 ):
     project_id, chapters, _ = await _book(client, test_db)
-    await _create_current_draft(
+    _, version = await _create_current_draft(
         test_db,
         project_id=project_id,
         chapter_id=chapters[0].id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
+
+    version.prompt_snapshot = ""
+    await test_db.commit()
 
     overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
 

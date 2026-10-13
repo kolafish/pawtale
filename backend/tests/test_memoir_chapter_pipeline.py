@@ -511,7 +511,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     context = _two_section_context()
     latest = SimpleNamespace(
         model="previous-model",
-        prompt_snapshot="llm_layered_sectioned_chapter_draft_v2",
+        prompt_snapshot=chapter_generation._render_policy_tag(context),
         section_snapshot_json=[
             {
                 "section_id": "section-1",
@@ -520,9 +520,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
                 "section_version": 1,
                 "sort_order": 0,
                 "input_signature": (
-                    chapter_generation._legacy_section_input_signature(
-                        context, context.sections[0], engine="v2"
-                    )
+                    chapter_generation._section_input_signature(context, context.sections[0])
                 ),
                 "content": "保留用户已经通读过的第一小节正文。",
                 "used_material_ids": ["material-1"],
@@ -596,20 +594,6 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     assert [section.section_id for section in reordered_plan.target_context.sections] == [
         "section-2"
     ]
-    tampered = SimpleNamespace(
-        **{
-            **vars(latest),
-            "material_snapshot_json": [
-                {**latest.material_snapshot_json[0], "text_hash": "outdated"}
-            ],
-        }
-    )
-    tampered_plan = chapter_generation.chapter_draft_generation_plan(
-        replace(context, chapter_title="新的章节标题"), tampered
-    )
-    assert [section.section_id for section in tampered_plan.target_context.sections] == [
-        "section-1", "section-2",
-    ]
 
     fake = ChangedSectionAI()
     generated = await chapter_generation.generate_chapter(
@@ -631,6 +615,28 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
         "保留用户已经通读过的第一小节正文。",
         "这是补充素材整理后的第二小节正文。",
     ]
+
+
+@pytest.mark.parametrize("engine", ["v2", "v3"])
+def test_retired_signatures_require_generation_and_preserve_manual_review(engine):
+    context = _two_section_context()
+    snapshot = {
+        "section_id": "section-1", "title": "出发", "section_type": "event",
+        "input_signature": "retired-section-signature", "content": "用户修订的出发故事。",
+        "used_material_ids": ["material-1"], "user_edited": True,
+    }
+    latest = SimpleNamespace(
+        model="previous-model", created_by="ai",
+        prompt_snapshot=f"llm_layered_sectioned_chapter_draft_{engine}",
+        section_snapshot_json=[snapshot],
+        material_snapshot_json=chapter_generation._snapshot(context, used_material_ids={"material-1"}),
+    )
+    plan = chapter_generation.chapter_draft_generation_plan(context, latest)
+    assert not plan.preserved_sections
+    assert [section.section_id for section in plan.target_context.sections] == ["section-1", "section-2"]
+    assert plan.protected_target_section_ids == ("section-1",)
+    assert plan.previous_sections[0].content == "用户修订的出发故事。"
+    assert not chapter_generation.chapter_draft_render_policy_current(context, latest)
 
 
 async def test_new_material_selects_only_evidence_backed_related_section(monkeypatch):
