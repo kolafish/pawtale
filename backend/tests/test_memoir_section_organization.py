@@ -1554,6 +1554,25 @@ async def test_initial_story_deduplicates_chapter_sources_before_persisting(clie
     assert result.result_json["growth"]["needs_material_chapters"] == []
 
 
+async def test_initial_story_waits_when_narration_only_answers_the_interviewer(client, test_db, monkeypatch):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, job = await _stopped_growth_job(client, test_db, project_id, "你叫我余大姐吧，年年有余的余。")
+    monkeypatch.setattr(
+        "app.services.memoir.book_plan_ai.get_ai_service",
+        lambda _model=None: FakeStoryGrowthAI({"title": "", "chapters": []}),
+    )
+
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+
+    assert result.status.value == "skipped"
+    job.status = result.status.value
+    await test_db.commit()
+    again = await story_tree_growth.schedule_story_tree_growth(
+        test_db, project_id=project_id, voice_session_id=job.payload_json["voice_session_id"], source="narration",
+    )
+    assert again.id == job.id and again.status == "pending"
+
+
 async def test_retry_initial_story_with_empty_chapters_preserves_existing_user_draft(client, test_db):
     from app.schemas.memoir_sections import MemoirSectionVersionReference
 

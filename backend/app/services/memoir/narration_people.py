@@ -117,25 +117,35 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
     return people
 
 
+_RELATION_CUES = ("关系", "什么人", "怎么认识", "是您的", "是你的")
+_NAME_CUES = ("名字", "叫什么", "姓")
+
+
 @dataclass(frozen=True)
 class Question:
     person_id: str
     text: str
-    # How the narrator refers to the person. A 小余 line asks the question when it names one and has a question mark.
+    # How the narrator refers to the person, and words that only a question about the gap would use.
     words: tuple[str, ...]
+    cues: tuple[str, ...]
 
     def asked_in(self, line: str) -> bool:
-        return bool(re.search(r"[？?]", line)) and any(word in line for word in self.words)
+        """A follow-up like "梁老师后来怎么样了？" names the person but does not ask about the gap."""
+        return (
+            bool(re.search(r"[？?]", line))
+            and any(word in line for word in self.words)
+            and any(cue in line for cue in self.cues)
+        )
 
 
-def _gap(person: Person) -> str:
-    """The one thing a reader would miss about someone the narrator keeps mentioning."""
+def _gap(person: Person) -> tuple[str, tuple[str, ...]]:
+    """What a reader would miss about someone the narrator keeps mentioning: the relation, else a name."""
     label = person.name or ("" if person.call in _PRONOUNS else person.call)
     if not person.relation:
-        return f"{label}和他是什么关系" if label else ""
+        return (f"{label}和他是什么关系", _RELATION_CUES) if label else ("", ())
     if not person.name and person.call in _PRONOUNS:
-        return f"这位{person.relation}叫什么名字"
-    return person.unclear
+        return f"这位{person.relation}叫什么名字", _NAME_CUES
+    return "", ()
 
 
 async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Question | None:
@@ -153,16 +163,16 @@ async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Q
     session_ids = {message.id for message in voice_session.messages}
     people = sorted((await load_people(db, voice_session.project_id)).values(), key=lambda person: -person.last_seen)
     for person in people:
-        text = _gap(person)
+        text, cues = _gap(person)
         if text and person.id not in asked and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
             words = tuple(word for word in (person.call, person.name, person.relation) if word and word not in _PRONOUNS)
-            return Question(person_id=person.id, text=text, words=words)
+            return Question(person_id=person.id, text=text, words=words, cues=cues)
     return None
 
 
 async def load_people(db: AsyncSession, project_id: str) -> dict[str, Person]:
     rows = await db.execute(
-        select(MemoirChatMessage.id, MemoirChatMessage.metadata_json)
+        select(MemoirChatMessage.id, MemoirChatMessage.metadata_json, MemoirChatMessage.transcript_version_id)
         .join(MemoirVoiceSession, MemoirChatMessage.voice_session_id == MemoirVoiceSession.id)
         .where(
             MemoirChatMessage.project_id == project_id,
@@ -172,10 +182,13 @@ async def load_people(db: AsyncSession, project_id: str) -> dict[str, Person]:
         )
         .order_by(MemoirVoiceSession.created_at, MemoirChatMessage.turn_index, MemoirChatMessage.created_at)
     )
+    # A reading of an older transcript version is dropped: what it said may have been corrected, and a
+    # re-read of that segment must not see its own old result as already known.
     return fold(
         (message_id, metadata[READING_KEY])
-        for message_id, metadata in rows
+        for message_id, metadata, version in rows
         if isinstance((metadata or {}).get(READING_KEY), dict)
+        and metadata[READING_KEY].get("transcript_version_id") == (version or "")
     )
 
 
