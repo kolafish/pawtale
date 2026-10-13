@@ -60,7 +60,9 @@ from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
-from app.services.memoir.transcript_projection import current_material_text, material_user_edit_time
+from app.services.memoir.transcript_projection import (
+    TranscriptEdit, current_material_text, load_transcript_edits,
+)
 
 
 CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v3"
@@ -94,7 +96,7 @@ class ChapterMaterialInput:
     text: str
     assigned_at: datetime | None = None
     interviewer_line: str = ""
-    user_edited_at: datetime | None = None
+    edits: tuple[TranscriptEdit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -726,6 +728,7 @@ def chapter_generation_context(
     polish_level: MemoirTranscriptPolishLevel,
     interviewer_lines: dict[str, str] | None = None,
     decisions: tuple[fact_decisions.FactDecision, ...] = (),
+    transcript_edits: dict[str, tuple[TranscriptEdit, ...]] | None = None,
 ) -> ChapterGenerationContext:
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=409, detail="请先确认章节规划")
@@ -761,7 +764,7 @@ def chapter_generation_context(
                 transcript_version_id=material.transcript_version_id,
                 text=text,
                 assigned_at=material.created_at,
-                user_edited_at=material_user_edit_time(material),
+                edits=(transcript_edits or {}).get(material.transcript_version_id, ()),
                 interviewer_line=(interviewer_lines or {}).get(material.utterance.chat_message_id or "", ""),
             )
             section_materials.append(item)
@@ -850,11 +853,15 @@ async def load_chapter_generation_context(
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
     message_ids = [material.utterance.chat_message_id for section in chapter.sections for material in section.materials]
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     context = chapter_generation_context(
         chapter,
         polish_level=await load_project_transcript_polish_level(db, project_id),
         interviewer_lines=await interviewer_lines(db, message_ids),
-        decisions=await fact_decisions.load_fact_decisions(db, project_id=project_id),
+        decisions=decisions,
+        transcript_edits=await load_transcript_edits(
+            db, [material for section in chapter.sections for material in section.materials],
+        ) if decisions else {},
     )
     return replace(context, people=await narration_people.people_lines_for(db, project_id, message_ids))
 
@@ -896,14 +903,15 @@ def build_chapter_generation_prompt(
                 f"section_id: {section_refs.encode(section.section_id)}",
                 f"小节标题: {section.title}",
                 f"小节类型: {section.section_type}",
-                fact_decisions.prompt(section.decisions),
+                fact_decisions.prompt(section.decisions, edits=tuple(
+                    edit for material in section.materials for edit in material.edits
+                )),
                 "允许素材：",
                 *[
                     (
                         f"material_id: {material_refs.encode(material.material_id)}\n"
                         + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
-                        + (f"用户编辑讲述时间（UTC）：{material.user_edited_at.isoformat()}\n" if material.user_edited_at else "")
-                        + f"原始讲述: {material.text}"
+                        + f"原始讲述: {material.text}\n"
                     )
                     for material in section.materials
                 ],

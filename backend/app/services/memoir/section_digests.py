@@ -44,7 +44,9 @@ from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
-from app.services.memoir.transcript_projection import current_material_text, material_user_edit_time
+from app.services.memoir.transcript_projection import (
+    TranscriptEdit, current_material_text, load_transcript_edits,
+)
 
 
 SECTION_DIGEST_ENGINE = "llm_section_digest_v3"
@@ -63,7 +65,7 @@ class SectionDigestMaterial:
     sort_order: int
     text: str
     include_in_book: bool
-    user_edited_at: datetime | None = None
+    edits: tuple[TranscriptEdit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,7 @@ def _string_list(
 
 def section_digest_context(
     section: MemoirSection, *, decisions: tuple[fact_decisions.FactDecision, ...] = (),
+    transcript_edits: dict[str, tuple[TranscriptEdit, ...]] | None = None,
 ) -> SectionDigestContext:
     ordered = sorted(
         section.materials,
@@ -147,7 +150,7 @@ def section_digest_context(
             sort_order=material.sort_order,
             text=_compact_text(current_material_text(material)),
             include_in_book=material.include_in_book,
-            user_edited_at=material_user_edit_time(material),
+            edits=(transcript_edits or {}).get(material.transcript_version_id, ()),
         )
         for material in ordered
     )
@@ -218,8 +221,10 @@ async def load_section_digest_context(
     )
     if section is None:
         raise HTTPException(status_code=404, detail="小章节不存在")
+    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     return section_digest_context(
-        section, decisions=await fact_decisions.load_fact_decisions(db, project_id=project_id),
+        section, decisions=decisions,
+        transcript_edits=await load_transcript_edits(db, list(section.materials)) if decisions else {},
     )
 
 
@@ -250,8 +255,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
     materials = "\n\n".join(
         (
             f"material_id: {references.encode(material.material_id)}\n"
-            + (f"用户编辑讲述时间（UTC）：{material.user_edited_at.isoformat()}\n" if material.user_edited_at else "")
-            + f"原始讲述: {material.text}"
+            f"原始讲述: {material.text}\n"
         )
         for material in context.materials
         if material.include_in_book
@@ -269,7 +273,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 有序讲述素材：
 {materials}
 
-{fact_decisions.prompt(context.decisions)}
+{fact_decisions.prompt(context.decisions, edits=tuple(edit for material in context.materials for edit in material.edits))}
 
 请输出严格 JSON，不要 Markdown，不要解释：
 {{

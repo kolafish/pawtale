@@ -28,6 +28,7 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirTranscriptVersion,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
@@ -828,7 +829,7 @@ async def test_book_review_regeneration_preserves_confirmed_answer(
         "material_ids": ["arbitrary-old-material"],
         "resolution": "user_decision",
     }
-    old_fingerprint = completion_issues.book_review_candidate_fingerprints([candidate])[0][0]
+    old_fingerprint = completion_issues.stable_book_issue_fingerprint(candidate)
     issue = MemoirCompletionIssue(
         project_id=project_id,
         scope="book",
@@ -3526,3 +3527,24 @@ async def test_confirmed_fact_invalidates_chapter_and_blocks_old_book_assembly(c
     assert "学校比赛" in prompt
     assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert assembled.omitted_chapter_ids == [chapter_id]
+
+    edited_text = "1982年，我参加了学校比赛。"
+    edited = MemoirTranscriptVersion(
+        voice_session_id=sources[0]["session"]["id"],
+        source_artifact_id=sources[0]["utterance_id"],
+        version_type="user_edited", created_by="user", content=edited_text,
+    )
+    test_db.add(edited)
+    await test_db.flush()
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == sources[0]["utterance_id"],
+    ))
+    material.transcript_version_id = edited.id
+    await test_db.flush()
+    updated = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=project_id, chapter_id=chapter_id,
+    )
+    assert updated.materials[0].text == edited_text
+    assert updated.materials[0].edits[-1].before == context.materials[0].text
+    assert updated.materials[0].edits[-1].after == edited_text
+    assert updated.sections[0].decisions == context.sections[0].decisions

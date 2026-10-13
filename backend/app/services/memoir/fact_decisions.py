@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirCompletionIssue, MemoirSection, MemoirSectionMaterial
 from app.services.memoir.semantic_state import semantic_json_signature
+from app.services.memoir.transcript_projection import TranscriptEdit, transcript_edits_prompt
 
 
 @dataclass(frozen=True)
@@ -95,20 +96,23 @@ def signature(decisions: Iterable[FactDecision]) -> str:
     return semantic_json_signature(signatures) if signatures else ""
 
 
-def prompt(decisions: Iterable[FactDecision]) -> str:
-    lines = [
-        f"确认时间（UTC）：{decision.confirmed_at.isoformat() if decision.confirmed_at else '未记录'}\n"
-        f"核对问题：{decision.question}\n用户确认：{decision.answer}"
-        for decision in decisions
-    ]
-    if not lines:
+def prompt(decisions: Iterable[FactDecision], *, edits: tuple[TranscriptEdit, ...] = ()) -> str:
+    decisions = tuple(decisions)
+    if not decisions:
         return ""
+    events = [(
+        decision.confirmed_at or datetime.min,
+        f"确认时间（UTC）：{decision.confirmed_at.isoformat() if decision.confirmed_at else '未记录'}\n"
+        f"核对问题：{decision.question}\n用户确认：{decision.answer}",
+    ) for decision in decisions]
+    events.extend((edit.edited_at, transcript_edits_prompt((edit,))) for edit in edits)
+    lines = [line for _, line in sorted(events, key=lambda event: event[0])]
     return (
-        "用户已确认的事实（按确认时间排序）：\n" + "\n\n".join(lines)
-        + "\n这些是对应原始讲述的事实更正。同一事实以用户较晚的明确确认为准，"
+        "用户更正记录（已按时间从早到晚排列，核对回答与人工编辑具有同等效力）：\n" + "\n\n".join(lines)
+        + "\n按顺序逐条应用这些更正。每条只替换它实际改变的事实，保留此前仍有效的更正。"
+        "较晚记录中的未修改片段只是上下文，不是重新确认旧说法。仅改标点或措辞，"
+        "不能撤销此前任何一次事实更正，包括之前的人工编辑。"
         "没有涉及的事实仍以原始讲述为准。只在已有叙述涉及该事实时采用，"
-        "如果用户在更晚的讲述文字编辑中明确再次更正同一事实，采用较晚的更正；"
-        "仅改语句、标点不能推翻已确认的事实。"
         "不要把核对过程写成新经历，也不要延伸出其他细节。"
         "审阅时不要再次询问已经明确回答的同一个问题。\n"
     )
