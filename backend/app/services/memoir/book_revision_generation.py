@@ -1066,6 +1066,16 @@ async def generate_book_revision_proposal(
         book_information=book_information,
     )
 
+    # The plan already contains complete metadata values. This is an actual,
+    # bounded patch, so a second LLM pass over the entire body adds no value.
+    direct_metadata_preview = bool(
+        not include_answers
+        and actions
+        and all(action.get("action_type") == "revise_book_profile" for action in actions)
+        and generated_plan.plan.book_metadata_patch
+        and set(generated_plan.plan.book_metadata_patch) <= book_editorial_actions.metadata_fields(actions)
+    )
+
     if progress_callback is not None:
         await progress_callback({"stage": "saving"})
     current_review, baseline = await _reload_baseline(
@@ -1107,7 +1117,7 @@ async def generate_book_revision_proposal(
         db,
         review=current_review,
         baseline=baseline,
-        candidate_snapshots=[],
+        candidate_snapshots=original_snapshots if direct_metadata_preview else [],
         selected_actions={
             "source": book_revision_proposals.BOOK_REVIEW_SELECTION_SOURCE,
             "include_answers": include_answers,
@@ -1124,7 +1134,8 @@ async def generate_book_revision_proposal(
         },
         generation=generated_plan.generation,
         summary=generated_plan.plan.summary.strip(),
-        phase=MemoirBookRevisionProposalPhase.PLAN_READY,
+        phase=(MemoirBookRevisionProposalPhase.DRAFT_READY if direct_metadata_preview
+               else MemoirBookRevisionProposalPhase.PLAN_READY),
         revision_plan=generated_plan.plan.model_dump(mode="json"),
     )
     summary = generated_plan.plan.summary.strip()

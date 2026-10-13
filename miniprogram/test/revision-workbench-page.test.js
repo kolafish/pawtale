@@ -648,3 +648,37 @@ for (const status of ["running", "failed", "succeeded"]) {
     page.onUnload.call(context);
   });
 }
+
+for (const bodyChanged of [false, true]) {
+  test(`metadata preview confirmation preserves body guard: ${bodyChanged}`, async () => {
+    let modals = 0;
+    let applied = 0;
+    global.wx = {
+      setNavigationBarTitle() {}, showToast() {},
+      showModal(options) { modals += 1; options.success({ confirm: true }); },
+    };
+    const original = revisionProposalMetadata();
+    const preview = revisionProposalMetadata({
+      comparison: {
+        ...original.comparison,
+        changed_chapter_count: bodyChanged ? 1 : 0,
+        changed_section_count: bodyChanged ? 1 : 0,
+        chapters: bodyChanged ? original.comparison.chapters : [],
+        metadata_changes: [{ field: "narrator_name", before_value: "老余", after_value: "余建国" }],
+      },
+    });
+    const { page } = loadRevisionPage({ api: {
+      getMemoirBookRevisionProposal: async () => preview,
+      applyMemoirBookRevisionProposal: async () => {
+        applied += 1;
+        return { ...preview, status: "applied", can_apply: false, can_dismiss: false };
+      },
+    } });
+    const context = pageContext(page);
+    await page.onLoad.call(context, { projectId: "project-1", proposalId: "proposal-1" });
+    await page.applyRevision.call(context);
+    assert.equal(applied, 1);
+    assert.equal(modals, bodyChanged ? 1 : 0);
+    assert.equal(context.data.proposal.status, "applied");
+  });
+}

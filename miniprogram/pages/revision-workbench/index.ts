@@ -753,7 +753,12 @@ definePage<RevisionWorkbenchData>()({
     ) {
       return;
     }
-    if (this.data.scope === "book" && !await confirmAction(
+    const comparison = this.data.proposal.comparison;
+    const metadataOnly = comparison.changed_chapter_count === 0
+      && comparison.changed_section_count === 0
+      && !comparison.chapter_order_changed
+      && comparison.metadata_changes.length > 0;
+    if (this.data.scope === "book" && !metadataOnly && !await confirmAction(
       "确认使用这版修改？",
       "确认后会生成新的正式书稿版本，原版本仍会保留。",
     )) {

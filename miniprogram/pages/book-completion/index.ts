@@ -218,15 +218,15 @@ export function revisionJobView(
     const titles: Partial<
       Record<MemoirBookRevisionJob["stage"], string>
     > = {
-      queued: "修改思路任务已提交",
+      queued: "修改任务已提交",
       assembling: "正在准备当前书稿",
-      revising: "正在根据所选内容制定修改思路",
-      saving: "正在保存修改思路",
+      revising: "正在处理所选修改",
+      saving: "正在保存修改结果",
     };
     return {
       visible: true,
-      title: titles[job.stage] || "正在生成修改思路",
-      detail: "任务在后台执行，完成后仍需查看并确认整体思路",
+      title: titles[job.stage] || "正在准备修改",
+      detail: "任务在后台执行，完成后可查看结果，再决定是否采用",
       progressMode: "indeterminate",
       progress: 0,
       className: "active",
@@ -822,7 +822,9 @@ definePage<BookCompletionData>()({
         if (finishedRevision) {
           const succeeded = revisionJob?.status === "succeeded";
           wx.showToast({
-            title: succeeded ? "修改思路已生成" : "修改思路未完成",
+            title: succeeded
+              ? (revisionJob?.proposal_phase === "draft_ready" ? "修改预览已生成" : "修改思路已生成")
+              : "修改未完成",
             icon: succeeded ? "success" : "none",
           });
         }
@@ -1070,8 +1072,8 @@ definePage<BookCompletionData>()({
       generatingRevision: true,
       error: "",
       revisionProgress: activeTaskProgress(
-        "正在提交修改思路",
-        "完成后仍需查看并确认整体思路",
+        "正在提交修改",
+        "完成后可查看结果，再决定是否采用",
       ),
     });
     try {

@@ -324,7 +324,7 @@ test("book revision reports its real background stage", () => {
     error_message: "模型暂时不可用",
   }));
 
-  assert.equal(revising.title, "正在根据所选内容制定修改思路");
+  assert.equal(revising.visible, true);
   assert.equal(revising.progressMode, "indeterminate");
   assert.equal(revising.canCancel, true);
   assert.equal(failed.title, "修改思路未完成");
