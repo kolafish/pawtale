@@ -53,99 +53,6 @@ from app.services.memoir.image_assets import (
 )
 
 
-def _manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str, object]]:
-    manuscript = version.manuscript_json if isinstance(version.manuscript_json, dict) else {}
-    chapters = manuscript.get("chapters")
-    return {
-        chapter["chapter_id"]: chapter
-        for chapter in (chapters if isinstance(chapters, list) else [])
-        if isinstance(chapter, dict) and isinstance(chapter.get("chapter_id"), str)
-    }
-
-
-def _local_copy_changes(
-    before: MemoirBookOutputVersion,
-    after: MemoirBookOutputVersion,
-) -> dict[str, set[str]] | None:
-    """Recognize a user edit confined to chapter introductions and quotations."""
-    if before.chapter_snapshot_json != after.chapter_snapshot_json:
-        return None
-    for version in (before, after):
-        if version.content != book_content_from_chapter_snapshots(
-            title=book_output_versions.book_output_version_title(version, fallback=""),
-            snapshots=version.chapter_snapshot_json,
-        ):
-            return None
-    old_chapters = _manuscript_chapters(before)
-    new_chapters = _manuscript_chapters(after)
-    if not old_chapters or old_chapters.keys() != new_chapters.keys():
-        return None
-    changes: dict[str, set[str]] = {}
-    for chapter_id, old in old_chapters.items():
-        new = new_chapters[chapter_id]
-        # Image placement is independent of the chapter's editorial text.
-        old_body = {key: value for key, value in old.items() if key not in {"intro", "pull_quotes", "illustrations"}}
-        new_body = {key: value for key, value in new.items() if key not in {"intro", "pull_quotes", "illustrations"}}
-        if old_body != new_body:
-            return None
-        changed = {
-            field for field in ("intro", "pull_quotes")
-            if old.get(field) != new.get(field)
-        }
-        if changed:
-            changes[chapter_id] = changed
-    return changes or None
-
-
-def _manual_copy_fields(
-    versions: list[MemoirBookOutputVersion],
-) -> dict[str, set[str]]:
-    latest_chapters = _manuscript_chapters(versions[-1])
-    edits: dict[tuple[str, str], object] = {}
-    for before, after in zip(versions, versions[1:]):
-        if after.created_by != MemoirCreatedBy.USER.value:
-            continue
-        changes = _local_copy_changes(before, after)
-        if changes is None:
-            continue
-        chapters = _manuscript_chapters(after)
-        for chapter_id, fields in changes.items():
-            for field in fields:
-                edits[(chapter_id, field)] = chapters[chapter_id].get(field)
-    manual: dict[str, set[str]] = {}
-    for (chapter_id, field), value in edits.items():
-        if latest_chapters.get(chapter_id, {}).get(field) == value:
-            manual.setdefault(chapter_id, set()).add(field)
-    return manual
-
-
-def _only_local_copy_is_protected(
-    output: MemoirBookOutput,
-    versions: list[MemoirBookOutputVersion],
-) -> bool:
-    metadata = output.metadata_json if isinstance(output.metadata_json, dict) else {}
-    applied_ids = {
-        marker.get("output_version_id")
-        for marker in (
-            metadata.get(book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY),
-            metadata.get(book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY),
-        )
-        if isinstance(marker, dict)
-    }
-    for index in range(len(versions) - 1, 0, -1):
-        current = versions[index]
-        if current.id in applied_ids:
-            return False
-        previous = versions[index - 1]
-        if book_output_versions._same_book_body(current, previous):
-            continue
-        return (
-            current.created_by == MemoirCreatedBy.USER.value
-            and _local_copy_changes(previous, current) is not None
-        )
-    return False
-
-
 def _same_chapter_copy_context(left: dict[str, object], right: dict[str, object]) -> bool:
     def sections(snapshot: dict[str, object]) -> list[tuple[object, ...]]:
         value = snapshot.get("sections")
@@ -295,7 +202,7 @@ async def assemble_book_output(
             .where(MemoirBookOutputVersion.output_id == output.id)
             .order_by(MemoirBookOutputVersion.version)
         )).all()) if previous_version else []
-        manual_copy_fields = _manual_copy_fields(versions) if versions else {}
+        manual_copy_fields = book_output_versions.automatic_editorial_copy_state(output, versions).manual_chapter_fields
         previous_snapshots = {
             item["chapter_id"]: item
             for item in (previous_version.chapter_snapshot_json if previous_version else [])
@@ -307,18 +214,11 @@ async def assemble_book_output(
         next_snapshots = {
             item["chapter_id"]: item for item in chapter_snapshots
         }
-        changed_manual_copy = any(
-            chapter_id in next_snapshots
-            and not _chapter_lost_sources(previous_snapshots.get(chapter_id, {}), next_snapshots[chapter_id])
-            and not _same_chapter_copy_context(previous_snapshots.get(chapter_id, {}), next_snapshots[chapter_id])
-            for chapter_id in manual_copy_fields
-        )
         if (
             not previous_contains_blocked_chapter
             and (
                 preserves_applied_answers
-                or (automatic and changed_manual_copy)
-                or (automatic and protected and not _only_local_copy_is_protected(output, versions))
+                or (automatic and protected)
             )
         ):
             if auto_images_changed:
@@ -336,7 +236,7 @@ async def assemble_book_output(
                 chapter_snapshot_json=list(
                     previous_version.chapter_snapshot_json or []
                 ),
-                preserved_manual=protected or changed_manual_copy,
+                preserved_manual=protected,
                 omitted_chapter_ids=omitted,
                 created_at=previous_version.created_at,
             )
@@ -398,13 +298,20 @@ async def assemble_book_output(
         image_appendix=image_appendix,
     )
     if manuscript and previous_version:
-        old_chapters = _manuscript_chapters(previous_version)
+        old_chapters = book_output_versions.manuscript_chapters(previous_version)
         for chapter in manuscript.chapters:
             old = old_chapters.get(chapter.chapter_id)
             previous_snapshot = previous_snapshots.get(chapter.chapter_id)
             next_snapshot = next_snapshots.get(chapter.chapter_id)
-            if old and previous_snapshot and next_snapshot and _same_chapter_copy_context(previous_snapshot, next_snapshot):
+            if not (old and previous_snapshot and next_snapshot):
+                continue
+            fields = {"intro", "pull_quotes"} if _same_chapter_copy_context(previous_snapshot, next_snapshot) else (
+                set(manual_copy_fields.get(chapter.chapter_id, []))
+                if not _chapter_lost_sources(previous_snapshot, next_snapshot) else set()
+            )
+            if "intro" in fields:
                 chapter.intro = str(old.get("intro") or "")
+            if "pull_quotes" in fields:
                 chapter.pull_quotes = [
                     MemoirBookManuscriptQuote.model_validate(value)
                     for value in repair_original_pull_quotes(old)

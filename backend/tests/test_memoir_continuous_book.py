@@ -174,7 +174,8 @@ async def test_candidate_is_actionable_on_home_and_disappears_when_resolved_or_o
     assert (await _snapshot(client))["chapters"][0]["candidate_job_id"] is None
 
 
-async def test_design_versions_keep_manual_body_protection(client, test_db, monkeypatch):
+@pytest.mark.parametrize("copy_field", ["subtitle", "intro"])
+async def test_design_versions_keep_manual_body_protection(client, test_db, monkeypatch, copy_field):
     project_id, _, _, _, parent = await _ready_book(client, test_db, monkeypatch)
     output = await test_db.get(MemoirBookOutput, parent.result_json["output_id"])
     latest = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
@@ -184,7 +185,10 @@ async def test_design_versions_keep_manual_body_protection(client, test_db, monk
         created_by=MemoirCreatedBy.USER,
     )
     design = copy.deepcopy(manual.manuscript_json)
-    design["profile"]["subtitle"] = "写给家人的书"
+    if copy_field == "subtitle":
+        design["profile"]["subtitle"] = "写给家人的书"
+    else:
+        design["chapters"][0]["intro"] = "我另写了一段导语"
     changed = await book_output_versions.append_book_output_version(
         test_db, output=output, content=manual.content,
         chapter_snapshot_json=manual.chapter_snapshot_json, manuscript_json=design, created_by=MemoirCreatedBy.AI,
@@ -287,6 +291,9 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
         assignment_reason="user_supplement",
     )
     await revise_chapter(0, "本章补充。", new_material_id=added["utterance_id"])
-    protected = await assemble_book_output(test_db, project_id=project_id, automatic=True)
-    assert protected.preserved_manual
-    assert "本章补充。" not in protected.content
+    updated = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert not updated.preserved_manual
+    assert "本章补充。" in updated.content
+    version = await test_db.get(MemoirBookOutputVersion, updated.output_version_id)
+    assert version.manuscript_json["chapters"][0]["intro"] == "我亲自写的章首语。"
+    assert version.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == "那年，我参加了第1次学校比赛。"

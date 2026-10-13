@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, timedelta, timezone
-from typing import Literal
-
-from pydantic import BaseModel, Field
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -35,7 +32,6 @@ from app.schemas.memoir_book import (
     MemoirBookAudioPlanRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
-    MemoirBookLevelEditorialCopyTarget,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookManuscriptTemplate,
@@ -64,7 +60,6 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
-    stored_manuscript_metadata,
     template_cover_style as _template_cover_style,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
@@ -89,6 +84,8 @@ from app.services.memoir.book_output_export_cache import PreparedBookExport, ren
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
+    AUTOMATIC_EDITORIAL_COPY_KEY,
+    automatic_editorial_copy_state,
     append_book_output_version,
     book_output_version_title,
 )
@@ -551,46 +548,6 @@ async def update_book_output(
     return _output_response(refreshed)
 
 
-class AutomaticEditorialCopyState(BaseModel):
-    input_signature: str = ""
-    processed_version: int = 0
-    status: Literal["succeeded", "failed", "not_started"] = "not_started"
-    manual_targets: list[MemoirBookLevelEditorialCopyTarget] = Field(default_factory=list)
-    manual_chapter_fields: dict[str, list[Literal["intro", "pull_quotes"]]] = Field(default_factory=dict)
-
-
-AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
-
-
-def _automatic_copy_state(output: MemoirBookOutput) -> AutomaticEditorialCopyState:
-    from app.services.memoir.narrative.book_output_assembly import _manuscript_chapters
-
-    state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
-    if not state.processed_version and output.versions and output.versions[0].created_by in {"user", "ai"}:
-        state.manual_targets = ["preface", "afterword", "back_cover_quote"]
-        state.manual_chapter_fields = {
-            chapter_id: ["intro", "pull_quotes"] for chapter_id in _manuscript_chapters(output.versions[0])
-        }
-    # Before the first automatic pass, every AI copy change was explicitly
-    # requested. Thereafter inspect only versions after our last saved pass.
-    for before, after in zip(output.versions, output.versions[1:]):
-        if after.version <= state.processed_version or after.created_by not in {"user", "ai"}:
-            continue
-        old = stored_manuscript_metadata(before.manuscript_json)
-        new = stored_manuscript_metadata(after.manuscript_json)
-        for target in ("preface", "afterword", "back_cover_quote"):
-            if old.get(target) != new.get(target) and target not in state.manual_targets:
-                state.manual_targets.append(target)
-        old_chapters, new_chapters = _manuscript_chapters(before), _manuscript_chapters(after)
-        for chapter_id, chapter in new_chapters.items():
-            for field in ("intro", "pull_quotes"):
-                if old_chapters.get(chapter_id, {}).get(field) != chapter.get(field):
-                    fields = state.manual_chapter_fields.setdefault(chapter_id, [])
-                    if field not in fields:
-                        fields.append(field)
-    return state
-
-
 async def regenerate_book_output_editorial_copy(
     db: AsyncSession,
     *,
@@ -626,7 +583,7 @@ async def regenerate_book_output_editorial_copy(
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
-    state = _automatic_copy_state(output) if automatic else None
+    state = automatic_editorial_copy_state(output, output.versions) if automatic else None
     if state is not None:
         from app.services.memoir.semantic_state import semantic_json_signature
         signature = semantic_json_signature({"title": output_title, "snapshot": snapshot})
