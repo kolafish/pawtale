@@ -568,6 +568,21 @@ async def _save_chapter_title(
     return await _plan_response(db, refreshed)
 
 
+async def activate_existing_plan_for_automatic_book(db: AsyncSession, *, project_id: str) -> bool:
+    """Adopt the existing outline in place when automatic writing is requested."""
+    from app.services.memoir.sections import lock_plan_structure
+    if await db.scalar(select(MemoirBookPlan.id).where(MemoirBookPlan.project_id == project_id)) is None:
+        return False
+    plan = await lock_plan_structure(db, project_id=project_id)
+    if plan.status == MemoirBookPlanStatus.CONFIRMED.value:
+        return False
+    plan.status = MemoirBookPlanStatus.CONFIRMED.value
+    plan.metadata_json = {**(plan.metadata_json or {}), "activated_for_automatic_book": True}
+    # Keep titles, order, source assignments, exclusions and authorship intact.
+    await db.flush()
+    return True
+
+
 async def confirm_book_plan(
     db: AsyncSession,
     *,

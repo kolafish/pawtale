@@ -731,8 +731,6 @@ test("book service APIs encode backend routes and selected AI model", async () =
   );
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },
-    { call: () => api.generateMemoirBookPlan("project/1"), method: "POST", url: `${base}/book-plan/generate`, data: { ai_model: selectedModel } },
-    { call: () => api.confirmMemoirBookPlan("project/1", { title: "目录", chapters: [] }), method: "PUT", url: `${base}/book-plan`, data: { title: "目录", chapters: [] } },
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },

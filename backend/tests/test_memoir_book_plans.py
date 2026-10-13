@@ -118,7 +118,7 @@ async def test_generate_plan_creates_single_section_material_ownership(
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["status"] == "draft"
+    assert payload["status"] == "confirmed"
     assert first["utterance_id"] not in fake_ai.prompts[0]
     assert first["message_id"] not in fake_ai.prompts[0]
     assert "source_index: 1" in fake_ai.prompts[0]

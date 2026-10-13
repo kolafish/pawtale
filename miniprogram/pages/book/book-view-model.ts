@@ -10,7 +10,6 @@ import type {
   MemoirBookOutputVersionSummary,
   MemoirBookPlan,
   MemoirBookPlanChapter,
-  MemoirBookPlanChapterInput,
 } from "../../domain/memoir-book";
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
@@ -28,7 +27,7 @@ export {
 } from "./book-automation-view-model";
 export { trimText } from "./book-view-model-utils";
 
-export type BookStage = "empty" | "plan_draft" | "drafting";
+export type BookStage = "empty" | "drafting";
 
 export interface ChapterPickerOption {
   label: string;
@@ -195,8 +194,8 @@ const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
 export interface BookHomeData {
   loading: boolean;
   needsLogin: boolean;
-  generatingPlan: boolean;
-  confirmingPlan: boolean;
+  retryingDraft: boolean;
+  planNeedsActivation: boolean;
   updatingPlanStructure: boolean;
   error: string;
   projectId: string;
@@ -1156,15 +1155,12 @@ export function planStage(plan: MemoirBookPlan | null): BookStage {
   if (!plan) {
     return "empty";
   }
-  return plan.status === "confirmed" ? "drafting" : "plan_draft";
+  return "drafting";
 }
 
 export function stageText(stage: BookStage): string {
   if (stage === "empty") {
     return "等待生成章节";
-  }
-  if (stage === "plan_draft") {
-    return "确认章节结构";
   }
   return "书稿管理";
 }
@@ -1176,6 +1172,7 @@ export function guestBookData(): Partial<BookHomeData> {
     projectTitle: "我的回忆录",
     planTitle: "",
     stage: "empty",
+    planNeedsActivation: false,
     stageText: stageText("empty"),
     chapters: [],
     chapterStructureEditing: false,
@@ -1201,15 +1198,4 @@ export function guestBookData(): Partial<BookHomeData> {
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
   };
-}
-
-export function toPlanInput(
-  chapters: BookChapterView[],
-  chapterSources: BookChapterSources,
-): MemoirBookPlanChapterInput[] {
-  return chapters.map((chapter) => ({
-    title: trimText(chapter.editingTitle),
-    include_in_book: chapter.include_in_book !== false,
-    source_refs: chapterSources[chapter.id] || [],
-  }));
 }

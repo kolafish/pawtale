@@ -141,11 +141,6 @@ export interface MemoirChapterSectionSummary {
   materials: MemoirChapterSectionMaterialSummary[];
 }
 
-export interface MemoirBookPlanChapterInput {
-  title: string;
-  include_in_book: boolean;
-  source_refs: MemoirBookChapterSourceRef[];
-}
 
 export interface MemoirBookPlanChapter {
   id: string;
@@ -178,9 +173,6 @@ export interface MemoirBookPlan {
   updated_at: string;
 }
 
-export interface MemoirBookPlanGenerateRequest {
-  ai_model?: string;
-}
 
 export interface MemoirBookChapterTitleUpdateRequest {
   title: string;
@@ -190,10 +182,6 @@ export interface MemoirBookChapterTitleGenerateRequest {
   ai_model?: string;
 }
 
-export interface MemoirBookPlanConfirmRequest {
-  title?: string;
-  chapters: MemoirBookPlanChapterInput[];
-}
 
 export type MemoirBookPlanStructureCommandType =
   | "delete_chapter"

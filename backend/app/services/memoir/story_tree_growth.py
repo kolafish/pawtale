@@ -565,6 +565,9 @@ async def grow_story_tree(
         db,
         project_id=job.project_id,
     )
+    if before_plan is not None:
+        from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
+        await activate_existing_plan_for_automatic_book(db, project_id=job.project_id)
     progress = _progress(job)
     initial_tree = before_plan is None or bool(progress.initial_sections)
     if before_plan is None:
