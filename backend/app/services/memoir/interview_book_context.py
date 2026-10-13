@@ -53,6 +53,8 @@ class InterviewBookContext:
     profile_questions: tuple[str, ...] = ()
     # People the narrator has talked about, most recently mentioned first.
     people: tuple[str, ...] = ()
+    # One gap about a person 小余 may ask once a story is told; never while profile items are left.
+    person_question: narration_people.Question | None = None
 
 
 async def load_interview_book_context(
@@ -87,6 +89,7 @@ async def load_interview_book_context(
         narrator=_narrator(profile),
         profile_questions=profile_questions,
         people=await narration_people.recent_people_lines(db, voice_session.project_id),
+        person_question=None if profile_questions else await narration_people.question_for(db, voice_session),
     )
 
 

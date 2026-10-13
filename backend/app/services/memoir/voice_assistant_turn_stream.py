@@ -27,6 +27,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
 from app.services.memoir import memory_activation
+from app.services.memoir import narration_people
 from app.services.memoir import narrator_profile
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import interview_policy_runtime
@@ -475,6 +476,7 @@ class VoiceAssistantTurnStreamSession:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
         profile_questions = book_context.profile_questions if book_context else ()
+        person_question = book_context.person_question if book_context else None
         message, audio_file_id = await self._persist_completed_turn(
             voice_session=voice_session,
             turn=turn,
@@ -485,6 +487,7 @@ class VoiceAssistantTurnStreamSession:
             progress_context=project_progress_context,
             completion_prompt_context=completion_prompt_context,
             profile_questions=profile_questions,
+            person_question=person_question,
         )
         if narrator_profile.ask_needs_check(profile_questions, turn.speech_text):
             narrator_profile.check_profile_ask_later(
@@ -778,6 +781,7 @@ class VoiceAssistantTurnStreamSession:
         progress_context: ProgressPromptContext,
         completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
         profile_questions: tuple[str, ...] = (),
+        person_question: narration_people.Question | None = None,
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -824,6 +828,11 @@ class VoiceAssistantTurnStreamSession:
                         {}
                         if narrator_profile.ask_needs_check(profile_questions, turn.speech_text)
                         else {"profile_asked": None}
+                    ),
+                    **(
+                        {narration_people.ASKED_KEY: person_question.person_id}
+                        if person_question and person_question.asked_in(turn.speech_text)
+                        else {}
                     ),
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,
                     "memory_activation_status": artifacts.memory_activation_status,
