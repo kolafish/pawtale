@@ -599,7 +599,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     ? ""
     : (isBookCompletion ? "只说您记得的部分就可以" : "现在可以说了");
   if (interactionPhase === "recording") {
-    controlHintText = isHumanInterview ? "" : "说完请点这里";
+    controlHintText = isHumanInterview ? "" : "讲完这段后，可以点这里";
   } else if (!isHumanInterview && interactionPhase === "assistant_preparing") {
     controlHintText = "小余先问一句，稍等一下";
   } else if (!isHumanInterview && interactionPhase === "assistant_responding") {
@@ -622,7 +622,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   } else if (completionUnavailable && !state.recording) {
     micButtonText = "请先保存离开";
   } else if (state.recording) {
-    micButtonText = isHumanInterview ? "说完了，保存这段" : "说完了，帮我整理";
+    micButtonText = isHumanInterview ? "说完了，保存这段" : "讲完这段，请小余接话";
   } else if (!isHumanInterview && (
     interactionPhase === "assistant_preparing"
     || interactionPhase === "assistant_responding"

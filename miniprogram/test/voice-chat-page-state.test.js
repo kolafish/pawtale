@@ -171,9 +171,9 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
     ["transcript-line user", "我"],
   ]);
-  assert.equal(patch.controlHintText, "说完请点这里");
+  assert.equal(patch.controlHintText, "讲完这段后，可以点这里");
   assert.equal(patch.micButtonClass, "mic-button recording");
-  assert.equal(patch.micButtonText, "说完了，帮我整理");
+  assert.equal(patch.micButtonText, "讲完这段，请小余接话");
 });
 
 test("voice chat only expands saved history when the user asks to review it", () => {
