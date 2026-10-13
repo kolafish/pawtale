@@ -24,9 +24,6 @@ from app.services.memoir.book_source_links import (
 )
 
 
-BOOK_OUTLINE_TTS_CACHE_KEY = "outline_tts_audio"
-
-
 async def get_book_plan(
     db: AsyncSession,
     *,
@@ -53,7 +50,7 @@ async def _outline_audio_source(
         raise HTTPException(409, "章节规划已变化，请重新发起朗读")
     refs = await _plan_source_ref_dicts_by_chapter(db, plan)
     text = build_book_outline_audio_text(plan, source_counts_by_chapter={key: len(value) for key, value in refs.items()})
-    return AudioSource(plan.id, text, plan.metadata_json or {}, BOOK_OUTLINE_TTS_CACHE_KEY)
+    return AudioSource(plan.id, text)
 
 
 async def prepare_book_outline_audio(

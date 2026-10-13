@@ -365,7 +365,6 @@ async def assemble_book_output(
                 else {}
             ),
             "source": "chapter_drafts",
-            "book_tts": None,
         }
         output.updated_at = utcnow_naive()
         db.add(output)

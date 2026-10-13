@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
-from app.models.memoir import AudioFile, MemoirBookOutput, MemoirBookOutputVersion, MemoirEditingJob
+from app.models.memoir import AudioFile, MemoirBookOutputVersion, MemoirEditingJob
 from app.schemas.memoir_book import (
     MemoirAudioPlanRequest,
     MemoirBookAudioPlanRequest,
@@ -39,8 +39,6 @@ from app.services.memoir.voice_tts_types import TTSClient
 class AudioSource:
     version_id: str
     text: str
-    legacy_metadata: dict
-    legacy_cache_key: str
 
 
 class AudioProfile(BaseModel):
@@ -137,78 +135,6 @@ async def _usable_audio(
     return result
 
 
-async def _legacy_audio_plan(
-    db: AsyncSession, *, project_id: str, user_id: str, source: AudioSource,
-    profile: AudioProfile, req: MemoirAudioPlanRequest,
-) -> MemoirBookAudioPlanResponse | None:
-    """Keep an existing complete recording for identical narration text.
-
-    Old caches did not record the resolved default voice/sample rate, so they
-    cannot safely populate the cross-version chunk cache.
-    """
-    text_hash = book_audio.source_text_hash(source.text.strip())
-    signature = book_audio.source_text_hash(f"legacy:{text_hash}:{profile_key(profile)}")
-    key = f"book-audio-legacy:{project_id}:{signature}"
-    job = await db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == key))
-    cached = await _usable_audio(db, job, user_id)
-    imported = await db.scalar(select(MemoirEditingJob.id).where(
-        MemoirEditingJob.project_id == project_id,
-        MemoirEditingJob.dedupe_key.like(f"book-audio-legacy:{project_id}:%"),
-        MemoirEditingJob.payload_json["text"].as_string() == source.text.strip(),
-    ).limit(1)) if job is None else None
-    if job is None and imported is None:
-        cached = book_audio.cached_audio_response(
-            source.legacy_metadata, cache_key=source.legacy_cache_key,
-            text_hash=text_hash, voice=req.voice, speed_ratio=profile.speed_ratio,
-            force_regenerate=req.force_regenerate,
-        )
-        if cached and (cached.provider, cached.model, cached.mime_type) != (
-            profile.provider, profile.model, profile.mime_type,
-        ):
-            cached = None
-        if cached:
-            job = await enqueue_editing_job(
-                db, project_id=project_id, job_type=MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK,
-                dedupe_key=key,
-                payload_json=AudioChunkPayload(
-                    version_id=source.version_id, user_id=user_id, text=source.text.strip(), profile=profile,
-                ).model_dump(mode="json"),
-            )
-            job.status = MemoirEditingJobStatus.SUCCEEDED.value
-            job.result_json = AudioChunkResult(audio=cached).model_dump(mode="json")
-            await db.flush()
-            cached = await _usable_audio(db, job, user_id)
-    chunks = book_audio.split_tts_text(source.text)
-    if cached is None or len(cached.audio_file_ids) != len(chunks):
-        return None
-    if req.start_index >= len(chunks):
-        raise HTTPException(400, "朗读片段超出书稿范围")
-    if req.profile_key and req.profile_key != signature:
-        raise HTTPException(409, "音频清单已变化，请重新发起朗读")
-    segments = []
-    elapsed_ms = 0
-    durations = cached.audio_file_durations_seconds
-    for index, chunk in enumerate(chunks):
-        duration = durations[index] if len(durations) == len(chunks) else None
-        alignment = [a.model_copy(update={
-            "start_ms": max(0, a.start_ms - elapsed_ms),
-            "end_ms": max(0, a.end_ms - elapsed_ms),
-            "text_start": a.text_start - chunk.text_start,
-            "text_end": a.text_end - chunk.text_start,
-        }) for a in cached.alignment if chunk.text_start <= a.text_start < chunk.text_end]
-        segments.append(MemoirBookAudioSegmentResponse(
-            index=index, text_start=chunk.text_start, text_end=chunk.text_end, status="succeeded",
-            audio_file_id=cached.audio_file_ids[index], duration_seconds=duration, alignment=alignment,
-        ))
-        elapsed_ms += round((duration or 0) * 1000)
-    await db.commit()
-    return MemoirBookAudioPlanResponse(
-        version_id=source.version_id, source_text_hash=text_hash, profile_key=signature,
-        voice=profile.voice, speed_ratio=profile.speed_ratio, segments=segments,
-        ready_count=len(segments), poll_after_ms=max(250, round(get_settings().book_audio_poll_seconds * 1000)),
-    )
-
-
 async def run_book_audio_chunk_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
     payload = AudioChunkPayload.model_validate(job.payload_json)
     cached = await _usable_audio(db, job, payload.user_id)
@@ -263,8 +189,7 @@ async def _book_audio_source(
     ))
     if version is None:
         raise HTTPException(404, "书稿版本不存在")
-    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-    return AudioSource(version.id, version.content.strip(), output.metadata_json or {} if output else {}, "book_tts")
+    return AudioSource(version.id, version.content.strip())
 
 
 async def prepare_book_audio(
@@ -306,17 +231,6 @@ async def prepare_audio_plan(
         AudioFile.id.in_(cached_ids), AudioFile.user_id == owner_id,
     ))).all()} if cached_ids else {}
     cached_by_key = {key: await _usable_audio(db, job, owner_id, files=files) for key, job in jobs.items()}
-    # Prefer a complete regenerated playlist for new requests. A playing legacy
-    # playlist keeps its own signature and audio, even after regeneration.
-    wants_legacy = req.profile_key is not None and req.profile_key != signature
-    if not req.force_regenerate and (
-        wants_legacy or (req.profile_key is None and not all(cached_by_key.get(key) for key in keys))
-    ):
-        legacy = await _legacy_audio_plan(
-            db, project_id=project_id, user_id=owner_id, source=source, profile=profile, req=req,
-        )
-        if legacy:
-            return legacy
     if req.profile_key and req.profile_key != signature:
         raise HTTPException(409, "朗读配置已变化，请重新发起朗读")
     if req.start_index >= len(chunks):

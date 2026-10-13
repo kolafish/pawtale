@@ -597,7 +597,6 @@ async def apply_proposal(
     metadata = {
         **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
         "source": BOOK_REVIEW_SELECTION_SOURCE,
-        "book_tts": None,
     }
     if include_answers:
         metadata[book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY] = {
