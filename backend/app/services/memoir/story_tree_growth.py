@@ -47,6 +47,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import automation_events, editing_jobs
+from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import load_plan_with_chapters
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.chapter_split import split_large_chapters
@@ -567,7 +568,19 @@ async def grow_story_tree(
     progress = _progress(job)
     initial_tree = before_plan is None or bool(progress.initial_sections)
     if before_plan is None:
-        await _create_initial_tree(db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress)
+        try:
+            await _create_initial_tree(
+                db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress
+            )
+        except HTTPException as exc:
+            if exc.detail != NO_STORY_YET:
+                raise
+            # Not a failure: the next narration in this session schedules growth again.
+            return EditingJobResult(
+                status=MemoirEditingJobStatus.SKIPPED,
+                result_json={"voice_session_id": session.id},
+                error_message=NO_STORY_YET,
+            )
     await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
 
     existing_material_ids = set(

@@ -37,7 +37,6 @@ class _BookPlanOutput(BaseModel):
 
     title: str = ""
     chapters: list[_BookPlanChapterOutput] = Field(
-        min_length=1,
         max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
     )
 
@@ -119,11 +118,14 @@ def build_plan_prompt(
 - 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，只返回必要的少量章节。
-- interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，不要放进任何章节；只要有一点经历或感受就照常放进章节。
+- interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，不要放进任何章节；只要有一点经历或感受就照常放进章节。全部讲述都不该放进章节时，chapters 返回空列表。
 
 口述内容：
 {source_text}
 """
+
+
+NO_STORY_YET = "讲述里还没有可以写进书的故事"
 
 
 def string_value(item: dict[str, Any], key: str) -> str:
@@ -155,6 +157,9 @@ def chapters_from_payload(
     raw_chapters = payload.get("chapters", [])
     if not isinstance(raw_chapters, list):
         raise HTTPException(status_code=502, detail="AI 未返回有效章节列表")
+    if not raw_chapters:
+        # Every source only answered the interviewer (a name, a greeting): there is no story to plan yet.
+        raise HTTPException(status_code=422, detail=NO_STORY_YET)
     if len(raw_chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
         raise HTTPException(
             status_code=502,
