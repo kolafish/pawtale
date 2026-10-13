@@ -723,9 +723,7 @@ export function bookOutputStaleNotice(
   const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
   const subject = titles.length ? `「${titles.join("、")}」${suffix}` : "章节内容";
   if (progress?.status === "needs_input") {
-    return progress.needs_user_material_count
-      ? `${subject}有变更，部分章节还需要补充讲述。请回到首页补充相关回忆。`
-      : `${subject}有变更。请到「书稿建议」处理，全书尚未更新。`;
+    return `${subject}有变更。请到「书稿建议」处理，全书尚未更新。`;
   }
   if (progress?.status === "failed") {
     return `${subject}有变更，后台整理遇到问题。请到「书稿建议」查看原因并重试。`;
@@ -840,9 +838,7 @@ function bookOmissionFollowUp(
   omittedChapters: BookChapterView[],
 ): string {
   if (progress?.status === "needs_input") {
-    return progress.needs_user_material_count
-      ? "请回到首页补充与本章有关的讲述。"
-      : "请查看书稿建议，处理后书稿会继续更新。";
+    return "请查看书稿建议，处理后书稿会继续更新。";
   }
   if (progress?.status === "failed") {
     return "后台整理遇到问题，请查看书稿建议并重试。";

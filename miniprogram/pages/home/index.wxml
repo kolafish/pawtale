@@ -200,9 +200,6 @@
       </view>
       <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft"
         loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
-      <button wx:elif="{{progress.status === 'needs_input' && progress.needs_user_material_count}}" size="mini"
-        class="home-inline-action ui-button" bindtap="continueNarration"
-        loading="{{creatingVoice}}" disabled="{{creatingVoice || voiceAuthorizationSaving}}">补充讲述 ›</button>
       <button wx:elif="{{progress.status === 'needs_input'}}" size="mini"
         class="home-inline-action ui-button" bindtap="openReviewIssues">查看待确认 ›</button>
       <button wx:elif="{{progress.status === 'ready' || progress.status === 'partial_ready'}}" size="mini"

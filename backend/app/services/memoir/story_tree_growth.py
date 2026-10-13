@@ -77,20 +77,12 @@ SYSTEM_PROMPT = (
 )
 SETTLE_SECONDS = 3
 MAX_UNASSIGNED_ATTEMPTS = 2
-ALLOWED_ACTIONS = {
-    "assign_existing",
-    "create_section",
-    "create_chapter",
-    "leave_unassigned",
-    "not_story",
-}
-
 
 class _GrowthGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_indices: list[int] = Field(default_factory=list)
-    action: str
+    action: Literal["assign_existing", "create_section", "create_chapter", "leave_unassigned", "not_story"]
     section_id: str | None = None
     chapter_id: str | None = None
     new_chapter_title: str | None = None
@@ -123,9 +115,11 @@ class DeferredSource(BaseModel):
     status: Literal["pending", "needs_user", "not_story"]
     reason: str
     attempts: int = 0
+    context_signature: str = ""
 
 
 class GrowthBatch(BaseModel):
+    context_signature: str = ""
     groups: list[GrowthGroup] = Field(default_factory=list)
     sources: dict[str, tuple[str, str | None]]
     section_versions: dict[str, int]
@@ -244,24 +238,25 @@ def _normalize_groups(
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
 ) -> list[GrowthGroup]:
-    used: set[int] = set()
+    indices = [index for group in output.groups for index in group.source_indices]
+    if sorted(indices) != list(range(1, len(utterances) + 1)):
+        raise HTTPException(status_code=422, detail="AI 归类结果遗漏或重复了讲述，原始讲述已保留，请继续整理")
     groups: list[GrowthGroup] = []
     for raw in output.groups:
-        indices = [index for index in raw.source_indices if 1 <= index <= len(utterances) and index not in used]
+        indices = raw.source_indices
         if not indices:
             continue
-        action = raw.action if raw.action in ALLOWED_ACTIONS else "leave_unassigned"
+        action = raw.action
         chapter_id = _decode_reference(chapter_refs, raw.chapter_id)
         section_id = _decode_reference(section_refs, raw.section_id)
         new_chapter_title = _clean_text(raw.new_chapter_title, limit=80) or None
         new_section_title = _clean_text(raw.new_section_title, limit=200) or None
         if action == "assign_existing" and section_id is None:
-            action = "leave_unassigned"
+            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
         if action == "create_section" and (chapter_id is None or not new_section_title):
-            action = "leave_unassigned"
+            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
         if action == "create_chapter" and (not new_chapter_title or not new_section_title):
-            action = "leave_unassigned"
-        used.update(indices)
+            raise HTTPException(status_code=422, detail="AI 返回了无效的归类位置，原始讲述已保留，请继续整理")
         groups.append(
             GrowthGroup(
                 utterance_ids=[utterances[index - 1].id for index in indices],
@@ -274,9 +269,6 @@ def _normalize_groups(
                 reason=_clean_text(raw.reason, limit=300) or "暂时无法确定素材归属",
             )
         )
-    missing = [utterance.id for index, utterance in enumerate(utterances, start=1) if index not in used]
-    if missing:
-        groups.append(GrowthGroup(utterance_ids=missing, action="leave_unassigned"))
     return groups
 
 
@@ -621,6 +613,13 @@ async def grow_story_tree(
     ).all()
     for previous in history:
         deferred.update(_progress(previous).deferred)
+    # Retry budgets belong to one set of evidence, not to the source forever.
+    context_signature = semantic_json_signature({
+        "sources": [(item.id, source_text_hash(current_utterance_text(item))) for item in project_sources],
+        "chapters": [(item.id, item.title) for item in before_chapters],
+        "sections": [(item.id, item.chapter_id, item.title, item.version) for item in before_sections],
+    })
+    explicit_retry = (job.payload_json or {}).get("source") == "retry"
     utterances = [
         item
         for item in project_sources
@@ -630,13 +629,21 @@ async def grow_story_tree(
         and has_story_content(current_utterance_text(item))
         and not (
             item.id in deferred
-            and deferred[item.id].attempts >= MAX_UNASSIGNED_ATTEMPTS
             and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
+            and (
+                deferred[item.id].status == "not_story"
+                or (
+                    deferred[item.id].attempts >= MAX_UNASSIGNED_ATTEMPTS
+                    and deferred[item.id].context_signature == context_signature
+                    and not explicit_retry
+                )
+            )
         )
     ]
     if progress.batch is None and utterances:
         _plan, chapters, sections = await _load_tree(db, project_id=job.project_id)
         batch = GrowthBatch(
+            context_signature=context_signature,
             sources={
                 item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
                 for item in utterances
@@ -681,10 +688,14 @@ async def grow_story_tree(
                     continue
                 text_hash = batch.sources[source_id][0]
                 previous = deferred.get(source_id)
-                attempts = previous.attempts if previous and previous.text_hash == text_hash else 0
+                attempts = previous.attempts if (
+                    previous and previous.text_hash == text_hash
+                    and previous.context_signature == batch.context_signature
+                ) else 0
                 if group.action == "not_story":
                     progress.deferred[source_id] = DeferredSource(
                         text_hash=text_hash, status="not_story", reason=group.reason, attempts=MAX_UNASSIGNED_ATTEMPTS,
+                        context_signature=batch.context_signature,
                     )
                     continue
                 if group.action == "leave_unassigned" and group.reason:
@@ -695,6 +706,7 @@ async def grow_story_tree(
                     status="needs_user" if needs_user else "pending",
                     reason=group.reason if needs_user else "素材尚未归类，等待下一次整理",
                     attempts=attempts,
+                    context_signature=batch.context_signature,
                 )
         progress.batch = None
     placed_ids = list(dict.fromkeys(progress.placed_ids))

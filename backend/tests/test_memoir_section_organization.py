@@ -1668,9 +1668,9 @@ async def test_set_aside_story_is_retried_before_waiting_for_user(
         await test_db.commit()
     old, first, second = sources
     if reason:
-        assert seen == [[old], [old, first], [first, second]]
-        assert results[1][old]["status"] == "needs_user"
-        assert results[1][old]["attempts"] == 2
+        assert seen == [[old], [old, first], [old, first, second]]
+        assert results[1][old]["status"] == "pending"
+        assert results[1][old]["attempts"] == 1
     else:
         assert seen == [[old], [old, first], [old, first, second]]
 
