@@ -4,12 +4,15 @@ Each narrator segment is read once per corrected (or hand-edited) transcript ver
 profile job. The reading is stored on the narrator message. The roster is never stored: it is folded from
 the readings in narration order whenever it is needed, so a deleted or re-read segment needs no override
 rules. A person keeps a stable id; the model sees P1, P2… and a new person gets "<message id>:<n>".
+Once a story is told, 小余 may ask about one gap in someone the narrator keeps mentioning; the next reading
+takes the answer from 小余's question and the narrator's reply.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+import re
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
@@ -28,6 +31,9 @@ READING_KEY = "people_reading"
 SYSTEM_PROMPT = "你帮一本口述回忆录记住书里出现的人，只记讲述者亲口说出的内容。"
 _FIELDS = ("call", "name", "relation", "note", "unclear")
 _PRONOUNS = {"他", "她", "它", "ta", "TA"}
+# Set on a 小余 line that asked about a person; each person is asked once per book, at most twice per session.
+ASKED_KEY = "person_asked"
+MAX_ASKS_PER_SESSION = 2
 
 
 class _PersonOutput(BaseModel):
@@ -109,6 +115,49 @@ def fold(readings: Iterable[tuple[str, dict]]) -> dict[str, Person]:
                 person.message_ids.append(message_id)
             person.last_seen = position
     return people
+
+
+@dataclass(frozen=True)
+class Question:
+    person_id: str
+    text: str
+    # How the narrator refers to the person. A 小余 line asks the question when it names one and has a question mark.
+    words: tuple[str, ...]
+
+    def asked_in(self, line: str) -> bool:
+        return bool(re.search(r"[？?]", line)) and any(word in line for word in self.words)
+
+
+def _gap(person: Person) -> str:
+    """The one thing a reader would miss about someone the narrator keeps mentioning."""
+    label = person.name or ("" if person.call in _PRONOUNS else person.call)
+    if not person.relation:
+        return f"{label}和他是什么关系" if label else ""
+    if not person.name and person.call in _PRONOUNS:
+        return f"这位{person.relation}叫什么名字"
+    return person.unclear
+
+
+async def question_for(db: AsyncSession, voice_session: MemoirVoiceSession) -> Question | None:
+    """Someone told about in this session and at least one earlier segment, with a gap not yet asked about."""
+    if sum(ASKED_KEY in (message.metadata_json or {}) for message in voice_session.messages) >= MAX_ASKS_PER_SESSION:
+        return None
+    asked_column = MemoirChatMessage.metadata_json[ASKED_KEY].as_string()
+    asked = set(await db.scalars(
+        select(asked_column).where(
+            MemoirChatMessage.project_id == voice_session.project_id,
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            asked_column.is_not(None),
+        )
+    ))
+    session_ids = {message.id for message in voice_session.messages}
+    people = sorted((await load_people(db, voice_session.project_id)).values(), key=lambda person: -person.last_seen)
+    for person in people:
+        text = _gap(person)
+        if text and person.id not in asked and len(person.message_ids) > 1 and session_ids.intersection(person.message_ids):
+            words = tuple(word for word in (person.call, person.name, person.relation) if word and word not in _PRONOUNS)
+            return Question(person_id=person.id, text=text, words=words)
+    return None
 
 
 async def load_people(db: AsyncSession, project_id: str) -> dict[str, Person]:

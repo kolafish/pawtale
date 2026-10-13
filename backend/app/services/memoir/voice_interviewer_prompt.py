@@ -63,6 +63,7 @@ def build_stream_turn_prompt(
             _header(host_name, regenerate),
             _FOLLOW_UP,
             _profile_question(book),
+            _person_question(book),
             policy_section,
             dialogue,
             _book_block(book, opening=False),
@@ -142,6 +143,15 @@ def _profile_question(book: InterviewBookContext) -> str:
 - 他刚才只答了称呼时，这个回答已经结束，不要重复问称呼；{after_name}
 - 候选项都已经答了或拒绝了，就不再问资料
 - 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
+
+
+def _person_question(book: InterviewBookContext) -> str:
+    if book.person_question is None:
+        return ""
+    return f"""还可以顺口问清书里一个人的一件事：{book.person_question.text}
+- 他正讲着一件事时，先听他讲完，这次不问
+- 一件事讲完了，就用一句自然的话问这件事，像聊天时顺口问起，不说为什么问；问了这个，这次就不再提新方向
+- 上下文里他已经说清了，或者说过不记得、不想聊这个人，就不问"""
 
 
 def _header(host_name: str, regenerate: bool) -> str:
