@@ -537,8 +537,9 @@ async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow
         clear_editing_job_handlers()
 
 
-async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(client, test_db, monkeypatch):
-    from app.services.memoir import book_generation_jobs, automatic_book_draft
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(client, test_db, monkeypatch, unavailable):
+    from app.services.memoir import book_generation_jobs, automatic_book_draft, draft_progress
     from app.services.memoir.book_output_versions import revision_compatible_version
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
     project, _, _ = await _output(client, test_db)
@@ -552,7 +553,7 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
     calls = []
     async def generate(**kwargs):
         calls.append(kwargs)
-        return _copy(kwargs["snapshot"])
+        return None if unavailable else _copy(kwargs["snapshot"])
     monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
     result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
     assert result.status.value == "pending" and not calls
@@ -560,8 +561,22 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
     parent.status = "succeeded"
     await test_db.commit()
     result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
-    assert result.status.value == "succeeded" and len(calls) == 1
+    assert result.status.value == ("failed" if unavailable else "succeeded") and len(calls) == 1
+    job.status, job.error_message = result.status.value, result.error_message
+    await test_db.commit()
+    if unavailable:
+        await draft_progress.retry_draft_progress(test_db, project_id=project.id)
+        # A new assembly coalesced before execution must retain this user retry.
+        await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+            user_id=project.user_id, project_id=project.id, req=req, automatic=True)
+        unavailable = False
+        result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
+        assert result.status.value == "succeeded" and len(calls) == 2
     assert (await revision_compatible_version(test_db, before)).version > before.version
+    from app.models.memoir import MemoirAutomationEvent
+    events = (await test_db.scalars(select(MemoirAutomationEvent).where(
+        MemoirAutomationEvent.editing_job_id == job.id))).all()
+    assert len(events) == 1  # Internal scheduling updates one durable event.
     job.status = "running"
     await test_db.commit()
     await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
