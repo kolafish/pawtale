@@ -54,6 +54,7 @@ from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
     _build_cleanup_prompt,
     _remove_obvious_oral_fillers,
+    _summary_fields,
     generate_cleaned_transcript_text,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
@@ -69,6 +70,15 @@ UTC_SUFFIXES = ("Z", "+00:00")
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+
+
+def test_transcript_summary_marks_cut_text_but_preserves_complete_sentences():
+    text = "那年我们回到老家修补房子，父亲和母亲一起挑水和泥巴，重新砌好了倒下的墙。"
+    title, summary, _ = _summary_fields(text)
+    assert title == text[:32] + "…"
+    assert summary == text
+    title, _, _ = _summary_fields("我们回老家了。" + text)
+    assert title == "我们回老家了。"
 
 
 @pytest.fixture(autouse=True)

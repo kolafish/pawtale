@@ -190,9 +190,11 @@
   color: var(--ui-value-text);
 }
 
-.text-action-button {
+button.text-action-button {
   width: auto;
   min-width: 88rpx;
+  margin: 0;
+  flex-shrink: 0;
   padding: 0 18rpx;
   border-radius: 999rpx;
   box-shadow: none;

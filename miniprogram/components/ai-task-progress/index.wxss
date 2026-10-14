@@ -40,7 +40,7 @@
 
 .ai-task-progress.is-indeterminate {
   width: 38% !important;
-  animation: ai-task-indeterminate 1.2s ease-in-out infinite;
+  animation: ai-task-indeterminate 1.2s ease-in-out infinite alternate;
 }
 
 .ai-task-cancel {
@@ -68,14 +68,10 @@
 
 @keyframes ai-task-indeterminate {
   0% {
-    transform: translateX(-120%);
-  }
-
-  50% {
-    transform: translateX(80%);
+    transform: translateX(0);
   }
 
   100% {
-    transform: translateX(260%);
+    transform: translateX(160%);
   }
 }

@@ -94,7 +94,7 @@
             wx:if="{{shareVideoPolling}}"
             class="share-video-task-progress"
             title="{{shareVideoStatusText || '正在生成视频'}}"
-            detail="完成后可以先预览，再决定是否分享"
+            detail="配图和合成可能需要几分钟，完成后可先预览，再决定是否分享"
             mode="indeterminate"
           />
           <button wx:else class="ghost-button share-video-retry" bindtap="refreshShareVideoJob">重新查看进度</button>

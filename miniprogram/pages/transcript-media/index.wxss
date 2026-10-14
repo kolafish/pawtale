@@ -286,6 +286,10 @@
   text-align: left;
 }
 
+.share-video-actions .primary-button {
+  background: var(--ui-surface);
+}
+
 .material-image-button {
   color: var(--ui-accent-strong);
 }
@@ -382,7 +386,7 @@
   margin-top: 10rpx;
 }
 
-.share-video-more {
+.text-action-button.share-video-more {
   display: block;
   margin: 18rpx auto 0;
 }
