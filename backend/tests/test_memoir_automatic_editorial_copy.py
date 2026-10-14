@@ -255,6 +255,72 @@ async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeyp
     assert len(calls) == (3 if failed_update else 2)  # Retrying another stage does not rewrite successful copy.
 
 
+@pytest.mark.parametrize('legacy_signature', [False, True])
+async def test_audit_changes_do_not_regenerate_editorial_copy(client, test_db, monkeypatch, legacy_signature):
+    from app.domain.memoir.types import MemoirCreatedBy
+    from app.services.memoir.book_output_versions import append_book_output_version
+    from app.services.memoir.semantic_state import semantic_json_signature
+
+    project, chapters, before = await _output(client, test_db)
+    snapshot = copy.deepcopy(before.chapter_snapshot_json)
+    for item in snapshot:
+        item['source_refs'] = [{'utterance_id': f"source-{item['chapter_id']}", 'quote': '那时我在家乡读书。',
+            'summary': '求学', 'representative_quote': '那时我在家乡读书。',
+            'transcript_version_id': 'original-transcript', 'voice_session_id': 'original-session'}]
+    before.chapter_snapshot_json = snapshot
+    await test_db.commit()
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs['snapshot'], len(calls))
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    first = await _automatic(test_db, project)
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
+    latest = await test_db.get(MemoirBookOutputVersion, first.latest_version.id)
+    if legacy_signature:
+        metadata = copy.deepcopy(output.metadata_json)
+        state = metadata['automatic_editorial_copy']
+        state.pop('signature_version')
+        state['input_signature'] = semantic_json_signature({'title': project.title, 'snapshot': latest.chapter_snapshot_json})
+        state['chapter_input_signatures'] = {item['chapter_id']: semantic_json_signature({
+            key: item.get(key) for key in ('chapter_title', 'chapter_summary', 'metadata_json', 'content', 'source_refs')
+        }) for item in latest.chapter_snapshot_json}
+        output.metadata_json = metadata
+    snapshot = copy.deepcopy(latest.chapter_snapshot_json)
+    for item in snapshot:
+        item['metadata_json'] = {**item['metadata_json'], 'audit_record': {'updated_at': 'later', 'attempts': 2}}
+        item['draft_version_id'] = 'new-version-with-same-content'
+        item['source_refs'][0].update(transcript_version_id='corrected-transcript', voice_session_id='archived-session')
+    changed = await append_book_output_version(test_db, output=output, content=latest.content,
+        chapter_snapshot_json=snapshot, manuscript_json=latest.manuscript_json, created_by=MemoirCreatedBy.SYSTEM)
+    await test_db.commit()
+    reused = await _automatic(test_db, project)
+    assert len(calls) == 1
+    assert reused.latest_version.id == changed.id
+    assert [chapter.intro for chapter in reused.latest_version.manuscript.chapters] == ['自动导语1'] * len(chapters)
+    # A real source correction still updates the affected chapter, even when body is unchanged.
+    corrected = copy.deepcopy(snapshot)
+    corrected[-1]['source_refs'][0]['quote'] = '那时我已经到外地读书。'
+    await append_book_output_version(test_db, output=output, content=latest.content,
+        chapter_snapshot_json=corrected, manuscript_json=latest.manuscript_json, created_by=MemoirCreatedBy.SYSTEM)
+    await test_db.commit()
+    await _automatic(test_db, project)
+    assert len(calls) == 2 and calls[-1]['chapter_ids'] == [chapters[-1].id]
+    project.title = '改过的书名'
+    await test_db.commit()
+    renamed = await _automatic(test_db, project)
+    assert len(calls) == 3 and calls[-1]['chapter_ids'] == []
+    assert 'chapter_intros' not in calls[-1]['targets']
+    latest = await test_db.get(MemoirBookOutputVersion, renamed.latest_version.id)
+    await append_book_output_version(test_db, output=output, content=latest.content,
+        chapter_snapshot_json=list(reversed(corrected)), manuscript_json=latest.manuscript_json,
+        created_by=MemoirCreatedBy.SYSTEM)
+    await test_db.commit()
+    await _automatic(test_db, project)
+    assert len(calls) == 4 and calls[-1]['chapter_ids'] == []
+    assert 'chapter_intros' not in calls[-1]['targets']
+
+
 @pytest.mark.parametrize('remove_selected_quote', [False, True])
 async def test_source_removal_preserves_authored_intro_and_only_valid_quotes(client, test_db, monkeypatch, remove_selected_quote):
     from app.models.memoir import MemoirBookChapterDraftVersion, MemoirSectionMaterial
