@@ -292,6 +292,8 @@ async def _proposal_records(
     project = await db.get(Project, proposal.project_id)
     if output is None or project is None:
         raise HTTPException(status_code=409, detail="书稿状态已变化")
+    if proposal.status == MemoirBookRevisionProposalStatus.READY.value:
+        baseline = await book_output_versions.revision_compatible_version(db, baseline) or baseline
     return output, baseline, project
 
 
@@ -548,6 +550,9 @@ async def apply_proposal(
         raise ValueError("这个修改预览已经不能确认")
     if proposal.phase != MemoirBookRevisionProposalPhase.DRAFT_READY.value:
         raise ValueError("请先按修改思路生成修改稿")
+    await db.execute(select(MemoirBookOutput.id).where(
+        MemoirBookOutput.project_id == proposal.project_id,
+    ).with_for_update())
     output, baseline, project = await _proposal_records(db, proposal=proposal)
     state, stale_message = await _ready_source_state(
         db,

@@ -26,11 +26,14 @@ async def project_jobs(
     for job_type in (
         MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
         MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+        MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value,
     ):
         query = select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == project_id,
             MemoirEditingJob.job_type == job_type,
         )
+        if job_type == MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value:
+            query = query.where(MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}")
         if voice_session_id and job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value:
             query = query.where(
                 MemoirEditingJob.payload_json["voice_session_id"].as_string() == voice_session_id
@@ -127,6 +130,7 @@ async def read_draft_progress(
 ) -> MemoirDraftProgressResponse:
     jobs = await project_jobs(db, project_id, voice_session_id=voice_session_id) if jobs is None else jobs
     parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
+    copy_job = next((job for job in jobs if job.job_type == "generate_book_editorial_copy"), None)
     growth_jobs = [job for job in jobs if job.job_type == "organize_material"]
     growth = next(
         (
@@ -141,6 +145,10 @@ async def read_draft_progress(
         if parent
         else automatic_book_draft.DraftProgress()
     )
+    if copy_job and (parent is None or copy_job.updated_at >= parent.updated_at):
+        progress.editorial_copy_status = {"succeeded": "succeeded", "failed": "failed", "cancelled": "failed"}.get(copy_job.status, "not_started")
+    elif copy_job and progress.editorial_copy_status == "succeeded":
+        copy_job = None  # A later full workflow already recovered this copy failure.
     material_count, pending_material_count, needs_user_count, needs_user_detail = await _source_counts_and_needs_user(db, project_id)
     ready = sum(
         (item.status == "ready" or item.draft_version_id is not None)
@@ -157,7 +165,7 @@ async def read_draft_progress(
         review_status=progress.review_status,
         review_error=progress.review_error,
     )
-    failures = [job.error_message for job in (growth, parent) if job and job.status in {"failed", "cancelled"}]
+    failures = [job.error_message for job in (growth, parent, copy_job) if job and job.status in {"failed", "cancelled"}]
     failures += [item.error_message for item in progress.chapters.values() if item.status in {"failed", "cancelled"}]
     result.can_retry = bool(failures or pending_material_count > needs_user_count
         or progress.review_status in {"failed", "cancelled"} or progress.editorial_copy_status == "failed")
@@ -212,6 +220,21 @@ async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
     jobs = await project_jobs(db, project_id)
     progress = await read_draft_progress(db, project_id=project_id, jobs=jobs)
     if not progress.can_retry:
+        return
+    copy_job = next((job for job in jobs if job.job_type == "generate_book_editorial_copy"), None)
+    parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
+    parent_progress = automatic_book_draft.DraftProgress.model_validate(parent.result_json or {}) if parent else automatic_book_draft.DraftProgress()
+    if (copy_job and copy_job.status in {"failed", "cancelled"}
+            and progress.pending_material_count <= progress.needs_user_material_count
+            and not any(job.status in {"failed", "cancelled"} for job in jobs if job.id != copy_job.id)
+            and parent_progress.review_status not in {"failed", "cancelled"}
+            and not any(item.status in {"failed", "cancelled"} for item in parent_progress.chapters.values())):
+        from app.models.projects import Project
+        from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
+        from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
+        project = await db.get(Project, project_id)
+        await schedule_book_editorial_copy_generation(db, project_id=project_id, user_id=project.user_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
         return
     growth = next((job for job in jobs if job.job_type == "organize_material"), None)
     retry_material = progress.pending_material_count > progress.needs_user_material_count

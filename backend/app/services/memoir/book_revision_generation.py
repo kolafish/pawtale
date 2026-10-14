@@ -437,22 +437,17 @@ async def _reload_baseline(
 ) -> tuple[MemoirBookReview, MemoirBookOutputVersion]:
     db.expire_all()
     review = await book_reviews.get_current_book_review(db, project_id=project_id)
-    latest = await book_output_versions.load_latest_book_output_version(
-        db,
-        output_id=output_id,
-    )
+    await db.execute(select(MemoirBookOutput.id).where(MemoirBookOutput.id == output_id).with_for_update())
+    baseline = await db.get(MemoirBookOutputVersion, baseline_id)
+    latest = await book_output_versions.revision_compatible_version(db, baseline) if baseline else None
     if (
         review is None
         or (require_ready_review and review.status != "ready")
         or review.input_signature != expected_review_input_signature
         or latest is None
-        or latest.id != baseline_id
     ):
         raise BookRevisionError(stale_message)
-    baseline = await db.get(MemoirBookOutputVersion, baseline_id)
-    if baseline is None:
-        raise BookRevisionError(stale_message)
-    return review, baseline
+    return review, latest
 
 
 def _chapter_source_text(
@@ -633,7 +628,7 @@ async def _refine_book_revision_plan(
         raise BookRevisionError("修改思路已经变化，请重新查看后再提交反馈")
     baseline = await db.get(
         MemoirBookOutputVersion,
-        proposal.base_output_version_id,
+        response.base_output_version_id,
     )
     if baseline is None:
         raise BookRevisionError("修改前的书稿版本已不可用")
@@ -733,7 +728,7 @@ async def generate_book_revision_draft(
         raise BookRevisionError("修改思路已经变化，请重新查看后再生成修改稿")
     baseline = await db.get(
         MemoirBookOutputVersion,
-        proposal.base_output_version_id,
+        response.base_output_version_id,
     )
     if baseline is None:
         raise BookRevisionError("修改前的书稿版本已不可用")

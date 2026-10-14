@@ -81,6 +81,39 @@ def _same_book_body(left: MemoirBookOutputVersion, right: MemoirBookOutputVersio
     return chapters(left) == chapters(right)
 
 
+def _without_automatic_copy(version: MemoirBookOutputVersion) -> dict:
+    manuscript = deepcopy(version.manuscript_json)
+    for section in manuscript.get("front_matter", []):
+        if section.get("kind") == "preface":
+            section["content"] = ""
+    afterword = manuscript.get("back_matter", {}).get("afterword")
+    if afterword is not None:
+        afterword["content"] = ""
+    for field in ("back_cover_quote", "editorial_copy_model"):
+        manuscript.get("render_settings", {}).pop(field, None)
+    for chapter in manuscript.get("chapters", []):
+        chapter.pop("intro", None)
+        chapter.pop("pull_quotes", None)
+    return manuscript
+
+
+async def revision_compatible_version(
+    db: AsyncSession, baseline: MemoirBookOutputVersion,
+) -> MemoirBookOutputVersion | None:
+    """Accept only system copy updates; any intervening authored edit is a conflict."""
+    versions = (await db.scalars(select(MemoirBookOutputVersion).where(
+        MemoirBookOutputVersion.output_id == baseline.output_id,
+        MemoirBookOutputVersion.version > baseline.version,
+    ).order_by(MemoirBookOutputVersion.version))).all()
+    expected = _without_automatic_copy(baseline)
+    if any(version.created_by != MemoirCreatedBy.SYSTEM.value
+           or version.content != baseline.content
+           or not _same_book_body(baseline, version)
+           or _without_automatic_copy(version) != expected for version in versions):
+        return None
+    return versions[-1] if versions else baseline
+
+
 async def book_body_is_protected(
     db: AsyncSession, *, output: MemoirBookOutput, version: MemoirBookOutputVersion,
 ) -> bool:

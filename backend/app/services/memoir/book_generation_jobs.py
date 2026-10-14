@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -8,14 +9,16 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import InsufficientAICreditError
 from app.clock import utcnow_naive
+from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirBookOutput
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookLevelEditorialCopyTarget,
@@ -27,6 +30,7 @@ from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
+from app.services.memoir.book_output_versions import AUTOMATIC_EDITORIAL_COPY_KEY, AutomaticEditorialCopyState
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 
 
@@ -100,9 +104,10 @@ async def _enqueue_generation_job(
     chapter_id: str | None,
     dedupe_key: str,
     payload_json: dict,
+    automatic: bool = False,
 ) -> MemoirEditingJob:
     existing = await _existing_active_generation_job(db, dedupe_key=dedupe_key)
-    if existing:
+    if existing and not automatic:
         return existing
     return await enqueue_editing_job(
         db,
@@ -113,6 +118,7 @@ async def _enqueue_generation_job(
         run_after=utcnow_naive(),
         dedupe_key=dedupe_key,
         replace_completed=True,
+        reschedule_running=automatic,
     )
 
 
@@ -248,14 +254,15 @@ async def _update_generation_event(
     )
 
 
-async def enqueue_book_editorial_copy_generation_job(
+async def schedule_book_editorial_copy_generation(
     db: AsyncSession,
     *,
     user_id: str,
     project_id: str,
     req: MemoirBookOutputEditorialCopyRegenerateRequest,
-) -> MemoirAutomationEventResponse:
-    await load_memoir_project(db, project_id, user_id)
+    automatic: bool = False,
+) -> MemoirAutomationEvent:
+    """Queue only copy, in the caller's transaction; never prepares chapters/reviews."""
     request_id = str(uuid4())
     label = _editorial_copy_label(req)
     job = await _enqueue_generation_job(
@@ -263,12 +270,14 @@ async def enqueue_book_editorial_copy_generation_job(
         project_id=project_id,
         chapter_id=None,
         job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
-        dedupe_key=_editorial_copy_dedupe_key(project_id, req),
+        dedupe_key=(f"automatic-editorial-copy:{project_id}" if automatic else _editorial_copy_dedupe_key(project_id, req)),
+        automatic=automatic,
         payload_json={
             "request_id": request_id,
             "user_id": user_id,
             "request": _request_payload(req),
             "target_label": label,
+            "automatic": automatic,
         },
     )
     event = await _ensure_generation_event(
@@ -282,6 +291,17 @@ async def enqueue_book_editorial_copy_generation_job(
             "chapter_ids": list(req.chapter_ids),
             "target_label": label,
         },
+    )
+    return event
+
+
+async def enqueue_book_editorial_copy_generation_job(
+    db: AsyncSession, *, user_id: str, project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+) -> MemoirAutomationEventResponse:
+    await load_memoir_project(db, project_id, user_id)
+    event = await schedule_book_editorial_copy_generation(
+        db, user_id=user_id, project_id=project_id, req=req,
     )
     await db.commit()
     return automation_events.event_response(event)
@@ -356,6 +376,16 @@ async def run_book_editorial_copy_generation_job(
     job_id = job.id
     payload = dict(job.payload_json or {})
     label = _safe_str(payload.get("target_label")) or "成书文案"
+    automatic = payload.get("automatic") is True
+    if automatic and await db.scalar(select(MemoirEditingJob.id).where(
+        MemoirEditingJob.project_id == job.project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
+        MemoirEditingJob.status.in_(ACTIVE_JOB_STATUSES),
+    ).limit(1)):
+        # The full workflow already owns copy while it is active. Wait for its
+        # checkpoint so a manual assembly cannot spend on a duplicate AI call.
+        job.run_after = utcnow_naive() + timedelta(seconds=get_settings().memoir_editing_poll_seconds)
+        return EditingJobResult(status=MemoirEditingJobStatus.PENDING)
     try:
         project = await db.get(Project, job.project_id)
         user_id = _safe_str(payload.get("user_id")) or (project.user_id if project else "")
@@ -374,7 +404,16 @@ async def run_book_editorial_copy_generation_job(
             user_id=user_id,
             project_id=job.project_id,
             req=req,
+            automatic=automatic,
+            retry=automatic,
         )
+        if automatic:
+            stored = await db.get(MemoirBookOutput, output.id)
+            state = AutomaticEditorialCopyState.model_validate((stored.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
+            if state.status == "failed":
+                return await _failed_result(db, job=job,
+                    event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+                    summary_text="成书文案暂未更新，已有书稿仍可阅读。", error_message="成书文案生成失败，可以继续整理重试。")
         latest_version = output.latest_version
         await _update_generation_event(
             db,
@@ -396,6 +435,15 @@ async def run_book_editorial_copy_generation_job(
                 "completed_at": utcnow_naive().isoformat(),
             },
         )
+    except InsufficientAICreditError as exc:
+        await db.rollback()
+        job = await db.get(MemoirEditingJob, job_id) or job
+        result = await _failed_result(db, job=job,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            summary_text=f"{label}等待可用额度。", error_message=str(exc))
+        # Keep the typed cause for shared wallet resumption, alongside the visible event.
+        result.result_json["failure"] = {"error_type": type(exc).__name__, "message": str(exc)}
+        return result
     except HTTPException as exc:
         await db.rollback()
         job = await db.get(MemoirEditingJob, job_id) or job

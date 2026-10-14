@@ -214,3 +214,41 @@ async def test_two_workers_claim_credit_recovery_only_once(client, test_db, test
         async with sessions() as db:
             return await editing_jobs.resume_credit_blocked_editing_jobs(db)
     assert sorted(await asyncio.gather(recover(), recover())) == [0, 1]
+
+
+async def test_automatic_copy_credit_recovery_does_not_restart_the_book(client, test_db, monkeypatch):
+    from app.services.memoir import book_generation_jobs, book_outputs
+    from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
+    from tests.test_memoir_automatic_editorial_copy import _output
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+    project, _, _ = await _output(client, test_db)
+    await _wallet(test_db, project.user_id, "0")
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project.id)
+    parent.status = "succeeded"
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db, user_id=project.user_id,
+        project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
+    job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project.id}"))
+    await test_db.commit()
+    async def insufficient(**kwargs):
+        raise InsufficientAICreditError("AI 额度已用尽")
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", insufficient)
+    editing_jobs.clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert not await run_test_editing_job(test_db, job.id)
+    finally:
+        editing_jobs.clear_editing_job_handlers()
+    await test_db.refresh(job)
+    assert job.result_json["failure"]["error_type"] == "InsufficientAICreditError"
+    from app.models.memoir import MemoirAutomationEvent
+    event = await test_db.get(MemoirAutomationEvent, job.payload_json["automation_event_id"])
+    assert event.status == "failed"
+    manual = await _blocked(test_db, project.id)
+    manual.job_type = "generate_book_editorial_copy"
+    manual.payload_json = {"automatic": False}
+    await test_db.commit()
+    await add_ai_credit(test_db, user_id=project.user_id, amount_rmb=Decimal("5"), kind="grant", actor_user_id=project.user_id)
+    assert await editing_jobs.resume_credit_blocked_editing_jobs(test_db) == 1
+    await test_db.refresh(parent)
+    await test_db.refresh(manual)
+    assert parent.status == "succeeded" and manual.status == "failed"
