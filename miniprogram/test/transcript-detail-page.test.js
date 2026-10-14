@@ -398,7 +398,8 @@ test("transcript detail opens the registered media tools page", async () => {
   ]);
 });
 
-test("transcript detail page shows saved audio awaiting transcription", async () => {
+for (const status of ["pending_transcription", "unrecognized", "empty"]) {
+test(`transcript detail page recovers saved audio: ${status}`, async () => {
   const recoverCalls = [];
   const toasts = [];
   const { page } = loadTranscriptDetailPage({
@@ -413,7 +414,7 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
         raw_char_count: 0,
         edited_char_count: 0,
         display_char_count: 0,
-        transcription_status: "pending_transcription",
+        transcription_status: status,
         can_recover_transcription: true,
       }),
       recoverMemoirVoiceTranscript: async (id) => {
@@ -470,6 +471,7 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(toasts.length, 1);
   assert.equal(toasts[0].icon, "success");
 });
+}
 
 test("transcript detail page labels human interviewer questions", async () => {
   const { page } = loadTranscriptDetailPage({

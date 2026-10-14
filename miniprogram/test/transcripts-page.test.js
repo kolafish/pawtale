@@ -941,13 +941,14 @@ test("transcripts page asks logged-in users to create a memoir before listing re
 });
 
 
-test("empty recovery outcome keeps original audio recoverable without claiming successful transcription", async () => {
+for (const status of ["unrecognized", "empty"]) {
+test(`no-text recovery keeps original audio recoverable: ${status}`, async () => {
   const item = { ...sampleTranscript("quiet"), transcript_raw: "", transcript_edited: "", display_text: "",
-    transcription_status: "unrecognized", can_recover_transcription: true, display_char_count: 0 };
+    transcription_status: status, can_recover_transcription: true, display_char_count: 0 };
   const { page } = loadTranscriptsPage({
     authExports: { getMemoirIdentity: async () => ({id: "user-1", active_project_id: "project-1", projects: []}) },
     voiceApiExports: { listMemoirVoiceTranscripts: async () => ({items: [item], total: 1, limit: 30, offset: 0}),
-      recoverMemoirVoiceTranscript: async () => item },
+      recoverMemoirVoiceTranscript: async () => ({...item, transcription_status: "unrecognized"}) },
   });
   const context = pageContext(page);
   const toasts = [];
@@ -959,3 +960,4 @@ test("empty recovery outcome keeps original audio recoverable without claiming s
   assert.equal(toasts.at(-1).icon, "none");
   delete global.wx;
 });
+}
