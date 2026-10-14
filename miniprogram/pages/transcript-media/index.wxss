@@ -386,7 +386,7 @@
   margin-top: 10rpx;
 }
 
-.share-video-more {
+.text-action-button.share-video-more {
   display: block;
   margin: 18rpx auto 0;
 }
