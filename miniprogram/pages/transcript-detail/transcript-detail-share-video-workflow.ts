@@ -1,6 +1,4 @@
 import type { ShareLikerView } from "../../services/share-likes";
-import { chooseImageFile } from "../../services/authenticated-media";
-import type { MemoirShareVideoCustomBackgroundAsset } from "../../domain/memoir-transcript";
 import {
   MEMOIR_SHARE_VIDEO_STYLES,
   normalizeMemoirShareVideoStyle,
@@ -8,10 +6,8 @@ import {
 import { trackAuditAction } from "../../services/audit-tracker";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
-  downloadMemoirShareVideoCustomBackgroundPreview,
   getMemoirShareVideoJob,
   getMemoirTranscriptShareVideoContext,
-  uploadMemoirShareVideoCustomBackground,
 } from "../../services/memoir-transcript-api";
 import {
   datasetNumber,
@@ -66,7 +62,6 @@ interface TranscriptMediaWorkflowHost {
   data: TranscriptMediaData;
   shareVideoController: TranscriptShareVideoController;
   materialImageController: TranscriptMaterialImageController;
-  shareVideoBackgroundUploadToken: number;
   setData(patch: Partial<TranscriptMediaData>): void;
 }
 
@@ -81,7 +76,9 @@ export interface TranscriptMediaWorkflowMethods {
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent): void;
   toggleShareVideoMoreSettings(): void;
   changeShareVideoBackgroundNote(event: PageTextInputEvent): void;
-  chooseShareVideoCustomBackground(): Promise<void>;
+  changeShareVideoPhotos(event: { detail: { photoIds: string[] } }): void;
+  markShareVideoPhotoBusy(event: { detail: { busy: boolean } }): void;
+  showShareVideoPhotoError(event: { detail: { message: string } }): void;
   createMaterialImage(): Promise<void>;
   openImageAssets(): void;
   createShareVideo(): Promise<void>;
@@ -97,7 +94,6 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   resetShareVideoState() {
     this.shareVideoController.reset();
     this.materialImageController.reset();
-    this.shareVideoBackgroundUploadToken += 1;
     this.setData(initialTranscriptShareVideoData());
   },
 
@@ -201,10 +197,8 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
         ...shareVideoStylePatch(context,
           normalizeMemoirShareVideoStyle(previousJob.video_style, previousJob.background_source)),
         ...(sameText ? selection : {}),
-        shareVideoCustomBackgroundAssetId: previousJob.custom_background_asset_id || "",
+        shareVideoPhotoIds: previousJob.photo_asset_ids || [],
         shareVideoBackgroundNote: previousJob.background_note || "",
-        shareVideoCustomBackgroundStatusText: previousJob.custom_background_asset_id
-          ? "沿用原视频的图片，也可以重新选择" : "",
         shareVideoError: sameText ? "" : "讲述文字已更新，请重新选择片段。已有视频会继续保留。",
       });
     }
@@ -220,7 +214,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.shareVideoPhotoBusy ||
       this.data.materialImageCreating ||
       this.data.materialImagePolling
     ) {
@@ -280,7 +274,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.shareVideoPhotoBusy ||
       this.data.materialImageCreating ||
       this.data.materialImagePolling
     ) {
@@ -310,7 +304,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.shareVideoPhotoBusy ||
       this.data.materialImageCreating ||
       this.data.materialImagePolling
     ) {
@@ -342,7 +336,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.shareVideoPhotoBusy ||
       this.data.materialImageCreating ||
       this.data.materialImagePolling
     ) {
@@ -359,91 +353,17 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     });
   },
 
-  async chooseShareVideoCustomBackground() {
-    const item = this.data.item;
-    if (
-      !item ||
-      this.data.shareVideoStyle !== "uploaded" ||
-      !this.data.shareVideoContext ||
-      this.data.shareVideoCreating ||
-      this.data.shareVideoPolling ||
-      this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
-      this.data.materialImageCreating ||
-      this.data.materialImagePolling
-    ) {
-      return;
-    }
-    let uploadToken = 0;
-    try {
-      const filePath = await chooseImageFile();
-      if (!filePath) {
-        return;
-      }
-      this.shareVideoController.clearResult();
-      this.shareVideoBackgroundUploadToken += 1;
-      const token = this.shareVideoBackgroundUploadToken;
-      uploadToken = token;
-      this.setData({
-        shareVideoCustomBackgroundUploading: true,
-        shareVideoCustomBackgroundStatusText: "正在处理背景图片",
-      });
-      const asset: MemoirShareVideoCustomBackgroundAsset = await uploadMemoirShareVideoCustomBackground(
-        item.project_id,
-        filePath,
-      );
-      if (token !== this.shareVideoBackgroundUploadToken) {
-        return;
-      }
-      if (asset.status !== "ready") {
-        throw new Error("背景图片还没有处理完成，请稍后重试");
-      }
-      let previewPath = "";
-      try {
-        previewPath = await downloadMemoirShareVideoCustomBackgroundPreview(asset);
-      } catch (previewError) {
-        if (token !== this.shareVideoBackgroundUploadToken) {
-          return;
-        }
-        this.setData({
-          shareVideoCustomBackgroundUploading: false,
-          shareVideoCustomBackgroundAssetId: asset.id,
-          shareVideoCustomBackgroundPreviewPath: "",
-          shareVideoCustomBackgroundStatusText: previewError instanceof Error
-            ? `背景图片已处理，预览暂不可用：${previewError.message}`
-            : "背景图片已处理，预览暂不可用",
-          shareVideoError: "",
-        });
-        return;
-      }
-      if (token !== this.shareVideoBackgroundUploadToken) {
-        return;
-      }
-      this.setData({
-        shareVideoCustomBackgroundUploading: false,
-        shareVideoCustomBackgroundAssetId: asset.id,
-        shareVideoCustomBackgroundPreviewPath: previewPath,
-        shareVideoCustomBackgroundStatusText: "背景图片已处理，会用于本次视频",
-        shareVideoError: "",
-      });
-      trackAuditAction(
-        "transcript.detail_share_video_custom_background_upload",
-        { asset_id: asset.id },
-        { projectId: item.project_id },
-      );
-    } catch (error) {
-      if (uploadToken && uploadToken !== this.shareVideoBackgroundUploadToken) {
-        return;
-      }
-      this.setData({
-        shareVideoCustomBackgroundUploading: false,
-        shareVideoCustomBackgroundStatusText: "",
-        shareVideoError: error instanceof Error ? error.message : "背景图片处理失败",
-        shareVideoStatusText: "背景图片处理失败",
-        shareVideoStatusClass: "failed",
-      });
-    }
+  changeShareVideoPhotos(event: { detail: { photoIds: string[] } }) {
+    this.shareVideoController.clearResult();
+    this.setData({ shareVideoPhotoIds: event.detail.photoIds, shareVideoError: "" });
+  },
+
+  markShareVideoPhotoBusy(event: { detail: { busy: boolean } }) {
+    this.setData({ shareVideoPhotoBusy: event.detail.busy });
+  },
+
+  showShareVideoPhotoError(event: { detail: { message: string } }) {
+    this.setData({ shareVideoError: event.detail.message });
   },
 
   async createMaterialImage() {
@@ -458,7 +378,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoPhotoBusy
     ) {
       return;
     }
@@ -501,7 +421,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.shareVideoPhotoBusy ||
       this.data.materialImageCreating ||
       this.data.materialImagePolling
     ) {
@@ -511,11 +431,13 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       this.setData({ shareVideoError: "AI配图暂不可用，请选择「自己配图」" });
       return;
     }
+    const photoIds = this.data.shareVideoPhotoIds;
     if (this.data.shareVideoStyle === "uploaded"
-      && !this.data.shareVideoCustomBackgroundAssetId) {
+      && (!photoIds.length || photoIds.length > this.data.shareVideoPhotoMaxCount)) {
       this.setData({
-        shareVideoError: "请先选择一张自定义背景图片",
-        shareVideoStatusText: "请先选择背景图片",
+        shareVideoError: photoIds.length
+          ? `这段最多放 ${this.data.shareVideoPhotoMaxCount} 张照片，请删掉几张或多选几句`
+          : "请先添加照片",
         shareVideoStatusClass: "failed",
       });
       return;
@@ -545,7 +467,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
             ? { backgroundNote: this.data.shareVideoBackgroundNote.trim() } : {}),
         } : {}),
         ...(this.data.shareVideoBackgroundSource === "custom" ? {
-          customBackgroundAssetId: this.data.shareVideoCustomBackgroundAssetId,
+          photoAssetIds: photoIds,
         } : {}),
       },
       ...(candidate ? { candidate: { projectId: item.project_id, id: candidate.id } } : {}),
@@ -553,7 +475,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
     if (job) {
       trackAuditAction(
         "transcript.detail_share_video_create",
-        { video_style: this.data.shareVideoStyle, duration_ms: job.duration_ms },
+        { video_style: this.data.shareVideoStyle, duration_ms: job.duration_ms, photo_count: photoIds.length },
         { projectId: item.project_id },
       );
     } else {

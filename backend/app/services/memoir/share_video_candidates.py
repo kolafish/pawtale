@@ -565,7 +565,7 @@ async def create_candidate_share_video(
             background_source=req.background_source,
             background_style=req.background_style,
             background_mode=req.background_mode,
-            custom_background_asset_id=req.custom_background_asset_id,
+            photo_asset_ids=req.photo_asset_ids,
             hook_text=candidate.hook_text if req.hook_text is None else req.hook_text,
             background_note=req.background_note,
         ),

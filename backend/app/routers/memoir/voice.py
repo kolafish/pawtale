@@ -7,7 +7,7 @@ from typing import Literal
 import uuid
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,7 +50,6 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
     MemoirTranscriptShareVideoContextResponse,
-    MemoirShareVideoCustomBackgroundAssetResponse,
     MemoirShareVideoJobCreateRequest,
     MemoirShareVideoDeleteRequest,
     MemoirShareVideoJobListResponse,
@@ -75,7 +74,6 @@ from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts_persistence as memoir_voice_tts
 from app.services.memoir import share_video_alignment as memoir_share_video_alignment
-from app.services.memoir import share_video_custom_backgrounds as memoir_share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs as memoir_share_video_jobs
 from app.services.memoir import share_video_shares as memoir_share_video_shares
 from app.services.memoir import share_video_candidates as memoir_share_video_candidates
@@ -579,28 +577,6 @@ async def get_mobile_memoir_material_image_generation_job(
         db,
         job_id=job_id,
         user_id=current_user.id,
-        allow_admin=is_admin_user(current_user),
-    )
-
-
-@router.post(
-    "/share-video/background-assets",
-    response_model=MemoirShareVideoCustomBackgroundAssetResponse,
-    status_code=201,
-)
-async def upload_mobile_memoir_share_video_background_asset(
-    project_id: str = Form(...),
-    processing_preset: str = Form("memoir_soft"),
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_share_video_custom_backgrounds.create_custom_share_video_background_asset(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        upload=file,
-        processing_preset=processing_preset,
         allow_admin=is_admin_user(current_user),
     )
 

@@ -65,7 +65,6 @@ definePage<TranscriptMediaData>()({
   loadToken: 0,
   requestedShareVideoJobId: "",
   requestedShareVideoCandidateId: "",
-  shareVideoBackgroundUploadToken: 0,
 
   data: {
     pageClass: "detail-page",
@@ -296,7 +295,6 @@ definePage<TranscriptMediaData>()({
 
   onUnload() {
     this.loadToken += 1;
-    this.shareVideoBackgroundUploadToken += 1;
     this.shareVideoController.dispose();
     this.materialImageController.dispose();
   },

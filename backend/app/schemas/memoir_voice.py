@@ -7,7 +7,6 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirGuidanceMode,
-    MemoirImageAssetStatus,
     MemoirInterviewType,
     MemoirSessionGoal,
     MemoirShareVideoJobStatus,
@@ -463,6 +462,8 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     alignment_confidence: float | None = None
     min_select_ms: int = 3000
     max_select_ms: int = 90000
+    photo_min_ms: int = 3000
+    photo_max_count: int = 20
     ai_background_enabled: bool = False
     default_video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
     video_styles: list[MemoirShareVideoStyleResponse] = Field(default_factory=list)
@@ -485,7 +486,7 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
-    custom_background_asset_id: str | None = Field(default=None, max_length=36)
+    photo_asset_ids: list[str] = Field(default_factory=list, max_length=20)
     # A verbatim sentence from the selection shown before the narration; empty lets the title step pick.
     hook_text: str = Field(default="", max_length=200)
     # Who the people are (gender, age, relationships), written by the author for the illustrations.
@@ -496,7 +497,6 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
         "background_source",
         "background_style",
         "background_mode",
-        "custom_background_asset_id",
     )
     @classmethod
     def _valid_optional_text(cls, value: str | None) -> str | None:
@@ -520,7 +520,7 @@ class MemoirShareVideoCandidateCreateVideoRequest(BaseModel):
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
-    custom_background_asset_id: str | None = Field(default=None, max_length=36)
+    photo_asset_ids: list[str] = Field(default_factory=list, max_length=20)
     # None keeps the recommendation's own opening line; "" lets the title step pick.
     hook_text: str | None = Field(default=None, max_length=200)
     background_note: str = Field(default="", max_length=300)
@@ -623,7 +623,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     background_style: str = "watercolor"
     background_mode: str = "auto"
     background_effective_mode: str = "single"
-    custom_background_asset_id: str | None = None
+    photo_asset_ids: list[str] = Field(default_factory=list)
     background_note: str = ""
     background_style_label: str = ""
     background_scene_count: int = 0
@@ -646,20 +646,6 @@ class MemoirShareVideoJobListResponse(BaseModel):
     total: int
     limit: int
     offset: int
-
-
-class MemoirShareVideoCustomBackgroundAssetResponse(BaseModel):
-    id: str
-    project_id: str
-    status: MemoirImageAssetStatus
-    preview_url: str
-    mime_type: str = "image/jpeg"
-    size_bytes: int | None = None
-    width: int | None = None
-    height: int | None = None
-    processing_preset: str = "memoir_soft"
-    original_mime_type: str = ""
-    original_size_bytes: int | None = None
 
 
 class MemoirVoiceSearchTranscriptionRequest(BaseModel):

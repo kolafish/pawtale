@@ -287,6 +287,16 @@ def _group_sentence_units(
     return groups
 
 
+def group_share_video_sentences(
+    selected_text: str,
+    char_timings: list[dict[str, int]],
+    duration_ms: int,
+    count: int,
+) -> list[list[ShareVideoSentence]]:
+    """Up to `count` runs of consecutive sentences of about equal length."""
+    return _group_sentence_units(share_video_sentence_units(selected_text, char_timings, duration_ms), count)
+
+
 def _fallback_title(text: str, index: int) -> str:
     compact = re.sub(r"[，。！？!?；;\s]+", "", text).strip()
     if compact:

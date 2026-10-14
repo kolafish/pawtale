@@ -1,0 +1,67 @@
+<view class="photo-grid">
+  <view
+    wx:for="{{photos}}"
+    wx:key="id"
+    class="photo-cell {{index === dragIndex ? 'dragging' : ''}}"
+    data-index="{{index}}"
+    bindlongpress="startDrag"
+    catchtouchmove="moveDrag"
+    bindtouchend="endDrag"
+    bindtouchcancel="endDrag"
+    aria-label="第 {{index + 1}} 张照片，长按拖动调整顺序"
+  >
+    <image wx:if="{{item.path}}" class="photo-image" src="{{item.path}}" mode="aspectFill" />
+    <view wx:else class="photo-image photo-placeholder"></view>
+    <text class="photo-order">{{index + 1}}</text>
+    <view
+      wx:if="{{!disabled && !busy}}"
+      class="photo-remove"
+      data-index="{{index}}"
+      catchtap="removePhoto"
+      aria-role="button"
+      aria-label="删除第 {{index + 1}} 张照片"
+    >×</view>
+  </view>
+  <view
+    wx:if="{{photos.length < maxCount}}"
+    class="photo-cell photo-add {{disabled || busy ? 'disabled' : ''}}"
+    bindtap="addPhotos"
+    aria-role="button"
+    aria-label="添加照片"
+  >
+    <text class="photo-add-mark">＋</text>
+    <text class="photo-add-label">添加照片</text>
+  </view>
+</view>
+<text wx:if="{{busy}}" class="photo-status">{{statusText}}</text>
+<text wx:elif="{{photos.length > maxCount}}" class="photo-status warning">已选 {{photos.length}} 张，这段最多放 {{maxCount}} 张，请删掉几张或多选几句</text>
+<text wx:elif="{{photos.length > 1}}" class="photo-status muted">照片按顺序配给每句话，长按拖动调整顺序</text>
+<text wx:else class="photo-status muted">可以选家里的老照片、旧物或地点，这段最多放 {{maxCount}} 张</text>
+
+<view wx:if="{{pickerOpen}}" class="picker-mask" catchtouchmove="keepPageStill" bindtap="closePicker"></view>
+<view wx:if="{{pickerOpen}}" class="picker-sheet">
+  <view class="picker-head">
+    <button class="text-action-button" bindtap="closePicker">取消</button>
+    <text class="picker-title">从图片素材选（{{pickerCount}}/{{maxCount}}）</text>
+    <button class="text-action-button" bindtap="confirmPicker">完成</button>
+  </view>
+  <scroll-view scroll-y class="picker-body">
+    <text wx:if="{{pickerLoading}}" class="photo-status muted">正在读取图片素材</text>
+    <text wx:elif="{{!pickerItems.length}}" class="photo-status muted">图片素材里还没有图片，可以从手机相册选</text>
+    <view wx:else class="photo-grid">
+      <view
+        wx:for="{{pickerItems}}"
+        wx:key="id"
+        class="photo-cell {{item.order ? 'chosen' : ''}}"
+        data-index="{{index}}"
+        bindtap="togglePickerItem"
+        aria-role="checkbox"
+        aria-checked="{{item.order > 0}}"
+      >
+        <image wx:if="{{item.path}}" class="photo-image" src="{{item.path}}" mode="aspectFill" />
+        <view wx:else class="photo-image photo-placeholder"></view>
+        <text wx:if="{{item.order}}" class="photo-order">{{item.order}}</text>
+      </view>
+    </view>
+  </scroll-view>
+</view>

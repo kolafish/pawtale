@@ -83,10 +83,10 @@ export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState 
   shareVideoBackgroundMode: string;
   shareVideoBackgroundModeLabel: string;
   shareVideoBackgroundModeOptions: MemoirShareVideoBackgroundMode[];
-  shareVideoCustomBackgroundUploading: boolean;
-  shareVideoCustomBackgroundAssetId: string;
-  shareVideoCustomBackgroundPreviewPath: string;
-  shareVideoCustomBackgroundStatusText: string;
+  // Image-library pictures for an uploaded-style video, in playing order.
+  shareVideoPhotoIds: string[];
+  shareVideoPhotoMaxCount: number;
+  shareVideoPhotoBusy: boolean;
   // Who the people are, written by the author so the illustrations get gender, age and relationships right.
   shareVideoBackgroundNote: string;
   // Illustration style and image mode stay folded behind one row until asked for.
@@ -103,6 +103,7 @@ type ShareVideoSelectionPatch = Pick<
   | "shareVideoSelectedText"
   | "shareVideoSelectedMetaText"
   | "shareVideoSelectedCanGenerate"
+  | "shareVideoPhotoMaxCount"
   | "shareVideoHookText"
   | "shareVideoHookChoices"
   | "shareVideoStatusText"
@@ -124,7 +125,7 @@ export interface TranscriptShareVideoCreateOptions {
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
-  customBackgroundAssetId?: string;
+  photoAssetIds?: string[];
   hookText?: string;
   backgroundNote?: string;
 }
@@ -216,6 +217,15 @@ function shareVideoHookChoices(
     .filter((text) => text && Array.from(text).filter((char) => char.trim()).length <= HOOK_MAX_VISIBLE_CHARS);
 }
 
+// Mirrors the backend rule: each photo needs a few seconds of narration.
+function shareVideoPhotoMaxCount(context: MemoirTranscriptShareVideoContext | null, durationMs: number): number {
+  const maxCount = context?.photo_max_count ?? 20;
+  if (!durationMs) {
+    return maxCount;
+  }
+  return Math.max(1, Math.min(maxCount, Math.floor(durationMs / (context?.photo_min_ms || 3000))));
+}
+
 export function shareVideoSelectionPatch(
   context: MemoirTranscriptShareVideoContext | null,
   selectedStartIndex: number,
@@ -274,6 +284,7 @@ export function shareVideoSelectionPatch(
       ? `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)} · ${Array.from(selectedText).length} 字`
       : "",
     shareVideoSelectedCanGenerate: selectedCanGenerate,
+    shareVideoPhotoMaxCount: shareVideoPhotoMaxCount(context, durationMs),
     shareVideoStatusText: statusText,
     shareVideoStatusClass: statusClass,
   };
@@ -376,10 +387,8 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
     ...shareVideoBackgroundPatch(null),
     ...shareVideoStylePatch(null),
     shareVideoCandidate: null,
-    shareVideoCustomBackgroundUploading: false,
-    shareVideoCustomBackgroundAssetId: "",
-    shareVideoCustomBackgroundPreviewPath: "",
-    shareVideoCustomBackgroundStatusText: "",
+    shareVideoPhotoIds: [],
+    shareVideoPhotoBusy: false,
     shareVideoBackgroundNote: "",
     shareVideoMoreSettingsOpen: false,
     ...initialTranscriptShareVideoTaskState(),
@@ -389,7 +398,7 @@ export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
 export function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
     if (job.background_source === "custom") {
-      return "视频已生成，已使用自定义背景";
+      return `视频已生成，用了 ${job.background_scene_count || 1} 张照片`;
     }
     if (job.background_source === "classic") {
       return "视频已生成，已使用经典背景";

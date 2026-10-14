@@ -28,12 +28,13 @@ from app.services.memoir.share_video_backgrounds import (
 from app.services.memoir.share_video_custom_backgrounds import (
     SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
-    load_custom_share_video_background_asset,
+    load_share_video_photo_paths,
     normalize_share_video_background_source,
 )
 from app.services.memoir.share_video_scene_planner import (
     SHARE_VIDEO_SCENE_MIN_DURATION_MS,
     ShareVideoScene,
+    group_share_video_sentences,
     plan_share_video_background_scenes,
     scene_plan_to_metadata,
 )
@@ -130,6 +131,25 @@ def _render_background_segments(
     return segments
 
 
+def _photo_segments(
+    selected_text: str,
+    char_timings: list[dict[str, int]],
+    duration_ms: int,
+    paths: list[Path],
+) -> list[rendering.ShareVideoBackgroundSegment]:
+    """Give each photo, in order, a run of whole sentences; split evenly when sentences run out."""
+    groups = group_share_video_sentences(selected_text, char_timings, duration_ms, len(paths))
+    if len(groups) == len(paths):
+        starts = [0, *(group[0].start_ms for group in groups[1:])]
+    else:
+        starts = [round(duration_ms * index / len(paths)) for index in range(len(paths))]
+    ends = [*starts[1:], duration_ms]
+    return [
+        rendering.ShareVideoBackgroundSegment(image_path=path, start_ms=start, end_ms=max(start + 1, end))
+        for path, start, end in zip(paths, starts, ends, strict=True)
+    ]
+
+
 async def prepare_share_video_background(
     db: AsyncSession,
     *,
@@ -158,23 +178,15 @@ async def prepare_share_video_background(
     narrator_context = share_video_narrator_context(project_metadata.get("memoir_profile"))
 
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
-        custom_background_asset_id = metadata.custom_background_asset_id
-        if not custom_background_asset_id:
-            raise rendering.ShareVideoGenerationError("自定义背景图不存在")
-        custom_asset, background_image_path = await load_custom_share_video_background_asset(
-            db,
-            user_id=job.user_id,
-            project_id=job.project_id,
-            asset_id=custom_background_asset_id,
-            allow_admin=True,
-        )
+        photo_paths = await load_share_video_photo_paths(
+            db, project_id=job.project_id, asset_ids=metadata.photo_asset_ids,
+        ) if metadata.photo_asset_ids else None
+        if not photo_paths:
+            raise rendering.ShareVideoGenerationError("有照片已删除，请重新选择")
+        background_segments = _photo_segments(job.selected_text, metadata.char_timing_dicts(), duration_ms, photo_paths)
         metadata.background_status = "ready"
         metadata.background_effective_mode = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
-        metadata.background_scene_count = 1
-        metadata.background_storage_path = custom_asset.storage_path
-        metadata.background_provider = custom_asset.provider
-        metadata.background_model = custom_asset.model
-        metadata.background_cache_hit = None
+        metadata.background_scene_count = len(photo_paths)
         metadata.background_error_message = ""
         await persist_progress(metadata)
     elif background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC:

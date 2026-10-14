@@ -6,7 +6,7 @@ from PIL import Image
 from app.models.memoir import MemoirMaterialShareVideo
 from app.models.projects import Project
 from app.services.memoir import share_video_alignment, share_video_jobs
-from app.services.memoir import image_assets, share_video_custom_backgrounds
+from app.services.memoir import image_assets
 from app.services.memoir.project_ai_preferences import (
     project_share_video_style,
     remember_project_share_video_style,
@@ -21,8 +21,9 @@ def test_legacy_style_and_current_render_signatures():
     remember_project_share_video_style(project, "uploaded")
     assert project_share_video_style(project) == "uploaded"
     assert ShareVideoJobMetadata.from_json({}).video_style == "illustrated"
-    uploaded = ShareVideoJobMetadata.from_json({"background_source": "custom"})
+    uploaded = ShareVideoJobMetadata.from_json({"background_source": "custom", "custom_background_asset_id": "photo"})
     assert uploaded.video_style == "uploaded"
+    assert uploaded.photo_asset_ids == ["photo"]
     illustrated = ShareVideoJobMetadata(ai_model="deepseek-flash", background_source="ai")
     signature = share_video_jobs._share_video_options_signature
     assert signature(uploaded) != signature(illustrated)
@@ -79,7 +80,7 @@ async def test_explicit_styles_require_their_source_but_legacy_default_survives(
     assert "AI配图" in unavailable.json()["detail"]
     upload = await client.post(url, json={**selection, "video_style": "uploaded"})
     assert upload.status_code == 400
-    assert "背景图" in upload.json()["detail"]
+    assert upload.json()["detail"] == "请选择照片"
     project = await test_db.get(Project, created["session"]["project_id"])
     project.metadata_json = {key: value for key, value in project.metadata_json.items() if key != "share_video_style"}
     await test_db.commit()
@@ -101,15 +102,7 @@ async def test_explicit_styles_require_their_source_but_legacy_default_survives(
 
 async def test_uploaded_style_keeps_asset_identity_and_separate_ai_jobs(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(share_video_jobs, "get_settings", lambda: _settings(ai_enabled=True))
-    monkeypatch.setattr(share_video_custom_backgrounds, "DATA_DIR", tmp_path)
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
-
-    async def process(source_path, target_path):
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(source_path.read_bytes())
-        return 8, 8
-
-    monkeypatch.setattr(share_video_custom_backgrounds, "_process_background_image", process)
     text = "后来我们约起一起走。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     project_id = created["session"]["project_id"]
@@ -118,8 +111,8 @@ async def test_uploaded_style_keeps_asset_identity_and_separate_ai_jobs(client, 
         source = BytesIO()
         Image.new("RGB", (8, 8), color).save(source, format="PNG")
         uploaded = await client.post(
-            "/api/mobile/memoir/share-video/background-assets",
-            data={"project_id": project_id}, files={"file": ("picture.png", source.getvalue(), "image/png")},
+            f"/api/mobile/memoir/projects/{project_id}/image-assets",
+            files={"file": ("picture.png", source.getvalue(), "image/png")},
         )
         assert uploaded.status_code == 201, uploaded.text
         asset_ids.append(uploaded.json()["id"])
@@ -128,14 +121,14 @@ async def test_uploaded_style_keeps_asset_identity_and_separate_ai_jobs(client, 
     jobs = []
     for asset_id in asset_ids:
         response = await client.post(url, json={
-            **selection, "video_style": "uploaded", "custom_background_asset_id": asset_id,
+            **selection, "video_style": "uploaded", "photo_asset_ids": [asset_id],
         })
         assert response.status_code == 201, response.text
         assert response.json()["video_style"] == "uploaded"
         assert response.json()["background_source"] == "custom"
         jobs.append(response.json()["id"])
     repeated = await client.post(url, json={
-        **selection, "video_style": "uploaded", "custom_background_asset_id": asset_ids[0],
+        **selection, "video_style": "uploaded", "photo_asset_ids": [asset_ids[0]],
     })
     assert repeated.json()["id"] == jobs[0]
     illustrated = await client.post(url, json={**selection, "video_style": "illustrated"})

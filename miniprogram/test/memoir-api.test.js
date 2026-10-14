@@ -562,7 +562,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   const detail = await getMemoirShareVideoJob("job/1");
   await createMemoirShareVideoCandidateJob("project/1", "candidate/1", {
     videoStyle: "uploaded",
-    customBackgroundAssetId: "photo-1",
+    photoAssetIds: ["photo-2", "photo-1"],
   });
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
   await downloadMemoirShareVideoThumbnail("job/1");
@@ -596,7 +596,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.equal(apiRequests[3].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/share-video-candidates/candidate%2F1/create-video");
   assert.deepEqual(apiRequests[3].data, {
-    ai_model: "deepseek-v4-pro", video_style: "uploaded", custom_background_asset_id: "photo-1",
+    ai_model: "deepseek-v4-pro", video_style: "uploaded", photo_asset_ids: ["photo-2", "photo-1"],
   });
   assert.equal(apiRequests[4].url,
     "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1");
@@ -619,7 +619,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   delete global.wx;
 });
 
-test("share video custom background upload and preview use backend session", async () => {
+test("image library upload and thumbnail download use backend session", async () => {
   const requests = [];
   const uploads = [];
   const downloads = [];
@@ -677,32 +677,13 @@ test("share video custom background upload and preview use backend session", asy
     },
   };
   resetMemoirApiModules();
-  const {
-    downloadMemoirShareVideoCustomBackgroundPreview,
-    uploadMemoirShareVideoCustomBackground,
-  } = require("../services/memoir-transcript-api.ts");
-
-  const uploaded = await uploadMemoirShareVideoCustomBackground("project/1", "/tmp/family.png");
-  const previewPath = await downloadMemoirShareVideoCustomBackgroundPreview(uploaded);
-
-  assert.equal(uploaded.id, "asset-1");
-  assert.equal(previewPath, "/tmp/processed-background.jpg");
-  assert.equal(uploads.length, 1);
-  assert.equal(uploads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/background-assets");
-  assert.equal(uploads[0].filePath, "/tmp/family.png");
-  assert.equal(uploads[0].name, "file");
-  assert.deepEqual(uploads[0].formData, {
-    project_id: "project/1",
-    processing_preset: "memoir_soft",
-  });
-  assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
-  assert.equal(uploads[0].timeout, 60000);
-  const { uploadMemoirImageAsset } = require("../services/memoir-book-api.ts");
+  const { downloadMemoirImageAssetFile, uploadMemoirImageAsset } = require("../services/memoir-book-api.ts");
   assert.equal((await uploadMemoirImageAsset("project/1", "/tmp/cover.png")).id, "asset-1");
-  assert.equal(uploads[1].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets");
-  assert.equal(uploads[1].filePath, "/tmp/cover.png");
-  assert.equal(uploads[1].name, "file");
-  assert.equal(uploads[1].header.Cookie, "pawtale_session=abc");
+  assert.equal(await downloadMemoirImageAssetFile("project/1", "asset-1"), "/tmp/processed-background.jpg");
+  assert.equal(uploads[0].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets");
+  assert.equal(uploads[0].filePath, "/tmp/cover.png");
+  assert.equal(uploads[0].name, "file");
+  assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(
     downloads[0].url.split("&cache_key=")[0],
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",

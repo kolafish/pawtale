@@ -41,6 +41,8 @@ from app.services.memoir.share_video_backgrounds import (
 from app.services.memoir.share_video_custom_backgrounds import (
     SHARE_VIDEO_BACKGROUND_SOURCE_AI,
     SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
+    SHARE_VIDEO_PHOTO_MAX_COUNT,
+    SHARE_VIDEO_PHOTO_MIN_MS,
     share_video_background_source_options,
 )
 from app.services.memoir.transcript_projection import (
@@ -442,6 +444,8 @@ def _response(
         alignment_confidence=result.confidence,
         min_select_ms=MIN_SELECT_MS,
         max_select_ms=MAX_SELECT_MS,
+        photo_min_ms=SHARE_VIDEO_PHOTO_MIN_MS,
+        photo_max_count=SHARE_VIDEO_PHOTO_MAX_COUNT,
         ai_background_enabled=ai_background_enabled,
         default_video_style=project_share_video_style(utterance.voice_session.project),
         video_styles=share_video_style_options(),
