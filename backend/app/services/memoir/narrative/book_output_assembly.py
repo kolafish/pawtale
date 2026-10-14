@@ -18,7 +18,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookCustomLayout, MemoirBookManuscriptQuote
+from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookCustomLayout
 from app.services.memoir import (
     automation_events,
     book_editorial_actions,
@@ -28,7 +28,6 @@ from app.services.memoir import (
     completion_issues,
     chapter_generation,
 )
-from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes
 from app.services.memoir.book_output_manuscript import (
     NEW_BOOK_COVER_STYLE,
     NEW_BOOK_TEMPLATE,
@@ -51,57 +50,6 @@ from app.services.memoir.image_assets import (
     manuscript_image_snapshots,
     sync_latest_book_output_image_snapshots,
 )
-
-
-def _same_chapter_copy_context(left: dict[str, object], right: dict[str, object]) -> bool:
-    def sections(snapshot: dict[str, object]) -> list[tuple[object, ...]]:
-        value = snapshot.get("sections")
-        return [
-            (
-                section.get("section_id"),
-                section.get("title"),
-                section.get("section_type"),
-                section.get("used_material_ids"),
-            )
-            for section in (value if isinstance(value, list) else [])
-            if isinstance(section, dict)
-        ]
-
-    return (
-        left.get("chapter_title") == right.get("chapter_title")
-        and sections(left) == sections(right)
-        and _chapter_source_refs(left) == _chapter_source_refs(right)
-    )
-
-
-def _chapter_source_refs(snapshot: dict[str, object]) -> dict[str, tuple[object, object]]:
-    refs = snapshot.get("source_refs")
-    return {
-        ref["utterance_id"]: (ref.get("transcript_version_id"), ref.get("quote"))
-        for ref in (refs if isinstance(refs, list) else [])
-        if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str)
-    }
-
-
-def _chapter_lost_sources(left: dict[str, object], right: dict[str, object]) -> bool:
-    def source_ids(snapshot: dict[str, object]) -> set[str]:
-        sections = snapshot.get("sections")
-        materials = {
-            material_id
-            for section in (sections if isinstance(sections, list) else [])
-            if isinstance(section, dict)
-            for material_id in section.get("used_material_ids", [])
-            if isinstance(material_id, str)
-        }
-        if materials:
-            return materials
-        return set(_chapter_source_refs(snapshot))
-
-    old_refs = _chapter_source_refs(left)
-    new_refs = _chapter_source_refs(right)
-    return bool(source_ids(left) - source_ids(right)) or any(
-        new_refs.get(source_id) != source for source_id, source in old_refs.items()
-    )
 
 
 async def assemble_book_output(
@@ -305,18 +253,15 @@ async def assemble_book_output(
             next_snapshot = next_snapshots.get(chapter.chapter_id)
             if not (old and previous_snapshot and next_snapshot):
                 continue
-            fields = {"intro", "pull_quotes"} if _same_chapter_copy_context(previous_snapshot, next_snapshot) else (
-                set(manual_copy_fields.get(chapter.chapter_id, []))
-                if not _chapter_lost_sources(previous_snapshot, next_snapshot) else set()
-            )
+            fields = set(manual_copy_fields.get(chapter.chapter_id, []))
+            if (book_output_versions.chapter_editorial_copy_signature(previous_snapshot)
+                    == book_output_versions.chapter_editorial_copy_signature(next_snapshot)):
+                fields.update({"intro", "pull_quotes"})
+            # An authored intro has no source binding. Deleting an unrelated
+            # narration must never turn it into a protected template sentence.
             if "intro" in fields:
                 chapter.intro = str(old.get("intro") or "")
-            if "pull_quotes" in fields:
-                chapter.pull_quotes = [
-                    MemoirBookManuscriptQuote.model_validate(value)
-                    for value in repair_original_pull_quotes(old)
-                    if isinstance(value, dict)
-                ]
+            chapter.pull_quotes = book_output_versions.retained_chapter_quotes(old, next_snapshot)
     version = await book_output_versions.append_book_output_version(
         db,
         output=output,
