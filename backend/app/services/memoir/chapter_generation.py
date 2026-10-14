@@ -117,6 +117,7 @@ class ChapterGenerationContext:
     polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
     # People cards for those mentioned in this chapter's narration; not part of the input signature.
     people: tuple[str, ...] = ()
+    previous_draft_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -902,7 +903,7 @@ async def load_chapter_generation_context(
         decisions=decisions,
         transcript_edits=await load_transcript_edits(
             db, [material for section in chapter.sections for material in section.materials],
-        ) if decisions else {},
+        ),
     )
     return replace(context, people=await narration_people.people_lines_for(db, project_id, message_ids))
 
@@ -913,9 +914,12 @@ def build_chapter_generation_prompt(
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
+    current_section_user_edited: bool = False,
     revision_instruction: str = "",
     source_update_reason: str = "",
     previous_section_context: str = "",
+    changed_material_ids: set[str] | None = None,
+    previous_material_ids: set[str] | None = None,
 ) -> str:
     section_refs = ModelReferenceMap(
         "S",
@@ -944,15 +948,27 @@ def build_chapter_generation_prompt(
                 f"section_id: {section_refs.encode(section.section_id)}",
                 f"小节标题: {section.title}",
                 f"小节类型: {section.section_type}",
-                fact_decisions.prompt(section.decisions, edits=tuple(
-                    edit for material in section.materials for edit in material.edits
-                )),
+                fact_decisions.prompt(
+                    tuple(decision for decision in section.decisions if not (
+                        current_section_user_edited and context.previous_draft_at
+                        and (decision.confirmed_at is None or decision.confirmed_at <= context.previous_draft_at)
+                    )),
+                    edits=tuple(edit for material in section.materials for edit in material.edits if not (
+                        current_section_user_edited and context.previous_draft_at
+                        and edit.edited_at <= context.previous_draft_at
+                    )),
+                ),
                 "允许素材：",
                 *[
                     (
                         f"material_id: {material_refs.encode(material.material_id)}\n"
                         + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
-                        + f"原始讲述: {material.text}\n"
+                        + (
+                            "已有素材：内容已体现在上方用户确认正文中，以该正文为准；如本条有后续人工更正，仅应用上方实际替换记录，不从转写全文恢复旧说法。\n"
+                            if current_section_user_edited and current_section_content
+                            and previous_material_ids is not None and material.material_id in previous_material_ids
+                            else f"原始讲述{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
+                        )
                     )
                     for material in section.materials
                 ],
@@ -1019,12 +1035,18 @@ def build_chapter_generation_prompt(
 """
     elif current_section_content:
         reason = source_update_reason or "本小节的原始讲述发生了变化。"
+        ownership = (
+            "现有正文已经由用户修改或确认。其与未变化的旧素材不同之处属于已采纳的表达，"
+            "不能仅因旧素材不支持就撤销。只按本次新增素材或明确更正更新实际涉及的事实，保留其余内容。"
+            if current_section_user_edited else
+            "保留仍受素材支持的事实；若素材不支持原有表述，不要延续该表述。"
+        )
         revision = f"""
 现有小节正文：
 {current_section_content}
 
 本次局部更新原因：{reason}
-请在现有正文基础上融入下方素材或调整必要的衔接。保留仍受素材支持的事实、用户原有表达和无关段落；只改与本次变化有关的文字。若素材不支持原有表述，不要延续该表述。标题保持输入标题。
+请在现有正文基础上融入下方素材或调整必要的衔接。{ownership}只改与本次变化有关的文字。标题保持输入标题。
 """
     return f"""{task}
 
@@ -1413,6 +1435,11 @@ async def generate_chapter(
                     previous_by_id[section.section_id].content
                     if section.section_id in previous_by_id else ""
                 ),
+                previous_material_ids=set(previous_by_id[section.section_id].used_material_ids)
+                    if section.section_id in previous_by_id else None,
+                current_section_user_edited=bool(
+                    section.section_id in previous_by_id and previous_by_id[section.section_id].user_edited
+                ),
                 source_update_reason=(related_section_reasons or {}).get(
                     section.section_id, ""
                 ),
@@ -1467,9 +1494,11 @@ async def generate_chapter_section(
     previous_section_content: str = "",
     preceding_section_context: str = "",
     current_section_content: str = "",
+    current_section_user_edited: bool = False,
     revision_instruction: str = "",
     source_update_reason: str = "",
     required_material_ids: set[str] | None = None,
+    previous_material_ids: set[str] | None = None,
     allow_title_revision: bool | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
@@ -1481,9 +1510,12 @@ async def generate_chapter_section(
         editorial_guidance=editorial_guidance,
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
+        current_section_user_edited=current_section_user_edited,
         revision_instruction=revision_instruction,
         source_update_reason=source_update_reason,
         previous_section_context=preceding_section_context,
+        changed_material_ids=required_material_ids,
+        previous_material_ids=previous_material_ids,
     )
     last_error: Exception | None = None
     policy = ai_text_workload_policy(
@@ -1678,6 +1710,8 @@ async def generate_and_save_chapter_draft(
         chapter_id=chapter_id,
     )
     base_version_id = latest_before.id if latest_before else None
+    if latest_before is not None:
+        before = replace(before, previous_draft_at=latest_before.created_at)
     style_refresh = automatic and not chapter_draft_render_policy_current(
         before, latest_before
     ) and latest_before is not None

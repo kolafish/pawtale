@@ -20,7 +20,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir.book_manuscript_cleanup import brief_text
+from app.services.memoir.book_manuscript_cleanup import brief_text, current_original_quote
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
@@ -112,78 +112,6 @@ def _int(value: object) -> int:
     return 0
 
 
-def _string_list(value: object, *, max_items: int, max_chars: int) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = _compact_text(_string(item), max_chars)
-        if text and text not in result:
-            result.append(text)
-        if len(result) >= max_items:
-            break
-    return result
-
-
-def _chapter_summary(item: dict[str, object]) -> str:
-    metadata = item.get("metadata_json")
-    summary = _string(item.get("chapter_summary")) or _string(item.get("summary"))
-    if not summary and isinstance(metadata, dict):
-        summary = (
-            _string(metadata.get("chapter_summary"))
-            or _string(metadata.get("summary"))
-            or _string(metadata.get("editorial_summary"))
-        )
-    return _compact_text(summary, 240)
-
-
-def _source_summaries(item: dict[str, object]) -> list[str]:
-    summaries = _string_list(item.get("source_summaries"), max_items=4, max_chars=120)
-    if summaries:
-        return summaries
-    raw_refs = item.get("source_refs")
-    if not isinstance(raw_refs, list):
-        return []
-    result: list[str] = []
-    for raw_ref in raw_refs:
-        if not isinstance(raw_ref, dict):
-            continue
-        summary = (
-            _string(raw_ref.get("summary"))
-            or _string(raw_ref.get("source_summary"))
-            or _string(raw_ref.get("record_summary"))
-        )
-        summary = _compact_text(summary, 120)
-        if summary and summary not in result:
-            result.append(summary)
-        if len(result) >= 4:
-            break
-    return result
-
-
-def _representative_quotes(item: dict[str, object], content: str) -> list[str]:
-    quotes = _string_list(item.get("representative_quotes"), max_items=5, max_chars=90)
-    raw_refs = item.get("source_refs")
-    if isinstance(raw_refs, list):
-        for raw_ref in raw_refs:
-            if not isinstance(raw_ref, dict):
-                continue
-            quote = (
-                _string(raw_ref.get("representative_quote"))
-                or _string(raw_ref.get("quote"))
-            )
-            quote = _compact_text(quote, 90)
-            if quote and quote not in quotes:
-                quotes.append(quote)
-            if len(quotes) >= 5:
-                break
-    if not quotes:
-        fallback = _compact_text(content, 90)
-        if fallback:
-            quotes.append(fallback)
-    return quotes[:5]
-
-
 def _manuscript_reference_maps(
     snapshot: list[dict[str, object]],
 ) -> tuple[ModelReferenceMap, ModelReferenceMap]:
@@ -210,9 +138,10 @@ def _manuscript_reference_maps(
 
 
 def _source_quote_lines(
-    raw_refs: object,
+    chapter: dict[str, object],
     source_refs: ModelReferenceMap,
 ) -> list[str]:
+    raw_refs = chapter.get("source_refs")
     if not isinstance(raw_refs, list):
         return []
     lines: list[str] = []
@@ -220,10 +149,7 @@ def _source_quote_lines(
         if not isinstance(raw_ref, dict):
             continue
         utterance_id = _string(raw_ref.get("utterance_id"))
-        quote = _compact_text(
-            _string(raw_ref.get("representative_quote")) or _string(raw_ref.get("quote")),
-            90,
-        )
+        quote = current_original_quote(chapter, raw_ref, max_chars=90)
         if not utterance_id or not quote:
             continue
         lines.append(
@@ -248,7 +174,7 @@ def _chapter_context(
         if not chapter_id or not content:
             continue
         source_quote_lines = _source_quote_lines(
-            item.get("source_refs"),
+            item,
             source_refs,
         )
         parts.append(
@@ -258,9 +184,6 @@ def _chapter_context(
                     f"chapter_index: {_int(item.get('chapter_index')) or fallback_index}",
                     f"title: {title}",
                     f"source_count: {_int(item.get('source_count'))}",
-                    f"chapter_summary: {_chapter_summary(item) or '无'}",
-                    f"source_summaries: {' / '.join(_source_summaries(item)) or '无'}",
-                    f"representative_quotes: {' / '.join(_representative_quotes(item, content))}",
                     "original_quote_candidates:",
                     *(source_quote_lines or ["- 无"]),
                     f"content_excerpt: {_compact_text(content, 420)}",
@@ -316,13 +239,13 @@ def build_manuscript_copy_prompt(
 
 要求：
 - 只输出本次生成目标中的文案；chapter_intros 只包含本次重点章节，未要求章节导语或引语时返回空数组。
-- 只能基于给定章节标题、章节摘要、素材摘要、代表性口述和正文摘录，不新增未出现的人物、地点、事件或评价。
+- 只以当前书稿正文摘录为事实依据；正文已包含用户确认的修改，不从旧素材或旧摘要恢复被改掉的说法。章节标题只定位章节，不据此推断事实。不新增人物、地点、事件或评价。
 - book_title 要像家人会保存的一本书名，避免“主题回忆录”“章节规划”等内部词；如果原书名已经自然，可以保留。
 - cover_subtitle 控制在 12 到 28 个汉字，可概括内容；素材不足时用“根据口述访谈整理而成”。
 - preface 最多 220 个汉字，不设最低字数，素材短就简短，语气安静、可信、像书，不要直接套书名或项目名，不要出现“主题回忆录”“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
 - afterword 最多 160 个汉字，不设最低字数，偏家人保存、后续补充和记忆延续，不要写空泛祝福语，不要像模板。
 - 每个 chapter_intro 最多 90 个汉字，不设最低字数，像书籍章节导语，用具体画面把读者带进正文；不要解释章节功能，不要写“这一章主要记录”“从口述内容看”“相关的回忆”“本章讲述”等系统摘要句。
-- 每个 pull_quote 必须逐字来自对应章节 original_quote_candidates 的 quote，可只取其中一个完整短句；不要把摘要改写成原话，不要编金句。
+- 每个 pull_quote 必须逐字来自对应章节 original_quote_candidates 的 quote，可只取其中一个完整短句；候选已核对当前正文。没有候选时留空，不把正文改写成原话，不编金句。
 - pull_quote_source_ref_id 必须来自对应章节 original_quote_candidates 的 source_ref_id。
 - back_cover_quote 控制在 15 到 45 个汉字，优先从全书 original_quote_candidates 中选择真实短句；不要用公共格言、励志句或“凡是过往皆是序章”这类非本人原话。
 
@@ -424,11 +347,7 @@ def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str,
                 if not isinstance(raw_ref, dict):
                     continue
                 utterance_id = _string(raw_ref.get("utterance_id"))
-                quote = (
-                    _string(raw_ref.get("representative_quote"))
-                    or _string(raw_ref.get("quote"))
-                )
-                quote = brief_text(quote, max_chars=90)
+                quote = current_original_quote(item, raw_ref, max_chars=90)
                 if utterance_id and quote:
                     candidates[utterance_id] = quote
         result[chapter_id] = candidates

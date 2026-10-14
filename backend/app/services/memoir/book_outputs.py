@@ -90,6 +90,7 @@ from app.services.memoir.book_output_versions import (
     book_output_version_title,
     book_editorial_copy_signature,
     chapter_editorial_copy_signature,
+    retained_chapter_quotes,
 )
 from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
@@ -587,16 +588,11 @@ async def regenerate_book_output_editorial_copy(
     chapter_ids = _chapter_id_set(req.chapter_ids)
     state = automatic_editorial_copy_state(output, output.versions) if automatic else None
     if state is not None:
-        if state.signature_version < 1:
-            from app.services.memoir.semantic_state import semantic_json_signature
-            processed = next((item for item in output.versions if item.version == state.processed_version), None)
-            # Translate the old checkpoint only when its exact title and snapshot
-            # still match; a real title change must remain eligible for regeneration.
-            if processed and state.input_signature == semantic_json_signature({
-                "title": output_title, "snapshot": processed.chapter_snapshot_json,
-            }):
-                state.input_signature = book_editorial_copy_signature(output_title, processed.chapter_snapshot_json)
-            state.signature_version = 1
+        if state.signature_version < 2:
+            # A new evidence policy requires one fresh automatic pass. Preserve
+            # ownership, but do not translate an old checkpoint into a cache hit.
+            state.chapter_input_signatures = {}
+            state.signature_version = 2
         signature = book_editorial_copy_signature(output_title, snapshot)
         if state.input_signature == signature and (not retry or state.status == "succeeded"):
             return _output_response(output)
@@ -632,6 +628,12 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")
 
     if editorial_copy:
+        snapshots_by_id = {item["chapter_id"]: item for item in snapshot}
+        for chapter in manuscript.chapters:
+            if ("pull_quotes" in targets and (not chapter_ids or chapter.chapter_id in chapter_ids)
+                    and (state is None or "pull_quotes" not in state.manual_chapter_fields.get(chapter.chapter_id, []))):
+                chapter_snapshot = snapshots_by_id[chapter.chapter_id]
+                chapter.pull_quotes = retained_chapter_quotes(chapter.model_dump(), chapter_snapshot)
         _apply_editorial_copy(manuscript, editorial_copy, targets=targets, chapter_ids=chapter_ids)
     if state is not None:
         for chapter in manuscript.chapters:

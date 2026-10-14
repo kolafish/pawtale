@@ -106,7 +106,7 @@ def signature(decisions: Iterable[FactDecision]) -> str:
 
 def prompt(decisions: Iterable[FactDecision], *, edits: tuple[TranscriptEdit, ...] = ()) -> str:
     decisions = tuple(decisions)
-    if not decisions:
+    if not decisions and not edits:
         return ""
     events = [(
         decision.confirmed_at or datetime.min,

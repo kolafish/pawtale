@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 
@@ -64,6 +65,35 @@ def first_sentence(text: str, *, max_chars: int) -> str:
         if char in "。！？!?":
             return brief_text(normalized[: index + 1], max_chars=max_chars)
     return brief_text(normalized, max_chars=max_chars)
+
+
+def current_original_quote(chapter: dict[str, Any], ref: dict[str, Any], *, max_chars: int) -> str:
+    """Quote only complete source sentences retained in this material's current section.
+
+    The recording remains evidence, but an obsolete sentence must not undo a
+    confirmed edit. Ambiguous attribution simply leaves the quote empty.
+    """
+    sections = _list(chapter.get("sections"))
+    if sections:
+        bodies = [_safe_str(section.get("content")) for section in sections
+                  if ref.get("utterance_id") in (section.get("used_material_ids") or section.get("source_ref_ids") or [])]
+    else:
+        bodies = [_safe_str(chapter.get("content"))]
+    def sentences(value: str) -> list[str]:
+        return [" ".join(part.split()) for part in re.findall(r"[^。！？!?\n]+[。！？!?]?", value) if part.strip()]
+    current = {sentence for body in bodies for sentence in sentences(body)}
+    runs: list[str] = []
+    run = ""
+    for sentence in sentences(_safe_str(ref.get("quote"))):
+        if sentence in current and len(run + sentence) <= max_chars:
+            run += sentence
+        else:
+            if run:
+                runs.append(run)
+            run = sentence if sentence in current and len(sentence) <= max_chars else ""
+    if run:
+        runs.append(run)
+    return max(runs, key=len, default="")
 
 
 def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
@@ -175,11 +205,7 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
         chapter = _dict(raw_chapter)
         for raw_quote in _list(chapter.get("pull_quotes")):
             quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
-            if quote:
-                candidates.append(quote)
-        for raw_ref in _list(chapter.get("source_refs")):
-            quote = brief_text(_safe_str(_dict(raw_ref).get("quote")), max_chars=45)
-            if quote:
+            if quote and quote in " ".join(_safe_str(chapter.get("content")).split()):
                 candidates.append(quote)
         excerpt = first_sentence(_safe_str(chapter.get("content")), max_chars=45)
         if excerpt:
