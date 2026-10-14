@@ -29,6 +29,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirTranscriptVersion,
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
@@ -57,7 +58,7 @@ from app.services.memoir.semantic_state import (
     semantic_text_hash,
 )
 from app.services.memoir.transcript_projection import (
-    TranscriptEdit, current_material_text, load_transcript_edits,
+    TranscriptEdit, current_material_text, load_transcript_edits, transcript_text_changes,
 )
 
 
@@ -93,6 +94,7 @@ class ChapterMaterialInput:
     assigned_at: datetime | None = None
     interviewer_line: str = ""
     edits: tuple[TranscriptEdit, ...] = ()
+    previous_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -512,6 +514,43 @@ def _changed_material_ids(
         if newly_assigned or changed_text:
             changed.add(material.material_id)
     return changed
+
+
+async def _with_previous_material_text(
+    db: AsyncSession, context: ChapterGenerationContext, latest: MemoirBookChapterDraftVersion,
+) -> ChapterGenerationContext:
+    saved = {item["material_id"]: item for item in latest.material_snapshot_json}
+    version_ids = {item.get("transcript_version_id") for item in saved.values()} - {None}
+    versions = (await db.scalars(select(MemoirTranscriptVersion).where(
+        MemoirTranscriptVersion.id.in_(version_ids),
+    ))).all() if version_ids else []
+    texts = {version.id: version.content.strip() for version in versions}
+    materials = []
+    for material in context.materials:
+        prior = saved.get(material.material_id, {})
+        text = texts.get(prior.get("transcript_version_id"))
+        if text is not None and semantic_text_hash(text) != prior.get("text_hash"):
+            text = None
+        materials.append(replace(material, previous_text=text))
+    by_id = {material.material_id: material for material in materials}
+    return replace(context, materials=tuple(materials), sections=tuple(
+        replace(section, materials=tuple(by_id[item.material_id] for item in section.materials))
+        for section in context.sections
+    ))
+
+
+def _confirmed_material_update(material: ChapterMaterialInput, changed: bool) -> str:
+    message = "已有素材：以用户确认正文为准，不从旧转写全文恢复旧说法。\n"
+    if not changed:
+        return message
+    if material.previous_text is None:
+        return message + "历史转写版本不可用：本条机器更新不能可靠比较，保留已确认正文，等待用户核对素材。\n"
+    changes = transcript_text_changes(material.previous_text, material.text, label="转写版本变化")
+    if not changes:
+        return message
+    return (message + "相对上次正文所用转写版本的变化（可能来自机器重识别，不是用户确认）：\n"
+            + changes + "\n仅处理变化片段；未变片段只是定位上下文，不能恢复旧事实。"
+            "与用户确认正文或明确更正冲突时保留用户说法，在 missing_source_candidates 中说明待核对处。\n")
 
 
 async def select_related_sections(
@@ -964,7 +1003,7 @@ def build_chapter_generation_prompt(
                         f"material_id: {material_refs.encode(material.material_id)}\n"
                         + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
                         + (
-                            "已有素材：内容已体现在上方用户确认正文中，以该正文为准；如本条有后续人工更正，仅应用上方实际替换记录，不从转写全文恢复旧说法。\n"
+                            _confirmed_material_update(material, material.material_id in (changed_material_ids or set()))
                             if current_section_user_edited and current_section_content
                             and previous_material_ids is not None and material.material_id in previous_material_ids
                             else f"原始讲述{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
@@ -1477,6 +1516,16 @@ async def generate_chapter(
                     )
                 )
         completed_sections.append(current)
+    for section in full_sections:
+        previous = previous_by_id.get(section.section_id)
+        if previous is not None and previous.user_edited and any(
+            material.material_id in previous.used_material_ids
+            and material.material_id in (changed_material_ids or set())
+            and material.previous_text is None for material in section.materials
+        ):
+            missing_source_candidates.append(
+                f"《{section.title}》的部分素材缺少历史转写版本，机器更新未合并；请核对素材后确认候选稿。"
+            )
     return _partial_generated_chapter(
         completed_sections,
         missing_source_candidates=missing_source_candidates,
@@ -1712,6 +1761,10 @@ async def generate_and_save_chapter_draft(
     base_version_id = latest_before.id if latest_before else None
     if latest_before is not None:
         before = replace(before, previous_draft_at=latest_before.created_at)
+        if latest_before.created_by == MemoirCreatedBy.USER.value or any(
+            section.get("user_edited") for section in latest_before.section_snapshot_json
+        ):
+            before = await _with_previous_material_text(db, before, latest_before)
     style_refresh = automatic and not chapter_draft_render_policy_current(
         before, latest_before
     ) and latest_before is not None
