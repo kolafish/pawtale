@@ -396,7 +396,10 @@ def test_corrected_body_controls_copy_and_original_quotes(body, expected):
     assert generated.chapter_intros[0].pull_quote == ""
     old = {**snapshot, "content": source, "pull_quotes": [
         {"text": "我十五岁那年发过洪水。", "source_ref_ids": ["u1"], "source": "original_quote"}]}
-    assert retained_chapter_quotes(old, snapshot) == []
+    # Historical originals retain their source binding, independent of polished body wording.
+    assert retained_chapter_quotes(old, snapshot)[0].source == "original_quote"
+    invalid_source = {**snapshot, "source_refs": [{**ref, "quote": "我五岁那年发过洪水。"}]}
+    assert retained_chapter_quotes(old, invalid_source) == []
     old["pull_quotes"][0]["source"] = "manual"
     assert retained_chapter_quotes(old, snapshot)[0].source == "manual"
 

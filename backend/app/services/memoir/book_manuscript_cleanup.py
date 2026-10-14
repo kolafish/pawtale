@@ -67,52 +67,15 @@ def first_sentence(text: str, *, max_chars: int) -> str:
     return brief_text(normalized, max_chars=max_chars)
 
 
-def _update_quote_stack(value: str, stack: list[str]) -> bool:
-    pairs = {"“": "”", "‘": "’", "「": "」", "『": "』"}
-    for char in value:
-        if char == '"':
-            if stack and stack[-1] == char:
-                stack.pop()
-            else:
-                stack.append(char)
-        elif char in pairs:
-            stack.append(pairs[char])
-        elif char in pairs.values():
-            if not stack or stack.pop() != char:
-                return False
-    return True
-
-
-def _balanced_quotes(value: str) -> bool:
-    stack: list[str] = []
-    return _update_quote_stack(value, stack) and not stack
-
-
 def usable_quote(value: str, *, min_chars: int = 2) -> bool:
-    return len(re.sub(r"[\W_]", "", value)) >= min_chars and _balanced_quotes(value) and not contains_template_language(value)
+    return (len(re.sub(r"[\W_]", "", value)) >= min_chars
+        and not any(char in value for char in "“”‘’「」『』\"'")
+        and not contains_template_language(value))
 
 
 def _sentences(value: str) -> list[str]:
-    sentences: list[str] = []
-    # Keep complete dialogue together. An unclosed tail falls back to literal
-    # sentence parts; unusable quote fragments are filtered by the evidence policy.
-    for paragraph in value.splitlines():
-        start: int | None = None
-        stack: list[str] = []
-        pending_parts: list[str] = []
-        for match in re.finditer(r'''[^。！？!?]+[。！？!?]*[”’」』"']*''', paragraph):
-            if start is None:
-                start = match.start()
-                pending_parts = []
-            pending_parts.append(" ".join(match.group().split()))
-            valid = _update_quote_stack(match.group(), stack)
-            if not stack or not valid:
-                sentences.append(" ".join(paragraph[start:match.end()].split()))
-                start = None
-                stack.clear()
-        if start is not None:
-            sentences.extend(pending_parts)
-    return sentences
+    return [" ".join(part.split()) for paragraph in value.splitlines()
+        for part in re.findall(r"[^。！？!?]+[。！？!?]*", paragraph) if part.strip()]
 
 
 def _signature_sentences(value: str) -> list[str]:
@@ -169,51 +132,9 @@ def _strip_quote_wrapper(value: str) -> str:
     return value
 
 
-def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_chars: int, allow_substring: bool = False) -> str:
-    value = _strip_quote_wrapper(" ".join(value.split()))
-    if not usable_quote(value):
-        return ""
-    candidates = [brief_text(candidate, max_chars=max_chars) for candidate in candidates]
-    def key(text: str) -> str:
-        return re.sub(r'''[。！？!?]+(?=[”’」』"']*$)''', "", _strip_quote_wrapper(text))
-    for candidate in candidates:
-        if len(candidate) <= max_chars and usable_quote(candidate) and key(value) == key(candidate):
-            return candidate  # Return the supplied evidence with its original punctuation.
-    if allow_substring:
-        for candidate in candidates:
-            if not usable_quote(candidate):
-                continue
-            if len(value) <= max_chars and usable_quote(value, min_chars=8) and value in candidate:
-                return value
-            if candidate in value:
-                return candidate
-    return ""
-
-
-def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
-    quotes = deepcopy(_list(chapter.get("pull_quotes")))
-    source_quotes = {
-        _safe_str(_dict(ref).get("utterance_id")): " ".join(_safe_str(_dict(ref).get("quote")).split())
-        for ref in _list(chapter.get("source_refs"))
-    }
-    for raw_quote in list(quotes):
-        quote = _dict(raw_quote)
-        if quote.get("source") != "original_quote":
-            continue
-        text = _safe_str(quote.get("text"))
-        for source_id in _list(quote.get("source_ref_ids")):
-            source = source_quotes.get(_safe_str(source_id), "")
-            if len(source) <= 80 or text in source:
-                continue
-            if text != source[:80].rstrip("，。；、,. ") + "。":
-                continue
-            replacement = brief_text(source, max_chars=80)
-            if replacement:
-                quote["text"] = replacement
-            else:
-                quotes.remove(raw_quote)
-            break
-    return quotes
+def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_chars: int) -> str:
+    value = _strip_quote_wrapper(value.strip())
+    return next((candidate for candidate in candidates if candidate == value and len(candidate) <= max_chars), "")
 
 
 def _strip_title_wrappers(title: str) -> str:
@@ -297,10 +218,6 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
     candidates: list[str] = []
     for raw_chapter in chapters:
         chapter = _dict(raw_chapter)
-        for raw_quote in _list(chapter.get("pull_quotes")):
-            quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
-            if usable_quote(quote, min_chars=8) and quote in " ".join(_safe_str(chapter.get("content")).split()):
-                candidates.append(quote)
         candidates.extend(body_excerpt_candidates(_safe_str(chapter.get("content")), max_chars=45))
     result: list[str] = []
     for candidate in candidates:
@@ -410,7 +327,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
             )
         chapter["pull_quotes"] = [
             quote
-            for quote in repair_original_pull_quotes(chapter)
+            for quote in _list(chapter.get("pull_quotes"))
             if not contains_template_language(_safe_str(_dict(quote).get("text")))
         ]
 

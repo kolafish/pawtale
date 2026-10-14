@@ -43,6 +43,7 @@ from app.services.memoir.book_output_snapshots import (
     load_book_plan_drafts,
     readable_chapter_versions,
 )
+from app.services.memoir.project_ai_preferences import project_transcript_polish_level
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
@@ -178,7 +179,7 @@ async def assemble_book_output(
                 )
                 assert previous_version is not None
             previous_version = await book_output_versions.repair_automatic_chapter_quotes(
-                db, output=output, version=previous_version, state=copy_state,
+                db, output=output, version=previous_version, state=copy_state, polish_level=project_transcript_polish_level(project),
             )
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
@@ -205,7 +206,7 @@ async def assemble_book_output(
                 )
                 assert previous_version is not None
             previous_version = await book_output_versions.repair_automatic_chapter_quotes(
-                db, output=output, version=previous_version, state=copy_state,
+                db, output=output, version=previous_version, state=copy_state, polish_level=project_transcript_polish_level(project),
             )
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
@@ -251,6 +252,7 @@ async def assemble_book_output(
             if field not in copy_state.manual_targets:
                 metadata.pop(field, None)
     manuscript = manuscript_from_snapshot(
+        polish_level=project_transcript_polish_level(project),
         title=title,
         content=content,
         snapshot=chapter_snapshots,
@@ -281,7 +283,7 @@ async def assemble_book_output(
             preserve_quotes = "pull_quotes" in manual_copy_fields.get(chapter.chapter_id, [])
             chapter.pull_quotes = book_output_versions.retained_chapter_quotes(old, next_snapshot, preserve_editorial=preserve_quotes)
             if not chapter.pull_quotes and not preserve_quotes:
-                chapter.pull_quotes = fallback_chapter_quotes(chapter.content, next_snapshot)
+                chapter.pull_quotes = fallback_chapter_quotes(chapter.content, next_snapshot, polish_level=project_transcript_polish_level(project))
     version = await book_output_versions.append_book_output_version(
         db,
         output=output,

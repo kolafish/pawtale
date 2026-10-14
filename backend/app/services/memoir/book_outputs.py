@@ -96,6 +96,7 @@ from app.services.memoir.book_output_versions import (
 from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
     select_project_ai_model,
+    project_transcript_polish_level,
 )
 
 
@@ -633,6 +634,7 @@ async def regenerate_book_output_editorial_copy(
         targets=sorted(targets),
         chapter_ids=sorted(chapter_ids),
         feedback=req.feedback,
+        polish_level=project_transcript_polish_level(project),
     ) if targets else None
     if not editorial_copy and not automatic:
         raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")

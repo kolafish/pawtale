@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domain.memoir.types import MemoirTranscriptPolishLevel
+
 from datetime import UTC, datetime, timedelta, timezone
 
 from fastapi import HTTPException
@@ -340,8 +342,8 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
     return refs
 
 
-def fallback_chapter_quotes(content: str, snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
-    candidates = original_quote_candidates(snapshot, max_chars=80)
+def fallback_chapter_quotes(content: str, snapshot: dict[str, object], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM) -> list[MemoirBookManuscriptQuote]:
+    candidates = original_quote_candidates(snapshot, max_chars=80) if polish_level == MemoirTranscriptPolishLevel.LOW else {}
     for source_id, quotes in candidates.items():
         quote = max(quotes, key=len, default="")
         if quote:
@@ -374,6 +376,7 @@ def manuscript_from_snapshot(
     content: str,
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
     template: MemoirBookManuscriptTemplate = "classic_family",
     custom_layout: MemoirBookCustomLayout | None = None,
@@ -417,7 +420,7 @@ def manuscript_from_snapshot(
                 index=chapter_index,
                 title=chapter_title,
                 intro=intro_by_chapter_id.get(chapter_id) or fallback_chapter_intro(chapter_title, chapter_content),
-                pull_quotes=[generated_pull_quote] if generated_pull_quote else fallback_chapter_quotes(chapter_content, item),
+                pull_quotes=[generated_pull_quote] if generated_pull_quote else fallback_chapter_quotes(chapter_content, item, polish_level=polish_level),
                 content=chapter_content,
                 sections=sections,
                 source_refs=source_refs,
