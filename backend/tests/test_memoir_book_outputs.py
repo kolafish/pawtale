@@ -2158,3 +2158,35 @@ def test_generated_excerpt_returns_canonical_evidence_without_guessing(wrapper):
     assert copy.chapter_intros[0].pull_quote == sentence
     assert copy.chapter_intros[0].pull_quote_source_ref_id == ''
     assert copy.back_cover_quote == sentence
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("speech", [
+    '母亲说：“孩子，路上小心。{sep}“到了就写信回来。”',
+    '母亲说：“孩子，路上小心。',
+    '母亲说：「路上要小心。',
+])
+def test_quote_evidence_survives_an_unclosed_previous_paragraph(separator, speech):
+    from app.services.memoir.book_manuscript_cleanup import body_excerpt_candidates, original_quote_candidates
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+    ending = '后来我们走了很远的路才到县城。'
+    body = separator.join(['我记得那天很冷。', speech.format(sep=separator), ending])
+    snapshot = {'chapter_id': 'c', 'chapter_title': '离家', 'content': body,
+        'source_refs': [{'utterance_id': 'u', 'quote': body}],
+        'sections': [{'content': body, 'used_material_ids': ['u']}]}
+    assert ending in body_excerpt_candidates(body, max_chars=90)
+    assert any(ending in candidate for candidate in original_quote_candidates(snapshot, max_chars=90)['u'])
+    for source in ('original_quote', 'editorial_generated'):
+        stored = {**snapshot, 'pull_quotes': [{'text': ending, 'source': source,
+            'source_ref_ids': ['u'] if source == 'original_quote' else []}]}
+        assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [ending]
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('我们', ''), ('我们一起走过那条很长的小路', '我们一起走过那条很长的小路'),
+    ('“后来我们一起走过那条很长的小路。”', '后来我们一起走过那条很长的小路。'),
+])
+def test_original_quote_fragments_require_meaningful_evidence(value, expected):
+    from app.services.memoir.book_manuscript_cleanup import matched_quote
+    assert matched_quote(value, ['后来我们一起走过那条很长的小路。'], max_chars=80, allow_substring=True) == expected
+    assert matched_quote('我很高兴', ['我很高兴。'], max_chars=80, allow_substring=True) == '我很高兴。'
