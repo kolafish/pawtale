@@ -9,6 +9,7 @@ import {
 import { relaunchHome } from "../../services/navigation";
 import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
+import { openWechatPrivacyContract } from "../../services/wechat-privacy";
 import { uploadBackendAvatar } from "../../services/user-profile";
 
 const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
@@ -72,6 +73,14 @@ definePage<LoginData>()({
       return;
     }
     this.setData({ profileAvatarPath: avatarPath, error: "" });
+  },
+
+  async openPrivacyContract() {
+    try {
+      await openWechatPrivacyContract();
+    } catch (error) {
+      wx.showToast({ title: error instanceof Error ? error.message : "暂时无法打开隐私保护指引", icon: "none" });
+    }
   },
 
   async submitWeChat() {

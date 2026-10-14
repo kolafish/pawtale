@@ -37,6 +37,7 @@
       <text>{{shareLiked ? '已赞' : '点赞'}}</text>
     </button>
     <view class="share-like-people-shell">
+      <text wx:if="{{shareCanLike && !shareLiked}}" class="share-like-text">首次使用会通过微信建立账号，记录您的点赞；头像和昵称可选填。</text>
       <template is="shareLikePeople" data="{{avatars: shareLikeAvatars, text: shareLikeText}}" />
       <text wx:if="{{shareLiked && shareLikeProfileMissing}}" class="share-like-profile-link" bindtap="openShareLikeProfile" aria-role="button">留下名字和头像，让讲故事的人知道是你 ›</text>
     </view>

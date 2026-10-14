@@ -273,6 +273,16 @@
     >注销账号</button>
   </block>
 
+  <view class="section">
+    <text class="section-title ui-section-heading">协议与隐私</text>
+    <view class="settings-list ui-card ui-card-borderless">
+      <view class="settings-nav-row" aria-role="button" bindtap="openPrivacyContract" hover-class="settings-nav-row-hover">
+        <view class="settings-row-copy"><text class="action-title">用户隐私保护指引</text></view>
+        <text class="row-chevron">›</text>
+      </view>
+    </view>
+  </view>
+
   <view
     wx:if="{{creditSheetVisible}}"
     class="credit-sheet-mask"

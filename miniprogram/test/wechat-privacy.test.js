@@ -159,3 +159,23 @@ test("wechat recorder errors hide native sync channel details", () => {
     /麦克风正在使用中/,
   );
 });
+
+test("reading the privacy contract opens WeChat's configured document without authorizing", async () => {
+  let opened = 0;
+  global.wx = {
+    openPrivacyContract(options) { opened += 1; options.success({}); },
+    requirePrivacyAuthorize() { throw new Error("reading is not consent"); },
+    authorize() { throw new Error("reading does not request the microphone"); },
+  };
+  await privacyModule().openWechatPrivacyContract();
+  assert.equal(opened, 1);
+  delete global.wx;
+});
+
+test("unavailable or failed privacy document opening gives a visible retryable error", async () => {
+  global.wx = {};
+  await assert.rejects(privacyModule().openWechatPrivacyContract(), /更新微信/);
+  global.wx = { openPrivacyContract(options) { options.fail({ errMsg: "openPrivacyContract:fail" }); } };
+  await assert.rejects(privacyModule().openWechatPrivacyContract(), /稍后再试/);
+  delete global.wx;
+});

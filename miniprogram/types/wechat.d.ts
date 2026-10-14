@@ -415,7 +415,7 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
-  interface PrivacyAuthorizeOption {
+  interface PrivacyCallbackOption {
     success?(result: GeneralCallbackResult): void;
     fail?(result: GeneralCallbackResult): void;
     complete?(result: GeneralCallbackResult): void;
@@ -538,7 +538,8 @@ declare namespace WechatMiniprogram {
     createInnerAudioContext(): InnerAudioContext;
     createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
-    requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
+    requirePrivacyAuthorize?(option: PrivacyCallbackOption): void;
+    openPrivacyContract?(option: PrivacyCallbackOption): void;
     getSetting?(option: GetSettingOption): void;
     authorize?(option: AuthorizeOption): void;
     openSetting?(option: OpenSettingOption): void;

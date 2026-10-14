@@ -3,13 +3,13 @@
     <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <view class="brand-copy">
       <text class="brand-title">老余口述</text>
-      <text class="brand-subtitle">语音访谈工作台</text>
+      <text class="brand-subtitle">把您的往事讲成一本书</text>
     </view>
   </view>
 
   <view wx:if="{{!profileMode}}" class="login-panel">
     <text class="panel-title">欢迎登录</text>
-    <text class="panel-copy">使用微信账号登录。登录 code 将发送给后端用于识别账号；头像和昵称仅在您主动选择后保存。</text>
+    <text class="panel-copy">用微信登录，您的讲述和书稿会跟随账号保存。头像和昵称由您选择是否填写。</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
@@ -25,6 +25,7 @@
       <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
 
+    <view class="skip-profile-button support-action ui-pressable" aria-role="button" bindtap="openPrivacyContract">《用户隐私保护指引》</view>
   </view>
 
   <view wx:else class="login-panel profile-setup-panel">
