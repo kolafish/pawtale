@@ -94,21 +94,24 @@ def usable_quote(value: str, *, min_chars: int = 2) -> bool:
 
 def _sentences(value: str) -> list[str]:
     sentences: list[str] = []
-    # A malformed or continued quotation may consume its own paragraph, never
-    # the following paragraphs. Keep complete multi-sentence dialogue together.
+    # Keep complete dialogue together. An unclosed tail falls back to literal
+    # sentence parts; unusable quote fragments are filtered by the evidence policy.
     for paragraph in value.splitlines():
         start: int | None = None
         stack: list[str] = []
+        pending_parts: list[str] = []
         for match in re.finditer(r'''[^。！？!?]+[。！？!?]*[”’」』"']*''', paragraph):
             if start is None:
                 start = match.start()
+                pending_parts = []
+            pending_parts.append(" ".join(match.group().split()))
             valid = _update_quote_stack(match.group(), stack)
             if not stack or not valid:
                 sentences.append(" ".join(paragraph[start:match.end()].split()))
                 start = None
                 stack.clear()
         if start is not None:
-            sentences.append(" ".join(paragraph[start:].split()))
+            sentences.extend(pending_parts)
     return sentences
 
 
