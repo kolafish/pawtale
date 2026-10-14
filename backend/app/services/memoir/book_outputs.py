@@ -88,6 +88,7 @@ from app.services.memoir.book_output_versions import (
     automatic_editorial_copy_state,
     append_book_output_version,
     book_output_version_title,
+    chapter_editorial_copy_signature,
 )
 from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
@@ -587,12 +588,22 @@ async def regenerate_book_output_editorial_copy(
     if state is not None:
         from app.services.memoir.semantic_state import semantic_json_signature
         signature = semantic_json_signature({"title": output_title, "snapshot": snapshot})
-        if state.input_signature == signature and not retry:
+        if state.input_signature == signature and (not retry or state.status == "succeeded"):
             return _output_response(output)
         state.input_signature = signature
         targets -= set(state.manual_targets)
+        signatures = {item["chapter_id"]: chapter_editorial_copy_signature(item) for item in snapshot}
+        chapter_ids = {
+            chapter_id for chapter_id, signature in signatures.items()
+            if (state.chapter_input_signatures.get(chapter_id) != signature
+                or (retry and chapter_id in state.failed_chapter_ids))
+            and not {"intro", "pull_quotes"}.issubset(state.manual_chapter_fields.get(chapter_id, []))
+        }
+        state.chapter_input_signatures = signatures
+        state.failed_chapter_ids = [value for value in state.failed_chapter_ids if value in signatures
+            and not {"intro", "pull_quotes"}.issubset(state.manual_chapter_fields.get(value, []))]
         for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes")):
-            if all(field in state.manual_chapter_fields.get(chapter.chapter_id, []) for chapter in manuscript.chapters):
+            if all(field in state.manual_chapter_fields.get(chapter_id, []) for chapter_id in chapter_ids):
                 targets.discard(target)
     protected_chapter_copy = {chapter.chapter_id: chapter.model_copy(deep=True) for chapter in manuscript.chapters}
     # Persist a changed model preference and release all locks before the
@@ -620,7 +631,15 @@ async def regenerate_book_output_editorial_copy(
                 chapter.intro = original.intro
             if "pull_quotes" in fields:
                 chapter.pull_quotes = original.pull_quotes
-        state.status = "succeeded" if editorial_copy or not targets else "failed"
+        failed = set(state.failed_chapter_ids) - chapter_ids
+        if not editorial_copy and targets:
+            failed |= chapter_ids
+        elif editorial_copy and "chapter_intros" in targets:
+            generated_intros = {item.chapter_id for item in editorial_copy.chapter_intros if item.intro}
+            failed |= {chapter_id for chapter_id in chapter_ids if chapter_id not in generated_intros
+                and "intro" not in state.manual_chapter_fields.get(chapter_id, [])}
+        state.failed_chapter_ids = sorted(failed)
+        state.status = "failed" if failed or (not editorial_copy and targets) else "succeeded"
     manuscript_json = manuscript.model_dump(mode="json") if editorial_copy else latest.manuscript_json
     await db.execute(
         select(MemoirBookOutput.id)

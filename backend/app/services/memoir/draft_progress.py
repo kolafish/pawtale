@@ -156,7 +156,8 @@ async def read_draft_progress(
     )
     failures = [job.error_message for job in (growth, parent) if job and job.status in {"failed", "cancelled"}]
     failures += [item.error_message for item in progress.chapters.values() if item.status in {"failed", "cancelled"}]
-    result.can_retry = bool(failures or pending_material_count > needs_user_count or progress.review_status in {"failed", "cancelled"})
+    result.can_retry = bool(failures or pending_material_count > needs_user_count
+        or progress.review_status in {"failed", "cancelled"} or progress.editorial_copy_status == "failed")
     if any(job.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for job in jobs):
         result.can_retry = False
         result.status, result.title = "processing", "正在后台整理书稿"
@@ -195,7 +196,7 @@ async def read_draft_progress(
             "ready" if ready == len(progress.chapters) and not result.pending_material_count else "partial_ready"
         )
         result.title = "书稿可阅读" if result.status == "ready" else "已有部分草稿可阅读"
-        result.detail = progress.review_error or (
+        result.detail = progress.review_error or ("成书文案暂未更新，可以继续整理；已有书稿仍可阅读。" if progress.editorial_copy_status == "failed" else "") or (
             "全书检查已完成" if progress.review_status == "succeeded" else "草稿尚未完成全书检查"
         )
     elif material_count:
