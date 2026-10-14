@@ -20,7 +20,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir.book_manuscript_cleanup import brief_text, original_quote_candidates, body_excerpt_candidates
+from app.services.memoir.book_manuscript_cleanup import original_quote_candidates, body_excerpt_candidates, matched_quote
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
@@ -137,15 +137,17 @@ def _manuscript_reference_maps(
     )
 
 
-def _source_quote_lines(
-    chapter: dict[str, object],
-    source_refs: ModelReferenceMap,
-) -> list[str]:
-    lines: list[str] = []
-    for source_id, candidates in original_quote_candidates(chapter, max_chars=90).items():
-        for quote in candidates:
-            lines.append(f"- source_ref_id: {source_refs.encode(source_id)}; quote: {quote}")
-    return lines[:6]
+@dataclass(frozen=True)
+class _QuoteCandidates:
+    originals: dict[str, dict[str, tuple[str, ...]]]
+    excerpts: dict[str, tuple[str, ...]]
+
+
+def _quote_candidates(snapshot: list[dict[str, object]]) -> _QuoteCandidates:
+    return _QuoteCandidates(
+        originals={_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90) for item in snapshot},
+        excerpts={_string(item.get("chapter_id")): body_excerpt_candidates(_string(item.get("content")), max_chars=90) for item in snapshot},
+    )
 
 
 def _chapter_context(
@@ -153,6 +155,7 @@ def _chapter_context(
     *,
     chapter_refs: ModelReferenceMap,
     source_refs: ModelReferenceMap,
+    candidates: _QuoteCandidates,
 ) -> str:
     parts: list[str] = []
     for fallback_index, item in enumerate(snapshot, start=1):
@@ -161,10 +164,8 @@ def _chapter_context(
         content = _string(item.get("content"))
         if not chapter_id or not content:
             continue
-        source_quote_lines = _source_quote_lines(
-            item,
-            source_refs,
-        )
+        source_quote_lines = [f"- source_ref_id: {source_refs.encode(source_id)}; quote: {quote}"
+            for source_id, quotes in candidates.originals.get(chapter_id, {}).items() for quote in quotes][:6]
         parts.append(
             "\n".join(
                 [
@@ -175,7 +176,7 @@ def _chapter_context(
                     "original_quote_candidates:",
                     *(source_quote_lines or ["- 无"]),
                     "body_excerpt_candidates（当前正文摘句，不是原话）:",
-                    *(f"- {quote}" for quote in body_excerpt_candidates(content, max_chars=90)[:6]),
+                    *(f"- {quote}" for quote in candidates.excerpts.get(chapter_id, ())[:6]),
                     f"content_excerpt: {_compact_text(content, 420)}",
                 ]
             )
@@ -190,12 +191,14 @@ def build_manuscript_copy_prompt(
     targets: list[str] | None = None,
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
+    candidates: _QuoteCandidates | None = None,
 ) -> str:
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     chapters = _chapter_context(
         snapshot,
         chapter_refs=chapter_refs,
         source_refs=source_refs,
+        candidates=candidates or _quote_candidates(snapshot),
     )
     target_text = "、".join(targets or []) or "全部成书文案"
     chapter_text = (
@@ -252,6 +255,7 @@ def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object
         snapshot,
         chapter_refs=chapter_refs,
         source_refs=source_refs,
+        candidates=_quote_candidates(snapshot),
     )
     return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选主书名。
 
@@ -324,11 +328,6 @@ def _clean_title(value: object) -> str:
     return title[:32]
 
 
-def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str, dict[str, tuple[str, ...]]]:
-    return {_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90)
-            for item in snapshot if _string(item.get("chapter_id"))}
-
-
 def _validated_original_quote(
     *,
     chapter_id: str,
@@ -336,34 +335,21 @@ def _validated_original_quote(
     source_ref_id: object,
     quote_candidates: dict[str, dict[str, tuple[str, ...]]],
 ) -> tuple[str, str]:
-    quote = _clean_copy_text(brief_text(_string(value), max_chars=90), max_chars=90).strip("“”\"'「」")
     candidate_by_source = quote_candidates.get(chapter_id, {})
     source_id = _string(source_ref_id)
     if source_id:
         candidate_by_source = {source_id: candidate_by_source.get(source_id, ())}
     for candidate_source_id, candidates in candidate_by_source.items():
-        for source_quote in candidates:
-            if not quote and source_id:
-                return source_quote, candidate_source_id
-            if quote and quote in source_quote:
-                return quote, candidate_source_id
-            if quote and source_quote in quote and len(source_quote) >= 8:
-                return source_quote, candidate_source_id
+        if not _string(value) and source_id and candidates:
+            return candidates[0], candidate_source_id
+        quote = matched_quote(_string(value), candidates, max_chars=90, allow_substring=True)
+        if quote:
+            return quote, candidate_source_id
     return "", ""
 
 
-def _validated_back_cover_quote(value: object, quote_candidates: dict[str, dict[str, tuple[str, ...]]]) -> str:
-    quote = _clean_copy_text(brief_text(_string(value), max_chars=60), max_chars=60).strip("“”\"'「」")
-    if not quote:
-        return ""
-    for candidate_by_source in quote_candidates.values():
-        for candidates in candidate_by_source.values():
-            for source_quote in candidates:
-                if quote in source_quote:
-                    return quote
-                if source_quote in quote and len(source_quote) >= 8:
-                    return source_quote
-    return ""
+def _validated_back_cover_quote(value: object, candidates: list[str]) -> str:
+    return matched_quote(_string(value), candidates, max_chars=60, allow_substring=True)
 
 
 def _copy_from_payload(
@@ -372,12 +358,12 @@ def _copy_from_payload(
     snapshot: list[dict[str, object]],
     prompt: str,
     model: str | None,
+    candidates: _QuoteCandidates | None = None,
 ) -> GeneratedManuscriptCopy | None:
     if not isinstance(payload, dict):
         return None
-    quote_candidates = _quote_candidates_by_chapter(snapshot)
-    excerpts = {_string(item.get("chapter_id")): body_excerpt_candidates(_string(item.get("content")), max_chars=90)
-                for item in snapshot}
+    candidates = candidates or _quote_candidates(snapshot)
+    quote_candidates, excerpts = candidates.originals, candidates.excerpts
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     raw_intros = payload.get("chapter_intros")
     chapter_intros: list[GeneratedChapterIntro] = []
@@ -406,9 +392,7 @@ def _copy_from_payload(
                 quote_candidates=quote_candidates,
             )
             if not pull_quote and not source_ref:
-                excerpt = _string(raw_intro.get("pull_quote"))
-                if excerpt in excerpts.get(chapter_id, ()):
-                    pull_quote = excerpt
+                pull_quote = matched_quote(_string(raw_intro.get("pull_quote")), excerpts.get(chapter_id, ()), max_chars=90)
             valid_empty_quote = (raw_intro.get("pull_quote") == ""
                 and not any(quote_candidates.get(chapter_id, {}).values()) and not excerpts.get(chapter_id))
             if chapter_id and (intro or pull_quote or valid_empty_quote):
@@ -426,9 +410,9 @@ def _copy_from_payload(
         preface=_clean_copy_text(payload.get("preface"), max_chars=260),
         afterword=_clean_copy_text(payload.get("afterword"), max_chars=320),
         chapter_intros=chapter_intros,
-        back_cover_quote=_validated_back_cover_quote(payload.get("back_cover_quote"), {
-            **quote_candidates, "body_excerpts": excerpts,
-        }),
+        back_cover_quote=_validated_back_cover_quote(payload.get("back_cover_quote"), [
+            quote for chapter in quote_candidates.values() for candidates in chapter.values() for quote in candidates
+        ] + [quote for candidates in excerpts.values() for quote in candidates]),
         model=model,
         prompt=prompt,
     )
@@ -454,12 +438,14 @@ async def generate_manuscript_editorial_copy(
     feedback: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedManuscriptCopy | None:
+    candidates = _quote_candidates(snapshot)
     prompt = build_manuscript_copy_prompt(
         title=title,
         snapshot=snapshot,
         targets=targets,
         chapter_ids=chapter_ids,
         feedback=feedback,
+        candidates=candidates,
     )
     client = ai_client
     if client is None and not _text_ai_configured(ai_model):
@@ -493,6 +479,7 @@ async def generate_manuscript_editorial_copy(
         snapshot=snapshot,
         prompt=prompt,
         model=generated.response.resolved_model,
+        candidates=candidates,
     )
 
 

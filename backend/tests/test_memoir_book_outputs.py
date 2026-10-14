@@ -2125,3 +2125,36 @@ def test_no_quote_candidate_is_a_valid_generation_result():
         prompt="", model="offline")
     assert result is not None
     assert result.chapter_intros[0].pull_quote == ""
+
+
+@pytest.mark.parametrize("body,expected", [
+    ('他说：“好。”', ()),
+    ('开头。嗯。好。', ()),
+    ('开头。老师说：“慢慢走。不用着急。”', ('老师说：“慢慢走。不用着急。”',)),
+    ('开头。后来我们一起走过那条很长的小路。', ('后来我们一起走过那条很长的小路。',)),
+    ('开头。没有闭合的“引号。', ()),
+])
+def test_body_quotes_have_meaningful_length_and_balanced_punctuation(body, expected):
+    from app.services.memoir.book_manuscript_cleanup import body_excerpt_candidates
+    assert body_excerpt_candidates(body, max_chars=90) == expected
+
+
+def test_quote_display_policy_preserves_existing_evidence_signature():
+    from app.services.memoir.book_output_versions import chapter_editorial_copy_signature
+    body = '他说：“好。”\n后来我们一起去了学校，我一直记得那天。'
+    snapshot = {'chapter_id': 'c', 'chapter_title': '上学', 'content': body,
+                'source_refs': [{'utterance_id': 'u', 'quote': body}]}
+    # Captured from v2 before the display-quality fix, including old quote splitting.
+    assert chapter_editorial_copy_signature(snapshot) == 'c946ade1be87df1e3777c9bc3de07cd92af99ef4d58e2371a856e68f2b8671f2'
+
+
+@pytest.mark.parametrize("wrapper", ["none", "quotes", "no_period"])
+def test_generated_excerpt_returns_canonical_evidence_without_guessing(wrapper):
+    from app.services.memoir.book_manuscript_ai import _copy_from_payload
+    sentence = '后来我们一起走过那条很长的小路。'
+    value = sentence if wrapper == 'none' else f'“{sentence}”' if wrapper == 'quotes' else sentence[:-1]
+    copy = _copy_from_payload({'chapter_intros': [{'chapter_id': 'C1', 'pull_quote': value}], 'back_cover_quote': value},
+        snapshot=[{'chapter_id': 'c', 'chapter_title': '回家', 'content': '那是一个普通的日子。' + sentence}], prompt='', model='offline')
+    assert copy.chapter_intros[0].pull_quote == sentence
+    assert copy.chapter_intros[0].pull_quote_source_ref_id == ''
+    assert copy.back_cover_quote == sentence
