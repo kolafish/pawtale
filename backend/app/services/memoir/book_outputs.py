@@ -88,6 +88,7 @@ from app.services.memoir.book_output_versions import (
     automatic_editorial_copy_state,
     append_book_output_version,
     book_output_version_title,
+    book_editorial_copy_signature,
     chapter_editorial_copy_signature,
 )
 from app.services.memoir.project_ai_preferences import (
@@ -586,8 +587,17 @@ async def regenerate_book_output_editorial_copy(
     chapter_ids = _chapter_id_set(req.chapter_ids)
     state = automatic_editorial_copy_state(output, output.versions) if automatic else None
     if state is not None:
-        from app.services.memoir.semantic_state import semantic_json_signature
-        signature = semantic_json_signature({"title": output_title, "snapshot": snapshot})
+        if state.signature_version < 1:
+            from app.services.memoir.semantic_state import semantic_json_signature
+            processed = next((item for item in output.versions if item.version == state.processed_version), None)
+            # Translate the old checkpoint only when its exact title and snapshot
+            # still match; a real title change must remain eligible for regeneration.
+            if processed and state.input_signature == semantic_json_signature({
+                "title": output_title, "snapshot": processed.chapter_snapshot_json,
+            }):
+                state.input_signature = book_editorial_copy_signature(output_title, processed.chapter_snapshot_json)
+            state.signature_version = 1
+        signature = book_editorial_copy_signature(output_title, snapshot)
         if state.input_signature == signature and (not retry or state.status == "succeeded"):
             return _output_response(output)
         state.input_signature = signature

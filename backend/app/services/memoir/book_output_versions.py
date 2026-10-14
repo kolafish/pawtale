@@ -139,6 +139,7 @@ def manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str,
 
 
 class AutomaticEditorialCopyState(BaseModel):
+    signature_version: int = 0
     input_signature: str = ""
     processed_version: int = 0
     status: Literal["succeeded", "failed", "not_started"] = "not_started"
@@ -152,10 +153,22 @@ AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
 
 
 def chapter_editorial_copy_signature(snapshot: dict[str, object]) -> str:
-    # Version numbers and position do not change a chapter's editorial evidence.
-    return semantic_json_signature({key: snapshot.get(key) for key in (
-        "chapter_title", "chapter_summary", "metadata_json", "content", "source_refs",
-    )})
+    # chapter_summary is already projected from editorial metadata in the snapshot.
+    # Audit metadata and transcript/session version IDs are not editorial evidence.
+    return semantic_json_signature({
+        **{key: snapshot.get(key) for key in ("chapter_title", "chapter_summary", "content")},
+        "source_refs": [
+            {key: source.get(key) for key in ("utterance_id", "quote", "summary", "representative_quote")}
+            for source in snapshot.get("source_refs", []) if isinstance(source, dict)
+        ],
+    })
+
+
+def book_editorial_copy_signature(title: str, snapshot: list[dict[str, object]]) -> str:
+    # Book copy also depends on chapter identity and order, but not audit fields.
+    return semantic_json_signature({"title": title, "chapters": [
+        (item["chapter_id"], chapter_editorial_copy_signature(item)) for item in snapshot
+    ]})
 
 
 def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
@@ -176,14 +189,15 @@ def automatic_editorial_copy_state(
     output: MemoirBookOutput, versions: list[MemoirBookOutputVersion],
 ) -> AutomaticEditorialCopyState:
     state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
-    if state.processed_version and not state.chapter_input_signatures:
+    if state.processed_version and (not state.chapter_input_signatures or state.signature_version < 1):
         processed = next((version for version in versions if version.version == state.processed_version), None)
         if processed:
+            legacy_failure = state.status == "failed" and not state.chapter_input_signatures
             state.chapter_input_signatures = {
                 item["chapter_id"]: chapter_editorial_copy_signature(item)
                 for item in processed.chapter_snapshot_json or []
             }
-            if state.status == "failed":
+            if legacy_failure:
                 state.failed_chapter_ids = list(state.chapter_input_signatures)
     if not state.processed_version and versions and versions[0].created_by in {"user", "ai"}:
         state.manual_targets = ["preface", "afterword", "back_cover_quote"]
