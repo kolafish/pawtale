@@ -53,6 +53,7 @@ async def test_confirmed_fact_edit_stays_current_and_readable(client, test_db, m
     assert cg.chapter_draft_facts_current(ctx, version)
     for title, content in [(section.title, "1978年，我参加比赛。\n\n这一段是我亲手补写的。"),
                            ("比赛往事", "1978年，我参加比赛。\n\n这一段是我亲手补写的。\n还有一件事。")]:
+        edit_started = utcnow_naive()
         _, version = await cg.apply_chapter_section_candidate(
             test_db, project_id=project_id, chapter_id=chapter_id, section_id=section.section_id,
             expected_version_id=version.id, expected_input_signature=ctx.input_signature,
@@ -67,6 +68,7 @@ async def test_confirmed_fact_edit_stays_current_and_readable(client, test_db, m
         plan = await cg.load_chapter_draft_generation_plan(test_db, context=ctx)
         assert not plan.target_context.sections
         assert plan.preserved_sections[0].content == content
+        assert edit_started <= plan.preserved_sections[0].user_edited_at <= utcnow_naive()
         assert not await cg.pending_fact_chapter_ids(test_db, project_id=project_id, chapter_versions=[(chapters[0], version)])
         assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
         assert not assembled.omitted_chapter_ids

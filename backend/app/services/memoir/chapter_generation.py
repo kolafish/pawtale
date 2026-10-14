@@ -136,6 +136,7 @@ class GeneratedChapterSection:
     content: str
     used_material_ids: tuple[str, ...]
     user_edited: bool = False
+    user_edited_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +246,7 @@ def _generated_chapter_checkpoint(
                 "content": section.content,
                 "used_material_ids": list(section.used_material_ids),
                 **({"user_edited": True} if section.user_edited else {}),
+                **({"user_edited_at": section.user_edited_at.isoformat()} if section.user_edited_at else {}),
             }
             for section in generated.sections
         ],
@@ -304,6 +306,7 @@ def _generated_chapter_from_checkpoint(
                 content=content,
                 used_material_ids=used,
                 user_edited=raw_section.get("user_edited") is True,
+                user_edited_at=datetime.fromisoformat(raw_section["user_edited_at"]) if raw_section.get("user_edited_at") else None,
             )
         )
         used_material_ids.update(used)
@@ -356,6 +359,7 @@ def _previous_draft_section(
         content=content,
         used_material_ids=used,
         user_edited=snapshot.get("user_edited") is True,
+        user_edited_at=datetime.fromisoformat(snapshot["user_edited_at"]) if snapshot.get("user_edited_at") else None,
     )
 
 
@@ -962,6 +966,7 @@ def build_chapter_generation_prompt(
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
     current_section_user_edited: bool = False,
+    current_section_user_edited_at: datetime | None = None,
     revision_instruction: str = "",
     source_update_reason: str = "",
     previous_section_context: str = "",
@@ -989,6 +994,7 @@ def build_chapter_generation_prompt(
         )
         for index, section in enumerate(outline_sections)
     )
+    edit_cutoff = current_section_user_edited_at or context.previous_draft_at
     blocks = "\n\n".join(
         "\n".join(
             [
@@ -997,12 +1003,12 @@ def build_chapter_generation_prompt(
                 f"小节类型: {section.section_type}",
                 fact_decisions.prompt(
                     tuple(decision for decision in section.decisions if not (
-                        current_section_user_edited and context.previous_draft_at
-                        and (decision.confirmed_at is None or decision.confirmed_at <= context.previous_draft_at)
+                        current_section_user_edited and edit_cutoff
+                        and (decision.confirmed_at is None or decision.confirmed_at <= edit_cutoff)
                     )),
                     edits=tuple(edit for material in section.materials for edit in material.edits if not (
-                        current_section_user_edited and context.previous_draft_at
-                        and edit.edited_at <= context.previous_draft_at
+                        current_section_user_edited and edit_cutoff
+                        and edit.edited_at <= edit_cutoff
                     )),
                 ),
                 "允许素材：",
@@ -1487,6 +1493,10 @@ async def generate_chapter(
                 current_section_user_edited=bool(
                     section.section_id in previous_by_id and previous_by_id[section.section_id].user_edited
                 ),
+                current_section_user_edited_at=(
+                    previous_by_id[section.section_id].user_edited_at
+                    if section.section_id in previous_by_id else None
+                ),
                 source_update_reason=(related_section_reasons or {}).get(
                     section.section_id, ""
                 ),
@@ -1502,6 +1512,7 @@ async def generate_chapter(
                 current = replace(
                     current,
                     user_edited=previous_by_id[section.section_id].user_edited,
+                    user_edited_at=previous_by_id[section.section_id].user_edited_at,
                 )
             generated_target_sections.append(current)
             generated_targets_by_id[current.section_id] = current
@@ -1552,6 +1563,7 @@ async def generate_chapter_section(
     preceding_section_context: str = "",
     current_section_content: str = "",
     current_section_user_edited: bool = False,
+    current_section_user_edited_at: datetime | None = None,
     revision_instruction: str = "",
     source_update_reason: str = "",
     required_material_ids: set[str] | None = None,
@@ -1568,6 +1580,7 @@ async def generate_chapter_section(
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
         current_section_user_edited=current_section_user_edited,
+        current_section_user_edited_at=current_section_user_edited_at,
         revision_instruction=revision_instruction,
         source_update_reason=source_update_reason,
         previous_section_context=preceding_section_context,
@@ -1738,6 +1751,7 @@ def _section_snapshot(
                if inputs[section.section_id].decisions else {}),
             "used_material_ids": list(section.used_material_ids),
             **({"user_edited": True} if section.user_edited else {}),
+            **({"user_edited_at": section.user_edited_at.isoformat()} if section.user_edited_at else {}),
         }
         for section in sections
     ]
@@ -2096,6 +2110,12 @@ async def apply_chapter_section_candidate(
         content=content,
         used_material_ids=tuple(latest_sections[target_index].get("used_material_ids", [])),
         user_edited=True,
+        user_edited_at=(
+            datetime.now(UTC).replace(tzinfo=None)
+            if content != latest_sections[target_index].get("content")
+            else datetime.fromisoformat(latest_sections[target_index]["user_edited_at"])
+            if latest_sections[target_index].get("user_edited_at") else None
+        ),
     ),))[0]
     revised_sections = [
         replacement if index == target_index else section
