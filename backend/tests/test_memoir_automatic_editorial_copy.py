@@ -570,7 +570,8 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
 
 
 @pytest.mark.parametrize("manual", [False, True])
-async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_changes(client, test_db, monkeypatch, manual):
+@pytest.mark.parametrize("continued_quote", [False, True])
+async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_changes(client, test_db, monkeypatch, manual, continued_quote):
     from app.models.memoir import MemoirBookChapterDraftVersion
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
     from app.services.memoir.book_output_versions import load_latest_book_output_version
@@ -578,7 +579,7 @@ async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_ch
     draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == chapters[0].id))
     opening = '那一天我们从县城回到老家。'
     ending = '从那以后，我一直记得师傅教我修车的那些日子。'
-    draft.content = opening + ending
+    draft.content = opening + ('\n母亲说：“孩子，路上小心。\n“到了就写信回来。”\n' if continued_quote else '') + ending
     sections = copy.deepcopy(draft.section_snapshot_json)
     sections[0]['content'] = draft.content
     draft.section_snapshot_json = sections

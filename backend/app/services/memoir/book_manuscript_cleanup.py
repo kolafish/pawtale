@@ -94,18 +94,21 @@ def usable_quote(value: str, *, min_chars: int = 2) -> bool:
 
 def _sentences(value: str) -> list[str]:
     sentences: list[str] = []
-    start: int | None = None
-    stack: list[str] = []
-    for match in re.finditer(r'''[^。！？!?\n]+[。！？!?]*[”’」』"']*''', value):
-        if start is None:
-            start = match.start()
-        valid = _update_quote_stack(match.group(), stack)
-        if not stack or not valid:
-            sentences.append(" ".join(value[start:match.end()].split()))
-            start = None
-            stack.clear()
-    if start is not None:
-        sentences.append(" ".join(value[start:].split()))
+    # A malformed or continued quotation may consume its own paragraph, never
+    # the following paragraphs. Keep complete multi-sentence dialogue together.
+    for paragraph in value.splitlines():
+        start: int | None = None
+        stack: list[str] = []
+        for match in re.finditer(r'''[^。！？!?]+[。！？!?]*[”’」』"']*''', paragraph):
+            if start is None:
+                start = match.start()
+            valid = _update_quote_stack(match.group(), stack)
+            if not stack or not valid:
+                sentences.append(" ".join(paragraph[start:match.end()].split()))
+                start = None
+                stack.clear()
+        if start is not None:
+            sentences.append(" ".join(paragraph[start:].split()))
     return sentences
 
 
@@ -117,6 +120,8 @@ def _signature_sentences(value: str) -> list[str]:
 
 def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int, for_signature: bool = False) -> dict[str, tuple[str, ...]]:
     """All source runs retained in their own section; split each body only once."""
+    # for_signature=True is the immutable evidence-v2 format; never apply new
+    # display splitting/filtering here without an explicit migration policy.
     sentences = _signature_sentences if for_signature else _sentences
     sections = _list(chapter.get("sections"))
     by_source: dict[str, set[str]] = {}
@@ -134,12 +139,13 @@ def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int, for_si
         runs: list[str] = []
         run = ""
         for sentence in sentences(_safe_str(ref.get("quote"))):
-            if sentence in current and len(run + sentence) <= max_chars:
+            eligible = sentence in current and (for_signature or usable_quote(sentence))
+            if eligible and len(run + sentence) <= max_chars:
                 run += sentence
             else:
                 if run:
                     runs.append(run)
-                run = sentence if sentence in current and len(sentence) <= max_chars else ""
+                run = sentence if eligible and len(sentence) <= max_chars else ""
         if run:
             runs.append(run)
         result[source_id] = tuple(dict.fromkeys(run for run in runs if for_signature or usable_quote(run)))
@@ -153,21 +159,20 @@ def body_excerpt_candidates(content: str, *, max_chars: int) -> tuple[str, ...]:
         if sentence != opening and len(sentence) <= max_chars and usable_quote(sentence, min_chars=8)))
 
 
-def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_chars: int, allow_substring: bool = False) -> str:
-    value = " ".join(value.split())
+def _strip_quote_wrapper(value: str) -> str:
     for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")):
         if value.startswith(opening) and value.endswith(closing):
-            value = value[1:-1].strip()
-            break
+            return value[1:-1].strip()
+    return value
+
+
+def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_chars: int, allow_substring: bool = False) -> str:
+    value = _strip_quote_wrapper(" ".join(value.split()))
     if not usable_quote(value):
         return ""
     candidates = [brief_text(candidate, max_chars=max_chars) for candidate in candidates]
     def key(text: str) -> str:
-        for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")):
-            if text.startswith(opening) and text.endswith(closing):
-                text = text[1:-1].strip()
-                break
-        return re.sub(r'''[。！？!?]+(?=[”’」』"']*$)''', "", text)
+        return re.sub(r'''[。！？!?]+(?=[”’」』"']*$)''', "", _strip_quote_wrapper(text))
     for candidate in candidates:
         if len(candidate) <= max_chars and usable_quote(candidate) and key(value) == key(candidate):
             return candidate  # Return the supplied evidence with its original punctuation.
@@ -175,7 +180,7 @@ def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_ch
         for candidate in candidates:
             if not usable_quote(candidate):
                 continue
-            if len(value) <= max_chars and value in candidate:
+            if len(value) <= max_chars and usable_quote(value, min_chars=8) and value in candidate:
                 return value
             if candidate in value:
                 return candidate
