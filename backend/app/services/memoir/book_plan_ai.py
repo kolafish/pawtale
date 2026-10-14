@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
-from app.services.ai_calls import AIInvalidStructuredOutputError, generate_structured_with_client
+from app.services.ai_calls import AIInvalidStructuredOutputError, AIOutputTruncatedError, generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
@@ -246,8 +246,10 @@ def clean_generated_chapter_title(title: str) -> str:
 
 
 def _source_counts(output: _BookPlanOutput) -> Counter[int]:
-    return Counter([index for chapter in output.chapters for index in chapter.source_indices]
-                   + output.not_story_source_indices)
+    # Repetition within one destination is unambiguous; conflicts across
+    # chapters or between a chapter and non-story must remain unresolved.
+    return Counter([index for chapter in output.chapters for index in set(chapter.source_indices)]
+                   + list(set(output.not_story_source_indices)))
 
 
 def _recover_partial_plan(output: _BookPlanOutput | None, expected: set[int]) -> _BookPlanOutput | None:
@@ -256,11 +258,11 @@ def _recover_partial_plan(output: _BookPlanOutput | None, expected: set[int]) ->
     counts = _source_counts(output)
     unique = {index for index, count in counts.items() if count == 1 and index in expected}
     chapters = [chapter.model_copy(update={"source_indices": indices}) for chapter in output.chapters
-                if chapter.title.strip() and (indices := [index for index in chapter.source_indices if index in unique])]
-    if not chapters:
+                if chapter.title.strip() and (indices := list(dict.fromkeys(index for index in chapter.source_indices if index in unique)))]
+    nonstory = list(dict.fromkeys(index for index in output.not_story_source_indices if index in unique))
+    if not chapters and set(nonstory) != expected:
         return None
-    return _BookPlanOutput(title=output.title, chapters=chapters,
-        not_story_source_indices=[index for index in output.not_story_source_indices if index in unique])
+    return _BookPlanOutput(title=output.title, chapters=chapters, not_story_source_indices=nonstory)
 
 
 async def generate_book_plan_from_sources(
@@ -273,12 +275,17 @@ async def generate_book_plan_from_sources(
 ) -> GeneratedBookPlan:
     prompt = build_plan_prompt(project_title, sources, interviewer_lines)
     expected = {source.source_index for source in sources}
-    last_candidate: _BookPlanOutput | None = None
+    best_candidate: _BookPlanOutput | None = None
+    best_coverage = -1
     class ValidatedBookPlanOutput(_BookPlanOutput):
         @model_validator(mode="after")
         def validate_source_coverage(self):
-            nonlocal last_candidate
-            last_candidate = self
+            nonlocal best_candidate, best_coverage
+            # Capture only complete, schema-valid responses; keep one coherent
+            # classification rather than merging contradictory attempts.
+            candidate = _recover_partial_plan(self, expected)
+            if candidate is not None and (coverage := len(_source_counts(candidate))) > best_coverage:
+                best_candidate, best_coverage = candidate, coverage
             counts = _source_counts(self)
             if (set(counts) != expected or any(count != 1 for count in counts.values())
                     or any(not chapter.title.strip() or not chapter.source_indices for chapter in self.chapters)):
@@ -302,8 +309,8 @@ async def generate_book_plan_from_sources(
             max_attempts=policy.max_attempts,
         )
         value, model = generated.value, generated.response.resolved_model
-    except AIInvalidStructuredOutputError as exc:
-        value = _recover_partial_plan(last_candidate, expected)
+    except (AIInvalidStructuredOutputError, AIOutputTruncatedError) as exc:
+        value = best_candidate
         if value is None:
             raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
         model = exc.response.resolved_model if exc.response else getattr(client, "model_name", ai_model)

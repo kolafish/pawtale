@@ -14,7 +14,8 @@ from tests.test_memoir_book_completion import _book
 from tests.test_memoir_section_organization import _stopped_growth_job
 
 
-async def test_initial_profile_result_is_durable_and_reconsidered_only_after_text_changes(client, test_db, monkeypatch):
+@pytest.mark.parametrize("indices", [[1], [1, 1]])
+async def test_initial_profile_result_is_durable_and_reconsidered_only_after_text_changes(client, test_db, monkeypatch, indices):
     from app.models.memoir import MemoirBookPlan, MemoirVoiceUtterance
     from app.services.memoir import book_plan_ai
     from tests.memoir_helpers import ensure_mobile_memoir_project
@@ -22,7 +23,7 @@ async def test_initial_profile_result_is_durable_and_reconsidered_only_after_tex
 
     project_id = await ensure_mobile_memoir_project(client)
     source, job = await _stopped_growth_job(client, test_db, project_id, "我叫余建国，今年七十八岁，老家绵阳。")
-    fake = FakeStoryGrowthAI({"chapters": [], "not_story_source_indices": [1]})
+    fake = FakeStoryGrowthAI({"chapters": [], "not_story_source_indices": indices})
     monkeypatch.setattr(book_plan_ai, "get_ai_service", lambda _model=None: fake)
     async def run():
         job.status = "running"
