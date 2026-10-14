@@ -6,8 +6,18 @@ import { getInitialProjectDocumentId } from '../domain/projectNavigation';
 import { formatProjectStructure, getProjectProfile } from '../domain/projectProfiles';
 import { useAppStore } from '../stores/appStore';
 import { ProjectDeleteDialog } from './ProjectDeleteDialog';
-import type { Project, ProjectListItem } from '../types';
+import type { Project, ProjectListItem, ProjectType } from '../types';
 import { formatBeijingDateTime } from '../utils/time';
+
+// 项目类型即来源：Web 端只新建小说，小鱼小程序写公众号文章，老余小程序写回忆录。
+type ProjectSourceTab = 'all' | 'web' | 'miniprogram' | 'memoir';
+
+const PROJECT_SOURCE_TABS: { key: ProjectSourceTab; label: string; types: ProjectType[] | null }[] = [
+  { key: 'all', label: '全部', types: null },
+  { key: 'web', label: 'Web', types: ['novel'] },
+  { key: 'miniprogram', label: '小程序', types: ['article'] },
+  { key: 'memoir', label: '回忆录', types: ['memoir'] },
+];
 
 export function ProjectHome() {
   const queryClient = useQueryClient();
@@ -18,6 +28,7 @@ export function ProjectHome() {
   const [editingTitle, setEditingTitle] = useState('');
   const [projectPendingDeletion, setProjectPendingDeletion] = useState<ProjectListItem | null>(null);
   const [deleteError, setDeleteError] = useState('');
+  const [sourceTab, setSourceTab] = useState<ProjectSourceTab>('all');
   const novelProfile = getProjectProfile('novel');
 
   const openLoadedProject = (project: Project) => {
@@ -29,6 +40,13 @@ export function ProjectHome() {
     queryKey: ['projects'],
     queryFn: projectsApi.list,
   });
+
+  const countForTab = (types: ProjectType[] | null) =>
+    types ? projects.filter((proj) => types.includes(proj.type)).length : projects.length;
+  const activeTabTypes = PROJECT_SOURCE_TABS.find((tab) => tab.key === sourceTab)?.types ?? null;
+  const visibleProjects = activeTabTypes
+    ? projects.filter((proj) => activeTabTypes.includes(proj.type))
+    : projects;
 
   const createMutation = useMutation({
     mutationFn: ({ title }: { title: string }) => projectsApi.create({ type: 'novel', title }),
@@ -173,8 +191,34 @@ export function ProjectHome() {
             </button>
           </div>
         ) : (
+          <>
+          <div role="tablist" aria-label="项目来源" className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200">
+            {PROJECT_SOURCE_TABS.map((tab) => {
+              const isActive = tab.key === sourceTab;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setSourceTab(tab.key)}
+                  className={`-mb-px min-h-10 shrink-0 border-b-2 px-3 py-2 text-sm transition-colors duration-150 ${
+                    isActive
+                      ? 'border-pink-500 font-medium text-pink-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab.label}
+                  <span className="ml-1 text-xs tabular-nums text-gray-400">{countForTab(tab.types)}</span>
+                </button>
+              );
+            })}
+          </div>
+          {visibleProjects.length === 0 ? (
+            <p className="py-12 text-center text-sm text-gray-400">这个分类下还没有项目</p>
+          ) : (
           <div className="flex flex-col gap-4">
-            {projects.map((proj) => {
+            {visibleProjects.map((proj) => {
               const canEditProject = proj.can_edit !== false;
               const showWritingStats = proj.type !== 'memoir';
               const ownerLabel = proj.owner_display_name || proj.owner_email || '';
@@ -281,6 +325,8 @@ export function ProjectHome() {
               );
             })}
           </div>
+          )}
+          </>
         )}
       </div>
       {projectPendingDeletion && (
