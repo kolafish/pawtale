@@ -7,7 +7,7 @@ import json
 from typing import Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -311,12 +311,24 @@ async def decide_story_growth(
         sections=sections,
         interviewer_lines=interviewer_lines,
     )
+
+    class ValidatedGrowthOutput(_GrowthOutput):
+        @model_validator(mode="after")
+        def validate_placements(self):
+            # Validate against this exact input inside the existing structured
+            # generation budget, before any chapter or material is written.
+            try:
+                _normalize_groups(self, utterances=utterances, chapter_refs=chapter_refs, section_refs=section_refs)
+            except HTTPException as exc:
+                raise ValueError(str(exc.detail)) from exc
+            return self
+
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     generated = await generate_structured_with_client(
         get_ai_service(ai_model),
         SYSTEM_PROMPT,
         prompt,
-        output_model=_GrowthOutput,
+        output_model=ValidatedGrowthOutput,
         requested_model=ai_model,
         temperature=0.15,
         max_tokens=policy.max_tokens,

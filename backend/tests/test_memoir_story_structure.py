@@ -4,8 +4,9 @@ from fastapi import HTTPException
 import pytest
 from sqlalchemy import select
 
-from app.models.memoir import MemoirBookPlanChapter, MemoirSection, MemoirSectionMaterial
+from app.models.memoir import MemoirBookPlanChapter, MemoirSection, MemoirSectionMaterial, MemoirVoiceUtterance
 from app.services.ai_references import ModelReferenceMap
+from app.services.ai_calls import AIInvalidStructuredOutputError
 from app.services.memoir import story_tree_growth as growth
 from app.services.memoir.book_plan_sources import renumber_chapters, set_temporary_chapter_orders
 from tests.test_memoir_book_completion import _book
@@ -132,3 +133,50 @@ def test_source_map_rejects_invented_keys_and_ambiguous_nonstory_destinations(pl
     with pytest.raises(HTTPException) as error:
         _normalize({'placements': placements}, ['父亲接我放学。后来李老师劝我复学。'])
     assert error.value.status_code == 422
+
+
+@pytest.mark.parametrize('invalid', [
+    {},
+    {'placements': {'1': {'kind': 'story', 'section_id': 'S99'}}},
+    {'placements': {'1': {'kind': 'story', 'section_id': 'S1', 'chapter_ref': 'C1'}}},
+    {'new_chapters': [{'chapter_ref': 'N1', 'title': '童年'}], 'placements': {'1': {'kind': 'not_story'}}},
+    {'placements': {'1': {'kind': 'unassigned', 'reason': ''}}},
+    {'placements': {'1': {'kind': 'unknown'}}},
+])
+async def test_structure_and_placement_errors_share_one_retry_budget(monkeypatch, invalid):
+    valid = {'placements': {'1': {'kind': 'story', 'section_id': 'S1'}}}
+    fake = FakeStoryGrowthAI(invalid)
+    original = fake._call_llm
+    async def replay(*args, **kwargs):
+        if fake.calls:
+            fake.payload = valid
+        return await original(*args, **kwargs)
+    monkeypatch.setattr(fake, '_call_llm', replay)
+    monkeypatch.setattr(growth, 'get_ai_service', lambda _: fake)
+    groups = await growth.decide_story_growth(
+        utterances=[MemoirVoiceUtterance(id='u1', transcript_raw='八岁那年父亲接我放学。', transcript_edited='')],
+        chapters=[MemoirBookPlanChapter(id='c1', title='童年', sort_order=0)],
+        sections=[MemoirSection(id='s1', chapter_id='c1', title='放学', materials=[], status='active', include_in_book=True, metadata_json={}, section_type='narrative')],
+        interviewer_lines={}, ai_model=None,
+    )
+    assert fake.calls == 2
+    assert [(item.action, item.section_id, item.utterance_ids) for item in groups] == [('assign_existing', 's1', ['u1'])]
+
+
+async def test_invalid_second_response_leaves_the_entire_batch_unplaced(client, test_db, monkeypatch):
+    from sqlalchemy import func
+    project_id, _, _ = await _book(client, test_db)
+    source, job = await _stopped_growth_job(client, test_db, project_id, '八岁那年父亲接我放学。')
+    second, _ = await _stopped_growth_job(client, test_db, project_id, '后来我去了工厂学修车。')
+    before = await test_db.scalar(select(func.count()).select_from(MemoirBookPlanChapter))
+    fake = FakeStoryGrowthAI({'new_chapters': [{'chapter_ref': 'N1', 'title': '童年'}],
+        'placements': {'1': {'chapter_ref': 'N1', 'new_section_title': '放学'}}})
+    monkeypatch.setattr(growth, 'get_ai_service', lambda _: fake)
+    with pytest.raises(AIInvalidStructuredOutputError):
+        await growth.run_story_tree_growth_job(test_db, job)
+    assert fake.calls == 2
+    assert await test_db.scalar(select(func.count()).select_from(MemoirBookPlanChapter)) == before
+    assert not await test_db.scalar(select(MemoirSectionMaterial.id).where(
+        MemoirSectionMaterial.utterance_id.in_([source['utterance_id'], second['utterance_id']]),
+    ))
+    assert growth._progress(job).deferred == {}
