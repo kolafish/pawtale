@@ -13,7 +13,7 @@ export interface VoiceSessionEntry {
 export type VoiceSessionExit =
   | { destination: "completion_issue"; projectId: string; projectTitle: string; issueId: string }
   | { destination: "story"; projectId: string; narrationSaved: boolean; finished?: boolean }
-  | { destination: "completion"; explainSaved?: boolean }
+  | { destination: "completion" }
   | { destination: "transcripts" };
 
 export interface VoiceSessionExitEvent { detail: VoiceSessionExit & { voiceSessionId: string } }

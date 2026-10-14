@@ -422,7 +422,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
       this.exitSession(this.runtime().requestedExit || (this.data.sessionGoal === "book_completion"
-        ? { destination: "completion", explainSaved: true }
+        ? { destination: "completion" }
         : {
           destination: "story",
           projectId: this.data.projectId,

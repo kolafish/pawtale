@@ -25,16 +25,11 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
       returnToStory(detail.projectId, detail.narrationSaved);
     } else if (detail.destination === "transcripts") {
       redirectToTranscripts();
-    } else if (detail.explainSaved) {
-      wx.showModal({
-        title: "本次补充已保存",
-        content: "回答已经直接放回相关小章节。返回后重新整理本章，就能生成更新后的正文。",
-        confirmText: "返回本章",
-        showCancel: false,
-        success: () => { wx.navigateBack({ delta: 1 }); },
-      });
     } else {
       wx.navigateBack({ delta: 1 });
+      if (detail.destination === "completion") {
+        wx.showToast({ title: "本次补充已保存", icon: "success" });
+      }
     }
   },
 });
