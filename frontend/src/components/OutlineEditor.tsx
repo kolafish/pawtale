@@ -1,15 +1,16 @@
-import { Save } from 'lucide-react';
+import { LayoutTemplate, Save } from 'lucide-react';
 import type { ReferenceItem } from '../types';
 import type { RefSaveStatus } from '../hooks/useReferenceEditor';
 
 interface OutlineEditorProps {
   data: ReferenceItem;
+  template: string | null;
   saveStatus: RefSaveStatus;
   onUpdate: (patch: Partial<ReferenceItem>) => void;
   onSave: () => void;
 }
 
-export function OutlineEditor({ data, saveStatus, onUpdate, onSave }: OutlineEditorProps) {
+export function OutlineEditor({ data, template, saveStatus, onUpdate, onSave }: OutlineEditorProps) {
   const statusLabel = saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存';
 
   return (
@@ -22,6 +23,15 @@ export function OutlineEditor({ data, saveStatus, onUpdate, onSave }: OutlineEdi
           className="text-lg font-semibold text-gray-800 flex-1 bg-transparent border-none outline-none focus:ring-0 placeholder-gray-300"
           placeholder="大纲标题..."
         />
+        {template && !data.content.trim() && (
+          <button
+            onClick={() => onUpdate({ content: template })}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+          >
+            <LayoutTemplate size={12} />
+            使用大纲模板
+          </button>
+        )}
         <span className={`text-xs ${saveStatus === 'saved' ? 'text-gray-400' : 'text-amber-500'}`}>
           {statusLabel}
         </span>

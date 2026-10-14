@@ -20,7 +20,39 @@ export interface ProjectProfile {
   documentUnit: string;
   groupUnit: string;
   referenceSections: ProjectReferenceSection[];
+  outlineTemplate: string | null;
 }
+
+const NOVEL_OUTLINE_TEMPLATE = `## 一句话故事
+- 
+
+## 故事设定
+- 主角：
+- 目标：
+- 核心冲突：
+- 失败的代价：
+
+## 开场
+- 主角的日常与处境：
+- 打破平衡的事件：
+
+## 发展
+- 主角的选择与行动：
+- 关键转折：
+- 冲突升级：
+
+## 高潮
+- 最终对决 / 关键抉择：
+
+## 结尾
+- 结局：
+- 主角的变化：
+- 余韵与伏笔：
+
+## 章节规划
+- 第一章：
+- 第二章：
+`;
 
 const NOVEL_REFERENCE_SECTIONS: ProjectReferenceSection[] = [
   { key: 'character', label: '人物', types: [REFERENCE_TYPES.CHARACTER], createType: REFERENCE_TYPES.CHARACTER },
@@ -48,6 +80,7 @@ export const PROJECT_PROFILES: Record<ProjectType, ProjectProfile> = {
     documentUnit: '章',
     groupUnit: '卷',
     referenceSections: NOVEL_REFERENCE_SECTIONS,
+    outlineTemplate: NOVEL_OUTLINE_TEMPLATE,
   },
   article: {
     type: 'article',
@@ -58,6 +91,7 @@ export const PROJECT_PROFILES: Record<ProjectType, ProjectProfile> = {
     documentUnit: '篇',
     groupUnit: '组',
     referenceSections: ARTICLE_REFERENCE_SECTIONS,
+    outlineTemplate: null,
   },
   memoir: {
     type: 'memoir',
@@ -68,6 +102,7 @@ export const PROJECT_PROFILES: Record<ProjectType, ProjectProfile> = {
     documentUnit: '段',
     groupUnit: '组',
     referenceSections: MEMOIR_REFERENCE_SECTIONS,
+    outlineTemplate: null,
   },
 };
 

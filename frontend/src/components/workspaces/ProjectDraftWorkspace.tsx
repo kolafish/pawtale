@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { getProjectProfile } from '../../domain/projectProfiles';
 import { REFERENCE_TYPES } from '../../domain/references';
 import { useDraftRevision } from '../../hooks/project/useDraftRevision';
 import { useProjectState } from '../../hooks/useProjectState';
@@ -100,6 +101,7 @@ export function ProjectDraftWorkspace({
         return (
           <OutlineEditor
             data={refEditor.referenceData}
+            template={getProjectProfile(project.type).outlineTemplate}
             saveStatus={refEditor.saveStatus}
             onUpdate={refEditor.updateField}
             onSave={refEditor.handleSave}
