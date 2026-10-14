@@ -853,6 +853,7 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
       }),
     },
     voiceApiExports: {
+      getMemoirVoiceTranscript: async () => ({ ...sampleTranscript("utterance-target"), transcription_status: "ready" }),
       listMemoirVoiceTranscripts: async ({ offset, includeEmpty }) => {
         assert.equal(includeEmpty, false);
         calls.push(offset);
@@ -1003,7 +1004,7 @@ test("empty recordings fold before pagination and can be expanded, recovered and
 });
 
 
-for (const scenario of ["empty", "deleted", "other-project", "video", "search-without-empty", "project-changed"]) {
+for (const scenario of ["empty", "deleted", "server-error", "other-project", "video", "search-without-empty", "project-changed"]) {
   test(`navigation reveals only a confirmed empty target: ${scenario}`, async () => {
     const targetId = "navigation-target";
     global.wx = {
@@ -1025,7 +1026,9 @@ for (const scenario of ["empty", "deleted", "other-project", "video", "search-wi
         },
         getMemoirVoiceTranscript: async () => {
           detailCalls++;
-          if (scenario === "deleted") throw new Error("讲述不存在");
+          const { ApiError } = require("../services/request.ts");
+          if (scenario === "deleted") throw new ApiError(404, "讲述不存在", {});
+          if (scenario === "server-error") throw new ApiError(503, "暂时无法连接", {});
           if (scenario === "project-changed") { context.data.activeProjectId = "project-2"; context.loadToken++; }
           return { ...sampleTranscript(targetId), transcription_status: "empty",
             project_id: scenario === "other-project" ? "project-2" : "project-1" };
@@ -1040,6 +1043,39 @@ for (const scenario of ["empty", "deleted", "other-project", "video", "search-wi
     assert.equal(detailCalls, noEmpty || scenario === "video" ? 0 : 1);
     assert.equal(context.data.highlightedId, expanded || noEmpty ? targetId : "");
     if (noEmpty) assert.equal(context.data.hasSearchCriteria, false);
-    if (scenario === "deleted") assert.equal(context.data.error, "讲述不存在");
+    if (scenario === "deleted") assert.equal(context.data.error, "");
+    if (scenario === "server-error") assert.equal(context.data.error, "暂时无法连接");
+  });
+}
+
+
+for (const targetPosition of [20, 500]) {
+  test(`large transcript navigation selects scope before pagination: ${targetPosition}`, async () => {
+    global.wx = {
+      getStorageSync: key => key === "pawtale_transcript_navigation_target" ? { utterance_id: "empty-target" } : "",
+      removeStorageSync() {}, pageScrollTo() {},
+    };
+    const ordinary = Array.from({ length: 500 }, (_, i) => sampleTranscript(`ordinary-${i}`));
+    const target = { ...sampleTranscript("empty-target"), transcription_status: "empty" };
+    const expanded = [...ordinary.slice(0, targetPosition), target, ...ordinary.slice(targetPosition)];
+    const requests = [];
+    const { page } = loadTranscriptsPage({
+      authExports: { getMemoirIdentity: async () => ({ active_project_id: "project-1", active_project: { title: "往事" } }) },
+      voiceApiExports: {
+        listMemoirVoiceTranscripts: async ({ offset, limit, includeEmpty }) => {
+          requests.push({ kind: includeEmpty ? "expanded" : "folded", offset, limit });
+          const list = includeEmpty ? expanded : ordinary;
+          return { items: list.slice(offset, offset + limit), total: list.length, empty_count: 1, offset, limit };
+        },
+        getMemoirVoiceTranscript: async () => { requests.push({ kind: "detail" }); return target; },
+      },
+    });
+    const context = pageContext(page, { limit: 50 });
+    await page.onShow.call(context);
+    assert.equal(context.data.highlightedId, target.id);
+    assert.equal(context.data.showEmptyRecordings, true);
+    assert.deepEqual(requests.filter(r => r.kind === "folded"), [{ kind: "folded", offset: 0, limit: 50 }]);
+    assert.equal(requests[1].kind, "detail");
+    assert.equal(requests.length, 2 + Math.ceil((targetPosition + 1) / 50));
   });
 }
