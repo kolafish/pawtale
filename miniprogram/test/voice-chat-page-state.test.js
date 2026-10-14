@@ -377,10 +377,12 @@ test("book completion without an issue exposes the invalid session and disables 
   assert.equal(patch.micButtonText, "请先保存离开");
 });
 
-test("closed book completion returns to the whole-book overview", () => {
+test("closed book completion offers an exit without another question", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
+    canRequestFollowUp: true,
+    assistantPromptText: "还想问您一个问题",
     completionIssue: {
       id: "issue-1",
       question: "请按顺序讲讲这段经历。",
@@ -393,6 +395,7 @@ test("closed book completion returns to the whole-book overview", () => {
   assert.equal(patch.completionIssueStatusText, "本次补充已经结束");
   assert.equal(patch.showControlBar, false);
   assert.equal(patch.showAssistantActions, false);
+  assert.equal(patch.showAssistantPanel, false);
 });
 
 test("answered book completion ends recording flow before background verification finishes", () => {
@@ -423,7 +426,7 @@ test("answered book completion ends recording flow before background verificatio
   assert.equal(patch.showCompletionIssueContinue, true);
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusText, "本次补充已经完成");
-  assert.equal(patch.liveDisplayText, "回答已经保存，可以返回全书概览。");
+  assert.equal(patch.liveDisplayText, "本次补充已保存，可以返回了。");
   assert.equal(patch.assistantLabelText, "本次补充已结束");
 });
 

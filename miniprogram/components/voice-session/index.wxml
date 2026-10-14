@@ -144,7 +144,7 @@
       aria-disabled="{{completionIssueControlsDisabled}}"
       bindtap="finishCompletionRound"
     >
-      返回全书概览
+      完成补充
     </view>
   </view>
 

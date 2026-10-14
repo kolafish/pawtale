@@ -3,20 +3,22 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadPageModule, pageContext } = require("./page-harness");
 
-test("voice page forwards entry and returns a completed supplement to its chapter", () => {
-  const modals = [], returns = [];
-  global.wx = { showModal: modal => modals.push(modal), navigateBack: options => returns.push(options) };
+test("completed supplement returns immediately to its caller with saved feedback", () => {
+  const modals = [], returns = [], toasts = [];
+  global.wx = {
+    showModal: modal => modals.push(modal),
+    showToast: toast => toasts.push(toast),
+    navigateBack: options => returns.push(options),
+  };
   const context = pageContext(loadPageModule("../pages/voice-chat/index.ts").page);
   const entry = { voiceSessionId: "voice-1", sessionGoal: "book_completion" };
   context.onLoad(entry);
   assert.equal(context.data.entry.voiceSessionId, entry.voiceSessionId);
   assert.equal(context.data.entry.sessionGoal, entry.sessionGoal);
-  context.exitSession({ detail: { destination: "completion", explainSaved: true } });
-  assert.equal(modals[0].title, "本次补充已保存");
-  assert.equal(modals[0].confirmText, "返回本章");
-  assert.deepEqual(returns, []);
-  modals[0].success();
+  context.exitSession({ detail: { destination: "completion" } });
   assert.deepEqual(returns, [{ delta: 1 }]);
+  assert.deepEqual(modals, [], "a saved answer must not require another confirmation or manual rewrite");
+  assert.equal(toasts.length, 1);
 });
 
 test("voice page returns a confirmed ordinary narration to the home story", () => {

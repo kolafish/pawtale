@@ -1040,7 +1040,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.deepEqual(storyTabs, []);
 });
 
-test("book completion finish explains that the answer is already in its section", async () => {
+test("book completion exits only after the saved session is confirmed", async () => {
   const modals = [];
   global.wx = {
     showModal(options) {
@@ -1096,7 +1096,7 @@ test("book completion finish explains that the answer is already in its section"
   await page.connectGateway.call(context);
   await page.finishSession.call(context);
 
-  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", explainSaved: true, voiceSessionId: "voice-completion-1" } }]);
+  assert.deepEqual(context.events, [{ name: "exit", detail: { destination: "completion", voiceSessionId: "voice-completion-1" } }]);
   assert.deepEqual(modals, []);
 });
 
