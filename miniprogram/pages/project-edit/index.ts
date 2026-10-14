@@ -36,6 +36,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import { returnToHome } from "../../services/navigation";
 import {
   transcriptPolishLevel,
   TRANSCRIPT_POLISH_LEVELS,
@@ -297,7 +298,8 @@ definePage<ProjectEditData>()({
       }
       this.pendingCreatedProject = null;
       wx.showToast({ title: "已保存", icon: "success" });
-      wx.navigateBack({ delta: 1 });
+      if (createdProject) returnToHome();
+      else wx.navigateBack({ delta: 1 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存失败";
       this.setData({ error: this.pendingCreatedProject && !this.data.projectId

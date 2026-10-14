@@ -130,7 +130,7 @@ export function narratorGenderLabel(gender: MemoirNarratorGender): string {
 export function projectProfileSummary(project: Project): string {
   const profile = memoirProjectProfile(project);
   const parts = [
-    narratorGenderLabel(profile.narratorGender),
+    profile.narratorGender === "unspecified" ? "" : narratorGenderLabel(profile.narratorGender),
     profile.narratorOrigin,
     profile.narratorAge !== null ? `${profile.narratorAge} 岁` : "",
     NARRATION_MODES[profile.defaultNarrationMode].label,

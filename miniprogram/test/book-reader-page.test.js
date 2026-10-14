@@ -118,6 +118,8 @@ test("shared reader opens without owner access and hides owner-only narration", 
 });
 
 test("demo reader uses the public book and disables account-only audio", async () => {
+  const destinations = [];
+  global.wx = { navigateTo({url}) { destinations.push(url); } };
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: unmockedAsync("owner book API"),
     readMemoirDemoBook: async () => sampleFinishedBook("家里的人完整章节"),
@@ -130,6 +132,11 @@ test("demo reader uses the public book and disables account-only audio", async (
   assert.equal(context.data.error, "");
   await context.playReaderAudio();
   assert.equal(context.data.ttsBusyTarget, "");
+  assert.equal(context.data.readerDemo, true);
+  context.startMyStory();
+  assert.deepEqual(destinations, ["/pages/login/index"]);
+  assert.equal(require("../services/navigation.ts").consumeNarrationAfterLogin(), true);
+  delete global.wx;
 });
 
 test("reader paragraphs only honor line breaks saved by the language model", () => {

@@ -47,7 +47,7 @@ test("tree ignores unavailable project switching and chapter actions without a t
   assert.deepEqual(context.events, []);
 });
 
-test("demo tree opens only readable chapters while owner chapters remain editable", () => {
+test("demo tree sends unavailable chapter taps to the parent for an explanation", () => {
   const story = {
     ...emptyStoryViewData(),
     // Object properties arrive from WeChat with nested arrays as indexed objects.
@@ -59,6 +59,7 @@ test("demo tree opens only readable chapters while owner chapters remain editabl
   guest.openChapter(tap());
   guest.openChapter(tap({ id: "family" }));
   assert.deepEqual(guest.events, [
+    { name: "openchapter", detail: { chapterId: "childhood" } },
     { name: "openchapter", detail: { chapterId: "family" } },
   ]);
 

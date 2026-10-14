@@ -34,7 +34,7 @@
       can-open-book="{{hasProject || (needsLogin && demoReadableChapterIds.length > 0)}}"
       can-switch-project="{{hasProject}}"
       profile-text="{{narratorProfileText}}"
-      can-voice-edit="{{hasProject}}"
+      can-voice-edit="{{hasProject && (hasLastStoryHint || story.overview.hasChapters)}}"
       show-book-hint="{{showBookHint}}"
       bind:focusgrowth="focusStoryGrowth"
       bind:openbook="openBook"

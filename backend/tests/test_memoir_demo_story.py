@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.main import app
-from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookOutputVersion
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookOutputVersion, MemoirSection
 from app.services.memoir import demo_story
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_outputs import _output_version_response
@@ -41,7 +41,7 @@ async def test_visitors_browse_the_demo_tree_but_read_only_its_open_chapters(cli
             version=1,
             content="父亲是个木匠。\n\n不公开的私密章节。",
             chapter_snapshot_json=[
-                chapter_snapshot(chapter, drafts[chapter.id], chapter_index=index + 1)
+                chapter_snapshot(chapter, drafts[chapter.id], chapter_index=index + 3)
                 for index, chapter in enumerate(chapters)
             ],
         )
@@ -59,12 +59,20 @@ async def test_visitors_browse_the_demo_tree_but_read_only_its_open_chapters(cli
         })
         monkeypatch.setattr(demo_story, "get_settings", lambda: settings)
 
+        # A newer working tree must not change what the public book advertises.
+        chapters[0].title = "尚未编入书稿的新章名"
+        test_db.add(MemoirSection(project_id=project_id, chapter_id=chapters[0].id,
+                                  title="未成书的新故事", sort_order=99))
+        await test_db.commit()
+
         story = (await guest.get("/api/mobile/memoir/demo-story")).json()
         assert story["title"]
         assert [(chapter["title"], chapter["readable"]) for chapter in story["chapters"]] == [
             ("家里的人", True), ("下乡那几年", False),
         ]
         assert story["chapters"][0]["sections"][0]["title"] == "家里的人"
+        assert len(story["chapters"][0]["sections"]) == 1
+        assert story["chapters"][0]["char_count"] == len("父亲是个木匠。")
         # A video the author deleted drops out instead of breaking the sample.
         assert story["videos"] == []
 
@@ -76,6 +84,8 @@ async def test_visitors_browse_the_demo_tree_but_read_only_its_open_chapters(cli
         assert "private-utterance" not in book.text
         assert [chapter["title"] for chapter in book.json()["latest_version"]["manuscript"]["chapters"]] == ["家里的人"]
         assert [item["title"] for item in book.json()["latest_version"]["manuscript"]["table_of_contents"]] == ["家里的人"]
+        assert book.json()["latest_version"]["manuscript"]["chapters"][0]["index"] == 1
+        assert book.json()["latest_version"]["manuscript"]["table_of_contents"][0]["index"] == 1
 
         # Removing the chapter from the book also removes it from the public sample,
         # even while a previous compiled book still contains it.

@@ -158,6 +158,7 @@
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
 
     <view class="reader-top-action-shell">
+      <view wx:if="{{readerDemo}}" class="reader-top-action ui-pressable" aria-role="button" bindtap="startMyStory">种下我的故事</view>
       <view
         class="reader-top-action ui-pressable"
         aria-role="button"
