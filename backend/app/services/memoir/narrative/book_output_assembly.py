@@ -18,7 +18,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookCustomLayout
+from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookCustomLayout, MemoirBookOutputEditorialCopyRegenerateRequest
 from app.services.memoir import (
     automation_events,
     book_editorial_actions,
@@ -281,10 +281,9 @@ async def assemble_book_output(
         created_by=MemoirCreatedBy.SYSTEM,
     )
     if chapter_snapshots and not automatic:
-        # Manual assembly and revision baselines publish the same safe defaults
-        # as the worker; continue through its existing copy/retry lifecycle.
-        from app.services.memoir.automatic_book_draft import schedule_book_draft
-        await schedule_book_draft(db, project_id=project_id, source="book_assembly", settled=True)
+        from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
+        await schedule_book_editorial_copy_generation(db, project_id=project_id, user_id=project.user_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
     if chapter_snapshots:
         await automation_events.record_automation_event(
             db,

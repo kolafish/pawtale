@@ -675,7 +675,7 @@ async def regenerate_book_output_editorial_copy(
             content=latest.content,
             chapter_snapshot_json=snapshot,
             manuscript_json=manuscript_json,
-            created_by=MemoirCreatedBy.AI,
+            created_by=MemoirCreatedBy.SYSTEM if automatic else MemoirCreatedBy.AI,
         )
         invalidate_book_output(output)
     if state is not None:

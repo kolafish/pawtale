@@ -464,7 +464,7 @@ async def test_old_editorial_policy_refreshes_once_without_claiming_manual_copy(
 
 
 @pytest.mark.parametrize("entry", ["manual", "revision", "automatic"])
-async def test_new_assembly_schedules_copy_through_existing_book_pipeline(client, test_db, entry):
+async def test_new_assembly_schedules_only_copy(client, test_db, entry):
     from app.models.memoir import MemoirBookChapterDraftVersion
     from app.services.memoir.book_revision_generation import _load_baseline
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
@@ -484,13 +484,86 @@ async def test_new_assembly_schedules_copy_through_existing_book_pipeline(client
     else:
         await assemble_book_output(test_db, project_id=project.id, automatic=True)
     job = await test_db.scalar(select(MemoirEditingJob).where(
-        MemoirEditingJob.dedupe_key == f"update-book-draft:{project.id}"))
+        MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project.id}"))
+    assert await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"update-book-draft:{project.id}")) is None
     if entry == "automatic":
         assert job is None  # The running pipeline already performs its copy stage.
     else:
         assert job is not None and job.status == "pending"
-        assert job.payload_json["source"] == "book_assembly"
+        assert job.payload_json["automatic"] is True
         scheduled_at = job.updated_at
         await assemble_book_output(test_db, project_id=project.id)
         await test_db.flush()
         assert job.updated_at == scheduled_at
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow(client, test_db, monkeypatch, unavailable):
+    from app.services.memoir import book_generation_jobs, draft_progress
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+    from app.services.memoir.editing_jobs import clear_editing_job_handlers
+    project, _, before = await _output(client, test_db)
+    async def generate(**kwargs):
+        return None if unavailable else _copy(kwargs["snapshot"])
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+        user_id=project.user_id, project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
+    await test_db.commit()
+    job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project.id}"))
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, job.id) is (not unavailable)
+        await test_db.refresh(job)
+        assert job.status == ("failed" if unavailable else "succeeded")
+        if unavailable:
+            status = await draft_progress.read_draft_progress(test_db, project_id=project.id)
+            assert status.can_retry and status.status == "failed"
+            unavailable = False
+            await draft_progress.retry_draft_progress(test_db, project_id=project.id)
+            await test_db.commit()
+            assert await run_test_editing_job(test_db, job.id)
+            await test_db.refresh(job)
+            assert job.status == "succeeded"
+        latest = await test_db.scalar(select(MemoirBookOutputVersion).where(
+            MemoirBookOutputVersion.output_id == before.output_id).order_by(MemoirBookOutputVersion.version.desc()))
+        assert latest.content == before.content
+        assert latest.chapter_snapshot_json == before.chapter_snapshot_json
+        assert latest.manuscript_json["chapters"][0]["intro"] == "自动导语1"
+        jobs = (await test_db.scalars(select(MemoirEditingJob).where(MemoirEditingJob.project_id == project.id))).all()
+        assert {item.job_type for item in jobs} == {"generate_book_editorial_copy"}
+    finally:
+        clear_editing_job_handlers()
+
+
+async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(client, test_db, monkeypatch):
+    from app.services.memoir import book_generation_jobs, automatic_book_draft
+    from app.services.memoir.book_output_versions import revision_compatible_version
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    project, _, _ = await _output(client, test_db)
+    assembled = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    before = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    req = MemoirBookOutputEditorialCopyRegenerateRequest()
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+        user_id=project.user_id, project_id=project.id, req=req, automatic=True)
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project.id)
+    job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project.id}"))
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs["snapshot"])
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
+    assert result.status.value == "pending" and not calls
+    await _automatic(test_db, project)
+    parent.status = "succeeded"
+    await test_db.commit()
+    result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
+    assert result.status.value == "succeeded" and len(calls) == 1
+    assert (await revision_compatible_version(test_db, before)).version > before.version
+    job.status = "running"
+    await test_db.commit()
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+        user_id=project.user_id, project_id=project.id, req=req, automatic=True)
+    assert job.rerun_requested  # New assemblies during an AI call cannot lose their copy update.

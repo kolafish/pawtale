@@ -776,6 +776,7 @@ _CREDIT_RESUMABLE_TYPES = (
     MemoirEditingJobType.PREPARE_CHAPTER.value,
     MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
     MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
+    MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value,
     MemoirEditingJobType.FILL_NARRATOR_PROFILE.value,
     MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
 )
@@ -792,6 +793,8 @@ async def resume_credit_blocked_editing_jobs(db: AsyncSession) -> int:
         MemoirEditingJob.job_type.in_(_CREDIT_RESUMABLE_TYPES),
         MemoirEditingJob.dedupe_key.is_not(None),  # Superseded jobs lose their key.
         or_(MemoirEditingJob.job_type != MemoirEditingJobType.PREPARE_CHAPTER.value,
+            MemoirEditingJob.payload_json["automatic"].as_boolean().is_(True)),
+        or_(MemoirEditingJob.job_type != MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value,
             MemoirEditingJob.payload_json["automatic"].as_boolean().is_(True)),
         or_(MemoirEditingJob.job_type != MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
             MemoirEditingJob.payload_json["input_signature"].as_string().is_not(None)),
@@ -823,7 +826,8 @@ async def resume_credit_blocked_editing_jobs(db: AsyncSession) -> int:
             job.run_after, job.first_started_at, job.attempts = utcnow_naive(), None, 0
             job.locked_at = job.lease_token = job.lease_expires_at = None
             job.rerun_requested = False
-            affected_projects.add(job.project_id)
+            if job.job_type != MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value:
+                affected_projects.add(job.project_id)
             resumed += 1
     await db.flush()
     from app.services.memoir.automatic_book_draft import schedule_book_draft

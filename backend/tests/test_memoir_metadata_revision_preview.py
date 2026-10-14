@@ -95,3 +95,69 @@ async def test_metadata_only_selection_previews_without_rewriting_the_book(clien
         assert final.content == before_content
         assert final.manuscript_json["chapters"] == before_body
         assert final.manuscript_json["back_matter"]["afterword"]["content"] != manuscript["back_matter"]["afterword"]["content"]
+
+
+@pytest.mark.parametrize("change", ["automatic_during", "automatic_after", "user_during", "user_then_automatic", "design", "body"])
+async def test_revision_accepts_only_copy_updates_and_applies_on_latest_version(client, test_db, monkeypatch, change):
+    from app.models.memoir import MemoirEditingJob
+    from app.services.memoir import book_output_versions
+    project_id, chapters, _ = await _book(client, test_db)
+    _install_ai(monkeypatch, LayeredBookAI(book_actions=True, book_profile_action=True))
+    await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
+                               status=MemoirBookChapterDraftStatus.CONFIRMED)
+    review = (await _run_book_review(client, test_db, project_id=project_id)).json()["review"]
+    selected = [a["id"] for a in review["editorial_actions"] if a["action_type"] == "revise_book_profile"]
+    assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
+    baseline = await test_db.get(MemoirBookOutputVersion, assembled.json()["output_version_id"])
+    output_id = baseline.output_id
+    async def update():
+        latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output_id)
+        manuscript = deepcopy(latest.manuscript_json)
+        manuscript["chapters"][0]["intro"] = "多年以后，操场上奔跑的身影依然清晰。"
+        if change == "design":
+            manuscript["render_settings"]["font_scale"] = "large"
+        newer = MemoirBookOutputVersion(output_id=output_id, project_id=project_id, plan_id=latest.plan_id,
+            version=latest.version+1, content=latest.content + ("正文变化" if change == "body" else ""),
+            chapter_snapshot_json=deepcopy(latest.chapter_snapshot_json), manuscript_json=manuscript,
+            created_by="user" if change in {"user_during", "user_then_automatic"} else "system")
+        test_db.add(newer)
+        await test_db.flush()
+        if change == "user_then_automatic":
+            test_db.add(MemoirBookOutputVersion(output_id=output_id, project_id=project_id, plan_id=latest.plan_id,
+                version=newer.version+1, content=newer.content, chapter_snapshot_json=deepcopy(newer.chapter_snapshot_json),
+                manuscript_json=deepcopy(manuscript), created_by="system"))
+        await test_db.commit()
+    generate = generation.generate_revision_plan
+    async def during(*args, **kwargs):
+        result = await generate(*args, **kwargs)
+        if change != "automatic_after":
+            await update()
+        return result
+    monkeypatch.setattr(generation, "generate_revision_plan", during)
+    queued = await client.post(f"/api/memoir/projects/{project_id}/book-review/revision/jobs", json={
+        "include_answers": False, "action_ids": selected,
+    })
+    assert queued.status_code == 202
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        succeeded = await run_test_editing_job(test_db, queued.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    if not change.startswith("automatic"):
+        job = await test_db.get(MemoirEditingJob, queued.json()["job_id"])
+        assert not succeeded and job.status == "failed"
+        assert "全书内容已经变化" in job.error_message
+        return
+    assert succeeded
+    proposal = await test_db.scalar(select(MemoirBookRevisionProposal).where(MemoirBookRevisionProposal.project_id == project_id))
+    if change == "automatic_after":
+        await update()
+    path = f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal.id}"
+    preview = (await client.get(path)).json()
+    assert preview["can_apply"]
+    assert preview["after"]["manuscript"]["chapters"][0]["intro"] == "多年以后，操场上奔跑的身影依然清晰。"
+    applied = await client.post(path+"/apply")
+    assert applied.status_code == 200, applied.text
+    latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output_id)
+    assert latest.manuscript_json["chapters"][0]["intro"] == "多年以后，操场上奔跑的身影依然清晰。"
