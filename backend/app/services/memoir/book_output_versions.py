@@ -172,6 +172,7 @@ def manuscript_chapters(version: MemoirBookOutputVersion) -> dict[str, dict[str,
 
 
 class AutomaticEditorialCopyState(BaseModel):
+    ownership_version: int = 0
     signature_version: int = 0
     input_signature: str = ""
     processed_version: int = 0
@@ -243,6 +244,8 @@ def automatic_editorial_copy_state(
     output: MemoirBookOutput, versions: list[MemoirBookOutputVersion],
 ) -> AutomaticEditorialCopyState:
     state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
+    if state.ownership_version >= 1:
+        return state
     if not state.processed_version and versions and versions[0].created_by in {"user", "ai"}:
         state.manual_targets = ["preface", "afterword", "back_cover_quote"]
         state.manual_chapter_fields = {
@@ -265,7 +268,23 @@ def automatic_editorial_copy_state(
                     fields = state.manual_chapter_fields.setdefault(chapter_id, [])
                     if field not in fields:
                         fields.append(field)
+    state.ownership_version = 1
+    output.metadata_json = {**(output.metadata_json or {}), AUTOMATIC_EDITORIAL_COPY_KEY: state.model_dump(mode="json")}
     return state
+
+
+def claim_editorial_copy_fields(
+    output: MemoirBookOutput, *, targets: list[MemoirBookLevelEditorialCopyTarget],
+    chapter_fields: dict[str, list[Literal["intro", "pull_quotes"]]],
+) -> None:
+    """Record explicit intent, including saving unchanged or empty text."""
+    state = automatic_editorial_copy_state(output, output.versions)
+    state.manual_targets = sorted(set(state.manual_targets) | set(targets))
+    for chapter_id, fields in chapter_fields.items():
+        if not fields:
+            continue
+        state.manual_chapter_fields[chapter_id] = sorted(set(state.manual_chapter_fields.get(chapter_id, [])) | set(fields))
+    output.metadata_json = {**(output.metadata_json or {}), AUTOMATIC_EDITORIAL_COPY_KEY: state.model_dump(mode="json")}
 
 
 async def repair_automatic_chapter_quotes(
