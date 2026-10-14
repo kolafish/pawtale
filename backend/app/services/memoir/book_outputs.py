@@ -86,6 +86,7 @@ from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
     AUTOMATIC_EDITORIAL_COPY_KEY,
     automatic_editorial_copy_state,
+    claim_editorial_copy_fields,
     append_book_output_version,
     book_output_version_title,
     book_editorial_copy_signature,
@@ -374,7 +375,12 @@ async def _load_output(
     db: AsyncSession,
     *,
     project_id: str,
+    for_update: bool = False,
 ) -> MemoirBookOutput | None:
+    if for_update:
+        await db.execute(select(MemoirBookOutput.id).where(
+            MemoirBookOutput.project_id == project_id,
+        ).with_for_update())
     return await db.scalar(
         select(MemoirBookOutput)
         .where(MemoirBookOutput.project_id == project_id)
@@ -497,7 +503,7 @@ async def update_book_output(
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    output = await _load_output(db, project_id=project_id)
+    output = await _load_output(db, project_id=project_id, for_update=True)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
@@ -516,6 +522,7 @@ async def update_book_output(
     else:
         cover_style = _template_cover_style(req.manuscript_template) or _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
+    claim_editorial_copy_fields(output, targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in metadata_patch], chapter_fields={})
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     manuscript_json = _updated_manuscript_payload(
         title=title,
@@ -562,7 +569,7 @@ async def regenerate_book_output_editorial_copy(
     retry: bool = False,
 ) -> MemoirBookOutputResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    output = await _load_output(db, project_id=project_id)
+    output = await _load_output(db, project_id=project_id, for_update=True)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
@@ -586,7 +593,9 @@ async def regenerate_book_output_editorial_copy(
     ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
-    state = automatic_editorial_copy_state(output, output.versions) if automatic else None
+    ownership = automatic_editorial_copy_state(output, output.versions)
+    base_ownership = (list(ownership.manual_targets), {key: list(fields) for key, fields in ownership.manual_chapter_fields.items()})
+    state = ownership if automatic else None
     if state is not None:
         if state.signature_version < 2:
             # A new evidence policy requires one fresh automatic pass. Preserve
@@ -595,6 +604,7 @@ async def regenerate_book_output_editorial_copy(
             state.signature_version = 2
         signature = book_editorial_copy_signature(output_title, snapshot)
         if state.input_signature == signature and (not retry or state.status == "succeeded"):
+            await db.commit()
             return _output_response(output)
         state.input_signature = signature
         targets -= set(state.manual_targets)
@@ -668,6 +678,21 @@ async def regenerate_book_output_editorial_copy(
             return _output_response(output)
         raise HTTPException(status_code=409, detail="生成期间全书稿已更新，请重试")
     latest = output.versions[-1]
+    current_ownership = automatic_editorial_copy_state(output, output.versions)
+    if (current_ownership.manual_targets, current_ownership.manual_chapter_fields) != base_ownership:
+        if automatic:
+            await db.commit()
+            return _output_response(output)
+        raise HTTPException(status_code=409, detail="生成期间文案选择已更新，请重试")
+    if not automatic and editorial_copy:
+        generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
+        claim_editorial_copy_fields(output,
+            targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in targets
+                and (key == "back_cover_quote" or getattr(editorial_copy, key))],
+            chapter_fields={chapter.chapter_id: [field for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes"))
+                if target in targets and (field == "pull_quotes" or generated[chapter.chapter_id].intro)]
+                for chapter in manuscript.chapters if chapter.chapter_id in generated
+                and (not chapter_ids or chapter.chapter_id in chapter_ids)})
     if manuscript_json != latest.manuscript_json:
         latest = await append_book_output_version(
             db,
@@ -698,7 +723,7 @@ async def update_book_output_chapter_editorial_copy(
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    output = await _load_output(db, project_id=project_id)
+    output = await _load_output(db, project_id=project_id, for_update=True)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
@@ -720,6 +745,11 @@ async def update_book_output_chapter_editorial_copy(
         pull_quote_source_ref_id=req.pull_quote_source_ref_id,
     )
 
+    fields_set = req.model_fields_set
+    claim_editorial_copy_fields(output, targets=[], chapter_fields={chapter_id: [
+        field for field, supplied in (("intro", "intro" in fields_set),
+            ("pull_quotes", bool({"pull_quote", "pull_quote_source_ref_id"} & fields_set))) if supplied
+    ]})
     manuscript_json = manuscript.model_dump(mode="json")
     if manuscript_json != latest.manuscript_json:
         await append_book_output_version(

@@ -597,6 +597,14 @@ async def apply_proposal(
         and not _metadata_changes(before_information, after_information)
     ):
         raise ValueError("这版没有产生实际修改，不能确认使用")
+    await db.refresh(output, attribute_names=["metadata_json", "versions"])
+    old_chapters = book_output_versions.manuscript_chapters(baseline)
+    book_output_versions.claim_editorial_copy_fields(output,
+        targets=[key for key in ("preface", "afterword", "back_cover_quote")
+            if before_information.get(key) != after_information.get(key)],
+        chapter_fields={chapter["chapter_id"]: [field for field in ("intro", "pull_quotes")
+            if old_chapters.get(chapter["chapter_id"], {}).get(field) != chapter.get(field)]
+            for chapter in manuscript_json.get("chapters", [])})
     applied_version = await book_output_versions.append_book_output_version(
         db,
         output=output,

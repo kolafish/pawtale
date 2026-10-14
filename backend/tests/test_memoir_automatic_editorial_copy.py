@@ -50,6 +50,11 @@ async def test_automatic_copy_runs_once_and_failure_keeps_readable_book(client, 
         return None if unavailable else _copy(kwargs['snapshot'])
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     first = await _automatic(test_db, project)
+    legacy = await book_outputs._load_output(test_db, project_id=project.id)
+    metadata = copy.deepcopy(legacy.metadata_json)
+    metadata['automatic_editorial_copy'].pop('ownership_version')
+    legacy.metadata_json = metadata
+    await test_db.commit()
     second = await _automatic(test_db, project)
     assert len(calls) == 1
     assert first.latest_version.id == second.latest_version.id
@@ -61,6 +66,7 @@ async def test_automatic_copy_runs_once_and_failure_keeps_readable_book(client, 
         assert second.latest_version.manuscript.chapters[0].intro == '自动导语1'
     output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
     assert output.metadata_json['automatic_editorial_copy']['status'] == ('failed' if unavailable else 'succeeded')
+    assert output.metadata_json['automatic_editorial_copy']['ownership_version'] == 1
 
 
 async def test_automatic_copy_preserves_manual_fields_across_later_content_passes(client, test_db, monkeypatch):
@@ -634,3 +640,51 @@ async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_ch
         project_id=project.id, export_format=book_outputs.MemoirBookOutputExportFormat.PDF)
     assert (before_export.cache_key == after_export.cache_key) is manual
     assert output.status == ('accepted' if manual else 'draft')
+
+
+@pytest.mark.parametrize("during_generation", [False, True])
+async def test_explicit_same_value_save_claims_copy_without_a_new_version(client, test_db, monkeypatch, during_generation):
+    project, chapters, _ = await _output(client, test_db)
+    async def generate(**kwargs):
+        return _copy(kwargs['snapshot'])
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    before = await _automatic(test_db, project)
+    async def claim():
+        saved = await book_outputs.update_book_output(test_db, user_id=project.user_id, project_id=project.id,
+            req=MemoirBookOutputUpdateRequest(preface='自动前言1'))
+        assert saved.latest_version.id == before.latest_version.id
+        saved = await book_outputs.update_book_output_chapter_editorial_copy(test_db, user_id=project.user_id,
+            project_id=project.id, chapter_id=chapters[0].id,
+            req=MemoirBookOutputChapterEditorialCopyUpdateRequest(intro='自动导语1', pull_quote=''))
+        return saved
+    before = await book_outputs.update_book_output(test_db, user_id=project.user_id, project_id=project.id,
+        req=MemoirBookOutputUpdateRequest(title='新的回忆录标题'))
+    if not during_generation:
+        await claim()
+    async def regenerate(**kwargs):
+        if during_generation:
+            await claim()
+        return _copy(kwargs['snapshot'], 2)
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', regenerate)
+    result = await _automatic(test_db, project)
+    assert next(s.content for s in result.latest_version.manuscript.front_matter if s.kind == 'preface') == '自动前言1'
+    assert result.latest_version.manuscript.chapters[0].intro == '自动导语1'
+    output = await book_outputs._load_output(test_db, project_id=project.id)
+    state = output.metadata_json['automatic_editorial_copy']
+    assert state['ownership_version'] == 1
+    assert state['manual_targets'] == ['preface']
+    assert state['manual_chapter_fields'][chapters[0].id] == ['intro', 'pull_quotes']
+
+
+def test_legacy_copy_ownership_is_migrated_once_and_then_ignores_version_authors():
+    from types import SimpleNamespace
+    from app.services.memoir.book_output_versions import automatic_editorial_copy_state
+    output = SimpleNamespace(metadata_json={})
+    before = SimpleNamespace(version=1, created_by='system', manuscript_json={})
+    after = SimpleNamespace(version=2, created_by='user', manuscript_json={
+        'chapters': [{'chapter_id': 'c', 'intro': '人工导语', 'pull_quotes': []}]})
+    state = automatic_editorial_copy_state(output, [before, after])
+    assert state.manual_chapter_fields['c'] == ['intro', 'pull_quotes']
+    assert output.metadata_json['automatic_editorial_copy']['ownership_version'] == 1
+    after.manuscript_json['chapters'].append({'chapter_id': 'new', 'intro': '自动文案'})
+    assert automatic_editorial_copy_state(output, [before, after]) == state
