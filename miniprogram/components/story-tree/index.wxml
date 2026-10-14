@@ -48,7 +48,6 @@
         bindtap="openChapter"
         hover-class="{{demoMode && !item.readable ? 'none' : 'theme-tag-hover'}}"
         aria-role="button"
-        aria-disabled="{{demoMode && !item.readable}}"
         aria-label="{{demoMode ? item.title + '，' + (item.readable ? '示例阅读' : '暂未开放') : '打开主题：' + item.title}}"
       >
         <view class="theme-tag-leaf" aria-hidden="true"></view>
@@ -95,7 +94,6 @@
               bindtap="openChapter"
               hover-class="{{demoMode && !item.readable ? 'none' : 'ui-subtle-action-hover'}}"
               aria-role="button"
-              aria-disabled="{{demoMode && !item.readable}}"
               aria-label="{{item.title}}，{{item.storyCountText}}{{demoMode ? '，' + (item.readable ? '示例阅读' : '暂未开放') : ''}}"
             >
               <view class="story-leaf story-tone-{{item.tone}}" aria-hidden="true">

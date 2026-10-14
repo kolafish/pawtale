@@ -283,6 +283,9 @@ def public_reading_response(
             "place_hint": "",
             "sections": [section.model_copy(update={"source_ref_ids": []}) for section in chapter.sections],
         }) for chapter in manuscript.chapters if chapter_ids is None or chapter.chapter_id in chapter_ids]
+        if chapter_ids is not None:
+            chapters = [chapter.model_copy(update={"index": index}) for index, chapter in enumerate(chapters, 1)]
+        public_indices = {chapter.chapter_id: chapter.index for chapter in chapters}
         back_matter = manuscript.back_matter.model_copy(update={
             key: getattr(manuscript.back_matter, key).model_copy(update={"content": ""})
             for key in ("afterword", "interview_records", "version_note", "unconfirmed_facts", "source_appendix")
@@ -297,8 +300,8 @@ def public_reading_response(
                 }),
                 "chapters": chapters,
                 "table_of_contents": [
-                    item for item in manuscript.table_of_contents
-                    if chapter_ids is None or item.chapter_id in chapter_ids
+                    item.model_copy(update={"index": public_indices[item.chapter_id]}) for item in manuscript.table_of_contents
+                    if item.chapter_id in public_indices
                 ],
                 "front_matter": [],
                 "back_matter": back_matter,

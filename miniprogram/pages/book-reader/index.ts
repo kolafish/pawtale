@@ -16,7 +16,7 @@ import {
   readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
-import { routeAuthError } from "../../services/navigation";
+import { navigateToLoginThenNarrate, routeAuthError } from "../../services/navigation";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
@@ -64,6 +64,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
   versionId: string;
   readerMode: "book" | "chapter";
   readerShared: boolean;
+  readerDemo: boolean;
   readerChapterIndex: number;
   readerChapterTotal: number;
   readerTitle: string;
@@ -311,6 +312,7 @@ definePage<BookReaderData>()({
     versionId: "",
     readerMode: "book",
     readerShared: false,
+    readerDemo: false,
     readerChapterIndex: 0,
     readerChapterTotal: 0,
     readerHighlightSectionId: "",
@@ -334,6 +336,10 @@ definePage<BookReaderData>()({
 
   ...shareLikeMethods,
 
+  startMyStory() {
+    if (this.data.readerDemo) navigateToLoginThenNarrate();
+  },
+
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
@@ -342,7 +348,7 @@ definePage<BookReaderData>()({
     // Visitors open the sample memoir's open chapters before logging in.
     const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, versionId, readerMode, readerShared: Boolean(shareToken) || demo });
+    this.setData({ projectId, chapterId, versionId, readerMode, readerDemo: demo, readerShared: Boolean(shareToken) || demo });
     if (shareToken || demo) {
       await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook() : readMemoirBookShare(shareToken)));
       // Family who open a forwarded link can like what they read.

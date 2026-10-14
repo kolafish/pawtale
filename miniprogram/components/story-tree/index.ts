@@ -56,7 +56,7 @@ Component({
         const chapters = Object.values(
           (this.properties.story as ReturnType<typeof emptyStoryViewData>).chapters || {},
         );
-        if (!chapters.some(chapter => chapter.id === chapterId && chapter.readable)) return;
+        if (!chapters.some(chapter => chapter.id === chapterId)) return;
       }
       if (chapterId) this.triggerEvent("openchapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);
     },

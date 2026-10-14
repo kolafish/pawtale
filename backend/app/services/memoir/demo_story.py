@@ -19,6 +19,7 @@ from app.schemas.memoir_snapshots import (
     MemoirDemoStoryResponse,
     MemoirDemoVideoResponse,
     MemoirStoryChapterResponse,
+    MemoirStorySectionResponse,
 )
 from app.services.memoir import share_video_shares
 from app.services.memoir.book_shares import public_reading_response
@@ -53,15 +54,15 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
         return MemoirDemoStoryResponse()
     project, readable_ids = demo
     book = await _demo_book(db, project.id, readable_ids)
-    readable_ids = {
-        chapter.chapter_id for chapter in book.latest_version.manuscript.chapters
+    published_chapters = {
+        chapter.chapter_id: chapter for chapter in book.latest_version.manuscript.chapters
         if chapter.content.strip()
-    } if book and book.latest_version and book.latest_version.manuscript else set()
+    } if book and book.latest_version and book.latest_version.manuscript else {}
     chapter_views = {}
     for chapter in await chapter_rows(db, project.id):
         if not chapter.include_in_book:
             continue
-        readable = chapter.id in readable_ids
+        readable = chapter.id in published_chapters
         chapter_views[chapter.id] = MemoirStoryChapterResponse(
             id=chapter.id,
             title=chapter.title,
@@ -72,6 +73,17 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
             state_text="可阅读" if readable else "待整理",
         )
     await attach_sections(db, project.id, chapter_views)
+    # Readable cards describe the public book, not newer working sections.
+    for chapter_id, published in published_chapters.items():
+        if chapter_id not in chapter_views:
+            continue
+        view = chapter_views[chapter_id]
+        view.title = published.title
+        view.char_count = len(published.content.strip())
+        view.sections = [MemoirStorySectionResponse(
+            id=section.section_id, title=section.title, material_count=section.source_count,
+        ) for section in published.sections]
+        view.material_count = sum(section.material_count for section in view.sections)
     chapters = list(chapter_views.values())
     videos = []
     codes = _configured(get_settings().memoir_demo_video_codes)
@@ -90,7 +102,7 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
             continue  # A deleted video simply leaves the sample.
         videos.append(MemoirDemoVideoResponse(**video.model_dump(), share_code=code))
     return MemoirDemoStoryResponse(
-        title=project.title,
+        title=book.title if book else project.title,
         chapters=chapters,
         book_chapter_count=len(chapters),
         book_char_count=sum(chapter.char_count for chapter in chapters),

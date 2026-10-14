@@ -99,13 +99,15 @@ test("project edit loads and saves memoir-level interview and polish settings", 
 });
 
 test("project creation retries activation without creating a duplicate", async () => {
+  const destinations = [];
   const project = { id: "project-1", title: "第一版" };
   let creates = 0;
   let activations = 0;
   const updates = [];
   const createdInputs = [];
   global.wx = {
-    navigateBack() {},
+    navigateBack() { assert.fail("a new memoir should return home"); },
+    reLaunch({url}) { destinations.push(url); },
     setNavigationBarTitle() {},
     showToast() {},
   };
@@ -131,6 +133,7 @@ test("project creation retries activation without creating a duplicate", async (
   assert.equal(creates, 1);
   assert.equal(createdInputs[0].share_video_style, "illustrated");
   assert.match(context.data.error, /已创建.*激活失败/);
+  assert.deepEqual(destinations, []);
 
   context.changeTitle({ detail: { value: "第二版" } });
   await context.saveProject();
@@ -138,4 +141,5 @@ test("project creation retries activation without creating a duplicate", async (
   assert.equal(activations, 2);
   assert.deepEqual(updates.map(({ id, input }) => [id, input.title]), [["project-1", "第二版"]]);
   assert.equal(context.pendingCreatedProject, null);
+  assert.deepEqual(destinations, ["/pages/home/index"]);
 });
