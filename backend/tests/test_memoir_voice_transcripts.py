@@ -2124,7 +2124,7 @@ async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
     assert detail["can_recover_transcription"] is True
 
 
-@pytest.mark.parametrize("speech_detected,expected,visible", [(False, "empty", False), (True, "unrecognized", True), (None, "unrecognized", True)])
+@pytest.mark.parametrize("speech_detected,expected,visible", [(False, "empty", True), (True, "unrecognized", True), (None, "unrecognized", True)])
 async def test_normal_empty_turn_has_terminal_outcome_and_cannot_replace_home_story(client, test_db, tmp_path, monkeypatch, speech_detected, expected, visible):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     story = await create_test_voice_transcript(client, test_db, "小时候母亲背我上山。")
@@ -2171,7 +2171,9 @@ async def test_recovery_empty_result_is_resolved_but_provider_failure_remains_re
     assert current["audio_file_id"] == saved["audio_file_id"] and current["can_recover_transcription"]
 
 
+@pytest.mark.parametrize("initial_status", ["pending_transcription", "empty"])
 async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
+    initial_status,
     client,
     test_db,
     tmp_path,
@@ -2201,6 +2203,14 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     await persistence.record_audio_frame(b"lost-audio-pcm")
     persisted = await persistence.flush_unfinalized_audio()
     assert persisted is not None
+
+    if initial_status == "empty":
+        utterance = await test_db.get(MemoirVoiceUtterance, persisted["utterance_id"])
+        utterance.provider_payload_json = {**(utterance.provider_payload_json or {}), "transcription_status": "empty"}
+        await test_db.commit()
+    before = (await client.get(f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}")).json()
+    assert before["transcription_status"] == initial_status
+    assert before["can_recover_transcription"] is True
 
     asr_client = FakeRecoveryASRClient([
         StreamingASREvent(

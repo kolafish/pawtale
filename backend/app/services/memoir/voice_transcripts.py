@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import and_, delete, false, func, or_, select
+from sqlalchemy import delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -122,10 +122,8 @@ def _has_transcript_text_clause(utterance_model=MemoirVoiceUtterance):
     )
 
 
-def _has_recoverable_audio_clause(utterance_model=MemoirVoiceUtterance):
-    return and_(utterance_model.audio_file_id.is_not(None), func.coalesce(
-        utterance_model.provider_payload_json["transcription_status"].as_string(), ""
-    ) != MemoirTranscriptionStatus.EMPTY.value)
+def _has_saved_audio_clause(utterance_model=MemoirVoiceUtterance):
+    return utterance_model.audio_file_id.is_not(None)
 
 
 def _transcription_status(utterance: MemoirVoiceUtterance) -> MemoirTranscriptionStatus:
@@ -392,7 +390,7 @@ def _transcript_filter(
     clauses = [
         or_(
             _has_transcript_text_clause(),
-            _has_recoverable_audio_clause(),
+            _has_saved_audio_clause(),
         ),
         ~_paired_human_interviewer_prompt_exists(),
     ]
@@ -588,8 +586,12 @@ def _item_response(
     display_text = edited.strip() or raw.strip()
     inclusions = included_chapters or []
     transcription_status = _transcription_status(utterance)
-    can_recover_transcription = transcription_status in {MemoirTranscriptionStatus.PENDING, MemoirTranscriptionStatus.UNRECOGNIZED}
-    if transcription_status == MemoirTranscriptionStatus.UNRECOGNIZED:
+    can_recover_transcription = bool(utterance.audio_file_id) and transcription_status != MemoirTranscriptionStatus.READY
+    if transcription_status == MemoirTranscriptionStatus.EMPTY and can_recover_transcription:
+        summary_title, summary_text, summary_source = (
+            "未检测到清晰说话声", "原录音已保留，可以试听或重新识别。", "empty",
+        )
+    elif transcription_status == MemoirTranscriptionStatus.UNRECOGNIZED:
         summary_title, summary_text, summary_source = (
             "录音未识别出文字", "原录音已保留，可以听一听或重新识别。", "unrecognized",
         )

@@ -54,3 +54,31 @@ export function transcriptTitleText(item: MemoirVoiceTranscriptItem): string {
 export function plainTranscriptSegments(text: string): TranscriptTextSegment[] {
   return text ? [{ text, highlight: false }] : [];
 }
+
+export function transcriptRecoveryText(status: MemoirVoiceTranscriptItem["transcription_status"]) {
+  if (status === "empty") {
+    return {
+      title: "未检测到清晰说话声",
+      summary: "原录音已保留，可以试听或重新识别。",
+      notice: "未检测到清晰说话声。原录音已保留，可以试听或重新识别。",
+      statusText: "未检测到清晰说话声",
+      buttonText: "重新识别录音",
+    };
+  }
+  if (status === "unrecognized") {
+    return {
+      title: "录音未识别出文字",
+      summary: "原录音已保留，可以听一听或重新识别。",
+      notice: "没有识别出文字。原录音已保留，可以听一听或重新识别。",
+      statusText: "未识别出文字",
+      buttonText: "重新识别录音",
+    };
+  }
+  return {
+    title: "录音已保存，等待生成文字",
+    summary: "点击下方按钮，把已保存的录音转成文字。",
+    notice: "录音已保存。把它转成文字后，就可以继续整理。",
+    statusText: "等待生成文字",
+    buttonText: "把录音转成文字",
+  };
+}

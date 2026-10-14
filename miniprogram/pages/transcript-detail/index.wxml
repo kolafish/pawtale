@@ -45,7 +45,7 @@
           loading="{{recovering}}"
           disabled="{{recovering || saving || deleting || convertingQuestionToAnswer}}"
         >
-          {{recovering ? "正在转成文字" : (item.transcription_status === "unrecognized" ? "重新识别录音" : "把录音转成文字")}}
+          {{recovering ? "正在转成文字" : item.recoveryButtonText}}
         </button>
       </view>
     </view>

@@ -29,6 +29,7 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
+  transcriptRecoveryText,
   transcriptCreatedAtText,
   transcriptDurationText,
   transcriptTitleText,
@@ -204,7 +205,7 @@ function withTranscriptRuntimeState(
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
-    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : (item.transcriptionStatus === "unrecognized" ? "重新识别录音" : "把录音转成文字"),
+    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : transcriptRecoveryText(item.transcriptionStatus).buttonText,
   };
 }
 
@@ -379,11 +380,9 @@ function toViewItem(
     item.is_included_in_book
     || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
   );
-  const unrecognized = item.transcription_status === "unrecognized";
-  const summaryTitleText = unrecognized ? "录音未识别出文字" : (canRecoverTranscription ? "录音已保存，等待生成文字" : transcriptTitleText(item));
-  const summaryPreviewText = unrecognized ? "原录音已保留，可以听一听或重新识别。" : canRecoverTranscription
-    ? "点击下方按钮，把已保存的录音转成文字。"
-    : transcriptSummaryPreview(item);
+  const recovery = transcriptRecoveryText(item.transcription_status);
+  const summaryTitleText = canRecoverTranscription ? recovery.title : transcriptTitleText(item);
+  const summaryPreviewText = canRecoverTranscription ? recovery.summary : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
   const includedChapter = [...(item.included_chapters || [])]
@@ -392,8 +391,8 @@ function toViewItem(
     || item.section_assignment?.chapter_title.trim()
     || includedChapter?.title.trim()
     || "";
-  const storyStatusText = unrecognized ? "未识别出文字" : canRecoverTranscription
-    ? "等待生成文字"
+  const storyStatusText = canRecoverTranscription
+    ? recovery.statusText
     : (isIncludedInBook
       ? `已收进：${includedLocationText || "故事树"}`
       : (item.section_assignment
@@ -415,7 +414,7 @@ function toViewItem(
     canRecoverTranscription,
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
-    recoverButtonText: "把录音转成文字",
+    recoverButtonText: recovery.buttonText,
     storyStatusText,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
     cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${storyStatusText}，打开详情`,
