@@ -16,6 +16,7 @@ import {
   recoverMemoirVoiceTranscript,
 } from "../../services/memoir-transcript-api";
 import { getMemoirIdentity } from "../../services/auth";
+import { optionalApiResource } from "../../services/request";
 import {
   isAuthError,
   navigateToLogin,
@@ -884,25 +885,29 @@ definePage<TranscriptsData>()({
       });
       await this.loadTranscripts(true);
     }
-    let item = await this.ensureTranscriptTargetLoaded(targetId);
+    let item = this.data.items.find((candidate) => candidate.id === targetId) || null;
     if (!item && !this.data.error && !this.data.pickForVideo
         && this.data.emptyCount > 0 && !this.data.showEmptyRecordings) {
       const projectId = this.data.activeProjectId;
       const loadToken = this.loadToken;
       try {
-        const target = await getMemoirVoiceTranscript(targetId);
+        const target = await optionalApiResource(getMemoirVoiceTranscript(targetId));
         if (loadToken !== this.loadToken || projectId !== this.data.activeProjectId) return;
-        if (target.project_id === projectId && target.transcription_status === "empty") {
+        if (!target || target.project_id !== projectId) return;
+        if (target.transcription_status === "empty") {
           setTranscriptsData(this, { showEmptyRecordings: true });
           await this.loadTranscripts(true);
-          item = await this.ensureTranscriptTargetLoaded(targetId);
+          if (projectId !== this.data.activeProjectId) return;
         }
       } catch (error) {
         if (loadToken === this.loadToken) {
           setTranscriptsData(this, { error: error instanceof Error ? error.message : "目标讲述加载失败" });
         }
+        return;
       }
     }
+    if (this.data.error) return;
+    item = item || await this.ensureTranscriptTargetLoaded(targetId);
     if (!item) {
       return;
     }
