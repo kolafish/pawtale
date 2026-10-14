@@ -51,7 +51,7 @@
 
   <view wx:if="{{!pickForVideo && activeProjectId && (emptyCount > 0 || showEmptyRecordings)}}"
     class="empty-secondary-button ui-block-action {{loading || recoveringId ? 'is-disabled' : ''}}"
-    bindtap="toggleEmptyRecordings" hover-class="empty-secondary-button-hover"
+    bindtap="toggleEmptyRecordings" hover-class="{{loading || recoveringId ? 'none' : 'empty-secondary-button-hover'}}"
     aria-role="button" aria-disabled="{{!!(loading || recoveringId)}}">
     {{showEmptyRecordings ? '收起这些录音' : '未检测到说话声（' + emptyCount + '），展开'}}
   </view>

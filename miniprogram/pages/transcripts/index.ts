@@ -10,6 +10,7 @@ import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   deleteMemoirVoiceTranscript,
+  getMemoirVoiceTranscript,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
   recoverMemoirVoiceTranscript,
@@ -871,10 +872,8 @@ definePage<TranscriptsData>()({
       return;
     }
     clearTranscriptNavigationTarget();
-    if (this.data.hasSearchCriteria || (this.data.emptyCount > 0 && !this.data.showEmptyRecordings
-        && !this.data.items.some((item) => item.id === targetId))) {
+    if (this.data.hasSearchCriteria) {
       setTranscriptsData(this, {
-        showEmptyRecordings: this.data.hasSearchCriteria || this.data.showEmptyRecordings || this.data.emptyCount > 0,
         searchInput: "",
         searchQuery: "",
         searchFilters: DEFAULT_SEARCH_FILTERS,
@@ -885,7 +884,25 @@ definePage<TranscriptsData>()({
       });
       await this.loadTranscripts(true);
     }
-    const item = await this.ensureTranscriptTargetLoaded(targetId);
+    let item = await this.ensureTranscriptTargetLoaded(targetId);
+    if (!item && !this.data.error && !this.data.pickForVideo
+        && this.data.emptyCount > 0 && !this.data.showEmptyRecordings) {
+      const projectId = this.data.activeProjectId;
+      const loadToken = this.loadToken;
+      try {
+        const target = await getMemoirVoiceTranscript(targetId);
+        if (loadToken !== this.loadToken || projectId !== this.data.activeProjectId) return;
+        if (target.project_id === projectId && target.transcription_status === "empty") {
+          setTranscriptsData(this, { showEmptyRecordings: true });
+          await this.loadTranscripts(true);
+          item = await this.ensureTranscriptTargetLoaded(targetId);
+        }
+      } catch (error) {
+        if (loadToken === this.loadToken) {
+          setTranscriptsData(this, { error: error instanceof Error ? error.message : "目标讲述加载失败" });
+        }
+      }
+    }
     if (!item) {
       return;
     }
