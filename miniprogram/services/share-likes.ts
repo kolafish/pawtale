@@ -193,7 +193,7 @@ function readActivitySeen(): Record<string, string> {
 
 function activityTarget(item: MemoirShareLikeActivityItem): string {
   const title = item.target_title.trim();
-  return title ? `《${title}》` : "你的故事";
+  return title ? `《${title}》` : "您的故事";
 }
 
 export function shareLikeNotice(items: MemoirShareLikeActivityItem[]): ShareLikeNotice | null {
@@ -202,7 +202,7 @@ export function shareLikeNotice(items: MemoirShareLikeActivityItem[]): ShareLike
   const likers = [...new Map(items.map((item) => [`${item.liker.display_name}|${item.liker.avatar_url || ""}`, item.liker])).values()];
   const names = likerNames({ likers });
   const targets = new Set(items.map(activityTarget));
-  const target = targets.size === 1 ? [...targets][0] : "你的故事";
+  const target = targets.size === 1 ? [...targets][0] : "您的故事";
   const who = names.length ? `${names.join("、")}${likers.length > names.length ? "等家人" : ""}` : "家人";
   return {
     avatars: shareLikePeople({ count: likers.length, likers }).avatars,

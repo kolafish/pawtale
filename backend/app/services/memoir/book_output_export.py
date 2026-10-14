@@ -150,6 +150,11 @@ def _str(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _prepared_by_credit(prepared_by: str) -> str:
+    name = prepared_by.strip()
+    return "家人整理" if not name or name == "家人整理" else f"整理：{name}"
+
+
 def _section_title(section: dict[str, Any], fallback: str) -> str:
     return _str(section.get("title")) or fallback
 
@@ -380,7 +385,7 @@ def _add_illustrated_cover_page(
             char_spacing=1.3 if navy else 0.8,
         )
     builder.add_centered_at(
-        f"整理：{prepared_by or '家人'}",
+        _prepared_by_credit(prepared_by),
         y=credit_y,
         font_size=layout.small_font_size + (2 if navy else 1),
         line_height=layout.line_height,
@@ -522,7 +527,7 @@ def _add_cover_credits(
             font_name=font_name,
         )
     builder.add_centered_at(
-        f"整理：{prepared_by or '家人'}",
+        _prepared_by_credit(prepared_by),
         y=credit_y,
         font_size=layout.small_font_size + 1,
         line_height=layout.line_height,
@@ -757,7 +762,7 @@ def _add_full_bleed_photo_cover_page(
         char_spacing=char_spacing,
     )
     credit_size = layout.small_font_size + 1
-    credit_parts = [part for part in (f"口述：{narrator_name}" if narrator_name else "", f"整理：{prepared_by or '家人'}") if part]
+    credit_parts = [part for part in (f"口述：{narrator_name}" if narrator_name else "", _prepared_by_credit(prepared_by)) if part]
     one_line = "　".join(credit_parts)
     fits_one_line = _text_units(one_line) * credit_size <= layout.page_width - 2 * 48
     credit_lines = [one_line] if fits_one_line else credit_parts
@@ -876,7 +881,7 @@ def _add_preset_cover_page(
             spacing_after=2,
         )
     builder.add_centered(
-        f"整理：{prepared_by or '家人'}",
+        _prepared_by_credit(prepared_by),
         font_size=builder.layout.small_font_size,
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
@@ -1775,12 +1780,11 @@ def _filename_book_title(title: str) -> str:
 
 def book_export_filename(
     title: str,
-    version: int,
     extension: str,
     layout: MemoirBookOutputExportLayout,
 ) -> str:
     suffix = PDF_LAYOUTS[layout].filename_suffix if extension == "pdf" else ""
-    parts = [_filename_book_title(title), suffix, f"v{version}"]
+    parts = [_filename_book_title(title), suffix]
     return safe_filename("_".join(part for part in parts if part), extension)
 
 
@@ -1805,7 +1809,7 @@ def render_book_output_export(
             custom_layout=_dict(manuscript_settings.get("custom_layout")),
         )
         return ExportFile(
-            filename=book_export_filename(export_title, version, "pdf", layout),
+            filename=book_export_filename(export_title, "pdf", layout),
             media_type="application/pdf",
             content=_render_manuscript_pdf(
                 title=export_title,
@@ -1816,7 +1820,7 @@ def render_book_output_export(
             ),
         )
     return ExportFile(
-        filename=book_export_filename(export_title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
+        filename=book_export_filename(export_title, "txt", MemoirBookOutputExportLayout.STANDARD),
         media_type="text/plain; charset=utf-8",
         content=content + "\n",
     )

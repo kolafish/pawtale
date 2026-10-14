@@ -23,7 +23,7 @@ function setup() {
       const params = new URL(options.url).searchParams;
       options.success({ statusCode: denied ? 404 : 200, data: denied ? { detail: "项目不存在" } : {
         version_id: params.get("version_id") || "version-28", cache_key: key,
-        filename: "《写给他的话》_阅读版_v28.pdf", ready: true,
+        filename: "《写给他的话》_阅读版.pdf", ready: true,
       }, header: {} });
     },
     downloadFile(options) {
@@ -45,7 +45,7 @@ test("reopening after a page/module reload uses a named local PDF and still chec
   const state = setup();
   const phases = [];
   const file = await state.api()("project-1", "pdf", "version-28", "standard", false, undefined, (phase) => phases.push(phase));
-  assert.ok(file.endsWith("/《写给他的话》_阅读版_v28.pdf"));
+  assert.ok(file.endsWith("/《写给他的话》_阅读版.pdf"));
   assert.deepEqual(phases, ["checking", "downloading", "opening"]);
   const reopened = await state.api()("project-1", "pdf", "version-28");
   assert.equal(reopened, file);

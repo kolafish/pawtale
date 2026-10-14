@@ -1972,7 +1972,7 @@ async def test_export_info_reuses_pdf_and_changes_with_effective_settings(client
     assert info["version_id"] == version.id
     assert info["ready"] is False
     assert "外婆的回忆录" in info["filename"]
-    assert info["filename"].endswith("_阅读版_v1.pdf")
+    assert info["filename"].endswith("_阅读版.pdf")
     first = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
     again = await client.get(base + "?format=pdf")
     assert first.status_code == again.status_code == 200
