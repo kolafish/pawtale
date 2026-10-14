@@ -119,6 +119,46 @@ async def test_progress_and_retry_enforce_project_ownership(client, test_db):
     assert await test_db.scalar(select(func.count()).select_from(MemoirEditingJob)) == 0
 
 
+async def test_acknowledgements_do_not_leave_ready_book_retryable(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirVoiceUtterance
+
+    project_id, chapter_id, _, fake, parent_id = await _setup(client, test_db, monkeypatch)
+    sources = [await create_test_voice_transcript(client, test_db, text, project_id=project_id)
+        for text in ("对。", "嗯", "好", "那个……就是，嗯。", "__？！")]
+    await test_db.execute(update(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id).values(status="succeeded"))
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    parent.result_json = automatic_book_draft.DraftProgress(
+        stage="ready", chapters={chapter_id: automatic_book_draft.ChapterProgress(status="ready")},
+    ).model_dump(mode="json")
+    # Historical deferrals must not subtract filtered acknowledgements twice.
+    test_db.add(MemoirEditingJob(project_id=project_id, job_type="organize_material",
+        status="succeeded", run_after=utcnow_naive(), dedupe_key="short-replies", result_json={"growth": {"deferred": {
+            source["utterance_id"]: {"status": status, "text_hash": source_text_hash(text), "reason": "旧归类"}
+            for source, text, status in zip(sources, ("对。", "嗯"), ("not_story", "needs_user"))
+        }}}))
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{project_id}/draft-progress"
+    progress = (await client.get(path)).json()
+    assert progress["material_count"] == 7  # Keep all saved narration in the total.
+    assert progress["status"] == "ready"
+    assert progress["pending_material_count"] == progress["needs_user_material_count"] == 0
+    assert progress["can_retry"] is False
+    assert (await client.post(path + "/retry")).json()["status"] == "ready"
+    await test_db.refresh(parent)
+    assert parent.status == "succeeded" and fake.prompts == []
+    # Correcting a short answer into actual story makes it actionable again.
+    utterance = await test_db.get(MemoirVoiceUtterance, sources[0]["utterance_id"])
+    utterance.transcript_edited = "回家"
+    await test_db.commit()
+    progress = (await client.get(path)).json()
+    assert progress["pending_material_count"] == 1 and progress["can_retry"] is True
+    utterance.transcript_edited = "嗯……"
+    await test_db.commit()
+    progress = (await client.get(path)).json()
+    assert progress["status"] == "ready" and progress["can_retry"] is False
+
+
 async def test_draft_progress_preserves_deferred_need_from_older_growth_job(client, test_db):
     text = "我小时候住在外婆家。"
     created = await create_test_voice_transcript(client, test_db, text)

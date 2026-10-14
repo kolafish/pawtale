@@ -13,7 +13,7 @@ from app.models.memoir import (
 from app.schemas.memoir_snapshots import MemoirDraftProgressResponse
 from app.services.memoir import automatic_book_draft, editing_jobs, story_tree_growth
 from app.services.memoir.material_roles import narrator_material_clause
-from app.services.memoir.transcript_projection import source_text_hash
+from app.services.memoir.transcript_projection import has_story_content, source_text_hash
 
 
 async def project_jobs(
@@ -78,10 +78,12 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
         .cte("assigned")
     )
     material_count = await db.scalar(select(func.count()).select_from(sources)) or 0
-    pending_count = await db.scalar(
-        select(func.count()).select_from(sources).outerjoin(assigned, assigned.c.utterance_id == sources.c.id)
+    unassigned = (await db.execute(
+        select(sources.c.id, sources.c.text).outerjoin(assigned, assigned.c.utterance_id == sources.c.id)
         .where(assigned.c.utterance_id.is_(None))
-    ) or 0
+    )).all()
+    # Use the organizer's content rule; saved acknowledgements are not unfinished work.
+    pending_ids = {key for key, text in unassigned if has_story_content(text)}
     deferred = func.json_each(
         MemoirEditingJob.result_json["growth"]["deferred"]
     ).table_valued("key", "value").lateral()
@@ -107,12 +109,13 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
             .order_by(MemoirEditingJob.updated_at)
         )
     ).all()
-    current = {key: (status, text, reason) for key, status, text_hash, text, reason in rows if text_hash == source_text_hash(text)}
+    current = {key: (status, text, reason) for key, status, text_hash, text, reason in rows
+        if key in pending_ids and text_hash == source_text_hash(text)}
     statuses = [value[0] for value in current.values()]
     need = next((value for value in current.values() if value[0] == "needs_user"), None)
     detail = f"关于“{need[1][:60]}”：{need[2] or '还需要一些背景信息'}。补充讲述后会自动继续整理。" if need else ""
     # Answers to the interviewer that are not story stay out of the book; they are not pending.
-    return material_count, pending_count - statuses.count("not_story"), statuses.count("needs_user"), detail
+    return material_count, len(pending_ids) - statuses.count("not_story"), statuses.count("needs_user"), detail
 
 
 async def read_draft_progress(
