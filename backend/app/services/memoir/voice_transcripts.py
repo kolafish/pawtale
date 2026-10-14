@@ -151,7 +151,7 @@ def _preview_sentence(value: str, *, limit: int) -> str:
         index = text.find(marker)
         if 0 < index + 1 <= limit:
             return text[: index + 1].strip()
-    return text[:limit].rstrip()
+    return text[:limit].rstrip() + "…"
 
 
 def _summary_fields(display_text: str) -> tuple[str, str, str]:

@@ -47,7 +47,8 @@ export function transcriptTitleText(item: MemoirVoiceTranscriptItem): string {
     return summaryTitle;
   }
   const displayText = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
-  return displayText ? displayText.slice(0, 32) : "讲述记录";
+  if (!displayText) return "讲述记录";
+  return displayText.length > 32 ? `${displayText.slice(0, 32)}…` : displayText;
 }
 
 export function plainTranscriptSegments(text: string): TranscriptTextSegment[] {
