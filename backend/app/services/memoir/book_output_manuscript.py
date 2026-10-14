@@ -23,12 +23,12 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir.book_manuscript_ai import GeneratedManuscriptCopy
 from app.services.memoir.book_manuscript_cleanup import (
-    current_original_quote,
+    original_quote_candidates,
+    body_excerpt_candidates,
     expanded_afterword,
     fallback_back_cover_quote,
     fallback_chapter_intro,
     fallback_preface,
-    first_sentence,
     formal_book_title as cleanup_formal_book_title,
     sanitize_manuscript_payload,
 )
@@ -341,11 +341,12 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
 
 
 def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef], snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
+    candidates = original_quote_candidates(snapshot, max_chars=80)
     for ref in source_refs:
-        quote = current_original_quote(snapshot, ref.model_dump(), max_chars=80)
+        quote = max(candidates.get(ref.utterance_id, ()), key=len, default="")
         if quote:
             return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
-    quote = first_sentence(content, max_chars=80)
+    quote = next(iter(body_excerpt_candidates(content, max_chars=80)), "")
     return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
 
 

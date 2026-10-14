@@ -67,33 +67,45 @@ def first_sentence(text: str, *, max_chars: int) -> str:
     return brief_text(normalized, max_chars=max_chars)
 
 
-def current_original_quote(chapter: dict[str, Any], ref: dict[str, Any], *, max_chars: int) -> str:
-    """Quote only complete source sentences retained in this material's current section.
+def _sentences(value: str) -> list[str]:
+    return [" ".join(part.split()) for part in re.findall(r"[^。！？!?\n]+[。！？!?]?", value) if part.strip()]
 
-    The recording remains evidence, but an obsolete sentence must not undo a
-    confirmed edit. Ambiguous attribution simply leaves the quote empty.
-    """
+
+def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int) -> dict[str, tuple[str, ...]]:
+    """All source runs retained in their own section; split each body only once."""
     sections = _list(chapter.get("sections"))
-    if sections:
-        bodies = [_safe_str(section.get("content")) for section in sections
-                  if ref.get("utterance_id") in (section.get("used_material_ids") or section.get("source_ref_ids") or [])]
-    else:
-        bodies = [_safe_str(chapter.get("content"))]
-    def sentences(value: str) -> list[str]:
-        return [" ".join(part.split()) for part in re.findall(r"[^。！？!?\n]+[。！？!?]?", value) if part.strip()]
-    current = {sentence for body in bodies for sentence in sentences(body)}
-    runs: list[str] = []
-    run = ""
-    for sentence in sentences(_safe_str(ref.get("quote"))):
-        if sentence in current and len(run + sentence) <= max_chars:
-            run += sentence
-        else:
-            if run:
-                runs.append(run)
-            run = sentence if sentence in current and len(sentence) <= max_chars else ""
-    if run:
-        runs.append(run)
-    return max(runs, key=len, default="")
+    by_source: dict[str, set[str]] = {}
+    for section in sections:
+        current = set(_sentences(_safe_str(section.get("content"))))
+        for source_id in section.get("used_material_ids", []):
+            by_source.setdefault(source_id, set()).update(current)
+    chapter_sentences = set(_sentences(_safe_str(chapter.get("content")))) if not sections else set()
+    result = {}
+    for ref in _list(chapter.get("source_refs")):
+        source_id = _safe_str(ref.get("utterance_id"))
+        if not source_id:
+            continue
+        current = by_source.get(source_id, set()) if sections else chapter_sentences
+        runs: list[str] = []
+        run = ""
+        for sentence in _sentences(_safe_str(ref.get("quote"))):
+            if sentence in current and len(run + sentence) <= max_chars:
+                run += sentence
+            else:
+                if run:
+                    runs.append(run)
+                run = sentence if sentence in current and len(sentence) <= max_chars else ""
+        if run:
+            runs.append(run)
+        result[source_id] = tuple(dict.fromkeys(runs))
+    return result
+
+
+def body_excerpt_candidates(content: str, *, max_chars: int) -> tuple[str, ...]:
+    sentences = _sentences(content)
+    opening = sentences[0] if sentences else ""
+    return tuple(dict.fromkeys(sentence for sentence in sentences[1:]
+        if sentence != opening and len(sentence) <= max_chars and not contains_template_language(sentence)))
 
 
 def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
@@ -207,9 +219,7 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
             quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
             if quote and quote in " ".join(_safe_str(chapter.get("content")).split()):
                 candidates.append(quote)
-        excerpt = first_sentence(_safe_str(chapter.get("content")), max_chars=45)
-        if excerpt:
-            candidates.append(excerpt)
+        candidates.extend(body_excerpt_candidates(_safe_str(chapter.get("content")), max_chars=45))
     result: list[str] = []
     for candidate in candidates:
         if candidate and candidate not in result and not contains_template_language(candidate):
