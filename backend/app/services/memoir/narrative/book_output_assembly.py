@@ -280,6 +280,11 @@ async def assemble_book_output(
         manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
         created_by=MemoirCreatedBy.SYSTEM,
     )
+    if chapter_snapshots and not automatic:
+        # Manual assembly and revision baselines publish the same safe defaults
+        # as the worker; continue through its existing copy/retry lifecycle.
+        from app.services.memoir.automatic_book_draft import schedule_book_draft
+        await schedule_book_draft(db, project_id=project_id, source="book_assembly", settled=True)
     if chapter_snapshots:
         await automation_events.record_automation_event(
             db,

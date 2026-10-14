@@ -461,3 +461,36 @@ async def test_old_editorial_policy_refreshes_once_without_claiming_manual_copy(
     assert set(calls[-1]["chapter_ids"]) == {chapter.id for chapter in chapters}
     assert not output.metadata_json["automatic_editorial_copy"]["manual_targets"]
     assert output.metadata_json["automatic_editorial_copy"]["signature_version"] == 2
+
+
+@pytest.mark.parametrize("entry", ["manual", "revision", "automatic"])
+async def test_new_assembly_schedules_copy_through_existing_book_pipeline(client, test_db, entry):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir.book_revision_generation import _load_baseline
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    project, chapters, _ = await _output(client, test_db)
+    version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[0].id))
+    version.content += "后来我们搬到了绵阳。"
+    sections = copy.deepcopy(version.section_snapshot_json)
+    sections[0]["content"] = version.content
+    version.section_snapshot_json = sections
+    await test_db.commit()
+    if entry == "manual":
+        response = await client.post(f"/api/memoir/projects/{project.id}/book-output/assemble")
+        assert response.status_code == 200
+    elif entry == "revision":
+        await _load_baseline(test_db, project_id=project.id, missing_message="缺少正文")
+    else:
+        await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"update-book-draft:{project.id}"))
+    if entry == "automatic":
+        assert job is None  # The running pipeline already performs its copy stage.
+    else:
+        assert job is not None and job.status == "pending"
+        assert job.payload_json["source"] == "book_assembly"
+        scheduled_at = job.updated_at
+        await assemble_book_output(test_db, project_id=project.id)
+        await test_db.flush()
+        assert job.updated_at == scheduled_at
