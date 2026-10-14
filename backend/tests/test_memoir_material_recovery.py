@@ -194,3 +194,42 @@ async def test_archived_or_excluded_placements_are_not_unassigned_work(client, t
     await test_db.commit()
     _, pending, needs_user, _ = await draft_progress._source_counts_and_needs_user(test_db, project_id)
     assert pending == 0 and needs_user == 0
+
+
+async def test_partial_initial_plan_leaves_omitted_source_in_existing_growth_queue(client, test_db, monkeypatch):
+    from app.services.memoir import book_plan_ai
+    from tests.memoir_helpers import ensure_mobile_memoir_project
+    from tests.test_memoir_section_organization import FakeStoryGrowthAI
+    project_id = await ensure_mobile_memoir_project(client)
+    first, _ = await _stopped_growth_job(client, test_db, project_id, "小时候奶奶背我赶集。")
+    second, job = await _stopped_growth_job(client, test_db, project_id, "后来我跟师傅学修车。")
+    fake = FakeStoryGrowthAI({"chapters": [{"title": "童年", "source_indices": [1]}]})
+    monkeypatch.setattr(book_plan_ai, "get_ai_service", lambda _model=None: fake)
+    seen = []
+    async def decide(**kwargs):
+        ids = [item.id for item in kwargs["utterances"]]
+        seen.extend(ids)
+        return [story_tree_growth.GrowthGroup(utterance_ids=ids, action="leave_unassigned", reason="待定位")]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert fake.calls == 2
+    assert seen == [second["utterance_id"]]
+    assert result.result_json["growth"]["deferred"][second["utterance_id"]]["status"] != "not_story"
+    links = (await test_db.scalars(select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == project_id))).all()
+    assert [link.utterance_id for link in links] == [first["utterance_id"]]
+
+
+async def test_manual_placement_overrides_cached_nonstory_without_reclassification(client, test_db, monkeypatch):
+    project_id, chapters, _ = await _book(client, test_db)
+    source, job = await _stopped_growth_job(client, test_db, project_id, "那时候奶奶每天背我上学。")
+    async def misclassify(**kwargs):
+        return [story_tree_growth.GrowthGroup(utterance_ids=[source["utterance_id"]], action="not_story", reason="误判样本")]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", misclassify)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    job.status, job.result_json = "succeeded", result.result_json
+    await test_db.commit()
+    response = await client.post(f"/api/memoir/projects/{project_id}/section-materials/{source['utterance_id']}/place",
+        json={"target_chapter_id": chapters[0].id, "new_section_title": "奶奶送我上学"})
+    assert response.status_code == 200, response.text
+    link = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == source["utterance_id"]))
+    assert link is not None and link.assigned_by == "user"
