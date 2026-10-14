@@ -111,7 +111,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     project = await load_memoir_project(db, identity.active_project_id, user.id)
     result.server_revision = await project_data_revision(db, project)
     result.updated_at = project.updated_at.isoformat()
-    transcripts = await voice_transcripts.list_voice_transcripts(db, user.id, project_id=project.id, limit=1)
+    transcripts = await voice_transcripts.list_voice_transcripts(db, user.id, project_id=project.id, limit=1, ready_only=True)
     result.latest_transcript = transcripts.items[0] if transcripts.items else None
     jobs = await draft_progress.project_jobs(db, project.id)
     result.progress = await draft_progress.read_draft_progress(db, project_id=project.id, jobs=jobs)

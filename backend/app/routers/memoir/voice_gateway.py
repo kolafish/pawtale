@@ -148,6 +148,7 @@ async def mobile_memoir_voice_gateway(
             on_turn_start=persistence.set_turn_context,
             on_stop=on_stop,
             on_audio_frame=persistence.record_audio_frame,
+            on_audio_end=persistence.finish_audio,
             authorize_audio=memoir_voice_authorization.audio_authorizer(db, current_user_id),
             on_asr_final=persistence.persist_final,
             text_normalizer=normalize_memoir_asr_text,

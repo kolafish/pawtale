@@ -400,7 +400,9 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
       this.setData({ item: toViewItem(recovered) });
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "录音已转成文字", icon: "success" });
+      wx.showToast(recovered.transcription_status === "unrecognized"
+        ? { title: "没有识别出文字，录音已保留", icon: "none" }
+        : { title: "录音已转成文字", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {

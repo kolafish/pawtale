@@ -73,6 +73,7 @@ interface SearchChipView {
 
 interface TranscriptItemView {
   id: string;
+  transcriptionStatus: MemoirVoiceTranscriptItem["transcription_status"];
   summaryTitleText: string;
   summaryPreviewText: string;
   summarySegments: TranscriptTextSegment[];
@@ -203,7 +204,7 @@ function withTranscriptRuntimeState(
     cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
-    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : "把录音转成文字",
+    recoverButtonText: state.recoveringId === item.id ? "正在转成文字" : (item.transcriptionStatus === "unrecognized" ? "重新识别录音" : "把录音转成文字"),
   };
 }
 
@@ -378,8 +379,9 @@ function toViewItem(
     item.is_included_in_book
     || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
   );
-  const summaryTitleText = canRecoverTranscription ? "录音已保存，等待生成文字" : transcriptTitleText(item);
-  const summaryPreviewText = canRecoverTranscription
+  const unrecognized = item.transcription_status === "unrecognized";
+  const summaryTitleText = unrecognized ? "录音未识别出文字" : (canRecoverTranscription ? "录音已保存，等待生成文字" : transcriptTitleText(item));
+  const summaryPreviewText = unrecognized ? "原录音已保留，可以听一听或重新识别。" : canRecoverTranscription
     ? "点击下方按钮，把已保存的录音转成文字。"
     : transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
@@ -390,7 +392,7 @@ function toViewItem(
     || item.section_assignment?.chapter_title.trim()
     || includedChapter?.title.trim()
     || "";
-  const storyStatusText = canRecoverTranscription
+  const storyStatusText = unrecognized ? "未识别出文字" : canRecoverTranscription
     ? "等待生成文字"
     : (isIncludedInBook
       ? `已收进：${includedLocationText || "故事树"}`
@@ -404,6 +406,7 @@ function toViewItem(
   ].filter(Boolean).join(" · ");
   return {
     id: item.id,
+    transcriptionStatus: item.transcription_status,
     summaryTitleText,
     summaryPreviewText,
     summarySegments: highlightTranscriptText(summaryPreviewText, searchQuery),
@@ -530,6 +533,7 @@ definePage<TranscriptsData>()({
         return;
       }
       const response = await listMemoirVoiceTranscripts({
+          readyOnly: this.data.pickForVideo,
           projectId: activeProjectId,
           query: searchQuery || undefined,
           included: searchFilters.included,
@@ -812,7 +816,9 @@ definePage<TranscriptsData>()({
         items: replaceItem(this.data.items, recovered, this.data.searchQuery),
       });
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
-      wx.showToast({ title: "录音已转成文字", icon: "success" });
+      wx.showToast(recovered.transcription_status === "unrecognized"
+        ? { title: "没有识别出文字，录音已保留", icon: "none" }
+        : { title: "录音已转成文字", icon: "success" });
     } catch (error) {
       setTranscriptsData(this, { error: error instanceof Error ? error.message : "录音转文字失败" });
     } finally {

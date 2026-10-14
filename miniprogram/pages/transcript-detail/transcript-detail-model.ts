@@ -272,6 +272,7 @@ export function toViewItem(
   const canRecoverTranscription = Boolean(
     item.can_recover_transcription || item.transcription_status === "pending_transcription",
   );
+  const unrecognized = item.transcription_status === "unrecognized";
   const savedText = item.transcript_edited || item.transcript_raw;
   const assignment = item.section_assignment;
   const includedChapter = [...(item.included_chapters || [])]
@@ -300,17 +301,17 @@ export function toViewItem(
     createdAtText,
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
-    transcriptionNoticeText: canRecoverTranscription
+    transcriptionNoticeText: unrecognized ? "没有识别出文字。原录音已保留，可以听一听或重新识别。" : canRecoverTranscription
       ? "录音已保存。把它转成文字后，就可以继续整理。"
       : "",
-    heroStatusText: canRecoverTranscription ? "等待生成文字" : "已整理",
+    heroStatusText: unrecognized ? "未识别出文字" : (canRecoverTranscription ? "等待生成文字" : "已整理"),
     heroStatusClass: canRecoverTranscription ? "pending" : "ready",
     displayCountText: canRecoverTranscription ? "尚未生成" : `${item.display_char_count} 字`,
     rawCountText: canRecoverTranscription ? "尚未转写" : `${item.raw_char_count} 字`,
     canRecoverTranscription,
     locationTitleText: hasLocation
       ? "已收进故事树"
-      : (canRecoverTranscription ? "等待生成文字" : "尚未整理"),
+      : (unrecognized ? "未识别出文字" : (canRecoverTranscription ? "等待生成文字" : "尚未整理")),
     showLocationPath: hasLocation,
     chapterLocationText,
     sectionLocationText,

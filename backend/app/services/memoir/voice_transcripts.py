@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import delete, false, func, or_, select
+from sqlalchemy import and_, delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -19,6 +19,7 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
+    MemoirTranscriptionStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -88,9 +89,6 @@ _SPACE_RE = re.compile(r"\s+")
 INCLUDED_FILTER_VALUES = {"all", "included", "not_included"}
 FALLBACK_SUMMARY_TITLE_LIMIT = 32
 FALLBACK_SUMMARY_TEXT_LIMIT = 120
-TRANSCRIPTION_STATUS_READY = "ready"
-TRANSCRIPTION_STATUS_PENDING = "pending_transcription"
-TRANSCRIPTION_STATUS_EMPTY = "empty"
 PENDING_TRANSCRIPTION_TITLE = "音频已保存，等待转写"
 PENDING_TRANSCRIPTION_SUMMARY = "这段录音已经保存，但还没有识别成文字。"
 TRANSCRIPT_DELETE_CONFLICT_DETAIL = (
@@ -125,15 +123,20 @@ def _has_transcript_text_clause(utterance_model=MemoirVoiceUtterance):
 
 
 def _has_recoverable_audio_clause(utterance_model=MemoirVoiceUtterance):
-    return utterance_model.audio_file_id.is_not(None)
+    return and_(utterance_model.audio_file_id.is_not(None), func.coalesce(
+        utterance_model.provider_payload_json["transcription_status"].as_string(), ""
+    ) != MemoirTranscriptionStatus.EMPTY.value)
 
 
-def _transcription_status(utterance: MemoirVoiceUtterance) -> str:
+def _transcription_status(utterance: MemoirVoiceUtterance) -> MemoirTranscriptionStatus:
     if current_utterance_text(utterance):
-        return TRANSCRIPTION_STATUS_READY
+        return MemoirTranscriptionStatus.READY
     if utterance.audio_file_id:
-        return TRANSCRIPTION_STATUS_PENDING
-    return TRANSCRIPTION_STATUS_EMPTY
+        status = (utterance.provider_payload_json or {}).get("transcription_status")
+        if status in {MemoirTranscriptionStatus.EMPTY.value, MemoirTranscriptionStatus.UNRECOGNIZED.value}:
+            return MemoirTranscriptionStatus(status)
+        return MemoirTranscriptionStatus.PENDING
+    return MemoirTranscriptionStatus.EMPTY
 
 
 def _compact_display_text(value: str) -> str:
@@ -585,8 +588,12 @@ def _item_response(
     display_text = edited.strip() or raw.strip()
     inclusions = included_chapters or []
     transcription_status = _transcription_status(utterance)
-    can_recover_transcription = transcription_status == TRANSCRIPTION_STATUS_PENDING
-    if can_recover_transcription:
+    can_recover_transcription = transcription_status in {MemoirTranscriptionStatus.PENDING, MemoirTranscriptionStatus.UNRECOGNIZED}
+    if transcription_status == MemoirTranscriptionStatus.UNRECOGNIZED:
+        summary_title, summary_text, summary_source = (
+            "录音未识别出文字", "原录音已保留，可以听一听或重新识别。", "unrecognized",
+        )
+    elif can_recover_transcription:
         summary_title, summary_text, summary_source = (
             PENDING_TRANSCRIPTION_TITLE,
             PENDING_TRANSCRIPTION_SUMMARY,
@@ -849,6 +856,7 @@ async def list_voice_transcripts(
     voice_session_id: str | None = None,
     manual_corrected: bool | None = None,
     narrator_only: bool = False,
+    ready_only: bool = False,
     oldest_first: bool = False,
     interview_time_order: bool = False,
     limit: int = 50,
@@ -858,6 +866,8 @@ async def list_voice_transcripts(
     if included not in INCLUDED_FILTER_VALUES:
         raise HTTPException(status_code=400, detail="不支持的讲述记录收录筛选条件")
     filters = _transcript_filter(user_id, project_id, allow_admin=allow_admin)
+    if ready_only:
+        filters.append(_has_transcript_text_clause())
     filters.extend(_search_filter(term) for term in _search_terms(search_query))
     if guidance_mode:
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)

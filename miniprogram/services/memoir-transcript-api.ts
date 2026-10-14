@@ -36,6 +36,7 @@ import {
 import { readSelectedTranscriptPolishLevel } from "./transcript-polish-settings";
 
 interface VoiceTranscriptListOptions {
+  readyOnly?: boolean;
   projectId?: string;
   query?: string;
   included?: MemoirVoiceTranscriptIncludedFilter;
@@ -92,6 +93,7 @@ export function listMemoirVoiceTranscripts(
   return memoirRequest<MemoirVoiceTranscriptListResponse>(
     `/api/mobile/memoir/voice-transcripts${queryString({
       project_id: options.projectId,
+      ready_only: options.readyOnly || undefined,
       q: options.query?.trim() || undefined,
       included: options.included && options.included !== "all" ? options.included : undefined,
       guidance_mode: options.guidanceMode,

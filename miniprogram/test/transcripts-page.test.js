@@ -939,3 +939,23 @@ test("transcripts page asks logged-in users to create a memoir before listing re
   assert.deepEqual(context.data.items, []);
   assert.equal(listCalls, 0);
 });
+
+
+test("empty recovery outcome keeps original audio recoverable without claiming successful transcription", async () => {
+  const item = { ...sampleTranscript("quiet"), transcript_raw: "", transcript_edited: "", display_text: "",
+    transcription_status: "unrecognized", can_recover_transcription: true, display_char_count: 0 };
+  const { page } = loadTranscriptsPage({
+    authExports: { getMemoirIdentity: async () => ({id: "user-1", active_project_id: "project-1", projects: []}) },
+    voiceApiExports: { listMemoirVoiceTranscripts: async () => ({items: [item], total: 1, limit: 30, offset: 0}),
+      recoverMemoirVoiceTranscript: async () => item },
+  });
+  const context = pageContext(page);
+  const toasts = [];
+  global.wx = {showToast: value => toasts.push(value)};
+  await page.loadTranscripts.call(context, true);
+  await page.recoverTranscript.call(context, {currentTarget: {dataset: {id: "quiet"}}});
+  assert.equal(context.data.items[0].transcriptionStatus, "unrecognized");
+  assert.equal(context.data.items[0].canRecoverTranscription, true);
+  assert.equal(toasts.at(-1).icon, "none");
+  delete global.wx;
+});

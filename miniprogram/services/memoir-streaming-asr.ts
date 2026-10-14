@@ -716,7 +716,7 @@ export class MemoirStreamingAsrClient {
     this.options.callbacks.onStatus("stopping");
     this.emitCaptureStats("stopping");
     this.emitClientEvent("audio_end_sent", { gatewayEventType: "audio.end" });
-    this.sendJson({ type: "audio.end" });
+    this.sendJson({ type: "audio.end", speech_detected: this.hasVoiceActivity });
   }
 
   private waitForEvent(eventType: string, timeoutMs: number): Promise<void> {

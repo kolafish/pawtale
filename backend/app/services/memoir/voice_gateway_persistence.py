@@ -9,7 +9,7 @@ import aiofiles
 import aiofiles.os
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirSpeakerRole
+from app.domain.memoir.types import MemoirSpeakerRole, MemoirTranscriptionStatus
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.asr.gateway import VoiceGatewayClientError, VoiceGatewayTurnContext
 from app.services.asr.streaming import StreamingASREvent
@@ -128,11 +128,19 @@ class VoiceGatewayPersistence:
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
         return await self.persist_segment(event)
 
-    async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
+    async def finish_audio(self, speech_detected: bool | None) -> None:
+        await self.flush_unfinalized_audio(
+            transcription_status=MemoirTranscriptionStatus.EMPTY if speech_detected is False else MemoirTranscriptionStatus.UNRECOGNIZED,
+        )
+
+    async def flush_unfinalized_audio(
+        self, *, transcription_status: MemoirTranscriptionStatus = MemoirTranscriptionStatus.PENDING,
+    ) -> dict[str, Any] | None:
         staged_audio = await self._pending_audio.stage(self.db)
         result = await self._service.persist_unfinalized_audio(
             staged_audio=staged_audio,
             speaker_role=self._turn_context.speaker_role,
+            transcription_status=transcription_status,
         )
         if result is None:
             return None
