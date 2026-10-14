@@ -1,11 +1,18 @@
 export type MarkdownFormat =
   | 'heading-1'
   | 'heading-2'
+  | 'heading-3'
   | 'bold'
   | 'italic'
+  | 'strikethrough'
+  | 'inline-code'
+  | 'link'
   | 'quote'
   | 'unordered-list'
   | 'ordered-list'
+  | 'task-list'
+  | 'code-block'
+  | 'table'
   | 'divider';
 
 export interface MarkdownSelection {
@@ -35,7 +42,14 @@ export interface MarkdownKeyboardInput {
 const INLINE_FORMATS: Partial<Record<MarkdownFormat, { marker: string; placeholder: string }>> = {
   bold: { marker: '**', placeholder: '加粗文字' },
   italic: { marker: '*', placeholder: '斜体文字' },
+  strikethrough: { marker: '~~', placeholder: '删除文字' },
+  'inline-code': { marker: '`', placeholder: '代码' },
 };
+
+const LINK_TEXT_PLACEHOLDER = '链接文字';
+const LINK_URL_PLACEHOLDER = 'https://';
+const CODE_PLACEHOLDER = '代码';
+const TABLE_TEMPLATE = '| 列1 | 列2 |\n| --- | --- |\n| 内容 | 内容 |';
 
 function lineBounds(text: string, start: number, end: number): MarkdownSelection {
   const lineStart = text.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
@@ -66,6 +80,7 @@ function stripBlockPrefix(line: string): string {
   return line
     .replace(/^#{1,6}\s+/, '')
     .replace(/^>\s?/, '')
+    .replace(/^[-*]\s+\[[ xX]\]\s+/, '')
     .replace(/^[-*]\s+/, '')
     .replace(/^\d+\.\s+/, '');
 }
@@ -88,6 +103,45 @@ function applyInlineFormat(
   };
 }
 
+function applyLinkFormat(text: string, selection: MarkdownSelection): MarkdownEditResult {
+  const selected = text.slice(selection.start, selection.end);
+  const label = selected || LINK_TEXT_PLACEHOLDER;
+  const replacement = `[${label}](${LINK_URL_PLACEHOLDER})`;
+  // 已选中文字时直接选中网址，否则先选中链接文字占位符。
+  const nextStart = selected
+    ? selection.start + label.length + 3
+    : selection.start + 1;
+  const nextEnd = selected ? nextStart + LINK_URL_PLACEHOLDER.length : nextStart + label.length;
+  return {
+    text: text.slice(0, selection.start) + replacement + text.slice(selection.end),
+    start: nextStart,
+    end: nextEnd,
+  };
+}
+
+function wrapCodeBlock(text: string, selection: MarkdownSelection): MarkdownEditResult {
+  const bounds = lineBounds(text, selection.start, selection.end);
+  const content = text.slice(bounds.start, bounds.end) || CODE_PLACEHOLDER;
+  const replacement = `\`\`\`\n${content}\n\`\`\``;
+  return {
+    text: text.slice(0, bounds.start) + replacement + text.slice(bounds.end),
+    start: bounds.start + 4,
+    end: bounds.start + 4 + content.length,
+  };
+}
+
+function insertBlock(text: string, selection: MarkdownSelection, block: string): MarkdownEditResult {
+  const before = selection.start > 0 && text[selection.start - 1] !== '\n' ? '\n\n' : '';
+  const after = selection.end < text.length && text[selection.end] !== '\n' ? '\n\n' : '\n';
+  const replacement = `${before}${block}${after}`;
+  const cursor = selection.start + replacement.length;
+  return {
+    text: text.slice(0, selection.start) + replacement + text.slice(selection.end),
+    start: cursor,
+    end: cursor,
+  };
+}
+
 export function applyMarkdownFormat(
   text: string,
   selection: MarkdownSelection,
@@ -98,25 +152,20 @@ export function applyMarkdownFormat(
     return applyInlineFormat(text, selection, inline.marker, inline.placeholder);
   }
 
-  if (format === 'divider') {
-    const before = selection.start > 0 && text[selection.start - 1] !== '\n' ? '\n\n' : '';
-    const after = selection.end < text.length && text[selection.end] !== '\n' ? '\n\n' : '\n';
-    const replacement = `${before}---${after}`;
-    const cursor = selection.start + replacement.length;
-    return {
-      text: text.slice(0, selection.start) + replacement + text.slice(selection.end),
-      start: cursor,
-      end: cursor,
-    };
-  }
+  if (format === 'link') return applyLinkFormat(text, selection);
+  if (format === 'code-block') return wrapCodeBlock(text, selection);
+  if (format === 'divider') return insertBlock(text, selection, '---');
+  if (format === 'table') return insertBlock(text, selection, TABLE_TEMPLATE);
 
   return transformSelectedLines(text, selection, (line, index) => {
     const body = stripBlockPrefix(line);
     if (format === 'heading-1') return `# ${body || '一级标题'}`;
     if (format === 'heading-2') return `## ${body || '二级标题'}`;
+    if (format === 'heading-3') return `### ${body || '三级标题'}`;
     if (format === 'quote') return `> ${body || '引用内容'}`;
     if (format === 'unordered-list') return `- ${body || '列表项'}`;
     if (format === 'ordered-list') return `${index + 1}. ${body || '列表项'}`;
+    if (format === 'task-list') return `- [ ] ${body || '待办事项'}`;
     return line;
   });
 }
@@ -144,9 +193,27 @@ export function continueMarkdownLine(
   const cursor = selection.start;
   const start = text.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1;
   const lineBeforeCursor = text.slice(start, cursor);
+  const task = lineBeforeCursor.match(/^(\s*)([-*])\s+\[[ xX]\]\s+(.*)$/);
   const unordered = lineBeforeCursor.match(/^(\s*)([-*])\s+(.*)$/);
   const ordered = lineBeforeCursor.match(/^(\s*)(\d+)\.\s+(.*)$/);
   const quote = lineBeforeCursor.match(/^(\s*)>\s?(.*)$/);
+
+  if (task) {
+    const [, indent, marker, body] = task;
+    if (!body.trim()) {
+      return {
+        text: text.slice(0, start) + indent + text.slice(cursor),
+        start: start + indent.length,
+        end: start + indent.length,
+      };
+    }
+    const insert = `\n${indent}${marker} [ ] `;
+    return {
+      text: text.slice(0, cursor) + insert + text.slice(cursor),
+      start: cursor + insert.length,
+      end: cursor + insert.length,
+    };
+  }
 
   if (unordered) {
     const [, indent, marker, body] = unordered;
@@ -224,11 +291,23 @@ export function getMarkdownKeyboardCommand(input: MarkdownKeyboardInput): Markdo
   if (!input.altKey && !input.shiftKey && key === 'i') {
     return { type: 'format', format: 'italic' };
   }
+  if (!input.altKey && input.shiftKey && key === 'x') {
+    return { type: 'format', format: 'strikethrough' };
+  }
+  if (!input.altKey && !input.shiftKey && key === 'e') {
+    return { type: 'format', format: 'inline-code' };
+  }
+  if (!input.altKey && !input.shiftKey && key === 'k') {
+    return { type: 'format', format: 'link' };
+  }
   if (input.altKey && !input.shiftKey && (input.key === '1' || input.code === 'Digit1')) {
     return { type: 'format', format: 'heading-1' };
   }
   if (input.altKey && !input.shiftKey && (input.key === '2' || input.code === 'Digit2')) {
     return { type: 'format', format: 'heading-2' };
+  }
+  if (input.altKey && !input.shiftKey && (input.key === '3' || input.code === 'Digit3')) {
+    return { type: 'format', format: 'heading-3' };
   }
   if (!input.altKey && input.shiftKey && (input.key === '7' || input.code === 'Digit7')) {
     return { type: 'format', format: 'ordered-list' };
