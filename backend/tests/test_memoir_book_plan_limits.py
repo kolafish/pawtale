@@ -112,3 +112,21 @@ async def test_plan_material_sync_rejects_cross_chapter_refs_before_mutating():
             assignment_reason="replace_book_plan",
         )
     assert rejected.value.status_code == 400
+
+
+@pytest.mark.parametrize("chapters", [
+    [{"title": "童年", "source_indices": [1]}],
+    [{"title": "童年", "source_indices": [1, 2]}, {"title": "求学", "source_indices": [2]}],
+    [{"title": "童年", "source_indices": [1]}, {"title": "", "source_indices": [2]}],
+])
+async def test_partial_initial_plan_keeps_unambiguous_sources_without_dropping_unresolved(chapters):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    from tests.test_memoir_section_organization import FakeStoryGrowthAI
+    sources = [SourceSegment(i, "session", f"message-{i}", f"utterance-{i}", None, None, None, None,
+        "小时候奶奶背我赶集。", datetime(2026, 10, 14)) for i in (1, 2)]
+    fake = FakeStoryGrowthAI({"chapters": chapters})
+    result = await generate_book_plan_from_sources(project_title="我的回忆录", sources=sources,
+        interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert [ref.utterance_id for chapter in result.chapters for ref in chapter.source_refs] == ["utterance-1"]
+    assert result.not_story_sources == ()
+    assert fake.calls == 2

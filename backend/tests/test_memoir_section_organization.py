@@ -1516,7 +1516,7 @@ async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, m
     assert len(result.result_json["growth"]["completed_initial_chapters"]) == 2
 
 
-async def test_initial_story_deduplicates_chapter_sources_before_persisting(client, test_db, monkeypatch):
+async def test_initial_story_retries_duplicate_chapter_sources_before_persisting(client, test_db, monkeypatch):
     project_id = await ensure_mobile_memoir_project(client)
     source, job = await _stopped_growth_job(
         client, test_db, project_id, "河边晨步、雨衣和一碗热汤面。",
@@ -1526,6 +1526,12 @@ async def test_initial_story_deduplicates_chapter_sources_before_persisting(clie
         {"title": "雨衣", "source_indices": [1]},
         {"title": "热汤面", "source_indices": [1]},
     ]})
+    original_call = plan_ai._call_llm
+    async def corrected_response(*args, **kwargs):
+        if plan_ai.calls:
+            plan_ai.payload = {"title": "我的故事", "chapters": [{"title": "雨衣", "source_indices": [1]}]}
+        return await original_call(*args, **kwargs)
+    monkeypatch.setattr(plan_ai, "_call_llm", corrected_response)
     sections_ai = ReplayMaterialOrganizationAI()
     monkeypatch.setattr("app.services.memoir.book_plan_ai.get_ai_service", lambda _model=None: plan_ai)
     monkeypatch.setattr(section_regeneration, "get_ai_service", lambda _model=None: sections_ai)
@@ -1543,6 +1549,8 @@ async def test_initial_story_deduplicates_chapter_sources_before_persisting(clie
         MemoirSectionMaterial.project_id == project_id,
     ))).all())
     assert len(chapters) == len(sections) == len(materials) == 1
+    assert plan_ai.calls == 2
+    assert chapters[0].title == "雨衣"
     assert materials[0].utterance_id == source["utterance_id"]
     assert materials[0].section_id == sections[0].id
     assert result.result_json["growth"]["completed_initial_chapters"] == [chapters[0].id]

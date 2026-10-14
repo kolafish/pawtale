@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
-from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_calls import AIInvalidStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
@@ -244,6 +245,24 @@ def clean_generated_chapter_title(title: str) -> str:
     return title[:80]
 
 
+def _source_counts(output: _BookPlanOutput) -> Counter[int]:
+    return Counter([index for chapter in output.chapters for index in chapter.source_indices]
+                   + output.not_story_source_indices)
+
+
+def _recover_partial_plan(output: _BookPlanOutput | None, expected: set[int]) -> _BookPlanOutput | None:
+    if output is None:
+        return None
+    counts = _source_counts(output)
+    unique = {index for index, count in counts.items() if count == 1 and index in expected}
+    chapters = [chapter.model_copy(update={"source_indices": indices}) for chapter in output.chapters
+                if chapter.title.strip() and (indices := [index for index in chapter.source_indices if index in unique])]
+    if not chapters:
+        return None
+    return _BookPlanOutput(title=output.title, chapters=chapters,
+        not_story_source_indices=[index for index in output.not_story_source_indices if index in unique])
+
+
 async def generate_book_plan_from_sources(
     *,
     project_title: str,
@@ -253,14 +272,17 @@ async def generate_book_plan_from_sources(
     ai_client: AITextClient | None = None,
 ) -> GeneratedBookPlan:
     prompt = build_plan_prompt(project_title, sources, interviewer_lines)
+    expected = {source.source_index for source in sources}
+    last_candidate: _BookPlanOutput | None = None
     class ValidatedBookPlanOutput(_BookPlanOutput):
         @model_validator(mode="after")
         def validate_source_coverage(self):
-            assigned = {index for chapter in self.chapters for index in chapter.source_indices}
-            excluded = set(self.not_story_source_indices)
-            expected = {source.source_index for source in sources}
-            if assigned & excluded or assigned | excluded != expected:
-                raise ValueError("每条来源必须进入章节或明确列为非故事，不能遗漏、重复排除或添加来源")
+            nonlocal last_candidate
+            last_candidate = self
+            counts = _source_counts(self)
+            if (set(counts) != expected or any(count != 1 for count in counts.values())
+                    or any(not chapter.title.strip() or not chapter.source_indices for chapter in self.chapters)):
+                raise ValueError("每条来源必须且只能进入一个有效章节或明确列为非故事，不能遗漏、重复或添加来源")
             return self
 
     client = ai_client
@@ -279,6 +301,13 @@ async def generate_book_plan_from_sources(
             timeout=ai_text_timeout_seconds(policy.timeout_profile),
             max_attempts=policy.max_attempts,
         )
+        value, model = generated.value, generated.response.resolved_model
+    except AIInvalidStructuredOutputError as exc:
+        value = _recover_partial_plan(last_candidate, expected)
+        if value is None:
+            raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+        model = exc.response.resolved_model if exc.response else getattr(client, "model_name", ai_model)
+        logger.warning("Partial memoir plan retained %s chapters; unresolved sources remain unassigned", len(value.chapters))
     except HTTPException as exc:
         if exc.status_code < 500:
             raise
@@ -289,14 +318,14 @@ async def generate_book_plan_from_sources(
         raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
 
     title, chapters = chapters_from_payload(
-        generated.value.model_dump(), sources=sources,
-    ) if generated.value.chapters else (generated.value.title, [])
+        value.model_dump(), sources=sources,
+    ) if value.chapters else (value.title, [])
     return GeneratedBookPlan(
         title=title,
         chapters=chapters,
-        model=generated.response.resolved_model,
+        model=model,
         prompt=prompt,
-        not_story_sources=tuple(source for source in sources if source.source_index in generated.value.not_story_source_indices),
+        not_story_sources=tuple(source for source in sources if source.source_index in value.not_story_source_indices),
     )
 
 
