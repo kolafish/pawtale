@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.memoir.project_ai_preferences import project_transcript_polish_level
+
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -335,6 +337,7 @@ def _candidate_manuscript(
     illustrations, image_appendix = _stored_illustrations(baseline.manuscript_json)
     template, custom_layout = stored_manuscript_design(baseline.manuscript_json)
     manuscript = manuscript_from_snapshot(
+        polish_level=project_transcript_polish_level(project),
         title=title,
         content=content,
         snapshot=snapshots,

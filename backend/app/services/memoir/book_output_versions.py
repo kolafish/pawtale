@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirCreatedBy
+from app.domain.memoir.types import MemoirCreatedBy, MemoirTranscriptPolishLevel
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
 from app.schemas.memoir_book import MemoirBookLevelEditorialCopyTarget, MemoirBookManuscriptQuote
-from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes, original_quote_candidates, body_excerpt_candidates, usable_quote
+from app.services.memoir.book_manuscript_cleanup import original_quote_candidates, body_excerpt_candidates
 from app.services.memoir.book_output_manuscript import stored_manuscript_metadata, fallback_chapter_quotes
 from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -211,10 +211,7 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
     def refs(value):
         return {item["utterance_id"]: item for item in value.get("source_refs", []) if isinstance(item, dict)}
     old_refs, new_refs = refs(stored), refs(snapshot)
-    candidates = original_quote_candidates(snapshot, max_chars=max(
-        (len(str(ref.get("quote") or "")) for ref in new_refs.values()), default=0,
-    ))
-    quotes = [MemoirBookManuscriptQuote.model_validate(value) for value in repair_original_pull_quotes(stored)]
+    quotes = [MemoirBookManuscriptQuote.model_validate(value) for value in stored.get("pull_quotes", [])]
     excerpts = body_excerpt_candidates(str(snapshot.get("content") or ""), max_chars=90)
     retained = []
     for quote in quotes:
@@ -226,8 +223,8 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
             ) for source_id in quote.source_ref_ids
         ):
             continue
-        if quote.source == "original_quote" and (not usable_quote(quote.text) or not quote.source_ref_ids or not all(
-            any(quote.text in candidate for candidate in candidates.get(source_id, ()))
+        if quote.source == "original_quote" and (not quote.source_ref_ids or not all(
+            quote.text in str(new_refs[source_id].get("quote") or "")
             for source_id in quote.source_ref_ids
         )):
             continue
@@ -290,6 +287,7 @@ def claim_editorial_copy_fields(
 async def repair_automatic_chapter_quotes(
     db: AsyncSession, *, output: MemoirBookOutput, version: MemoirBookOutputVersion,
     state: AutomaticEditorialCopyState,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
 ) -> MemoirBookOutputVersion:
     """Upgrade old automatic excerpts deterministically; keep authored choices and AI checkpoints."""
     from app.services.memoir.book_output_state import invalidate_book_output
@@ -302,7 +300,7 @@ async def repair_automatic_chapter_quotes(
         snapshot = snapshots[chapter_id]
         quotes = retained_chapter_quotes(chapter, snapshot)
         if not quotes:
-            quotes = fallback_chapter_quotes(str(snapshot.get("content") or ""), snapshot)
+            quotes = fallback_chapter_quotes(str(snapshot.get("content") or ""), snapshot, polish_level=polish_level)
         chapter["pull_quotes"] = [quote.model_dump(mode="json") for quote in quotes]
     if manuscript == version.manuscript_json:
         return version

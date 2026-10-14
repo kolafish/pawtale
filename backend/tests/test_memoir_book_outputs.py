@@ -17,6 +17,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirOutputStatus,
+    MemoirTranscriptPolishLevel,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
@@ -124,7 +125,7 @@ class FakeEditorialAI(AITextServiceBase):
                 .split(";", 1)[0]
                 .strip()
             )
-        return f"""
+        response = f"""
         {{
           "book_title": "外婆慢慢说",
           "cover_subtitle": "关于童年与离家的记忆",
@@ -141,6 +142,12 @@ class FakeEditorialAI(AITextServiceBase):
           "back_cover_quote": "我小时候常在外婆家的院子里晒太阳。"
         }}
         """
+
+
+        payload = json.loads(response)
+        if '"pull_quote_source_ref_id"' not in user_prompt:
+            payload['chapter_intros'][0].pop('pull_quote_source_ref_id')
+        return json.dumps(payload, ensure_ascii=False)
 
 
 class FakeTitleAI(AITextServiceBase):
@@ -178,8 +185,7 @@ class FakeTemplateCopyAI(AITextServiceBase):
             {
               "chapter_id": "chapter-1",
               "intro": "这一章主要记录外婆家的童年相关的回忆。",
-              "pull_quote": "这句不是原始口述里的金句。",
-              "pull_quote_source_ref_id": "u1"
+              "pull_quote": "这句不是原始口述里的金句。"
             }
           ],
           "back_cover_quote": "凡是过往皆是序章"
@@ -218,6 +224,7 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
         ],
         ai_model="fake-model",
         ai_client=fake_ai,
+        polish_level=MemoirTranscriptPolishLevel.LOW,
     )
 
     assert copy is not None
@@ -339,7 +346,7 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
     assert "讲述来源" not in cleaned["back_matter"]["interview_records"]["content"]
     assert cleaned["back_matter"]["version_note"]["content"] == "本书正文采用适合阅读的整理版表达。原始口述材料已保留，便于家人日后继续核对、补充和修订。"
     assert cleaned["back_matter"]["source_appendix"]["title"] == "口述片段"
-    assert cleaned["render_settings"]["back_cover_quote"] == "夏天的晚上，我就坐在院子里边看月亮。"
+    assert cleaned["render_settings"]["back_cover_quote"] == "那个院子里有一棵葡萄树。"
 
 
 @pytest.fixture
@@ -360,7 +367,7 @@ def release_quote_snapshot():
 
 def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
     narration = release_quote_snapshot[0]["content"]
-    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
+    manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot, polish_level=MemoirTranscriptPolishLevel.LOW)
 
     assert manuscript is not None
     quote = manuscript.chapters[0].pull_quotes[0]
@@ -368,19 +375,19 @@ def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
     assert quote.source == "original_quote"
     assert quote.source_ref_ids == ["release-utterance"]
     assert manuscript.chapters[0].source_refs[0].transcript_version_id == "release-transcript"
-    assert manuscript.render_settings.back_cover_quote == narration[:43]
+    assert manuscript.render_settings.back_cover_quote == "我小时候住在四川成都，7岁那年，奶奶每天早晨带我去河边散步。"
 
     payload = manuscript.model_dump(mode="json")
     payload["render_settings"]["back_cover_quote"] = ""
     regenerated = sanitize_manuscript_payload(title="发布手测", manuscript=payload)
-    assert regenerated["render_settings"]["back_cover_quote"] == narration[:43]
+    assert regenerated["render_settings"]["back_cover_quote"] == "我小时候住在四川成都，7岁那年，奶奶每天早晨带我去河边散步。"
 
 
 def test_release_quote_skips_source_without_a_complete_sentence_in_budget(release_quote_snapshot):
     chapter = release_quote_snapshot[0]
     chapter["source_refs"][0]["quote"] = chapter["content"].replace("。", "，")
     chapter["source_refs"].append({"utterance_id": "short-source", "quote": "回到家以后，她给我煮了一碗热汤面。"})
-    manuscript = manuscript_from_snapshot(title="发布手测", content=chapter["content"], snapshot=release_quote_snapshot)
+    manuscript = manuscript_from_snapshot(title="发布手测", content=chapter["content"], snapshot=release_quote_snapshot, polish_level=MemoirTranscriptPolishLevel.LOW)
 
     assert manuscript is not None
     quote = manuscript.chapters[0].pull_quotes[0]
@@ -414,11 +421,12 @@ def test_release_quote_metadata_update_preserves_manual_text(release_quote_snaps
 async def test_release_quote_regeneration_keeps_complete_sentences_and_selected_targets(release_quote_snapshot, monkeypatch):
     narration = release_quote_snapshot[0]["content"]
     fake_ai = FakeEditorialAI()
+    excerpt = "回到家以后，她给我煮了一碗热汤面。"
 
     async def provider_response(*args, **kwargs):
         return json.dumps({
-            "chapter_intros": [{"chapter_id": "C1", "pull_quote": narration, "pull_quote_source_ref_id": "M1"}],
-            "back_cover_quote": narration,
+            "chapter_intros": [{"chapter_id": "C1", "pull_quote": excerpt}],
+            "back_cover_quote": excerpt,
         }, ensure_ascii=False)
 
     monkeypatch.setattr(fake_ai, "_call_llm", provider_response)
@@ -427,56 +435,22 @@ async def test_release_quote_regeneration_keeps_complete_sentences_and_selected_
         targets=["pull_quotes", "back_cover_quote"],
     )
     assert copy is not None
-    assert copy.chapter_intros[0].pull_quote == narration[:90]
-    assert copy.chapter_intros[0].pull_quote_source_ref_id == "release-utterance"
-    assert copy.back_cover_quote == narration[:43]
+    assert copy.chapter_intros[0].pull_quote == excerpt
+    assert copy.chapter_intros[0].pull_quote_source_ref_id == ""
+    assert copy.back_cover_quote == excerpt
 
     manuscript = manuscript_from_snapshot(title="发布手测", content=narration, snapshot=release_quote_snapshot)
     assert manuscript is not None
     manuscript.chapters[0].pull_quotes[0].text = "手工保留的摘录"
     manuscript.chapters[0].pull_quotes[0].source = "manual"
     apply_editorial_copy(manuscript, copy, targets={"back_cover_quote"}, chapter_ids=set())
-    assert manuscript.render_settings.back_cover_quote == narration[:43]
+    assert manuscript.render_settings.back_cover_quote == excerpt
     assert manuscript.chapters[0].pull_quotes[0].text == "手工保留的摘录"
     apply_editorial_copy(manuscript, copy, targets={"pull_quotes"}, chapter_ids={"release-chapter"})
-    assert manuscript.chapters[0].pull_quotes[0].text == narration[:90]
-    assert manuscript.chapters[0].pull_quotes[0].source_ref_ids == ["release-utterance"]
+    assert manuscript.chapters[0].pull_quotes[0].text == excerpt
+    assert manuscript.chapters[0].pull_quotes[0].source_ref_ids == []
 
 
-@pytest.mark.parametrize("has_complete_sentence", [True, False])
-def test_release_quote_cleanup_repairs_only_proven_automatic_history(release_quote_snapshot, has_complete_sentence):
-    narration = release_quote_snapshot[0]["content"]
-    if not has_complete_sentence:
-        narration = narration.replace("。", "，")
-        release_quote_snapshot[0]["source_refs"][0]["quote"] = narration
-    old_quote = narration[:80].rstrip("，。；、,. ") + "。"
-    old_back_cover = narration[:45].rstrip("，。；、,. ") + "。"
-    manuscript = manuscript_from_snapshot(
-        title="发布手测", content=narration, snapshot=release_quote_snapshot,
-        metadata={"back_cover_quote": old_back_cover},
-    )
-    assert manuscript is not None
-    stored = manuscript.model_dump(mode="json")
-    chapter = stored["chapters"][0]
-    chapter["source_refs"].append({"utterance_id": "literal-source", "quote": old_quote + "这句话本来就这样说。"})
-    chapter["pull_quotes"] = [
-        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["release-utterance"]},
-        {"text": old_quote, "source": "manual", "source_ref_ids": ["release-utterance"]},
-        {"text": old_quote, "source": "editorial_generated", "source_ref_ids": ["release-utterance"]},
-        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["unknown-source"]},
-        {"text": old_quote + "自定说明", "source": "original_quote", "source_ref_ids": ["release-utterance"]},
-        {"text": old_quote, "source": "original_quote", "source_ref_ids": ["literal-source"]},
-    ]
-
-    cleaned = sanitize_manuscript_payload(title="发布手测", manuscript=stored)
-
-    assert [quote["text"] for quote in cleaned["chapters"][0]["pull_quotes"]] == (
-        [narration[:73]] if has_complete_sentence else []
-    ) + [old_quote, old_quote, old_quote, old_quote + "自定说明", old_quote]
-    if has_complete_sentence:
-        assert cleaned["chapters"][0]["pull_quotes"][0]["source_ref_ids"] == ["release-utterance"]
-    assert cleaned["render_settings"]["back_cover_quote"] == old_back_cover
-    assert stored["chapters"][0]["pull_quotes"][0]["text"] == old_quote
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -2130,7 +2104,7 @@ def test_no_quote_candidate_is_a_valid_generation_result():
 @pytest.mark.parametrize("body,expected", [
     ('他说：“好。”', ()),
     ('开头。嗯。好。', ()),
-    ('开头。老师说：“慢慢走。不用着急。”', ('老师说：“慢慢走。不用着急。”',)),
+    ('开头。老师说：“慢慢走。不用着急。”', ()),
     ('开头。后来我们一起走过那条很长的小路。', ('后来我们一起走过那条很长的小路。',)),
     ('开头。没有闭合的“引号。', ()),
 ])
@@ -2148,7 +2122,7 @@ def test_quote_display_policy_preserves_existing_evidence_signature():
     assert chapter_editorial_copy_signature(snapshot) == 'c946ade1be87df1e3777c9bc3de07cd92af99ef4d58e2371a856e68f2b8671f2'
 
 
-@pytest.mark.parametrize("wrapper", ["none", "quotes", "no_period"])
+@pytest.mark.parametrize("wrapper", ["none", "quotes"])
 def test_generated_excerpt_returns_canonical_evidence_without_guessing(wrapper):
     from app.services.memoir.book_manuscript_ai import _copy_from_payload
     sentence = '后来我们一起走过那条很长的小路。'
@@ -2182,31 +2156,40 @@ def test_quote_evidence_survives_an_unclosed_previous_paragraph(separator, speec
         assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [ending]
 
 
-@pytest.mark.parametrize('value,expected', [
-    ('我们', ''), ('我们一起走过那条很长的小路', '我们一起走过那条很长的小路'),
-    ('“后来我们一起走过那条很长的小路。”', '后来我们一起走过那条很长的小路。'),
+
+
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("后来我们一起走过那条很长的小路。", True),
+    ("“后来我们一起走过那条很长的小路。”", True),
+    ("后来我们一起走过那条很长的小路", False),
+    ("我们一起走过那条很长的小路。", False),
 ])
-def test_original_quote_fragments_require_meaningful_evidence(value, expected):
+def test_quote_selection_requires_exact_candidate(value, expected):
     from app.services.memoir.book_manuscript_cleanup import matched_quote
-    assert matched_quote(value, ['后来我们一起走过那条很长的小路。'], max_chars=80, allow_substring=True) == expected
-    assert matched_quote('我很高兴', ['我很高兴。'], max_chars=80, allow_substring=True) == '我很高兴。'
+    candidate = "后来我们一起走过那条很长的小路。"
+    assert matched_quote(value, [candidate], max_chars=90) == (candidate if expected else "")
 
 
-@pytest.mark.parametrize('opening', ['“', '「', '『', '"'])
-@pytest.mark.parametrize('prefix', ['他说：', '开头。老师说：“慢慢走。不用着急。”后来他说：'])
-def test_unclosed_quote_tail_keeps_later_evidence_and_complete_dialogue(opening, prefix):
-    from app.services.memoir.book_manuscript_cleanup import body_excerpt_candidates, original_quote_candidates
-    from app.services.memoir.book_output_versions import retained_chapter_quotes
-    ending = '后来我们去了县城，那里很热闹。我在那里待了三年。'
-    body = prefix + opening + '好。我们走吧。' + ending
-    snapshot = {'content': body, 'source_refs': [{'utterance_id': 'u', 'quote': body}],
-        'sections': [{'content': body, 'used_material_ids': ['u']}]}
-    excerpts = body_excerpt_candidates(body, max_chars=90)
-    assert excerpts[-2:] == ('后来我们去了县城，那里很热闹。', '我在那里待了三年。')
-    if prefix.startswith('开头'):
-        assert excerpts[0] == '老师说：“慢慢走。不用着急。”'
-    assert any(ending in candidate for candidate in original_quote_candidates(snapshot, max_chars=90)['u'])
-    for source in ('original_quote', 'editorial_generated'):
-        stored = {**snapshot, 'pull_quotes': [{'text': excerpts[-1], 'source': source,
-            'source_ref_ids': ['u'] if source == 'original_quote' else []}]}
-        assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [excerpts[-1]]
+@pytest.mark.parametrize("level", list(MemoirTranscriptPolishLevel))
+async def test_quote_policy_is_shared_by_prompt_schema_validation_and_fallback(level):
+    from app.services.memoir.book_manuscript_ai import _ManuscriptCopyOutput, _OriginalManuscriptCopyOutput, _copy_from_payload, build_manuscript_copy_prompt
+    excerpt = '后来我们一起走过那条很长的小路。'
+    snapshot = [{'chapter_id': 'c', 'chapter_title': '往事', 'content': '那年我回了家。' + excerpt,
+        'source_refs': [{'utterance_id': 'u', 'quote': excerpt}]}]
+    prompt = build_manuscript_copy_prompt(title='往事', snapshot=snapshot, polish_level=level)
+    original = level == MemoirTranscriptPolishLevel.LOW
+    assert ('original_quote_candidates' in prompt) is original
+    assert ('pull_quote_source_ref_id' in prompt) is original
+    payload = {'chapter_intros': [{'chapter_id': 'C1', 'pull_quote': excerpt,
+        **({'pull_quote_source_ref_id': 'M1'} if original else {})}]}
+    schema = _OriginalManuscriptCopyOutput if original else _ManuscriptCopyOutput
+    result = _copy_from_payload(schema.model_validate(payload).model_dump(), snapshot=snapshot,
+        prompt=prompt, model='offline', polish_level=level)
+    assert result.chapter_intros[0].pull_quote == excerpt
+    assert result.chapter_intros[0].pull_quote_source_ref_id == ('u' if original else '')
+    manuscript = manuscript_from_snapshot(title='往事', content=snapshot[0]['content'], snapshot=snapshot, polish_level=level)
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.source == ('original_quote' if original else 'editorial_generated')
+    assert quote.source_ref_ids == (['u'] if original else [])

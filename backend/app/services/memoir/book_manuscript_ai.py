@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
+from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.services.ai_calls import AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import (
     DEEPSEEK_FLASH_ALIASES,
@@ -33,6 +34,9 @@ class _ChapterIntroOutput(BaseModel):
     chapter_id: str = ""
     intro: str = ""
     pull_quote: str = ""
+
+
+class _OriginalChapterIntroOutput(_ChapterIntroOutput):
     pull_quote_source_ref_id: str = ""
 
 
@@ -58,6 +62,10 @@ class _ManuscriptCopyOutput(BaseModel):
         ):
             raise ValueError("manuscript copy is empty")
         return self
+
+
+class _OriginalManuscriptCopyOutput(_ManuscriptCopyOutput):
+    chapter_intros: list[_OriginalChapterIntroOutput] = Field(default_factory=list)
 
 
 class _TitleSuggestionsOutput(BaseModel):
@@ -143,9 +151,10 @@ class _QuoteCandidates:
     excerpts: dict[str, tuple[str, ...]]
 
 
-def _quote_candidates(snapshot: list[dict[str, object]]) -> _QuoteCandidates:
+def _quote_candidates(snapshot: list[dict[str, object]], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM) -> _QuoteCandidates:
     return _QuoteCandidates(
-        originals={_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90) for item in snapshot},
+        originals={_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90) for item in snapshot}
+            if polish_level == MemoirTranscriptPolishLevel.LOW else {},
         excerpts={_string(item.get("chapter_id")): body_excerpt_candidates(_string(item.get("content")), max_chars=90) for item in snapshot},
     )
 
@@ -173,8 +182,7 @@ def _chapter_context(
                     f"chapter_index: {_int(item.get('chapter_index')) or fallback_index}",
                     f"title: {title}",
                     f"source_count: {_int(item.get('source_count'))}",
-                    "original_quote_candidates:",
-                    *(source_quote_lines or ["- 无"]),
+                    *(["original_quote_candidates:", *(source_quote_lines or ["- 无"])] if candidates.originals else []),
                     "body_excerpt_candidates（当前正文摘句，不是原话）:",
                     *(f"- {quote}" for quote in candidates.excerpts.get(chapter_id, ())[:6]),
                     f"content_excerpt: {_compact_text(content, 420)}",
@@ -192,13 +200,14 @@ def build_manuscript_copy_prompt(
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
     candidates: _QuoteCandidates | None = None,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
 ) -> str:
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     chapters = _chapter_context(
         snapshot,
         chapter_refs=chapter_refs,
         source_refs=source_refs,
-        candidates=candidates or _quote_candidates(snapshot),
+        candidates=candidates or _quote_candidates(snapshot, polish_level=polish_level),
     )
     target_text = "、".join(targets or []) or "全部成书文案"
     chapter_text = (
@@ -207,6 +216,14 @@ def build_manuscript_copy_prompt(
         else "全部章节"
     )
     feedback_text = f"\n用户本次反馈：{feedback.strip()}" if feedback and feedback.strip() else ""
+    original = polish_level == MemoirTranscriptPolishLevel.LOW
+    quote_source_field = ',\n      "pull_quote_source_ref_id": "对应 source_ref_id"' if original else ''
+    quote_rule = (
+        "每个 pull_quote 必须逐字选择 original_quote_candidates 中的一条完整候选，来源编号填写对应 source_ref_id；"
+        "没有原话候选时从 body_excerpt_candidates 选择正文摘句，来源编号留空。"
+        if original else "每个 pull_quote 必须逐字选择 body_excerpt_candidates 中的一条正文摘句；正文摘句不标为原话，不提供来源编号。"
+    )
+    cover_rule = "original_quote_candidates 或 body_excerpt_candidates" if original else "body_excerpt_candidates"
     return f"""请根据下面已经确认的回忆录章节，生成适合 PDF 成书的前置文案。
 
 当前书名：{title}
@@ -223,8 +240,7 @@ def build_manuscript_copy_prompt(
     {{
       "chapter_id": "对应 chapter_id",
       "intro": "章节导语",
-      "pull_quote": "从本章原话候选或正文摘句中逐字选择的句子",
-      "pull_quote_source_ref_id": "对应 source_ref_id"
+      "pull_quote": "从本章候选中逐字选择的完整句子"{quote_source_field}
     }}
   ],
   "back_cover_quote": "封底短句"
@@ -238,9 +254,8 @@ def build_manuscript_copy_prompt(
 - preface 最多 220 个汉字，不设最低字数，素材短就简短，语气安静、可信、像书，不要直接套书名或项目名，不要出现“主题回忆录”“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
 - afterword 最多 160 个汉字，不设最低字数，偏家人保存、后续补充和记忆延续，不要写空泛祝福语，不要像模板。
 - 每个 chapter_intro 最多 90 个汉字，不设最低字数，像书籍章节导语，用具体画面把读者带进正文；不要解释章节功能，不要写“这一章主要记录”“从口述内容看”“相关的回忆”“本章讲述”等系统摘要句。
-- 每个 pull_quote 必须逐字来自对应章节 original_quote_candidates 的 quote，可只取其中一个完整短句；候选已核对当前正文。没有原话候选时可从 body_excerpt_candidates 逐字选正文摘句，pull_quote_source_ref_id 留空；两者都没有时留空。不改写、不编金句。
-- 原话的 pull_quote_source_ref_id 必须来自对应章节 original_quote_candidates 的 source_ref_id；正文摘句不得填写来源编号。
-- back_cover_quote 控制在 15 到 45 个汉字，优先从全书 original_quote_candidates 中选择真实短句，也可逐字选 body_excerpt_candidates；不要用公共格言、励志句或“凡是过往皆是序章”这类非本人原话。
+- {quote_rule} 没有合适候选时留空。不改写、不截断、不增删标点，不编金句。
+- back_cover_quote 控制在 15 到 45 个汉字，从全书 {cover_rule} 中逐字选择完整候选；没有合适候选时留空，不使用公共格言或励志句。
 
 章节材料：
 {chapters}
@@ -340,16 +355,14 @@ def _validated_original_quote(
     if source_id:
         candidate_by_source = {source_id: candidate_by_source.get(source_id, ())}
     for candidate_source_id, candidates in candidate_by_source.items():
-        if not _string(value) and source_id and candidates:
-            return candidates[0], candidate_source_id
-        quote = matched_quote(_string(value), candidates, max_chars=90, allow_substring=True)
+        quote = matched_quote(_string(value), candidates, max_chars=90)
         if quote:
             return quote, candidate_source_id
     return "", ""
 
 
 def _validated_back_cover_quote(value: object, candidates: list[str]) -> str:
-    return matched_quote(_string(value), candidates, max_chars=60, allow_substring=True)
+    return matched_quote(_string(value), candidates, max_chars=60)
 
 
 def _copy_from_payload(
@@ -359,10 +372,11 @@ def _copy_from_payload(
     prompt: str,
     model: str | None,
     candidates: _QuoteCandidates | None = None,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
 ) -> GeneratedManuscriptCopy | None:
     if not isinstance(payload, dict):
         return None
-    candidates = candidates or _quote_candidates(snapshot)
+    candidates = candidates or _quote_candidates(snapshot, polish_level=polish_level)
     quote_candidates, excerpts = candidates.originals, candidates.excerpts
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     raw_intros = payload.get("chapter_intros")
@@ -437,8 +451,9 @@ async def generate_manuscript_editorial_copy(
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
     ai_client: AITextClient | None = None,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
 ) -> GeneratedManuscriptCopy | None:
-    candidates = _quote_candidates(snapshot)
+    candidates = _quote_candidates(snapshot, polish_level=polish_level)
     prompt = build_manuscript_copy_prompt(
         title=title,
         snapshot=snapshot,
@@ -446,6 +461,7 @@ async def generate_manuscript_editorial_copy(
         chapter_ids=chapter_ids,
         feedback=feedback,
         candidates=candidates,
+        polish_level=polish_level,
     )
     client = ai_client
     if client is None and not _text_ai_configured(ai_model):
@@ -458,7 +474,7 @@ async def generate_manuscript_editorial_copy(
             client,
             SYSTEM_PROMPT,
             prompt,
-            output_model=_ManuscriptCopyOutput,
+            output_model=_OriginalManuscriptCopyOutput if polish_level == MemoirTranscriptPolishLevel.LOW else _ManuscriptCopyOutput,
             requested_model=ai_model,
             temperature=0.35,
             max_tokens=policy.max_tokens,
@@ -480,6 +496,7 @@ async def generate_manuscript_editorial_copy(
         prompt=prompt,
         model=generated.response.resolved_model,
         candidates=candidates,
+        polish_level=polish_level,
     )
 
 
