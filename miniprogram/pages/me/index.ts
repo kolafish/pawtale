@@ -1,5 +1,6 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-session";
 import { definePage } from "../../services/page-definition";
+import { openWechatPrivacyContract } from "../../services/wechat-privacy";
 import {
   getMemoirIdentity,
   deleteAccountWithWeChat,
@@ -659,6 +660,14 @@ definePage<MeData>()({
       largeTextEnabled: settings.largeTextEnabled,
     });
     wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
+  },
+
+  async openPrivacyContract() {
+    try {
+      await openWechatPrivacyContract();
+    } catch (error) {
+      wx.showToast({ title: error instanceof Error ? error.message : "暂时无法打开隐私保护指引", icon: "none" });
+    }
   },
 
   openVoiceAuthorization() {

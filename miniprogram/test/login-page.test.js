@@ -138,3 +138,16 @@ test("a first like asks for avatar and nickname, then returns to what was liked"
   assert.deepEqual(backs, [true]);
   assert.deepEqual(relaunches, []);
 });
+
+test("privacy entry shows an immediate opening error and permits a successful retry", async () => {
+  const toasts = [];
+  global.wx = { getStorageSync: () => "", showToast: (options) => toasts.push(options), openPrivacyContract(options) { options.fail({}); } };
+  const { page } = loadLoginPage();
+  const context = pageContext(page);
+  await context.openPrivacyContract();
+  assert.match(toasts[0].title, /隐私保护指引/);
+  global.wx.openPrivacyContract = (options) => options.success({});
+  await context.openPrivacyContract();
+  assert.equal(toasts.length, 1);
+  delete global.wx;
+});

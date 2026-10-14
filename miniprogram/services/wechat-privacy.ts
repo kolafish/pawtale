@@ -150,3 +150,16 @@ export function openRecorderPermissionSettings(): Promise<boolean> {
     });
   });
 }
+
+export function openWechatPrivacyContract(): Promise<void> {
+  const openPrivacyContract = wx.openPrivacyContract;
+  if (typeof openPrivacyContract !== "function") {
+    return Promise.reject(new Error("当前微信版本暂不支持查看隐私保护指引，请更新微信后重试。"));
+  }
+  return new Promise((resolve, reject) => {
+    openPrivacyContract({
+      success: () => resolve(),
+      fail: () => reject(new Error("暂时无法打开隐私保护指引，请稍后再试。")),
+    });
+  });
+}

@@ -724,3 +724,16 @@ test("me keeps account and local data when deletion is cancelled or fails", asyn
   assert.equal(cacheClearCount, 0);
   assert.deepEqual(pageStack, ["/pages/home/index", "/pages/me/index"]);
 });
+
+test("privacy entry shows an immediate opening error and permits a successful retry", async () => {
+  const toasts = [];
+  global.wx = { getStorageSync: () => "", showToast: (options) => toasts.push(options), openPrivacyContract(options) { options.fail({}); } };
+  const { page } = loadMePage();
+  const context = pageContext(page);
+  await context.openPrivacyContract();
+  assert.match(toasts[0].title, /隐私保护指引/);
+  global.wx.openPrivacyContract = (options) => options.success({});
+  await context.openPrivacyContract();
+  assert.equal(toasts.length, 1);
+  delete global.wx;
+});
