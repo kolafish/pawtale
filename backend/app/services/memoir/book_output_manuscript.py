@@ -340,12 +340,12 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
     return refs
 
 
-def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef], snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
+def fallback_chapter_quotes(content: str, snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
     candidates = original_quote_candidates(snapshot, max_chars=80)
-    for ref in source_refs:
-        quote = max(candidates.get(ref.utterance_id, ()), key=len, default="")
+    for source_id, quotes in candidates.items():
+        quote = max(quotes, key=len, default="")
         if quote:
-            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
+            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[source_id], source="original_quote")]
     quote = next(iter(body_excerpt_candidates(content, max_chars=80)), "")
     return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
 
@@ -417,7 +417,7 @@ def manuscript_from_snapshot(
                 index=chapter_index,
                 title=chapter_title,
                 intro=intro_by_chapter_id.get(chapter_id) or fallback_chapter_intro(chapter_title, chapter_content),
-                pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs, item),
+                pull_quotes=[generated_pull_quote] if generated_pull_quote else fallback_chapter_quotes(chapter_content, item),
                 content=chapter_content,
                 sections=sections,
                 source_refs=source_refs,

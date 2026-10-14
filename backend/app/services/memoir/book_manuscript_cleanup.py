@@ -67,19 +67,64 @@ def first_sentence(text: str, *, max_chars: int) -> str:
     return brief_text(normalized, max_chars=max_chars)
 
 
+def _update_quote_stack(value: str, stack: list[str]) -> bool:
+    pairs = {"“": "”", "‘": "’", "「": "」", "『": "』"}
+    for char in value:
+        if char == '"':
+            if stack and stack[-1] == char:
+                stack.pop()
+            else:
+                stack.append(char)
+        elif char in pairs:
+            stack.append(pairs[char])
+        elif char in pairs.values():
+            if not stack or stack.pop() != char:
+                return False
+    return True
+
+
+def _balanced_quotes(value: str) -> bool:
+    stack: list[str] = []
+    return _update_quote_stack(value, stack) and not stack
+
+
+def usable_quote(value: str, *, min_chars: int = 2) -> bool:
+    return len(re.sub(r"[\W_]", "", value)) >= min_chars and _balanced_quotes(value) and not contains_template_language(value)
+
+
 def _sentences(value: str) -> list[str]:
+    sentences: list[str] = []
+    start: int | None = None
+    stack: list[str] = []
+    for match in re.finditer(r'''[^。！？!?\n]+[。！？!?]*[”’」』"']*''', value):
+        if start is None:
+            start = match.start()
+        valid = _update_quote_stack(match.group(), stack)
+        if not stack or not valid:
+            sentences.append(" ".join(value[start:match.end()].split()))
+            start = None
+            stack.clear()
+    if start is not None:
+        sentences.append(" ".join(value[start:].split()))
+    return sentences
+
+
+def _signature_sentences(value: str) -> list[str]:
+    # Evidence v2 serialization is frozen: display-quality fixes must not
+    # invalidate already processed books or trigger another paid AI pass.
     return [" ".join(part.split()) for part in re.findall(r"[^。！？!?\n]+[。！？!?]?", value) if part.strip()]
 
 
-def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int) -> dict[str, tuple[str, ...]]:
+def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int, for_signature: bool = False) -> dict[str, tuple[str, ...]]:
     """All source runs retained in their own section; split each body only once."""
+    sentences = _signature_sentences if for_signature else _sentences
     sections = _list(chapter.get("sections"))
     by_source: dict[str, set[str]] = {}
     for section in sections:
-        current = set(_sentences(_safe_str(section.get("content"))))
+        current = set(sentences(_safe_str(section.get("content"))))
         for source_id in section.get("used_material_ids", []):
             by_source.setdefault(source_id, set()).update(current)
-    chapter_sentences = set(_sentences(_safe_str(chapter.get("content")))) if not sections else set()
+    chapter_sentences = set(sentences(_safe_str(chapter.get("content")))) if not sections else set()
     result = {}
     for ref in _list(chapter.get("source_refs")):
         source_id = _safe_str(ref.get("utterance_id"))
@@ -88,7 +133,7 @@ def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int) -> dic
         current = by_source.get(source_id, set()) if sections else chapter_sentences
         runs: list[str] = []
         run = ""
-        for sentence in _sentences(_safe_str(ref.get("quote"))):
+        for sentence in sentences(_safe_str(ref.get("quote"))):
             if sentence in current and len(run + sentence) <= max_chars:
                 run += sentence
             else:
@@ -97,7 +142,7 @@ def original_quote_candidates(chapter: dict[str, Any], *, max_chars: int) -> dic
                 run = sentence if sentence in current and len(sentence) <= max_chars else ""
         if run:
             runs.append(run)
-        result[source_id] = tuple(dict.fromkeys(runs))
+        result[source_id] = tuple(dict.fromkeys(run for run in runs if for_signature or usable_quote(run)))
     return result
 
 
@@ -105,7 +150,36 @@ def body_excerpt_candidates(content: str, *, max_chars: int) -> tuple[str, ...]:
     sentences = _sentences(content)
     opening = sentences[0] if sentences else ""
     return tuple(dict.fromkeys(sentence for sentence in sentences[1:]
-        if sentence != opening and len(sentence) <= max_chars and not contains_template_language(sentence)))
+        if sentence != opening and len(sentence) <= max_chars and usable_quote(sentence, min_chars=8)))
+
+
+def matched_quote(value: str, candidates: list[str] | tuple[str, ...], *, max_chars: int, allow_substring: bool = False) -> str:
+    value = " ".join(value.split())
+    for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")):
+        if value.startswith(opening) and value.endswith(closing):
+            value = value[1:-1].strip()
+            break
+    if not usable_quote(value):
+        return ""
+    candidates = [brief_text(candidate, max_chars=max_chars) for candidate in candidates]
+    def key(text: str) -> str:
+        for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"), ('"', '"'), ("'", "'")):
+            if text.startswith(opening) and text.endswith(closing):
+                text = text[1:-1].strip()
+                break
+        return re.sub(r'''[。！？!?]+(?=[”’」』"']*$)''', "", text)
+    for candidate in candidates:
+        if len(candidate) <= max_chars and usable_quote(candidate) and key(value) == key(candidate):
+            return candidate  # Return the supplied evidence with its original punctuation.
+    if allow_substring:
+        for candidate in candidates:
+            if not usable_quote(candidate):
+                continue
+            if len(value) <= max_chars and value in candidate:
+                return value
+            if candidate in value:
+                return candidate
+    return ""
 
 
 def repair_original_pull_quotes(chapter: dict[str, Any]) -> list[Any]:
@@ -217,7 +291,7 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
         chapter = _dict(raw_chapter)
         for raw_quote in _list(chapter.get("pull_quotes")):
             quote = brief_text(_safe_str(_dict(raw_quote).get("text")), max_chars=45)
-            if quote and quote in " ".join(_safe_str(chapter.get("content")).split()):
+            if usable_quote(quote, min_chars=8) and quote in " ".join(_safe_str(chapter.get("content")).split()):
                 candidates.append(quote)
         candidates.extend(body_excerpt_candidates(_safe_str(chapter.get("content")), max_chars=45))
     result: list[str] = []

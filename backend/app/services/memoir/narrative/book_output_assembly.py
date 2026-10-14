@@ -35,6 +35,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_from_snapshot,
     stored_manuscript_design,
     stored_cover_style,
+    fallback_chapter_quotes,
 )
 from app.services.memoir.book_output_snapshots import (
     book_content_from_chapter_snapshots,
@@ -176,6 +177,9 @@ async def assemble_book_output(
                     db, output_id=output.id,
                 )
                 assert previous_version is not None
+            previous_version = await book_output_versions.repair_automatic_chapter_quotes(
+                db, output=output, version=previous_version, state=copy_state,
+            )
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -200,6 +204,9 @@ async def assemble_book_output(
                     db, output_id=output.id,
                 )
                 assert previous_version is not None
+            previous_version = await book_output_versions.repair_automatic_chapter_quotes(
+                db, output=output, version=previous_version, state=copy_state,
+            )
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -271,7 +278,10 @@ async def assemble_book_output(
             # narration must never turn it into a protected template sentence.
             if "intro" in fields:
                 chapter.intro = str(old.get("intro") or "")
-            chapter.pull_quotes = book_output_versions.retained_chapter_quotes(old, next_snapshot)
+            preserve_quotes = "pull_quotes" in manual_copy_fields.get(chapter.chapter_id, [])
+            chapter.pull_quotes = book_output_versions.retained_chapter_quotes(old, next_snapshot, preserve_editorial=preserve_quotes)
+            if not chapter.pull_quotes and not preserve_quotes:
+                chapter.pull_quotes = fallback_chapter_quotes(chapter.content, next_snapshot)
     version = await book_output_versions.append_book_output_version(
         db,
         output=output,

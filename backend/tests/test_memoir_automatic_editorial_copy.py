@@ -567,3 +567,52 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
     await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
         user_id=project.user_id, project_id=project.id, req=req, automatic=True)
     assert job.rerun_requested  # New assemblies during an AI call cannot lose their copy update.
+
+
+@pytest.mark.parametrize("manual", [False, True])
+async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_changes(client, test_db, monkeypatch, manual):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from app.services.memoir.book_output_versions import load_latest_book_output_version
+    project, chapters, _ = await _output(client, test_db)
+    draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == chapters[0].id))
+    opening = '那一天我们从县城回到老家。'
+    ending = '从那以后，我一直记得师傅教我修车的那些日子。'
+    draft.content = opening + ending
+    sections = copy.deepcopy(draft.section_snapshot_json)
+    sections[0]['content'] = draft.content
+    draft.section_snapshot_json = sections
+    await test_db.commit()
+    await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs['snapshot'])
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    await _automatic(test_db, project)
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
+    latest = await load_latest_book_output_version(test_db, output_id=output.id)
+    manuscript = copy.deepcopy(latest.manuscript_json)
+    manuscript['chapters'][0]['pull_quotes'] = [{'text': opening, 'source': 'editorial_generated', 'source_ref_ids': []}]
+    latest.manuscript_json = manuscript
+    if manual:
+        metadata = copy.deepcopy(output.metadata_json)
+        metadata['automatic_editorial_copy']['manual_chapter_fields'][chapters[0].id] = ['pull_quotes']
+        output.metadata_json = metadata
+    output.status = 'accepted'
+    await test_db.commit()
+    before_export = await book_outputs.prepare_book_output_export(test_db, user_id=project.user_id,
+        project_id=project.id, export_format=book_outputs.MemoirBookOutputExportFormat.PDF)
+    before_id = latest.id
+    first = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    second = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    assert first.output_version_id == second.output_version_id
+    await _automatic(test_db, project)
+    assert len(calls) == 1  # Policy cleanup never invalidates paid generation checkpoints.
+    latest = await load_latest_book_output_version(test_db, output_id=output.id)
+    assert latest.manuscript_json['chapters'][0]['pull_quotes'][0]['text'] == (opening if manual else ending)
+    assert (latest.id == before_id) is manual
+    after_export = await book_outputs.prepare_book_output_export(test_db, user_id=project.user_id,
+        project_id=project.id, export_format=book_outputs.MemoirBookOutputExportFormat.PDF)
+    assert (before_export.cache_key == after_export.cache_key) is manual
+    assert output.status == ('accepted' if manual else 'draft')
