@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application_errors import InsufficientAICreditError
 from app.clock import utcnow_naive
-from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -30,7 +28,7 @@ from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
-from app.services.memoir.book_output_versions import AUTOMATIC_EDITORIAL_COPY_KEY, AutomaticEditorialCopyState
+from app.services.memoir.book_output_versions import AUTOMATIC_EDITORIAL_COPY_KEY, AutomaticEditorialCopyState, book_editorial_copy_signature, load_latest_book_output_version
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 
 
@@ -268,6 +266,23 @@ async def schedule_book_editorial_copy_generation(
     retry: bool = False,
 ) -> MemoirAutomationEvent:
     """Queue only copy, in the caller's transaction; never prepares chapters/reviews."""
+    signature = None
+    if automatic:
+        output = await db.scalar(select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        latest = await load_latest_book_output_version(db, output_id=output.id) if output else None
+        project = await db.get(Project, project_id)
+        if latest and project:
+            signature = book_editorial_copy_signature(project.title, latest.chapter_snapshot_json)
+            existing = await db.scalar(select(MemoirEditingJob).where(
+                MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}",
+            ).execution_options(populate_existing=True))
+            if existing and not retry and (existing.payload_json or {}).get("input_signature") == signature:
+                event = await _generation_event_for_job(db, job=existing,
+                    event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED)
+                if event is not None:
+                    return event
     request_id = str(uuid4())
     label = _editorial_copy_label(req)
     job = await _enqueue_generation_job(
@@ -284,6 +299,7 @@ async def schedule_book_editorial_copy_generation(
             "target_label": label,
             "automatic": automatic,
             "retry": retry,
+            "input_signature": signature,
         },
     )
     event = await _ensure_generation_event(
@@ -299,6 +315,20 @@ async def schedule_book_editorial_copy_generation(
         },
     )
     return event
+
+
+async def reconcile_legacy_editorial_copy_jobs(db: AsyncSession) -> None:
+    """Transfer old inline failures to the existing queue once at worker startup."""
+    projects = (await db.scalars(select(Project).join(
+        MemoirEditingJob, MemoirEditingJob.project_id == Project.id,
+    ).join(MemoirBookOutput, MemoirBookOutput.project_id == Project.id).where(
+        MemoirEditingJob.dedupe_key == "update-book-draft:" + Project.id,
+        MemoirEditingJob.result_json["editorial_copy_status"].as_string() == "failed",
+    ))).all()
+    for project in projects:
+        await schedule_book_editorial_copy_generation(db, project_id=project.id, user_id=project.user_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
+    await db.commit()
 
 
 async def enqueue_book_editorial_copy_generation_job(
@@ -383,15 +413,6 @@ async def run_book_editorial_copy_generation_job(
     payload = dict(job.payload_json or {})
     label = _safe_str(payload.get("target_label")) or "成书文案"
     automatic = payload.get("automatic") is True
-    if automatic and await db.scalar(select(MemoirEditingJob.id).where(
-        MemoirEditingJob.project_id == job.project_id,
-        MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_BOOK_DRAFT.value,
-        MemoirEditingJob.status.in_(ACTIVE_JOB_STATUSES),
-    ).limit(1)):
-        # The full workflow already owns copy while it is active. Wait for its
-        # checkpoint so a manual assembly cannot spend on a duplicate AI call.
-        job.run_after = utcnow_naive() + timedelta(seconds=get_settings().memoir_editing_poll_seconds)
-        return EditingJobResult(status=MemoirEditingJobStatus.PENDING)
     try:
         project = await db.get(Project, job.project_id)
         user_id = _safe_str(payload.get("user_id")) or (project.user_id if project else "")
@@ -414,6 +435,11 @@ async def run_book_editorial_copy_generation_job(
             retry=automatic and payload.get("retry") is True,
         )
         if automatic:
+            await db.refresh(job)
+            if job.rerun_requested:
+                # New input/retry arrived during the provider call. Even an old
+                # failed attempt must leave the latest request runnable.
+                return EditingJobResult(status=MemoirEditingJobStatus.PENDING)
             stored = await db.get(MemoirBookOutput, output.id)
             state = AutomaticEditorialCopyState.model_validate((stored.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
             if state.status == "failed":

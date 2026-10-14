@@ -157,10 +157,6 @@ async def _draft_progress_projection(
         if parent
         else automatic_book_draft.DraftProgress()
     )
-    if copy_job and (parent is None or copy_job.updated_at >= parent.updated_at):
-        progress.editorial_copy_status = {"succeeded": "succeeded", "failed": "failed", "cancelled": "failed"}.get(copy_job.status, "not_started")
-    elif copy_job and progress.editorial_copy_status == "succeeded":
-        copy_job = None  # A later full workflow already recovered this copy failure.
     material_count, pending_material_count, needs_user_count, needs_user_detail = await _source_counts_and_needs_user(db, project_id)
     ready = sum(
         (item.status == "ready" or item.draft_version_id is not None)
@@ -185,7 +181,7 @@ async def _draft_progress_projection(
     if copy_failed:
         failures.append(copy_job.error_message)
     result.can_retry = bool(failures or pending_material_count > needs_user_count
-        or progress.review_status in {"failed", "cancelled"} or progress.editorial_copy_status == "failed")
+        or progress.review_status in {"failed", "cancelled"})
     if any(job.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for job in jobs):
         result.can_retry = False
         result.status, result.title = "processing", "正在后台整理书稿"
@@ -224,7 +220,7 @@ async def _draft_progress_projection(
             "ready" if ready == len(progress.chapters) and not result.pending_material_count else "partial_ready"
         )
         result.title = "书稿可阅读" if result.status == "ready" else "已有部分草稿可阅读"
-        result.detail = progress.review_error or ("成书文案暂未更新，可以继续整理；已有书稿仍可阅读。" if progress.editorial_copy_status == "failed" else "") or (
+        result.detail = progress.review_error or (
             "全书检查已完成" if progress.review_status == "succeeded" else "草稿尚未完成全书检查"
         )
     elif material_count:

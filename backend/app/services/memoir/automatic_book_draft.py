@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,14 +29,14 @@ from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
-from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, completion_issues, editing_jobs
+from app.services.memoir import book_reviews, book_review_jobs, chapter_generation, chapter_preparation_jobs, completion_issues, editing_jobs
 from app.services.memoir.book_output_snapshots import (
     legacy_chapter_version_needs_upgrade,
     load_book_plan_drafts,
     protected_legacy_chapter_version,
     readable_chapter_versions,
 )
-from app.services.memoir.book_output_versions import AUTOMATIC_EDITORIAL_COPY_KEY, AutomaticEditorialCopyState, load_latest_book_output_version
+from app.services.memoir.book_output_versions import load_latest_book_output_version
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
@@ -61,8 +61,13 @@ class DraftProgress(BaseModel):
     review_job_id: str | None = None
     review_status: str = "not_started"
     review_error: str = ""
-    editorial_copy_status: Literal["succeeded", "failed", "not_started"] = "not_started"
-    retry_stages: list[Literal["chapters", "editorial_copy", "review"]] = Field(default_factory=list)
+    retry_stages: list[Literal["chapters", "review"]] = Field(default_factory=list)
+
+    @field_validator("retry_stages", mode="before")
+    @classmethod
+    def discard_legacy_copy_stage(cls, value: list[str]) -> list[str]:
+        # The worker transfers old copy retry intent to the copy job payload.
+        return [stage for stage in value if stage != "editorial_copy"]
 
 
 async def schedule_book_draft(
@@ -83,7 +88,10 @@ async def schedule_book_draft(
         project_id=project_id,
         job_type=MemoirEditingJobType.UPDATE_BOOK_DRAFT,
         dedupe_key=f"update-book-draft:{project_id}",
-        payload_json={"source": source},
+        payload_json={"source": source, "retry_editorial_copy": source == "retry" or bool(
+            existing and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+            and (existing.payload_json or {}).get("retry_editorial_copy")
+        )},
         run_after=utcnow_naive() + timedelta(seconds=0 if settled else get_settings().memoir_story_settle_seconds),
         replace_completed=True,
         preserve_progress=True,
@@ -160,7 +168,10 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
 
 async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
     project_id = job.project_id
-    progress = DraftProgress.model_validate(job.result_json or {})
+    legacy = job.result_json or {}
+    if "editorial_copy" in legacy.get("retry_stages", []):
+        job.payload_json = {**(job.payload_json or {}), "retry_editorial_copy": True}
+    progress = DraftProgress.model_validate(legacy)
     dependency = await db.scalar(
         select(MemoirEditingJob.id)
         .where(
@@ -195,7 +206,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     progress.chapters = {chapter.id: progress.chapters.get(chapter.id, ChapterProgress()) for chapter in chapters}
     source = (job.payload_json or {}).get("source")
     if source == "retry":
-        progress.retry_stages = ["chapters", "editorial_copy", "review"]
+        progress.retry_stages = ["chapters", "review"]
     retry_chapters = "chapters" in progress.retry_stages
     previous_draft_ids = {chapter_id: item.draft_version_id for chapter_id, item in progress.chapters.items()}
     readable = set()
@@ -268,9 +279,9 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             state.status = "pending"
         state.error_message = str(child.get("error_message") or "")
     # Consume once per stage; asynchronous chapter work must not consume the
-    # later copy/review retry, and dependency polls must not redispatch it.
+    # later review retry, and dependency polls must not redispatch it.
     progress.retry_stages = [stage for stage in progress.retry_stages if stage != "chapters"]
-    job.payload_json = {"source": "progress"}
+    job.payload_json = {"source": "progress", "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
@@ -285,19 +296,13 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
     if readable and progress.output_id and not progress.preserved_manual:
-        from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
-        polished = await regenerate_book_output_editorial_copy(
+        from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
+        await schedule_book_editorial_copy_generation(
             db, user_id=project.user_id, project_id=project_id,
             req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True,
-            retry="editorial_copy" in progress.retry_stages,
+            retry=(job.payload_json or {}).get("retry_editorial_copy") is True,
         )
-        progress.retry_stages = [stage for stage in progress.retry_stages if stage != "editorial_copy"]
-        if polished.latest_version:
-            progress.output_version_id = polished.latest_version.id
-        output = await db.get(MemoirBookOutput, progress.output_id)
-        progress.editorial_copy_status = AutomaticEditorialCopyState.model_validate(
-            (output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}),
-        ).status
+        job.payload_json = {"source": "progress"}
     progress.stage = "partial_ready" if readable else "needs_attention"
     if current and len(current) == len(progress.chapters):
         policy_only = source == "assembly_policy" and all(
@@ -308,8 +313,10 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             # Reassembling unchanged chapters must not supersede unanswered decisions.
             progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
         else:
-            review_signature = semantic_json_signature({"output_version_id": progress.output_version_id,
-                "chapters": {key: item.draft_version_id for key, item in progress.chapters.items()}})
+            review_signature = semantic_json_signature({"book_title": project.title, "engine": book_reviews.BOOK_REVIEW_ENGINE,
+                "chapters": [(chapter.id, chapter.title, chapter.sort_order,
+                    progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
+                    for chapter in chapters]})
 
             async def record_review(child: MemoirEditingJob) -> None:
                 progress.review_job_id = child.id
