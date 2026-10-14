@@ -675,7 +675,6 @@ async def grow_story_tree(
         "chapters": [(item.id, item.title) for item in before_chapters],
         "sections": [(item.id, item.chapter_id, item.title, item.version) for item in before_sections],
     })
-    explicit_retry = (job.payload_json or {}).get("source") == "retry"
     utterances = [
         item
         for item in project_sources
@@ -691,7 +690,6 @@ async def grow_story_tree(
                 or (
                     deferred[item.id].attempts >= MAX_UNASSIGNED_ATTEMPTS
                     and deferred[item.id].context_signature == context_signature
-                    and not explicit_retry
                 )
             )
         )
@@ -853,5 +851,6 @@ async def run_story_tree_growth_job(
         )
     result = await grow_story_tree(db, job=job, session=session)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=job.project_id, source="organized", settled=True)
+    await schedule_book_draft(db, project_id=job.project_id,
+        source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized", settled=True)
     return result

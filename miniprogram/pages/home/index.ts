@@ -87,7 +87,7 @@ const RESUME_HINT_CHAR_LIMIT = 28;
 // The first story starts without a setup form; the title can be changed later.
 const FIRST_PROJECT_TITLE = "我的回忆录";
 
-type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
+type HomeVoiceEntry = "home" | "home_launch" | "home_resume" | "home_supplement";
 
 interface HomeData extends HomeStoryData {
   loading: boolean;
@@ -205,8 +205,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     showNarrationChoiceCard: !state.needsLogin && state.hasProject && state.hasStories
       && state.hasLastStoryHint && state.selectedMode !== "book_completion",
     showVoiceAuthorizationPanel: !state.needsLogin && !state.loading
-      && state.selectedMode !== "book_completion" && !state.voiceAuthorizationAgreed
-      && state.voiceAuthorizationRequested,
+      && !state.voiceAuthorizationAgreed && state.voiceAuthorizationRequested,
   };
 }
 
@@ -723,6 +722,11 @@ definePage<HomeData>()({
     await this.startPrimaryVoiceChat();
   },
 
+  async supplementPendingMaterial() {
+    // Unassigned narration needs more context, not a chapter-bound book interview.
+    await this.startSelectedNarration("home_supplement");
+  },
+
   openSettings() {
     navigateToMe();
   },
@@ -927,7 +931,8 @@ definePage<HomeData>()({
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {
-    const mode = this.data.selectedMode;
+    const mode = entry === "home_supplement" && this.data.selectedMode === "book_completion"
+      ? "guided_interview" : this.data.selectedMode;
     if (mode === "book_completion") {
       this.openBookSupplementInterview();
       return;

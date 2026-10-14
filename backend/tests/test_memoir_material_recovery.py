@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.models.memoir import MemoirSection, MemoirSectionMaterial
+from app.models.memoir import MemoirEditingJob, MemoirSection, MemoirSectionMaterial
 from app.models.projects import Project
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import draft_progress, story_tree_growth
@@ -15,7 +15,7 @@ from tests.test_memoir_section_organization import _stopped_growth_job
 
 
 @pytest.mark.parametrize("assign_after_context", [True, False])
-async def test_deferred_source_retries_with_new_evidence_and_explicit_retry(client, test_db, monkeypatch, assign_after_context):
+async def test_deferred_source_waits_for_new_evidence_after_bounded_retries(client, test_db, monkeypatch, assign_after_context):
     project_id, chapters, _ = await _book(client, test_db)
     user_id = (await test_db.get(Project, project_id)).user_id
     await book_completion.ensure_chapter_sections(test_db, project_id=project_id, chapter_id=chapters[0].id, user_id=user_id)
@@ -39,21 +39,24 @@ async def test_deferred_source_retries_with_new_evidence_and_explicit_retry(clie
         await test_db.commit()
         return result
     await run(job)
+    await test_db.execute(update(MemoirEditingJob).where(MemoirEditingJob.project_id == project_id, MemoirEditingJob.job_type == "update_book_draft").values(status="succeeded"))
+    await test_db.commit()
     await draft_progress.retry_draft_progress(test_db, project_id=project_id)
     await test_db.refresh(job)
     assert job.status == "pending"
     second = await run(job)
     assert second.result_json["growth"]["deferred"][old["utterance_id"]]["status"] == "needs_user"
-    # No new evidence: a normal automatic run spends no further model call.
-    job.payload_json = {**job.payload_json, "source": "transcript_ready"}
-    await run(job)
+    # Even an explicit retry cannot invent missing information or spend again.
+    for source in ("retry", "transcript_ready"):
+        job.payload_json = {**job.payload_json, "source": source}
+        await run(job)
     assert len(seen) == 2
     _, next_job = await _stopped_growth_job(client, test_db, project_id, "刚才说的他，就是带我参赛的张老师。")
     await run(next_job)
     assert old["utterance_id"] in seen[-1]
     link = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == old["utterance_id"]))
     assert (link is not None) == assign_after_context
-    _, _, needs_user = await draft_progress._source_counts_and_needs_user(test_db, project_id)
+    _, _, needs_user, _ = await draft_progress._source_counts_and_needs_user(test_db, project_id)
     assert needs_user == 0
 
 
@@ -114,7 +117,13 @@ async def test_unassigned_material_offers_recovery_without_hiding_fact_confirmat
     await test_db.commit()
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == ("needs_input" if fact_blocked else "partial_ready")
-    assert progress.can_retry is not fact_blocked
+    assert progress.can_retry is False
+    if not fact_blocked:
+        assert "人物尚不明确" in progress.detail
+        await draft_progress.retry_draft_progress(test_db, project_id=project_id)
+        await test_db.refresh(growth)
+        await test_db.refresh(parent)
+        assert growth.status == parent.status == "succeeded"
     assert progress.pending_material_count >= 1
 
 
@@ -125,5 +134,5 @@ async def test_archived_or_excluded_placements_are_not_unassigned_work(client, t
     section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapters[0].id))
     section.status, section.include_in_book = "archived", False
     await test_db.commit()
-    _, pending, needs_user = await draft_progress._source_counts_and_needs_user(test_db, project_id)
+    _, pending, needs_user, _ = await draft_progress._source_counts_and_needs_user(test_db, project_id)
     assert pending == 0 and needs_user == 0

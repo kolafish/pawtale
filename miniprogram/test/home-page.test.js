@@ -28,6 +28,15 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("unassigned material supplement uses the shared narration flow even in book completion mode", async () => {
+  const { page } = loadHomePage();
+  const calls = [];
+  const context = pageContext(page, { selectedMode: "book_completion" });
+  context.startVoiceChatWithMode = async (...args) => calls.push(args);
+  await context.supplementPendingMaterial();
+  assert.deepEqual(calls, [["guided_interview", "home_supplement", "ai_interview"]]);
+});
+
 function loadHomePage({
   authExports = {},
   voiceApiExports = {},
