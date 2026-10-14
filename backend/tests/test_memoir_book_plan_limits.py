@@ -195,3 +195,39 @@ async def test_partial_initial_plan_keeps_unambiguous_sources_without_dropping_u
     assert [ref.utterance_id for chapter in result.chapters for ref in chapter.source_refs] == ["utterance-1"]
     assert result.not_story_sources == ()
     assert fake.calls == 2
+
+
+@pytest.mark.parametrize("worse", [
+    {"chapters": [], "not_story_source_indices": list(range(1, 11)) + [999]},
+    {"chapters": [{"title": "回家", "source_indices": [1]}], "not_story_source_indices": list(range(2, 11)) + [999]},
+])
+async def test_invalid_exclusions_cannot_outscore_recovered_stories(worse):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    better = {"chapters": [{"title": "童年", "source_indices": list(range(1, 10))}]}
+    fake = ReplayPlanAI([better, worse])
+    result = await generate_book_plan_from_sources(project_title="往事", sources=_plan_sources(10),
+        interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert fake.calls == 2
+    assert [ref.utterance_id for chapter in result.chapters for ref in chapter.source_refs] == [f"utterance-{i}" for i in range(1, 10)]
+    assert result.not_story_sources == ()
+
+
+async def test_partial_plan_rescues_chapters_but_does_not_checkpoint_exclusions():
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    payload = {"chapters": [{"title": "童年", "source_indices": [1]}], "not_story_source_indices": [2, 999]}
+    fake = ReplayPlanAI([payload, TRUNCATED_PLAN])
+    result = await generate_book_plan_from_sources(project_title="往事", sources=_plan_sources(2),
+        interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert fake.calls == 2
+    assert len(result.chapters) == 1 and len(result.chapters[0].source_refs) == 1
+    assert result.not_story_sources == ()
+
+
+async def test_invalid_all_nonstory_response_keeps_material_retryable():
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    payload = {"chapters": [], "not_story_source_indices": [1, 2, 999]}
+    fake = ReplayPlanAI([payload, payload])
+    with pytest.raises(HTTPException) as error:
+        await generate_book_plan_from_sources(project_title="往事", sources=_plan_sources(2),
+            interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert error.value.status_code == 503 and fake.calls == 2

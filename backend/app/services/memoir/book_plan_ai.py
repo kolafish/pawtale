@@ -259,10 +259,11 @@ def _recover_partial_plan(output: _BookPlanOutput | None, expected: set[int]) ->
     unique = {index for index, count in counts.items() if count == 1 and index in expected}
     chapters = [chapter.model_copy(update={"source_indices": indices}) for chapter in output.chapters
                 if chapter.title.strip() and (indices := list(dict.fromkeys(index for index in chapter.source_indices if index in unique)))]
-    nonstory = list(dict.fromkeys(index for index in output.not_story_source_indices if index in unique))
-    if not chapters and set(nonstory) != expected:
+    if not chapters:
         return None
-    return _BookPlanOutput(title=output.title, chapters=chapters, not_story_source_indices=nonstory)
+    # Partial recovery can rescue positive assignments, but cannot authorize
+    # durable exclusions. Non-story checkpoints require a fully valid response.
+    return _BookPlanOutput(title=output.title, chapters=chapters, not_story_source_indices=[])
 
 
 async def generate_book_plan_from_sources(
@@ -284,7 +285,7 @@ async def generate_book_plan_from_sources(
             # Capture only complete, schema-valid responses; keep one coherent
             # classification rather than merging contradictory attempts.
             candidate = _recover_partial_plan(self, expected)
-            if candidate is not None and (coverage := len(_source_counts(candidate))) > best_coverage:
+            if candidate is not None and (coverage := sum(len(chapter.source_indices) for chapter in candidate.chapters)) > best_coverage:
                 best_candidate, best_coverage = candidate, coverage
             counts = _source_counts(self)
             if (set(counts) != expected or any(count != 1 for count in counts.values())

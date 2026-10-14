@@ -197,14 +197,16 @@ async def test_archived_or_excluded_placements_are_not_unassigned_work(client, t
     assert pending == 0 and needs_user == 0
 
 
-async def test_partial_initial_plan_leaves_omitted_source_in_existing_growth_queue(client, test_db, monkeypatch):
+@pytest.mark.parametrize("invalid_exclusion", [False, True])
+async def test_partial_initial_plan_leaves_omitted_source_in_existing_growth_queue(client, test_db, monkeypatch, invalid_exclusion):
     from app.services.memoir import book_plan_ai
     from tests.memoir_helpers import ensure_mobile_memoir_project
     from tests.test_memoir_section_organization import FakeStoryGrowthAI
     project_id = await ensure_mobile_memoir_project(client)
     first, _ = await _stopped_growth_job(client, test_db, project_id, "小时候奶奶背我赶集。")
     second, job = await _stopped_growth_job(client, test_db, project_id, "后来我跟师傅学修车。")
-    fake = FakeStoryGrowthAI({"chapters": [{"title": "童年", "source_indices": [1]}]})
+    fake = FakeStoryGrowthAI({"chapters": [{"title": "童年", "source_indices": [1]}],
+        "not_story_source_indices": [2, 999] if invalid_exclusion else []})
     monkeypatch.setattr(book_plan_ai, "get_ai_service", lambda _model=None: fake)
     seen = []
     async def decide(**kwargs):
