@@ -656,19 +656,17 @@ async def test_old_automatic_opening_quote_repaired_once_without_ai_or_manual_ch
 
 
 @pytest.mark.parametrize("during_generation", [False, True])
-async def test_explicit_same_value_save_claims_copy_without_a_new_version(client, test_db, monkeypatch, during_generation):
+async def test_explicit_same_value_chapter_save_claims_copy_without_a_new_version(client, test_db, monkeypatch, during_generation):
     project, chapters, _ = await _output(client, test_db)
     async def generate(**kwargs):
         return _copy(kwargs['snapshot'])
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
-    before = await _automatic(test_db, project)
+    await _automatic(test_db, project)
     async def claim():
-        saved = await book_outputs.update_book_output(test_db, user_id=project.user_id, project_id=project.id,
-            req=MemoirBookOutputUpdateRequest(preface='自动前言1'))
-        assert saved.latest_version.id == before.latest_version.id
         saved = await book_outputs.update_book_output_chapter_editorial_copy(test_db, user_id=project.user_id,
             project_id=project.id, chapter_id=chapters[0].id,
             req=MemoirBookOutputChapterEditorialCopyUpdateRequest(intro='自动导语1', pull_quote=''))
+        assert saved.latest_version.id == before.latest_version.id
         return saved
     before = await book_outputs.update_book_output(test_db, user_id=project.user_id, project_id=project.id,
         req=MemoirBookOutputUpdateRequest(title='新的回忆录标题'))
@@ -680,12 +678,12 @@ async def test_explicit_same_value_save_claims_copy_without_a_new_version(client
         return _copy(kwargs['snapshot'], 2)
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', regenerate)
     result = await _automatic(test_db, project)
-    assert next(s.content for s in result.latest_version.manuscript.front_matter if s.kind == 'preface') == '自动前言1'
+    assert next(s.content for s in result.latest_version.manuscript.front_matter if s.kind == 'preface') == ('自动前言1' if during_generation else '自动前言2')
     assert result.latest_version.manuscript.chapters[0].intro == '自动导语1'
     output = await book_outputs._load_output(test_db, project_id=project.id)
     state = output.metadata_json['automatic_editorial_copy']
     assert state['ownership_version'] == 1
-    assert state['manual_targets'] == ['preface']
+    assert state['manual_targets'] == []
     assert state['manual_chapter_fields'][chapters[0].id] == ['intro', 'pull_quotes']
 
 
@@ -757,3 +755,48 @@ async def test_copy_input_arriving_during_generation_remains_runnable(client, te
     assert copy_job.status == 'pending'
     assert await run_test_editing_job(test_db, copy_id)
     assert len(calls) == 2 and calls[1]['title'] == '生成期间确认的新书名'
+
+
+@pytest.mark.parametrize('clear_field', [None, 'preface', 'afterword', 'back_cover_quote'])
+async def test_legacy_metadata_form_claims_only_changed_copy(client, test_db, monkeypatch, clear_field):
+    from app.services.memoir.book_output_manuscript import stored_manuscript_metadata
+    project, _, _ = await _output(client, test_db)
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return replace(_copy(kwargs['snapshot'], len(calls)), back_cover_quote='自动封底')
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    before = await _automatic(test_db, project)
+    metadata = stored_manuscript_metadata(before.latest_version.manuscript.model_dump())
+    # Old clients submit the whole form, including untouched copy and whitespace.
+    payload = {key: f'  {value}  ' for key, value in metadata.items()}
+    if clear_field:
+        payload[clear_field] = ''
+    await book_outputs.update_book_output(test_db, user_id=project.user_id, project_id=project.id,
+        req=MemoirBookOutputUpdateRequest(title='只改书名的新标题', **payload))
+    output = await book_outputs._load_output(test_db, project_id=project.id)
+    assert output.metadata_json['automatic_editorial_copy']['manual_targets'] == ([clear_field] if clear_field else [])
+    result = await _automatic(test_db, project)
+    actual = stored_manuscript_metadata(result.latest_version.manuscript.model_dump())
+    if clear_field:
+        assert actual[clear_field] == ''
+        assert clear_field not in calls[-1]['targets']
+        requested = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+            project_id=project.id, user_id=project.user_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=['chapter_intros']))
+        assert stored_manuscript_metadata(requested.latest_version.manuscript.model_dump())[clear_field] == ''
+
+        from app.models.memoir import MemoirBookChapterDraftVersion
+        from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+        draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.project_id == project.id).limit(1))
+        draft.content += '后来全家又搬了一次家。'
+        await test_db.commit()
+        await assemble_book_output(test_db, project_id=project.id, automatic=True)
+        assembled = await book_outputs.get_book_output(test_db, project_id=project.id, user_id=project.user_id)
+        assert stored_manuscript_metadata(assembled.latest_version.manuscript.model_dump())[clear_field] == ''
+
+    else:
+        assert actual['preface'] == '自动前言2'
+        assert actual['afterword'] == '自动后记2'
+        assert {'preface', 'afterword', 'back_cover_quote'} <= set(calls[-1]['targets'])

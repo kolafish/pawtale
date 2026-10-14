@@ -61,7 +61,7 @@ import {
   bookDesignSaveStatusText,
   bookEditorialCopyBlockedMessage,
   bookMetadataChanged,
-  currentBookMetadataPayload,
+  changedBookMetadataPayload,
   isBookLevelEditorialCopyTarget,
   latestBookTitle,
 } from "../book/book-design-model";
@@ -743,27 +743,15 @@ definePage<BookExportData>()({
       this.setData({ error: "书名不能为空", bookDesignSaveStatusText: "保存失败" });
       return;
     }
-    const metadata = currentBookMetadataPayload(this.data, true);
+    const metadata = changedBookMetadataPayload(this.data, this.bookOutput);
     this.setData({ bookTitleSaving: true, bookDesignSaveStatusText: "保存中", error: "" });
     try {
       const output = await updateMemoirBookOutput(this.data.projectId, {
-        title,
-        subtitle: metadata.subtitle,
-        narrator_name: metadata.narrator_name,
-        prepared_by: metadata.prepared_by,
-        preface: metadata.preface,
-        afterword: metadata.afterword,
-        back_cover_quote: metadata.back_cover_quote,
+        ...(title !== latestBookTitle(this.bookOutput) ? { title } : {}),
+        ...metadata,
       });
       this.applyBookExportData(this.bookPlan, output, true);
       this.setData({
-        bookTitleInput: title,
-        bookSubtitleInput: metadata.subtitle,
-        bookNarratorNameInput: metadata.narrator_name,
-        bookPreparedByInput: metadata.prepared_by,
-        bookPrefaceInput: metadata.preface,
-        bookAfterwordInput: metadata.afterword,
-        bookBackCoverQuoteInput: metadata.back_cover_quote,
         bookTitleChanged: false,
         bookMetadataChanged: false,
         bookDesignSaveStatusText: "已自动保存",
@@ -868,14 +856,10 @@ definePage<BookExportData>()({
     if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
       return;
     }
-    const metadata = currentBookMetadataPayload(this.data, false);
     this.setData({ generatingBook: true, error: "" });
     try {
       await assembleMemoirBookOutput(this.data.projectId);
-      const output = await updateMemoirBookOutput(this.data.projectId, {
-        title: trimText(this.data.bookTitleInput) || undefined,
-        ...metadata,
-      });
+      const output = await getMemoirBookOutput(this.data.projectId);
       this.applyBookExportData(this.bookPlan, output);
       this.setData({ exportNotice: "已根据各章确认正文更新全书稿。" });
       wx.showToast({ title: "书稿已更新", icon: "success" });

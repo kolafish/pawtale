@@ -242,6 +242,9 @@ async def assemble_book_output(
     metadata = effective_book_metadata(
         project=project, stored=previous_version.manuscript_json if previous_version else None,
     )
+    if previous_version:
+        stored_metadata = book_output_versions.stored_manuscript_metadata(previous_version.manuscript_json)
+        metadata.update({field: stored_metadata[field] for field in copy_state.manual_targets})
     if previous_version and (
         book_output_versions.book_editorial_copy_signature(title, previous_version.chapter_snapshot_json)
         != book_output_versions.book_editorial_copy_signature(title, chapter_snapshots)

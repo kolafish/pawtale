@@ -60,6 +60,7 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
+    stored_manuscript_metadata,
     template_cover_style as _template_cover_style,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
@@ -523,7 +524,9 @@ async def update_book_output(
     else:
         cover_style = _template_cover_style(req.manuscript_template) or _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
-    claim_editorial_copy_fields(output, targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in metadata_patch], chapter_fields={})
+    stored_metadata = stored_manuscript_metadata(latest.manuscript_json)
+    claim_editorial_copy_fields(output, targets=[key for key in ("preface", "afterword", "back_cover_quote")
+        if key in metadata_patch and metadata_patch[key] != stored_metadata[key]], chapter_fields={})
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     manuscript_json = _updated_manuscript_payload(
         title=title,
@@ -622,6 +625,7 @@ async def regenerate_book_output_editorial_copy(
         for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes")):
             if all(field in state.manual_chapter_fields.get(chapter_id, []) for chapter_id in chapter_ids):
                 targets.discard(target)
+    protected_book_copy = stored_manuscript_metadata(latest.manuscript_json)
     protected_chapter_copy = {chapter.chapter_id: chapter.model_copy(deep=True) for chapter in manuscript.chapters}
     # Persist a changed model preference and release all locks before the
     # provider call. The output row is locked and the base version revalidated
@@ -647,6 +651,17 @@ async def regenerate_book_output_editorial_copy(
                 chapter_snapshot = snapshots_by_id[chapter.chapter_id]
                 chapter.pull_quotes = retained_chapter_quotes(chapter.model_dump(), chapter_snapshot)
         _apply_editorial_copy(manuscript, editorial_copy, targets=targets, chapter_ids=chapter_ids)
+    # Legacy cleanup may supply defaults for blank fields. Preserve authored
+    # choices unless this request explicitly regenerates that same field.
+    protected_targets = set(ownership.manual_targets) - targets
+    if "preface" in protected_targets:
+        for section in manuscript.front_matter:
+            if section.kind == "preface":
+                section.content = protected_book_copy["preface"]
+    if "afterword" in protected_targets:
+        manuscript.back_matter.afterword.content = protected_book_copy["afterword"]
+    if "back_cover_quote" in protected_targets:
+        manuscript.render_settings.back_cover_quote = protected_book_copy["back_cover_quote"]
     if state is not None:
         for chapter in manuscript.chapters:
             original = protected_chapter_copy[chapter.chapter_id]

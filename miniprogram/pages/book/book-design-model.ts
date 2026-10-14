@@ -39,18 +39,11 @@ export function bookMetadataChanged(
   data: BookDesignState,
   output: MemoirBookOutput | null,
 ): boolean {
-  const stored = latestBookMetadata(output);
-  return (
-    trimText(data.bookSubtitleInput) !== stored.subtitle
-    || trimText(data.bookNarratorNameInput) !== stored.narrator_name
-    || trimText(data.bookPreparedByInput || "家人整理") !== stored.prepared_by
-    || trimText(data.bookPrefaceInput) !== stored.preface
-    || trimText(data.bookAfterwordInput) !== stored.afterword
-    || trimText(data.bookBackCoverQuoteInput) !== stored.back_cover_quote
-  );
+  return Object.keys(changedBookMetadataPayload(data, output)).length > 0;
 }
 
-export function currentBookMetadataPayload(data: BookDesignState, includeEmpty: boolean): Record<string, string> {
+export function changedBookMetadataPayload(data: BookDesignState, output: MemoirBookOutput | null): Record<string, string> {
+  const stored = latestBookMetadata(output);
   const values: Record<string, string> = {
     subtitle: trimText(data.bookSubtitleInput),
     narrator_name: trimText(data.bookNarratorNameInput),
@@ -59,11 +52,8 @@ export function currentBookMetadataPayload(data: BookDesignState, includeEmpty: 
     afterword: trimText(data.bookAfterwordInput),
     back_cover_quote: trimText(data.bookBackCoverQuoteInput),
   };
-  if (includeEmpty) {
-    return values;
-  }
   return Object.keys(values).reduce<Record<string, string>>((memo, key) => {
-    if (values[key]) {
+    if (values[key] !== stored[key]) {
       memo[key] = values[key];
     }
     return memo;
