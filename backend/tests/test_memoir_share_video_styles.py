@@ -55,6 +55,8 @@ async def test_project_style_default_override_and_task_snapshot(client, test_db,
     context = (await client.get(f"{base}/context")).json()
     assert context["default_video_style"] == "illustrated"
     assert [option["value"] for option in context["video_styles"]] == ["uploaded", "illustrated"]
+    assert context["video_styles"][0]["description"].startswith("免费")
+    assert "约 0.22 元/张，一条最多 5 张" in context["video_styles"][1]["description"]
     selection = {"start_char": 0, "end_char": len(text)}
     created_job = await client.post(f"{base}/jobs", json=selection)
     assert created_job.status_code == 201, created_job.text
