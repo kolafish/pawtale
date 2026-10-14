@@ -49,10 +49,12 @@
     <text wx:if="{{voiceSearchStatusText}}" class="search-summary voice-search-status">{{voiceSearchStatusText}}</text>
   </view>
 
-  <button wx:if="{{!pickForVideo && activeProjectId && (emptyCount > 0 || showEmptyRecordings)}}"
-    class="empty-secondary-button" bindtap="toggleEmptyRecordings" disabled="{{loading || recoveringId}}">
-    {{showEmptyRecordings ? '收起未检测到说话声的录音' : '另有 ' + emptyCount + ' 条未检测到说话声的录音，展开查看'}}
-  </button>
+  <view wx:if="{{!pickForVideo && activeProjectId && (emptyCount > 0 || showEmptyRecordings)}}"
+    class="empty-secondary-button ui-block-action {{loading || recoveringId ? 'is-disabled' : ''}}"
+    bindtap="toggleEmptyRecordings" hover-class="empty-secondary-button-hover"
+    aria-role="button" aria-disabled="{{!!(loading || recoveringId)}}">
+    {{showEmptyRecordings ? '收起这些录音' : '未检测到说话声（' + emptyCount + '），展开'}}
+  </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
