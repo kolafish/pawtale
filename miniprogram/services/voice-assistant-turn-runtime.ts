@@ -144,8 +144,18 @@ export class VoiceAssistantTurnRuntime {
           this.finishAudioFrames(event);
         }
       },
+      onAudioFailed: (event) => {
+        if (this.callbacksActive()) {
+          this.recordPlaybackError(new Error(event.error));
+          this.stopPlayback();
+        }
+      },
       onCompleted: (event) => {
         if (this.callbacksActive()) {
+          if (event.audio_status === "failed" && !this.playbackError) {
+            this.recordPlaybackError(new Error("小余的声音暂时没出来，您可以看着文字回答，也可以重试朗读。"));
+            this.stopPlayback();
+          }
           this.callbacks.onCompleted?.(event);
         }
       },
@@ -176,7 +186,7 @@ export class VoiceAssistantTurnRuntime {
   }
 
   private async playAudioFrame(frame: PreparedAssistantStreamAudioFrame): Promise<void> {
-    if (!this.callbacksActive()) {
+    if (!this.callbacksActive() || this.playbackError) {
       return;
     }
     this.callbacks.onAudioFrame?.(frame);

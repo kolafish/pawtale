@@ -130,6 +130,7 @@ class AssistantTurnArtifacts:
     resolved_ai_model: str | None = None
     response_ai_model: str | None = None
     audio_chunks: list[bytes] = field(default_factory=list)
+    audio_failed: bool = False
     audio_mime_type: str | None = None
     tts_provider: str | None = None
     tts_model: str | None = None
@@ -588,6 +589,7 @@ class VoiceAssistantTurnStreamSession:
                 "state": "completed",
                 "message_id": message.id,
                 "audio_file_id": audio_file_id,
+                "audio_status": "failed" if artifacts.audio_failed else "ready",
                 "text": turn.speech_text,
                 "primary_intent": turn.primary_intent,
                 "intent_tags": turn.intent_tags,
@@ -789,6 +791,21 @@ class VoiceAssistantTurnStreamSession:
                     input_characters=tts_character_count,
                     error_type=type(exc).__name__,
                 )
+            if isinstance(exc, HTTPException) and exc.status_code in {502, 503, 504}:
+                # Provider failures do not invalidate completed LLM text. Keep
+                # producing/validating text, but never save a partial recording.
+                artifacts.audio_failed = True
+                artifacts.audio_chunks.clear()
+                artifacts.tts_alignment.clear()
+                artifacts.tts_duration_seconds = None
+                logger.warning("Assistant TTS unavailable voice_session_id=%s turn_id=%s status=%s",
+                               self.voice_session_id, turn_id, exc.status_code)
+                await self.client.send_json({
+                    "type": "audio.failed", "turn_id": turn_id,
+                    "voice_session_id": self.voice_session_id,
+                    "error": "小余的声音暂时没出来，您可以看着文字回答，也可以重试朗读。",
+                })
+                return
             raise
         if tts_character_count > 0:
             await record_ai_usage(

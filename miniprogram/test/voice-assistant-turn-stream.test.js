@@ -79,6 +79,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+test("audio failure is non-terminal and retains the completed text response", async () => {
+  const harness = installWxSocketHarness();
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const failures = [];
+  const client = new VoiceAssistantTurnStreamClient("voice-1", {
+    onAudioFailed: event => failures.push(event),
+    onFailed: () => assert.fail("TTS failure must not fail the text turn"),
+  });
+  const pending = client.start();
+  await new Promise(resolve => setImmediate(resolve));
+  harness.handlers.open();
+  socketMessage(harness.handlers, {type: "audio.failed", error: "TTS unavailable"});
+  socketMessage(harness.handlers, {type: "turn.completed", audio_status: "failed", text: "您接着讲。"});
+  const completed = await pending;
+  assert.equal(failures.length, 1);
+  assert.equal(completed.text, "您接着讲。");
+  assert.equal(completed.audio_status, "failed");
+  delete global.wx;
+});
+
 test("assistant turn stream sends pcm frame protocol and emits audio frames", async () => {
   const harness = installWxSocketHarness();
   delete require.cache[require.resolve("../services/request.ts")];

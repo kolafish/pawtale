@@ -22,6 +22,30 @@ function completedTurn(overrides = {}) {
   };
 }
 
+test("provider audio failure stops queued audio while the full text still completes", async () => {
+  const events = [];
+  const runtime = new VoiceAssistantTurnRuntime("voice-1", {
+    onCompleted: event => events.push(event.text),
+    onPlaybackError: error => events.push(error.message),
+  }, {
+    createStreamClient: (_id, callbacks) => ({
+      async start() {
+        callbacks.onAudioFrame({sequence: 1, audio: new Uint8Array([1, 2])});
+        callbacks.onAudioFailed({type: "audio.failed", error: "看着文字回答"});
+        callbacks.onTextDelta({type: "text.delta", text: "那时候谁也在院子里？"});
+        const completed = completedTurn({audio_status: "failed"});
+        callbacks.onCompleted(completed);
+        return completed;
+      }, cancel() {}, close() {},
+    }),
+    createPlaybackController: () => { throw new Error("failed audio must not be played"); },
+  });
+  const result = await runtime.start();
+  assert.equal(result.completed.message_id, "assistant-1");
+  assert.equal(result.playbackError.message, "看着文字回答");
+  assert.deepEqual(events, ["看着文字回答", result.completed.text]);
+});
+
 test("voice assistant turn runtime streams text, plays frames, and waits for drain", async () => {
   const events = [];
   const appended = [];

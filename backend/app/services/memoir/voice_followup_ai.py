@@ -70,8 +70,8 @@ def interviewer_persona_for_voice(voice: str | None) -> InterviewerPersona:
     if "female" in normalized or "xiaohe" in normalized:
         return InterviewerPersona(host_name="小余", voice_gender="female")
     if "male" in normalized or "m191" in normalized:
-        return InterviewerPersona(host_name="老余", voice_gender="male")
-    return InterviewerPersona(host_name="老余", voice_gender="unknown")
+        return InterviewerPersona(host_name="小余", voice_gender="male")
+    return InterviewerPersona(host_name="小余", voice_gender="unknown")
 
 
 def system_prompt_for_persona(persona: InterviewerPersona) -> str:

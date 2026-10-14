@@ -1003,7 +1003,6 @@ Component({
           : true,
         canRequestFollowUp: false,
       }),
-      followUpTTSError: "",
       persistenceStateText: "小余正在回应",
     });
   },
@@ -1034,6 +1033,7 @@ Component({
       && line.message_id !== event.message_id
     ));
     const transcriptLines = upsertTranscriptLine(withoutTemporaryLine, finalLine);
+    this.runtime().assistantStreamLineId = "";
     applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
@@ -1047,7 +1047,6 @@ Component({
         assistantExpectsAnswer: event.expects_answer !== false,
         canRequestFollowUp: false,
       }),
-      followUpTTSError: "",
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
   },
@@ -1088,6 +1087,8 @@ Component({
     this.stopFollowUpProgressTimer();
     applyVoiceChatDataPatch(this, {
       followUpTTSError: error.message,
+      followUpTTSPlaying: false,
+      followUpTTSLoading: false,
       followUpTTSStateText: "播放失败",
     });
   },

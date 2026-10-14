@@ -522,9 +522,10 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     || interactionPhase === "assistant_error";
   const showAssistantPanel = !isHumanInterview
     && (!completionRoundFinished || assistantBusy)
-    && !state.recording
     && !showTranscriptProcessing
-    && Boolean(assistantPhaseVisible || state.canRequestFollowUp);
+    && (state.recording
+      ? hasAssistantPrompt && !isBookCompletion
+      : Boolean(assistantPhaseVisible || state.canRequestFollowUp));
   const showHumanRecordActions = isHumanInterview
     && !completionRoundFinished
     && !state.recording
@@ -743,7 +744,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     assistantDisplayText: state.assistantPromptText
       || (state.followUpLoading ? state.assistantLoadingText : (state.followUpError || state.assistantEmptyText)),
     showTTSProgress: Boolean(state.assistantPromptText && state.followUpTTSPlaying),
-    showAssistantActions: !completionRoundFinished && showAssistantPanel,
+    showAssistantActions: !state.recording && !completionRoundFinished && showAssistantPanel,
     showTranscriptStage,
     replayButtonText: state.followUpTTSError ? "重试朗读" : (hasAssistantPrompt ? "重听一遍" : "读给我听"),
     followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),

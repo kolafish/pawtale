@@ -149,7 +149,7 @@
   </view>
 
   <view wx:if="{{showAssistantPanel}}" class="{{assistantPanelClass}}">
-    <view class="assistant-head">
+    <view wx:if="{{!recording}}" class="assistant-head">
       <view class="assistant-label">
         <text class="assistant-label-text centered-control-label">{{assistantLabelText}}</text>
       </view>
