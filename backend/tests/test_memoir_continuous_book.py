@@ -38,6 +38,10 @@ async def _ready_book(client, db, monkeypatch):
     assert not await run_test_editing_job(db, parent_id)
     assert await run_test_editing_job(db, parent.result_json["review_job_id"])
     assert await run_test_editing_job(db, parent_id)
+    copy_job = await db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
+    if copy_job is not None:
+        await run_test_editing_job(db, copy_job.id)
     return project_id, chapter_id, section_id, fake, parent
 
 

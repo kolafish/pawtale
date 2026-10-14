@@ -852,8 +852,10 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
             from app.services.memoir.book_completion_jobs import advance_book_completion_jobs
             if not book_policy_reconciled:
                 from app.services.memoir.automatic_book_draft import reconcile_books_omitted_by_editorial_review
+                from app.services.memoir.book_generation_jobs import reconcile_legacy_editorial_copy_jobs
                 async with async_session_maker() as db:
                     await reconcile_books_omitted_by_editorial_review(db)
+                    await reconcile_legacy_editorial_copy_jobs(db)
                 book_policy_reconciled = True
             async with async_session_maker() as db:
                 await resume_credit_blocked_editing_jobs(db)

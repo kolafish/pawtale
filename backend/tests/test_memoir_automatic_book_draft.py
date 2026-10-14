@@ -88,8 +88,8 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
     events = list((await test_db.scalars(select(MemoirAutomationEvent).where(
         MemoirAutomationEvent.project_id == project_id,
     ))).all())
-    assert {event.event_type for event in events} == {"chapter_draft_generated", "book_output_generated"}
-    assert all(event.status == "completed" for event in events)
+    assert {event.event_type for event in events} == {"chapter_draft_generated", "book_output_generated", "book_editorial_copy_generated"}
+    assert all(event.status == "completed" for event in events if event.event_type != "book_editorial_copy_generated")
     chapter_event = next(event for event in events if event.event_type == "chapter_draft_generated")
     assert chapter_event.chapter_id == chapter_id
     assert chapter_event.metadata_json["draft_version_id"] == latest.id

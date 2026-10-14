@@ -122,24 +122,18 @@ async def test_requested_ai_copy_predating_automation_is_also_preserved(client, 
     assert result.latest_version.manuscript.chapters[0].intro == '自动导语2'
 
 
-@pytest.mark.parametrize('explicit_retry', [False, True])
-async def test_book_pipeline_generates_editorial_copy_before_its_review(client, test_db, monkeypatch, explicit_retry):
-    from app.services.memoir import automatic_book_draft, book_review_jobs
+@pytest.mark.parametrize('explicit_retry', [False, True, 'legacy'])
+async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review(client, test_db, monkeypatch, explicit_retry):
+    from app.services.memoir import automatic_book_draft
     project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
-    if explicit_retry:
+    if explicit_retry == 'legacy':
+        parent = await test_db.get(MemoirEditingJob, parent_id)
+        parent.result_json = {'retry_stages': ['chapters', 'editorial_copy', 'review']}
+        await test_db.commit()
+    elif explicit_retry:
         await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source='retry')
         await test_db.commit()
     calls = []
-    retries, reviews = [], []
-    regenerate, enqueue_review = book_outputs.regenerate_book_output_editorial_copy, book_review_jobs.enqueue_book_review_job
-    async def record_retry(*args, **kwargs):
-        retries.append(kwargs.get('retry', False))
-        return await regenerate(*args, **kwargs)
-    async def record_review(*args, **kwargs):
-        reviews.append(kwargs.get('automatic', False))
-        return await enqueue_review(*args, **kwargs)
-    monkeypatch.setattr(book_outputs, 'regenerate_book_output_editorial_copy', record_retry)
-    monkeypatch.setattr(book_review_jobs, 'enqueue_book_review_job', record_review)
     async def generate(**kwargs):
         calls.append(kwargs)
         return _copy(kwargs['snapshot'])
@@ -148,12 +142,24 @@ async def test_book_pipeline_generates_editorial_copy_before_its_review(client, 
     parent = await test_db.get(MemoirEditingJob, parent_id)
     assert await run_test_editing_job(test_db, parent.result_json['chapters'][chapter_id]['job_id'])
     assert not await run_test_editing_job(test_db, parent_id)
-    assert len(calls) == 1
-    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
+    assert not calls
+    copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
+    assert copy_job.payload_json['retry'] is bool(explicit_retry)
+    copy_id = copy_job.id
+    review_id = parent.result_json['review_job_id']
+    assert await run_test_editing_job(test_db, review_id)
+    assert await run_test_editing_job(test_db, copy_id)
     assert await run_test_editing_job(test_db, parent_id)
-    assert len(calls) == 1
-    assert retries == [explicit_retry, False]
-    assert reviews == [not explicit_retry, True]
+    await test_db.refresh(parent)
+    await test_db.refresh(copy_job)
+    assert parent.result_json['review_job_id'] == review_id
+    assert copy_job.status == 'succeeded' and len(calls) == 1
+    assert not copy_job.rerun_requested
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert copy_job.status == 'succeeded' and parent.result_json['review_job_id'] == review_id
 
 
 async def test_first_historical_user_version_is_preserved_without_spending_model_calls(client, test_db, monkeypatch):
@@ -199,6 +205,9 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     parent = await test_db.get(MemoirEditingJob, parent_id)
     assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
     assert await run_test_editing_job(test_db, parent_id)
+    copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
+    assert await run_test_editing_job(test_db, copy_job.id)
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == 'ready'
     current = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
@@ -359,11 +368,12 @@ async def test_copy_failure_is_retryable_without_rewriting_ready_chapters(client
     project_id, chapter_id, _, _, parent = await _ready_book(client, test_db, monkeypatch)
     original_draft = parent.result_json['chapters'][chapter_id]['draft_version_id']
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
-    assert progress.status == 'ready' and progress.can_retry
+    assert progress.status == 'failed' and progress.can_retry
     await draft_progress.retry_draft_progress(test_db, project_id=project_id)
-    assert not await run_test_editing_job(test_db, parent.id)
-    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
-    assert await run_test_editing_job(test_db, parent.id)
+    copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
+    assert parent.status == 'succeeded'
+    assert await run_test_editing_job(test_db, copy_job.id)
     assert parent.result_json['chapters'][chapter_id]['draft_version_id'] == original_draft
     assert len(calls) == 2
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
@@ -547,7 +557,7 @@ async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
-async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(client, test_db, monkeypatch, unavailable):
+async def test_assembly_copy_runs_independently_and_coalesces_new_input(client, test_db, monkeypatch, unavailable):
     from app.services.memoir import book_generation_jobs, automatic_book_draft, draft_progress
     from app.services.memoir.book_output_versions import revision_compatible_version
     from app.services.memoir.narrative.book_output_assembly import assemble_book_output
@@ -565,8 +575,7 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
         return None if unavailable else _copy(kwargs["snapshot"])
     monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
     result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
-    assert result.status.value == "pending" and not calls
-    await _automatic(test_db, project)
+    assert result.status.value == ("failed" if unavailable else "succeeded") and len(calls) == 1
     parent.status = "succeeded"
     await test_db.commit()
     result = await book_generation_jobs.run_book_editorial_copy_generation_job(test_db, job)
@@ -587,6 +596,7 @@ async def test_assembly_copy_waits_for_full_workflow_and_coalesces_new_input(cli
         MemoirAutomationEvent.editing_job_id == job.id))).all()
     assert len(events) == 1  # Internal scheduling updates one durable event.
     job.status = "running"
+    project.title = "新的书名触发新文案输入"
     await test_db.commit()
     await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
         user_id=project.user_id, project_id=project.id, req=req, automatic=True)
@@ -691,3 +701,59 @@ def test_legacy_copy_ownership_is_migrated_once_and_then_ignores_version_authors
     assert output.metadata_json['automatic_editorial_copy']['ownership_version'] == 1
     after.manuscript_json['chapters'].append({'chapter_id': 'new', 'intro': '自动文案'})
     assert automatic_editorial_copy_state(output, [before, after]) == state
+
+
+async def test_legacy_inline_copy_failure_becomes_a_retryable_job_without_an_ai_retry(client, test_db, monkeypatch):
+    from app.services.memoir import automatic_book_draft, book_generation_jobs
+    project, _, _ = await _output(client, test_db)
+    calls = []
+    async def unavailable(**kwargs):
+        calls.append(kwargs)
+        return None
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', unavailable)
+    await _automatic(test_db, project)
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project.id)
+    parent.status = 'succeeded'
+    parent.result_json = {'editorial_copy_status': 'failed'}
+    await test_db.commit()
+    await book_generation_jobs.reconcile_legacy_editorial_copy_jobs(test_db)
+    copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f'automatic-editorial-copy:{project.id}'))
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+    register_memoir_editing_job_handlers()
+    assert not await run_test_editing_job(test_db, copy_job.id)
+    assert copy_job.status == 'failed' and len(calls) == 1
+    await book_generation_jobs.reconcile_legacy_editorial_copy_jobs(test_db)
+    await test_db.refresh(copy_job)
+    assert copy_job.status == 'failed' and len(calls) == 1
+
+
+@pytest.mark.parametrize('first_unavailable', [False, True])
+async def test_copy_input_arriving_during_generation_remains_runnable(client, test_db, monkeypatch, first_unavailable):
+    from app.services.memoir import book_generation_jobs
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+    project, _, _ = await _output(client, test_db)
+    project_id, user_id = project.id, project.user_id
+    req = MemoirBookOutputEditorialCopyRegenerateRequest()
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+        project_id=project_id, user_id=user_id, req=req, automatic=True)
+    copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f'automatic-editorial-copy:{project_id}'))
+    copy_id = copy_job.id
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            await book_outputs.update_book_output(test_db, project_id=project_id, user_id=user_id,
+                req=MemoirBookOutputUpdateRequest(title='生成期间确认的新书名'))
+            await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+                project_id=project_id, user_id=user_id, req=req, automatic=True)
+            return None if first_unavailable else _copy(kwargs['snapshot'])
+        return _copy(kwargs['snapshot'], 2)
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    register_memoir_editing_job_handlers()
+    assert not await run_test_editing_job(test_db, copy_id)
+    await test_db.refresh(copy_job)
+    assert copy_job.status == 'pending'
+    assert await run_test_editing_job(test_db, copy_id)
+    assert len(calls) == 2 and calls[1]['title'] == '生成期间确认的新书名'
