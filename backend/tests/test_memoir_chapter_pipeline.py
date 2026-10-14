@@ -1414,7 +1414,8 @@ async def test_chapter_confirmation_rejects_changed_material_structure(
 
 
 @pytest.mark.ci_smoke
-def test_confirmed_body_only_accepts_later_source_edits_and_new_narration():
+@pytest.mark.parametrize("section_edit_at", [None, datetime(2026, 1, 2)])
+def test_confirmed_body_only_accepts_later_source_edits_and_new_narration(section_edit_at):
     from app.services.memoir.fact_decisions import FactDecision
     from app.services.memoir.transcript_projection import TranscriptEdit
     context = _two_section_context()
@@ -1427,9 +1428,10 @@ def test_confirmed_body_only_accepts_later_source_edits_and_new_narration():
     recent = replace(old, issue_id="recent", answer="本次确认七岁", confirmed_at=datetime(2026, 1, 3))
     section = replace(context.sections[0], materials=(material, new), decisions=(old, recent))
     context = replace(context, sections=(section,), materials=(material, new),
-                      previous_draft_at=datetime(2026, 1, 2))
+                      previous_draft_at=datetime(2026, 1, 4) if section_edit_at else datetime(2026, 1, 2))
     prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
         current_section_content="我五岁那年家里发洪水。", current_section_user_edited=True,
+        current_section_user_edited_at=section_edit_at,
         previous_material_ids={material.material_id}, changed_material_ids={material.material_id, new.material_id})
     assert "我五岁那年家里发洪水。" in prompt
     assert "我十五岁那年家里发洪水。" not in prompt
@@ -1512,7 +1514,7 @@ async def test_missing_history_is_visible_even_when_model_omits_warning():
     context = replace(context, sections=(context.sections[0],), materials=(material,))
     previous = chapter_generation.GeneratedChapterSection(section_id=material.section_id,
         title=material.section_title, content="我五岁那年离开家。",
-        used_material_ids=(material.material_id,), user_edited=True)
+        used_material_ids=(material.material_id,), user_edited=True, user_edited_at=datetime(2026, 1, 2))
     fake = FakeChapterAI(section_material_id=material.material_id,
         chapter_section_id=material.section_id, chapter_material_id=material.material_id,
         draft_material_ids=[material.material_id])
@@ -1520,3 +1522,9 @@ async def test_missing_history_is_visible_even_when_model_omits_warning():
         previous_sections=(previous,), changed_material_ids={material.material_id}, ai_client=fake)
     assert any("机器更新未合并" in item for item in result.missing_source_candidates)
     assert result.sections[0].user_edited
+
+    assert result.sections[0].user_edited_at == previous.user_edited_at
+    snapshot = chapter_generation._section_snapshot(context, sections=result.sections)
+    assert chapter_generation._previous_draft_section(context.sections[0], snapshot[0]) == result.sections[0]
+    checkpoint = chapter_generation._generated_chapter_checkpoint(context, result, current_section=None)
+    assert chapter_generation._generated_chapter_from_checkpoint(context, checkpoint).sections == result.sections

@@ -283,6 +283,7 @@ async def revise_chapter_draft(
             # A user version copies every section. Record the actual edited
             # section so later automatic updates can retain the other prose.
             revised["user_edited"] = True
+            revised["user_edited_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         revised["content"] = revision.content
         revised_sections.append(revised)
     content = "\n\n".join(
