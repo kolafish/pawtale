@@ -1419,6 +1419,7 @@ def test_confirmed_body_only_accepts_later_source_edits_and_new_narration():
     from app.services.memoir.transcript_projection import TranscriptEdit
     context = _two_section_context()
     material = replace(context.materials[0], text="我十五岁那年家里发洪水。",
+        previous_text="我十五岁那年家里发洪水。",
         edits=(TranscriptEdit(datetime(2026, 1, 3), "原文旧称呼", "后来更正的称呼"),))
     new = replace(material, material_id="new-source", text="后来我们搬到绵阳。", edits=())
     old = FactDecision("old", "年龄？", "早先确认十五岁", frozenset({material.material_id}),
@@ -1436,3 +1437,69 @@ def test_confirmed_body_only_accepts_later_source_edits_and_new_narration():
     assert "本次确认七岁" in prompt
     assert "后来更正的" in prompt
     assert new.text in prompt
+
+
+@pytest.mark.ci_smoke
+def test_confirmed_body_receives_only_recognition_delta():
+    context = _two_section_context()
+    material = replace(context.materials[0],
+        previous_text="我十五岁时搬到成都。师傅叫王明。",
+        text="我十五岁时搬到绵阳。师傅叫王明。")
+    section = replace(context.sections[0], materials=(material,))
+    context = replace(context, sections=(section,), materials=(material,))
+    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
+        current_section_content="我五岁时搬到成都。师傅叫李明。", current_section_user_edited=True,
+        previous_material_ids={material.material_id}, changed_material_ids={material.material_id})
+    assert "绵阳" in prompt
+    assert "我五岁时搬到成都。师傅叫李明。" in prompt
+    assert "原始讲述（本次新增或更正）" not in prompt
+    assert "机器" in prompt
+    assert "用户确认" in prompt
+
+
+@pytest.mark.ci_smoke
+def test_changed_confirmed_material_without_previous_text_is_not_silently_applied():
+    context = _two_section_context()
+    material = context.materials[0]
+    context = replace(context, sections=(context.sections[0],), materials=(material,))
+    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
+        current_section_content="我五岁那年离开家。", current_section_user_edited=True,
+        previous_material_ids={material.material_id}, changed_material_ids={material.material_id})
+    assert "历史转写版本不可用" in prompt
+    assert material.text not in prompt
+    assert "我五岁那年离开家。" in prompt
+
+
+async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, test_db):
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    fake = FakeChapterAI(section_material_id=materials[0]["utterance_id"],
+        chapter_section_id=section["id"], chapter_material_id=materials[0]["utterance_id"],
+        draft_material_ids=[materials[0]["utterance_id"]])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
+        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+    context = await chapter_generation.load_chapter_generation_context(test_db,
+        project_id=project_id, chapter_id=chapter.id)
+    original = context.materials[0].text
+    updated = replace(context.materials[0], text=original + "后来我学会了补胎。")
+    changed = replace(context, materials=(updated,),
+        sections=(replace(context.sections[0], materials=(updated,)),))
+    loaded = await chapter_generation._with_previous_material_text(test_db, changed, version)
+    assert loaded.materials[0].previous_text == original
+    assert loaded.sections[0].materials[0] == loaded.materials[0]
+    assert loaded.materials[0].text.endswith("后来我学会了补胎。")
+
+
+async def test_missing_history_is_visible_even_when_model_omits_warning():
+    context = _two_section_context()
+    material = context.materials[0]
+    context = replace(context, sections=(context.sections[0],), materials=(material,))
+    previous = chapter_generation.GeneratedChapterSection(section_id=material.section_id,
+        title=material.section_title, content="我五岁那年离开家。",
+        used_material_ids=(material.material_id,), user_edited=True)
+    fake = FakeChapterAI(section_material_id=material.material_id,
+        chapter_section_id=material.section_id, chapter_material_id=material.material_id,
+        draft_material_ids=[material.material_id])
+    result = await chapter_generation.generate_chapter(context, editorial_guidance=[],
+        previous_sections=(previous,), changed_material_ids={material.material_id}, ai_client=fake)
+    assert any("机器更新未合并" in item for item in result.missing_source_candidates)
+    assert result.sections[0].user_edited

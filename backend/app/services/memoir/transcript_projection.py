@@ -97,15 +97,9 @@ async def load_transcript_edits(
 def transcript_edits_prompt(edits: tuple[TranscriptEdit, ...]) -> str:
     lines = []
     for edit in edits:
-        changes = []
-        for tag, a, b, c, d in SequenceMatcher(None, edit.before, edit.after, autojunk=False).get_opcodes():
-            if tag != "equal":
-                changes.append(
-                    f"- 原片段：{edit.before[max(0, a - 20):b + 20]}\n"
-                    f"  用户实际替换：{edit.before[a:b]!r} → {edit.after[c:d]!r}"
-                )
+        changes = transcript_text_changes(edit.before, edit.after, label="用户实际替换")
         if changes:
-            lines.append(f"用户编辑（UTC {edit.edited_at.isoformat()}）：\n" + "\n".join(changes))
+            lines.append(f"用户编辑（UTC {edit.edited_at.isoformat()}）：\n" + changes)
     if not lines:
         return ""
     return (
@@ -117,3 +111,14 @@ def transcript_edits_prompt(edits: tuple[TranscriptEdit, ...]) -> str:
 
 def source_text_hash(text: str) -> str:
     return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+
+def transcript_text_changes(before: str, after: str, *, label: str) -> str:
+    changes = []
+    for tag, a, b, c, d in SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
+        if tag != "equal":
+            changes.append(
+                f"- 原片段：{before[max(0, a - 20):b + 20]}\n"
+                f"  {label}：{before[a:b]!r} → {after[c:d]!r}"
+            )
+    return "\n".join(changes)
