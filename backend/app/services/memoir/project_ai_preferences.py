@@ -36,6 +36,11 @@ TEXT_POLISH_REQUIREMENTS = {
         "- 可以压缩无信息量的铺陈，但不得省略具体事实与有意义的细节，仍保持第一人称讲述"
     ),
 }
+TEXT_POLISH_FIDELITY = (
+    "\n- 所有档位只改变表达，不增加信息。动作、环境和外貌描写、身体感觉、人物动机、心理活动及对话，必须有讲述者明确提供的依据；符合常理、听起来感人或常见文学表达都不构成依据。"
+    "\n- 原话明确说出的感受与不确定性应保留；没有说出的感受不替讲述者补写。素材短就写短，不用氛围、感慨和总结句填充篇幅。"
+    "\n- 原话中人物指代、动作归属、时间跨度或因果关系没有说清时，不要自行确定，保留原话的不确定性和指代；不要把相邻两句话自动补成持续过程或因果。"
+)
 
 
 def project_ai_model(project: Project | None) -> str | None:
@@ -90,7 +95,7 @@ def normalize_transcript_polish_level(
 def text_polish_requirements(
     value: str | MemoirTranscriptPolishLevel | None,
 ) -> str:
-    return TEXT_POLISH_REQUIREMENTS[normalize_transcript_polish_level(value)]
+    return TEXT_POLISH_REQUIREMENTS[normalize_transcript_polish_level(value)] + TEXT_POLISH_FIDELITY
 
 
 def project_transcript_polish_level(project: Project | None) -> MemoirTranscriptPolishLevel:
