@@ -404,6 +404,15 @@ async def _apply_recovered_transcript(
         version_type=MemoirTranscriptVersionType.ASR_RAW,
     )
     if speaker_role == MemoirSpeakerRole.NARRATOR.value:
+        from app.services.memoir import completion_interviews
+        from app.services.memoir.narrative import interview_policy_outcomes
+        # Use only the target persisted with this recording. The session may
+        # have moved on, or an old recording may have no recoverable target.
+        if utterance.completion_issue_id:
+            await completion_interviews.bind_answer_segment(db, voice_session=voice_session, utterance=utterance)
+        await interview_policy_outcomes.schedule_policy_outcome_evaluation(
+            db, project_id=voice_session.project_id, utterance=utterance,
+        )
         polish_level = await load_project_transcript_polish_level(
             db,
             voice_session.project_id,

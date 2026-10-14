@@ -85,6 +85,7 @@ export interface MemoirVoiceTranscriptItem {
 }
 
 export interface MemoirVoiceTranscriptListResponse {
+  empty_count?: number;
   items: MemoirVoiceTranscriptItem[];
   total: number;
   limit: number;

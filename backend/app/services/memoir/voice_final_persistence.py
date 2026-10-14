@@ -78,6 +78,8 @@ async def _assign_interview_target(
         completion_issue=completion_issue,
         framework_item=framework_item,
     )
+    if not (utterance.transcript_edited or utterance.transcript_raw).strip():
+        return  # Capture the original target without claiming an answer or evaluating silence.
     if completion_issue is not None:
         await completion_interviews.bind_answer_segment(
             db,
@@ -305,7 +307,7 @@ class VoiceFinalPersistenceService:
             )
             self.db.add(utterance)
             await self.db.flush()
-            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value and transcription_status != MemoirTranscriptionStatus.EMPTY:
+            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
                 await _assign_interview_target(
                     self.db,
                     voice_session=voice_session,

@@ -859,6 +859,7 @@ async def list_voice_transcripts(
     manual_corrected: bool | None = None,
     narrator_only: bool = False,
     ready_only: bool = False,
+    include_empty: bool = True,
     oldest_first: bool = False,
     interview_time_order: bool = False,
     limit: int = 50,
@@ -898,12 +899,19 @@ async def list_voice_transcripts(
         else:
             if included_utterance_ids:
                 filters.append(~MemoirVoiceUtterance.id.in_(included_utterance_ids))
-    total = await db.scalar(
-        select(func.count(MemoirVoiceUtterance.id))
+    empty_audio = (~_has_transcript_text_clause()) & (
+        func.coalesce(MemoirVoiceUtterance.provider_payload_json["transcription_status"].as_string(), "")
+        == MemoirTranscriptionStatus.EMPTY.value
+    )
+    total, empty_count = (await db.execute(
+        select(func.count(MemoirVoiceUtterance.id), func.count(MemoirVoiceUtterance.id).filter(empty_audio))
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(*filters)
-    )
+    )).one()
+    if not include_empty:
+        filters.append(~empty_audio)
+        total -= empty_count
     if interview_time_order:
         interview_time = func.coalesce(MemoirVoiceSession.started_at, MemoirVoiceSession.created_at)
         ordering = (
@@ -955,6 +963,7 @@ async def list_voice_transcripts(
     return MemoirVoiceTranscriptListResponse(
         items=items,
         total=total or 0,
+        empty_count=empty_count,
         limit=limit,
         offset=offset,
     )

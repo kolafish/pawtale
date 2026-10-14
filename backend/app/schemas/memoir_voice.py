@@ -409,6 +409,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
 
 class MemoirVoiceTranscriptListResponse(BaseModel):
     items: list[MemoirVoiceTranscriptItemResponse] = Field(default_factory=list)
+    empty_count: int = 0
     total: int
     limit: int
     offset: int

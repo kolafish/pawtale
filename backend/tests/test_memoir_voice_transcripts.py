@@ -3289,3 +3289,56 @@ async def test_mobile_memoir_voice_transcripts_are_user_scoped(anonymous_client,
     assert list_response.json()["total"] == 0
     assert update_response.status_code == 404
     assert delete_response.status_code == 404
+
+
+async def test_folded_empty_recordings_do_not_consume_story_pagination(client, test_db, tmp_path, monkeypatch):
+    from app.domain.memoir.types import MemoirTranscriptionStatus
+    from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    first = await create_test_voice_transcript(client, test_db, "母亲背我上山。")
+    second = await create_test_voice_transcript(client, test_db, "后来在县城读书。", project_id=first["session"]["project_id"])
+    project_id = first["session"]["project_id"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    service = VoiceFinalPersistenceService(db=test_db, voice_session_id=first["session"]["id"], user_id=user_id)
+    for status in (MemoirTranscriptionStatus.PENDING, MemoirTranscriptionStatus.UNRECOGNIZED,
+                   *([MemoirTranscriptionStatus.EMPTY] * 3)):
+        await service.persist_unfinalized_audio(audio=b"\0" * 640, transcription_status=status)
+    params = {"project_id": project_id, "include_empty": "false", "limit": 1}
+    seen = []
+    for offset in range(4):
+        page = (await client.get("/api/mobile/memoir/voice-transcripts", params={**params, "offset": offset})).json()
+        assert page["total"] == 4 and page["empty_count"] == 3
+        assert len(page["items"]) == 1 and page["items"][0]["transcription_status"] != "empty"
+        seen.append(page["items"][0]["id"])
+    assert len(set(seen)) == 4 and {first["utterance_id"], second["utterance_id"]} <= set(seen)
+    expanded = (await client.get("/api/mobile/memoir/voice-transcripts", params={**params, "include_empty": "true", "limit": 30})).json()
+    assert expanded["total"] == 7 and expanded["empty_count"] == 3
+    assert all(item["can_recover_transcription"] for item in expanded["items"] if item["transcription_status"] == "empty")
+    ready = (await client.get("/api/mobile/memoir/voice-transcripts", params={**params, "ready_only": "true"})).json()
+    assert ready["total"] == 2 and ready["empty_count"] == 0
+
+
+async def test_empty_audio_recovery_retains_framework_without_moving_current_interview(client, test_db, tmp_path, monkeypatch):
+    from app.domain.memoir.types import MemoirTranscriptionStatus
+    from app.models.memoir import MemoirVoiceSession
+    from app.services.memoir.narrative import frameworks
+    from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
+    from app.services.memoir.voice_transcript_recovery import _load_recoverable_utterance, _apply_recovered_transcript
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    story = await create_test_voice_transcript(client, test_db, "小时候和姐姐一起走路上学。")
+    session = await test_db.get(MemoirVoiceSession, story["session"]["id"])
+    framework = await frameworks.initialize_project_framework(test_db, project_id=session.project_id)
+    original_id, current_id = framework.items[0].id, framework.items[1].id
+    session.guidance_mode = "guided_interview"
+    session.anchor_framework_item_id = original_id
+    await test_db.commit()
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    service = VoiceFinalPersistenceService(db=test_db, voice_session_id=session.id, user_id=user_id)
+    saved = await service.persist_unfinalized_audio(audio=b"\0" * 640, transcription_status=MemoirTranscriptionStatus.EMPTY)
+    session.anchor_framework_item_id = current_id
+    await test_db.commit()
+    utterance = await _load_recoverable_utterance(test_db, saved.utterance_id, user_id, allow_admin=False)
+    await _apply_recovered_transcript(test_db, utterance, StreamingASREvent(type="final", text="每天走三里路才到学校。", raw={}),
+        provider="offline-replay", transcript_polish_level="medium")
+    assert utterance.framework_item_id == original_id
+    assert session.anchor_framework_item_id == current_id

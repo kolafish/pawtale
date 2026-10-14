@@ -961,3 +961,40 @@ test(`no-text recovery keeps original audio recoverable: ${status}`, async () =>
   delete global.wx;
 });
 }
+
+
+test("empty recordings fold before pagination and can be expanded, recovered and folded again", async () => {
+  const story = sampleTranscript("story");
+  const quiet = { ...sampleTranscript("quiet"), transcript_raw: "", display_text: "", transcription_status: "empty",
+    summary_title: "未检测到清晰说话声", summary_text: "原录音已保留，可以试听或重新识别。", can_recover_transcription: true };
+  let recovered = false;
+  const requests = [];
+  const { page } = loadTranscriptsPage({
+    authExports: { getMemoirIdentity: async () => ({ active_project_id: "project-1", projects: [] }) },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async options => {
+        requests.push(options);
+        const items = options.includeEmpty || recovered ? [recovered ? story : quiet, story] : [story];
+        return { items, total: items.length, empty_count: recovered ? 0 : 1, offset: 0, limit: 30 };
+      },
+      recoverMemoirVoiceTranscript: async () => { recovered = true; return {...story, id: "quiet", transcription_status: "ready", can_recover_transcription: false}; },
+    },
+  });
+  const context = pageContext(page);
+  global.wx = {showToast: () => {}};
+  try {
+    await context.loadTranscripts(true);
+    assert.equal(requests[0].includeEmpty, false);
+    assert.equal(context.data.emptyCount, 1);
+    assert.deepEqual(context.data.items.map(item => item.id), ["story"]);
+    await context.toggleEmptyRecordings();
+    assert.equal(requests.at(-1).offset, 0);
+    assert.equal(context.data.items[0].id, "quiet");
+    assert.equal(context.data.items[0].summaryTitleText, quiet.summary_title);
+    await context.recoverTranscript({currentTarget: {dataset: {id: "quiet"}}});
+    assert.equal(context.data.emptyCount, 0);
+    assert.equal(context.data.items[0].transcriptionStatus, "ready");
+    await context.toggleEmptyRecordings();
+    assert.equal(requests.at(-1).includeEmpty, false);
+  } finally { delete global.wx; }
+});
