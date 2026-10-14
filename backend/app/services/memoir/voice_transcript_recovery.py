@@ -17,6 +17,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirSpeakerRole,
     MemoirTranscriptVersionType,
+    MemoirTranscriptionStatus,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
@@ -49,6 +50,11 @@ ASR_RECOVERY_PCM_SEGMENT_BYTES = (
     * ASR_RECOVERY_PCM_SEGMENT_SECONDS
 )
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
+
+
+class ASRNoTextError(HTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=422, detail="没有识别到这段录音的文字")
 
 
 async def recover_voice_transcript_from_audio(
@@ -85,6 +91,8 @@ async def recover_voice_transcript_from_audio(
             path,
             asr_client_factory=asr_client_factory,
         )
+    except ASRNoTextError:
+        recovered_event = None
     except Exception as exc:
         await record_volc_streaming_asr_usage(
             audio_duration_seconds=duration_seconds,
@@ -96,6 +104,17 @@ async def recover_voice_transcript_from_audio(
         audio_duration_seconds=duration_seconds,
         status="succeeded",
     )
+    if recovered_event is None:
+        # No text is a completed recognition result, not a perpetually pending
+        # job. Keep uncertain audio available; an ASR error is never silence.
+        await db.refresh(utterance)
+        if not current_utterance_text(utterance):
+            utterance.provider_payload_json = {
+                **(utterance.provider_payload_json or {}),
+                "transcription_status": MemoirTranscriptionStatus.UNRECOGNIZED.value,
+            }
+            await db.commit()
+        return await get_voice_transcript(db, utterance.id, user_id, allow_admin=allow_admin)
     await _apply_recovered_transcript(
         db,
         utterance,
@@ -135,10 +154,8 @@ async def transcribe_audio_path_for_recovery(
                 byte_count=byte_count,
                 asr_client_factory=asr_client_factory,
             )
-        except HTTPException as exc:
-            if exc.status_code == 422:
-                continue
-            raise
+        except ASRNoTextError:
+            continue
         recovered_events.append(
             _offset_segment_event(
                 segment_event,
@@ -149,7 +166,7 @@ async def transcribe_audio_path_for_recovery(
         )
 
     if not recovered_events:
-        raise HTTPException(status_code=422, detail="没有识别到这段录音的文字")
+        raise ASRNoTextError()
     return _merge_segment_events(recovered_events)
 
 
@@ -206,7 +223,7 @@ async def _transcribe_audio_segment_for_recovery(
 
     recovered_event = final_events[-1] if final_events else latest_text_event
     if recovered_event is None or not (recovered_event.text or "").strip():
-        raise HTTPException(status_code=422, detail="没有识别到这段录音的文字")
+        raise ASRNoTextError()
     return recovered_event
 
 
@@ -322,7 +339,7 @@ async def _apply_recovered_transcript(
 ) -> None:
     content = (event.text or "").strip()
     if not content:
-        raise HTTPException(status_code=422, detail="没有识别到这段录音的文字")
+        raise ASRNoTextError()
 
     voice_session = utterance.voice_session
     transcript_version = MemoirTranscriptVersion(

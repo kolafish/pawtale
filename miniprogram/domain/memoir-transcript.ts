@@ -65,7 +65,7 @@ export interface MemoirVoiceTranscriptItem {
   summary_title: string;
   summary_text: string;
   summary_source: string;
-  transcription_status?: string;
+  transcription_status?: "ready" | "pending_transcription" | "unrecognized" | "empty";
   can_recover_transcription?: boolean;
   raw_char_count: number;
   edited_char_count: number;

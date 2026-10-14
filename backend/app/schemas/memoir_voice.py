@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirShareVideoJobStatus,
     MemoirShareVideoCandidateStatus,
     MemoirTranscriptPolishLevel,
+    MemoirTranscriptionStatus,
     MemoirVoiceSessionStatus,
 )
 from app.schemas.memoir_automation import (
@@ -384,7 +385,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     summary_title: str = ""
     summary_text: str = ""
     summary_source: str = "fallback"
-    transcription_status: str = "ready"
+    transcription_status: MemoirTranscriptionStatus = MemoirTranscriptionStatus.READY
     can_recover_transcription: bool = False
     raw_char_count: int
     edited_char_count: int

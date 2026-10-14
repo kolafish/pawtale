@@ -35,6 +35,7 @@ TurnStartHandler = Callable[["VoiceGatewayTurnContext"], Awaitable[None]]
 VoiceGatewayStopReason = Literal["client_stop", "transport_closed", "terminal_error"]
 SessionStopHandler = Callable[[str | None, VoiceGatewayStopReason], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
+AudioEndHandler = Callable[[bool | None], Awaitable[None]]
 AudioAuthorizationHandler = Callable[[], Awaitable[bool]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
@@ -80,6 +81,7 @@ class VoiceGatewaySession:
         on_turn_start: TurnStartHandler | None = None,
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
+        on_audio_end: AudioEndHandler | None = None,
         authorize_audio: AudioAuthorizationHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
         text_normalizer: TextNormalizer = _identity_text,
@@ -96,6 +98,7 @@ class VoiceGatewaySession:
         self.on_turn_start = on_turn_start
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
+        self.on_audio_end = on_audio_end
         self.authorize_audio = authorize_audio
         self.on_asr_final = on_asr_final
         self.text_normalizer = text_normalizer
@@ -206,7 +209,8 @@ class VoiceGatewaySession:
             await self._send_audio_frame(message)
             return False
         if message_type == "audio.end":
-            await self._finish_audio()
+            detected = message.get("speech_detected")
+            await self._finish_audio(detected if isinstance(detected, bool) else None)
             return self._terminal_error is not None
         if message_type == "session.stop":
             if self._state == VoiceGatewayState.LISTENING and self._terminal_error is None:
@@ -355,7 +359,7 @@ class VoiceGatewaySession:
         if self.authorize_audio and not await self.authorize_audio():
             raise VoiceGatewayClientError("voice_authorization_revoked")
 
-    async def _finish_audio(self) -> None:
+    async def _finish_audio(self, speech_detected: bool | None = None) -> None:
         if self._state == VoiceGatewayState.READY and self._asr_client is None:
             return
         if self._state != VoiceGatewayState.LISTENING or self._asr_client is None:
@@ -367,6 +371,10 @@ class VoiceGatewaySession:
         await self._drain_asr_events()
         if self._terminal_error is None:
             await self._persist_pending_final_event()
+        if self._terminal_error is None and self.on_audio_end:
+            # Only a normally drained provider can resolve an empty turn. On
+            # disconnect/error the stop handler preserves recoverable audio.
+            await self.on_audio_end(speech_detected)
         if self._terminal_error is None:
             self._state = VoiceGatewayState.READY
             self._log_diagnostic("audio.ended")
@@ -477,7 +485,7 @@ class VoiceGatewaySession:
         await self.client.send_json(payload)
 
     def _final_event_for_persistence(self) -> StreamingASREvent | None:
-        if self._pending_final_event is not None:
+        if self._pending_final_event is not None and self._pending_final_event.text.strip():
             return self._pending_final_event
         if self._latest_text_event is None:
             return None

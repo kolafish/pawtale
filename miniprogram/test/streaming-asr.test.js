@@ -1473,6 +1473,7 @@ test("streaming ASR waits for voice before auto-stopping after silence", async (
     "audio.frame",
     "audio.end",
   ]);
+  assert.equal(sent.at(-1).speech_detected, true);
   delete global.wx;
 });
 
@@ -1562,6 +1563,7 @@ test("streaming ASR auto-stops auto-listen when no voice answers", async () => {
     "audio.frame",
     "audio.end",
   ]);
+  assert.equal(sent.at(-1).speech_detected, false);
   delete global.wx;
 });
 

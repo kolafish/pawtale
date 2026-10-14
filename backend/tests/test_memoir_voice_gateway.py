@@ -77,6 +77,24 @@ def test_voice_gateway_validates_transcript_polish_level():
         )
 
 
+async def test_completed_empty_turn_reports_activity_only_after_provider_drain():
+    from unittest.mock import AsyncMock
+    asr = PartialOnlyStreamingASRClient([])
+    end = AsyncMock()
+    session = VoiceGatewaySession(client=FakeGatewayClient(), asr_client_factory=lambda: asr, on_audio_end=end)
+    await session._handle_client_message({"type": "session.start"})
+    await session._handle_client_message({"type": "audio.end", "speech_detected": False})
+    end.assert_awaited_once_with(False)
+    assert asr.finished
+
+
+def test_empty_final_does_not_discard_preceding_recognized_speech():
+    session = VoiceGatewaySession(client=FakeGatewayClient(), asr_client_factory=lambda: FakeStreamingASRClient())
+    session._latest_text_event = StreamingASREvent(type="partial", text="母亲背我上山。")
+    session._pending_final_event = StreamingASREvent(type="final", text="")
+    assert session._final_event_for_persistence().text == "母亲背我上山。"
+
+
 async def test_voice_gateway_stops_before_recording_when_consent_is_revoked():
     client = FakeGatewayClient()
 
@@ -879,6 +897,9 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
             return None
 
         async def record_audio_frame(self, _audio: bytes) -> None:
+            return None
+
+        async def finish_audio(self, _speech_detected: bool | None) -> None:
             return None
 
         async def persist_final(self, _event: StreamingASREvent) -> dict[str, Any]:

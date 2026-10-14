@@ -54,6 +54,13 @@ class MemoirChatContentStatus(str, Enum):
     CORRECTED = "corrected"
 
 
+class MemoirTranscriptionStatus(str, Enum):
+    READY = "ready"
+    PENDING = "pending_transcription"
+    UNRECOGNIZED = "unrecognized"
+    EMPTY = "empty"
+
+
 class MemoirTranscriptVersionType(str, Enum):
     ASR_RAW = "asr_raw"
     DIALECT_CORRECTED = "dialect_corrected"

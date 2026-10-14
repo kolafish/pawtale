@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirInterviewType,
     MemoirSpeakerRole,
+    MemoirTranscriptionStatus,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
@@ -274,6 +275,7 @@ class VoiceFinalPersistenceService:
         *,
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
         speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
+        transcription_status: MemoirTranscriptionStatus = MemoirTranscriptionStatus.PENDING,
     ) -> VoiceFinalPersistenceResult | None:
         if not audio and staged_audio is None:
             return None
@@ -298,11 +300,12 @@ class VoiceFinalPersistenceService:
                 provider_payload_json={
                     "source": "unfinalized_audio",
                     "speaker_role": normalized_speaker_role,
+                    **({"transcription_status": transcription_status.value} if transcription_status != MemoirTranscriptionStatus.PENDING else {}),
                 },
             )
             self.db.add(utterance)
             await self.db.flush()
-            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
+            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value and transcription_status != MemoirTranscriptionStatus.EMPTY:
                 await _assign_interview_target(
                     self.db,
                     voice_session=voice_session,

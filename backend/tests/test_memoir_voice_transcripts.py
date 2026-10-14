@@ -2241,6 +2241,53 @@ async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
     assert detail["can_recover_transcription"] is True
 
 
+@pytest.mark.parametrize("speech_detected,expected,visible", [(False, "empty", False), (True, "unrecognized", True), (None, "unrecognized", True)])
+async def test_normal_empty_turn_has_terminal_outcome_and_cannot_replace_home_story(client, test_db, tmp_path, monkeypatch, speech_detected, expected, visible):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    story = await create_test_voice_transcript(client, test_db, "小时候母亲背我上山。")
+    user = (await client.get("/api/auth/me")).json()
+    persistence = VoiceGatewayPersistence(db=test_db, voice_session_id=story["session"]["id"], user_id=user["id"])
+    await persistence.record_audio_frame(b"\0" * 32000)
+    await persistence.finish_audio(speech_detected)
+    assert persistence.pending_audio_size_bytes == 0
+    utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(
+        MemoirVoiceUtterance.voice_session_id == story["session"]["id"], MemoirVoiceUtterance.transcript_raw == "",
+    ))
+    assert utterance.audio_file_id  # Preserve the original audio even for a silent turn.
+    detail = (await client.get(f"/api/mobile/memoir/voice-transcripts/{utterance.id}")).json()
+    assert detail["transcription_status"] == expected
+    assert detail["can_recover_transcription"] == visible
+    listing = (await client.get("/api/mobile/memoir/voice-transcripts")).json()
+    assert (utterance.id in {item["id"] for item in listing["items"]}) == visible
+    ready = (await client.get("/api/mobile/memoir/voice-transcripts?ready_only=true")).json()
+    assert [item["id"] for item in ready["items"]] == [story["utterance_id"]]
+    for endpoint in ("home-snapshot", "story-snapshot"):
+        snapshot = (await client.get(f"/api/mobile/memoir/{endpoint}")).json()
+        assert snapshot["latest_transcript"]["id"] == story["utterance_id"]
+
+
+@pytest.mark.parametrize("provider_failure", [False, True])
+async def test_recovery_empty_result_is_resolved_but_provider_failure_remains_recoverable(client, test_db, tmp_path, monkeypatch, provider_failure):
+    from fastapi import HTTPException
+    from app.services.memoir.voice_transcript_recovery import ASRNoTextError
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.assert_ai_credit_available", AsyncMock())
+    monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.record_volc_streaming_asr_usage", AsyncMock())
+    monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.transcribe_audio_path_for_recovery", AsyncMock(
+        side_effect=HTTPException(status_code=504, detail="timeout") if provider_failure else ASRNoTextError(),
+    ))
+    user = (await client.get("/api/auth/me")).json()
+    session = (await post_mobile_memoir_voice_session(client, json={"guidance_mode": "free_narration"})).json()["session"]
+    persistence = VoiceGatewayPersistence(db=test_db, voice_session_id=session["id"], user_id=user["id"])
+    await persistence.record_audio_frame(b"\0" * 32000)
+    saved = await persistence.flush_unfinalized_audio()
+    result = await client.post(f"/api/mobile/memoir/voice-transcripts/{saved['utterance_id']}/recover-transcription", json={})
+    assert result.status_code == (504 if provider_failure else 200)
+    current = (await client.get(f"/api/mobile/memoir/voice-transcripts/{saved['utterance_id']}")).json()
+    assert current["transcription_status"] == ("pending_transcription" if provider_failure else "unrecognized")
+    assert current["audio_file_id"] == saved["audio_file_id"] and current["can_recover_transcription"]
+
+
 async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     client,
     test_db,

@@ -56,6 +56,7 @@ async def home_snapshot(
         user.id,
         project_id=project.id,
         limit=1,
+        ready_only=True,
     )
     return MemoirHomeSnapshotResponse(
         server_revision=await project_data_revision(db, project),

@@ -249,7 +249,7 @@ export type VoiceGatewayClientEvent =
   | { type: "barge_in.start" | "barge_in.stop"; monitor_id: string }
   | { type: "barge_in.frame"; monitor_id: string; audio: string }
   | { type: "audio.frame"; audio: string }
-  | { type: "audio.end" }
+  | { type: "audio.end"; speech_detected?: boolean }
   | { type: "session.stop" };
 
 export interface VoiceGatewayServerEvent {
