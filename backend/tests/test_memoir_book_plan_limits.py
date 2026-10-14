@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +15,70 @@ from app.schemas.memoir_book import (
 from app.services.memoir.book_plan_ai import build_plan_prompt, chapters_from_payload
 from app.services.memoir.book_plan_sources import SourceSegment
 from app.services.memoir.sections import sync_materials_to_chapters
+from tests.test_memoir_section_organization import FakeStoryGrowthAI
+
+
+class ReplayPlanAI(FakeStoryGrowthAI):
+    def __init__(self, responses):
+        super().__init__({})
+        self.responses = iter(responses)
+
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.calls += 1
+        response = next(self.responses)
+        return json.dumps(response, ensure_ascii=False) if isinstance(response, dict) else response
+
+
+def _plan_sources(count):
+    return [SourceSegment(i, "session", f"message-{i}", f"utterance-{i}", None, None, None, None,
+        "小时候奶奶背我赶集。", datetime(2026, 10, 14)) for i in range(1, count + 1)]
+
+
+TRUNCATED_PLAN = ('{"chapters":[{"title":"未完成",', {"choices": [{"finish_reason": "length"}]})
+
+
+@pytest.mark.parametrize("count", [32, 128, 256])
+@pytest.mark.parametrize("last_truncated", [False, True])
+async def test_plan_recovery_retains_best_complete_attempt_within_existing_budget(count, last_truncated):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    better = {"chapters": [{"title": "童年", "source_indices": list(range(1, count))}]}
+    worse = {"chapters": [{"title": "回家", "source_indices": [count]}]}
+    fake = ReplayPlanAI([better, TRUNCATED_PLAN if last_truncated else worse])
+    result = await generate_book_plan_from_sources(project_title="我的回忆录", sources=_plan_sources(count),
+        interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert fake.calls == 2
+    assert [chapter.title for chapter in result.chapters] == ["童年"]
+    assert [ref.utterance_id for chapter in result.chapters for ref in chapter.source_refs] == [f"utterance-{i}" for i in range(1, count)]
+    assert result.not_story_sources == ()  # Never union unrelated attempts or classify omitted sources.
+
+
+@pytest.mark.parametrize("nonstory", [False, True])
+async def test_repeated_source_in_same_destination_is_not_a_conflict(nonstory):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    payload = {"chapters": [], "not_story_source_indices": [1, 1, 2]} if nonstory else {
+        "chapters": [{"title": "童年", "source_indices": [1, 1, 2]}]}
+    fake = ReplayPlanAI([payload])
+    result = await generate_book_plan_from_sources(project_title="我的回忆录", sources=_plan_sources(2),
+        interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert fake.calls == 1
+    assert len(result.chapters) == (0 if nonstory else 1)
+    assert len(result.not_story_sources) == (2 if nonstory else 0)
+    if not nonstory:
+        assert len(result.chapters[0].source_refs) == 2
+
+
+@pytest.mark.parametrize("responses", [
+    [TRUNCATED_PLAN, TRUNCATED_PLAN],
+    [{"chapters": [], "not_story_source_indices": [1, 1]}, TRUNCATED_PLAN],
+])
+async def test_plan_recovery_without_usable_complete_candidate_still_fails(responses):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    fake = ReplayPlanAI(responses)
+    with pytest.raises(HTTPException) as error:
+        await generate_book_plan_from_sources(project_title="我的回忆录", sources=_plan_sources(2),
+            interviewer_lines={}, ai_model=None, ai_client=fake)
+    assert error.value.status_code == 503
+    assert fake.calls == 2
 
 
 @pytest.mark.parametrize("payload", [
