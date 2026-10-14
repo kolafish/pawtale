@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
 from app.schemas.memoir_book import MemoirBookLevelEditorialCopyTarget, MemoirBookManuscriptQuote
-from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes, current_original_quote
+from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes, original_quote_candidates
 from app.services.memoir.book_output_manuscript import stored_manuscript_metadata
 from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -155,11 +155,12 @@ AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
 def chapter_editorial_copy_signature(snapshot: dict[str, object]) -> str:
     # Copy describes the current body; audit metadata and stale source summaries
     # are not evidence. Original quotations must also occur in their own section.
+    candidates = original_quote_candidates(snapshot, max_chars=90)
     return semantic_json_signature({
         "editorial_evidence_version": 2,
         **{key: snapshot.get(key) for key in ("chapter_title", "content")},
         "original_quotes": [
-            (source.get("utterance_id"), current_original_quote(snapshot, source, max_chars=90))
+            (source.get("utterance_id"), max(candidates.get(source.get("utterance_id"), ()), key=len, default=""))
             for source in snapshot.get("source_refs", []) if isinstance(source, dict)
         ],
     })
@@ -176,6 +177,9 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
     def refs(value):
         return {item["utterance_id"]: item for item in value.get("source_refs", []) if isinstance(item, dict)}
     old_refs, new_refs = refs(stored), refs(snapshot)
+    candidates = original_quote_candidates(snapshot, max_chars=max(
+        (len(str(ref.get("quote") or "")) for ref in new_refs.values()), default=0,
+    ))
     quotes = [MemoirBookManuscriptQuote.model_validate(value) for value in repair_original_pull_quotes(stored)]
     retained = []
     for quote in quotes:
@@ -188,8 +192,7 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
         ):
             continue
         if quote.source == "original_quote" and (not quote.source_ref_ids or not all(
-            quote.text in current_original_quote(snapshot, new_refs[source_id],
-                max_chars=len(str(new_refs[source_id].get("quote") or "")))
+            any(quote.text in candidate for candidate in candidates.get(source_id, ()))
             for source_id in quote.source_ref_ids
         )):
             continue

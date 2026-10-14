@@ -371,14 +371,14 @@ async def test_copy_failure_is_retryable_without_rewriting_ready_chapters(client
 ])
 def test_corrected_body_controls_copy_and_original_quotes(body, expected):
     from app.services.memoir.book_manuscript_ai import build_manuscript_copy_prompt, _copy_from_payload
-    from app.services.memoir.book_manuscript_cleanup import current_original_quote
+    from app.services.memoir.book_manuscript_cleanup import original_quote_candidates
     from app.services.memoir.book_output_versions import retained_chapter_quotes
     source = "我十五岁那年发过洪水。爹挑着我们上山。"
     ref = {"utterance_id": "u1", "quote": source}
     snapshot = {"chapter_id": "c1", "chapter_title": "洪水", "content": body,
                 "chapter_summary": source, "source_refs": [{**ref, "summary": source}],
                 "sections": [{"section_id": "s1", "content": body, "used_material_ids": ["u1"]}]}
-    assert current_original_quote(snapshot, ref, max_chars=90) == expected
+    assert original_quote_candidates(snapshot, max_chars=90)["u1"] == ((expected,) if expected else ())
     prompt = build_manuscript_copy_prompt(title="往事", snapshot=[snapshot])
     # Old summaries and recordings cannot compete with the corrected body.
     assert source not in prompt
@@ -396,14 +396,15 @@ def test_corrected_body_controls_copy_and_original_quotes(body, expected):
 
 
 def test_quote_cannot_borrow_a_matching_sentence_from_another_material():
-    from app.services.memoir.book_manuscript_cleanup import current_original_quote
+    from app.services.memoir.book_manuscript_cleanup import original_quote_candidates
     source = "十五岁那年我去北京。"
     snapshot = {"content": "五岁那年我去北京。" + source, "sections": [
         {"content": "五岁那年我去北京。", "used_material_ids": ["u1"]},
         {"content": source, "used_material_ids": ["u2"]},
     ]}
-    assert current_original_quote(snapshot, {"utterance_id": "u1", "quote": source}, max_chars=90) == ""
-    assert current_original_quote(snapshot, {"utterance_id": "u2", "quote": source}, max_chars=90) == source
+    snapshot["source_refs"] = [{"utterance_id": key, "quote": source} for key in ("u1", "u2")]
+    assert original_quote_candidates(snapshot, max_chars=90)["u1"] == ()
+    assert original_quote_candidates(snapshot, max_chars=90)["u2"] == (source,)
 
 
 def test_edited_body_fallback_never_restores_old_recording_in_cover_copy():
@@ -414,8 +415,7 @@ def test_edited_body_fallback_never_restores_old_recording_in_cover_copy():
         "chapter_id": "c1", "chapter_title": "洪水", "content": body,
         "source_refs": [{"utterance_id": "u1", "quote": old}],
     }])
-    assert manuscript.chapters[0].pull_quotes[0].text == body
-    assert manuscript.chapters[0].pull_quotes[0].source == "editorial_generated"
+    assert manuscript.chapters[0].pull_quotes == []
     assert old not in manuscript.render_settings.back_cover_quote
 
 

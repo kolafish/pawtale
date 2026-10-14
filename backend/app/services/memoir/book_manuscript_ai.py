@@ -20,7 +20,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir.book_manuscript_cleanup import brief_text, current_original_quote
+from app.services.memoir.book_manuscript_cleanup import brief_text, original_quote_candidates, body_excerpt_candidates
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
@@ -141,23 +141,11 @@ def _source_quote_lines(
     chapter: dict[str, object],
     source_refs: ModelReferenceMap,
 ) -> list[str]:
-    raw_refs = chapter.get("source_refs")
-    if not isinstance(raw_refs, list):
-        return []
     lines: list[str] = []
-    for index, raw_ref in enumerate(raw_refs, start=1):
-        if not isinstance(raw_ref, dict):
-            continue
-        utterance_id = _string(raw_ref.get("utterance_id"))
-        quote = current_original_quote(chapter, raw_ref, max_chars=90)
-        if not utterance_id or not quote:
-            continue
-        lines.append(
-            f"- source_ref_id: {source_refs.encode(utterance_id)}; quote: {quote}"
-        )
-        if len(lines) >= 6:
-            break
-    return lines
+    for source_id, candidates in original_quote_candidates(chapter, max_chars=90).items():
+        for quote in candidates:
+            lines.append(f"- source_ref_id: {source_refs.encode(source_id)}; quote: {quote}")
+    return lines[:6]
 
 
 def _chapter_context(
@@ -186,6 +174,8 @@ def _chapter_context(
                     f"source_count: {_int(item.get('source_count'))}",
                     "original_quote_candidates:",
                     *(source_quote_lines or ["- 无"]),
+                    "body_excerpt_candidates（当前正文摘句，不是原话）:",
+                    *(f"- {quote}" for quote in body_excerpt_candidates(content, max_chars=90)[:6]),
                     f"content_excerpt: {_compact_text(content, 420)}",
                 ]
             )
@@ -230,7 +220,7 @@ def build_manuscript_copy_prompt(
     {{
       "chapter_id": "对应 chapter_id",
       "intro": "章节导语",
-      "pull_quote": "从本章 original_quote_candidates 中选择的原始口述句",
+      "pull_quote": "从本章原话候选或正文摘句中逐字选择的句子",
       "pull_quote_source_ref_id": "对应 source_ref_id"
     }}
   ],
@@ -245,9 +235,9 @@ def build_manuscript_copy_prompt(
 - preface 最多 220 个汉字，不设最低字数，素材短就简短，语气安静、可信、像书，不要直接套书名或项目名，不要出现“主题回忆录”“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
 - afterword 最多 160 个汉字，不设最低字数，偏家人保存、后续补充和记忆延续，不要写空泛祝福语，不要像模板。
 - 每个 chapter_intro 最多 90 个汉字，不设最低字数，像书籍章节导语，用具体画面把读者带进正文；不要解释章节功能，不要写“这一章主要记录”“从口述内容看”“相关的回忆”“本章讲述”等系统摘要句。
-- 每个 pull_quote 必须逐字来自对应章节 original_quote_candidates 的 quote，可只取其中一个完整短句；候选已核对当前正文。没有候选时留空，不把正文改写成原话，不编金句。
-- pull_quote_source_ref_id 必须来自对应章节 original_quote_candidates 的 source_ref_id。
-- back_cover_quote 控制在 15 到 45 个汉字，优先从全书 original_quote_candidates 中选择真实短句；不要用公共格言、励志句或“凡是过往皆是序章”这类非本人原话。
+- 每个 pull_quote 必须逐字来自对应章节 original_quote_candidates 的 quote，可只取其中一个完整短句；候选已核对当前正文。没有原话候选时可从 body_excerpt_candidates 逐字选正文摘句，pull_quote_source_ref_id 留空；两者都没有时留空。不改写、不编金句。
+- 原话的 pull_quote_source_ref_id 必须来自对应章节 original_quote_candidates 的 source_ref_id；正文摘句不得填写来源编号。
+- back_cover_quote 控制在 15 到 45 个汉字，优先从全书 original_quote_candidates 中选择真实短句，也可逐字选 body_excerpt_candidates；不要用公共格言、励志句或“凡是过往皆是序章”这类非本人原话。
 
 章节材料：
 {chapters}
@@ -334,24 +324,9 @@ def _clean_title(value: object) -> str:
     return title[:32]
 
 
-def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str, dict[str, str]]:
-    result: dict[str, dict[str, str]] = {}
-    for item in snapshot:
-        chapter_id = _string(item.get("chapter_id"))
-        if not chapter_id:
-            continue
-        candidates: dict[str, str] = {}
-        raw_refs = item.get("source_refs")
-        if isinstance(raw_refs, list):
-            for raw_ref in raw_refs:
-                if not isinstance(raw_ref, dict):
-                    continue
-                utterance_id = _string(raw_ref.get("utterance_id"))
-                quote = current_original_quote(item, raw_ref, max_chars=90)
-                if utterance_id and quote:
-                    candidates[utterance_id] = quote
-        result[chapter_id] = candidates
-    return result
+def _quote_candidates_by_chapter(snapshot: list[dict[str, object]]) -> dict[str, dict[str, tuple[str, ...]]]:
+    return {_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90)
+            for item in snapshot if _string(item.get("chapter_id"))}
 
 
 def _validated_original_quote(
@@ -359,38 +334,35 @@ def _validated_original_quote(
     chapter_id: str,
     value: object,
     source_ref_id: object,
-    quote_candidates: dict[str, dict[str, str]],
+    quote_candidates: dict[str, dict[str, tuple[str, ...]]],
 ) -> tuple[str, str]:
     quote = _clean_copy_text(brief_text(_string(value), max_chars=90), max_chars=90).strip("“”\"'「」")
     candidate_by_source = quote_candidates.get(chapter_id, {})
     source_id = _string(source_ref_id)
-    if source_id and source_id in candidate_by_source:
-        source_quote = candidate_by_source[source_id]
-        if not quote:
-            return source_quote, source_id
-        if quote in source_quote:
-            return quote, source_id
-        if source_quote in quote and len(source_quote) >= 8:
-            return source_quote, source_id
-        return "", ""
-    for candidate_source_id, source_quote in candidate_by_source.items():
-        if quote and quote in source_quote:
-            return quote, candidate_source_id
-        if quote and source_quote in quote and len(source_quote) >= 8:
-            return source_quote, candidate_source_id
+    if source_id:
+        candidate_by_source = {source_id: candidate_by_source.get(source_id, ())}
+    for candidate_source_id, candidates in candidate_by_source.items():
+        for source_quote in candidates:
+            if not quote and source_id:
+                return source_quote, candidate_source_id
+            if quote and quote in source_quote:
+                return quote, candidate_source_id
+            if quote and source_quote in quote and len(source_quote) >= 8:
+                return source_quote, candidate_source_id
     return "", ""
 
 
-def _validated_back_cover_quote(value: object, quote_candidates: dict[str, dict[str, str]]) -> str:
+def _validated_back_cover_quote(value: object, quote_candidates: dict[str, dict[str, tuple[str, ...]]]) -> str:
     quote = _clean_copy_text(brief_text(_string(value), max_chars=60), max_chars=60).strip("“”\"'「」")
     if not quote:
         return ""
     for candidate_by_source in quote_candidates.values():
-        for source_quote in candidate_by_source.values():
-            if quote in source_quote:
-                return quote
-            if source_quote in quote and len(source_quote) >= 8:
-                return source_quote
+        for candidates in candidate_by_source.values():
+            for source_quote in candidates:
+                if quote in source_quote:
+                    return quote
+                if source_quote in quote and len(source_quote) >= 8:
+                    return source_quote
     return ""
 
 
@@ -404,6 +376,8 @@ def _copy_from_payload(
     if not isinstance(payload, dict):
         return None
     quote_candidates = _quote_candidates_by_chapter(snapshot)
+    excerpts = {_string(item.get("chapter_id")): body_excerpt_candidates(_string(item.get("content")), max_chars=90)
+                for item in snapshot}
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     raw_intros = payload.get("chapter_intros")
     chapter_intros: list[GeneratedChapterIntro] = []
@@ -431,7 +405,13 @@ def _copy_from_payload(
                 source_ref_id=source_ref,
                 quote_candidates=quote_candidates,
             )
-            if chapter_id and (intro or pull_quote):
+            if not pull_quote and not source_ref:
+                excerpt = _string(raw_intro.get("pull_quote"))
+                if excerpt in excerpts.get(chapter_id, ()):
+                    pull_quote = excerpt
+            valid_empty_quote = (raw_intro.get("pull_quote") == ""
+                and not any(quote_candidates.get(chapter_id, {}).values()) and not excerpts.get(chapter_id))
+            if chapter_id and (intro or pull_quote or valid_empty_quote):
                 chapter_intros.append(
                     GeneratedChapterIntro(
                         chapter_id=chapter_id,
@@ -446,7 +426,9 @@ def _copy_from_payload(
         preface=_clean_copy_text(payload.get("preface"), max_chars=260),
         afterword=_clean_copy_text(payload.get("afterword"), max_chars=320),
         chapter_intros=chapter_intros,
-        back_cover_quote=_validated_back_cover_quote(payload.get("back_cover_quote"), quote_candidates),
+        back_cover_quote=_validated_back_cover_quote(payload.get("back_cover_quote"), {
+            **quote_candidates, "body_excerpts": excerpts,
+        }),
         model=model,
         prompt=prompt,
     )

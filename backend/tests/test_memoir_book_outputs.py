@@ -652,7 +652,7 @@ async def test_release_quote_normal_assembly_repairs_reused_original_only(client
     quotes = current.manuscript_json["chapters"][0]["pull_quotes"]
     assert [quote["text"] for quote in quotes] == [old_quote]
     assert [quote["source"] for quote in quotes] == ["manual"]
-    assert current.manuscript_json["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert current.manuscript_json["render_settings"]["back_cover_quote"] == "正常整理发布测试说明。"
     assert previous.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == old_quote
 
 
@@ -832,15 +832,13 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert manuscript["chapters"][0]["intro"].startswith("记忆先回到外婆家的童年")
     assert "这一章主要记录" not in manuscript["chapters"][0]["intro"]
     assert "从口述内容看" not in manuscript["chapters"][0]["intro"]
-    assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert manuscript["chapters"][0]["pull_quotes"] == []
     assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
     assert manuscript["back_matter"]["interview_records"]["title"] == "口述片段"
     assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
     assert manuscript["back_matter"]["source_appendix"]["title"] == "口述片段"
     assert "第1章「外婆家的童年」：1 条口述片段" in manuscript["back_matter"]["source_appendix"]["content"]
-    assert manuscript["render_settings"]["back_cover_quote"] == (
-        "我小时候常在外婆家的院子里晒太阳。"
-    )
+    assert manuscript["render_settings"]["back_cover_quote"] != "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["render_settings"]["page_size"] == "a5"
 
     version_response = await client.get(
@@ -1321,18 +1319,10 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     assert response.status_code == 200
     manuscript = response.json()["latest_version"]["manuscript"]
     assert manuscript["back_matter"]["afterword"]["content"].startswith("这一次先把已经讲出来的童年")
-    assert manuscript["render_settings"]["back_cover_quote"] == (
-        "我小时候常在外婆家的院子里晒太阳。"
-    )
+    assert manuscript["render_settings"]["back_cover_quote"] != "我小时候常在外婆家的院子里晒太阳。"
     first_chapter = manuscript["chapters"][0]
     assert first_chapter["intro"] == "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"
-    assert first_chapter["pull_quotes"] == [
-        {
-            "text": "我小时候常在外婆家的院子里晒太阳。",
-            "source_ref_ids": [],
-            "source": "editorial_generated",
-        }
-    ]
+    assert first_chapter["pull_quotes"] == []
     assert "本次生成目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
     assert "用户本次反馈：更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
     assert "这一章写外婆家的院子和童年生活。" not in fake_ai.calls[0]["user_prompt"]
@@ -1427,13 +1417,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
         .order_by(MemoirBookOutputVersion.version.desc())
     )
     assert event.metadata_json["result_version_id"] == version.id
-    assert version.manuscript_json["chapters"][0]["pull_quotes"] == [
-        {
-            "text": "我小时候常在外婆家的院子里晒太阳。",
-            "source_ref_ids": [],
-            "source": "editorial_generated",
-        }
-    ]
+    assert version.manuscript_json["chapters"][0]["pull_quotes"] == []
     assert "本次生成目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]
     assert "用户本次反馈：只换章首引语" in fake_ai.calls[0]["user_prompt"]
 
@@ -2093,3 +2077,51 @@ async def test_project_deletion_waits_for_export_and_removes_the_pdf_cache(clien
         await book_outputs.export_book_output_file(prepared)
     assert error.value.status_code == 404
     assert not (content_storage.PROJECTS_DIR / project_id).exists()
+
+
+def test_retains_shorter_valid_original_quote_after_another_sentence_changes():
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+    ref = {"utterance_id": "u", "quote": "我很高兴。那年我十五岁。我一直记得师傅教我修车的日子。"}
+    stored = {"source_refs": [ref], "pull_quotes": [
+        {"text": "我很高兴。", "source": "original_quote", "source_ref_ids": ["u"]}]}
+    current = {"source_refs": [ref], "content": "我很高兴。那年我十六岁。我一直记得师傅教我修车的日子。"}
+    assert [item.text for item in retained_chapter_quotes(stored, current)] == ["我很高兴。"]
+
+
+def test_polished_prose_falls_back_to_a_distinct_body_excerpt():
+    snapshot = [{"chapter_id": "c", "chapter_title": "往事", "chapter_index": 1,
+        "content": "那一天，我非常高兴。我始终记得师傅教我修车的那些日子。",
+        "source_refs": [{"utterance_id": "u", "quote": "那天我很高兴。我一直记得师傅教我修车的日子。"}]}]
+    manuscript = manuscript_from_snapshot(title="往事", content=snapshot[0]["content"], snapshot=snapshot)
+    quote = manuscript.chapters[0].pull_quotes[0]
+    assert quote.text == "我始终记得师傅教我修车的那些日子。"
+    assert quote.source == "editorial_generated"
+    assert quote.source_ref_ids == []
+    snapshot[0]["content"] = "那一天，我非常高兴。"
+    manuscript = manuscript_from_snapshot(title="往事", content=snapshot[0]["content"], snapshot=snapshot)
+    assert manuscript.chapters[0].pull_quotes == []
+
+
+def test_generated_body_excerpt_never_claims_to_be_original_speech():
+    from app.services.memoir.book_manuscript_ai import _copy_from_payload
+    snapshot = [{"chapter_id": "c", "content": "那一天，我非常高兴。我始终记得师傅教我修车的那些日子。",
+        "source_refs": [{"utterance_id": "u", "quote": "那天我很高兴。我一直记得师傅教我修车的日子。"}]}]
+    excerpt = "我始终记得师傅教我修车的那些日子。"
+    payload = {"chapter_intros": [{"chapter_id": "C1", "pull_quote": excerpt,
+        "pull_quote_source_ref_id": ""}], "back_cover_quote": excerpt}
+    result = _copy_from_payload(payload, snapshot=snapshot, prompt="", model="offline")
+    assert result.chapter_intros[0].pull_quote == excerpt
+    assert result.chapter_intros[0].pull_quote_source_ref_id == ""
+    assert result.back_cover_quote == excerpt
+    payload["chapter_intros"][0]["pull_quote_source_ref_id"] = "M1"
+    result = _copy_from_payload(payload, snapshot=snapshot, prompt="", model="offline")
+    assert result.chapter_intros == []
+
+
+def test_no_quote_candidate_is_a_valid_generation_result():
+    from app.services.memoir.book_manuscript_ai import _copy_from_payload
+    result = _copy_from_payload({"chapter_intros": [{"chapter_id": "C1", "pull_quote": ""}]},
+        snapshot=[{"chapter_id": "c", "content": "我五岁那年离开家。", "source_refs": []}],
+        prompt="", model="offline")
+    assert result is not None
+    assert result.chapter_intros[0].pull_quote == ""
