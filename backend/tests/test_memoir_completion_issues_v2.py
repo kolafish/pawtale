@@ -327,3 +327,51 @@ async def test_completion_answer_correction_refreshes_layered_material_version(
             utterance_id=persisted.utterance_id,
             transcript_version_id=materials[0]["transcript_version_id"],
         )
+
+
+@pytest.mark.parametrize("restore_target", [True, False])
+async def test_empty_audio_recovery_keeps_original_question_after_session_moves(client, test_db, tmp_path, monkeypatch, restore_target):
+    from app.domain.memoir.types import MemoirTranscriptionStatus
+    from app.services.memoir import completion_interviews, voice_transcript_recovery
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    project_id, section, materials = await _section(client, test_db)
+    issue = await _completion_issue(test_db, project_id=project_id, chapter_id=section["chapter_id"], material_id=materials[0]["utterance_id"])
+    await test_db.commit()
+    response = await post_mobile_memoir_voice_session(client, project_id=project_id, json={
+        "guidance_mode": "guided_interview", "session_goal": "book_completion", "current_completion_issue_id": issue.id,
+    })
+    session_id = response.json()["session"]["id"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    persistence = VoiceFinalPersistenceService(db=test_db, voice_session_id=session_id, user_id=user_id)
+    saved = await persistence.persist_unfinalized_audio(audio=b"\0" * 32000, transcription_status=MemoirTranscriptionStatus.EMPTY)
+    utterance = await test_db.get(MemoirVoiceUtterance, saved.utterance_id)
+    assert utterance.completion_issue_id == issue.id
+    await test_db.refresh(issue)
+    assert issue.status == "in_progress" and issue.answered_material_id is None
+    session = await test_db.get(MemoirVoiceSession, session_id)
+    await completion_interviews.release_session_issue(test_db, voice_session=session)
+    other = MemoirCompletionIssue(project_id=project_id, scope="chapter", chapter_id=section["chapter_id"],
+        issue_type="meaning", channel="interview", question="后来去了哪里？", reason="补充背景", priority="high",
+        fingerprint=sha256(b"other-question").hexdigest(), input_signature="test-input", related_material_ids_json=[materials[0]["utterance_id"]])
+    test_db.add(other)
+    await test_db.flush()
+    session.current_completion_issue_id = other.id
+    if not restore_target:
+        # Historical EMPTY recordings with no durable target must not attach to today's question.
+        utterance.completion_issue_id = None
+    await test_db.commit()
+    utterance = await voice_transcript_recovery._load_recoverable_utterance(test_db, utterance_id=utterance.id, user_id=user_id, allow_admin=False)
+    await voice_transcript_recovery._apply_recovered_transcript(test_db, utterance,
+        StreamingASREvent(type="final", text="我们已经两年没有见面，那次爬山让大家重新熟悉起来。", raw={}),
+        provider="offline-replay", transcript_polish_level="medium")
+    await test_db.refresh(issue)
+    await test_db.refresh(other)
+    assert other.answered_material_id is None and other.status == "open"
+    assignment = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == utterance.id))
+    if restore_target:
+        assert issue.status == "closed" and issue.outcome == "answered"
+        assert issue.answered_material_id == utterance.id
+        assert assignment.section_id == section["id"]
+    else:
+        assert issue.status == "open" and assignment is None
+    assert utterance.audio_file_id == saved.audio_file_id

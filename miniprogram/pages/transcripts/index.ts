@@ -101,6 +101,8 @@ interface TranscriptsData {
   error: string;
   items: TranscriptItemView[];
   total: number;
+  emptyCount: number;
+  showEmptyRecordings: boolean;
   limit: number;
   offset: number;
   searchInput: string;
@@ -381,8 +383,8 @@ function toViewItem(
     || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
   );
   const recovery = transcriptRecoveryText(item.transcription_status);
-  const summaryTitleText = canRecoverTranscription ? recovery.title : transcriptTitleText(item);
-  const summaryPreviewText = canRecoverTranscription ? recovery.summary : transcriptSummaryPreview(item);
+  const summaryTitleText = transcriptTitleText(item);
+  const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
   const includedChapter = [...(item.included_chapters || [])]
@@ -452,6 +454,8 @@ definePage<TranscriptsData>()({
     error: "",
     items: [],
     total: 0,
+    emptyCount: 0,
+    showEmptyRecordings: false,
     limit: DEFAULT_LIMIT,
     offset: 0,
     searchInput: "",
@@ -524,6 +528,8 @@ definePage<TranscriptsData>()({
           projectTitle: projectTitle || "尚未创建回忆录",
           items: [],
           total: 0,
+          emptyCount: 0,
+          showEmptyRecordings: false,
           offset: 0,
           searchResultText: "",
           hasSearchCriteria,
@@ -531,7 +537,9 @@ definePage<TranscriptsData>()({
         });
         return;
       }
+      const showEmptyRecordings = activeProjectId === this.data.activeProjectId && this.data.showEmptyRecordings;
       const response = await listMemoirVoiceTranscripts({
+          includeEmpty: showEmptyRecordings,
           readyOnly: this.data.pickForVideo,
           projectId: activeProjectId,
           query: searchQuery || undefined,
@@ -551,6 +559,8 @@ definePage<TranscriptsData>()({
         projectTitle,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
+        emptyCount: response.empty_count || 0,
+        showEmptyRecordings,
         offset: offset + nextItems.length,
         searchResultText: hasSearchCriteria ? `找到 ${response.total} 条相关记录` : "",
         hasSearchCriteria,
@@ -574,6 +584,8 @@ definePage<TranscriptsData>()({
           projectTitle: "我的回忆录",
           items: [],
           total: 0,
+          emptyCount: 0,
+          showEmptyRecordings: false,
           offset: 0,
           searchResultText: "",
           hasSearchCriteria: false,
@@ -587,6 +599,15 @@ definePage<TranscriptsData>()({
         setTranscriptsData(this, { loading: false });
       }
     }
+  },
+
+  async toggleEmptyRecordings() {
+    if (this.data.loading || this.data.recoveringId || this.data.pickForVideo) return;
+    setTranscriptsData(this, {
+      showEmptyRecordings: !this.data.showEmptyRecordings,
+      items: [], total: 0, offset: 0, highlightedId: "",
+    });
+    await this.loadTranscripts(true);
   },
 
   async loadMore() {
@@ -814,6 +835,9 @@ definePage<TranscriptsData>()({
       setTranscriptsData(this, {
         items: replaceItem(this.data.items, recovered, this.data.searchQuery),
       });
+      if (item.transcriptionStatus === "empty" && recovered.transcription_status !== "empty") {
+        setTranscriptsData(this, { emptyCount: Math.max(0, this.data.emptyCount - 1) });
+      }
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
       wx.showToast(recovered.transcription_status === "unrecognized"
         ? { title: "没有识别出文字，录音已保留", icon: "none" }
@@ -847,8 +871,10 @@ definePage<TranscriptsData>()({
       return;
     }
     clearTranscriptNavigationTarget();
-    if (this.data.hasSearchCriteria) {
+    if (this.data.hasSearchCriteria || (this.data.emptyCount > 0 && !this.data.showEmptyRecordings
+        && !this.data.items.some((item) => item.id === targetId))) {
       setTranscriptsData(this, {
+        showEmptyRecordings: this.data.hasSearchCriteria || this.data.showEmptyRecordings || this.data.emptyCount > 0,
         searchInput: "",
         searchQuery: "",
         searchFilters: DEFAULT_SEARCH_FILTERS,
