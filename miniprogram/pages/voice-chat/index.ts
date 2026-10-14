@@ -20,7 +20,13 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
   async exitSession({ detail }: VoiceSessionExitEvent) {
     if (detail.destination === "completion_issue") {
       try { await openOfferedCompletionInterview({ ...detail, replacePage: true }); }
-      catch (error) { wx.showToast({ title: error instanceof Error ? error.message : "补充问题暂时不可用", icon: "none" }); }
+      catch (error) {
+        // The original session was already saved and stopped before this handoff.
+        // A created supplement can be resumed from the existing issue list.
+        this.setData({ entry: null });
+        returnToStory(detail.projectId);
+        wx.showToast({ title: error instanceof Error ? error.message : "补充问题暂时不可用", icon: "none" });
+      }
     } else if (detail.destination === "story") {
       returnToStory(detail.projectId, detail.narrationSaved);
     } else if (detail.destination === "transcripts") {

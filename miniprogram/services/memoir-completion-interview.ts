@@ -20,18 +20,26 @@ interface CompletionInterviewOptions {
   chapterId?: string;
 }
 
-function openVoiceChat(voiceSessionId: string, projectTitle: string, replacePage = false) {
-  const options = {
-    url: pageUrl("/pages/voice-chat/index", {
+function openInterviewPage(url: string, replacePage = false): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const options = {
+      url,
+      success: () => resolve(),
+      fail: () => reject(new Error("补充访谈未能打开，可以从书稿补充继续")),
+    };
+    if (replacePage) wx.redirectTo(options);
+    else wx.navigateTo(options);
+  });
+}
+
+function openVoiceChat(voiceSessionId: string, projectTitle: string, replacePage = false): Promise<void> {
+  return openInterviewPage(pageUrl("/pages/voice-chat/index", {
       voiceSessionId,
       mode: "guided_interview",
       interviewType: "ai_interview",
       sessionGoal: "book_completion",
       projectTitle,
-    }),
-  };
-  if (replacePage) wx.redirectTo(options);
-  else wx.navigateTo(options);
+    }), replacePage);
 }
 
 export async function openMemoirCompletionInterview(
@@ -39,11 +47,11 @@ export async function openMemoirCompletionInterview(
 ): Promise<void> {
   const { issue } = options;
   if (issue.status === "in_progress" && issue.active_session_id) {
-    openVoiceChat(issue.active_session_id, options.projectTitle, options.replacePage);
+    await openVoiceChat(issue.active_session_id, options.projectTitle, options.replacePage);
     return;
   }
   if (!readVoiceAuthorizationConsent()) {
-    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+    await openInterviewPage(VOICE_AUTHORIZATION_PAGE_URL, options.replacePage);
     return;
   }
   await syncVoiceAuthorizationConsent();
@@ -70,7 +78,7 @@ export async function openMemoirCompletionInterview(
     },
     { projectId: options.projectId, voiceSessionId: detail.session.id },
   );
-  openVoiceChat(detail.session.id, options.projectTitle, options.replacePage);
+  await openVoiceChat(detail.session.id, options.projectTitle, options.replacePage);
 }
 
 
