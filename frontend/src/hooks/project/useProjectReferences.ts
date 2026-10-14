@@ -1,5 +1,6 @@
 import { projectsApi } from '../../api';
-import { DEFAULT_REFERENCE_NAMES, type ReferenceType } from '../../domain/references';
+import { getProjectProfile } from '../../domain/projectProfiles';
+import { DEFAULT_REFERENCE_NAMES, REFERENCE_TYPES, type ReferenceType } from '../../domain/references';
 import { useAppStore } from '../../stores/appStore';
 import type { Project } from '../../types';
 
@@ -22,6 +23,9 @@ export function useProjectReferences({
     const ref = await projectsApi.createReference(currentProject.id, {
       type,
       name: DEFAULT_REFERENCE_NAMES[type],
+      content: type === REFERENCE_TYPES.OUTLINE
+        ? getProjectProfile(currentProject.type).outlineTemplate ?? undefined
+        : undefined,
     });
     await refreshProject();
     setCurrentReferenceId(ref.id);
