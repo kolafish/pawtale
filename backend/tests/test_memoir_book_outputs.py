@@ -2190,3 +2190,23 @@ def test_original_quote_fragments_require_meaningful_evidence(value, expected):
     from app.services.memoir.book_manuscript_cleanup import matched_quote
     assert matched_quote(value, ['后来我们一起走过那条很长的小路。'], max_chars=80, allow_substring=True) == expected
     assert matched_quote('我很高兴', ['我很高兴。'], max_chars=80, allow_substring=True) == '我很高兴。'
+
+
+@pytest.mark.parametrize('opening', ['“', '「', '『', '"'])
+@pytest.mark.parametrize('prefix', ['他说：', '开头。老师说：“慢慢走。不用着急。”后来他说：'])
+def test_unclosed_quote_tail_keeps_later_evidence_and_complete_dialogue(opening, prefix):
+    from app.services.memoir.book_manuscript_cleanup import body_excerpt_candidates, original_quote_candidates
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+    ending = '后来我们去了县城，那里很热闹。我在那里待了三年。'
+    body = prefix + opening + '好。我们走吧。' + ending
+    snapshot = {'content': body, 'source_refs': [{'utterance_id': 'u', 'quote': body}],
+        'sections': [{'content': body, 'used_material_ids': ['u']}]}
+    excerpts = body_excerpt_candidates(body, max_chars=90)
+    assert excerpts[-2:] == ('后来我们去了县城，那里很热闹。', '我在那里待了三年。')
+    if prefix.startswith('开头'):
+        assert excerpts[0] == '老师说：“慢慢走。不用着急。”'
+    assert any(ending in candidate for candidate in original_quote_candidates(snapshot, max_chars=90)['u'])
+    for source in ('original_quote', 'editorial_generated'):
+        stored = {**snapshot, 'pull_quotes': [{'text': excerpts[-1], 'source': source,
+            'source_ref_ids': ['u'] if source == 'original_quote' else []}]}
+        assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [excerpts[-1]]
