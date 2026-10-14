@@ -853,13 +853,15 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
       }),
     },
     voiceApiExports: {
-      listMemoirVoiceTranscripts: async ({ offset }) => {
+      listMemoirVoiceTranscripts: async ({ offset, includeEmpty }) => {
+        assert.equal(includeEmpty, false);
         calls.push(offset);
         return {
           items: offset === 0
             ? [sampleTranscript("utterance-old")]
             : [sampleTranscript("utterance-target")],
           total: 2,
+          empty_count: 3,
           limit: 1,
           offset,
         };
@@ -871,6 +873,7 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
   await page.onShow.call(context);
 
   assert.deepEqual(calls, [0, 1]);
+  assert.equal(context.data.showEmptyRecordings, false);
   assert.equal(context.data.highlightedId, "utterance-target");
   assert.deepEqual(removedKeys, ["pawtale_transcript_navigation_target"]);
   assert.deepEqual(scrolls, [
@@ -998,3 +1001,45 @@ test("empty recordings fold before pagination and can be expanded, recovered and
     assert.equal(requests.at(-1).includeEmpty, false);
   } finally { delete global.wx; }
 });
+
+
+for (const scenario of ["empty", "deleted", "other-project", "video", "search-without-empty", "project-changed"]) {
+  test(`navigation reveals only a confirmed empty target: ${scenario}`, async () => {
+    const targetId = "navigation-target";
+    global.wx = {
+      getStorageSync: key => key === "pawtale_transcript_navigation_target" ? { utterance_id: targetId } : "",
+      removeStorageSync() {}, pageScrollTo() {},
+    };
+    const calls = [];
+    let detailCalls = 0;
+    const noEmpty = scenario === "search-without-empty";
+    const { page } = loadTranscriptsPage({
+      authExports: { getMemoirIdentity: async () => ({ active_project_id: "project-1", active_project: { title: "往事" } }) },
+      voiceApiExports: {
+        listMemoirVoiceTranscripts: async options => {
+          calls.push(options);
+          const items = options.query ? [] : noEmpty ? [sampleTranscript(targetId)]
+            : options.includeEmpty ? [sampleTranscript("ordinary"), { ...sampleTranscript(targetId), transcription_status: "empty" }]
+            : [sampleTranscript("ordinary")];
+          return { items, total: items.length, empty_count: noEmpty ? 0 : 1, limit: 30, offset: 0 };
+        },
+        getMemoirVoiceTranscript: async () => {
+          detailCalls++;
+          if (scenario === "deleted") throw new Error("讲述不存在");
+          if (scenario === "project-changed") { context.data.activeProjectId = "project-2"; context.loadToken++; }
+          return { ...sampleTranscript(targetId), transcription_status: "empty",
+            project_id: scenario === "other-project" ? "project-2" : "project-1" };
+        },
+      },
+    });
+    const context = pageContext(page, { pickForVideo: scenario === "video", searchQuery: noEmpty ? "搜索词" : "" });
+    await page.onShow.call(context);
+    const expanded = scenario === "empty";
+    assert.equal(context.data.showEmptyRecordings, expanded);
+    assert.equal(calls.some(call => call.includeEmpty), expanded);
+    assert.equal(detailCalls, noEmpty || scenario === "video" ? 0 : 1);
+    assert.equal(context.data.highlightedId, expanded || noEmpty ? targetId : "");
+    if (noEmpty) assert.equal(context.data.hasSearchCriteria, false);
+    if (scenario === "deleted") assert.equal(context.data.error, "讲述不存在");
+  });
+}
