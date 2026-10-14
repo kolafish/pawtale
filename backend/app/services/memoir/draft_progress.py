@@ -56,7 +56,7 @@ async def project_jobs(
     return jobs
 
 
-async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tuple[int, int, int]:
+async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tuple[int, int, int, str]:
     source_text = func.coalesce(
         func.nullif(MemoirVoiceUtterance.transcript_edited, ""),
         MemoirVoiceUtterance.transcript_raw,
@@ -93,6 +93,7 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
                 deferred_value["status"].as_string(),
                 deferred_value["text_hash"].as_string(),
                 sources.c.text,
+                deferred_value["reason"].as_string(),
             )
             .select_from(MemoirEditingJob)
             .join(deferred, true())
@@ -106,10 +107,12 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
             .order_by(MemoirEditingJob.updated_at)
         )
     ).all()
-    current = {key: status for key, status, text_hash, text in rows if text_hash == source_text_hash(text)}
-    statuses = list(current.values())
+    current = {key: (status, text, reason) for key, status, text_hash, text, reason in rows if text_hash == source_text_hash(text)}
+    statuses = [value[0] for value in current.values()]
+    need = next((value for value in current.values() if value[0] == "needs_user"), None)
+    detail = f"关于“{need[1][:60]}”：{need[2] or '还需要一些背景信息'}。补充讲述后会自动继续整理。" if need else ""
     # Answers to the interviewer that are not story stay out of the book; they are not pending.
-    return material_count, pending_count - statuses.count("not_story"), statuses.count("needs_user")
+    return material_count, pending_count - statuses.count("not_story"), statuses.count("needs_user"), detail
 
 
 async def read_draft_progress(
@@ -135,7 +138,7 @@ async def read_draft_progress(
         if parent
         else automatic_book_draft.DraftProgress()
     )
-    material_count, pending_material_count, needs_user_count = await _source_counts_and_needs_user(db, project_id)
+    material_count, pending_material_count, needs_user_count, needs_user_detail = await _source_counts_and_needs_user(db, project_id)
     ready = sum(
         (item.status == "ready" or item.draft_version_id is not None)
         and key not in progress.omitted_chapter_ids for key, item in progress.chapters.items()
@@ -153,7 +156,7 @@ async def read_draft_progress(
     )
     failures = [job.error_message for job in (growth, parent) if job and job.status in {"failed", "cancelled"}]
     failures += [item.error_message for item in progress.chapters.values() if item.status in {"failed", "cancelled"}]
-    result.can_retry = bool(failures or pending_material_count or progress.review_status in {"failed", "cancelled"})
+    result.can_retry = bool(failures or pending_material_count > needs_user_count or progress.review_status in {"failed", "cancelled"})
     if any(job.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for job in jobs):
         result.can_retry = False
         result.status, result.title = "processing", "正在后台整理书稿"
@@ -179,7 +182,7 @@ async def read_draft_progress(
     elif pending_material_count:
         result.status = "partial_ready" if ready else "no_change"
         result.title = "部分讲述还没整理进书稿"
-        result.detail = "讲述已经保存，可以继续整理；已有正文仍可阅读。"
+        result.detail = needs_user_detail or "讲述已经保存，可以继续整理；已有正文仍可阅读。"
     elif (
         voice_session_id
         and growth
@@ -203,12 +206,16 @@ async def read_draft_progress(
 
 async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
     jobs = await project_jobs(db, project_id)
+    progress = await read_draft_progress(db, project_id=project_id, jobs=jobs)
+    if not progress.can_retry:
+        return
     growth = next((job for job in jobs if job.job_type == "organize_material"), None)
-    if growth and growth.status not in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
+    retry_material = progress.pending_material_count > progress.needs_user_material_count
+    if growth and (growth.status in {"failed", "cancelled"} or retry_material):
         await story_tree_growth.schedule_story_tree_growth(
             db, project_id=project_id, voice_session_id=growth.payload_json["voice_session_id"], source="retry"
         )
-    elif growth is None:
+    elif growth is None and retry_material:
         sessions = (await db.scalars(select(MemoirVoiceSession).where(
             MemoirVoiceSession.project_id == project_id,
             MemoirVoiceSession.session_goal == "open_narration",

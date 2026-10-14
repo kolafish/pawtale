@@ -66,6 +66,14 @@ class DraftProgress(BaseModel):
 async def schedule_book_draft(
     db: AsyncSession, *, project_id: str, source: str = "materials", settled: bool = False,
 ) -> MemoirEditingJob:
+    existing = await db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"update-book-draft:{project_id}",
+    ).with_for_update().execution_options(populate_existing=True))
+    # Upstream completions and new material may coalesce with a user retry.
+    # Keep that intent until the worker has dispatched it, even while waiting.
+    if (existing is not None and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+            and (existing.payload_json or {}).get("source") == "retry"):
+        source = "retry"
     # Incoming source changes retain their debounce. A completed upstream step or
     # explicit user decision can advance immediately; the worker still checks dependencies.
     return await editing_jobs.enqueue_editing_job(

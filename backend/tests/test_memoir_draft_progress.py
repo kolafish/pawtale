@@ -158,4 +158,4 @@ async def test_draft_progress_preserves_deferred_need_from_older_growth_job(clie
     assert response.json()["pending_material_count"] == 1
     assert response.json()["needs_user_material_count"] == 1
     assert response.json()["status"] == "no_change"
-    assert response.json()["can_retry"] is True
+    assert response.json()["can_retry"] is False

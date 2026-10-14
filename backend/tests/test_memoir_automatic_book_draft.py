@@ -129,6 +129,47 @@ async def test_failed_chapter_is_not_automatically_reissued(client, test_db, mon
     assert parent.result_json["chapters"][chapter_id]["job_id"] == new_id
 
 
+@pytest.mark.parametrize("growth_failed", [False, True])
+async def test_user_retry_survives_growth_and_coalesced_updates(client, test_db, monkeypatch, growth_failed):
+    from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance
+    from app.services.memoir import draft_progress
+
+    project_id, chapter_id, section_id, fake, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    child = await test_db.get(MemoirEditingJob, parent.result_json["chapters"][chapter_id]["job_id"])
+    child.status, child.error_message = "failed", "模型超时"
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    session_id = await test_db.scalar(select(MemoirVoiceUtterance.voice_session_id).join(
+        MemoirSectionMaterial, MemoirSectionMaterial.utterance_id == MemoirVoiceUtterance.id,
+    ).where(MemoirSectionMaterial.section_id == section_id).limit(1))
+    growth = MemoirEditingJob(project_id=project_id, job_type="organize_material",
+        dedupe_key=f"organize_session:{session_id}", run_after=utcnow_naive(),
+        status="failed" if growth_failed else "succeeded", error_message="归类中断" if growth_failed else "",
+        payload_json={"voice_session_id": session_id, "source": "transcript_ready"})
+    test_db.add(growth)
+    await test_db.commit()
+    calls = len(fake.prompts)
+    response = await client.post(f"/api/mobile/memoir/projects/{project_id}/draft-progress/retry")
+    assert response.status_code == 202
+    await test_db.refresh(growth)
+    assert growth.status == ("pending" if growth_failed else "succeeded")
+    if growth_failed:
+        assert not await run_test_editing_job(test_db, parent_id)
+        assert await run_test_editing_job(test_db, growth.id)
+    assert len(fake.prompts) == calls  # Assigned material is never reclassified.
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source="organized", settled=True)
+    await test_db.commit()
+    assert not await run_test_editing_job(test_db, parent_id)
+    await test_db.refresh(parent)
+    replacement = parent.result_json["chapters"][chapter_id]["job_id"]
+    assert replacement != child.id
+    await draft_progress.retry_draft_progress(test_db, project_id=project_id)  # Double tap while active is inert.
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["chapters"][chapter_id]["job_id"] == replacement
+
+
 async def test_stale_generation_requeues_without_reusing_its_checkpoint(client, test_db, monkeypatch):
     project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
     assert not await run_test_editing_job(test_db, parent_id)
