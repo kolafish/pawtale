@@ -176,6 +176,17 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.micButtonText, "讲完这段，请小余接话");
 });
 
+test("recording keeps the last question visible without replay actions or duplicate completion questions", () => {
+  const data = { ...initialVoiceChatData(), voiceAuthorizationAgreed: true,
+    recording: true, assistantPromptText: "那时候谁陪着您？" };
+  const patch = voiceChatViewPatch(data);
+  assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.assistantDisplayText, data.assistantPromptText);
+  assert.equal(patch.showAssistantActions, false);
+  assert.equal(patch.showTranscriptStage, true);
+  assert.equal(voiceChatViewPatch({...data, sessionGoal: "book_completion"}).showAssistantPanel, false);
+});
+
 test("voice chat only expands saved history when the user asks to review it", () => {
   const lines = [
     { id: "user-1", role: "user", text: "我想讲外婆。" },

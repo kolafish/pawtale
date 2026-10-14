@@ -2136,6 +2136,11 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.equal(context.data.persistenceStateText, "等待回答");
   assert.deepEqual(startCalls, [true]);
   assert.deepEqual(playbackEvents, ["appendFrame", "waitForDrain", "destroy", "startRecording"]);
+  // Starting the next recording cancels playback cleanup; the persisted
+  // question must no longer be treated as a temporary streaming line.
+  page.cancelFollowUpTTS.call(context);
+  assert.equal(context.data.assistantPromptText, "那时候在院子里，外婆最常带着您做什么？");
+  assert.equal(context.data.followUpMessageId, "assistant-question-1");
   assert.deepEqual(voicePlayedCalls, [
     {
       projectId: "project-1",
@@ -2682,7 +2687,7 @@ test("voice chat drives first streaming highlight from WebAudio playback progres
   assert.notEqual(context.data.ttsSpokenText, prompt);
 });
 
-test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
+for (const failureKind of ["playback", "provider"]) test(`voice chat keeps completed assistant text after ${failureKind} failure`, async () => {
   let playbackDestroyed = false;
   const voicePlayedCalls = [];
   const page = loadVoiceChatPage({
@@ -2698,13 +2703,14 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
           this.callbacks = callbacks;
         }
         async start() {
+          if (failureKind === "provider") this.callbacks.onAudioFailed?.({type: "audio.failed", error: "tts unavailable"});
           this.callbacks.onTextDelta?.({
             type: "text.delta",
             turn_id: "turn-1",
             text_delta: "那时候在院子里，外婆最常带着您做什么？",
             text: "那时候在院子里，外婆最常带着您做什么？",
           });
-          this.callbacks.onAudioFrame?.({
+          if (failureKind === "playback") this.callbacks.onAudioFrame?.({
             turnId: "turn-1",
             sequence: 1,
             audio: new Uint8Array([1, 2, 3]),
@@ -2713,7 +2719,7 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
             channels: 1,
             bitsPerSample: 16,
           });
-          this.callbacks.onAudioDone?.({
+          if (failureKind === "playback") this.callbacks.onAudioDone?.({
             type: "audio.done",
             turn_id: "turn-1",
             voice_session_id: "voice-1",
@@ -2726,7 +2732,8 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
             state: "completed",
             project_id: "project-1",
             message_id: "assistant-question-1",
-            audio_file_id: "audio-question-1",
+            audio_file_id: failureKind === "playback" ? "audio-question-1" : null,
+            audio_status: failureKind === "playback" ? "ready" : "failed",
             text: "那时候在院子里，外婆最常带着您做什么？",
             primary_intent: "follow_up",
             intent_tags: ["follow_up"],
@@ -2799,13 +2806,14 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
   await page.generateFollowUp.call(context, false);
 
   assert.equal(context.data.followUpError, "");
-  assert.equal(context.data.followUpTTSError, "pcm audio failed");
+  assert.equal(context.data.followUpTTSError, failureKind === "playback" ? "pcm audio failed" : "tts unavailable");
+  assert.equal(context.data.assistantPromptText, "那时候在院子里，外婆最常带着您做什么？");
   assert.equal(context.data.followUpTTSStateText, "语音播放失败，可重播");
   assert.equal(context.data.persistenceStateText, "语音播放失败");
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
-  assert.equal(context.data.followUpAudioFileId, "audio-question-1");
+  assert.equal(context.data.followUpAudioFileId, failureKind === "playback" ? "audio-question-1" : "");
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
-  assert.equal(playbackDestroyed, true);
+  assert.equal(playbackDestroyed, failureKind === "playback");
   assert.deepEqual(startCalls, []);
   assert.deepEqual(voicePlayedCalls, []);
   assert.equal(

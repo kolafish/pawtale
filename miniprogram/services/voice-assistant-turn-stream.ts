@@ -94,6 +94,7 @@ export interface VoiceAssistantTurnCompletedEvent {
   state: "completed";
   message_id: string;
   audio_file_id?: string | null;
+  audio_status?: "ready" | "failed";
   text: string;
   primary_intent: string;
   intent_tags: string[];
@@ -109,6 +110,13 @@ export interface VoiceAssistantTurnCompletedEvent {
   progress_update_used?: boolean;
   progress_voice_selected_event_ids?: string[];
   turn_pipeline?: string;
+}
+
+export interface VoiceAssistantTurnAudioFailedEvent {
+  type: "audio.failed";
+  turn_id: string;
+  voice_session_id: string;
+  error: string;
 }
 
 export interface VoiceAssistantTurnTerminalEvent {
@@ -131,6 +139,7 @@ export interface VoiceAssistantTurnStreamCallbacks {
   onAudioFormat?(event: VoiceAssistantTurnAudioFormatEvent): void;
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioDone?(event: VoiceAssistantTurnAudioDoneEvent): void;
+  onAudioFailed?(event: VoiceAssistantTurnAudioFailedEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onCancelled?(event: VoiceAssistantTurnTerminalEvent): void;
   onFailed?(event: VoiceAssistantTurnTerminalEvent): void;
@@ -351,6 +360,10 @@ export class VoiceAssistantTurnStreamClient {
     }
     if (event.type === "audio.done") {
       this.callbacks.onAudioDone?.(event as unknown as VoiceAssistantTurnAudioDoneEvent);
+      return;
+    }
+    if (event.type === "audio.failed") {
+      this.callbacks.onAudioFailed?.(event as unknown as VoiceAssistantTurnAudioFailedEvent);
       return;
     }
     if (event.type === "turn.completed") {

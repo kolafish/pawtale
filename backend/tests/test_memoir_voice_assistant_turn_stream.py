@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.services.ai_base import AITextServiceBase
@@ -699,7 +700,7 @@ async def test_voice_assistant_turn_first_opening_asks_how_to_address_the_narrat
     assert completed["progress_update_used"] is False
     assert completed["progress_update"] is None
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
-    assert "“老余”" in prompt
+    assert "“小余”" in prompt
     assert "当前是第一次开场" in prompt
     assert "怎么称呼他" in prompt
     assert "待讲主题" not in prompt
@@ -1235,10 +1236,11 @@ async def test_guided_opening_from_life_topic_starts_with_that_topic(
     assert topic["intent"] in prompt
 
 
-async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message(
-    client,
-    test_db,
+@pytest.mark.parametrize("failure_stage", ["before_text", "partial_audio", "after_text", "text_failed"])
+async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(
+    client, test_db, tmp_path, monkeypatch, failure_stage,
 ):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     created = await create_test_voice_transcript(
         client,
         test_db,
@@ -1247,7 +1249,15 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
         current_guidance_module="work",
     )
     stream_client = FakeTurnClient()
-    ai_client = FakeStreamingAI(
+    class PacedAI(FakeStreamingAI):
+        async def stream_llm(self, *args, **kwargs):
+            async for chunk in super().stream_llm(*args, **kwargs):
+                await asyncio.sleep(0.005)
+                if failure_stage == "text_failed" and chunk.finish_reason:
+                    raise RuntimeError("text interrupted")
+                yield chunk
+
+    ai_client = PacedAI(
         [
             "好，那我们就聊聊朋友。",
             "你说到朋友，我想问这些年里有没有一个人让你觉得一见面还是特别亲？",
@@ -1259,24 +1269,35 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
         voice_session_id=created["session"]["id"],
         user_id=created["user_id"],
         ai_client_factory=lambda model=None: ai_client,
-        tts_client_factory=lambda: FailingStreamingTTS(),
+        tts_client_factory=lambda: FailingStreamingTTS(failure_stage),
     )
 
     run_task = asyncio.create_task(session.run())
     await _wait_for_event(stream_client, "turn.ready")
     await stream_client.push({"type": "turn.start"})
-    failed = await _wait_for_event(stream_client, "turn.failed")
+    completed = await _wait_for_event(stream_client, "turn.failed" if failure_stage == "text_failed" else "turn.completed")
     await asyncio.wait_for(run_task, timeout=1)
 
-    assert "tts failed" in failed["error"]
-    assert not [event for event in stream_client.sent if event["type"].startswith("audio.")]
-    assistant_count = await test_db.scalar(
-        select(func.count(MemoirChatMessage.id)).where(
-            MemoirChatMessage.voice_session_id == created["session"]["id"],
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
-        )
-    )
-    assert assistant_count == 0
+    assistant_messages = list((await test_db.scalars(select(MemoirChatMessage).where(
+        MemoirChatMessage.voice_session_id == created["session"]["id"],
+        MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+    ))).all())
+    if failure_stage == "text_failed":
+        assert assistant_messages == []
+        return
+    assert completed["audio_status"] == "failed"
+    assert completed["audio_file_id"] is None
+    assert completed["text"] == "".join(ai_client.chunks)
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0].content_text == completed["text"]
+    assert assistant_messages[0].audio_file_id is None
+    assert [e["type"] for e in stream_client.sent].count("audio.failed") == 1
+    assert not any(e["type"] == "audio.done" for e in stream_client.sent)
+    if failure_stage == "partial_audio":
+        assert any(e["type"] == "audio.frame" for e in stream_client.sent)
+    if failure_stage == "before_text":
+        types = [e["type"] for e in stream_client.sent]
+        assert types.index("audio.failed") < types.index("text.delta")
 
 
 async def _as_book_completion(test_db, voice_session_id: str) -> None:
@@ -1486,31 +1507,17 @@ class FakeStreamingTTS:
 
 
 class FailingStreamingTTS(FakeStreamingTTS):
-    async def stream_input_synthesize(
-        self,
-        text_chunks,
-        *,
-        voice=None,
-        speed_ratio=None,
-        response_format=None,
-        sample_rate=None,
-    ):
-        call = {
-            "text_chunks": [],
-            "voice": voice,
-            "speed_ratio": speed_ratio,
-            "response_format": response_format,
-            "sample_rate": sample_rate,
-        }
-        self.calls.append(call)
+    def __init__(self, stage):
+        super().__init__()
+        self.stage = stage
+
+    async def stream_input_synthesize(self, text_chunks, **kwargs):
+        if self.stage == "before_text":
+            raise HTTPException(status_code=503, detail="TTS unavailable")
         async for text in text_chunks:
-            call["text_chunks"].append(text)
-        if False:
-            yield StreamingTTSChunk(
-                audio=b"",
-                mime_type="audio/L16",
-                provider=self.provider_name,
-                model=self.model_name,
-                voice=voice or self.default_voice,
-            )
-        raise RuntimeError("tts failed after text completed")
+            if self.stage == "partial_audio":
+                yield StreamingTTSChunk(audio=b"incomplete-pcm", mime_type="audio/L16",
+                    provider=self.provider_name, model=self.model_name, voice=self.default_voice,
+                    sample_rate=16000)
+                break
+        raise HTTPException(status_code=504, detail="语音合成超时")
