@@ -66,7 +66,8 @@ from app.services.memoir.share_video_custom_backgrounds import (
     SHARE_VIDEO_BACKGROUND_SOURCE_AI,
     SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
     SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
-    load_custom_share_video_background_asset,
+    load_share_video_photo_paths,
+    max_share_video_photo_count,
     normalize_share_video_background_source,
 )
 from app.services.memoir.share_video_alignment import (
@@ -245,7 +246,7 @@ def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str
         metadata.background_source,
         metadata.background_style,
         metadata.background_mode,
-        metadata.custom_background_asset_id or "",
+        ",".join(metadata.photo_asset_ids),
         metadata.background_note,
     )
 
@@ -416,7 +417,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         background_style=metadata.background_style,
         background_mode=metadata.background_mode,
         background_effective_mode=metadata.background_effective_mode,
-        custom_background_asset_id=metadata.custom_background_asset_id,
+        photo_asset_ids=metadata.photo_asset_ids,
         background_note=metadata.background_note,
         background_style_label=_illustration_style_label(metadata),
         background_scene_count=metadata.background_scene_count,
@@ -507,20 +508,24 @@ async def create_share_video_job(
     audio_file = utterance.audio_file
     if not audio_file:
         raise HTTPException(status_code=400, detail="素材没有可分享的音频")
-    custom_background_asset_id: str | None = None
+    photo_asset_ids = req.photo_asset_ids if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else []
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
-        if not req.custom_background_asset_id:
-            raise HTTPException(status_code=400, detail="请选择自定义背景图")
-        custom_asset, _custom_path = await load_custom_share_video_background_asset(
-            db,
-            user_id=user_id,
-            project_id=utterance.voice_session.project_id,
-            asset_id=req.custom_background_asset_id,
-            allow_admin=allow_admin,
-        )
-        custom_background_asset_id = custom_asset.id
-    elif req.custom_background_asset_id:
-        raise HTTPException(status_code=400, detail="只有自定义背景图模式可以选择背景图片")
+        if not photo_asset_ids:
+            raise HTTPException(status_code=400, detail="请选择照片")
+        if len(set(photo_asset_ids)) != len(photo_asset_ids):
+            raise HTTPException(status_code=400, detail="同一张照片只能放一次")
+        max_photos = max_share_video_photo_count(duration_ms)
+        if len(photo_asset_ids) > max_photos:
+            raise HTTPException(
+                status_code=400,
+                detail=f"这段 {duration_ms // 1000} 秒最多放 {max_photos} 张照片，请删掉几张或多选几句",
+            )
+        if await load_share_video_photo_paths(
+            db, project_id=utterance.voice_session.project_id, asset_ids=photo_asset_ids,
+        ) is None:
+            raise HTTPException(status_code=404, detail="有照片已删除，请重新选择")
+    elif req.photo_asset_ids:
+        raise HTTPException(status_code=400, detail="只有自己配图可以选择照片")
 
     effective_background_mode = (
         SHARE_VIDEO_BACKGROUND_MODE_SINGLE
@@ -545,9 +550,9 @@ async def create_share_video_job(
         background_style=background_style,
         background_mode=background_mode,
         background_effective_mode=effective_background_mode,
-        custom_background_asset_id=custom_background_asset_id,
+        photo_asset_ids=photo_asset_ids,
         background_note=req.background_note.strip() if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI else "",
-        background_scene_count=1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
+        background_scene_count=len(photo_asset_ids),
         background_status=background_orchestration.initial_background_status(
             background_source,
             ai_background_enabled=ai_background_enabled,

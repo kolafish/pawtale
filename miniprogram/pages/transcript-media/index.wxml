@@ -158,7 +158,7 @@
             <button
               class="text-action-button"
               bindtap="clearShareVideoSelection"
-              disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
+              disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoPhotoBusy || materialImageCreating || materialImagePolling}}"
             >
               重选
             </button>
@@ -273,21 +273,18 @@
 
         <view wx:if="{{shareVideoBackgroundUsesCustom}}" class="share-video-background custom-background-panel">
           <view class="share-video-background-head">
-            <text class="voice-edit-label">自定义视频背景</text>
-            <button
-              class="text-action-button"
-              bindtap="chooseShareVideoCustomBackground"
-              loading="{{shareVideoCustomBackgroundUploading}}"
-              disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
-            >
-              {{shareVideoCustomBackgroundAssetId ? "更换图片" : "选择图片"}}
-            </button>
+            <text class="voice-edit-label">视频里的照片</text>
+            <text class="share-video-background-current">{{shareVideoPhotoIds.length}}/{{shareVideoPhotoMaxCount}}</text>
           </view>
-          <view wx:if="{{shareVideoCustomBackgroundPreviewPath}}" class="custom-background-preview-wrap">
-            <image class="custom-background-preview" src="{{shareVideoCustomBackgroundPreviewPath}}" mode="aspectFill" />
-          </view>
-          <text wx:if="{{shareVideoCustomBackgroundStatusText}}" class="custom-background-status">{{shareVideoCustomBackgroundStatusText}}</text>
-          <text wx:else class="custom-background-status muted">选择家庭照片、旧物或地点图片，照片会完整放进竖版视频画面里。</text>
+          <share-video-photos
+            project-id="{{item.project_id}}"
+            photo-ids="{{shareVideoPhotoIds}}"
+            max-count="{{shareVideoPhotoMaxCount}}"
+            disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || materialImageCreating || materialImagePolling}}"
+            bindchange="changeShareVideoPhotos"
+            bindbusy="markShareVideoPhotoBusy"
+            binderror="showShareVideoPhotoError"
+          />
         </view>
 
         <view class="actions-row share-video-actions">
@@ -295,7 +292,7 @@
             class="ghost-button material-image-button"
             bindtap="createMaterialImage"
             loading="{{materialImageCreating || materialImagePolling}}"
-            disabled="{{!shareVideoSelectedText || materialImageCreating || materialImagePolling || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+            disabled="{{!shareVideoSelectedText || materialImageCreating || materialImagePolling || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoPhotoBusy}}"
           >
             {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}
           </button>
@@ -303,7 +300,7 @@
             class="primary-button"
             bindtap="createShareVideo"
             loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-            disabled="{{!shareVideoSelectedCanGenerate || shareVideoStyleUnavailable || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
+            disabled="{{!shareVideoSelectedCanGenerate || shareVideoStyleUnavailable || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoPhotoBusy || materialImageCreating || materialImagePolling}}"
           >
             {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
           </button>

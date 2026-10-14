@@ -1,4 +1,3 @@
-import type { MemoirImageAssetStatus } from "./memoir-book";
 import type {
   MemoirChatMessageRole,
   MemoirGuidanceMode,
@@ -134,6 +133,8 @@ export interface MemoirTranscriptShareVideoContext {
   alignment_confidence?: number | null;
   min_select_ms: number;
   max_select_ms: number;
+  photo_min_ms?: number;
+  photo_max_count?: number;
   default_video_style: MemoirShareVideoStyle;
   video_styles: MemoirShareVideoStyleOption[];
   ai_background_enabled: boolean;
@@ -233,7 +234,7 @@ export interface MemoirShareVideoJob {
   background_style?: string;
   background_mode?: string;
   background_effective_mode?: string;
-  custom_background_asset_id?: string | null;
+  photo_asset_ids?: string[];
   background_note?: string;
   background_style_label?: string;
   background_scene_count?: number;
@@ -272,20 +273,6 @@ export interface MemoirShareVideoListResponse {
   total: number;
   limit: number;
   offset: number;
-}
-
-export interface MemoirShareVideoCustomBackgroundAsset {
-  id: string;
-  project_id: string;
-  status: MemoirImageAssetStatus;
-  preview_url: string;
-  mime_type: string;
-  size_bytes?: number | null;
-  width?: number | null;
-  height?: number | null;
-  processing_preset: string;
-  original_mime_type: string;
-  original_size_bytes?: number | null;
 }
 
 export interface MemoirVoiceSearchTranscriptionResponse {

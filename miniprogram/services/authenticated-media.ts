@@ -232,18 +232,18 @@ function isChooseImageCancel(error: WechatMiniprogram.GeneralCallbackResult): bo
   return String(error.errMsg || "").toLowerCase().includes("cancel");
 }
 
-export function chooseImageFile(): Promise<string | null> {
+export function chooseImageFiles(count: number): Promise<string[]> {
   if (typeof wx.chooseMedia === "function") {
     return new Promise((resolve, reject) => {
       wx.chooseMedia?.({
-        count: 1,
+        count,
         mediaType: ["image"],
         sourceType: ["album", "camera"],
         sizeType: ["original", "compressed"],
-        success: (result) => resolve(result.tempFiles[0]?.tempFilePath || null),
+        success: (result) => resolve(result.tempFiles.map((file) => file.tempFilePath).filter(Boolean)),
         fail: (error) => {
           if (isChooseImageCancel(error)) {
-            resolve(null);
+            resolve([]);
             return;
           }
           reject(new Error(error.errMsg || "选择图片失败"));
@@ -253,19 +253,23 @@ export function chooseImageFile(): Promise<string | null> {
   }
   return new Promise((resolve, reject) => {
     wx.chooseImage({
-      count: 1,
+      count,
       sourceType: ["album", "camera"],
       sizeType: ["original", "compressed"],
-      success: (result) => resolve(result.tempFilePaths[0] || null),
+      success: (result) => resolve(result.tempFilePaths.filter(Boolean)),
       fail: (error) => {
         if (isChooseImageCancel(error)) {
-          resolve(null);
+          resolve([]);
           return;
         }
         reject(new Error(error.errMsg || "选择图片失败"));
       },
     });
   });
+}
+
+export async function chooseImageFile(): Promise<string | null> {
+  return (await chooseImageFiles(1))[0] || null;
 }
 
 export function editImageFile(src: string): Promise<string | null> {

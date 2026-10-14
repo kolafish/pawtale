@@ -186,7 +186,7 @@ function sampleShareVideoJob(overrides = {}) {
     background_style: "old_album",
     background_mode: "auto",
     background_effective_mode: "single",
-    custom_background_asset_id: null,
+    photo_asset_ids: [],
     background_scene_count: 1,
     background_status: "ready",
     output: {
@@ -236,9 +236,6 @@ function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
     createMemoirMaterialImageGenerationJob: unmockedAsync("createMemoirMaterialImageGenerationJob"),
     createMemoirTranscriptShareVideoJob: unmockedAsync("createMemoirTranscriptShareVideoJob"),
     deleteMemoirVoiceTranscript: unmockedAsync("deleteMemoirVoiceTranscript"),
-    downloadMemoirShareVideoCustomBackgroundPreview: unmockedAsync(
-      "downloadMemoirShareVideoCustomBackgroundPreview",
-    ),
     downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
     memoirSharedVideoUrl: (code, variant = "video") => `https://api.example.com/shares/${code}/${variant}`,
     getMemoirMaterialImageGenerationJob: unmockedAsync("getMemoirMaterialImageGenerationJob"),
@@ -251,7 +248,6 @@ function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
     recoverMemoirVoiceTranscript: unmockedAsync("recoverMemoirVoiceTranscript"),
     startMemoirMaterialOfflineASR: unmockedAsync("startMemoirMaterialOfflineASR"),
     updateMemoirVoiceTranscript: unmockedAsync("updateMemoirVoiceTranscript"),
-    uploadMemoirShareVideoCustomBackground: unmockedAsync("uploadMemoirShareVideoCustomBackground"),
     ...voiceApiExports,
   });
   mockModule("../services/memoir-api-client.ts", {
@@ -1362,13 +1358,13 @@ test("transcript media page reopens a completed video and loads creation tools o
   assert.equal(context.data.shareVideoBackgroundStyle, "old_album");
 });
 
-test("transcript media remake restores uploaded style for legacy custom-background videos", async () => {
+test("transcript media remake restores the uploaded video's photos in order", async () => {
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
     getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
     getMemoirShareVideoJob: async () => sampleShareVideoJob({
       utterance_id: "utterance-result", background_source: "custom",
-      custom_background_asset_id: "original-photo",
+      photo_asset_ids: ["photo-2", "photo-1"],
     }),
     downloadMemoirShareVideoJob: async () => "/tmp/completed.mp4",
   } });
@@ -1377,7 +1373,7 @@ test("transcript media remake restores uploaded style for legacy custom-backgrou
   await page.remakeShareVideo.call(context);
   assert.equal(context.data.shareVideoStyle, "uploaded");
   assert.equal(context.data.shareVideoBackgroundUsesCustom, true);
-  assert.equal(context.data.shareVideoCustomBackgroundAssetId, "original-photo");
+  assert.deepEqual(context.data.shareVideoPhotoIds, ["photo-2", "photo-1"]);
 });
 
 test("remake preserves the range and replaces a retired style with the available default", async () => {
@@ -1560,14 +1556,14 @@ test("transcript media recommendation opens with editable range and styles, and 
     if (style === "uploaded") {
       await page.createShareVideo.call(context);
       assert.deepEqual(calls, []);
-      context.setData({ shareVideoCustomBackgroundAssetId: "photo-1" });
+      page.changeShareVideoPhotos.call(context, { detail: { photoIds: ["photo-1"] } });
     } else if (style === "illustrated") {
       page.selectShareVideoBackgroundStyle.call(context, { currentTarget: { dataset: { backgroundStyle: "ink_paper" } } });
       page.selectShareVideoBackgroundMode.call(context, { currentTarget: { dataset: { backgroundMode: "smart_multi" } } });
     }
     await page.createShareVideo.call(context);
     const options = style === "uploaded"
-      ? { videoStyle: style, backgroundSource: "custom", customBackgroundAssetId: "photo-1" }
+      ? { videoStyle: style, backgroundSource: "custom", photoAssetIds: ["photo-1"] }
       : { videoStyle: style, backgroundSource: "ai", backgroundStyle: "ink_paper", backgroundMode: "smart_multi" };
     assert.deepEqual(calls, [["project-1", "candidate-1", options]]);
     context.shareVideoController.cancel();
@@ -1778,15 +1774,11 @@ test("transcript media page requires a custom background asset before creating v
   assert.deepEqual(createCalls, []);
   assert.equal(context.data.shareVideoBackgroundSource, "custom");
   assert.equal(context.data.shareVideoBackgroundUsesCustom, true);
-  assert.equal(context.data.shareVideoError, "请先选择一张自定义背景图片");
-  assert.equal(context.data.shareVideoStatusText, "请先选择背景图片");
+  assert.equal(context.data.shareVideoError, "请先添加照片");
 });
 
-test("transcript media page uploads a custom background before creating share video", async () => {
-  const uploadCalls = [];
-  const previewCalls = [];
+test("transcript media page sends the chosen photos in order and limits them by clip length", async () => {
   const createCalls = [];
-  const storageWrites = [];
   const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
@@ -1795,90 +1787,34 @@ test("transcript media page uploads a custom background before creating share vi
         display_char_count: 23,
       }),
       getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
-      uploadMemoirShareVideoCustomBackground: async (projectId, filePath) => {
-        uploadCalls.push({ projectId, filePath });
-        return {
-          id: "asset-custom-1",
-          project_id: projectId,
-          status: "ready",
-          preview_url: `/api/mobile/memoir/projects/${projectId}/image-assets/asset-custom-1/file`,
-          mime_type: "image/jpeg",
-          size_bytes: 4096,
-          width: 1280,
-          height: 720,
-          processing_preset: "memoir_soft",
-          original_mime_type: "image/png",
-          original_size_bytes: 2048,
-        };
-      },
-      downloadMemoirShareVideoCustomBackgroundPreview: async (asset) => {
-        previewCalls.push(asset.id);
-        return "/tmp/custom-background-processed.jpg";
-      },
       createMemoirTranscriptShareVideoJob: async (id, startChar, endChar, options) => {
         createCalls.push({ id, startChar, endChar, options });
-        return sampleShareVideoJob({
-          id: "job-custom",
-          utterance_id: id,
-          audio_file_id: `audio-${id}`,
-          status: "pending",
-          background_source: "custom",
-          custom_background_asset_id: "asset-custom-1",
-          start_char: startChar,
-          end_char: endChar,
-          output: null,
-          completed_at: null,
-        });
+        return sampleShareVideoJob({ status: "pending", background_source: "custom", output: null });
       },
     },
   });
   const context = pageContext(page);
-  global.wx = {
-    chooseMedia(options) {
-      options.success({
-        errMsg: "chooseMedia:ok",
-        type: "image",
-        tempFiles: [{ tempFilePath: "/tmp/family-photo.png", size: 2048, fileType: "image" }],
-      });
-    },
-    setStorageSync(key, value) {
-      storageWrites.push({ key, value });
-    },
-  };
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  page.selectShareVideoStyle.call(context, {
-    currentTarget: { dataset: { videoStyle: "uploaded" } },
-  });
-  await page.chooseShareVideoCustomBackground.call(context);
-
-  assert.deepEqual(uploadCalls, [{ projectId: "project-1", filePath: "/tmp/family-photo.png" }]);
-  assert.deepEqual(previewCalls, ["asset-custom-1"]);
-  assert.equal(context.data.shareVideoBackgroundSource, "custom");
-  assert.equal(context.data.shareVideoBackgroundUsesCustom, true);
-  assert.equal(context.data.shareVideoCustomBackgroundUploading, false);
-  assert.equal(context.data.shareVideoCustomBackgroundAssetId, "asset-custom-1");
-  assert.equal(context.data.shareVideoCustomBackgroundPreviewPath, "/tmp/custom-background-processed.jpg");
-  assert.equal(context.data.shareVideoCustomBackgroundStatusText, "背景图片已处理，会用于本次视频");
-
-  page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "illustrated" } } });
   page.selectShareVideoStyle.call(context, { currentTarget: { dataset: { videoStyle: "uploaded" } } });
-  assert.equal(context.data.shareVideoCustomBackgroundAssetId, "asset-custom-1");
-  assert.equal(context.data.shareVideoCustomBackgroundPreviewPath, "/tmp/custom-background-processed.jpg");
-
+  page.changeShareVideoPhotos.call(context, { detail: { photoIds: ["photo-2", "photo-1"] } });
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
+  // 4.2 seconds holds one photo, at three seconds each.
+  assert.equal(context.data.shareVideoPhotoMaxCount, 1);
+  await page.createShareVideo.call(context);
+  assert.deepEqual(createCalls, []);
+  assert.equal(context.data.shareVideoError, "这段最多放 1 张照片，请删掉几张或多选几句");
+
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 1 } } });
+  assert.equal(context.data.shareVideoPhotoMaxCount, 2);
   await page.createShareVideo.call(context);
   context.shareVideoController.cancel();
-
-  assert.deepEqual(createCalls, [
-    {
-      id: "utterance-share",
-      startChar: 0,
-      endChar: 13,
-      options: { videoStyle: "uploaded", backgroundSource: "custom", customBackgroundAssetId: "asset-custom-1" },
-    },
-  ]);
-  assert.deepEqual(storageWrites, []);
+  assert.deepEqual(createCalls, [{
+    id: "utterance-share",
+    startChar: 0,
+    endChar: 23,
+    options: { videoStyle: "uploaded", backgroundSource: "custom", photoAssetIds: ["photo-2", "photo-1"] },
+  }]);
 });
 
 

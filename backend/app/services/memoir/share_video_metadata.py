@@ -82,7 +82,8 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_style: str = DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     background_mode: str = DEFAULT_SHARE_VIDEO_BACKGROUND_MODE
     background_effective_mode: str = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
-    custom_background_asset_id: str | None = None
+    # Image-library pictures of an uploaded-style video, in playing order.
+    photo_asset_ids: list[str] = Field(default_factory=list)
     background_note: str = ""
     background_status: BackgroundStatus = "disabled"
     background_scene_count: int = Field(default=0, ge=0)
@@ -106,6 +107,8 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     @classmethod
     def from_json(cls, value: object) -> "ShareVideoJobMetadata":
         data = dict(value) if isinstance(value, dict) else {}
+        if legacy_photo := data.pop("custom_background_asset_id", None):
+            data.setdefault("photo_asset_ids", [legacy_photo])
         if "video_style" not in data and data.get("background_source") == "custom":
             data["video_style"] = "uploaded"
         else:

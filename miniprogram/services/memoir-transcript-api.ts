@@ -1,6 +1,5 @@
 import type {
   MemoirMaterialImageGenerationJob,
-  MemoirShareVideoCustomBackgroundAsset,
   MemoirShareVideoCandidate,
   MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
@@ -25,7 +24,6 @@ import {
 } from "./memoir-api-client";
 import {
   downloadAuthenticatedFile,
-  uploadAuthenticatedFile,
 } from "./authenticated-media";
 import {
   ApiError,
@@ -51,7 +49,7 @@ interface ShareVideoJobOptions {
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
-  customBackgroundAssetId?: string;
+  photoAssetIds?: string[];
   // Undefined keeps the default opening line; "" asks for an automatic one.
   hookText?: string;
   backgroundNote?: string;
@@ -65,7 +63,7 @@ interface ShareVideoJobRequest {
   background_source?: string;
   background_style?: string;
   background_mode?: string;
-  custom_background_asset_id?: string;
+  photo_asset_ids?: string[];
   hook_text?: string;
   background_note?: string;
 }
@@ -76,7 +74,7 @@ interface ShareVideoCandidateJobRequest {
   background_source?: string;
   background_style?: string;
   background_mode?: string;
-  custom_background_asset_id?: string;
+  photo_asset_ids?: string[];
   hook_text?: string;
   background_note?: string;
 }
@@ -156,7 +154,7 @@ export function createMemoirTranscriptShareVideoJob(
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
-      ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.photoAssetIds?.length ? { photo_asset_ids: options.photoAssetIds } : {}),
       ...(options.hookText ? { hook_text: options.hookText } : {}),
       ...(options.backgroundNote ? { background_note: options.backgroundNote } : {}),
     },
@@ -207,7 +205,7 @@ export function createMemoirShareVideoCandidateJob(
       ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
       ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
-      ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
+      ...(options.photoAssetIds?.length ? { photo_asset_ids: options.photoAssetIds } : {}),
       ...(options.hookText !== undefined ? { hook_text: options.hookText } : {}),
       ...(options.backgroundNote ? { background_note: options.backgroundNote } : {}),
     },
@@ -241,46 +239,6 @@ export function getMemoirMaterialImageGenerationJob(
   return memoirRequest<MemoirMaterialImageGenerationJob>(
     `/api/mobile/memoir/image-generation/jobs/${encodeURIComponent(jobId)}`,
   );
-}
-
-function uploadApiMessage(data: string): string {
-  try {
-    const parsed = JSON.parse(data) as { detail?: unknown };
-    return typeof parsed.detail === "string" ? parsed.detail : "背景图片上传失败";
-  } catch {
-    return data || "背景图片上传失败";
-  }
-}
-
-function parseUploadJson<T>(data: string): T {
-  try {
-    return JSON.parse(data) as T;
-  } catch (error) {
-    throw new ApiError(0, "背景图片上传结果解析失败", error);
-  }
-}
-
-export function uploadMemoirShareVideoCustomBackground(
-  projectId: string,
-  filePath: string,
-): Promise<MemoirShareVideoCustomBackgroundAsset> {
-  const config = readBackendConfig();
-  if (!config.httpBaseUrl) {
-    throw new ApiError(0, "未配置后端 HTTP 地址", {});
-  }
-  const url = `${cleanBaseUrl(config.httpBaseUrl)}/api/mobile/memoir/share-video/background-assets`;
-  return uploadAuthenticatedFile(url, {
-    filePath,
-    name: "file",
-    formData: {
-      project_id: projectId,
-      processing_preset: "memoir_soft",
-    },
-    failureMessage: "背景图片上传失败",
-    domainLabel: "图片上传",
-    parseResponse: parseUploadJson<MemoirShareVideoCustomBackgroundAsset>,
-    responseErrorMessage: uploadApiMessage,
-  });
 }
 
 export function getMemoirShareVideoJob(jobId: string): Promise<MemoirShareVideoJob> {
@@ -342,19 +300,6 @@ export function downloadMemoirShareVideoThumbnail(jobId: string): Promise<string
   return downloadAuthenticatedFile(url, {
     failureMessage: "视频缩略图下载失败",
     domainLabel: "视频缩略图",
-  });
-}
-
-export function downloadMemoirShareVideoCustomBackgroundPreview(
-  asset: MemoirShareVideoCustomBackgroundAsset,
-): Promise<string> {
-  if (!asset.preview_url) {
-    throw new ApiError(400, "背景图片预览不可用", asset);
-  }
-  const url = memoirShareVideoDownloadUrl(asset.preview_url);
-  return downloadAuthenticatedFile(url, {
-    failureMessage: "背景图片预览下载失败",
-    domainLabel: "图片预览",
   });
 }
 
