@@ -47,6 +47,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_plan_ai import (
     ChapterTitleSourceDigest,
+    NO_STORY_YET,
     generate_book_plan_from_sources as _generate_book_plan_from_sources,
     generate_chapter_title_from_sources as _generate_chapter_title_from_sources,
 )
@@ -66,6 +67,7 @@ from app.services.memoir.book_plan_sources import (
     text_or_empty as _text_or_empty,
 )
 from app.services.memoir.material_roles import interviewer_lines
+from app.services.memoir.transcript_projection import source_text_hash
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
@@ -318,6 +320,8 @@ async def generate_book_plan(
     allow_admin: bool = False,
     status: MemoirBookPlanStatus = MemoirBookPlanStatus.DRAFT,
     before_commit: Callable[[], Awaitable[None]] | None = None,
+    on_not_story: Callable[[tuple[SourceSegment, ...]], Awaitable[None]] | None = None,
+    excluded_source_hashes: dict[str, str] | None = None,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     sources = await _source_segments(
@@ -328,6 +332,9 @@ async def generate_book_plan(
     )
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
+    sources = [source for source in sources if (excluded_source_hashes or {}).get(source.utterance_id) != source_text_hash(source.text)]
+    if not sources:
+        raise HTTPException(status_code=422, detail=NO_STORY_YET)
     project_title = project.title
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     lines = await interviewer_lines(db, (source.message_id for source in sources))
@@ -339,6 +346,10 @@ async def generate_book_plan(
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )
+    if on_not_story and generated.not_story_sources:
+        await on_not_story(generated.not_story_sources)
+    if not generated.chapters:
+        raise HTTPException(status_code=422, detail=NO_STORY_YET)
     return await _replace_plan(
         db,
         project_id=project_id,

@@ -14,6 +14,64 @@ from tests.test_memoir_book_completion import _book
 from tests.test_memoir_section_organization import _stopped_growth_job
 
 
+async def test_initial_profile_result_is_durable_and_reconsidered_only_after_text_changes(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirBookPlan, MemoirVoiceUtterance
+    from app.services.memoir import book_plan_ai
+    from tests.memoir_helpers import ensure_mobile_memoir_project
+    from tests.test_memoir_section_organization import FakeStoryGrowthAI
+
+    project_id = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(client, test_db, project_id, "我叫余建国，今年七十八岁，老家绵阳。")
+    fake = FakeStoryGrowthAI({"chapters": [], "not_story_source_indices": [1]})
+    monkeypatch.setattr(book_plan_ai, "get_ai_service", lambda _model=None: fake)
+    async def run():
+        job.status = "running"
+        await test_db.commit()
+        result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        job.status, job.result_json = result.status.value, result.result_json
+        await test_db.commit()
+        return result
+    await run()
+    assert await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id)) is None
+    assert (await draft_progress._source_counts_and_needs_user(test_db, project_id))[1:3] == (0, 0)
+    await run()
+    assert fake.calls == 1
+    # The same record gains a memory: its prior classification no longer applies.
+    utterance = await test_db.get(MemoirVoiceUtterance, source["utterance_id"])
+    utterance.transcript_edited = "我叫余建国，小时候奶奶背我去赶集。"
+    await test_db.commit()
+    fake.payload = {"chapters": [{"title": "奶奶背我赶集", "source_indices": [1]}]}
+    await run()
+    assert fake.calls == 2
+    assert await test_db.scalar(select(MemoirSectionMaterial.id).where(
+        MemoirSectionMaterial.utterance_id == utterance.id,
+    ))
+    assert (await draft_progress._source_counts_and_needs_user(test_db, project_id))[1:3] == (0, 0)
+
+
+async def test_initial_mixed_plan_reuses_explicit_nonstory_outcome_without_second_classification(client, test_db, monkeypatch):
+    from app.services.memoir import book_plan_ai
+    from tests.memoir_helpers import ensure_mobile_memoir_project
+    from tests.test_memoir_section_organization import FakeStoryGrowthAI
+
+    project_id = await ensure_mobile_memoir_project(client)
+    profile, _ = await _stopped_growth_job(client, test_db, project_id, "我今年七十八岁，老家绵阳。")
+    story, job = await _stopped_growth_job(client, test_db, project_id, "我叫余建国，小时候奶奶背我赶集。")
+    fake = FakeStoryGrowthAI({"chapters": [{"title": "奶奶背我赶集", "source_indices": [2]}], "not_story_source_indices": [1]})
+    monkeypatch.setattr(book_plan_ai, "get_ai_service", lambda _model=None: fake)
+    async def unexpected_growth(**_kwargs):
+        raise AssertionError("Already classified profile must not be classified again")
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", unexpected_growth)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    job.status, job.result_json = result.status.value, result.result_json
+    await test_db.commit()
+    assert fake.calls == 1
+    links = (await test_db.scalars(select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == project_id))).all()
+    assert [link.utterance_id for link in links] == [story["utterance_id"]]
+    assert result.result_json["growth"]["deferred"][profile["utterance_id"]]["status"] == "not_story"
+    assert (await draft_progress._source_counts_and_needs_user(test_db, project_id))[1:3] == (0, 0)
+
+
 @pytest.mark.parametrize("assign_after_context", [True, False])
 async def test_deferred_source_waits_for_new_evidence_after_bounded_retries(client, test_db, monkeypatch, assign_after_context):
     project_id, chapters, _ = await _book(client, test_db)

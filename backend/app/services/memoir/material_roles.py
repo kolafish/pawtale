@@ -10,6 +10,20 @@ from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
+STORY_CONTENT_GUIDANCE = (
+    "按以下顺序判断整条回答是否有可入书的内容："
+    "（1）先判断是否在补充往事。若 interviewer_line 询问某段往事中的年龄、人物或地点，"
+    "回答属于故事补充，即使只有年龄、姓名或地点也必须保留；例如问‘发大水那年多大’，答‘我那年五岁’，"
+    "问‘那位师傅叫什么’，答‘他叫李明’，都不是当前个人资料。"
+    "（2）若回答讲了亲历事件、生活经历、具体回忆或自己的真实感受，整条保留，不因同时报资料或问题是资料采集而丢弃、切断。"
+    "真实感受不要求同时有完整事件；表达思念、留恋、遗憾等也超出了个人资料，必须保留。"
+    "（3）只有整条停留在姓名/称呼、当前年龄、性别、籍贯/老家等个人资料（包括一次回答多项），"
+    "以及纯寒暄、停顿、暂停请求，才排除；不要为这些内容建立自我介绍或个人资料章节。"
+    "没有 interviewer_line 时按回答本身判断。访谈员的问题帮助确定回答的指代，不可把问题中的猜测写成讲述者确认的事实。"
+)
+
+
+
 def is_narrator_material(utterance: MemoirVoiceUtterance) -> bool:
     if utterance.chat_message is not None:
         return utterance.chat_message.role == MemoirChatMessageRole.USER.value

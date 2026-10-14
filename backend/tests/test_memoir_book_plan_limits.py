@@ -16,6 +16,24 @@ from app.services.memoir.book_plan_sources import SourceSegment
 from app.services.memoir.sections import sync_materials_to_chapters
 
 
+@pytest.mark.parametrize("payload", [
+    {"chapters": []},
+    {"chapters": [], "not_story_source_indices": [2]},
+    {"chapters": [{"title": "往事", "source_indices": [1]}], "not_story_source_indices": [1]},
+])
+async def test_model_omission_or_conflicting_exclusion_never_marks_source_as_nonstory(payload):
+    from app.services.memoir.book_plan_ai import generate_book_plan_from_sources
+    from tests.test_memoir_section_organization import FakeStoryGrowthAI
+    fake = FakeStoryGrowthAI(payload)
+    with pytest.raises(HTTPException) as error:
+        await generate_book_plan_from_sources(
+            project_title="我的回忆录", sources=[SourceSegment(1, "session", "message", "utterance", None, None, None, None,
+                "我叫余建国，小时候奶奶背我赶集。", datetime(2026, 10, 14))], interviewer_lines={}, ai_model=None, ai_client=fake,
+        )
+    assert error.value.status_code == 503
+    assert fake.calls == 2
+
+
 def _chapters(count: int) -> list[dict[str, str]]:
     return [{"title": f"第 {index} 章"} for index in range(count)]
 
