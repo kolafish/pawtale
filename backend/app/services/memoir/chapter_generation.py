@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -58,7 +58,7 @@ from app.services.memoir.semantic_state import (
     semantic_text_hash,
 )
 from app.services.memoir.transcript_projection import (
-    TranscriptEdit, current_material_text, load_transcript_edits, transcript_text_changes,
+    TranscriptEdit, current_material_text, load_transcript_edits, normalized_material_text, transcript_text_changes,
 )
 
 
@@ -519,16 +519,24 @@ def _changed_material_ids(
 async def _with_previous_material_text(
     db: AsyncSession, context: ChapterGenerationContext, latest: MemoirBookChapterDraftVersion,
 ) -> ChapterGenerationContext:
-    saved = {item["material_id"]: item for item in latest.material_snapshot_json}
+    saved = {item["material_id"]: item for item in (latest.material_snapshot_json or [])
+             if isinstance(item, dict) and item.get("material_id")}
     version_ids = {item.get("transcript_version_id") for item in saved.values()} - {None}
-    versions = (await db.scalars(select(MemoirTranscriptVersion).where(
+    unversioned = {source_id for source_id, item in saved.items() if not item.get("transcript_version_id")}
+    versions = (await db.scalars(select(MemoirTranscriptVersion).where(or_(
         MemoirTranscriptVersion.id.in_(version_ids),
-    ))).all() if version_ids else []
-    texts = {version.id: version.content.strip() for version in versions}
+        and_(MemoirTranscriptVersion.source_artifact_id.in_(unversioned),
+             MemoirTranscriptVersion.created_at <= latest.created_at),
+    )))).all() if version_ids or unversioned else []
+    texts = {version.id: normalized_material_text(version.content) for version in versions}
+    history = {(version.source_artifact_id, semantic_text_hash(texts[version.id])): texts[version.id]
+               for version in versions if version.source_artifact_id in unversioned}
     materials = []
     for material in context.materials:
         prior = saved.get(material.material_id, {})
-        text = texts.get(prior.get("transcript_version_id"))
+        text = texts.get(prior.get("transcript_version_id")) if prior.get("transcript_version_id") else history.get(
+            (material.material_id, prior.get("text_hash")),
+        )
         if text is not None and semantic_text_hash(text) != prior.get("text_hash"):
             text = None
         materials.append(replace(material, previous_text=text))
@@ -831,7 +839,7 @@ def chapter_generation_context(
         ):
             if not material.include_in_book:
                 continue
-            text = " ".join(current_material_text(material).split())
+            text = normalized_material_text(current_material_text(material))
             if not text:
                 continue
             item = ChapterMaterialInput(

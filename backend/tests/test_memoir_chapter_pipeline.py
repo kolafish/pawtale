@@ -1,6 +1,6 @@
 import json
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -1470,8 +1470,15 @@ def test_changed_confirmed_material_without_previous_text_is_not_silently_applie
     assert "我五岁那年离开家。" in prompt
 
 
-async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, test_db):
+@pytest.mark.parametrize("multiline,history", [(False, "pinned"), (True, "pinned"), (True, "unversioned"), (True, "mismatch"), (True, "future")])
+async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, test_db, multiline, history):
     project_id, chapter, section, materials = await _chapter(client, test_db)
+    from app.models.memoir import MemoirTranscriptVersion
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == materials[0]["utterance_id"]))
+    transcript = await test_db.get(MemoirTranscriptVersion, material.transcript_version_id)
+    if multiline:
+        transcript.content = "师傅教我修车。\n\n后来我  学会了拆轮胎。"
+        await test_db.commit()
     fake = FakeChapterAI(section_material_id=materials[0]["utterance_id"],
         chapter_section_id=section["id"], chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[materials[0]["utterance_id"]])
@@ -1483,8 +1490,18 @@ async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, t
     updated = replace(context.materials[0], text=original + "后来我学会了补胎。")
     changed = replace(context, materials=(updated,),
         sections=(replace(context.sections[0], materials=(updated,)),))
+    if history != "pinned":
+        version.material_snapshot_json = [{**item, "transcript_version_id": None} for item in version.material_snapshot_json]
+    if history == "mismatch":
+        transcript.content = "与快照不一致的历史文字。"
+    elif history == "future":
+        transcript.created_at = version.created_at + timedelta(seconds=1)
+    await test_db.flush()
+    # Ignore malformed metadata without discarding the valid pinned evidence.
+    if not multiline:
+        version.material_snapshot_json = [*version.material_snapshot_json, None, {"unrelated": True}]
     loaded = await chapter_generation._with_previous_material_text(test_db, changed, version)
-    assert loaded.materials[0].previous_text == original
+    assert loaded.materials[0].previous_text == (None if history in {"mismatch", "future"} else original)
     assert loaded.sections[0].materials[0] == loaded.materials[0]
     assert loaded.materials[0].text.endswith("后来我学会了补胎。")
 

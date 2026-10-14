@@ -42,6 +42,11 @@ def current_transcript_version_id(
     return message.transcript_version_id if message else None
 
 
+def normalized_material_text(text: str) -> str:
+    """Canonical text used by chapter evidence snapshots and history checks."""
+    return " ".join(text.split())
+
+
 def current_material_text(
     material: MemoirSectionMaterial,
     *,
