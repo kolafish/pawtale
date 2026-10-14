@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
 from app.schemas.memoir_book import MemoirBookLevelEditorialCopyTarget, MemoirBookManuscriptQuote
-from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes
+from app.services.memoir.book_manuscript_cleanup import repair_original_pull_quotes, current_original_quote
 from app.services.memoir.book_output_manuscript import stored_manuscript_metadata
 from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -153,12 +153,13 @@ AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
 
 
 def chapter_editorial_copy_signature(snapshot: dict[str, object]) -> str:
-    # chapter_summary is already projected from editorial metadata in the snapshot.
-    # Audit metadata and transcript/session version IDs are not editorial evidence.
+    # Copy describes the current body; audit metadata and stale source summaries
+    # are not evidence. Original quotations must also occur in their own section.
     return semantic_json_signature({
-        **{key: snapshot.get(key) for key in ("chapter_title", "chapter_summary", "content")},
-        "source_refs": [
-            {key: source.get(key) for key in ("utterance_id", "quote", "summary", "representative_quote")}
+        "editorial_evidence_version": 2,
+        **{key: snapshot.get(key) for key in ("chapter_title", "content")},
+        "original_quotes": [
+            (source.get("utterance_id"), current_original_quote(snapshot, source, max_chars=90))
             for source in snapshot.get("source_refs", []) if isinstance(source, dict)
         ],
     })
@@ -176,29 +177,32 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
         return {item["utterance_id"]: item for item in value.get("source_refs", []) if isinstance(item, dict)}
     old_refs, new_refs = refs(stored), refs(snapshot)
     quotes = [MemoirBookManuscriptQuote.model_validate(value) for value in repair_original_pull_quotes(stored)]
-    return [quote for quote in quotes if all(
-        source_id in new_refs and (
-            (new_refs[source_id].get("transcript_version_id"), new_refs[source_id].get("quote"))
-            == (old_refs.get(source_id, {}).get("transcript_version_id"), old_refs.get(source_id, {}).get("quote"))
-            or quote.text in str(new_refs[source_id].get("quote") or "")
-        ) for source_id in quote.source_ref_ids
-    )]
+    retained = []
+    for quote in quotes:
+        if not all(
+            source_id in new_refs and (
+                (new_refs[source_id].get("transcript_version_id"), new_refs[source_id].get("quote"))
+                == (old_refs.get(source_id, {}).get("transcript_version_id"), old_refs.get(source_id, {}).get("quote"))
+                or quote.text in str(new_refs[source_id].get("quote") or "")
+            ) for source_id in quote.source_ref_ids
+        ):
+            continue
+        if quote.source == "original_quote" and (not quote.source_ref_ids or not all(
+            quote.text in current_original_quote(snapshot, new_refs[source_id],
+                max_chars=len(str(new_refs[source_id].get("quote") or "")))
+            for source_id in quote.source_ref_ids
+        )):
+            continue
+        if quote.source == "editorial_generated" and quote.text not in str(snapshot.get("content") or ""):
+            continue
+        retained.append(quote)
+    return retained
 
 
 def automatic_editorial_copy_state(
     output: MemoirBookOutput, versions: list[MemoirBookOutputVersion],
 ) -> AutomaticEditorialCopyState:
     state = AutomaticEditorialCopyState.model_validate((output.metadata_json or {}).get(AUTOMATIC_EDITORIAL_COPY_KEY, {}))
-    if state.processed_version and (not state.chapter_input_signatures or state.signature_version < 1):
-        processed = next((version for version in versions if version.version == state.processed_version), None)
-        if processed:
-            legacy_failure = state.status == "failed" and not state.chapter_input_signatures
-            state.chapter_input_signatures = {
-                item["chapter_id"]: chapter_editorial_copy_signature(item)
-                for item in processed.chapter_snapshot_json or []
-            }
-            if legacy_failure:
-                state.failed_chapter_ids = list(state.chapter_input_signatures)
     if not state.processed_version and versions and versions[0].created_by in {"user", "ai"}:
         state.manual_targets = ["preface", "afterword", "back_cover_quote"]
         state.manual_chapter_fields = {

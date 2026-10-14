@@ -208,9 +208,8 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     assert before_ids < after_ids
 
 
-@pytest.mark.parametrize('legacy_state', [False, True])
 @pytest.mark.parametrize('failed_update', [False, True, 'missing_intro'])
-async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeypatch, legacy_state, failed_update):
+async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeypatch, failed_update):
     from app.domain.memoir.types import MemoirCreatedBy
     from app.services.memoir.book_output_versions import append_book_output_version
     from tests.memoir_helpers import create_test_book_plan_with_chapters
@@ -230,11 +229,6 @@ async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeyp
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     first = await _automatic(test_db, project)
     output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-    if legacy_state:
-        metadata = copy.deepcopy(output.metadata_json)
-        metadata['automatic_editorial_copy'].pop('chapter_input_signatures')
-        metadata['automatic_editorial_copy'].pop('failed_chapter_ids')
-        output.metadata_json = metadata
     latest = await test_db.get(MemoirBookOutputVersion, first.latest_version.id)
     snapshot = copy.deepcopy(latest.chapter_snapshot_json)
     snapshot[-1]['content'] += '后来又发生了一件事。'
@@ -255,18 +249,17 @@ async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeyp
     assert len(calls) == (3 if failed_update else 2)  # Retrying another stage does not rewrite successful copy.
 
 
-@pytest.mark.parametrize('legacy_signature', [False, True])
-async def test_audit_changes_do_not_regenerate_editorial_copy(client, test_db, monkeypatch, legacy_signature):
+async def test_audit_changes_do_not_regenerate_editorial_copy(client, test_db, monkeypatch):
     from app.domain.memoir.types import MemoirCreatedBy
     from app.services.memoir.book_output_versions import append_book_output_version
-    from app.services.memoir.semantic_state import semantic_json_signature
 
     project, chapters, before = await _output(client, test_db)
     snapshot = copy.deepcopy(before.chapter_snapshot_json)
     for item in snapshot:
-        item['source_refs'] = [{'utterance_id': f"source-{item['chapter_id']}", 'quote': '那时我在家乡读书。',
-            'summary': '求学', 'representative_quote': '那时我在家乡读书。',
+        item['source_refs'] = [{'utterance_id': f"source-{item['chapter_id']}", 'quote': item["content"],
             'transcript_version_id': 'original-transcript', 'voice_session_id': 'original-session'}]
+        for section in item.get("sections", []):
+            section["used_material_ids"] = [item["source_refs"][0]["utterance_id"]]
     before.chapter_snapshot_json = snapshot
     await test_db.commit()
     calls = []
@@ -277,15 +270,6 @@ async def test_audit_changes_do_not_regenerate_editorial_copy(client, test_db, m
     first = await _automatic(test_db, project)
     output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
     latest = await test_db.get(MemoirBookOutputVersion, first.latest_version.id)
-    if legacy_signature:
-        metadata = copy.deepcopy(output.metadata_json)
-        state = metadata['automatic_editorial_copy']
-        state.pop('signature_version')
-        state['input_signature'] = semantic_json_signature({'title': project.title, 'snapshot': latest.chapter_snapshot_json})
-        state['chapter_input_signatures'] = {item['chapter_id']: semantic_json_signature({
-            key: item.get(key) for key in ('chapter_title', 'chapter_summary', 'metadata_json', 'content', 'source_refs')
-        }) for item in latest.chapter_snapshot_json}
-        output.metadata_json = metadata
     snapshot = copy.deepcopy(latest.chapter_snapshot_json)
     for item in snapshot:
         item['metadata_json'] = {**item['metadata_json'], 'audit_record': {'updated_at': 'later', 'attempts': 2}}
@@ -378,3 +362,102 @@ async def test_copy_failure_is_retryable_without_rewriting_ready_chapters(client
     assert len(calls) == 2
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == 'ready' and not progress.can_retry
+
+
+@pytest.mark.ci_smoke
+@pytest.mark.parametrize("body, expected", [
+    ("我五岁那年发过洪水。爹挑着我们上山。", "爹挑着我们上山。"),
+    ("并不是我十五岁那年发过洪水。", ""),
+])
+def test_corrected_body_controls_copy_and_original_quotes(body, expected):
+    from app.services.memoir.book_manuscript_ai import build_manuscript_copy_prompt, _copy_from_payload
+    from app.services.memoir.book_manuscript_cleanup import current_original_quote
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+    source = "我十五岁那年发过洪水。爹挑着我们上山。"
+    ref = {"utterance_id": "u1", "quote": source}
+    snapshot = {"chapter_id": "c1", "chapter_title": "洪水", "content": body,
+                "chapter_summary": source, "source_refs": [{**ref, "summary": source}],
+                "sections": [{"section_id": "s1", "content": body, "used_material_ids": ["u1"]}]}
+    assert current_original_quote(snapshot, ref, max_chars=90) == expected
+    prompt = build_manuscript_copy_prompt(title="往事", snapshot=[snapshot])
+    # Old summaries and recordings cannot compete with the corrected body.
+    assert source not in prompt
+    assert body in prompt
+    generated = _copy_from_payload({"preface": "家里发过洪水。",
+        "chapter_intros": [{"chapter_id": "C1", "intro": "家里发过洪水。",
+                           "pull_quote": "我十五岁那年发过洪水。", "pull_quote_source_ref_id": "M1"}]},
+        snapshot=[snapshot], prompt=prompt, model="offline")
+    assert generated.chapter_intros[0].pull_quote == ""
+    old = {**snapshot, "content": source, "pull_quotes": [
+        {"text": "我十五岁那年发过洪水。", "source_ref_ids": ["u1"], "source": "original_quote"}]}
+    assert retained_chapter_quotes(old, snapshot) == []
+    old["pull_quotes"][0]["source"] = "manual"
+    assert retained_chapter_quotes(old, snapshot)[0].source == "manual"
+
+
+def test_quote_cannot_borrow_a_matching_sentence_from_another_material():
+    from app.services.memoir.book_manuscript_cleanup import current_original_quote
+    source = "十五岁那年我去北京。"
+    snapshot = {"content": "五岁那年我去北京。" + source, "sections": [
+        {"content": "五岁那年我去北京。", "used_material_ids": ["u1"]},
+        {"content": source, "used_material_ids": ["u2"]},
+    ]}
+    assert current_original_quote(snapshot, {"utterance_id": "u1", "quote": source}, max_chars=90) == ""
+    assert current_original_quote(snapshot, {"utterance_id": "u2", "quote": source}, max_chars=90) == source
+
+
+def test_edited_body_fallback_never_restores_old_recording_in_cover_copy():
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+    old = "我十五岁那年家里发洪水。"
+    body = "我五岁那年家里发洪水。"
+    manuscript = manuscript_from_snapshot(title="往事", content=body, snapshot=[{
+        "chapter_id": "c1", "chapter_title": "洪水", "content": body,
+        "source_refs": [{"utterance_id": "u1", "quote": old}],
+    }])
+    assert manuscript.chapters[0].pull_quotes[0].text == body
+    assert manuscript.chapters[0].pull_quotes[0].source == "editorial_generated"
+    assert old not in manuscript.render_settings.back_cover_quote
+
+
+async def test_assembly_with_new_body_drops_obsolete_automatic_preface_before_copy_job(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    project, chapters, _ = await _output(client, test_db)
+    async def generate(**kwargs):
+        return replace(_copy(kwargs["snapshot"]), preface="十五岁那年发生洪水。")
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    await _automatic(test_db, project)
+    version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[0].id))
+    version.content = "五岁那年发生洪水。"
+    sections = copy.deepcopy(version.section_snapshot_json)
+    sections[0]["content"] = version.content
+    version.section_snapshot_json = sections
+    await test_db.commit()
+    assembled = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    output = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    preface = next(s["content"] for s in output.manuscript_json["front_matter"] if s["kind"] == "preface")
+    assert "十五岁" not in preface and "15岁" not in preface
+    assert "五岁" in output.content
+
+
+@pytest.mark.parametrize("old_version", [0, 1])
+async def test_old_editorial_policy_refreshes_once_without_claiming_manual_copy(client, test_db, monkeypatch, old_version):
+    project, chapters, _ = await _output(client, test_db)
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs["snapshot"], len(calls))
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    await _automatic(test_db, project)
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
+    metadata = copy.deepcopy(output.metadata_json)
+    metadata["automatic_editorial_copy"].update(signature_version=old_version, input_signature="old-evidence-policy")
+    output.metadata_json = metadata
+    await test_db.commit()
+    await _automatic(test_db, project)
+    await _automatic(test_db, project)
+    assert len(calls) == 2
+    assert set(calls[-1]["chapter_ids"]) == {chapter.id for chapter in chapters}
+    assert not output.metadata_json["automatic_editorial_copy"]["manual_targets"]
+    assert output.metadata_json["automatic_editorial_copy"]["signature_version"] == 2

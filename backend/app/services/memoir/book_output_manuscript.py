@@ -23,7 +23,7 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir.book_manuscript_ai import GeneratedManuscriptCopy
 from app.services.memoir.book_manuscript_cleanup import (
-    brief_text,
+    current_original_quote,
     expanded_afterword,
     fallback_back_cover_quote,
     fallback_chapter_intro,
@@ -340,9 +340,9 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
     return refs
 
 
-def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
+def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef], snapshot: dict[str, object]) -> list[MemoirBookManuscriptQuote]:
     for ref in source_refs:
-        quote = brief_text(ref.quote, max_chars=80)
+        quote = current_original_quote(snapshot, ref.model_dump(), max_chars=80)
         if quote:
             return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
     quote = first_sentence(content, max_chars=80)
@@ -416,7 +416,7 @@ def manuscript_from_snapshot(
                 index=chapter_index,
                 title=chapter_title,
                 intro=intro_by_chapter_id.get(chapter_id) or fallback_chapter_intro(chapter_title, chapter_content),
-                pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs),
+                pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs, item),
                 content=chapter_content,
                 sections=sections,
                 source_refs=source_refs,
@@ -625,8 +625,10 @@ def apply_editorial_copy(
         _set_preface(manuscript, editorial_copy.preface)
     if "afterword" in targets and editorial_copy.afterword:
         manuscript.back_matter.afterword.content = editorial_copy.afterword
-    if "back_cover_quote" in targets and editorial_copy.back_cover_quote:
-        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote
+    if "back_cover_quote" in targets:
+        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote or fallback_back_cover_quote(
+            [chapter.model_dump(mode="json") for chapter in manuscript.chapters]
+        )
     if editorial_copy.model:
         manuscript.render_settings.editorial_copy_model = editorial_copy.model
     generated_by_chapter = {item.chapter_id: item for item in editorial_copy.chapter_intros if item.chapter_id}

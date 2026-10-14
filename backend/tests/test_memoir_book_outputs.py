@@ -229,9 +229,6 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
     assert copy.chapter_intros[0].pull_quote_source_ref_id == "u1"
     assert copy.back_cover_quote == "我小时候常在外婆家的院子里晒太阳。"
     assert "chapter_id: C1" in fake_ai.calls[0]["user_prompt"]
-    assert "chapter_summary: 这一章围绕外婆家的院子和第一次离家的记忆展开。" in fake_ai.calls[0]["user_prompt"]
-    assert "source_summaries: 讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。" in fake_ai.calls[0]["user_prompt"]
-    assert "representative_quotes: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
     assert "source_ref_id: M1; quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
     assert "chapter-1" not in fake_ai.calls[0]["user_prompt"]
     assert "u1" not in fake_ai.calls[0]["user_prompt"]
@@ -342,7 +339,7 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
     assert "讲述来源" not in cleaned["back_matter"]["interview_records"]["content"]
     assert cleaned["back_matter"]["version_note"]["content"] == "本书正文采用适合阅读的整理版表达。原始口述材料已保留，便于家人日后继续核对、补充和修订。"
     assert cleaned["back_matter"]["source_appendix"]["title"] == "口述片段"
-    assert cleaned["render_settings"]["back_cover_quote"] == "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+    assert cleaned["render_settings"]["back_cover_quote"] == "夏天的晚上，我就坐在院子里边看月亮。"
 
 
 @pytest.fixture
@@ -382,12 +379,12 @@ def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
 def test_release_quote_skips_source_without_a_complete_sentence_in_budget(release_quote_snapshot):
     chapter = release_quote_snapshot[0]
     chapter["source_refs"][0]["quote"] = chapter["content"].replace("。", "，")
-    chapter["source_refs"].append({"utterance_id": "short-source", "quote": "奶奶把蓝色雨衣披在我身上。"})
+    chapter["source_refs"].append({"utterance_id": "short-source", "quote": "回到家以后，她给我煮了一碗热汤面。"})
     manuscript = manuscript_from_snapshot(title="发布手测", content=chapter["content"], snapshot=release_quote_snapshot)
 
     assert manuscript is not None
     quote = manuscript.chapters[0].pull_quotes[0]
-    assert quote.text == "奶奶把蓝色雨衣披在我身上。"
+    assert quote.text == "回到家以后，她给我煮了一碗热汤面。"
     assert quote.source_ref_ids == ["short-source"]
 
 
@@ -653,9 +650,9 @@ async def test_release_quote_normal_assembly_repairs_reused_original_only(client
     current = await test_db.get(MemoirBookOutputVersion, assembled.json()["output_version_id"])
     assert current is not None and current.id != previous.id
     quotes = current.manuscript_json["chapters"][0]["pull_quotes"]
-    assert [quote["text"] for quote in quotes] == [narration[:73], old_quote, old_quote]
-    assert [quote["source"] for quote in quotes] == ["original_quote", "manual", "editorial_generated"]
-    assert current.manuscript_json["render_settings"]["back_cover_quote"] == old_back_cover
+    assert [quote["text"] for quote in quotes] == [old_quote]
+    assert [quote["source"] for quote in quotes] == ["manual"]
+    assert current.manuscript_json["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
     assert previous.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == old_quote
 
 
@@ -1303,7 +1300,7 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
         chapter_id=chapters[0].id,
         utterance_id="u1",
         quote="我小时候常在外婆家的院子里晒太阳。",
-        text="讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
+        text="我小时候常在外婆家的院子里晒太阳。",
     )
     await test_db.commit()
     await _seed_confirmed_book_output(test_db, project_id=project_id)
@@ -1325,20 +1322,20 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     manuscript = response.json()["latest_version"]["manuscript"]
     assert manuscript["back_matter"]["afterword"]["content"].startswith("这一次先把已经讲出来的童年")
     assert manuscript["render_settings"]["back_cover_quote"] == (
-        "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。"
+        "我小时候常在外婆家的院子里晒太阳。"
     )
     first_chapter = manuscript["chapters"][0]
     assert first_chapter["intro"] == "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"
     assert first_chapter["pull_quotes"] == [
         {
-            "text": "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
-            "source_ref_ids": ["u1"],
-            "source": "original_quote",
+            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "source_ref_ids": [],
+            "source": "editorial_generated",
         }
     ]
     assert "本次生成目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
     assert "用户本次反馈：更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
-    assert "chapter_summary: 这一章写外婆家的院子和童年生活。" in fake_ai.calls[0]["user_prompt"]
+    assert "这一章写外婆家的院子和童年生活。" not in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_editorial_copy_explains_empty_book_after_chapters_are_withheld(client, test_db):
@@ -1383,7 +1380,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
         chapter_id=chapters[0].id,
         utterance_id="u1",
         quote="我小时候常在外婆家的院子里晒太阳。",
-        text="讲述小时候在院子里晒太阳。",
+        text="我小时候常在外婆家的院子里晒太阳。",
     )
     await test_db.commit()
     await _seed_confirmed_book_output(test_db, project_id=project_id)
@@ -1432,9 +1429,9 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     assert event.metadata_json["result_version_id"] == version.id
     assert version.manuscript_json["chapters"][0]["pull_quotes"] == [
         {
-            "text": "讲述小时候在院子里晒太阳。",
-            "source_ref_ids": ["u1"],
-            "source": "original_quote",
+            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "source_ref_ids": [],
+            "source": "editorial_generated",
         }
     ]
     assert "本次生成目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]

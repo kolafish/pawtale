@@ -150,7 +150,8 @@ async def assemble_book_output(
             .where(MemoirBookOutputVersion.output_id == output.id)
             .order_by(MemoirBookOutputVersion.version)
         )).all()) if previous_version else []
-        manual_copy_fields = book_output_versions.automatic_editorial_copy_state(output, versions).manual_chapter_fields
+        copy_state = book_output_versions.automatic_editorial_copy_state(output, versions)
+        manual_copy_fields = copy_state.manual_chapter_fields
         previous_snapshots = {
             item["chapter_id"]: item
             for item in (previous_version.chapter_snapshot_json if previous_version else [])
@@ -230,6 +231,18 @@ async def assemble_book_output(
         template, custom_layout = stored_manuscript_design(previous_version.manuscript_json)
     else:
         template, custom_layout = NEW_BOOK_TEMPLATE, MemoirBookCustomLayout()
+    metadata = effective_book_metadata(
+        project=project, stored=previous_version.manuscript_json if previous_version else None,
+    )
+    if previous_version and (
+        book_output_versions.book_editorial_copy_signature(title, previous_version.chapter_snapshot_json)
+        != book_output_versions.book_editorial_copy_signature(title, chapter_snapshots)
+    ):
+        # A new body must never be published with obsolete automatic front matter,
+        # even while the next copy job is still running or has failed.
+        for field in ("preface", "afterword", "back_cover_quote"):
+            if field not in copy_state.manual_targets:
+                metadata.pop(field, None)
     manuscript = manuscript_from_snapshot(
         title=title,
         content=content,
@@ -238,10 +251,7 @@ async def assemble_book_output(
         template=template,
         custom_layout=custom_layout,
         cover_image=cover_image,
-        metadata=effective_book_metadata(
-            project=project,
-            stored=previous_version.manuscript_json if previous_version else None,
-        ),
+        metadata=metadata,
         chapter_illustrations_by_chapter=chapter_illustrations,
         image_appendix=image_appendix,
     )

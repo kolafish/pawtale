@@ -1411,3 +1411,28 @@ async def test_chapter_confirmation_rejects_changed_material_structure(
         )
     assert exc.value.status_code == 409
     assert "素材已变化" in exc.value.detail
+
+
+@pytest.mark.ci_smoke
+def test_confirmed_body_only_accepts_later_source_edits_and_new_narration():
+    from app.services.memoir.fact_decisions import FactDecision
+    from app.services.memoir.transcript_projection import TranscriptEdit
+    context = _two_section_context()
+    material = replace(context.materials[0], text="我十五岁那年家里发洪水。",
+        edits=(TranscriptEdit(datetime(2026, 1, 3), "原文旧称呼", "后来更正的称呼"),))
+    new = replace(material, material_id="new-source", text="后来我们搬到绵阳。", edits=())
+    old = FactDecision("old", "年龄？", "早先确认十五岁", frozenset({material.material_id}),
+                       frozenset({context.chapter_id}), datetime(2026, 1, 1))
+    recent = replace(old, issue_id="recent", answer="本次确认七岁", confirmed_at=datetime(2026, 1, 3))
+    section = replace(context.sections[0], materials=(material, new), decisions=(old, recent))
+    context = replace(context, sections=(section,), materials=(material, new),
+                      previous_draft_at=datetime(2026, 1, 2))
+    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
+        current_section_content="我五岁那年家里发洪水。", current_section_user_edited=True,
+        previous_material_ids={material.material_id}, changed_material_ids={material.material_id, new.material_id})
+    assert "我五岁那年家里发洪水。" in prompt
+    assert "我十五岁那年家里发洪水。" not in prompt
+    assert "早先确认十五岁" not in prompt
+    assert "本次确认七岁" in prompt
+    assert "后来更正的" in prompt
+    assert new.text in prompt
