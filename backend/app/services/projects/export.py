@@ -26,7 +26,7 @@ class ProjectExportFormat(StrEnum):
     ZIP = "zip"
 
 
-markdown_parser = MarkdownIt("commonmark")
+markdown_parser = MarkdownIt("commonmark").enable(["strikethrough", "table"])
 
 
 async def export_project_data(db: AsyncSession, project_id: str, user_id: str) -> ProjectExportResponse:
@@ -90,6 +90,7 @@ def markdown_to_plain_text(markdown: str) -> str:
     tokens = markdown_parser.parse(markdown)
     blocks: list[str] = []
     current_lines: list[str] = []
+    row_cells: list[str] | None = None
 
     def flush_current() -> None:
         if current_lines:
@@ -99,6 +100,19 @@ def markdown_to_plain_text(markdown: str) -> str:
             current_lines.clear()
 
     for token in tokens:
+        if token.type == "tr_open":
+            row_cells = []
+            continue
+        if token.type == "tr_close":
+            current_lines.append(" | ".join(row_cells or []))
+            row_cells = None
+            continue
+        if token.type == "inline" and row_cells is not None:
+            row_cells.append(_inline_text(token).strip())
+            continue
+        if token.type in {"table_open", "table_close"}:
+            flush_current()
+            continue
         if token.type in {"heading_open", "paragraph_open", "blockquote_open", "list_item_open"}:
             flush_current()
             continue

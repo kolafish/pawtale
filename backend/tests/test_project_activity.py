@@ -47,7 +47,11 @@ class TestExport:
             "- 第一项\n"
             "- 第二项\n\n"
             "---\n\n"
-            "[链接文字](https://example.com)\n"
+            "[链接文字](https://example.com)\n\n"
+            "这句~~删掉~~保留。\n\n"
+            "| 人物 | 年份 |\n"
+            "| --- | --- |\n"
+            "| 外婆 | 1950 |\n"
         )
 
         assert "# " not in text
@@ -61,6 +65,9 @@ class TestExport:
         assert "----------" in text
         assert "链接文字" in text
         assert "https://example.com" not in text
+        assert "这句删掉保留。" in text
+        assert "人物 | 年份\n外婆 | 1950" in text
+        assert "---" not in text.replace("----------", "")
 
     async def test_download_markdown_export(self, client):
         project_id, document_id = await create_project_with_document(client, "Markdown 导出")

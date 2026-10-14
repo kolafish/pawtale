@@ -3,17 +3,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Bold,
+  Code,
   Columns2,
   Heading1,
   Heading2,
+  Heading3,
   Italic,
+  Link,
   List,
+  ListChecks,
   ListOrdered,
   Minus,
   Pencil,
   Quote,
   RefreshCw,
   Save,
+  SquareCode,
+  Strikethrough,
+  Table,
   Wand2,
   Eye,
 } from 'lucide-react';
@@ -72,11 +79,18 @@ interface MarkdownTool {
 const MARKDOWN_TOOLS: MarkdownTool[] = [
   { format: 'heading-1', title: '一级标题 Cmd/Ctrl+Alt+1', icon: Heading1 },
   { format: 'heading-2', title: '二级标题 Cmd/Ctrl+Alt+2', icon: Heading2 },
+  { format: 'heading-3', title: '三级标题 Cmd/Ctrl+Alt+3', icon: Heading3 },
   { format: 'bold', title: '加粗 Cmd/Ctrl+B', icon: Bold },
   { format: 'italic', title: '斜体 Cmd/Ctrl+I', icon: Italic },
+  { format: 'strikethrough', title: '删除线 Cmd/Ctrl+Shift+X', icon: Strikethrough },
+  { format: 'inline-code', title: '行内代码 Cmd/Ctrl+E', icon: Code },
+  { format: 'link', title: '链接 Cmd/Ctrl+K', icon: Link },
   { format: 'quote', title: '引用 Cmd/Ctrl+Shift+>', icon: Quote },
   { format: 'unordered-list', title: '无序列表 Cmd/Ctrl+Shift+8', icon: List },
   { format: 'ordered-list', title: '有序列表 Cmd/Ctrl+Shift+7', icon: ListOrdered },
+  { format: 'task-list', title: '任务列表', icon: ListChecks },
+  { format: 'code-block', title: '代码块', icon: SquareCode },
+  { format: 'table', title: '表格', icon: Table },
   { format: 'divider', title: '分隔线', icon: Minus },
 ];
 
@@ -314,7 +328,7 @@ export function EditorMain({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-pink-100 bg-white px-2 py-2">
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {MARKDOWN_TOOLS.map((tool) => {
                   const Icon = tool.icon;
                   return (
