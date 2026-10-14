@@ -116,7 +116,7 @@ export function homeStorySnapshotData(
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount || bookCharCountDelta
-      ? "你的书又长了一点"
+      ? "您的书又长了一点"
       : updatedCount ? "这段回忆刚刚又丰富了一些" : "故事整理有了新进展",
     growthNoticeText,
     growthNoticeContext,

@@ -178,7 +178,7 @@ test("the home notice names who liked which story", () => {
     like(1, "小军", "book", "余仲尤往事"),
     like(0, "", "book", "余仲尤往事"),
   ]);
-  assert.equal(notice.text, "三姑、小军等家人给你的故事点了 4 个赞");
+  assert.equal(notice.text, "三姑、小军等家人给您的故事点了 4 个赞");
   assert.equal(notice.avatars.length, 3);
   assert.equal(notice.latestAt, "2026-10-09T08:03:00");
 });

@@ -129,7 +129,7 @@ test("story turns new sections into reader-facing growth results and focuses the
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
-  assert.equal(context.data.growthNoticeTitle, "你的书又长了一点");
+  assert.equal(context.data.growthNoticeTitle, "您的书又长了一点");
   assert.equal(context.data.growthNoticeText, "新增 1 个故事");
   assert.equal(context.data.growthNoticeContext, "章节 2等内容已更新");
   const targets = [];
@@ -444,7 +444,7 @@ test("home combines story and manuscript deltas without double counting assembly
     },
   ] });
   const homeData = homeStorySnapshotData(current, storyViewData(current));
-  assert.equal(homeData.growthNoticeTitle, "你的书又长了一点");
+  assert.equal(homeData.growthNoticeTitle, "您的书又长了一点");
   assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
   assert.equal(homeData.growthNoticeContext, "章节 2等内容已更新");
 });

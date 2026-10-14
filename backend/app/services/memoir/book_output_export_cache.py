@@ -23,7 +23,7 @@ from app.services.memoir.book_output_export import (
 )
 
 # Bump when rendering or bundled fonts/artwork change.
-BOOK_EXPORT_RENDER_REVISION = 6
+BOOK_EXPORT_RENDER_REVISION = 7
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class PreparedBookExport:
     def filename(self) -> str:
         return book_export_filename(
             _export_title(self.title, self.manuscript.model_dump(mode="json") if self.manuscript else {}),
-            self.version, self.export_format.value, self.layout,
+            self.export_format.value, self.layout,
         )
 
     @cached_property

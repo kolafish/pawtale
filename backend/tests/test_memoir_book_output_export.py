@@ -444,7 +444,7 @@ def test_long_new_template_headings_stay_within_reading_and_print_margins():
                 if command.text in long_title and command.font_size >= 18
             ]
             assert "".join(command.text for command in cover_title_lines) == long_title
-            credit = _text_command(pages[0], "整理：家人整理")
+            credit = _text_command(pages[0], "家人整理")
             assert min(command.y for command in cover_title_lines) > credit.y + 45
             for command in cover_title_lines:
                 font_name = command.font_name or PDF_SERIF_FONT_NAME
@@ -823,6 +823,20 @@ def test_table_of_contents_skips_links_without_chapter_pages():
     assert missing_command.target_anchor is None
 
 
+@pytest.mark.parametrize("prepared_by,credit", [("", "家人整理"), ("家人整理", "家人整理"), ("小李", "整理：小李")])
+def test_cover_credit_avoids_repeated_default_role(prepared_by, credit):
+    for style in PDF_COVER_STYLES:
+        manuscript = _sample_manuscript("院子里有一棵树。", cover_style=style)
+        manuscript["profile"]["prepared_by"] = prepared_by
+        pages = _build_manuscript_pdf_pages(
+            title="外婆回忆录", content="", manuscript=manuscript,
+            layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        )
+        cover_text = "\n".join(command.text for command in pages[0].commands)
+        assert credit in cover_text
+        assert "整理：家人整理" not in cover_text
+
+
 def test_export_filename_preserves_natural_memoir_titles():
     family_export = render_book_output_export(
         title="家庭回忆录",
@@ -839,8 +853,8 @@ def test_export_filename_preserves_natural_memoir_titles():
         export_format=MemoirBookOutputExportFormat.TXT,
     )
 
-    assert family_export.filename.startswith("家庭回忆录_")
-    assert oral_export.filename.startswith("《外婆口述回忆录》_")
+    assert family_export.filename == "家庭回忆录.txt"
+    assert oral_export.filename == "《外婆口述回忆录》.txt"
     assert "口述的回忆录" not in oral_export.filename
 
 
@@ -911,7 +925,7 @@ def test_manuscript_pdf_export_sanitizes_legacy_copy_without_replacing_user_titl
         manuscript=manuscript,
         export_format=MemoirBookOutputExportFormat.PDF,
     )
-    assert export.filename.startswith("《我的小时候》_阅读版_")
+    assert export.filename == "《我的小时候》_阅读版.pdf"
 
 
 def test_chapter_epigraph_does_not_repeat_as_first_body_sentence():
@@ -1162,7 +1176,7 @@ def test_uploaded_cover_photo_never_sits_under_cover_text(tmp_path, monkeypatch,
         assert title.replace("——", "") in "".join(texts).replace("——", "")
         assert "根据口述访谈整理" in texts
         assert any("口述：外婆" in text for text in texts)
-        assert any("整理：家人整理" in text for text in texts)
+        assert any("家人整理" in text for text in texts)
         if display_size == "cover_full_bleed":
             assert cover.background_image_path == photo
             assert cover.background_image_crop_to_fill is True
