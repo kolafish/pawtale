@@ -48,12 +48,12 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import automation_events, editing_jobs
 from app.services.memoir.book_plan_ai import NO_STORY_YET
-from app.services.memoir.book_plan_sources import load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
+from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.chapter_split import split_large_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import interviewer_lines, is_ready_story_material
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_lines, is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -214,7 +214,7 @@ def build_story_growth_prompt(
     ]
     prompt = (
         '请将本次全部讲述安排到故事目录中。先判断哪些是故事，再安排故事的章节和小节。\n'
-        '1. 只有整条没有亲历事情、经历或感受（纯称呼、寒暄、停顿、请求暂停）才标为 not_story，不能和故事放进同一小节。\n'
+        f'1. {STORY_CONTENT_GUIDANCE} 非故事标为 not_story。\n'
         '2. source_index 是不可拆分的一整条原始讲述，不是事件编号；不能复制、分割或自编 source_index。优先保证每条讲述完整且只收录一次。在能按整条讲述分组的前提下，同一事件的断续讲述合组，不同事件分组。如果同一条讲述包含多个事件，必须整体放在一个小节，使用能覆盖这些事件的共同主题标题，不能拆成多个小节重复引用该条，也不能只保留第一个事件。章节对应人生阶段或持续主题；不同原始讲述能分开的事件仍分小节，不因同属一个阶段就全部合并。\n'
         '章节的主题由章节标题决定，已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
         '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让相应讲述用 chapter_ref 引用它，不需要重复定义章节。\n'
@@ -440,7 +440,16 @@ async def _create_initial_tree(
     project_id: str,
     job: MemoirEditingJob,
     progress: StoryGrowthProgress,
+    excluded_source_hashes: dict[str, str],
 ) -> None:
+    async def checkpoint_not_story(sources: tuple[SourceSegment, ...]) -> None:
+        for source in sources:
+            progress.deferred[source.utterance_id] = DeferredSource(
+                text_hash=source_text_hash(source.text), status="not_story", reason="资料或对话回应，不含故事",
+                attempts=MAX_UNASSIGNED_ATTEMPTS,
+            )
+        await _save_progress(db, job, progress)
+
     async def checkpoint_plan() -> None:
         sections = (await db.scalars(select(MemoirSection).where(MemoirSection.project_id == project_id))).all()
         for section in sections:
@@ -467,6 +476,8 @@ async def _create_initial_tree(
         req=MemoirBookPlanGenerateRequest(),
         status=MemoirBookPlanStatus.CONFIRMED,
         before_commit=checkpoint_plan,
+        on_not_story=checkpoint_not_story,
+        excluded_source_hashes=excluded_source_hashes,
     )
 
 
@@ -629,11 +640,25 @@ async def grow_story_tree(
         from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
         await activate_existing_plan_for_automatic_book(db, project_id=job.project_id)
     progress = _progress(job)
+    deferred = {}
+    history = (
+        await db.scalars(
+            select(MemoirEditingJob)
+            .where(
+                MemoirEditingJob.project_id == job.project_id,
+                MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+            )
+            .order_by(MemoirEditingJob.updated_at)
+        )
+    ).all()
+    for previous in history:
+        deferred.update(_progress(previous).deferred)
     initial_tree = before_plan is None or bool(progress.initial_sections)
     if before_plan is None:
         try:
             await _create_initial_tree(
-                db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress
+                db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress,
+                excluded_source_hashes={key: value.text_hash for key, value in deferred.items() if value.status == "not_story"},
             )
         except HTTPException as exc:
             if exc.detail != NO_STORY_YET:
@@ -641,7 +666,7 @@ async def grow_story_tree(
             # Not a failure: the next narration in this session schedules growth again.
             return EditingJobResult(
                 status=MemoirEditingJobStatus.SKIPPED,
-                result_json={"voice_session_id": session.id},
+                result_json={"voice_session_id": session.id, "growth": progress.model_dump(mode="json")},
                 error_message=NO_STORY_YET,
             )
     await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
@@ -668,19 +693,7 @@ async def grow_story_tree(
             .execution_options(populate_existing=True)
         )
     ).all()
-    deferred = {}
-    history = (
-        await db.scalars(
-            select(MemoirEditingJob)
-            .where(
-                MemoirEditingJob.project_id == job.project_id,
-                MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
-            )
-            .order_by(MemoirEditingJob.updated_at)
-        )
-    ).all()
-    for previous in history:
-        deferred.update(_progress(previous).deferred)
+    deferred.update(progress.deferred)
     # Retry budgets belong to one set of evidence, not to the source forever.
     context_signature = semantic_json_signature({
         "sources": [(item.id, source_text_hash(current_utterance_text(item))) for item in project_sources],

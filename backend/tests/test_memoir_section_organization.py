@@ -1554,7 +1554,7 @@ async def test_initial_story_waits_when_narration_only_answers_the_interviewer(c
     _, job = await _stopped_growth_job(client, test_db, project_id, "你叫我余大姐吧，年年有余的余。")
     monkeypatch.setattr(
         "app.services.memoir.book_plan_ai.get_ai_service",
-        lambda _model=None: FakeStoryGrowthAI({"title": "", "chapters": []}),
+        lambda _model=None: FakeStoryGrowthAI({"title": "", "chapters": [], "not_story_source_indices": [1]}),
     )
 
     result = await story_tree_growth.run_story_tree_growth_job(test_db, job)

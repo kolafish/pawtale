@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
@@ -15,6 +15,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_plan_sources import SourceSegment
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述内容整理章节。"
@@ -36,6 +37,7 @@ class _BookPlanOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = ""
+    not_story_source_indices: list[int] = Field(default_factory=list)
     chapters: list[_BookPlanChapterOutput] = Field(
         max_length=MAX_MEMOIR_BOOK_PLAN_CHAPTERS,
     )
@@ -62,6 +64,7 @@ class GeneratedBookPlan:
     chapters: list[MemoirBookPlanChapterInput]
     model: str | None
     prompt: str
+    not_story_sources: tuple[SourceSegment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,7 @@ def build_plan_prompt(
 请输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
   "title": "章节规划标题",
+  "not_story_source_indices": [],
   "chapters": [
     {{
       "title": "章节标题",
@@ -118,7 +122,8 @@ def build_plan_prompt(
 - 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，只返回必要的少量章节。
-- interviewer_line 是访谈员小余在这条讲述前刚说的话，只用来理解讲述在回答什么。整条讲述没有任何经历、往事或感受，只是在回应小余（比如只说了怎么称呼、寒暄、说不想聊或换个话题、问小余问题）时，不要放进任何章节；只要有一点经历或感受就照常放进章节。全部讲述都不该放进章节时，chapters 返回空列表。
+- {STORY_CONTENT_GUIDANCE}
+- 非故事的 source_index 明确放入 not_story_source_indices，不放进章节；其余来源全部放进章节，两者不能重叠或遗漏。全部是非故事时 chapters 返回空列表。
 
 口述内容：
 {source_text}
@@ -248,6 +253,16 @@ async def generate_book_plan_from_sources(
     ai_client: AITextClient | None = None,
 ) -> GeneratedBookPlan:
     prompt = build_plan_prompt(project_title, sources, interviewer_lines)
+    class ValidatedBookPlanOutput(_BookPlanOutput):
+        @model_validator(mode="after")
+        def validate_source_coverage(self):
+            assigned = {index for chapter in self.chapters for index in chapter.source_indices}
+            excluded = set(self.not_story_source_indices)
+            expected = {source.source_index for source in sources}
+            if assigned & excluded or assigned | excluded != expected:
+                raise ValueError("每条来源必须进入章节或明确列为非故事，不能遗漏、重复排除或添加来源")
+            return self
+
     client = ai_client
     try:
         if client is None:
@@ -257,7 +272,7 @@ async def generate_book_plan_from_sources(
             client,
             SYSTEM_PROMPT,
             prompt,
-            output_model=_BookPlanOutput,
+            output_model=ValidatedBookPlanOutput,
             requested_model=ai_model,
             temperature=0.2,
             max_tokens=policy.max_tokens,
@@ -274,14 +289,14 @@ async def generate_book_plan_from_sources(
         raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
 
     title, chapters = chapters_from_payload(
-        generated.value.model_dump(),
-        sources=sources,
-    )
+        generated.value.model_dump(), sources=sources,
+    ) if generated.value.chapters else (generated.value.title, [])
     return GeneratedBookPlan(
         title=title,
         chapters=chapters,
         model=generated.response.resolved_model,
         prompt=prompt,
+        not_story_sources=tuple(source for source in sources if source.source_index in generated.value.not_story_source_indices),
     )
 
 
