@@ -521,6 +521,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     || interactionPhase === "waiting_for_answer"
     || interactionPhase === "assistant_error";
   const showAssistantPanel = !isHumanInterview
+    && (!completionRoundFinished || assistantBusy)
     && !state.recording
     && !showTranscriptProcessing
     && Boolean(assistantPhaseVisible || state.canRequestFollowUp);
@@ -582,7 +583,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   }
   if (isBookCompletion && !state.recording && !assistantBusy) {
     liveDisplayText = completionRoundFinished
-      ? "回答已经保存，可以返回全书概览。"
+      ? "本次补充已保存，可以返回了。"
       : (
         state.latestTranscriptText
         || (state.completionIssue
