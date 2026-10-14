@@ -128,6 +128,18 @@ async def read_draft_progress(
     voice_session_id: str | None = None,
     jobs: list[MemoirEditingJob] | None = None,
 ) -> MemoirDraftProgressResponse:
+    response, _ = await _draft_progress_projection(db, project_id=project_id,
+        voice_session_id=voice_session_id, jobs=jobs)
+    return response
+
+
+async def _draft_progress_projection(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    voice_session_id: str | None = None,
+    jobs: list[MemoirEditingJob] | None = None,
+) -> tuple[MemoirDraftProgressResponse, bool]:
     jobs = await project_jobs(db, project_id, voice_session_id=voice_session_id) if jobs is None else jobs
     parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
     copy_job = next((job for job in jobs if job.job_type == "generate_book_editorial_copy"), None)
@@ -165,8 +177,13 @@ async def read_draft_progress(
         review_status=progress.review_status,
         review_error=progress.review_error,
     )
-    failures = [job.error_message for job in (growth, parent, copy_job) if job and job.status in {"failed", "cancelled"}]
+    failures = [job.error_message for job in (growth, parent) if job and job.status in {"failed", "cancelled"}]
     failures += [item.error_message for item in progress.chapters.values() if item.status in {"failed", "cancelled"}]
+    copy_failed = bool(copy_job and copy_job.status in {"failed", "cancelled"})
+    copy_only_retry = (copy_failed and not failures and pending_material_count <= needs_user_count
+        and progress.review_status not in {"failed", "cancelled"})
+    if copy_failed:
+        failures.append(copy_job.error_message)
     result.can_retry = bool(failures or pending_material_count > needs_user_count
         or progress.review_status in {"failed", "cancelled"} or progress.editorial_copy_status == "failed")
     if any(job.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for job in jobs):
@@ -213,28 +230,21 @@ async def read_draft_progress(
     elif material_count:
         result.status, result.title = "no_change", "讲述已保存，暂时没有新增正文"
         result.detail = "待整理的讲述会在下次更新时继续处理"
-    return result
+    return result, result.can_retry and copy_only_retry
 
 
 async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
     jobs = await project_jobs(db, project_id)
-    progress = await read_draft_progress(db, project_id=project_id, jobs=jobs)
+    progress, copy_only_retry = await _draft_progress_projection(db, project_id=project_id, jobs=jobs)
     if not progress.can_retry:
         return
-    copy_job = next((job for job in jobs if job.job_type == "generate_book_editorial_copy"), None)
-    parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
-    parent_progress = automatic_book_draft.DraftProgress.model_validate(parent.result_json or {}) if parent else automatic_book_draft.DraftProgress()
-    if (copy_job and copy_job.status in {"failed", "cancelled"}
-            and progress.pending_material_count <= progress.needs_user_material_count
-            and not any(job.status in {"failed", "cancelled"} for job in jobs if job.id != copy_job.id)
-            and parent_progress.review_status not in {"failed", "cancelled"}
-            and not any(item.status in {"failed", "cancelled"} for item in parent_progress.chapters.values())):
+    if copy_only_retry:
         from app.models.projects import Project
         from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
         from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
         project = await db.get(Project, project_id)
         await schedule_book_editorial_copy_generation(db, project_id=project_id, user_id=project.user_id,
-            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True, retry=True)
         return
     growth = next((job for job in jobs if job.job_type == "organize_material"), None)
     retry_material = progress.pending_material_count > progress.needs_user_material_count

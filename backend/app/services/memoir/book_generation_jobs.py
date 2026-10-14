@@ -109,6 +109,10 @@ async def _enqueue_generation_job(
     existing = await _existing_active_generation_job(db, dedupe_key=dedupe_key)
     if existing and not automatic:
         return existing
+    if (automatic and existing and existing.status == MemoirEditingJobStatus.PENDING.value
+            and (existing.payload_json or {}).get("retry") is True):
+        # Coalescing a later assembly must not discard an unconsumed user retry.
+        payload_json = {**payload_json, "retry": True}
     return await enqueue_editing_job(
         db,
         project_id=project_id,
@@ -261,6 +265,7 @@ async def schedule_book_editorial_copy_generation(
     project_id: str,
     req: MemoirBookOutputEditorialCopyRegenerateRequest,
     automatic: bool = False,
+    retry: bool = False,
 ) -> MemoirAutomationEvent:
     """Queue only copy, in the caller's transaction; never prepares chapters/reviews."""
     request_id = str(uuid4())
@@ -278,6 +283,7 @@ async def schedule_book_editorial_copy_generation(
             "request": _request_payload(req),
             "target_label": label,
             "automatic": automatic,
+            "retry": retry,
         },
     )
     event = await _ensure_generation_event(
@@ -405,7 +411,7 @@ async def run_book_editorial_copy_generation_job(
             project_id=job.project_id,
             req=req,
             automatic=automatic,
-            retry=automatic,
+            retry=automatic and payload.get("retry") is True,
         )
         if automatic:
             stored = await db.get(MemoirBookOutput, output.id)
