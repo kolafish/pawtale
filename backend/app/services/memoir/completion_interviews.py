@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.memoir.types import (
     MemoirCompletionIssueChannel,
@@ -19,6 +21,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookPlanChapter,
+    MemoirChatMessage,
     MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
@@ -36,6 +39,8 @@ class OpeningCompletionOffer:
 
 
 OPENING_OFFER_KEY = "opening_completion_issue_id"
+# Assistant lines that leave the narrator still answering the opening.
+OPENING_INTENTS = ("opening", "no_answer_prompt")
 
 
 async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> OpeningCompletionOffer | None:
@@ -66,6 +71,50 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
         await db.flush()
         return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
     return None
+
+
+async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+    """For narrator messages answering an opening offer, the chapter the offered question is about.
+
+    Narrator messages before 小余's first follow-up may answer the opening, including replies after
+    a no-answer reminder or an interrupted opening. Recovery retains the hint only when its saved
+    turn_index is before that follow-up; deleting a reply never moves this boundary. Only the chapter is given:
+    chapter issues do not keep their section. The reply stays ordinary narration and the issue is
+    untouched."""
+    ids = {message_id for message_id in message_ids if message_id}
+    if not ids:
+        return {}
+    follow_up = aliased(MemoirChatMessage)
+    first_follow_up = (
+        select(func.min(follow_up.turn_index))
+        .where(
+            follow_up.voice_session_id == MemoirChatMessage.voice_session_id,
+            follow_up.role == "assistant",
+            or_(follow_up.guidance_intent.is_(None), follow_up.guidance_intent.not_in(OPENING_INTENTS)),
+        )
+        .scalar_subquery()
+    )
+    rows = (await db.execute(
+        select(MemoirChatMessage.id, MemoirCompletionIssue)
+        .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirChatMessage.voice_session_id)
+        .join(MemoirCompletionIssue, MemoirCompletionIssue.id == MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string())
+        .where(
+            MemoirChatMessage.id.in_(ids),
+            MemoirChatMessage.role == "user",
+            MemoirChatMessage.content_text != "",
+            or_(first_follow_up.is_(None), MemoirChatMessage.turn_index < first_follow_up),
+        )
+    )).all()
+    result = {}
+    for message_id, issue in rows:
+        chapter_ids = (
+            [issue.chapter_id]
+            if issue.scope == MemoirCompletionIssueScope.CHAPTER.value
+            else issue.related_chapter_ids_json
+        )
+        if len(chapter_ids) == 1 and chapter_ids[0]:
+            result[message_id] = chapter_ids[0]
+    return result
 
 
 @dataclass(frozen=True)

@@ -46,7 +46,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir import automation_events, editing_jobs
+from app.services.memoir import automation_events, completion_interviews, editing_jobs
 from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
@@ -75,6 +75,7 @@ SYSTEM_PROMPT = (
     "请把本次新讲述作为一个整体理解，只在确有新主题时生长章节或小节，"
     "不要改名、删除、移动或重排已有结构。"
 )
+OFFERED_CHAPTER_GUIDANCE = "offered_chapter_id 表示访谈员问的是这一章里的事：回答在补充这一章的内容就放进这一章（已有小节或新小节），讲了别的事就照常安排。"
 SETTLE_SECONDS = 3
 MAX_UNASSIGNED_ATTEMPTS = 2
 
@@ -179,6 +180,7 @@ def build_story_growth_prompt(
     chapters: list[MemoirBookPlanChapter],
     sections: list[MemoirSection],
     interviewer_lines: dict[str, str],
+    offered_chapters: dict[str, str] | None = None,
 ) -> tuple[str, ModelReferenceMap, ModelReferenceMap]:
     chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
@@ -187,10 +189,17 @@ def build_story_growth_prompt(
         chapters=chapters,
         sections=sections,
     )
+    candidate_chapter_ids = {chapter.id for chapter in chapter_candidates}
+    offered = {
+        message_id: chapter_refs.encode(chapter_id)
+        for message_id, chapter_id in (offered_chapters or {}).items()
+        if chapter_id in candidate_chapter_ids
+    }
     source_payload = [
         {
             "source_index": index,
             **({"interviewer_line": line} if (line := interviewer_lines.get(utterance.chat_message_id or "")) else {}),
+            **({"offered_chapter_id": ref} if (ref := offered.get(utterance.chat_message_id or "")) else {}),
             "text": current_utterance_text(utterance),
         }
         for index, utterance in enumerate(utterances, start=1)
@@ -222,7 +231,7 @@ def build_story_growth_prompt(
         '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才标为 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
         '6. 新章可用 insert_before_chapter_id 指定插在某个现有章节前。只有明确的人生先后且现有目录按人生阶段组织时才指定；主题目录或时间不明填 null。不重排已有章节。不同新章节按拟收录先后顺序列出。time_evidence 必须是本次讲述中能支持插入位置的原文片段；没有明确时间证据时 time_evidence 和 insert_before_chapter_id 都填 null。\n'
         '标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
-        '7. placements 必须以本次给出的 source_index 字符串为键，每个键对应一个对象且只有一个归属。不能将一个 source_index 解释成多个事件编号，也不能添加本次未给出的键。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。\n'
+        f'7. placements 必须以本次给出的 source_index 字符串为键，每个键对应一个对象且只有一个归属。不能将一个 source_index 解释成多个事件编号，也不能添加本次未给出的键。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。{OFFERED_CHAPTER_GUIDANCE if offered else ""}\n'
         '\n'
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
         f"已有章节：\n{json.dumps(chapter_payload, ensure_ascii=False)}\n\n"
@@ -304,12 +313,14 @@ async def decide_story_growth(
     sections: list[MemoirSection],
     interviewer_lines: dict[str, str],
     ai_model: str | None,
+    offered_chapters: dict[str, str] | None = None,
 ) -> list[GrowthGroup]:
     prompt, chapter_refs, section_refs = build_story_growth_prompt(
         utterances=utterances,
         chapters=chapters,
         sections=sections,
         interviewer_lines=interviewer_lines,
+        offered_chapters=offered_chapters,
     )
 
     class ValidatedGrowthOutput(_GrowthOutput):
@@ -734,6 +745,7 @@ async def grow_story_tree(
         )
         ai_model = await load_project_ai_model(db, job.project_id, None)
         lines = await interviewer_lines(db, (item.chat_message_id for item in utterances))
+        offered = await completion_interviews.offered_chapters(db, (item.chat_message_id for item in utterances))
         await db.commit()
         batch.groups = await decide_story_growth(
             utterances=utterances,
@@ -741,6 +753,7 @@ async def grow_story_tree(
             sections=sections,
             interviewer_lines=lines,
             ai_model=ai_model,
+            offered_chapters=offered,
         )
         progress.batch = batch
         await _save_progress(db, job, progress)
