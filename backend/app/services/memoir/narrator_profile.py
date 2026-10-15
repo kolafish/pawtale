@@ -163,6 +163,14 @@ def _has_open_fields(profile: dict) -> bool:
     return any(_is_empty(profile.get(key)) or key in inferred for key in (*_LABELS, "narrator_gender"))
 
 
+def _asked(message: MemoirChatMessage) -> list[str]:
+    """Items an interviewer line asked for; until its check finishes, every item it was offered."""
+    metadata = message.metadata_json or {}
+    if "profile_asked" in metadata:
+        return [metadata["profile_asked"]]
+    return metadata.get("profile_questions", [metadata.get("profile_question")])
+
+
 def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
     """How many interviewer lines in a session asked for each item.
 
@@ -170,26 +178,32 @@ def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
     """
     counts: dict[str, int] = {}
     for message in messages:
-        metadata = message.metadata_json or {}
         if message.role != MemoirChatMessageRole.ASSISTANT.value:
             continue
-        fields = (
-            [metadata["profile_asked"]]
-            if "profile_asked" in metadata
-            else metadata.get("profile_questions", [metadata.get("profile_question")])
-        )
-        # Until classification finishes, reserve an ask for every offered item. The reply may skip
-        # one already answered in the latest segment, but no item may exceed the cap meanwhile.
-        for field in fields:
+        for field in _asked(message):
             if field in _LABELS:
                 counts[field] = counts.get(field, 0) + 1
     return counts
 
 
 def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -> tuple[str, ...]:
-    """Eligible items in order; the reply skips answers not yet persisted by the background reader."""
+    """The item the next reply asks for, then the one it asks instead when the narrator has just given the
+    first; messages are in turn order. Answers may not be saved yet.
+
+    The item the latest interviewer line asked is skipped once the narrator has spoken since. If they did not
+    answer it, that line asked nothing and it is offered again.
+    """
     asks = profile_asks(messages)
-    return tuple(key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS)
+    spoke = False
+    answering: list[str] = []
+    for message in reversed(messages):
+        if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            answering = _asked(message) if spoke else []
+            break
+        spoke = spoke or bool(message.content_text.strip())
+    return tuple(
+        key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS and key not in answering
+    )[:2]
 
 
 def ask_needs_check(fields: tuple[str, ...], text: str) -> bool:

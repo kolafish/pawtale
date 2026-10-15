@@ -313,7 +313,8 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     await _narrate(client, test_db, session_id, "那时候我们家在河边，有一棵大槐树。")
     session = await test_db.get(MemoirVoiceSession, session_id)
     await test_db.refresh(session, ["messages"])
-    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_age", "narrator_origin")
+    # Right after the narrator speaks, the item just asked waits for the reading of their answer.
+    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_origin",)
 
     # A line offered age but asking about something else does not count.
     await _ask(test_db, session_id, "那棵槐树后来还在吗？", offered="narrator_age", asked=False)
@@ -401,7 +402,7 @@ async def test_reply_can_ask_age_after_a_name_answer_while_the_profile_job_is_pe
         test_db, voice_session_id=session_id, user_id=user_id, chunks=["余大姐，您是哪年出生的？"],
     )
     await narrator_profile.wait_for_profile_ask_checks()
-    assert "如果年纪仍没说，就接着问年纪" in ai_client.calls[0]["user_prompt"]
+    assert "这次要问的资料：他的年纪" in ai_client.calls[0]["user_prompt"]
     test_db.expire_all()
     reply = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert reply.metadata_json["profile_asked"] == "narrator_age"
@@ -527,31 +528,38 @@ def _prompt(session_id: str, messages: list[MemoirChatMessage], book: InterviewB
     )
 
 
-def test_the_interviewer_can_advance_past_a_recent_answer_even_before_it_is_saved():
+def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being_read():
+    asked = SimpleNamespace(
+        id="m0", role=MemoirChatMessageRole.ASSISTANT.value, content_text="您怎么称呼？", turn_index=0, created_at=None,
+        metadata_json={"profile_questions": ["narrator_name"], "profile_asked": "narrator_name"},
+    )
     narrator = SimpleNamespace(
-        id="m1", role=MemoirChatMessageRole.USER.value, content_text="我叫王秀英。", turn_index=1, created_at=None,
+        id="m1", role=MemoirChatMessageRole.USER.value, content_text="你叫我于大姐吧。", turn_index=1, created_at=None,
         metadata_json={},
     )
+    # Code picks the item, so the reply cannot ask the hometown or follow the story instead; the hometown is
+    # only the fallback when the narrator already gave their age along with the name.
+    assert narrator_profile.profile_questions_to_ask({}, [asked]) == ("narrator_name", "narrator_age")
+    questions = narrator_profile.profile_questions_to_ask({}, [asked, narrator])
+    assert questions == ("narrator_age", "narrator_origin")
     book = InterviewBookContext(
-        chapters=(("童年", 2),), last_chapter_title="童年", topics=(), anchor_topic=None,
-        profile_questions=narrator_profile.profile_questions_to_ask({}, []),
+        chapters=(("童年", 2),), last_chapter_title="童年", topics=(), anchor_topic=None, profile_questions=questions,
     )
-    prompt = _prompt("s1", [narrator], book)
-    assert "他的年纪" in prompt
-    assert "您是哪年生的？" in prompt
-    assert "如果年纪仍没说，就接着问年纪" in prompt
-    assert "我叫王秀英。" in prompt
-    assert "最多问一项" in prompt
+    prompt = _prompt("s1", [asked, narrator], book)
+    assert "这次要问的资料：他的年纪，比如“您是哪年生的？”" in prompt
+    assert "就改问：他的老家，比如“您老家是哪里的？”（这一项也说了就不问）" in prompt
+    assert "你叫我于大姐吧。" in prompt
+    last = InterviewBookContext(
+        chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_origin",),
+    )
+    assert "或明确不想说，就不问资料" in _prompt("s1", [asked, narrator], last)
 
-    capped = InterviewBookContext(
-        chapters=(), last_chapter_title="", topics=(), anchor_topic=None,
-        profile_questions=("narrator_name", "narrator_origin"),
-    )
-    assert "接着问年纪" not in _prompt("s1", [narrator], capped)
-    assert "您是哪年生的？" not in _prompt("s1", [narrator], capped)
+    # An ask the narrator did not answer leaves the line counted but not asking, so the item comes back.
+    asked.metadata_json["profile_asked"] = None
+    assert narrator_profile.profile_questions_to_ask({}, [asked, narrator]) == ("narrator_name", "narrator_age")
 
     done = InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
-    assert "还可以问的资料" not in _prompt("s1", [narrator], done)
+    assert "这次要问的资料：" not in _prompt("s1", [narrator], done)
 
     opening = InterviewBookContext(
         chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_name",),
