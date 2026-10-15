@@ -4,8 +4,8 @@ A new book has no profile form. The book's first voice session where the narrato
 profile session: only there does the interviewer ask for 称呼, age, hometown and gender. In every AI interview,
 each narrator segment (one recording) is read with the interviewer's line before it and what is already
 known, for anything the narrator newly says or corrects about themselves. A segment is read again
-when its transcript changes. Asking stops after two asks or a refusal; reading does not, so a late
-answer is still kept. A value the user saved on the project page is never overwritten.
+when its transcript changes. Asking stops after two asks (one for gender) or a refusal; reading does not,
+so a late answer is still kept. A value the user saved on the project page is never overwritten.
 The same job reads the people in a corrected segment (see narration_people).
 """
 
@@ -57,6 +57,8 @@ logger = logging.getLogger(__name__)
 
 # Each item is asked at most this many times; an answer given later is still kept.
 MAX_ASKS = 2
+# Gender is asked once and otherwise left to what the narrator says.
+_ASK_LIMITS = {"narrator_gender": 1}
 # A failed reading is tried again after these delays, then left failed.
 RETRY_DELAYS = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
 SYSTEM_PROMPT = "你从回忆录访谈里记下讲述者本人的基本资料，只记他说出来或能明确看出的内容。"
@@ -206,7 +208,8 @@ def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -
             break
         spoke = spoke or bool(message.content_text.strip())
     return tuple(
-        key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS and key not in answering
+        key for key in profile_items_to_ask(profile)
+        if asks.get(key, 0) < _ASK_LIMITS.get(key, MAX_ASKS) and key not in answering
     )[:2]
 
 

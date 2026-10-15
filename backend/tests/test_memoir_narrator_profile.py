@@ -314,13 +314,17 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     session = await test_db.get(MemoirVoiceSession, session_id)
     await test_db.refresh(session, ["messages"])
     # Right after the narrator speaks, the item just asked waits for the reading of their answer.
-    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_origin",)
+    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == (
+        "narrator_origin", "narrator_gender",
+    )
 
     # A line offered age but asking about something else does not count.
     await _ask(test_db, session_id, "那棵槐树后来还在吗？", offered="narrator_age", asked=False)
     await _ask(test_db, session_id, "王阿姨，您今年多大年纪了？", offered="narrator_age")
     await test_db.refresh(session, ["messages"])
-    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == ("narrator_origin",)
+    assert narrator_profile.profile_questions_to_ask(profile, list(session.messages)) == (
+        "narrator_origin", "narrator_gender",
+    )
 
     # After the second ask the answer still comes, much later.
     late = await _narrate(client, test_db, session_id, "我是五二年生的，属龙。")
@@ -389,7 +393,9 @@ def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
 
 def test_gender_is_asked_last_and_only_while_unknown():
     known = {"narrator_name": "老王", "narrator_age": 70, "narrator_origin": "山东"}
-    assert narrator_profile.profile_questions_to_ask({"narrator_gender": "unspecified"}, []) == ("narrator_name",)
+    assert narrator_profile.profile_questions_to_ask({"narrator_gender": "unspecified"}, []) == (
+        "narrator_name", "narrator_age",
+    )
     assert narrator_profile.profile_questions_to_ask({**known, "narrator_gender": "unspecified"}, []) == (
         "narrator_gender",
     )
@@ -397,6 +403,19 @@ def test_gender_is_asked_last_and_only_while_unknown():
     assert narrator_profile.profile_questions_to_ask({**known, "narrator_gender": "female"}, []) == ()
     declined = {**known, projects.SKIPPED_PROFILE_FIELDS_KEY: {"narrator_gender": "segment"}}
     assert narrator_profile.profile_questions_to_ask(declined, []) == ()
+    # Asked once; if the narrator tells a story instead, gender is left to what they say later.
+    asked = SimpleNamespace(
+        role=MemoirChatMessageRole.ASSISTANT.value, content_text="我该叫您叔叔还是阿姨呀？",
+        metadata_json={"profile_questions": ["narrator_gender"], "profile_asked": "narrator_gender"},
+    )
+    story = SimpleNamespace(role=MemoirChatMessageRole.USER.value, content_text="那年我们去赶集……", metadata_json={})
+    went_on = SimpleNamespace(
+        role=MemoirChatMessageRole.ASSISTANT.value, content_text="后来呢？",
+        metadata_json={"profile_questions": [], "profile_asked": None},
+    )
+    finished = SimpleNamespace(role=MemoirChatMessageRole.USER.value, content_text="就这些。", metadata_json={})
+    unknown = {**known, "narrator_gender": "unspecified"}
+    assert narrator_profile.profile_questions_to_ask(unknown, [asked, story, went_on, finished]) == ()
 
     narrator = SimpleNamespace(
         id="m1", role=MemoirChatMessageRole.USER.value, content_text="那年我们去赶集。", turn_index=1, created_at=None,
