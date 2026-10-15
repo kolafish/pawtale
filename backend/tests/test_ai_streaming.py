@@ -162,3 +162,113 @@ async def test_provider_stream_releases_http_connection_and_slot(monkeypatch, se
     assert closed
     # A new call must not remain blocked after cancellation or a network timeout.
     assert await asyncio.wait_for(limiter.run("ai_text", 1, lambda: asyncio.sleep(0, result=True)), 1)
+
+
+@pytest.mark.parametrize("ending", ["heartbeat_timeout", "metadata_timeout", "cancel_before_text", "close_after_text", "stall_after_text"])
+async def test_owned_text_stream_stops_upstream_and_releases_slot(monkeypatch, ending):
+    from app.services import ai_calls
+
+    service = DeepSeekTextService()
+    service.max_concurrent_requests = 1
+    limiter = ProviderConcurrencyLimiter()
+    monkeypatch.setattr("app.services.ai_base.provider_concurrency_limiter", limiter)
+    records = []
+    monkeypatch.setattr(ai_calls, "record_ai_usage_in_background", lambda **kwargs: records.append(kwargs))
+    entered, closed = asyncio.Event(), asyncio.Event()
+
+    class ResponseStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            entered.set()
+            if ending.endswith("after_text"):
+                yield b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'
+            while True:
+                # Real outage payload: HTTP 200 with SSE comments, no text.
+                yield b": keep-alive\n\n"
+                if ending == "metadata_timeout":
+                    yield b'data: {"usage":{"prompt_tokens":1}}\n\n'
+                await asyncio.sleep(0.005)
+
+        async def aclose(self):
+            closed.set()
+
+    client_type = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=ResponseStream()))
+    monkeypatch.setattr("httpx.AsyncClient", lambda: client_type(transport=transport))
+    stream = ai_calls.stream_text_with_client(
+        service, "system", "user", requested_model=None, temperature=0, max_tokens=10,
+        timeout=1, text_timeout=0.05,
+    )
+    if ending.endswith("after_text"):
+        assert (await anext(stream)).text_delta == "hello"
+    if ending == "close_after_text":
+        await stream.aclose()
+    elif ending == "cancel_before_text":
+        task = asyncio.create_task(anext(stream))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(AIProviderTimeoutError):
+            async with asyncio.timeout(1):
+                async for _ in stream:
+                    pass
+    assert closed.is_set()
+    assert await asyncio.wait_for(limiter.run("ai_text", 1, lambda: asyncio.sleep(0, result=True)), 1)
+    assert len(records) == 1
+    assert records[0]["status"] == ("cancelled" if ending in {"cancel_before_text", "close_after_text"} else "failed")
+
+
+async def test_text_deadline_includes_waiting_for_provider_slot(monkeypatch):
+    from app.services import ai_calls
+
+    service = DeepSeekTextService()
+    service.max_concurrent_requests = 1
+    limiter = ProviderConcurrencyLimiter()
+    monkeypatch.setattr("app.services.ai_base.provider_concurrency_limiter", limiter)
+    monkeypatch.setattr(ai_calls, "record_ai_usage_in_background", lambda **kwargs: None)
+    async with limiter.slot("ai_text", 1):
+        stream = ai_calls.stream_text_with_client(
+            service, "system", "user", requested_model=None, temperature=0, max_tokens=10,
+            timeout=1, text_timeout=0.02,
+        )
+        with pytest.raises(AIProviderTimeoutError):
+            await anext(stream)
+    assert await asyncio.wait_for(limiter.run("ai_text", 1, lambda: asyncio.sleep(0, result=True)), 1)
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+async def test_text_progress_extends_idle_deadline_but_not_total(monkeypatch, bounded):
+    from app.services import ai_calls
+    from app.services.ai_streaming import AITextStreamChunk
+
+    closed = False
+    async def record(**kwargs):
+        pass
+    monkeypatch.setattr(ai_calls, "record_ai_usage", record)
+    monkeypatch.setattr(ai_calls, "record_ai_usage_in_background", lambda **kwargs: None)
+
+    class Client:
+        async def stream_llm(self, *args, **kwargs):
+            nonlocal closed
+            try:
+                for _ in range(100 if bounded else 6):
+                    await asyncio.sleep(0.01)
+                    yield AITextStreamChunk(text_delta="字")
+            finally:
+                closed = True
+
+    stream = ai_calls.stream_text_with_client(
+        Client(), "system", "user", requested_model=None, temperature=0, max_tokens=100,
+        timeout=0.07 if bounded else 1, text_timeout=0.05,
+    )
+    output = []
+    if bounded:
+        with pytest.raises(AIProviderTimeoutError):
+            async for chunk in stream:
+                output.append(chunk.text_delta)
+        assert 0 < len(output) < 100
+    else:
+        output = [chunk.text_delta async for chunk in stream]
+        assert len(output) == 6
+    assert closed

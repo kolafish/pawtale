@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import httpx
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -1298,6 +1299,59 @@ async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(
     if failure_stage == "before_text":
         types = [e["type"] for e in stream_client.sent]
         assert types.index("audio.failed") < types.index("text.delta")
+
+
+@pytest.mark.parametrize("failure", ["timeout", "rate_limit", "unavailable", "credit"])
+async def test_upstream_failure_is_retryable_and_preserves_narration(client, test_db, monkeypatch, failure):
+    from app.application_errors import InsufficientAICreditError
+    from app.services.ai_timeouts import AIProviderTimeoutError
+
+    created = await create_test_voice_transcript(client, test_db, text="我想聊聊小时候。")
+    session_id = created["session"]["id"]
+    query = select(MemoirChatMessage.id).where(MemoirChatMessage.voice_session_id == session_id)
+    before = list((await test_db.scalars(query)).all())
+    closed = False
+
+    class FailingAI(FakeStreamingAI):
+        async def stream_llm(self, *args, **kwargs):
+            nonlocal closed
+            try:
+                if failure == "timeout":
+                    raise AIProviderTimeoutError(provider="deepseek", model="test", timeout_seconds=15)
+                if failure == "credit":
+                    raise InsufficientAICreditError("AI 额度不足，请先充值")
+                response = httpx.Response(
+                    429 if failure == "rate_limit" else 503,
+                    request=httpx.Request("POST", "https://upstream.test/chat"),
+                )
+                response.raise_for_status()
+                yield AITextStreamChunk()
+            finally:
+                closed = True
+
+    stream_client = FakeTurnClient()
+    session = VoiceAssistantTurnStreamSession(
+        db=test_db, client=stream_client, voice_session_id=session_id, user_id=created["user_id"],
+        ai_client_factory=lambda model=None: FailingAI([]), tts_client_factory=FakeStreamingTTS,
+    )
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(stream_client, "turn.ready")
+    await stream_client.push({"type": "turn.start"})
+    failed = await _wait_for_event(stream_client, "turn.failed")
+    await asyncio.wait_for(run_task, 1)
+    assert closed
+    if failure == "credit":
+        assert "额度不足" in failed["error"]
+    else:
+        assert "请稍等片刻" in failed["error"] and "再问一次" in failed["error"]
+        assert "upstream.test" not in failed["error"]
+    assert not any(event["type"] == "turn.completed" for event in stream_client.sent)
+    assert list((await test_db.scalars(query)).all()) == before
+    if failure == "timeout":
+        _, _, _, completed = await _run_stream_turn(
+            test_db, voice_session_id=session_id, user_id=created["user_id"], chunks=["您小时候住在哪里？"],
+        )
+        assert completed["text"] == "您小时候住在哪里？"
 
 
 async def _as_book_completion(test_db, voice_session_id: str) -> None:

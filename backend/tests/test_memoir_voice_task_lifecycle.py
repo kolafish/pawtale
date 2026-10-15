@@ -322,3 +322,30 @@ async def test_closing_text_chunks_waits_for_pending_input_cleanup():
     assert await anext(chunks) == "短句"
     await chunks.aclose()
     assert closed.is_set()
+
+
+async def test_client_send_failure_closes_text_upstream(monkeypatch):
+    from app.services.ai_streaming import AITextStreamChunk
+
+    closed = False
+    class AI:
+        async def stream_llm(self, *args, **kwargs):
+            nonlocal closed
+            try:
+                yield AITextStreamChunk(text_delta="[listen]\n您好，怎么称呼您？")
+                await asyncio.Event().wait()
+            finally:
+                closed = True
+
+    class Client:
+        async def send_json(self, payload):
+            raise ConnectionError("client disconnected")
+
+    monkeypatch.setattr("app.services.ai_calls.record_ai_usage_in_background", lambda **kwargs: None)
+    session = VoiceAssistantTurnStreamSession(db=None, client=Client(), voice_session_id="session", user_id="user")
+    with pytest.raises(ConnectionError):
+        await session._stream_text(
+            ai_client=AI(), system_prompt="", prompt="", req=AssistantTurnStartRequest(), max_tokens=10,
+            turn_id="turn", artifacts=AssistantTurnArtifacts(), cancel_event=asyncio.Event(), text_queue=asyncio.Queue(),
+        )
+    assert closed

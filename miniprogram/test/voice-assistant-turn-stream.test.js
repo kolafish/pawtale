@@ -261,7 +261,7 @@ test("assistant turn stream rejects when opened stream has no activity", async (
 
   const startPromise = assert.rejects(
     client.start({ connectTimeoutMs: 50, turnActivityTimeoutMs: 10 }),
-    /AI 回应等待超时/,
+    /请稍等片刻.*再问一次/,
   );
   await new Promise((resolve) => setImmediate(resolve));
   harness.handlers.open();

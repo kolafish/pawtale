@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -19,7 +20,8 @@ from app.services.ai_costs import (
 from app.services.ai_types import AITextClient
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.ai_credits import assert_current_ai_credit_available
-from app.services.ai_usage_records import record_ai_usage
+from app.services.ai_usage_records import record_ai_usage, record_ai_usage_in_background
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.json_utils import extract_json_payload
 
 
@@ -287,73 +289,6 @@ async def generate_text_with_client(
     return result
 
 
-_STREAM_DONE = object()
-# Upstream streams keep running after the consumer stops (for example when the
-# speaker interrupts a voice turn) so the final usage chunk still gets billed.
-_background_streams: set[asyncio.Task[None]] = set()
-
-
-async def _pump_text_stream(
-    client: AITextClient,
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    requested_model: str | None,
-    temperature: float,
-    max_tokens: int,
-    timeout: float,
-    queue: asyncio.Queue[object],
-) -> None:
-    provider = getattr(client, "provider_name", None)
-    resolved_model = getattr(client, "model_name", requested_model)
-    mismatch_logged = False
-    last_chunk: AITextStreamChunk | None = None
-    try:
-        async for chunk in client.stream_llm(
-            system_prompt,
-            user_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        ):
-            enriched = replace(
-                chunk,
-                provider=provider,
-                requested_model=requested_model,
-                resolved_model=resolved_model,
-            )
-            last_chunk = enriched
-            if enriched.model_mismatch and not mismatch_logged:
-                logger.warning(
-                    "AI streaming response model differs from resolved model "
-                    "requested=%s resolved=%s response=%s",
-                    requested_model or "<default>",
-                    resolved_model,
-                    enriched.response_model,
-                )
-                mismatch_logged = True
-            queue.put_nowait(enriched)
-    except Exception as exc:
-        await record_ai_usage(
-            provider=provider or "unknown",
-            model=resolved_model or requested_model or "unknown",
-            status="failed",
-            cost=AICostEstimate(None, "unknown", provider, resolved_model or requested_model, reason="AI stream failed"),
-            error_type=type(exc).__name__,
-        )
-        queue.put_nowait(exc)
-        return
-    if last_chunk is not None:
-        await record_ai_usage(
-            provider=last_chunk.provider or "unknown",
-            model=last_chunk.response_model or last_chunk.resolved_model or requested_model or "unknown",
-            status="succeeded",
-            cost=last_chunk.cost_estimate,
-            usage=last_chunk.normalized_usage,
-        )
-    queue.put_nowait(_STREAM_DONE)
-
-
 async def stream_text_with_client(
     client: AITextClient,
     system_prompt: str,
@@ -363,28 +298,94 @@ async def stream_text_with_client(
     temperature: float,
     max_tokens: int,
     timeout: float,
+    text_timeout: float | None = None,
 ) -> AsyncIterator[AITextStreamChunk]:
+    """Own the upstream stream; only text extends its idle deadline.
+
+    Callers must close this iterator when they stop consuming. Cancellation must
+    release the HTTP connection and provider slot, even without a final usage
+    event. Only usage actually returned by the provider can be billed.
+    """
     await assert_current_ai_credit_available()
-    queue: asyncio.Queue[object] = asyncio.Queue()
-    pump = asyncio.create_task(_pump_text_stream(
-        client,
-        system_prompt,
-        user_prompt,
-        requested_model=requested_model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        queue=queue,
-    ))
-    _background_streams.add(pump)
-    pump.add_done_callback(_background_streams.discard)
-    while True:
-        item = await queue.get()
-        if item is _STREAM_DONE:
-            return
-        if isinstance(item, Exception):
-            raise item
-        yield item  # type: ignore[misc]
+    provider = getattr(client, "provider_name", None)
+    resolved_model = getattr(client, "model_name", requested_model)
+    mismatch_logged = False
+    last_chunk: AITextStreamChunk | None = None
+    usage_chunk: AITextStreamChunk | None = None
+    status = "cancelled"
+    error_type: str | None = None
+    loop = asyncio.get_running_loop()
+    text_timeout = timeout if text_timeout is None else text_timeout
+    total_deadline = loop.time() + timeout
+    text_deadline = loop.time() + text_timeout
+    try:
+        async with aclosing(client.stream_llm(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )) as stream:
+            while True:
+                deadline = min(total_deadline, text_deadline)
+                try:
+                    chunk = await asyncio.wait_for(anext(stream), max(0, deadline - loop.time()))
+                except StopAsyncIteration:
+                    break
+                except AIProviderTimeoutError:
+                    raise
+                except TimeoutError as exc:
+                    raise AIProviderTimeoutError(
+                        provider=provider or "unknown",
+                        model=resolved_model or requested_model or "unknown",
+                        timeout_seconds=timeout if total_deadline <= text_deadline else text_timeout,
+                    ) from exc
+                enriched = replace(
+                    chunk,
+                    provider=provider,
+                    requested_model=requested_model,
+                    resolved_model=resolved_model,
+                )
+                last_chunk = enriched
+                if enriched.usage:
+                    usage_chunk = enriched
+                if enriched.text_delta.strip():
+                    text_deadline = loop.time() + text_timeout
+                if enriched.model_mismatch and not mismatch_logged:
+                    logger.warning(
+                        "AI streaming response model differs from resolved model "
+                        "requested=%s resolved=%s response=%s",
+                        requested_model or "<default>",
+                        resolved_model,
+                        enriched.response_model,
+                    )
+                    mismatch_logged = True
+                yield enriched
+        status = "succeeded"
+    except Exception as exc:
+        status = "failed"
+        error_type = type(exc).__name__
+        raise
+    finally:
+        result = usage_chunk or last_chunk
+        record = dict(
+            provider=provider or "unknown",
+            model=(result.response_model if result else None) or resolved_model or requested_model or "unknown",
+            status=status,
+            cost=usage_chunk.cost_estimate if usage_chunk else AICostEstimate(
+                None, "unknown", provider, resolved_model or requested_model,
+                reason="AI stream ended without provider usage",
+            ),
+            usage=usage_chunk.normalized_usage if usage_chunk else None,
+            error_type=error_type,
+            billable=usage_chunk is not None,
+        )
+        if status == "succeeded":
+            await record_ai_usage(**record)
+        else:
+            # Persist diagnostics without keeping the upstream alive or delaying
+            # the failure response while the accounting transaction completes.
+            record_ai_usage_in_background(**record)
 
 
 def validate_structured_response(
