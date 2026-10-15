@@ -149,17 +149,18 @@ async def is_profile_session(db: AsyncSession, voice_session: MemoirVoiceSession
 async def profile_questions_for(
     db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
 ) -> tuple[str, ...]:
-    """The one item this session's next reply asks for; asks in the first session count toward the cap."""
+    """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
+    toward the cap, including an opening ask the narrator left without answering."""
     if not await is_profile_session(db, voice_session, project):
         return ()
-    pinned = _profile(project).get(PROFILE_SESSION_KEY)
-    earlier = [] if pinned in (None, voice_session.id) else list((await db.scalars(
+    earlier = list((await db.scalars(
         select(MemoirChatMessage)
         .where(
-            MemoirChatMessage.voice_session_id == pinned,
+            MemoirChatMessage.project_id == voice_session.project_id,
+            MemoirChatMessage.voice_session_id != voice_session.id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
         )
-        .order_by(MemoirChatMessage.turn_index)
+        .order_by(MemoirChatMessage.created_at)
     )).all())
     return profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
 

@@ -655,6 +655,28 @@ def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being
     assert "再问一句怎么称呼他" in _prompt("s1", [], opening)
 
 
+@pytest.mark.asyncio
+async def test_an_opening_ask_left_unanswered_still_counts_in_later_sessions(client, test_db, fake_ai):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    first = await _session(client, project_id)
+    await _ask(test_db, first, "您是哪年生的？", offered="narrator_age")
+    segment = await _narrate(client, test_db, first, "我叫李桂兰，老家湖南长沙，我年纪就先不说了。")
+    fake_ai.payload = {"name": "李桂兰", "origin": "湖南长沙"}
+    await _run(test_db, segment.utterance_id)
+    # The narrator leaves the next two sessions right after 小余's opening question.
+    for line, item in (
+        ("李阿姨，欢迎回来。您是哪年生的？", "narrator_age"),
+        ("冒昧问一句，我该叫您叔叔还是阿姨呀？", "narrator_gender"),
+    ):
+        silent = await _session(client, project_id)
+        await _ask(test_db, silent, line, offered=item)
+    latest = await test_db.get(MemoirVoiceSession, await _session(client, project_id))
+    await test_db.refresh(latest, ["messages"])
+    project = await test_db.get(Project, project_id)
+    assert await narrator_profile.is_profile_session(test_db, latest, project)
+    assert await narrator_profile.profile_questions_for(test_db, latest, project) == ()
+
+
 def test_the_second_session_opens_by_asking_what_the_first_left():
     book = InterviewBookContext(
         chapters=(("新都县的家", 4),), last_chapter_title="新都县的家", topics=(), anchor_topic=None,
