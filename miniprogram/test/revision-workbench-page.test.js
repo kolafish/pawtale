@@ -248,6 +248,41 @@ test("section revision keeps a request handed over from voice edit while restori
   assert.equal(context.data.feedbackText, "把奶奶的部分写得更细");
 });
 
+test("section revision keeps a handed-over request when an older job finishes later", async () => {
+  global.wx = { setNavigationBarTitle() {}, showToast() {} };
+  let status = "running";
+  let scheduledFeedbackPoll = null;
+  const { page } = loadRevisionPage({
+    handedOffFeedback: "把奶奶的部分写得更细",
+    api: {
+      getMemoirChapterSectionRevisionJob: async () => ({
+        ...revisionFeedbackJob(status), operation: "revise", proposal_id: "proposal-1",
+      }),
+      getMemoirChapterSectionRevisionProposal: async () => revisionPlanProposal(),
+    },
+  });
+  const context = pageContext(page);
+  context.pageActive = true;
+  await page.onLoad.call(context, {
+    scope: "chapter_section", projectId: "project-1", chapterId: "chapter-1", sectionId: "section-1",
+  });
+  context.feedbackPoller = {
+    cancel() {},
+    schedule(callback) {
+      scheduledFeedbackPoll = callback;
+      return true;
+    },
+  };
+  await page.refreshFeedbackJob.call(context);
+  assert.equal(context.data.feedbackBusy, true);
+  assert.ok(scheduledFeedbackPoll);
+  status = "succeeded";
+  scheduledFeedbackPoll();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.feedbackBusy, false);
+  assert.equal(context.data.feedbackText, "把奶奶的部分写得更细");
+});
+
 test("book revision plan presents proposed book information before drafting", () => {
   const { mod } = loadRevisionPage();
   const proposal = revisionPlanProposal({

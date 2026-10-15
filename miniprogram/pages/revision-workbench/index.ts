@@ -306,9 +306,9 @@ definePage<RevisionWorkbenchData>()({
   feedbackPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   draftPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   feedbackBaselineUpdatedAt: "",
-  // Only text the narrator sent as a plan request is cleared when that plan appears;
-  // a request handed over from home voice edit survives restoring an older plan.
-  planFeedbackSubmitted: false,
+  // Only feedback this page sent is cleared when its job finishes. A request handed over
+  // from home voice edit survives restoring an older plan or an older job finishing.
+  feedbackSubmitted: false,
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
   wholeLoadSequence: 0,
@@ -513,9 +513,9 @@ definePage<RevisionWorkbenchData>()({
       if (job.proposal_id) {
         this.setData({
           proposalId: job.proposal_id,
-          ...(this.planFeedbackSubmitted ? { feedbackText: "" } : {}),
+          ...(this.feedbackSubmitted ? { feedbackText: "" } : {}),
         });
-        this.planFeedbackSubmitted = false;
+        this.feedbackSubmitted = false;
         if (await this.loadProposal(true)) {
           await Promise.all([
             this.refreshFeedbackJob(),
@@ -592,7 +592,8 @@ definePage<RevisionWorkbenchData>()({
             !this.feedbackBaselineUpdatedAt
             || this.data.proposal?.updated_at !== this.feedbackBaselineUpdatedAt
           ) {
-            this.setData({ feedbackText: "", error: "" });
+            this.setData({ ...(this.feedbackSubmitted ? { feedbackText: "" } : {}), error: "" });
+            this.feedbackSubmitted = false;
             wx.showToast({
               title: this.data.proposal?.revision_plan
                 ? "修改思路已更新"
@@ -642,7 +643,7 @@ definePage<RevisionWorkbenchData>()({
         return;
       }
       this.setData({ feedbackBusy: true, error: "" });
-      this.planFeedbackSubmitted = true;
+      this.feedbackSubmitted = true;
       try {
         const job = await enqueueTargetRevision(this.data, "plan", feedback);
         const active = job.status === "pending" || job.status === "running";
@@ -651,6 +652,7 @@ definePage<RevisionWorkbenchData>()({
           this.scheduleJobPoll("feedback");
         } else if (job.status === "succeeded" && job.proposal_id) {
           this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+          this.feedbackSubmitted = false;
           await this.loadProposal(true);
         }
       } catch (error) {
@@ -672,6 +674,7 @@ definePage<RevisionWorkbenchData>()({
     }
     this.feedbackBaselineUpdatedAt = this.data.proposal.updated_at;
     this.setData({ feedbackBusy: true, error: "" });
+    this.feedbackSubmitted = true;
     try {
       const job = await enqueueTargetRevision(this.data, "feedback", feedback);
       const active = job.status === "pending" || job.status === "running";
@@ -681,6 +684,7 @@ definePage<RevisionWorkbenchData>()({
       } else if (job.status === "succeeded") {
         if (await this.loadProposal(true)) {
           this.setData({ feedbackText: "" });
+          this.feedbackSubmitted = false;
         }
       }
     } catch (error) {
