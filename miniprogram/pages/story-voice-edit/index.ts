@@ -3,7 +3,8 @@ import { definePage } from "../../services/page-definition";
 import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
 import { ensureMemoirBackendSession, memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import { getMemoirChapterSectionRegenerationJob, type MemoirChapterSectionRegenerationJob } from "../../services/memoir-chapter-workspace-api";
-import { applyVoiceEdit, previewVoiceEdit, type VoiceEditItem, type VoiceEditPreview } from "../../services/memoir-voice-edit";
+import { applyVoiceEdit, previewVoiceEdit, undoVoiceEdit, type VoiceEditItem, type VoiceEditNavigation, type VoiceEditPreview } from "../../services/memoir-voice-edit";
+import { handOffSectionRevisionFeedback, navigateToBook, navigateToTranscripts } from "../../services/navigation";
 import { PollingTimer } from "../../services/polling-timer";
 import { markCurrentUserMemoirSnapshotsStale } from "../../stores/memoir-read-cache";
 
@@ -55,6 +56,28 @@ interface EditData {
   splitConfirmation: VoiceEditItem | null;
   items: Array<VoiceEditItem & { selected: boolean; selectionKey: string }>;
   selectedCount: number;
+  undoable: boolean;
+  undoing: boolean;
+}
+
+function navigationUrl(projectId: string, target: VoiceEditNavigation): string {
+  if (target.page === "section_revision") {
+    return pageUrl("/pages/revision-workbench/index", {
+      scope: "chapter_section",
+      projectId,
+      chapterId: target.chapter_id || "",
+      sectionId: target.section_id || "",
+      sectionTitle: target.section_title || "",
+    });
+  }
+  if (target.page === "chapter") {
+    return pageUrl("/pages/chapter-workspace/index", {
+      projectId,
+      chapterId: target.chapter_id || "",
+      ...(target.section_id ? { sectionId: target.section_id } : {}),
+    });
+  }
+  return pageUrl("/pages/project-edit/index", { projectId });
 }
 
 definePage<EditData>()({
@@ -62,6 +85,7 @@ definePage<EditData>()({
     pageClass: accessibilityPageClass("voice-edit-page ui-page-shell ui-accessible-page"),
     projectId: "", projectTitle: "", gatewayUrl: "", instruction: "",
     loading: false, applying: false, error: "", message: "", sectionTasks: [], preview: null, splitConfirmation: null, items: [], selectedCount: 0,
+    undoable: false, undoing: false,
   },
   requestSequence: 0,
   sectionTaskSequence: 0,
@@ -87,13 +111,13 @@ definePage<EditData>()({
     this.sectionTaskSequence++;
     this.sectionTaskPoller.cancel();
     if (this.data.sectionTasks.length) markCurrentUserMemoirSnapshotsStale();
-    this.setData({ loading: false, applying: false, preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
+    this.setData({ loading: false, applying: false, undoing: false, preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
   },
 
   onUnload() { this.onHide(); },
 
   changeInstruction(event: { detail: { value: string } }) {
-    if (this.data.loading || this.data.applying) return;
+    if (this.data.loading || this.data.applying || this.data.undoing) return;
     const clarification = this.data.preview?.questions.length && !this.data.items.length
       ? this.data.preview : null;
     this.setData({ instruction: event.detail.value, preview: clarification, splitConfirmation: null, items: [], selectedCount: 0, message: "", error: "" });
@@ -101,9 +125,9 @@ definePage<EditData>()({
 
   async submitInstruction(event?: { detail?: { value?: string } }) {
     const instruction = String(event?.detail?.value ?? this.data.instruction).trim();
-    if (!instruction || !this.data.projectId || this.data.loading || this.data.applying) return;
+    if (!instruction || !this.data.projectId || this.data.loading || this.data.applying || this.data.undoing) return;
     const sequence = ++this.requestSequence;
-    this.setData({ instruction, loading: true, error: "", message: "", preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
+    this.setData({ instruction, loading: true, error: "", message: "", undoable: false, preview: null, splitConfirmation: null, items: [], selectedCount: 0 });
     try {
       await ensureMemoirBackendSession();
       if (sequence !== this.requestSequence) return;
@@ -137,11 +161,8 @@ definePage<EditData>()({
     if (!this.data.preview || this.data.applying || !this.data.selectedCount) return;
     const sequence = ++this.requestSequence;
     const selectedItems = this.data.items.filter(item => item.selected);
-    const operations = selectedItems.map(({ action, target_ref, new_title, utterance_ids, section_ids }) => ({
-      action, target_ref, new_title,
-      ...((action === "split_chapter" || action === "merge_sections") && section_ids?.length ? { section_ids } : {}),
-      ...(action === "split_chapter" && utterance_ids?.length ? { utterance_ids } : {}),
-    }));
+    // Echo each previewed operation exactly; the server signs every field it proposed.
+    const operations = selectedItems.map(({ label: _label, detail: _detail, selected: _selected, selectionKey: _key, ...operation }) => operation);
     this.setData({ applying: true, error: "" });
     try {
       const result = await applyVoiceEdit(this.data.projectId, this.data.preview.signature, operations);
@@ -155,6 +176,7 @@ definePage<EditData>()({
         message: sectionTasks.length
           ? `${operations.length > sectionTasks.length ? "其他修改已保存；" : ""}${sectionTasks.length === 1 ? "本章" : `${sectionTasks.length} 章`}的小节整理任务已开始，下面分别显示处理结果。`
           : result.message,
+        undoable: Boolean(result.undoable),
         sectionTasks,
         preview: null, splitConfirmation: null, items: [], selectedCount: 0, instruction: "",
       });
@@ -165,6 +187,37 @@ definePage<EditData>()({
       this.setData({ preview: null, splitConfirmation: null, items: [], selectedCount: 0, error: `${error instanceof Error ? error.message : "未收到修改结果"}。请先回到故事查看当前内容，再提出修改。` });
     } finally {
       if (sequence === this.requestSequence) this.setData({ applying: false });
+    }
+  },
+
+  async undo() {
+    if (!this.data.projectId || !this.data.undoable || this.data.undoing || this.data.applying || this.data.loading) return;
+    const sequence = ++this.requestSequence;
+    this.setData({ undoing: true, error: "" });
+    try {
+      const result = await undoVoiceEdit(this.data.projectId);
+      if (sequence !== this.requestSequence) return;
+      this.setData({ message: result.message, undoable: false });
+    } catch (error) {
+      if (sequence !== this.requestSequence) return;
+      this.setData({ undoable: false, error: error instanceof Error ? error.message : "没有撤销成功，请回到故事查看当前内容" });
+    } finally {
+      if (sequence === this.requestSequence) this.setData({ undoing: false });
+    }
+  },
+
+  openNavigation() {
+    const target = this.data.preview?.navigation;
+    if (!target || !this.data.projectId) return;
+    if (target.page === "book_info") {
+      navigateToBook();
+    } else if (target.page === "transcripts") {
+      navigateToTranscripts();
+    } else {
+      if (target.page === "section_revision" && target.section_id && target.feedback) {
+        handOffSectionRevisionFeedback({ projectId: this.data.projectId, sectionId: target.section_id, feedback: target.feedback });
+      }
+      wx.navigateTo({ url: navigationUrl(this.data.projectId, target) });
     }
   },
 

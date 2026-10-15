@@ -50,6 +50,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import narration_people
+from app.services.memoir.dialect_glossary import glossary_context_lines, glossary_entries
 from app.services.memoir.memory_activation import delete_source_memory_traces
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
@@ -65,6 +66,7 @@ from app.services.memoir.project_ai_preferences import (
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
+from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.sections import refresh_material_transcript_version
 from app.services.memoir.transcript_projection import current_utterance_text, has_story_content
 from app.services.memoir.utterance_editing_pipeline import (
@@ -370,12 +372,21 @@ async def load_voice_transcript_cleanup_context(
             recent_user.append(content_text)
         elif role in {MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value}:
             recent_assistant.append(content_text)
+    project = await db.get(Project, voice_session.project_id)
+    corrections = glossary_entries(project) if project is not None else []
+    corrected_sources = {entry.source for entry in corrections}
     return MemoirTranscriptCleanupContext(
         scene="voice_chat",
         guidance_mode=voice_session.guidance_mode,
         current_guidance_module=voice_session.current_guidance_module,
-        # Names the narrator has said help pick the right characters for 同音字.
-        dialect_glossary=(*dialect_glossary, *await narration_people.names(db, voice_session.project_id)),
+        # Names the narrator has said help pick the right characters for 同音字,
+        # unless a correction retired that writing. The prompt keeps the last
+        # entries, so the project's confirmed corrections go last.
+        dialect_glossary=tuple(dict.fromkeys((
+            *(name for name in await narration_people.names(db, voice_session.project_id) if name not in corrected_sources),
+            *dialect_glossary,
+            *glossary_context_lines(corrections),
+        ))),
         recent_user_utterances=tuple(recent_user[-5:]),
         recent_assistant_messages=tuple(recent_assistant[-3:]),
     )
@@ -1114,6 +1125,60 @@ async def _apply_edited_text(
         assignments.get(utterance.id),
         offline_asr=offline_asr_states.get(utterance.id),
     )
+
+
+async def apply_corrected_writing_text(
+    db: AsyncSession,
+    utterance: MemoirVoiceUtterance,
+    content: str,
+    *,
+    project_id: str,
+) -> tuple[str | None, str]:
+    """Save a user-confirmed writing correction as a new user version of this narration.
+
+    Only the spelling changes, so this keeps the narration's existing chapter placement,
+    reading and analysis: it refreshes the material link, the visible message and the
+    search index, but does not queue organisation, topic matching or profile reading.
+    The caller decides how affected chapter drafts follow. Returns the previous and
+    new transcript version ids of the visible message.
+    """
+    previous_version_id = utterance.chat_message.transcript_version_id if utterance.chat_message else None
+    version = MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id,
+        source_artifact_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+        content=content,
+        provider=None,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    db.add(version)
+    await db.flush()
+    utterance.transcript_edited = content
+    from app.services.memoir.share_video_candidate_scheduling import invalidate_share_video_candidate
+
+    await invalidate_share_video_candidate(db, utterance_id=utterance.id)
+    if utterance.chat_message:
+        utterance.chat_message.content_text = content
+        utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
+        utterance.chat_message.transcript_version_id = version.id
+    await refresh_material_transcript_version(
+        db,
+        project_id=project_id,
+        utterance_id=utterance.id,
+        transcript_version_id=version.id,
+    )
+    await prune_transcript_versions_for_utterance(
+        db,
+        utterance_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.USER_EDITED,
+    )
+    await schedule_source_indexing_job(
+        db,
+        project_id=project_id,
+        utterance=utterance,
+        source="transcript_writing_correction",
+    )
+    return previous_version_id, version.id
 
 
 async def apply_cleaned_voice_transcript_text(

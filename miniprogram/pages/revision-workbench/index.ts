@@ -27,7 +27,7 @@ import {
   getMemoirChapterSectionRevisionJob,
   getMemoirChapterSectionRevisionProposal,
 } from "../../services/memoir-chapter-workspace-api";
-import { routeAuthError } from "../../services/navigation";
+import { consumeSectionRevisionFeedback, routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -351,6 +351,8 @@ definePage<RevisionWorkbenchData>()({
       sectionId,
       sectionTitle,
       proposalId,
+      // Home voice edit hands over the narrator's request; it is sent only after they confirm.
+      feedbackText: scope === "chapter_section" ? consumeSectionRevisionFeedback(projectId, sectionId) : "",
       feedbackDictationUrl: projectId
         ? memoirProjectDictationUrl(projectId)
         : "",

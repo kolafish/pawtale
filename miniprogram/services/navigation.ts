@@ -39,6 +39,21 @@ export function consumeHomeStoryTarget(): HomeStoryTarget | null {
   return target;
 }
 
+export interface SectionRevisionFeedback { projectId: string; sectionId: string; feedback: string }
+
+let pendingSectionFeedback: SectionRevisionFeedback | null = null;
+
+/** Hand a spoken revision request to the section workbench without putting it in the URL. */
+export function handOffSectionRevisionFeedback(target: SectionRevisionFeedback): void {
+  pendingSectionFeedback = target;
+}
+
+export function consumeSectionRevisionFeedback(projectId: string, sectionId: string): string {
+  const target = pendingSectionFeedback;
+  pendingSectionFeedback = null;
+  return target && target.projectId === projectId && target.sectionId === sectionId ? target.feedback : "";
+}
+
 function appendQuery(url: string, query: PageNotFoundQuery): string {
   const search = Object.entries(query)
     .filter((entry): entry is [string, string] => typeof entry[1] === "string")

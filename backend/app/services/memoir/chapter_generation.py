@@ -1730,6 +1730,85 @@ def _section_input_signature(
     )
 
 
+def rebased_chapter_draft_version(
+    *,
+    before: ChapterGenerationContext | None,
+    after: ChapterGenerationContext | None,
+    latest: MemoirBookChapterDraftVersion,
+    patch_text: Callable[[str, str], str],
+) -> MemoirBookChapterDraftVersion:
+    """Copy the latest draft with deterministic text patches applied, without an AI rewrite.
+
+    `patch_text(key, text)` receives "content" for the whole chapter and a section id
+    for each section. `before`/`after` are this chapter's sources around the same edit
+    (for example a corrected writing). A section that was current before stays current
+    afterwards; a section already waiting for an update keeps its old signature, so the
+    existing pipeline still rewrites it. Authorship, manual-section marks and the
+    draft time are copied unchanged, so answers and materials added after the
+    original draft are still treated as newer. Without contexts only the text changes.
+    """
+    before_sections = {section.section_id: section for section in before.sections} if before else {}
+    after_sections = {section.section_id: section for section in after.sections} if after else {}
+    sections: list[object] = []
+    for snapshot in latest.section_snapshot_json or []:
+        if not isinstance(snapshot, dict):
+            sections.append(snapshot)
+            continue
+        item = dict(snapshot)
+        section_id = str(item.get("section_id") or "")
+        item["content"] = patch_text(section_id, str(item.get("content") or ""))
+        prior = before_sections.get(section_id)
+        current = after_sections.get(section_id)
+        if (
+            before is not None and after is not None
+            and prior is not None and current is not None
+            and _preserved_draft_section(before, prior, snapshot) is not None
+            and fact_decisions.signature(prior.decisions) == fact_decisions.signature(current.decisions)
+        ):
+            item["title"] = current.title
+            item["section_version"] = current.section_version
+            item["input_signature"] = _section_input_signature(after, current)
+        sections.append(item)
+    before_materials = {material.material_id: material for material in before.materials} if before else {}
+    after_materials = {material.material_id: material for material in after.materials} if after else {}
+    material_snapshot: list[object] = []
+    for entry in latest.material_snapshot_json or []:
+        if not isinstance(entry, dict):
+            material_snapshot.append(entry)
+            continue
+        item = dict(entry)
+        prior = before_materials.get(str(item.get("material_id") or ""))
+        current = after_materials.get(str(item.get("material_id") or ""))
+        if (
+            prior is not None and current is not None
+            and item.get("transcript_version_id") == prior.transcript_version_id
+            and item.get("text_hash") == semantic_text_hash(prior.text)
+        ):
+            item["transcript_version_id"] = current.transcript_version_id
+            item["text_hash"] = semantic_text_hash(current.text)
+        material_snapshot.append(item)
+    return MemoirBookChapterDraftVersion(
+        draft_id=latest.draft_id,
+        project_id=latest.project_id,
+        chapter_id=latest.chapter_id,
+        version=latest.version + 1,
+        content=patch_text("content", latest.content),
+        created_by=latest.created_by,
+        model=latest.model,
+        prompt_snapshot=latest.prompt_snapshot,
+        feedback=latest.feedback,
+        input_signature=(
+            after.input_signature
+            if before is not None and after is not None and latest.input_signature == before.input_signature
+            else latest.input_signature
+        ),
+        used_material_ids_json=list(latest.used_material_ids_json or []),
+        material_snapshot_json=material_snapshot,
+        section_snapshot_json=sections,
+        created_at=latest.created_at,
+    )
+
+
 def _section_snapshot(
     context: ChapterGenerationContext,
     *,

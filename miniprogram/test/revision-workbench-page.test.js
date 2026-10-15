@@ -184,7 +184,7 @@ function loadRevisionPage({ api = {} } = {}) {
     memoirProjectDictationUrl: () =>
       "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
-  mockModule("../services/navigation.ts", { routeAuthError: () => false });
+  mockModule("../services/navigation.ts", { routeAuthError: () => false, consumeSectionRevisionFeedback: () => "" });
   return loadPageModule("../pages/revision-workbench/index.ts");
 }
 

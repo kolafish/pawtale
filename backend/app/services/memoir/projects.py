@@ -313,6 +313,14 @@ async def update_mobile_memoir_project(
     # Automatic profile completion may have committed since load_project.
     # Read the current values under the same row lock before merging this save.
     await db.refresh(project, with_for_update=True)
+    await apply_memoir_project_update(db, project, req)
+    await db.commit()
+    return await _load_memoir_project_response(db, project.id, user_id)
+
+
+async def apply_memoir_project_update(db: AsyncSession, project: Project, req: MemoirProjectUpdate) -> None:
+    """Merge a profile/title save into a locked project row; the caller commits."""
+    project_id = project.id
     if req.title is not None:
         title = req.title.strip()
         if not title:
@@ -341,8 +349,6 @@ async def update_mobile_memoir_project(
             from app.services.memoir.automatic_book_draft import schedule_book_draft
             await schedule_book_draft(db, project_id=project_id, source="polish_level")
     project.updated_at = utcnow_naive()
-    await db.commit()
-    return await _load_memoir_project_response(db, project.id, user_id)
 
 
 async def activate_mobile_memoir_project(
