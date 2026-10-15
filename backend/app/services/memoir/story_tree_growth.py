@@ -835,7 +835,7 @@ async def grow_story_tree(
         if (item.id not in existing_material_ids or item.id in recovery_materials)
         and not item.completion_issue_id
         and is_ready_story_material(item)
-        and has_story_content(current_utterance_text(item))
+        and (item.id in recovery_materials or has_story_content(current_utterance_text(item)))
         and not (
             item.id in deferred
             and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
