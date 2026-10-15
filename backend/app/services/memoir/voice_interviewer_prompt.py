@@ -72,28 +72,19 @@ def build_stream_turn_prompt(
         )
 
     progress = progress_context.prompt_text if progress_context.progress_update is not None else ""
-    if book.anchor_topic is None and first_narration:
-        # "Tell me anything" is a blank page for a first-time narrator, so the first question is concrete.
-        # A new book has no profile form, so its first question is how to address the narrator.
-        known = f"已知的讲述者情况：{book.narrator}。\n" if book.narrator else ""
-        question = (
-            "再问一句怎么称呼他。只问这一个问题。"
-            if book.profile_questions and book.profile_questions[0] == "narrator_name"
-            else "再用一个几乎人人都能马上答上来的具体问题开个头，比如老家在哪、小时候住在什么地方。只问一个问题。"
-        )
+    if book.anchor_topic is None and (first_narration or book.profile_questions):
+        # Only the greeting differs: all openings use the same candidates and answer exclusions.
         mode = (
             "当前是第一次开场，这本书还没有内容。\n"
-            f"{known}"
-            f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好；{question}"
-        )
-        return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
-
-    if book.profile_questions and book.anchor_topic is None:
-        # The first narration ended with profile items left; ask before inviting a story.
-        mode = (
+            f"用“{host_name}”很短地自我介绍，说明想听他讲讲自己的故事，慢慢说就好。"
+            if first_narration else
             "当前是开场，叙述者以前讲过。\n"
-            "自然地欢迎回来，按下面的资料规则问剩下的一项；都已经回答或拒绝了，就只欢迎回来，请他接着讲。"
-            "最多问一个问题，这次不另提故事方向。"
+            "自然地欢迎回来。"
+        )
+        mode += (
+            "按下面的资料规则问剩下的一项；都已经回答或拒绝了，就请他讲一件自己想讲的往事。"
+            "最多问一个问题，问资料时不另提故事方向。"
+            if book.profile_questions else "请他讲一件自己想讲的往事，不再问资料。"
         )
         return _join(
             _header(host_name, regenerate), mode, _profile_question(book, opening=True), progress,

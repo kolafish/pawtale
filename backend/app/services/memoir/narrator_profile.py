@@ -163,9 +163,9 @@ async def profile_question_context_for(
     db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
 ) -> ProfileQuestionContext:
     """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
-    toward the cap, including an opening ask the narrator left without answering. Their narration is kept too,
-    so answers not yet read can be recognized in both the opening and subsequent replies."""
-    if not await is_profile_session(db, voice_session, project):
+    toward the cap, including an opening ask the narrator left without answering. Profile exchanges from
+    both this and earlier sessions survive the recent-dialogue window while their reading is pending."""
+    if not await is_profile_session(db, voice_session, project) or not profile_items_to_ask(_profile(project)):
         return ProfileQuestionContext()
     earlier = list((await db.scalars(
         select(MemoirChatMessage)
@@ -175,8 +175,10 @@ async def profile_question_context_for(
         )
         .order_by(MemoirChatMessage.created_at, MemoirChatMessage.turn_index)
     )).all())
-    questions = profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
-    return ProfileQuestionContext(questions, _previous_profile_answers(earlier) if questions else ())
+    messages = earlier + list(voice_session.messages)
+    questions = profile_questions_to_ask(_profile(project), messages)
+    messages.sort(key=lambda message: (message.created_at, message.turn_index))
+    return ProfileQuestionContext(questions, _previous_profile_answers(messages) if questions else ())
 
 
 def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[ProfileAnswer, ...]:

@@ -35,14 +35,9 @@ async def project_has_previous_narration(
         await db.scalar(
             select(1)
             .select_from(MemoirChatMessage)
-            .join(
-                MemoirVoiceSession,
-                MemoirChatMessage.voice_session_id == MemoirVoiceSession.id,
-            )
             .where(
                 MemoirChatMessage.project_id == voice_session.project_id,
                 MemoirChatMessage.voice_session_id != voice_session.id,
-                MemoirVoiceSession.guidance_mode == voice_session.guidance_mode,
                 MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
                 MemoirChatMessage.content_text != "",
             )
