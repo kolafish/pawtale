@@ -88,6 +88,17 @@ def build_stream_turn_prompt(
         )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 
+    if book.profile_questions and book.anchor_topic is None:
+        # The first narration ended with profile items left; ask before inviting a story.
+        mode = (
+            "当前是开场，叙述者以前讲过。\n"
+            f"自然地欢迎回来，然后问一句{_PROFILE_QUESTIONS[book.profile_questions[0]]}。"
+            "只问这一个问题，这次不提讲哪段故事。"
+        )
+        return _join(
+            _header(host_name, regenerate), mode, progress, _book_block(book, opening=True), policy_section, dialogue,
+        )
+
     if book.completion_offer is not None:
         return _join(
             _header(host_name, regenerate),

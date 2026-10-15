@@ -521,7 +521,9 @@ async def test_the_first_two_spoken_ai_sessions_ask_but_later_ai_sessions_still_
     session = await test_db.get(MemoirVoiceSession, later)
     await test_db.refresh(session, ["messages"])
     project = await test_db.get(Project, other_id)
-    assert await narrator_profile.profile_questions_for(test_db, session, project) == ("narrator_origin",)
+    assert await narrator_profile.profile_questions_for(test_db, session, project) == (
+        "narrator_origin", "narrator_gender",
+    )
     segment = await _narrate(client, test_db, later, "我小时候住在四川省成都市新都县。")
     assert await _profile_job(test_db, segment.utterance_id) is not None
     fake_ai.payload = {"origin": "四川省成都市新都县"}
@@ -651,6 +653,25 @@ def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being
         chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_name",),
     )
     assert "再问一句怎么称呼他" in _prompt("s1", [], opening)
+
+
+def test_the_second_session_opens_by_asking_what_the_first_left():
+    book = InterviewBookContext(
+        chapters=(("新都县的家", 4),), last_chapter_title="新都县的家", topics=(), anchor_topic=None,
+        narrator="于大姐，女，家乡四川省成都市新都县", profile_questions=("narrator_age", "narrator_gender"),
+    )
+    prompt = build_stream_turn_prompt(
+        SimpleNamespace(id="s2", session_goal="open_narration", messages=[]),
+        has_previous_project_narration=True,
+        activation_context="",
+        regenerate=False,
+        progress_context=ProgressPromptContext(prompt_text=""),
+        persona=InterviewerPersona(host_name="小余", voice_gender="female"),
+        completion_prompt_context=None,
+        book_context=book,
+    )
+    assert "自然地欢迎回来，然后问一句他的年纪，比如“您是哪年生的？”" in prompt
+    assert "接着上次" not in prompt
 
 
 @pytest.fixture
