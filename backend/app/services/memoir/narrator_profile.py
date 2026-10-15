@@ -150,7 +150,8 @@ async def profile_questions_for(
     db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
 ) -> tuple[str, ...]:
     """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
-    toward the cap, including an opening ask the narrator left without answering."""
+    toward the cap, including an opening ask the narrator left without answering. Their narration is kept too,
+    so an answer given just before leaving, and not yet read, still skips the item it answered."""
     if not await is_profile_session(db, voice_session, project):
         return ()
     earlier = list((await db.scalars(
@@ -158,9 +159,8 @@ async def profile_questions_for(
         .where(
             MemoirChatMessage.project_id == voice_session.project_id,
             MemoirChatMessage.voice_session_id != voice_session.id,
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
         )
-        .order_by(MemoirChatMessage.created_at)
+        .order_by(MemoirChatMessage.created_at, MemoirChatMessage.turn_index)
     )).all())
     return profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
 
