@@ -38,8 +38,8 @@ from app.services.memoir.book_manuscript_cleanup import (
 
 DEFAULT_BOOK_COVER_STYLE = "classic_plain"
 # A book's first assembly starts with this set; later versions keep whatever the author picked.
-NEW_BOOK_TEMPLATE: MemoirBookManuscriptTemplate = "heritage_classic"
-NEW_BOOK_COVER_STYLE: MemoirBookCoverStyle = "heritage_classic"
+NEW_BOOK_TEMPLATE: MemoirBookManuscriptTemplate = "warm_journal"
+NEW_BOOK_COVER_STYLE: MemoirBookCoverStyle = "warm_journal"
 BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
 BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
 BOOK_INFORMATION_LABELS = {
@@ -342,7 +342,7 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
     return refs
 
 
-def fallback_chapter_quotes(content: str, snapshot: dict[str, object], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM) -> list[MemoirBookManuscriptQuote]:
+def fallback_chapter_quotes(content: str, snapshot: dict[str, object], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH) -> list[MemoirBookManuscriptQuote]:
     candidates = original_quote_candidates(snapshot, max_chars=80) if polish_level == MemoirTranscriptPolishLevel.LOW else {}
     for source_id, quotes in candidates.items():
         quote = max(quotes, key=len, default="")
@@ -376,7 +376,7 @@ def manuscript_from_snapshot(
     content: str,
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
     template: MemoirBookManuscriptTemplate = "classic_family",
     custom_layout: MemoirBookCustomLayout | None = None,

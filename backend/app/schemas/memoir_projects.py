@@ -21,7 +21,7 @@ class MemoirProjectCreate(BaseModel):
     default_guidance_mode: MemoirGuidanceMode | None = None
     default_interview_type: MemoirInterviewType | None = None
     default_session_goal: MemoirSessionGoal | None = None
-    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH
     share_video_style: ShareVideoStyle = DEFAULT_SHARE_VIDEO_STYLE
 
     @field_validator("narrator_age")

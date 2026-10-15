@@ -36,7 +36,7 @@ export function transcriptPolishLevel(
   project?: Pick<Project, "metadata_json"> | null,
 ): MemoirTranscriptPolishLevel {
   const value = project?.metadata_json?.transcript_polish_level;
-  return value === "low" || value === "high" ? value : "medium";
+  return value === "low" || value === "medium" ? value : "high";
 }
 
 export function readSelectedTranscriptPolishLevel(): MemoirTranscriptPolishLevel | undefined {
