@@ -142,7 +142,7 @@ function revisionFeedbackJob(status = "idle") {
   };
 }
 
-function loadRevisionPage({ api = {} } = {}) {
+function loadRevisionPage({ api = {}, handedOffFeedback = "" } = {}) {
   mockMemoirApiModules({
     getMemoirBookRevisionProposal: async (_projectId, _proposalId, preview = "none") => (
       preview === "none"
@@ -184,7 +184,10 @@ function loadRevisionPage({ api = {} } = {}) {
     memoirProjectDictationUrl: () =>
       "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
-  mockModule("../services/navigation.ts", { routeAuthError: () => false, consumeSectionRevisionFeedback: () => "" });
+  mockModule("../services/navigation.ts", {
+    routeAuthError: () => false,
+    consumeSectionRevisionFeedback: () => handedOffFeedback,
+  });
   return loadPageModule("../pages/revision-workbench/index.ts");
 }
 
@@ -224,6 +227,25 @@ test("section revision resolves an existing proposal before mounting its voice e
   assert.equal(context.data.loading, false);
   assert.equal(context.data.proposal.phase, "plan_ready");
   assert.equal(context.data.proposalId, "proposal-1");
+});
+
+test("section revision keeps a request handed over from voice edit while restoring an older plan", async () => {
+  global.wx = { setNavigationBarTitle() {} };
+  const { page } = loadRevisionPage({
+    handedOffFeedback: "把奶奶的部分写得更细",
+    api: {
+      getMemoirChapterSectionRevisionJob: async () => ({
+        ...revisionFeedbackJob("succeeded"), operation: "plan", proposal_id: "proposal-1",
+      }),
+      getMemoirChapterSectionRevisionProposal: async () => revisionPlanProposal(),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    scope: "chapter_section", projectId: "project-1", chapterId: "chapter-1", sectionId: "section-1",
+  });
+  assert.equal(context.data.proposalId, "proposal-1");
+  assert.equal(context.data.feedbackText, "把奶奶的部分写得更细");
 });
 
 test("book revision plan presents proposed book information before drafting", () => {

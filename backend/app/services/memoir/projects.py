@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -72,6 +73,24 @@ def _default_profile() -> dict[str, object]:
 
 def _field_was_set(req: MemoirProjectCreate | MemoirProjectUpdate, field: str) -> bool:
     return field in getattr(req, "model_fields_set", set())
+
+
+def profile_inferred_sources(project: Project, fields: Iterable[str]) -> dict[str, object]:
+    """The narration sources of these profile fields, kept so an undo can restore them."""
+    profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY)
+    inferred = profile.get(INFERRED_PROFILE_FIELDS_KEY) if isinstance(profile, dict) else None
+    return {key: inferred[key] for key in fields if isinstance(inferred, dict) and key in inferred}
+
+
+def restore_profile_inferred_sources(project: Project, sources: dict[str, object]) -> None:
+    """Mark restored values as heard again, so later narration may still correct them."""
+    if not sources:
+        return
+    metadata = dict(project.metadata_json or {})
+    profile = dict(metadata.get(MEMOIR_PROFILE_METADATA_KEY) or {})
+    profile[INFERRED_PROFILE_FIELDS_KEY] = {**(profile.get(INFERRED_PROFILE_FIELDS_KEY) or {}), **sources}
+    metadata[MEMOIR_PROFILE_METADATA_KEY] = profile
+    project.metadata_json = metadata
 
 
 def _profile_metadata(

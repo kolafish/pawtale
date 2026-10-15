@@ -318,6 +318,7 @@ class WritingUndo(BaseModel):
     corrections: list[tuple[str, str]]
     project_title: TitleChange | None = None
     narrator_name: TitleChange | None = None
+    narrator_name_sources: dict[str, object] = Field(default_factory=dict)
     chapter_titles: list[TitleChange] = Field(default_factory=list)
     section_titles: list[TitleChange] = Field(default_factory=list)
     transcripts: list[TextChange] = Field(default_factory=list)
@@ -426,7 +427,7 @@ async def apply_writing_corrections(
     from app.services.memoir.book_output_state import invalidate_book_output
     from app.services.memoir.book_output_versions import append_book_output_version
     from app.services.memoir.completion_issues import lock_project_chapters
-    from app.services.memoir.projects import apply_memoir_project_update
+    from app.services.memoir.projects import apply_memoir_project_update, profile_inferred_sources
     from app.services.memoir.voice_transcripts import apply_corrected_writing_text
 
     validate_corrections(corrections)
@@ -482,6 +483,7 @@ async def apply_writing_corrections(
     if _contains(name, corrections):
         corrected_name = replaced(name)[0]
         undo.narrator_name = TitleChange(ref=project.id, before=name, after=corrected_name)
+        undo.narrator_name_sources = profile_inferred_sources(project, ["narrator_name"])
         profile_update["elder_name"] = corrected_name
     if profile_update:
         await apply_memoir_project_update(db, project, MemoirProjectUpdate(**profile_update))
@@ -564,7 +566,7 @@ async def revert_writing_corrections(db: AsyncSession, *, user_id: str, project:
     from app.services.memoir.book_output_state import invalidate_book_output
     from app.services.memoir.book_output_versions import append_book_output_version, load_latest_book_output_version
     from app.services.memoir.completion_issues import lock_project_chapters
-    from app.services.memoir.projects import apply_memoir_project_update
+    from app.services.memoir.projects import apply_memoir_project_update, restore_profile_inferred_sources
     from app.services.memoir.voice_transcripts import apply_corrected_writing_text
 
     await lock_project_chapters(db, project_id=project.id)
@@ -618,6 +620,7 @@ async def revert_writing_corrections(db: AsyncSession, *, user_id: str, project:
         profile_update["elder_name"] = undo.narrator_name.before
     if profile_update:
         await apply_memoir_project_update(db, project, MemoirProjectUpdate(**profile_update))
+        restore_profile_inferred_sources(project, undo.narrator_name_sources)
     for change in undo.chapter_titles:
         await _rename_chapter(db, user_id=user_id, project_id=project.id, chapter_id=change.ref, title=change.before)
     for change in undo.section_titles:

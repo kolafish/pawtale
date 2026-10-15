@@ -42,7 +42,9 @@ from app.services.memoir.book_plan_write_workflow import apply_book_plan_structu
 from app.services.memoir.book_structure_commands import moved_chapter_order
 from app.services.memoir.completion_issues import lock_project_chapters
 from app.services.memoir.project_ai_preferences import project_ai_model
-from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY, apply_memoir_project_update
+from app.services.memoir.projects import (
+    MEMOIR_PROFILE_METADATA_KEY, apply_memoir_project_update, profile_inferred_sources, restore_profile_inferred_sources,
+)
 from app.services.memoir.section_regeneration import enqueue_chapter_section_regeneration
 from app.services.memoir.sections import delete_section, lock_plan_structure, merge_sections, update_section
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -442,7 +444,8 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
         "regenerate_chapter_sections": 2, "consolidate_chapter_sections": 2, "split_chapter": 2, "merge_sections": 2,
         "delete_section": 3, "delete_chapter": 4,
     }
-    return sorted(result, key=lambda op: order[op.action])
+    # Include chapters before excluding others, so a valid batch never passes through zero included chapters.
+    return sorted(result, key=lambda op: (order[op.action], op.action == "set_chapter_book_inclusion" and not op.include_in_book))
 
 
 def _validate_extended_batch(story: dict, operations: list[VoiceEditOperation]) -> None:
@@ -856,7 +859,10 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
                 await apply_memoir_project_update(db, project, MemoirProjectUpdate(title=op.new_title))
             elif op.action == "update_narrator_profile":
                 after = _profile_changes(story, op)
-                changes.append({"type": "profile", "before": {name: story["profile"][name] for name in after}, "after": after})
+                changes.append({
+                    "type": "profile", "before": {name: story["profile"][name] for name in after}, "after": after,
+                    "sources": profile_inferred_sources(project, after),
+                })
                 await apply_memoir_project_update(db, project, _profile_update(after))
             elif op.action in {"regenerate_chapter_sections", "consolidate_chapter_sections"}:
                 await enqueue_chapter_section_regeneration(
@@ -1013,3 +1019,4 @@ async def _revert_change(db: AsyncSession, *, user_id: str, project: Project, ch
         await apply_memoir_project_update(db, project, MemoirProjectUpdate(title=change["before"]))
     elif kind == "profile":
         await apply_memoir_project_update(db, project, _profile_update(change["before"]))
+        restore_profile_inferred_sources(project, change.get("sources") or {})

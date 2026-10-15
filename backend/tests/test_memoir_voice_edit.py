@@ -1437,3 +1437,44 @@ async def test_correct_term_follows_people_readings_and_book_copy(client, test_d
         .order_by(MemoirBookOutputVersion.version.desc()).limit(1).execution_options(populate_existing=True)
     )
     assert latest.manuscript_json["render_settings"]["back_cover_quote"] == "感谢于大姐。"
+
+
+async def test_inclusion_swap_applies_in_any_proposed_order_and_undoes(client, test_db, monkeypatch, story):
+    first, second, third = story["chapters"]
+    for chapter_id in (second, third):
+        (await test_db.get(MemoirBookPlanChapter, chapter_id)).include_in_book = False
+    await test_db.commit()
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "set_chapter_book_inclusion", "target_ref": first, "include_in_book": False},
+        {"action": "set_chapter_book_inclusion", "target_ref": second, "include_in_book": True},
+    ]})
+    assert response.status_code == 200, response.text
+    applied = await apply(client, story, response.json(), echoed(response.json()))
+    assert applied.status_code == 200, applied.text
+    included = {c: (await test_db.get(MemoirBookPlanChapter, c, populate_existing=True)).include_in_book for c in story["chapters"]}
+    assert included == {first: False, second: True, third: False}
+    assert (await undo(client, story)).status_code == 200
+    included = {c: (await test_db.get(MemoirBookPlanChapter, c, populate_existing=True)).include_in_book for c in story["chapters"]}
+    assert included == {first: True, second: False, third: False}
+
+
+@pytest.mark.parametrize("operation", [
+    {"action": "update_narrator_profile", "target_ref": "profile", "narrator_name": "于老师"},
+    {"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+])
+async def test_undo_restores_heard_profile_sources(client, test_db, monkeypatch, story, operation):
+    project = await test_db.get(Project, story["pid"])
+    project.metadata_json = {**(project.metadata_json or {}), "memoir_profile": {
+        "narrator_name": "于大姐", "narrator_gender": "female", "narrator_origin": "苏州", "narrator_age": 80,
+        "inferred_from": {"narrator_name": {"utterance_id": story["materials"][1]}},
+    }}
+    await test_db.commit()
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [operation]})
+    assert response.status_code == 200, response.text
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 200
+    profile = (await test_db.get(Project, story["pid"], populate_existing=True)).metadata_json["memoir_profile"]
+    assert "narrator_name" not in profile.get("inferred_from", {})
+    assert (await undo(client, story)).status_code == 200, "undo"
+    profile = (await test_db.get(Project, story["pid"], populate_existing=True)).metadata_json["memoir_profile"]
+    assert profile["narrator_name"] == "于大姐"
+    assert profile["inferred_from"] == {"narrator_name": {"utterance_id": story["materials"][1]}}

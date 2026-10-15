@@ -306,6 +306,9 @@ definePage<RevisionWorkbenchData>()({
   feedbackPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   draftPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   feedbackBaselineUpdatedAt: "",
+  // Only text the narrator sent as a plan request is cleared when that plan appears;
+  // a request handed over from home voice edit survives restoring an older plan.
+  planFeedbackSubmitted: false,
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
   wholeLoadSequence: 0,
@@ -508,7 +511,11 @@ definePage<RevisionWorkbenchData>()({
     try {
       const job = await loadTargetJob(this.data, "feedback");
       if (job.proposal_id) {
-        this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+        this.setData({
+          proposalId: job.proposal_id,
+          ...(this.planFeedbackSubmitted ? { feedbackText: "" } : {}),
+        });
+        this.planFeedbackSubmitted = false;
         if (await this.loadProposal(true)) {
           await Promise.all([
             this.refreshFeedbackJob(),
@@ -635,6 +642,7 @@ definePage<RevisionWorkbenchData>()({
         return;
       }
       this.setData({ feedbackBusy: true, error: "" });
+      this.planFeedbackSubmitted = true;
       try {
         const job = await enqueueTargetRevision(this.data, "plan", feedback);
         const active = job.status === "pending" || job.status === "running";
