@@ -27,7 +27,7 @@ import {
   getMemoirChapterSectionRevisionJob,
   getMemoirChapterSectionRevisionProposal,
 } from "../../services/memoir-chapter-workspace-api";
-import { routeAuthError } from "../../services/navigation";
+import { consumeSectionRevisionFeedback, routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -306,6 +306,9 @@ definePage<RevisionWorkbenchData>()({
   feedbackPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   draftPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   feedbackBaselineUpdatedAt: "",
+  // Only feedback this page sent is cleared when its job finishes. A request handed over
+  // from home voice edit survives restoring an older plan or an older job finishing.
+  feedbackSubmitted: false,
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
   wholeLoadSequence: 0,
@@ -351,6 +354,8 @@ definePage<RevisionWorkbenchData>()({
       sectionId,
       sectionTitle,
       proposalId,
+      // Home voice edit hands over the narrator's request; it is sent only after they confirm.
+      feedbackText: scope === "chapter_section" ? consumeSectionRevisionFeedback(projectId, sectionId) : "",
       feedbackDictationUrl: projectId
         ? memoirProjectDictationUrl(projectId)
         : "",
@@ -506,7 +511,11 @@ definePage<RevisionWorkbenchData>()({
     try {
       const job = await loadTargetJob(this.data, "feedback");
       if (job.proposal_id) {
-        this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+        this.setData({
+          proposalId: job.proposal_id,
+          ...(this.feedbackSubmitted ? { feedbackText: "" } : {}),
+        });
+        this.feedbackSubmitted = false;
         if (await this.loadProposal(true)) {
           await Promise.all([
             this.refreshFeedbackJob(),
@@ -583,7 +592,8 @@ definePage<RevisionWorkbenchData>()({
             !this.feedbackBaselineUpdatedAt
             || this.data.proposal?.updated_at !== this.feedbackBaselineUpdatedAt
           ) {
-            this.setData({ feedbackText: "", error: "" });
+            this.setData({ ...(this.feedbackSubmitted ? { feedbackText: "" } : {}), error: "" });
+            this.feedbackSubmitted = false;
             wx.showToast({
               title: this.data.proposal?.revision_plan
                 ? "修改思路已更新"
@@ -633,6 +643,7 @@ definePage<RevisionWorkbenchData>()({
         return;
       }
       this.setData({ feedbackBusy: true, error: "" });
+      this.feedbackSubmitted = true;
       try {
         const job = await enqueueTargetRevision(this.data, "plan", feedback);
         const active = job.status === "pending" || job.status === "running";
@@ -641,6 +652,7 @@ definePage<RevisionWorkbenchData>()({
           this.scheduleJobPoll("feedback");
         } else if (job.status === "succeeded" && job.proposal_id) {
           this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+          this.feedbackSubmitted = false;
           await this.loadProposal(true);
         }
       } catch (error) {
@@ -662,6 +674,7 @@ definePage<RevisionWorkbenchData>()({
     }
     this.feedbackBaselineUpdatedAt = this.data.proposal.updated_at;
     this.setData({ feedbackBusy: true, error: "" });
+    this.feedbackSubmitted = true;
     try {
       const job = await enqueueTargetRevision(this.data, "feedback", feedback);
       const active = job.status === "pending" || job.status === "running";
@@ -671,6 +684,7 @@ definePage<RevisionWorkbenchData>()({
       } else if (job.status === "succeeded") {
         if (await this.loadProposal(true)) {
           this.setData({ feedbackText: "" });
+          this.feedbackSubmitted = false;
         }
       }
     } catch (error) {

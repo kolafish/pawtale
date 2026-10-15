@@ -14,11 +14,15 @@ from app.schemas.memoir_interview_editor import (
     MemoirBatchTranscriptCleanupPreviewItem,
     MemoirBatchTranscriptCleanupPreviewRequest,
     MemoirBatchTranscriptCleanupPreviewResponse,
-    MemoirDialectGlossaryEntry,
     MemoirDialectGlossaryResponse,
     MemoirDialectGlossaryUpdateRequest,
 )
 from app.services.memoir import voice_transcripts
+from app.services.memoir.dialect_glossary import (
+    glossary_context_lines as _glossary_context_lines,
+    glossary_entries as _glossary_entries,
+    save_glossary_entries,
+)
 from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
     select_project_ai_model,
@@ -31,66 +35,6 @@ from app.services.memoir.utterance_editing_pipeline import (
     claim_transcript_mutation_guard,
     transcript_mutation_guard,
 )
-
-
-GLOSSARY_METADATA_KEY = "memoir_dialect_glossary_entries"
-
-
-def _entry_from_raw(value: object) -> MemoirDialectGlossaryEntry | None:
-    if not isinstance(value, dict):
-        return None
-    source = str(value.get("source") or "").strip()
-    target = str(value.get("target") or "").strip()
-    note = str(value.get("note") or "").strip() or None
-    if not source or not target:
-        return None
-    return MemoirDialectGlossaryEntry(source=source, target=target, note=note)
-
-
-def _glossary_entries(project: Project) -> list[MemoirDialectGlossaryEntry]:
-    raw_entries = (project.metadata_json or {}).get(GLOSSARY_METADATA_KEY)
-    if not isinstance(raw_entries, list):
-        return []
-    entries: list[MemoirDialectGlossaryEntry] = []
-    seen: set[tuple[str, str]] = set()
-    for raw_entry in raw_entries:
-        entry = _entry_from_raw(raw_entry)
-        if entry is None:
-            continue
-        key = (entry.source, entry.target)
-        if key in seen:
-            continue
-        seen.add(key)
-        entries.append(entry)
-    return entries
-
-
-def _glossary_payload(entries: list[MemoirDialectGlossaryEntry]) -> list[dict[str, str]]:
-    payload: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for entry in entries:
-        source = entry.source.strip()
-        target = entry.target.strip()
-        note = (entry.note or "").strip()
-        key = (source, target)
-        if not source or not target or key in seen:
-            continue
-        seen.add(key)
-        item = {"source": source, "target": target}
-        if note:
-            item["note"] = note
-        payload.append(item)
-    return payload
-
-
-def _glossary_context_lines(entries: list[MemoirDialectGlossaryEntry]) -> tuple[str, ...]:
-    lines: list[str] = []
-    for entry in entries:
-        line = f"{entry.source} => {entry.target}"
-        if entry.note:
-            line = f"{line}（{entry.note}）"
-        lines.append(line)
-    return tuple(lines)
 
 
 def _detail_options():
@@ -161,13 +105,7 @@ async def update_dialect_glossary(
     allow_admin: bool = False,
 ) -> MemoirDialectGlossaryResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    saved_entries = [
-        MemoirDialectGlossaryEntry(**entry)
-        for entry in _glossary_payload(req.entries)
-    ]
-    metadata = dict(project.metadata_json or {})
-    metadata[GLOSSARY_METADATA_KEY] = [entry.model_dump(exclude_none=True) for entry in saved_entries]
-    project.metadata_json = metadata
+    saved_entries = save_glossary_entries(project, req.entries)
     await db.commit()
     return MemoirDialectGlossaryResponse(project_id=project_id, entries=saved_entries)
 

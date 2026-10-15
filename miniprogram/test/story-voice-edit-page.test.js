@@ -14,8 +14,8 @@ const proposal = {
   ],
 };
 
-function setup({ preview, apply, getJob } = {}) {
-  const calls = { previews: [], applies: [], jobs: [], invalidations: 0, routes: [], back: 0 };
+function setup({ preview, apply, getJob, undo } = {}) {
+  const calls = { previews: [], applies: [], undos: [], jobs: [], invalidations: 0, routes: [], back: 0 };
   mockModule("../services/accessibility-settings.ts", { accessibilityPageClass: c => `${c} large-text` });
   mockModule("../services/memoir-api-client.ts", { ensureMemoirBackendSession: async () => {}, memoirProjectDictationUrl: id => `wss://test/projects/${id}/dictation` });
   mockModule("../services/memoir-chapter-workspace-api.ts", {
@@ -28,6 +28,7 @@ function setup({ preview, apply, getJob } = {}) {
   mockModule("../services/memoir-voice-edit.ts", {
     previewVoiceEdit: async (...args) => { calls.previews.push(args); return preview ? preview(...args) : proposal; },
     applyVoiceEdit: async (...args) => { calls.applies.push(args); return apply ? apply(...args) : { message: "修改已保存" }; },
+    undoVoiceEdit: async (...args) => { calls.undos.push(args); return undo ? undo(...args) : { message: "已撤销刚才的语音修改。" }; },
   });
   global.wx = { navigateBack: () => calls.back++, navigateTo: ({ url }) => calls.routes.push(url) };
   const context = pageContext(loadPageModule("../pages/story-voice-edit/index.ts").page);
@@ -393,4 +394,70 @@ test("voice edit gives the model a generation deadline, uses mutation writes and
   assert.equal(calls[0][3].timeoutProfile, "generation");
   assert.equal(calls[0][3].invalidatesSnapshots, false);
   assert.equal(calls[1][2].timeoutProfile, "mutation");
+});
+
+
+test("extended edits echo every proposed field and can undo the last batch once", async () => {
+  const operation = {
+    action: "correct_term", target_ref: "book", new_title: null, utterance_ids: [], section_ids: [],
+    target_index: null, target_position: null, relative_ref: null, relative_position: null, include_in_book: null,
+    term_from: "于大姐", term_to: "余大姐", narrator_name: null, narrator_gender: null, narrator_origin: null, narrator_age: null,
+  };
+  const { context, calls } = setup({
+    preview: async () => ({ signature: "term-sig", reply: "请确认写法。", questions: [], operations: [
+      { ...operation, label: "更正写法：「于大姐」→「余大姐」", detail: "将修改：讲述文字 2 条。" },
+    ] }),
+    apply: async () => ({ message: "写法已更正，以后的讲述也会按新写法记录。", undoable: true }),
+  });
+  await context.submitInstruction({ detail: { value: "于大姐的于应该是多余的余" } });
+  await context.apply();
+  assert.deepEqual(calls.applies, [["p1", "term-sig", [operation]]]);
+  assert.equal(context.data.undoable, true);
+  await Promise.all([context.undo(), context.undo()]);
+  assert.deepEqual(calls.undos, [["p1"]]);
+  assert.equal(context.data.message, "已撤销刚才的语音修改。");
+  assert.equal(context.data.undoable, false);
+});
+
+test("a new request hides the undo of an earlier batch", async () => {
+  const { context, calls } = setup({ apply: async () => ({ message: "修改已保存", undoable: true }) });
+  await context.submitInstruction({ detail: { value: "改个名字" } });
+  context.selectOperations({ detail: { value: [context.data.items[1].selectionKey] } });
+  await context.apply();
+  assert.equal(context.data.undoable, true);
+  await context.submitInstruction({ detail: { value: "再改一个" } });
+  assert.equal(context.data.undoable, false);
+  await context.undo();
+  assert.equal(calls.undos.length, 0);
+});
+
+test("unsupported edits open the page that can make them with the request handed over", async () => {
+  const navigation = require("../services/navigation.ts");
+  const { context, calls } = setup({ preview: async () => ({
+    signature: "{}", reply: "这段正文的改写需要在小节页面完成。", questions: [], operations: [],
+    navigation: {
+      page: "section_revision", label: "去修改小节「童年回忆」", chapter_id: "c1", section_id: "s1",
+      section_title: "童年回忆", feedback: "把奶奶的部分写得更细",
+    },
+  }) });
+  await context.submitInstruction({ detail: { value: "童年回忆那段把奶奶写得更细一些" } });
+  context.openNavigation();
+  assert.deepEqual(calls.routes, [
+    "/pages/revision-workbench/index?scope=chapter_section&projectId=p1&chapterId=c1&sectionId=s1&sectionTitle=%E7%AB%A5%E5%B9%B4%E5%9B%9E%E5%BF%86",
+  ]);
+  assert.equal(navigation.consumeSectionRevisionFeedback("p1", "s1"), "把奶奶的部分写得更细");
+  assert.equal(navigation.consumeSectionRevisionFeedback("p1", "s1"), "");
+  context.openNavigation();
+  assert.equal(navigation.consumeSectionRevisionFeedback("p1", "other"), "");
+  assert.equal(calls.applies.length, 0);
+});
+
+test("profile navigation opens this memoir's profile editor", async () => {
+  const { context, calls } = setup({ preview: async () => ({
+    signature: "{}", reply: "请在资料页修改。", questions: [], operations: [],
+    navigation: { page: "project_profile", label: "编辑讲述人资料" },
+  }) });
+  await context.submitInstruction({ detail: { value: "把讲述人的职业改成教师" } });
+  context.openNavigation();
+  assert.deepEqual(calls.routes, ["/pages/project-edit/index?projectId=p1"]);
 });
