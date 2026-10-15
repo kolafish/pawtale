@@ -248,11 +248,16 @@ async def retry_draft_progress(db: AsyncSession, *, project_id: str) -> None:
         return
     growth = next((job for job in jobs if job.job_type == "organize_material"), None)
     retry_material = progress.pending_material_count > progress.needs_user_material_count
-    if growth and (growth.status in {"failed", "cancelled"} or retry_material):
+    parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
+    retry_chapters = bool(parent and any(
+        item.status == "failed"
+        for item in automatic_book_draft.DraftProgress.model_validate(parent.result_json or {}).chapters.values()
+    ))
+    if growth and (growth.status in {"failed", "cancelled"} or retry_material or retry_chapters):
         await story_tree_growth.schedule_story_tree_growth(
             db, project_id=project_id, voice_session_id=growth.payload_json["voice_session_id"], source="retry"
         )
-    elif growth is None and retry_material:
+    elif growth is None and (retry_material or retry_chapters):
         sessions = (await db.scalars(select(MemoirVoiceSession).where(
             MemoirVoiceSession.project_id == project_id,
             MemoirVoiceSession.session_goal == "open_narration",

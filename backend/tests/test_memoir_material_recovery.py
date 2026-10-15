@@ -14,6 +14,73 @@ from tests.test_memoir_book_completion import _book
 from tests.test_memoir_section_organization import _stopped_growth_job
 
 
+@pytest.mark.parametrize("outcome", ["not_story", "story", "manual", "manual_during", "edited_during"])
+async def test_failed_chapter_retry_rechecks_only_unpublished_automatic_additions(
+    client, test_db, monkeypatch, outcome,
+):
+    from app.domain.memoir.types import MemoirSectionMaterialAssignedBy
+    from app.models.memoir import MemoirVoiceUtterance
+    from app.services.memoir import automatic_book_draft, chapter_generation, sections
+    from tests.memoir_helpers import run_test_editing_job
+    from tests.test_memoir_automatic_book_draft import _setup
+
+    project_id, chapter_id, section_id, _, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json["chapters"][chapter_id]["job_id"])
+    latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter_id)
+    original_content = latest.content
+    source, job = await _stopped_growth_job(client, test_db, project_id, "可以说明一下，就这么解释一下就好了。")
+    source_id = source["utterance_id"]
+    material = await sections.assign_material_to_section(
+        test_db, project_id=project_id, section_id=section_id, utterance_id=source_id,
+        assigned_by=MemoirSectionMaterialAssignedBy.USER if outcome == "manual" else MemoirSectionMaterialAssignedBy.AI,
+        assignment_reason="旧规则误归类",
+    )
+    job.status = "succeeded"
+    parent.status = "succeeded"
+    parent.result_json = automatic_book_draft.DraftProgress(chapters={
+        chapter_id: automatic_book_draft.ChapterProgress(status="failed", draft_version_id=latest.id,
+            error_message="本次新增或变更的讲述未纳入小节正文"),
+    }).model_dump(mode="json")
+    await test_db.commit()
+
+    seen = []
+    async def decide(**kwargs):
+        seen.extend(item.id for item in kwargs["utterances"])
+        if outcome == "manual_during":
+            material.assigned_by = "user"
+            await test_db.commit()
+        elif outcome == "edited_during":
+            utterance = await test_db.get(MemoirVoiceUtterance, source_id)
+            utterance.transcript_edited = "对，那年我五岁，妈妈牵着我去上学。"
+            await test_db.commit()
+        return [story_tree_growth.GrowthGroup(
+            utterance_ids=[source_id], action="assign_existing" if outcome == "story" else "not_story",
+            section_id=section_id if outcome == "story" else None, reason="编辑确认",
+        )]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    await draft_progress.retry_draft_progress(test_db, project_id=project_id)
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    assert not await run_test_editing_job(test_db, parent_id)  # Wait for the reclassification.
+    assert await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    link = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == source_id))
+    assert seen == ([] if outcome == "manual" else [source_id])
+    assert (link is None) is (outcome == "not_story")
+    assert await test_db.get(MemoirVoiceUtterance, source_id) is not None
+    assert latest.content == original_content
+    if outcome == "not_story":
+        assert story_tree_growth._progress(job).deferred[source_id].status == "not_story"
+        assert (await draft_progress._source_counts_and_needs_user(test_db, project_id))[1:3] == (0, 0)
+        # Resuming the same retry must not pay to classify the removed association again.
+        job.status = "running"
+        await test_db.commit()
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        assert seen == [source_id]
+
+
 @pytest.mark.parametrize("indices", [[1], [1, 1]])
 async def test_initial_profile_result_is_durable_and_reconsidered_only_after_text_changes(client, test_db, monkeypatch, indices):
     from app.models.memoir import MemoirBookPlan, MemoirVoiceUtterance
