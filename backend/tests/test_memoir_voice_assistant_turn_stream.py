@@ -759,7 +759,7 @@ async def test_first_narration_offers_one_profile_item_and_records_the_ask(clien
     assert saved.content_text == "好的，您老家是哪里的？"
     assert "profile_asked" not in saved.metadata_json
     # Until the check finishes the line counts as an ask.
-    assert narrator_profile.profile_asks([saved]) == {"narrator_origin": 1}
+    assert narrator_profile.profile_asks([saved]) == {"narrator_origin": 1, "narrator_gender": 1}
     release.set()
     await narrator_profile.wait_for_profile_ask_checks()
     test_db.expire_all()
@@ -772,7 +772,7 @@ async def test_first_narration_offers_one_profile_item_and_records_the_ask(clien
         .order_by(MemoirChatMessage.turn_index.desc())
         .limit(1)
     )
-    assert reply.metadata_json["profile_questions"] == ["narrator_origin"]
+    assert reply.metadata_json["profile_questions"] == ["narrator_origin", "narrator_gender"]
     assert reply.metadata_json["profile_asked"] == "narrator_origin"
 
 
