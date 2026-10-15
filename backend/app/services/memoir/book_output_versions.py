@@ -209,7 +209,7 @@ def book_editorial_copy_signature(title: str, snapshot: list[dict[str, object]])
 
 def retained_chapter_quotes(
     stored: dict[str, object], snapshot: dict[str, object], *, preserve_manual: bool = False,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> list[MemoirBookManuscriptQuote]:
     def refs(value):
         return {item["utterance_id"]: item for item in value.get("source_refs", []) if isinstance(item, dict)}
@@ -296,7 +296,7 @@ def claim_editorial_copy_fields(
 async def repair_automatic_chapter_quotes(
     db: AsyncSession, *, output: MemoirBookOutput, version: MemoirBookOutputVersion,
     state: AutomaticEditorialCopyState,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> MemoirBookOutputVersion:
     """Upgrade old automatic excerpts deterministically; keep authored choices and AI checkpoints."""
     from app.services.memoir.book_output_state import invalidate_book_output

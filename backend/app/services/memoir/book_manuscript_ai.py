@@ -160,7 +160,7 @@ class _QuoteCandidates:
     excerpts: dict[str, tuple[str, ...]]
 
 
-def _quote_candidates(snapshot: list[dict[str, object]], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM) -> _QuoteCandidates:
+def _quote_candidates(snapshot: list[dict[str, object]], *, polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH) -> _QuoteCandidates:
     return _QuoteCandidates(
         originals={_string(item.get("chapter_id")): original_quote_candidates(item, max_chars=90) for item in snapshot}
             if polish_level == MemoirTranscriptPolishLevel.LOW else {},
@@ -209,7 +209,7 @@ def build_manuscript_copy_prompt(
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
     candidates: _QuoteCandidates | None = None,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> str:
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     chapters = _chapter_context(
@@ -381,7 +381,7 @@ def _copy_from_payload(
     prompt: str,
     model: str | None,
     candidates: _QuoteCandidates | None = None,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> GeneratedManuscriptCopy | None:
     if not isinstance(payload, dict):
         return None
@@ -460,7 +460,7 @@ async def generate_manuscript_editorial_copy(
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
     ai_client: AITextClient | None = None,
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> GeneratedManuscriptCopy | None:
     candidates = _quote_candidates(snapshot, polish_level=polish_level)
     prompt = build_manuscript_copy_prompt(

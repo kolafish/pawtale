@@ -116,7 +116,7 @@ class ChapterGenerationContext:
     sections: tuple[ChapterSectionInput, ...]
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
-    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH
     # People cards for those mentioned in this chapter's narration; not part of the input signature.
     people: tuple[str, ...] = ()
     previous_draft_at: datetime | None = None
