@@ -334,7 +334,7 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     await _run(test_db, refusal.utterance_id)
     _project, saved = await _profile(test_db, project_id)
     assert saved[projects.SKIPPED_PROFILE_FIELDS_KEY] == {"narrator_origin": refusal.utterance_id}
-    assert projects.profile_items_to_ask(saved) == ["narrator_name"]
+    assert projects.profile_items_to_ask(saved) == ["narrator_name", "narrator_gender"]
 
 
 @pytest.mark.asyncio
@@ -370,10 +370,13 @@ async def test_when_the_check_fails_plain_wording_decides(monkeypatch):
     assert await narrator_profile.asked_profile_field(fields, "您是哪年参加工作的？", ai_model=None) is None
     assert await narrator_profile.asked_profile_field(fields, "那年您多大，还记得吗？", ai_model=None) is None
     assert await narrator_profile.asked_profile_field(fields, "您怎么称呼？", ai_model=None) == "narrator_name"
+    gender = ("narrator_gender",)
+    assert await narrator_profile.asked_profile_field(gender, "我该叫您叔叔还是阿姨呀？", ai_model=None) == "narrator_gender"
+    assert await narrator_profile.asked_profile_field(gender, "那时候女的也要下地干活吗？", ai_model=None) is None
 
 
 def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
-    fields = ("narrator_name", "narrator_age", "narrator_origin")
+    fields = projects.ASKED_PROFILE_FIELDS
     replies = [SimpleNamespace(role="assistant", metadata_json={"profile_questions": list(fields)}) for _ in range(2)]
     assert narrator_profile.profile_questions_to_ask({}, replies) == ()
     for reply in replies:
@@ -382,6 +385,56 @@ def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
     assert narrator_profile.profile_questions_to_ask({}, replies) == ("narrator_name", "narrator_origin")
     declined = {"declined_in": {field: "segment" for field in fields}}
     assert narrator_profile.profile_questions_to_ask(declined, replies) == ()
+
+
+def test_gender_is_asked_last_and_only_while_unknown():
+    known = {"narrator_name": "老王", "narrator_age": 70, "narrator_origin": "山东"}
+    assert narrator_profile.profile_questions_to_ask({"narrator_gender": "unspecified"}, []) == ("narrator_name",)
+    assert narrator_profile.profile_questions_to_ask({**known, "narrator_gender": "unspecified"}, []) == (
+        "narrator_gender",
+    )
+    # 于大姐 or a gender saved on the project page is never asked; neither is a declined one.
+    assert narrator_profile.profile_questions_to_ask({**known, "narrator_gender": "female"}, []) == ()
+    declined = {**known, projects.SKIPPED_PROFILE_FIELDS_KEY: {"narrator_gender": "segment"}}
+    assert narrator_profile.profile_questions_to_ask(declined, []) == ()
+
+    narrator = SimpleNamespace(
+        id="m1", role=MemoirChatMessageRole.USER.value, content_text="那年我们去赶集。", turn_index=1, created_at=None,
+        metadata_json={},
+    )
+    book = InterviewBookContext(
+        chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_gender",),
+    )
+    prompt = _prompt("s1", [narrator], book)
+    assert "这次要问的资料：他是男是女，比如“冒昧问一句，我该叫您叔叔还是阿姨呀？”" in prompt
+    assert "除了问性别，不要用“是……还是……”的二选一问法" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_gender_answer_sets_gender_but_not_the_name_and_can_be_declined(client, test_db, fake_ai):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    named = await _narrate(client, test_db, session_id, "我叫王建华。")
+    fake_ai.payload = {"name": "王建华"}
+    await _run(test_db, named.utterance_id)
+    await _ask(test_db, session_id, "冒昧问一句，我该叫您叔叔还是阿姨呀？", offered="narrator_gender")
+    answer = await _narrate(client, test_db, session_id, "叫我王阿姨就行。")
+    fake_ai.payload = {"gender": "female"}
+    await _run(test_db, answer.utterance_id)
+    assert "只是在说性别，name 填 null" in fake_ai.prompts[-1]
+    project, profile = await _profile(test_db, project_id)
+    assert (profile["narrator_name"], profile["narrator_gender"]) == ("王建华", "female")
+    assert project.title == "王建华的回忆录"
+    assert profile[projects.INFERRED_PROFILE_FIELDS_KEY]["narrator_gender"]["utterance_id"] == answer.utterance_id
+
+    other_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    other = await _session(client, other_id)
+    refusal = await _narrate(client, test_db, other, "这个就不说了吧。")
+    fake_ai.payload = {"skip": ["gender"]}
+    await _run(test_db, refusal.utterance_id)
+    _project, profile = await _profile(test_db, other_id)
+    assert profile[projects.SKIPPED_PROFILE_FIELDS_KEY] == {"narrator_gender": refusal.utterance_id}
+    assert "narrator_gender" not in projects.profile_items_to_ask(profile)
 
 
 @pytest.mark.asyncio
