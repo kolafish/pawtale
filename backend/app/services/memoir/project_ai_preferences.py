@@ -89,7 +89,7 @@ def normalize_transcript_polish_level(
     try:
         return MemoirTranscriptPolishLevel(value)
     except (TypeError, ValueError):
-        return MemoirTranscriptPolishLevel.MEDIUM
+        return MemoirTranscriptPolishLevel.HIGH
 
 
 def text_polish_requirements(

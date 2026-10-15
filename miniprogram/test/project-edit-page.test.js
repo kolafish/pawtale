@@ -132,6 +132,7 @@ test("project creation retries activation without creating a duplicate", async (
   await context.saveProject();
   assert.equal(creates, 1);
   assert.equal(createdInputs[0].share_video_style, "illustrated");
+  assert.equal(createdInputs[0].transcript_polish_level, "high");
   assert.match(context.data.error, /已创建.*激活失败/);
   assert.deepEqual(destinations, []);
 

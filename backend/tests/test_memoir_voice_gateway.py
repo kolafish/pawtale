@@ -1215,7 +1215,7 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
         assert strict is False
         assert kwargs["context"].scene == "voice_chat"
         assert kwargs["context"].guidance_mode == "free_narration"
-        assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.MEDIUM
+        assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.HIGH
         return CleanedTranscriptText(
             content="我小时候住在外婆家。",
             provider="fake-ai",
@@ -1277,7 +1277,7 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     assert message.metadata_json["auto_corrected"] is True
     assert message.metadata_json["correction_status"] == "succeeded"
     assert message.metadata_json["correction_provider"] == "fake-ai"
-    assert message.metadata_json["correction_polish_level"] == "medium"
+    assert message.metadata_json["correction_polish_level"] == "high"
     assert message.metadata_json["correction_polish_fallback"] is False
     assert utterance is not None
     assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"

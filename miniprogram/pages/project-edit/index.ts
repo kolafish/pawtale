@@ -115,7 +115,7 @@ definePage<ProjectEditData>()({
     narratorOrigin: "",
     narratorAgeText: "",
     defaultNarrationMode: "guided_interview",
-    transcriptPolishLevel: "medium",
+    transcriptPolishLevel: transcriptPolishLevel(),
     shareVideoStyle: "illustrated",
     genderOptions: [
       { value: "male", label: "男" },
@@ -149,7 +149,7 @@ definePage<ProjectEditData>()({
       narratorOrigin: "",
       narratorAgeText: "",
       defaultNarrationMode: "guided_interview",
-      transcriptPolishLevel: "medium",
+      transcriptPolishLevel: transcriptPolishLevel(),
       shareVideoStyle: "illustrated",
     });
     setPageNavigationTitle("新建回忆录");

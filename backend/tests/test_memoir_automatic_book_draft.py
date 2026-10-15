@@ -209,7 +209,7 @@ async def test_polish_setting_change_schedules_one_refresh_for_existing_draft(cl
     for _ in range(2):
         response = await client.patch(
             f"/api/mobile/memoir/projects/{project_id}",
-            json={"transcript_polish_level": "high"},
+            json={"transcript_polish_level": "medium"},
         )
         assert response.status_code == 200, response.text
     assert scheduled == ["polish_level"]

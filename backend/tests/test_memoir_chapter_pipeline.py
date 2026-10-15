@@ -508,7 +508,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
                 ensure_ascii=False,
             )
 
-    context = _two_section_context()
+    context = replace(_two_section_context(), polish_level=MemoirTranscriptPolishLevel.MEDIUM)
     latest = SimpleNamespace(
         model="previous-model",
         prompt_snapshot=chapter_generation._render_policy_tag(context),
