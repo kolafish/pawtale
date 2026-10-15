@@ -482,7 +482,7 @@ async def test_reply_can_ask_age_after_a_name_answer_while_the_profile_job_is_pe
 
 
 @pytest.mark.asyncio
-async def test_only_the_first_spoken_ai_session_asks_but_later_ai_sessions_still_collect(client, test_db, fake_ai):
+async def test_the_first_two_spoken_ai_sessions_ask_but_later_ai_sessions_still_collect(client, test_db, fake_ai):
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     empty = await _session(client, project_id)
     human = await _session(client, project_id, interview_type="human_interview")
@@ -506,23 +506,37 @@ async def test_only_the_first_spoken_ai_session_asks_but_later_ai_sessions_still
     spoken = await _session(client, other_id)
     session = await test_db.get(MemoirVoiceSession, silent)
     assert await narrator_profile.is_profile_session(test_db, session, await test_db.get(Project, other_id))
-    await _narrate(client, test_db, spoken, "我叫李桂兰。")
+    named = await _narrate(client, test_db, spoken, "我叫李桂兰。")
+    fake_ai.payload = {"name": "李桂兰"}
+    await _run(test_db, named.utterance_id)
     _project, profile = await _profile(test_db, other_id)
     assert profile[projects.PROFILE_SESSION_KEY] == spoken
-    assert not await narrator_profile.is_profile_session(test_db, session, await test_db.get(Project, other_id))
+    await _ask(test_db, spoken, "您是哪年生的？", offered="narrator_age")
+    await _ask(test_db, spoken, "李阿姨，您今年多大年纪了？", offered="narrator_age")
 
-    # Reproduce the device test: stop after answering the name, then give the hometown next session.
+    # Reproduce 于大姐: she stops early, so the next session keeps asking, with the first session's asks counted.
     stopped = await client.post(f"/api/mobile/memoir/voice-sessions/{spoken}/stop", json={})
     assert stopped.status_code == 200
     later = await _session(client, other_id)
+    session = await test_db.get(MemoirVoiceSession, later)
+    await test_db.refresh(session, ["messages"])
+    project = await test_db.get(Project, other_id)
+    assert await narrator_profile.profile_questions_for(test_db, session, project) == ("narrator_origin",)
     segment = await _narrate(client, test_db, later, "我小时候住在四川省成都市新都县。")
     assert await _profile_job(test_db, segment.utterance_id) is not None
     fake_ai.payload = {"origin": "四川省成都市新都县"}
     await _run(test_db, segment.utterance_id)
     project, profile = await _profile(test_db, other_id)
     assert profile["narrator_origin"] == "四川省成都市新都县"
-    session = await test_db.get(MemoirVoiceSession, later)
-    assert not await narrator_profile.is_profile_session(test_db, session, project)
+    await test_db.refresh(session, ["messages"])
+    assert await narrator_profile.profile_questions_for(test_db, session, project) == ("narrator_gender",)
+
+    # Once a third session has narration, asking is over; reading goes on.
+    third = await _session(client, other_id)
+    await _narrate(client, test_db, third, "后来我嫁到了绵阳。")
+    for session_id in (later, third):
+        session = await test_db.get(MemoirVoiceSession, session_id)
+        assert not await narrator_profile.is_profile_session(test_db, session, project)
 
 
 @pytest.mark.asyncio

@@ -142,7 +142,7 @@ def _profile_question(book: InterviewBookContext) -> str:
         return ""
     first, *rest = book.profile_questions
     instead = f"就改问：{_PROFILE_QUESTIONS[rest[0]]}（这一项也说了就不问）" if rest else "就不问资料"
-    return f"""这本书第一次讲述，这次要问的资料：{_PROFILE_QUESTIONS[first]}
+    return f"""这次要问的资料：{_PROFILE_QUESTIONS[first]}
 - 他刚回答完你上一句的问题，还没开始讲一件具体的事：先用半句接住他的回答，再问这一项
 - 他正讲着一件事：先听他讲完，这次不问；一件事讲完了，先问这一项，再开启新故事
 - 上下文里他本人已经说了这一项，或明确不想说，{instead}

@@ -44,7 +44,7 @@ DEFAULT_SESSION_GOAL = "open_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
 
 
-# Asked for by voice in a new book's first narration, in this order. Gender comes last: a name like 于大姐
+# Asked for by voice in a new book's first two narrations, in this order. Gender comes last: a name like 于大姐
 # or 王阿姨 usually gives it, and by then that answer has long been read.
 ASKED_PROFILE_FIELDS = ("narrator_name", "narrator_age", "narrator_origin", "narrator_gender")
 

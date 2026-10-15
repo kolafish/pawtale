@@ -49,7 +49,8 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # The profile item to ask, then the one to ask if the narrator already gave it; only in the first narration.
+    # The profile item to ask, then the one to ask if the narrator already gave it; only in a new book's first
+    # two narrations.
     profile_questions: tuple[str, ...] = ()
     # People the narrator has talked about, most recently mentioned first.
     people: tuple[str, ...] = ()
@@ -77,11 +78,7 @@ async def load_interview_book_context(
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
-    profile_questions = (
-        narrator_profile.profile_questions_to_ask(profile, list(voice_session.messages))
-        if await narrator_profile.is_profile_session(db, voice_session, project)
-        else ()
-    )
+    profile_questions = await narrator_profile.profile_questions_for(db, voice_session, project)
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),

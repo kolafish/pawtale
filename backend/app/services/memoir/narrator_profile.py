@@ -1,11 +1,12 @@
 """Fill the narrator's profile from what they say in AI interviews.
 
 A new book has no profile form. The book's first voice session where the narrator speaks becomes its
-profile session: only there does the interviewer ask for 称呼, age, hometown and gender. In every AI interview,
-each narrator segment (one recording) is read with the interviewer's line before it and what is already
-known, for anything the narrator newly says or corrects about themselves. A segment is read again
-when its transcript changes. Asking stops after two asks (one for gender) or a refusal; reading does not,
-so a late answer is still kept. A value the user saved on the project page is never overwritten.
+profile session: there, and in the next session if items are left, the interviewer asks for 称呼, age,
+hometown and gender. In every AI interview, each narrator segment (one recording) is read with the
+interviewer's line before it and what is already known, for anything the narrator newly says or corrects
+about themselves. A segment is read again when its transcript changes. Asking stops after two asks (one
+for gender) or a refusal; reading does not, so a late answer is still kept. A value the user saved on the
+project page is never overwritten.
 The same job reads the people in a corrected segment (see narration_people).
 """
 
@@ -118,13 +119,15 @@ def _collects_profile(voice_session: MemoirVoiceSession) -> bool:
     )
 
 
-async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: MemoirVoiceSession) -> bool:
+async def _project_has_narration_elsewhere(
+    db: AsyncSession, voice_session: MemoirVoiceSession, *, besides: str | None = None,
+) -> bool:
     return bool(await db.scalar(
         select(1)
         .select_from(MemoirChatMessage)
         .where(
             MemoirChatMessage.project_id == voice_session.project_id,
-            MemoirChatMessage.voice_session_id != voice_session.id,
+            MemoirChatMessage.voice_session_id.not_in({voice_session.id, besides or voice_session.id}),
             MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
             MemoirChatMessage.content_text != "",
         )
@@ -133,13 +136,32 @@ async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: Memo
 
 
 async def is_profile_session(db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None) -> bool:
-    """Whether this session asks for the profile; before the narrator speaks, whether it will."""
+    """Whether this session asks for the profile: the book's first session where the narrator spoke, or the one
+    after it, so a short first session does not end the asking. Before the narrator speaks, whether it will."""
     if project is None or not _collects_profile(voice_session):
         return False
     pinned = _profile(project).get(PROFILE_SESSION_KEY)
-    if pinned:
-        return pinned == voice_session.id
-    return not await _project_has_narration_elsewhere(db, voice_session)
+    return pinned == voice_session.id or not await _project_has_narration_elsewhere(
+        db, voice_session, besides=pinned,
+    )
+
+
+async def profile_questions_for(
+    db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
+) -> tuple[str, ...]:
+    """The one item this session's next reply asks for; asks in the first session count toward the cap."""
+    if not await is_profile_session(db, voice_session, project):
+        return ()
+    pinned = _profile(project).get(PROFILE_SESSION_KEY)
+    earlier = [] if pinned in (None, voice_session.id) else list((await db.scalars(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.voice_session_id == pinned,
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+        )
+        .order_by(MemoirChatMessage.turn_index)
+    )).all())
+    return profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
 
 
 async def pin_profile_session(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> None:
