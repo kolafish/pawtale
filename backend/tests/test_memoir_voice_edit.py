@@ -1115,3 +1115,366 @@ def test_apply_contract_requires_concrete_split_title():
 def test_provider_string_arrays_are_not_interpreted_as_actions():
     with pytest.raises(ValidationError):
         VoiceEditProposal.model_validate({"operations": "[]", "questions": [], "reply": ""})
+
+
+# --- Extended edits: writing corrections, chapter order/inclusion, book info, navigation, undo.
+
+from app.services.memoir import chapter_generation, dialect_glossary  # noqa: E402
+from app.services.memoir.transcript_projection import current_utterance_text  # noqa: E402
+
+FULL_CLIENT = {
+    "supports_chapter_split": True, "supports_section_merge": True, "supports_composed_chapter_edits": True,
+    "supports_multiple_chapter_splits": True, "supports_extended_edits": True,
+}
+
+
+async def preview_proposal(client, monkeypatch, story, proposal, *, instruction="帮我改一下", extended=True):
+    fake = FakeAI({"operations": [], "questions": [], "reply": "请确认。", **proposal})
+    monkeypatch.setattr("app.services.memoir.voice_edit.get_ai_service", lambda model: fake)
+    response = await client.post(
+        f"/api/memoir/projects/{story['pid']}/voice-edit/preview",
+        json={"instruction": instruction, "ai_model": "deepseek-v4-flash", **FULL_CLIENT, "supports_extended_edits": extended},
+    )
+    return response, fake
+
+
+def echoed(preview_data):
+    return [{key: value for key, value in op.items() if key not in {"label", "detail"}} for op in preview_data["operations"]]
+
+
+async def undo(client, story):
+    return await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/undo")
+
+
+async def latest_draft(test_db, chapter_id):
+    return await test_db.scalar(
+        select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.chapter_id == chapter_id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc()).limit(1)
+        .execution_options(populate_existing=True)
+    )
+
+
+@pytest_asyncio.fixture
+async def writing_story(story, test_db):
+    chapter = await test_db.get(MemoirBookPlanChapter, story["chapters"][1])
+    chapter.title = "于大姐与童年"
+    section = await test_db.get(MemoirSection, story["sections"][1])
+    section.title = "于大姐来看我"
+    material = await test_db.get(MemoirVoiceUtterance, story["materials"][1])
+    material.transcript_raw = "我出生在八十年代，于大姐常来看我，于大姐人很好。"
+    await test_db.flush()
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db, project_id=story["pid"], chapter_id=chapter.id,
+    )
+    version = await latest_draft(test_db, chapter.id)
+    bodies = {item.section_id: ("于大姐常来看我。" if item.section_id == section.id else "外婆家很远。") for item in context.sections}
+    version.content = "\n\n".join(bodies.values())
+    version.input_signature = context.input_signature
+    version.prompt_snapshot = chapter_generation._render_policy_tag(context)
+    version.material_snapshot_json = chapter_generation._snapshot(context, used_material_ids={material.id})
+    version.section_snapshot_json = chapter_generation._section_snapshot(context, sections=tuple(
+        chapter_generation.GeneratedChapterSection(
+            section_id=item.section_id, title=item.title, content=bodies[item.section_id],
+            used_material_ids=tuple(m.material_id for m in item.materials),
+        )
+        for item in context.sections
+    ))
+    await test_db.commit()
+    assert chapter_generation.chapter_draft_is_current(context, version)
+    return story
+
+
+async def test_correct_term_fixes_every_place_without_rewriting_and_undoes(client, test_db, monkeypatch, writing_story):
+    story = writing_story
+    chapter_id, section_id, material_id = story["chapters"][1], story["sections"][1], story["materials"][1]
+    before_draft = await latest_draft(test_db, chapter_id)
+    original_body, original_created_at = before_draft.content, before_draft.created_at
+    response, fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+    ]}, instruction="于大姐的于应该是多余的余")
+    assert response.status_code == 200, response.text
+    assert "correct_term" in fake.system and fake.inputs[0]["book_data"]["book"]["ref"] == "book"
+    data = response.json()
+    item = data["operations"][0]
+    assert item["label"] == "更正写法：「于大姐」→「余大姐」"
+    assert "章节标题 1 处" in item["detail"] and "小节标题 1 处" in item["detail"]
+    assert "讲述文字 1 条" in item["detail"] and "章节正文 1 章" in item["detail"]
+    assert (await test_db.get(MemoirBookPlanChapter, chapter_id)).title == "于大姐与童年"
+
+    applied = await apply(client, story, data, echoed(data))
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["undoable"] is True
+    assert (await test_db.get(MemoirBookPlanChapter, chapter_id, populate_existing=True)).title == "余大姐与童年"
+    assert (await test_db.get(MemoirSection, section_id, populate_existing=True)).title == "余大姐来看我"
+    material = await test_db.get(MemoirVoiceUtterance, material_id, populate_existing=True)
+    assert current_utterance_text(material) == "我出生在八十年代，余大姐常来看我，余大姐人很好。"
+    assert material.transcript_raw == "我出生在八十年代，于大姐常来看我，于大姐人很好。"
+    corrected = await latest_draft(test_db, chapter_id)
+    assert corrected.version == before_draft.version + 1
+    assert corrected.content == original_body.replace("于大姐", "余大姐")
+    assert corrected.created_at == original_created_at
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=story["pid"], chapter_id=chapter_id)
+    assert chapter_generation.chapter_draft_is_current(context, corrected)
+    project = await test_db.get(Project, story["pid"], populate_existing=True)
+    assert [(e.source, e.target) for e in dialect_glossary.glossary_entries(project)] == [("于大姐", "余大姐")]
+    assert (await apply(client, story, data, echoed(data))).status_code == 409
+
+    undone = await undo(client, story)
+    assert undone.status_code == 200, undone.text
+    assert (await test_db.get(MemoirBookPlanChapter, chapter_id, populate_existing=True)).title == "于大姐与童年"
+    assert (await test_db.get(MemoirSection, section_id, populate_existing=True)).title == "于大姐来看我"
+    material = await test_db.get(MemoirVoiceUtterance, material_id, populate_existing=True)
+    assert current_utterance_text(material) == "我出生在八十年代，于大姐常来看我，于大姐人很好。"
+    restored = await latest_draft(test_db, chapter_id)
+    assert restored.content == original_body
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=story["pid"], chapter_id=chapter_id)
+    assert chapter_generation.chapter_draft_is_current(context, restored)
+    project = await test_db.get(Project, story["pid"], populate_existing=True)
+    assert dialect_glossary.glossary_entries(project) == []
+    assert (await undo(client, story)).status_code == 409
+
+
+async def test_correct_term_undo_refuses_after_a_later_edit(client, test_db, monkeypatch, writing_story):
+    story = writing_story
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+    ]})
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 200
+    chapter = await test_db.get(MemoirBookPlanChapter, story["chapters"][1])
+    chapter.title = "后来又改的标题"
+    await test_db.commit()
+    assert (await undo(client, story)).status_code == 409
+    material = await test_db.get(MemoirVoiceUtterance, story["materials"][1], populate_existing=True)
+    assert "余大姐" in current_utterance_text(material)
+
+
+@pytest.mark.parametrize("operations, reply_part", [
+    ([{"action": "correct_term", "target_ref": "book", "term_from": "张大爷", "term_to": "章大爷"}], "没有找到「张大爷」"),
+])
+async def test_correct_term_reports_missing_writing(client, monkeypatch, writing_story, operations, reply_part):
+    response, _fake = await preview_proposal(client, monkeypatch, writing_story, {"operations": operations})
+    assert response.status_code == 200, response.text
+    assert response.json()["operations"] == [] and reply_part in response.json()["reply"]
+
+
+@pytest.mark.parametrize("operations", [
+    [{"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+     {"action": "rename_section", "target_ref": "SECTION", "new_title": "新名字"}],
+    [{"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+     {"action": "correct_term", "target_ref": "book", "term_from": "于大姐人", "term_to": "余大姐人"}],
+])
+async def test_correct_term_rejects_unsafe_batches(client, monkeypatch, writing_story, operations):
+    operations = [{**op, "target_ref": writing_story["sections"][1]} if op["target_ref"] == "SECTION" else op for op in operations]
+    response, _fake = await preview_proposal(client, monkeypatch, writing_story, {"operations": operations})
+    assert response.status_code == 422, response.text
+
+
+async def test_extended_actions_need_an_updated_client(client, test_db, monkeypatch, story):
+    response, fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "update_book_title", "target_ref": "book", "new_title": "奶奶的一生"},
+    ]}, extended=False)
+    assert response.status_code == 200, response.text
+    assert response.json()["operations"] == [] and "请更新小程序" in response.json()["reply"]
+    assert "当前客户端还可以使用以下操作" not in fake.system and "book" not in fake.inputs[0]["book_data"]
+
+
+async def test_structure_book_and_profile_edits_apply_together_and_undo(client, test_db, monkeypatch, story):
+    first, second, third = story["chapters"]
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "move_chapter", "target_ref": third, "target_position": "first"},
+        {"action": "rename_chapter", "target_ref": third, "new_title": "每天早晨"},
+        {"action": "set_chapter_book_inclusion", "target_ref": first, "include_in_book": False},
+        {"action": "update_book_title", "target_ref": "book", "new_title": "奶奶的一生"},
+        {"action": "update_narrator_profile", "target_ref": "profile", "narrator_name": "余桂兰", "narrator_age": 88},
+    ]})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    labels = [item["label"] for item in data["operations"]]
+    assert "第3章「早晨日常」移到最前面" in labels
+    assert "第1章「测试录音」：不收入本书" in labels
+    assert "书名「我的回忆录」→「奶奶的一生」" in labels
+    move = next(item for item in data["operations"] if item["action"] == "move_chapter")
+    assert move["detail"].splitlines()[1:] == ["1. 早晨日常", "2. 测试录音", "3. 童年回忆"]
+
+    applied = await apply(client, story, data, echoed(data))
+    assert applied.status_code == 200, applied.text
+    order = (await test_db.scalars(select(MemoirBookPlanChapter.id).where(MemoirBookPlanChapter.project_id == story["pid"]).order_by(MemoirBookPlanChapter.sort_order))).all()
+    assert order == [third, first, second]
+    assert (await test_db.get(MemoirBookPlanChapter, third, populate_existing=True)).title == "每天早晨"
+    assert (await test_db.get(MemoirBookPlanChapter, first, populate_existing=True)).include_in_book is False
+    project = await test_db.get(Project, story["pid"], populate_existing=True)
+    assert project.title == "奶奶的一生"
+    assert project.metadata_json["memoir_profile"]["narrator_name"] == "余桂兰"
+    assert project.metadata_json["memoir_profile"]["narrator_age"] == 88
+
+    undone = await undo(client, story)
+    assert undone.status_code == 200, undone.text
+    order = (await test_db.scalars(select(MemoirBookPlanChapter.id).where(MemoirBookPlanChapter.project_id == story["pid"]).order_by(MemoirBookPlanChapter.sort_order).execution_options(populate_existing=True))).all()
+    assert order == [first, second, third]
+    assert (await test_db.get(MemoirBookPlanChapter, third, populate_existing=True)).title == "早晨日常"
+    assert (await test_db.get(MemoirBookPlanChapter, first, populate_existing=True)).include_in_book is True
+    project = await test_db.get(Project, story["pid"], populate_existing=True)
+    assert project.title == "我的回忆录"
+    assert project.metadata_json["memoir_profile"]["narrator_name"] == ""
+    assert project.metadata_json["memoir_profile"]["narrator_age"] is None
+
+
+async def test_irreversible_batch_clears_undo(client, test_db, monkeypatch, story):
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "rename_chapter", "target_ref": story["chapters"][2], "new_title": "每天早晨"},
+    ]})
+    assert (await apply(client, story, response.json(), echoed(response.json()))).json()["undoable"] is True
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "delete_section", "target_ref": story["sections"][3]},
+    ]})
+    applied = await apply(client, story, response.json(), echoed(response.json()))
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["undoable"] is False
+    assert (await undo(client, story)).status_code == 409
+    assert (await test_db.get(MemoirBookPlanChapter, story["chapters"][2], populate_existing=True)).title == "每天早晨"
+
+
+@pytest.mark.parametrize("operations", [
+    [{"action": "move_chapter", "target_ref": "C0", "target_position": "first"}],
+    [{"action": "set_chapter_book_inclusion", "target_ref": "C0", "include_in_book": True}],
+    [{"action": "move_chapter", "target_ref": "C0", "target_index": 3},
+     {"action": "delete_chapter", "target_ref": "C1"}],
+    [{"action": "update_book_title", "target_ref": "book", "new_title": "我的回忆录"}],
+])
+async def test_extended_actions_reject_no_ops_and_conflicts(client, monkeypatch, story, operations):
+    refs = {"C0": story["chapters"][0], "C1": story["chapters"][1]}
+    operations = [{**op, "target_ref": refs.get(op["target_ref"], op["target_ref"])} for op in operations]
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": operations})
+    assert response.status_code == 422, response.text
+
+
+async def test_unsupported_edit_links_to_the_section_workbench(client, monkeypatch, story):
+    response, fake = await preview_proposal(client, monkeypatch, story, {
+        "reply": "这段正文的改写需要在小节页面完成。",
+        "unsupported_intent": "text_rewrite",
+        "navigation": {"page": "section_revision", "chapter_ref": story["chapters"][0], "section_ref": story["sections"][1], "feedback": "把奶奶的部分写得更细"},
+    }, instruction="童年回忆那段把奶奶写得更细一些")
+    assert response.status_code == 200, response.text
+    assert "unsupported_intent" in fake.system
+    navigation = response.json()["navigation"]
+    # The section decides the chapter even when the model names another one.
+    assert navigation == {
+        "page": "section_revision", "label": "去修改小节「童年回忆」", "chapter_id": story["chapters"][1],
+        "section_id": story["sections"][1], "section_title": "童年回忆", "feedback": "把奶奶的部分写得更细",
+    }
+    response, _fake = await preview_proposal(client, monkeypatch, story, {
+        "reply": "请到章节页面调整。", "unsupported_intent": "section_reorder",
+        "navigation": {"page": "section_revision", "chapter_ref": "missing", "section_ref": "missing"},
+    })
+    assert response.json()["navigation"] is None
+
+
+async def test_large_book_uses_compact_context(client, test_db, monkeypatch, story):
+    material = await test_db.get(MemoirVoiceUtterance, story["materials"][2])
+    material.transcript_raw = "今天早晨吃了粽子。" * 25_000
+    await test_db.commit()
+    response, fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "rename_chapter", "target_ref": story["chapters"][2], "new_title": "粽子"},
+    ]})
+    assert response.status_code == 200, response.text
+    data = fake.inputs[0]["book_data"]
+    assert data["drafts"] == []
+    compacted = next(m for m in data["materials"] if m["ref"] == story["materials"][2])
+    assert compacted["text_truncated"] is True and len(compacted["text"]) == 240 and "raw" not in compacted
+    assert "精简版" in fake.system
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 200
+
+
+async def test_correct_term_follows_people_readings_and_book_copy(client, test_db, monkeypatch, writing_story):
+    from app.models.memoir import MemoirBookOutputVersion, MemoirChatMessage
+
+    story = writing_story
+    utterance = await test_db.get(MemoirVoiceUtterance, story["materials"][1])
+    message = MemoirChatMessage(
+        project_id=story["pid"], voice_session_id=utterance.voice_session_id, role="user",
+        content_text=utterance.transcript_raw,
+        metadata_json={"people_reading": {"transcript_version_id": "", "people": [
+            {"call": "于大姐", "name": "于大姐", "relation": "邻居", "note": "常来看我", "unclear": None},
+        ]}},
+    )
+    test_db.add(message)
+    await test_db.flush()
+    utterance.chat_message_id = message.id
+    plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == story["pid"]))
+    output = MemoirBookOutput(project_id=story["pid"], plan_id=plan.id, title="我的回忆录", status="accepted")
+    test_db.add(output)
+    await test_db.flush()
+    test_db.add(MemoirBookOutputVersion(
+        output_id=output.id, project_id=story["pid"], plan_id=plan.id, version=1, content="# 我的回忆录",
+        manuscript_json={"title": "我的回忆录", "render_settings": {"back_cover_quote": "感谢于大姐。"},
+                         "chapters": [{"title": "于大姐与童年", "intro": "这一章写于大姐。"}]},
+    ))
+    await test_db.commit()
+
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+    ]})
+    assert "书稿文案 2 处" in response.json()["operations"][0]["detail"]
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 200
+    message = await test_db.get(MemoirChatMessage, message.id, populate_existing=True)
+    reading = message.metadata_json["people_reading"]
+    assert reading["transcript_version_id"] == message.transcript_version_id
+    assert reading["people"][0]["call"] == reading["people"][0]["name"] == "余大姐"
+    latest = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc()).limit(1).execution_options(populate_existing=True)
+    )
+    assert latest.manuscript_json["render_settings"]["back_cover_quote"] == "感谢余大姐。"
+    assert latest.manuscript_json["chapters"][0]["intro"] == "这一章写余大姐。"
+
+    assert (await undo(client, story)).status_code == 200
+    message = await test_db.get(MemoirChatMessage, message.id, populate_existing=True)
+    reading = message.metadata_json["people_reading"]
+    assert reading["transcript_version_id"] == message.transcript_version_id
+    assert reading["people"][0]["name"] == "于大姐"
+    latest = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc()).limit(1).execution_options(populate_existing=True)
+    )
+    assert latest.manuscript_json["render_settings"]["back_cover_quote"] == "感谢于大姐。"
+
+
+async def test_inclusion_swap_applies_in_any_proposed_order_and_undoes(client, test_db, monkeypatch, story):
+    first, second, third = story["chapters"]
+    for chapter_id in (second, third):
+        (await test_db.get(MemoirBookPlanChapter, chapter_id)).include_in_book = False
+    await test_db.commit()
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "set_chapter_book_inclusion", "target_ref": first, "include_in_book": False},
+        {"action": "set_chapter_book_inclusion", "target_ref": second, "include_in_book": True},
+    ]})
+    assert response.status_code == 200, response.text
+    applied = await apply(client, story, response.json(), echoed(response.json()))
+    assert applied.status_code == 200, applied.text
+    included = {c: (await test_db.get(MemoirBookPlanChapter, c, populate_existing=True)).include_in_book for c in story["chapters"]}
+    assert included == {first: False, second: True, third: False}
+    assert (await undo(client, story)).status_code == 200
+    included = {c: (await test_db.get(MemoirBookPlanChapter, c, populate_existing=True)).include_in_book for c in story["chapters"]}
+    assert included == {first: True, second: False, third: False}
+
+
+@pytest.mark.parametrize("operation", [
+    {"action": "update_narrator_profile", "target_ref": "profile", "narrator_name": "于老师"},
+    {"action": "correct_term", "target_ref": "book", "term_from": "于大姐", "term_to": "余大姐"},
+])
+async def test_undo_restores_heard_profile_sources(client, test_db, monkeypatch, story, operation):
+    project = await test_db.get(Project, story["pid"])
+    project.metadata_json = {**(project.metadata_json or {}), "memoir_profile": {
+        "narrator_name": "于大姐", "narrator_gender": "female", "narrator_origin": "苏州", "narrator_age": 80,
+        "inferred_from": {"narrator_name": {"utterance_id": story["materials"][1]}},
+    }}
+    await test_db.commit()
+    response, _fake = await preview_proposal(client, monkeypatch, story, {"operations": [operation]})
+    assert response.status_code == 200, response.text
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 200
+    profile = (await test_db.get(Project, story["pid"], populate_existing=True)).metadata_json["memoir_profile"]
+    assert "narrator_name" not in profile.get("inferred_from", {})
+    assert (await undo(client, story)).status_code == 200, "undo"
+    profile = (await test_db.get(Project, story["pid"], populate_existing=True)).metadata_json["memoir_profile"]
+    assert profile["narrator_name"] == "于大姐"
+    assert profile["inferred_from"] == {"narrator_name": {"utterance_id": story["materials"][1]}}

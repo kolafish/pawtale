@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -72,6 +73,24 @@ def _default_profile() -> dict[str, object]:
 
 def _field_was_set(req: MemoirProjectCreate | MemoirProjectUpdate, field: str) -> bool:
     return field in getattr(req, "model_fields_set", set())
+
+
+def profile_inferred_sources(project: Project, fields: Iterable[str]) -> dict[str, object]:
+    """The narration sources of these profile fields, kept so an undo can restore them."""
+    profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY)
+    inferred = profile.get(INFERRED_PROFILE_FIELDS_KEY) if isinstance(profile, dict) else None
+    return {key: inferred[key] for key in fields if isinstance(inferred, dict) and key in inferred}
+
+
+def restore_profile_inferred_sources(project: Project, sources: dict[str, object]) -> None:
+    """Mark restored values as heard again, so later narration may still correct them."""
+    if not sources:
+        return
+    metadata = dict(project.metadata_json or {})
+    profile = dict(metadata.get(MEMOIR_PROFILE_METADATA_KEY) or {})
+    profile[INFERRED_PROFILE_FIELDS_KEY] = {**(profile.get(INFERRED_PROFILE_FIELDS_KEY) or {}), **sources}
+    metadata[MEMOIR_PROFILE_METADATA_KEY] = profile
+    project.metadata_json = metadata
 
 
 def _profile_metadata(
@@ -313,6 +332,14 @@ async def update_mobile_memoir_project(
     # Automatic profile completion may have committed since load_project.
     # Read the current values under the same row lock before merging this save.
     await db.refresh(project, with_for_update=True)
+    await apply_memoir_project_update(db, project, req)
+    await db.commit()
+    return await _load_memoir_project_response(db, project.id, user_id)
+
+
+async def apply_memoir_project_update(db: AsyncSession, project: Project, req: MemoirProjectUpdate) -> None:
+    """Merge a profile/title save into a locked project row; the caller commits."""
+    project_id = project.id
     if req.title is not None:
         title = req.title.strip()
         if not title:
@@ -341,8 +368,6 @@ async def update_mobile_memoir_project(
             from app.services.memoir.automatic_book_draft import schedule_book_draft
             await schedule_book_draft(db, project_id=project_id, source="polish_level")
     project.updated_at = utcnow_naive()
-    await db.commit()
-    return await _load_memoir_project_response(db, project.id, user_id)
 
 
 async def activate_mobile_memoir_project(
