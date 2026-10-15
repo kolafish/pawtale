@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.memoir.types import (
     MemoirCompletionIssueChannel,
@@ -70,32 +71,33 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
     return None
 
 
-async def offered_sections(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
-    """For each narrator message that was the first reply to an opening offer, the offered issue's section.
+async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+    """For narrator messages replying to an opening offer, the chapter the offered question is about.
 
-    The reply stays ordinary narration; this only tells placement what the question was about."""
+    A reply is recognised by the line it answers, so deleting one reply never moves the mark to a later
+    answer. Only the chapter is given: chapter issues do not keep their section. The reply stays
+    ordinary narration and the issue is untouched."""
     ids = {message_id for message_id in message_ids if message_id}
     if not ids:
         return {}
-    sessions = (await db.scalars(select(MemoirVoiceSession).where(
-        MemoirVoiceSession.id.in_(select(MemoirChatMessage.voice_session_id).where(MemoirChatMessage.id.in_(ids))),
-        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
-    ))).all()
+    opening = aliased(MemoirChatMessage)
+    offered_issue_id = MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string()
+    rows = (await db.execute(
+        select(MemoirChatMessage.id, MemoirCompletionIssue)
+        .join(opening, opening.id == MemoirChatMessage.parent_message_id)
+        .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirChatMessage.voice_session_id)
+        .join(MemoirCompletionIssue, MemoirCompletionIssue.id == offered_issue_id)
+        .where(MemoirChatMessage.id.in_(ids), MemoirChatMessage.content_text != "", opening.guidance_intent == "opening")
+    )).all()
     result = {}
-    for session in sessions:
-        first_reply = await db.scalar(select(MemoirChatMessage.id).where(
-            MemoirChatMessage.voice_session_id == session.id,
-            MemoirChatMessage.role == "user",
-            MemoirChatMessage.content_text != "",
-        ).order_by(MemoirChatMessage.turn_index, MemoirChatMessage.created_at).limit(1))
-        issue = await db.get(MemoirCompletionIssue, session.metadata_json[OPENING_OFFER_KEY])
-        if first_reply not in ids or issue is None:
-            continue
-        try:
-            result[first_reply] = await _target_section_id(db, issue=issue)
-        except HTTPException as exc:
-            if exc.status_code != 409:
-                raise
+    for message_id, issue in rows:
+        chapter_ids = (
+            [issue.chapter_id]
+            if issue.scope == MemoirCompletionIssueScope.CHAPTER.value
+            else issue.related_chapter_ids_json
+        )
+        if len(chapter_ids) == 1 and chapter_ids[0]:
+            result[message_id] = chapter_ids[0]
     return result
 
 

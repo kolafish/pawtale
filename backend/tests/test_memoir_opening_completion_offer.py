@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models.memoir import MemoirChatMessage, MemoirCompletionIssue, MemoirSection, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import MemoirChatMessage, MemoirCompletionIssue, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.domain.memoir.types import MemoirCompletionIssueOutcome
 from app.services.memoir import completion_interviews, completion_issues
@@ -88,17 +88,56 @@ async def test_explicit_accept_creates_a_separate_existing_completion_session(cl
     assert len((await test_db.scalars(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id))).all()) >= 2
 
 
-async def test_only_the_first_reply_to_an_offer_points_placement_at_the_offered_section(client, test_db):
+
+def _line(project_id, session_id, role, text, turn_index, *, parent=None, intent=None):
+    return MemoirChatMessage(project_id=project_id, voice_session_id=session_id, role=role, content_text=text,
+                             turn_index=turn_index, parent_message_id=parent.id if parent else None, guidance_intent=intent)
+
+
+async def test_replies_to_the_offer_line_point_placement_at_its_chapter_and_deletion_never_moves_it(client, test_db):
     project_id, chapter, issue = await _issue(client, test_db)
     session = await _opening(client, test_db, project_id)
     await completion_interviews.offer_for_opening(test_db, voice_session=session)
-    replies = [MemoirChatMessage(project_id=project_id, voice_session_id=session.id, role='user', content_text=text, turn_index=index)
-               for index, text in ((1, '是我爸爸送我去的。'), (3, '后来我又去了工厂。'))]
+    opening = _line(project_id, session.id, 'assistant', '愿意补充可以点补充这段。', 0, intent='opening')
+    test_db.add(opening)
+    await test_db.flush()
+    reply = _line(project_id, session.id, 'user', '是我爸爸送我去的。', 1, parent=opening)
+    test_db.add(reply)
+    await test_db.flush()
+    follow_up = _line(project_id, session.id, 'assistant', '后来呢？', 2, parent=reply, intent='follow_up')
+    test_db.add(follow_up)
+    await test_db.flush()
+    later = _line(project_id, session.id, 'user', '后来我又去了工厂。', 3, parent=follow_up)
     plain = await _opening(client, test_db, project_id)
-    other = MemoirChatMessage(project_id=project_id, voice_session_id=plain.id, role='user', content_text='讲讲工厂。', turn_index=1)
-    test_db.add_all([*replies, other])
+    plain_opening = _line(project_id, plain.id, 'assistant', '想从哪儿讲起？', 0, intent='opening')
+    test_db.add_all([later, plain_opening])
+    await test_db.flush()
+    other = _line(project_id, plain.id, 'user', '讲讲工厂。', 1, parent=plain_opening)
+    test_db.add(other)
     await test_db.commit()
-    section_id = await test_db.scalar(select(MemoirSection.id).where(MemoirSection.chapter_id == chapter.id))
-    assert await completion_interviews.offered_sections(test_db, [item.id for item in (*replies, other)]) == {replies[0].id: section_id}
+    ids = [reply.id, later.id, other.id]
+    assert await completion_interviews.offered_chapters(test_db, ids) == {reply.id: chapter.id}
+    # Deleting a reply that already has a follow-up clears it in place (see delete_voice_transcript).
+    reply.content_text = ''
+    await test_db.commit()
+    assert await completion_interviews.offered_chapters(test_db, ids) == {}
     await test_db.refresh(issue)
     assert issue.status == 'open'
+
+
+async def test_a_book_question_spanning_chapters_gives_no_placement_mark(client, test_db):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    issue = MemoirCompletionIssue(project_id=project_id, scope='book', channel='interview', issue_type='context',
+        question='这两次比赛隔了几年？', reason='补充时间', priority='medium', fingerprint='b'*64, input_signature='current',
+        related_material_ids_json=[], related_chapter_ids_json=[item.id for item in chapters])
+    test_db.add(issue)
+    await test_db.commit()
+    session = await _opening(client, test_db, project_id)
+    session.metadata_json = {**(session.metadata_json or {}), completion_interviews.OPENING_OFFER_KEY: issue.id}
+    opening = _line(project_id, session.id, 'assistant', '愿意补充可以点补充这段。', 0, intent='opening')
+    test_db.add(opening)
+    await test_db.flush()
+    reply = _line(project_id, session.id, 'user', '隔了两年。', 1, parent=opening)
+    test_db.add(reply)
+    await test_db.commit()
+    assert await completion_interviews.offered_chapters(test_db, [reply.id]) == {}

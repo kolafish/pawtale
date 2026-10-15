@@ -182,21 +182,19 @@ async def test_invalid_second_response_leaves_the_entire_batch_unplaced(client, 
     assert growth._progress(job).deferred == {}
 
 
-def test_offered_section_is_shown_only_for_its_reply_and_only_when_it_can_be_chosen():
+
+def test_offered_chapter_is_shown_only_for_its_reply_and_only_when_it_can_be_chosen():
     import json
-    chapter = MemoirBookPlanChapter(id='c1', title='童年', sort_order=0)
-    def section(section_id, status='active'):
-        return MemoirSection(id=section_id, chapter_id='c1', title=section_id, materials=[], status=status,
-                             include_in_book=True, metadata_json={}, section_type='narrative')
+    chapters = [MemoirBookPlanChapter(id='c1', title='童年', sort_order=0)]
+    sections = [MemoirSection(id='home', chapter_id='c1', title='新都县的家', materials=[], status='active',
+                              include_in_book=True, metadata_json={}, section_type='narrative')]
     utterances = [MemoirVoiceUtterance(id=f'u{i}', chat_message_id=f'm{i}', transcript_raw='妈妈大名叫庄增芬。', transcript_edited='') for i in (1, 2, 3)]
     prompt, _, _ = growth.build_story_growth_prompt(
-        utterances=utterances, chapters=[chapter], sections=[section('home'), section('hidden', status='archived')],
-        interviewer_lines={}, offered_sections={'m1': 'home', 'm3': 'hidden'},
+        utterances=utterances, chapters=chapters, sections=sections,
+        interviewer_lines={}, offered_chapters={'m1': 'c1', 'm3': 'removed-chapter'},
     )
     sources = json.loads(prompt.split('本次新讲述：\n', 1)[1].split('\n\n', 1)[0])
-    assert [item.get('offered_section_id') for item in sources] == ['S1', None, None]
-    assert growth.OFFERED_SECTION_GUIDANCE in prompt
-    plain, _, _ = growth.build_story_growth_prompt(
-        utterances=utterances, chapters=[chapter], sections=[section('home')], interviewer_lines={},
-    )
-    assert 'offered_section_id' not in plain
+    assert [item.get('offered_chapter_id') for item in sources] == ['C1', None, None]
+    assert growth.OFFERED_CHAPTER_GUIDANCE in prompt
+    plain, _, _ = growth.build_story_growth_prompt(utterances=utterances, chapters=chapters, sections=sections, interviewer_lines={})
+    assert 'offered_chapter_id' not in plain
