@@ -10,8 +10,10 @@ from typing import Protocol
 import uuid
 
 from fastapi import HTTPException
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import ApplicationError
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -23,7 +25,7 @@ from app.services.ai_calls import stream_text_with_client
 from app.services.ai_costs import estimate_text_cost
 from app.services.ai_usage_records import record_ai_usage, record_ai_usage_in_background
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError, AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
@@ -679,7 +681,7 @@ class VoiceAssistantTurnStreamSession:
         control_buffer = ""
         initial_text_buffer = ""
         initial_text_resolved = False
-        async for chunk in stream_text_with_client(
+        async with contextlib.aclosing(stream_text_with_client(
             ai_client,
             system_prompt,
             prompt,
@@ -687,42 +689,44 @@ class VoiceAssistantTurnStreamSession:
             temperature=req.temperature,
             max_tokens=max_tokens,
             timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
-        ):
-            if cancel_event.is_set():
-                return
-            artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
-            if chunk.usage:
-                artifacts.usage.update(chunk.usage)
-            artifacts.ai_provider = chunk.provider or artifacts.ai_provider
-            artifacts.requested_ai_model = chunk.requested_model or artifacts.requested_ai_model
-            artifacts.resolved_ai_model = chunk.resolved_model or artifacts.resolved_ai_model
-            artifacts.response_ai_model = chunk.response_model or artifacts.response_ai_model
-            if not chunk.text_delta:
-                continue
-            text_delta = chunk.text_delta
-            if artifacts.conversation_action is None:
-                control_buffer += text_delta
-                text_delta, artifacts.conversation_action = split_interviewer_control_prefix(control_buffer)
+            text_timeout=ai_text_timeout_seconds(AITextTimeoutProfile.REALTIME),
+        )) as stream:
+            async for chunk in stream:
+                if cancel_event.is_set():
+                    return
+                artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
+                if chunk.usage:
+                    artifacts.usage.update(chunk.usage)
+                artifacts.ai_provider = chunk.provider or artifacts.ai_provider
+                artifacts.requested_ai_model = chunk.requested_model or artifacts.requested_ai_model
+                artifacts.resolved_ai_model = chunk.resolved_model or artifacts.resolved_ai_model
+                artifacts.response_ai_model = chunk.response_model or artifacts.response_ai_model
+                if not chunk.text_delta:
+                    continue
+                text_delta = chunk.text_delta
                 if artifacts.conversation_action is None:
-                    continue
-            if not initial_text_resolved:
-                initial_text_buffer += text_delta
-                text_delta, initial_text_resolved = strip_streaming_speaker_label_prefix(initial_text_buffer)
+                    control_buffer += text_delta
+                    text_delta, artifacts.conversation_action = split_interviewer_control_prefix(control_buffer)
+                    if artifacts.conversation_action is None:
+                        continue
                 if not initial_text_resolved:
+                    initial_text_buffer += text_delta
+                    text_delta, initial_text_resolved = strip_streaming_speaker_label_prefix(initial_text_buffer)
+                    if not initial_text_resolved:
+                        continue
+                if not text_delta:
                     continue
-            if not text_delta:
-                continue
-            artifacts.text += text_delta
-            await text_queue.put(text_delta)
-            await self.client.send_json(
-                {
-                    "type": "text.delta",
-                    "turn_id": turn_id,
-                    "voice_session_id": self.voice_session_id,
-                    "text_delta": text_delta,
-                    "text": artifacts.text,
-                }
-            )
+                artifacts.text += text_delta
+                await text_queue.put(text_delta)
+                await self.client.send_json(
+                    {
+                        "type": "text.delta",
+                        "turn_id": turn_id,
+                        "voice_session_id": self.voice_session_id,
+                        "text_delta": text_delta,
+                        "text": artifacts.text,
+                    }
+                )
 
         if artifacts.conversation_action is None:
             raise ValueError("AI 访谈回复的会话动作不完整，请重试")
@@ -957,6 +961,10 @@ def _cancel_reason(message: dict) -> str:
 
 
 def _exception_message(exc: Exception) -> str:
-    if isinstance(exc, HTTPException):
+    if isinstance(exc, (AIProviderTimeoutError, httpx.HTTPError)):
+        return "小余暂时没能回应，请稍等片刻，再点“再问一次”。"
+    if isinstance(exc, HTTPException) and exc.status_code < 500:
         return str(exc.detail)
-    return str(exc) or exc.__class__.__name__
+    if isinstance(exc, ApplicationError):
+        return str(exc)
+    return "这次回应没能完成，请稍等片刻，再点“再问一次”。"

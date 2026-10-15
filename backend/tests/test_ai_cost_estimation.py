@@ -267,44 +267,56 @@ def test_retried_structured_output_prices_each_attempt_on_its_own_tier():
     assert total.cost_estimate.amount_rmb == 0.16
 
 
-async def test_interrupted_stream_still_records_final_usage(monkeypatch):
-    import asyncio
-
+@pytest.mark.parametrize("finish", ["complete", "cancel_before_usage", "cancel_after_usage"])
+async def test_stream_records_only_observed_usage_and_closes_upstream(monkeypatch, finish):
     from app.services import ai_calls
     from app.services.ai_streaming import AITextStreamChunk
 
     recorded: list[dict] = []
-    finished = asyncio.Event()
+    closed = False
 
     async def fake_record(**kwargs):
         recorded.append(kwargs)
-        finished.set()
 
     class FakeClient:
         provider_name = "deepseek"
         model_name = "deepseek-flash"
 
         async def stream_llm(self, *_args, **_kwargs):
-            yield AITextStreamChunk(text_delta="你好")
-            await asyncio.sleep(0)
-            yield AITextStreamChunk(text_delta="，再讲讲")
-            yield AITextStreamChunk(usage={"prompt_tokens": 100, "completion_tokens": 20})
+            nonlocal closed
+            try:
+                yield AITextStreamChunk(text_delta="你好")
+                yield AITextStreamChunk(usage={"prompt_tokens": 100, "completion_tokens": 20})
+                yield AITextStreamChunk(finish_reason="stop")
+            finally:
+                closed = True
 
     monkeypatch.setattr(ai_calls, "record_ai_usage", fake_record)
+    monkeypatch.setattr(ai_calls, "record_ai_usage_in_background", lambda **kwargs: recorded.append(kwargs))
     stream = ai_calls.stream_text_with_client(
         FakeClient(), "system", "user",
         requested_model=None, temperature=0.2, max_tokens=100, timeout=10,
     )
-    async for chunk in stream:
-        assert chunk.text_delta == "你好"
-        break
-    await stream.aclose()
+    assert (await anext(stream)).text_delta == "你好"
+    if finish == "complete":
+        async for _ in stream:
+            pass
+    else:
+        if finish == "cancel_after_usage":
+            await anext(stream)
+        await stream.aclose()
 
-    await asyncio.wait_for(finished.wait(), timeout=1)
+    assert closed
     [record] = recorded
-    assert record["status"] == "succeeded"
-    assert record["usage"].output_tokens == 20
-    assert record["cost"].amount_rmb is not None
+    assert record["status"] == ("succeeded" if finish == "complete" else "cancelled")
+    if finish == "cancel_before_usage":
+        assert record["usage"] is None
+        assert record["cost"].amount_rmb is None
+        assert record["billable"] is False
+    else:
+        assert record["usage"].output_tokens == 20
+        assert record["cost"].amount_rmb is not None
+        assert record["billable"] is True
 
 
 async def test_rejected_structured_output_bills_the_tokens_it_used(monkeypatch):

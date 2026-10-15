@@ -197,7 +197,7 @@ export class VoiceAssistantTurnStreamClient {
             }
             this.closed = true;
             this.closeSocket("assistant turn activity timeout");
-            reject(new Error("AI 回应等待超时"));
+            reject(new Error("小余暂时没能回应，请稍等片刻，再点“再问一次”。"));
           });
         };
         const settle = (
