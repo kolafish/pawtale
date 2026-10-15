@@ -296,6 +296,15 @@ class VolcTTSClient:
                 sample_rate=sample_rate,
             )
         )
+        # The provider can finish with no audio if StartSession sits idle while
+        # the LLM prepares its first text. Wait before taking a TTS slot or
+        # starting its deadline; the caller owns the text-generation deadline.
+        async for first_text in text_chunks:
+            if first_text:
+                break
+        else:
+            raise HTTPException(status_code=502, detail="TTS 未收到可朗读文字")
+
         connection: Any | None = None
         producer_task: asyncio.Task[None] | None = None
         audio_seen = False
@@ -343,7 +352,9 @@ class VolcTTSClient:
 
                 producer_task = asyncio.create_task(
                     asyncio.wait_for(
-                        _volc_bidi_send_text_chunks(connection, text_chunks, session_id=session_id),
+                        _volc_bidi_send_text_chunks(
+                            connection, text_chunks, session_id=session_id, first_text=first_text,
+                        ),
                         _remaining_tts_seconds(deadline),
                     )
                 )
@@ -507,10 +518,9 @@ async def _volc_bidi_send_text_chunks(
     text_chunks: AsyncIterator[str],
     *,
     session_id: str,
+    first_text: str,
 ) -> None:
-    async for text in text_chunks:
-        if not text:
-            continue
+    async def send_text(text: str) -> None:
         await _volc_bidi_send_packet(
             connection,
             _VOLC_BIDI_TASK_REQUEST,
@@ -521,6 +531,11 @@ async def _volc_bidi_send_text_chunks(
             },
             session_id=session_id,
         )
+
+    await send_text(first_text)
+    async for text in text_chunks:
+        if text:
+            await send_text(text)
     await _volc_bidi_send_packet(
         connection,
         _VOLC_BIDI_FINISH_SESSION,

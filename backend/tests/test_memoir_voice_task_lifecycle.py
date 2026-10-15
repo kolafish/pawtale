@@ -12,7 +12,7 @@ from app.services.memoir.voice_assistant_turn_stream import (
 )
 from app.services.memoir.voice_tts import VolcTTSClient
 from app.services.memoir.streaming_tts_events import chunk_text_for_tts, stream_tts_events
-from tests.test_memoir_voice_tts import FakeBidirectionalConnection, bidi_server_packet
+from tests.test_memoir_voice_tts import FakeBidirectionalConnection, bidi_server_packet, decode_bidi_client_packet
 
 
 @pytest.mark.parametrize("ending", ["cancel", "text_error", "audio_error", "normal"])
@@ -132,8 +132,8 @@ async def test_tts_sender_failure_interrupts_stalled_receiver(monkeypatch):
 
     async def broken_text():
         try:
+            yield "你好"
             raise TypeError("producer failed")
-            yield "unreachable"
         finally:
             sender_closed.set()
 
@@ -164,13 +164,16 @@ async def test_tts_deadline_does_not_cancel_consumer_between_chunks(monkeypatch)
     assert connection.closed and limiter.active == 0
 
 
-async def test_cancelled_tts_releases_sender_connection_and_slot(monkeypatch):
+@pytest.mark.parametrize("has_first_text", [False, True])
+async def test_cancelled_tts_releases_sender_connection_and_slot(monkeypatch, has_first_text):
     connection = StalledConnection([bidi_server_packet(50), bidi_server_packet(150)])
     client, limiter = _tts(monkeypatch, connection)
     sender_started, sender_closed = asyncio.Event(), asyncio.Event()
 
     async def pending_text():
         try:
+            if has_first_text:
+                yield "你好"
             sender_started.set()
             await asyncio.Event().wait()
             yield "unreachable"
@@ -185,7 +188,63 @@ async def test_cancelled_tts_releases_sender_connection_and_slot(monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert sender_closed.is_set() and connection.closed and limiter.active == 0
+    assert sender_closed.is_set() and limiter.active == 0
+    assert connection.closed == has_first_text
+    assert bool(connection.sent) == has_first_text
+
+
+async def test_tts_waits_for_first_text_before_opening_provider_session(monkeypatch):
+    connection = FakeBidirectionalConnection([
+        bidi_server_packet(50), bidi_server_packet(150),
+        bidi_server_packet(352, audio=b"pcm", message_type=0xB4), bidi_server_packet(152),
+    ])
+    client, limiter = _tts(monkeypatch, connection)
+    text_waiting, text_ready = asyncio.Event(), asyncio.Event()
+
+    async def delayed_text():
+        yield ""
+        text_waiting.set()
+        await text_ready.wait()
+        yield "您好。"
+        yield "您怎么称呼？"
+
+    async def consume():
+        return [chunk async for chunk in client.stream_input_synthesize(delayed_text())]
+
+    task = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(text_waiting.wait(), 1)
+        # Exceed the TTS deadline while the LLM is still preparing text.
+        await asyncio.sleep(1.05)
+        assert not task.done()
+        assert limiter.active == 0 and not connection.sent
+        text_ready.set()
+        chunks = await asyncio.wait_for(task, 1)
+        assert b"".join(chunk.audio for chunk in chunks) == b"pcm"
+        requests = [decode_bidi_client_packet(frame) for frame in connection.sent]
+        assert [p["payload"]["req_params"]["text"] for p in requests if p["event"] == 200] == [
+            "您好。", "您怎么称呼？",
+        ]
+        assert connection.closed and limiter.active == 0
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("ending", ["empty", "error"])
+async def test_tts_without_first_text_does_not_open_provider_session(monkeypatch, ending):
+    connection = FakeBidirectionalConnection([])
+    client, limiter = _tts(monkeypatch, connection)
+
+    async def text():
+        yield ""
+        if ending == "error":
+            raise ValueError("text generation failed")
+
+    with pytest.raises(HTTPException if ending == "empty" else ValueError):
+        async for _ in client.stream_input_synthesize(text()):
+            pytest.fail("No text must not produce audio")
+    assert not connection.sent and limiter.active == 0
 
 
 async def test_cancelled_turn_waits_for_both_children(monkeypatch):
