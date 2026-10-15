@@ -457,12 +457,7 @@ test("book export page saves book metadata without changing the selected cover",
     projectId: "project/1",
     payload: {
       title: "外婆的月光",
-      subtitle: "根据口述访谈整理",
-      narrator_name: "外婆",
-      prepared_by: "家人整理",
       preface: "写给家人的开篇。",
-      afterword: "这些故事还可以继续补充。",
-      back_cover_quote: "我小时候常在院子里晒太阳。",
     },
   });
   assert.equal(context.data.bookTitleChanged, false);
@@ -485,6 +480,12 @@ test("book export page suggests titles and queues book-level editorial copy", as
     },
   };
   const { page } = loadBookExportPage({
+    updateMemoirBookOutput: async (_projectId, payload) => {
+      const output = sampleBookOutput();
+      output.title = payload.title;
+      output.latest_version.manuscript.profile.title = payload.title;
+      return output;
+    },
     suggestMemoirBookOutputTitles: async (projectId, payload) => {
       titleRequests.push({ projectId, payload });
       return { suggestions: [" 外婆的月光 ", "庭院往事"] };
@@ -1119,6 +1120,8 @@ test("canceling TXT sharing does not report a successful download", async () => 
 test("book export page assembles confirmed chapter drafts as a new full-book version", async () => {
   const requests = [];
   const toasts = [];
+  const freshOutput = sampleBookOutput();
+  freshOutput.latest_version.manuscript.front_matter.find(section => section.kind === 'preface').content = '组装后的新前言';
   global.wx = {
     showToast(options) {
       toasts.push(options);
@@ -1128,30 +1131,23 @@ test("book export page assembles confirmed chapter drafts as a new full-book ver
     assembleMemoirBookOutput: async (projectId) => {
       requests.push({ kind: "assemble", projectId });
     },
-    updateMemoirBookOutput: async (projectId, payload) => {
-      requests.push({ kind: "update", projectId, payload });
-      return sampleBookOutput();
+    getMemoirBookOutput: async (projectId) => {
+      requests.push({ kind: "read", projectId });
+      return freshOutput;
     },
+    updateMemoirBookOutput: async () => { throw new Error('重新整理不应回写旧文案'); },
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
 
   await page.generateBook.call(context);
 
-  assert.deepEqual(requests[0], { kind: "assemble", projectId: "project/1" });
-  assert.deepEqual(requests[1], {
-    kind: "update",
-    projectId: "project/1",
-    payload: {
-      title: "外婆回忆录",
-      subtitle: "根据口述访谈整理",
-      narrator_name: "外婆",
-      prepared_by: "家人整理",
-      preface: "这些故事来自家里的讲述。",
-      afterword: "这些故事还可以继续补充。",
-      back_cover_quote: "我小时候常在院子里晒太阳。",
-    },
-  });
+  assert.deepEqual(requests, [
+    { kind: "assemble", projectId: "project/1" },
+    { kind: "read", projectId: "project/1" },
+  ]);
+  assert.equal(context.data.bookPrefaceInput, '组装后的新前言');
+  assert.equal(context.data.error, '');
   assert.equal(context.data.generatingBook, false);
   assert.equal(context.data.exportNotice, "已根据各章确认正文更新全书稿。");
   assert.equal(toasts[0].title, "书稿已更新");
@@ -1307,3 +1303,25 @@ test("upload, cancel, replace failure and restore a cover without changing body 
   assert.deepEqual(calls.find((call) => call[0] === "place"), ["place", "project/1", "photo", { placement_type: "cover", display_size: "cover_frame" }]);
   assert.ok(calls.some((call) => call[0] === "restore" && call[3] === "cover-place"));
 });
+
+
+for (const field of ['title', 'preface']) {
+  test(`book metadata saves only the changed ${field}, including explicit clearing`, async () => {
+    const updates = [];
+    const { page } = loadBookExportPage({
+      updateMemoirBookOutput: async (projectId, payload) => {
+        updates.push(payload);
+        return sampleBookOutput();
+      },
+    });
+    const context = pageContext(page, { projectId: 'project/1' });
+    page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+    if (field === 'title') {
+      page.changeBookTitle.call(context, { detail: { value: '新的书名' } });
+    } else {
+      page.changeBookMetadataField.call(context, { currentTarget: { dataset: { key: field } }, detail: { value: '' } });
+    }
+    await page.saveBookDesignSettings.call(context);
+    assert.deepEqual(updates, [field === 'title' ? { title: '新的书名' } : { preface: '' }]);
+  });
+}
