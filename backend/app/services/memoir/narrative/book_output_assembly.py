@@ -284,7 +284,9 @@ async def assemble_book_output(
             if "intro" in fields:
                 chapter.intro = str(old.get("intro") or "")
             preserve_quotes = "pull_quotes" in manual_copy_fields.get(chapter.chapter_id, [])
-            chapter.pull_quotes = book_output_versions.retained_chapter_quotes(old, next_snapshot, preserve_editorial=preserve_quotes)
+            chapter.pull_quotes = book_output_versions.retained_chapter_quotes(
+                old, next_snapshot, preserve_manual=preserve_quotes, polish_level=project_transcript_polish_level(project),
+            )
             if not chapter.pull_quotes and not preserve_quotes:
                 chapter.pull_quotes = fallback_chapter_quotes(chapter.content, next_snapshot, polish_level=project_transcript_polish_level(project))
     version = await book_output_versions.append_book_output_version(

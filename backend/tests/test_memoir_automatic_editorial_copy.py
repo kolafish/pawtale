@@ -406,10 +406,13 @@ def test_corrected_body_controls_copy_and_original_quotes(body, expected):
     assert generated.chapter_intros[0].pull_quote == ""
     old = {**snapshot, "content": source, "pull_quotes": [
         {"text": "我十五岁那年发过洪水。", "source_ref_ids": ["u1"], "source": "original_quote"}]}
-    # Historical originals retain their source binding, independent of polished body wording.
-    assert retained_chapter_quotes(old, snapshot)[0].source == "original_quote"
+    # Automatic originals cannot contradict a corrected body, even in LOW.
+    from app.domain.memoir.types import MemoirTranscriptPolishLevel
+    for level in MemoirTranscriptPolishLevel:
+        assert retained_chapter_quotes(old, snapshot, polish_level=level) == []
+    assert retained_chapter_quotes(old, snapshot, preserve_manual=True)[0].source == "original_quote"
     invalid_source = {**snapshot, "source_refs": [{**ref, "quote": "我五岁那年发过洪水。"}]}
-    assert retained_chapter_quotes(old, invalid_source) == []
+    assert retained_chapter_quotes(old, invalid_source, preserve_manual=True) == []
     old["pull_quotes"][0]["source"] = "manual"
     assert retained_chapter_quotes(old, snapshot)[0].source == "manual"
 
@@ -800,3 +803,63 @@ async def test_legacy_metadata_form_claims_only_changed_copy(client, test_db, mo
         assert actual['preface'] == '自动前言2'
         assert actual['afterword'] == '自动后记2'
         assert {'preface', 'afterword', 'back_cover_quote'} <= set(calls[-1]['targets'])
+
+
+@pytest.mark.parametrize('level,body_changed,manual', [
+    ('low', False, False), ('low', True, False), ('medium', False, False),
+    ('high', True, False), ('medium', True, True), ('high', False, True),
+])
+async def test_old_original_quote_reconciles_with_current_body_and_policy(client, test_db, monkeypatch, level, body_changed, manual):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from app.services.memoir.book_output_versions import load_latest_book_output_version
+    from tests.test_memoir_book_outputs import _add_output_source_link
+    project_id = await ensure_mobile_memoir_project(client)
+    project = await test_db.get(Project, project_id)
+    project.metadata_json = {**project.metadata_json, 'transcript_polish_level': level}
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    old_quote = '我十五岁那年发过洪水。'
+    ending = '从此我一直记得全家一起走过那条山路的日子。'
+    await _add_output_source_link(test_db, project_id=project_id, plan_id=plan.id,
+        chapter_id=chapters[0].id, utterance_id='old-flood-source', quote=old_quote)
+    draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[0].id))
+    draft.content = old_quote + ending
+    sections = copy.deepcopy(draft.section_snapshot_json)
+    sections[0].update(content=draft.content, used_material_ids=['old-flood-source'])
+    draft.section_snapshot_json = sections
+    await test_db.commit()
+    await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        return _copy(kwargs['snapshot'])
+    monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+    await _automatic(test_db, project)
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    previous = await load_latest_book_output_version(test_db, output_id=output.id)
+    manuscript = copy.deepcopy(previous.manuscript_json)
+    manuscript['chapters'][0]['pull_quotes'] = [
+        {'text': old_quote, 'source': 'original_quote', 'source_ref_ids': ['old-flood-source']}]
+    previous.manuscript_json = manuscript
+    if manual:
+        metadata = copy.deepcopy(output.metadata_json)
+        metadata['automatic_editorial_copy']['manual_chapter_fields'][chapters[0].id] = ['pull_quotes']
+        output.metadata_json = metadata
+    if body_changed:
+        draft.content = draft.content.replace('十五岁', '五岁')
+        draft.section_snapshot_json = [{**sections[0], 'content': draft.content}]
+    await test_db.commit()
+    first = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    second = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert first.output_version_id == second.output_version_id
+    latest = await load_latest_book_output_version(test_db, output_id=output.id)
+    quote = latest.manuscript_json['chapters'][0]['pull_quotes'][0]
+    retained = manual or (level == 'low' and not body_changed)
+    assert quote['text'] == (old_quote if retained else ending)
+    assert quote['source'] == ('original_quote' if retained else 'editorial_generated')
+    assert previous.manuscript_json['chapters'][0]['pull_quotes'][0]['text'] == old_quote
+    assert len(calls) == 1  # Policy repair itself never calls AI.
+    if not body_changed:
+        await _automatic(test_db, project)
+        assert len(calls) == 1  # The evidence-v2 checkpoint is still reusable.

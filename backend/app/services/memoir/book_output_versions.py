@@ -207,12 +207,16 @@ def book_editorial_copy_signature(title: str, snapshot: list[dict[str, object]])
     ]})
 
 
-def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, object], *, preserve_editorial: bool = False) -> list[MemoirBookManuscriptQuote]:
+def retained_chapter_quotes(
+    stored: dict[str, object], snapshot: dict[str, object], *, preserve_manual: bool = False,
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.MEDIUM,
+) -> list[MemoirBookManuscriptQuote]:
     def refs(value):
         return {item["utterance_id"]: item for item in value.get("source_refs", []) if isinstance(item, dict)}
     old_refs, new_refs = refs(stored), refs(snapshot)
     quotes = [MemoirBookManuscriptQuote.model_validate(value) for value in stored.get("pull_quotes", [])]
     excerpts = body_excerpt_candidates(str(snapshot.get("content") or ""), max_chars=90)
+    originals = original_quote_candidates(snapshot, max_chars=90) if polish_level == MemoirTranscriptPolishLevel.LOW else {}
     retained = []
     for quote in quotes:
         if not all(
@@ -228,9 +232,14 @@ def retained_chapter_quotes(stored: dict[str, object], snapshot: dict[str, objec
             for source_id in quote.source_ref_ids
         )):
             continue
+        if quote.source == "original_quote" and not preserve_manual and not all(
+            any(quote.text in run for run in originals.get(source_id, ()))
+            for source_id in quote.source_ref_ids
+        ):
+            continue
         if quote.source == "editorial_generated" and (
             quote.text not in str(snapshot.get("content") or "")
-            or (not preserve_editorial and quote.text not in excerpts)
+            or (not preserve_manual and quote.text not in excerpts)
         ):
             continue
         retained.append(quote)
@@ -298,7 +307,7 @@ async def repair_automatic_chapter_quotes(
         if "pull_quotes" in state.manual_chapter_fields.get(chapter_id, []) or chapter_id not in snapshots:
             continue
         snapshot = snapshots[chapter_id]
-        quotes = retained_chapter_quotes(chapter, snapshot)
+        quotes = retained_chapter_quotes(chapter, snapshot, polish_level=polish_level)
         if not quotes:
             quotes = fallback_chapter_quotes(str(snapshot.get("content") or ""), snapshot, polish_level=polish_level)
         chapter["pull_quotes"] = [quote.model_dump(mode="json") for quote in quotes]
