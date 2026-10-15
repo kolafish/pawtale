@@ -49,8 +49,11 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # Eligible fields in order, only in the first narration. Recent answers may not be saved yet.
+    # The profile item to ask, then the one to ask if the narrator already gave it; only in a new book's first
+    # two narrations.
     profile_questions: tuple[str, ...] = ()
+    # Earlier profile exchanges remain available while asynchronous reading catches up.
+    profile_answers: tuple[narrator_profile.ProfileAnswer, ...] = ()
     # People the narrator has talked about, most recently mentioned first.
     people: tuple[str, ...] = ()
     # One gap about a person 小余 may ask once a story is told; never while profile items are left.
@@ -77,11 +80,8 @@ async def load_interview_book_context(
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
-    profile_questions = (
-        narrator_profile.profile_questions_to_ask(profile, list(voice_session.messages))
-        if await narrator_profile.is_profile_session(db, voice_session, project)
-        else ()
-    )
+    profile_context = await narrator_profile.profile_question_context_for(db, voice_session, project)
+    profile_questions = profile_context.questions
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
@@ -89,6 +89,7 @@ async def load_interview_book_context(
         anchor_topic=anchor_topic,
         narrator=_narrator(profile),
         profile_questions=profile_questions,
+        profile_answers=profile_context.previous_answers,
         people=await narration_people.recent_people_lines(db, voice_session.project_id),
         person_question=None if profile_questions else await narration_people.question_for(db, voice_session),
         completion_offer=(await completion_interviews.offer_for_opening(db, voice_session=voice_session))

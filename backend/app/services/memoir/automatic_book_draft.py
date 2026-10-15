@@ -69,6 +69,11 @@ class DraftProgress(BaseModel):
         # The worker transfers old copy retry intent to the copy job payload.
         return [stage for stage in value if stage != "editorial_copy"]
 
+    def clear_review(self) -> None:
+        self.review_job_id = None
+        self.review_status = "not_started"
+        self.review_error = ""
+
 
 async def schedule_book_draft(
     db: AsyncSession, *, project_id: str, source: str = "materials", settled: bool = False,
@@ -283,6 +288,16 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     progress.retry_stages = [stage for stage in progress.retry_stages if stage != "chapters"]
     job.payload_json = {"source": "progress", "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
+    review_signature = semantic_json_signature({"book_title": project.title, "engine": book_reviews.BOOK_REVIEW_ENGINE,
+        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
+            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
+            for chapter in chapters]})
+    previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
+    if (not current or len(current) != len(progress.chapters) or previous_review is None
+            or (previous_review.payload_json or {}).get("input_signature") != review_signature):
+        # Chapter failures retain a readable book, but not a review of another input.
+        # Keep the old review job itself; normal dispatch still handles reuse and retries.
+        progress.clear_review()
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -313,11 +328,6 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             # Reassembling unchanged chapters must not supersede unanswered decisions.
             progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
         else:
-            review_signature = semantic_json_signature({"book_title": project.title, "engine": book_reviews.BOOK_REVIEW_ENGINE,
-                "chapters": [(chapter.id, chapter.title, chapter.sort_order,
-                    progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
-                    for chapter in chapters]})
-
             async def record_review(child: MemoirEditingJob) -> None:
                 progress.review_job_id = child.id
                 job.result_json = progress.model_dump(mode="json")

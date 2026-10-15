@@ -129,6 +129,120 @@ async def test_failed_chapter_is_not_automatically_reissued(client, test_db, mon
     assert parent.result_json["chapters"][chapter_id]["job_id"] == new_id
 
 
+async def test_five_chapter_review_does_not_cover_six_chapters_when_an_update_fails(client, test_db, monkeypatch):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.models.memoir import MemoirBookPlanChapter
+    from tests.test_memoir_book_completion import _book, _create_current_draft, LayeredBookAI
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=6)
+    first_chapter_id, last_chapter_id = chapters[0].id, chapters[-1].id
+    chapters[-1].include_in_book = False
+    for chapter in chapters[:-1]:
+        _, version = await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT)
+        version.created_by = "ai"
+    fake = LayeredBookAI()
+    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews"):
+        monkeypatch.setattr(f"app.services.memoir.{module}.get_ai_service", lambda *_: fake)
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    parent_id = parent.id
+    await test_db.commit()
+    assert not await run_test_editing_job(test_db, parent_id)
+    old_review_id = parent.result_json["review_job_id"]
+    assert await run_test_editing_job(test_db, old_review_id)
+    await test_db.refresh(parent)
+    old_review = await test_db.get(MemoirEditingJob, old_review_id)
+    assert old_review.status == "succeeded", old_review.error_message
+    old_review_signature = old_review.payload_json["input_signature"]
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["review_status"] == "succeeded"
+
+    last_chapter = await test_db.get(MemoirBookPlanChapter, last_chapter_id)
+    last_chapter.include_in_book = True
+    await _create_current_draft(test_db, project_id=project_id, chapter_id=last_chapter_id,
+        status=MemoirBookChapterDraftStatus.DRAFT)
+    section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == first_chapter_id))
+    section.title = "重新整理的第一次比赛"
+    section.version += 1
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    assert not await run_test_editing_job(test_db, parent_id)
+    child = await test_db.get(MemoirEditingJob, parent.result_json["chapters"][first_chapter_id]["job_id"])
+    child.status, child.error_message = "failed", "章节更新失败"
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["stage"] == "partial_ready"
+    assert parent.result_json["review_status"] == "not_started"
+    assert parent.result_json["review_job_id"] is None
+    output = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert len(output.chapter_snapshot_json) == 6
+    old_review = await test_db.get(MemoirEditingJob, old_review_id)
+    assert old_review.status == "succeeded"
+    assert old_review.result_json["total_chapter_count"] == 5
+
+    # An old persisted progress record is projected safely without rerunning jobs or writing it back.
+    parent.result_json = {**parent.result_json, "review_job_id": old_review_id, "review_status": "succeeded"}
+    await test_db.commit()
+    before = copy.deepcopy(parent.result_json)
+    calls = len(fake.prompts)
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/draft-progress")
+    assert response.status_code == 200
+    assert response.json()["review_status"] == "not_started"
+    assert response.json()["readable_chapter_count"] == 6
+    await test_db.refresh(parent)
+    assert parent.result_json == before
+    assert len(fake.prompts) == calls
+
+    # After chapter recovery the normal scheduler reviews the new six-chapter input exactly once.
+    await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id,
+        chapter_id=first_chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    assert not await run_test_editing_job(test_db, parent_id)
+    review_id = parent.result_json["review_job_id"]
+    review = await test_db.get(MemoirEditingJob, review_id)
+    assert review.status == "pending"
+    assert review.payload_json["input_signature"] != old_review_signature
+    assert review.result_json["total_chapter_count"] == 6
+    assert await run_test_editing_job(test_db, review_id)
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["review_status"] == "succeeded"
+    assert (await test_db.get(MemoirEditingJob, review_id)).result_json["total_chapter_count"] == 6
+    calls = len(fake.prompts)
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["review_job_id"] == review_id
+    assert len(fake.prompts) == calls
+
+
+async def test_policy_assembly_does_not_reuse_review_status_for_changed_book_title(client, test_db, monkeypatch):
+    from app.models.projects import Project
+
+    project_id, chapter_id, _, fake, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json["chapters"][chapter_id]["job_id"])
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json["review_job_id"])
+    assert await run_test_editing_job(test_db, parent_id)
+    calls = len(fake.prompts)
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source="assembly_policy")
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["review_status"] == "succeeded"
+    project = await test_db.get(Project, project_id)
+    project.title = "改过名字的回忆录"
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source="assembly_policy")
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["review_status"] == "not_started"
+    assert parent.result_json["review_job_id"] is None
+    assert len(fake.prompts) == calls
+
+
 @pytest.mark.parametrize("growth_failed", [False, True])
 async def test_user_retry_survives_growth_and_coalesced_updates(client, test_db, monkeypatch, growth_failed):
     from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance

@@ -45,14 +45,17 @@ DEFAULT_SESSION_GOAL = "open_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
 
 
-# Asked for by voice in a new book's first narration; gender is only inferred.
-ASKED_PROFILE_FIELDS = ("narrator_name", "narrator_age", "narrator_origin")
+# Asked for by voice in a new book's first two narrations, in this order. Gender comes last: a name like 于大姐
+# or 王阿姨 usually gives it, and by then that answer has long been read.
+ASKED_PROFILE_FIELDS = ("narrator_name", "narrator_age", "narrator_origin", "narrator_gender")
 
 
 def profile_items_to_ask(profile: dict) -> list[str]:
     """Asked fields still empty that the narrator has not declined."""
     skipped = profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {}
-    return [key for key in ASKED_PROFILE_FIELDS if profile.get(key) in (None, "") and key not in skipped]
+    return [
+        key for key in ASKED_PROFILE_FIELDS if profile.get(key) in (None, "", "unspecified") and key not in skipped
+    ]
 
 
 def _clean_text(value: str | None) -> str:

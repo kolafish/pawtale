@@ -88,6 +88,18 @@ def build_stream_turn_prompt(
         )
         return _join(_header(host_name, regenerate), mode, progress, policy_section, dialogue)
 
+    if book.profile_questions and book.anchor_topic is None:
+        # The first narration ended with profile items left; ask before inviting a story.
+        mode = (
+            "当前是开场，叙述者以前讲过。\n"
+            "自然地欢迎回来，按下面的资料规则问剩下的一项；都已经回答或拒绝了，就只欢迎回来，请他接着讲。"
+            "最多问一个问题，这次不另提故事方向。"
+        )
+        return _join(
+            _header(host_name, regenerate), mode, _profile_question(book, opening=True), progress,
+            _book_block(book, opening=True), policy_section, dialogue,
+        )
+
     if book.completion_offer is not None:
         return _join(
             _header(host_name, regenerate),
@@ -130,30 +142,29 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 
 
 _PROFILE_QUESTIONS = {
-    "narrator_name": ("怎么称呼他", "您怎么称呼？"),
-    "narrator_age": ("他的年纪", "您是哪年生的？"),
-    "narrator_origin": ("他的老家", "您老家是哪里的？"),
+    "narrator_name": "怎么称呼他，比如“您怎么称呼？”",
+    "narrator_age": "他的年纪，比如“您是哪年生的？”",
+    "narrator_origin": "他的老家，比如“您老家是哪里的？”",
+    "narrator_gender": "他是男是女，比如“冒昧问一句，我该叫您叔叔还是阿姨呀？”",
 }
 
 
-def _profile_question(book: InterviewBookContext) -> str:
+def _profile_question(book: InterviewBookContext, *, opening: bool = False) -> str:
     if not book.profile_questions:
         return ""
-    questions = "\n".join(
-        f"- {topic}，比如“{example}”" for topic, example in (_PROFILE_QUESTIONS[field] for field in book.profile_questions)
-    )
-    after_name = (
-        "如果年纪仍没说，就接着问年纪"
-        if "narrator_age" in book.profile_questions
-        else "继续补问上述剩下的第一项"
-    )
-    return f"""这本书第一次讲述，还可以问的资料按顺序是：
-{questions}
-- 后台资料可能还没记下他刚才的答案：先排除上下文里他本人已经回答或明确不想说的项，只选剩下的第一项，最多问一项
-- 他正讲着一件事时，先听他讲完，这次不问；一件事讲完了，优先问上述剩下的第一项，再开启新故事
-- 他刚才只答了称呼时，这个回答已经结束，不要重复问称呼；{after_name}
-- 候选项都已经答了或拒绝了，就不再问资料
-- 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
+    first, *rest = book.profile_questions
+    instead = f"就改问：{_PROFILE_QUESTIONS[rest[0]]}（这一项也说了就不问）" if rest else "就不问资料"
+    timing = "" if opening else """- 他刚回答完你上一句的问题，还没开始讲一件具体的事：先用半句接住他的回答，再问这一项
+- 他正讲着一件事：先听他讲完，这次不问；一件事讲完了，先问这一项，再开启新故事
+"""
+    history = "\n\n以前的资料问答原文（可能尚未写入资料；只用于识别已回答或拒绝的项，不重新提问确认）：\n" + "\n".join(
+        f"AI：{exchange.question}\n叙述者：{exchange.answer}" for exchange in book.profile_answers
+    ) if book.profile_answers else ""
+    return f"""这次要问的资料：{_PROFILE_QUESTIONS[first]}
+{timing}- 同时检查以前的资料问答和本次对话；一句回答可能包含多个资料项，以最新说法为准
+- 岁数和出生年份属于同一项年龄资料：已说“今年七十岁”就不能再问“哪年生的”，也不换个问法确认
+- 上下文里他本人已经说了这一项，或明确不想说，{instead}
+- 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）{history}"""
 
 
 def _person_question(book: InterviewBookContext) -> str:
@@ -172,11 +183,11 @@ def _header(host_name: str, regenerate: bool) -> str:
         "输出要求：",
         INTERVIEWER_TURN_OUTPUT_RULES,
         f"- 你自称“{host_name}”，不要用这个名字称呼叙述者",
-        "- 一般 1 到 2 句，35 到 75 个汉字；最多问一个问题，不要用“是……还是……”的二选一问法",
+        "- 一般 1 到 2 句，35 到 75 个汉字；最多问一个问题，除了问性别，不要用“是……还是……”的二选一问法",
         "- 讲述过程中不要提记录条数、章节数、整理进度",
         "- 不要编造上下文里没有的事；以前讲过的事只能来自“以前讲过的相关原文”和“书里的人物”",
         "- 叙述者明确要换话题、暂停或不想说时，以他最新一句为准",
-        "- 称呼、年纪、老家只从本次允许的资料候选项里问；没有资料候选项时，不主动追问这些资料",
+        "- 称呼、年纪、老家、性别只问“这次要问的资料”那一项；没有要问的资料时，不主动追问这些资料",
     ]
     if regenerate:
         lines.append("- 这次是在替换上一句回应，请换一个角度，不要重复上一句")

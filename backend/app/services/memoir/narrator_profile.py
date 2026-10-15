@@ -1,11 +1,12 @@
 """Fill the narrator's profile from what they say in AI interviews.
 
 A new book has no profile form. The book's first voice session where the narrator speaks becomes its
-profile session: only there does the interviewer ask for 称呼, age and hometown. In every AI interview,
-each narrator segment (one recording) is read with the interviewer's line before it and what is already
-known, for anything the narrator newly says or corrects about themselves. A segment is read again
-when its transcript changes. Asking stops after two asks or a refusal; reading does not, so a late
-answer is still kept. A value the user saved on the project page is never overwritten.
+profile session: there, and in the next session if items are left, the interviewer asks for 称呼, age,
+hometown and gender. In every AI interview, each narrator segment (one recording) is read with the
+interviewer's line before it and what is already known, for anything the narrator newly says or corrects
+about themselves. A segment is read again when its transcript changes. Asking stops after two asks (one
+for gender) or a refusal; reading does not, so a late answer is still kept. A value the user saved on the
+project page is never overwritten.
 The same job reads the people in a corrected segment (see narration_people).
 """
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 import re
@@ -57,28 +59,34 @@ logger = logging.getLogger(__name__)
 
 # Each item is asked at most this many times; an answer given later is still kept.
 MAX_ASKS = 2
+# Gender is asked once and otherwise left to what the narrator says.
+_ASK_LIMITS = {"narrator_gender": 1}
 # A failed reading is tried again after these delays, then left failed.
 RETRY_DELAYS = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
 SYSTEM_PROMPT = "你从回忆录访谈里记下讲述者本人的基本资料，只记他说出来或能明确看出的内容。"
-_LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家"}
-_SKIP_FIELDS = {"name": "narrator_name", "age": "narrator_age", "origin": "narrator_origin"}
+_LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家", "narrator_gender": "性别"}
+_SKIP_FIELDS = {
+    "name": "narrator_name", "gender": "narrator_gender", "age": "narrator_age", "origin": "narrator_origin",
+}
 _ASK_TOPICS = {
     "narrator_name": "他本人怎么称呼、叫什么名字",
     "narrator_age": "他本人现在的年纪，或者哪年出生",
     "narrator_origin": "他本人的老家、籍贯或是哪里人",
+    "narrator_gender": "他本人是男是女，比如该叫他叔叔还是阿姨",
 }
 # Only when the check call fails: wording that plainly asks for each item.
 _ASK_PATTERNS = {
     "narrator_name": re.compile(r"怎么称呼|贵姓|叫什么名字|您的名字"),
     "narrator_age": re.compile(r"多少岁|几岁|多大岁数|多大年纪|年纪多大|高寿|贵庚|哪一?年(出)?生|出生年|属什么|属相"),
     "narrator_origin": re.compile(r"老家|哪里人|哪儿人|家乡|籍贯|祖籍"),
+    "narrator_gender": re.compile(r"性别|(男的|女的|男士|女士|叔叔|阿姨|大哥|大姐|爷爷|奶奶)还是"),
 }
 
 
 class _AskOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    field: Literal["narrator_name", "narrator_age", "narrator_origin"] | None
+    field: Literal["narrator_name", "narrator_age", "narrator_origin", "narrator_gender"] | None
 
 
 class _ProfileOutput(BaseModel):
@@ -88,7 +96,7 @@ class _ProfileOutput(BaseModel):
     gender: Literal["male", "female"] | None = None
     age: int | None = None
     origin: str | None = None
-    skip: list[Literal["name", "age", "origin"]] = []
+    skip: list[Literal["name", "gender", "age", "origin"]] = []
 
 
 def _is_empty(value: object) -> bool:
@@ -112,13 +120,15 @@ def _collects_profile(voice_session: MemoirVoiceSession) -> bool:
     )
 
 
-async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: MemoirVoiceSession) -> bool:
+async def _project_has_narration_elsewhere(
+    db: AsyncSession, voice_session: MemoirVoiceSession, *, besides: str | None = None,
+) -> bool:
     return bool(await db.scalar(
         select(1)
         .select_from(MemoirChatMessage)
         .where(
             MemoirChatMessage.project_id == voice_session.project_id,
-            MemoirChatMessage.voice_session_id != voice_session.id,
+            MemoirChatMessage.voice_session_id.not_in({voice_session.id, besides or voice_session.id}),
             MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
             MemoirChatMessage.content_text != "",
         )
@@ -127,13 +137,71 @@ async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: Memo
 
 
 async def is_profile_session(db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None) -> bool:
-    """Whether this session asks for the profile; before the narrator speaks, whether it will."""
+    """Whether this session asks for the profile: the book's first session where the narrator spoke, or the one
+    after it, so a short first session does not end the asking. Before the narrator speaks, whether it will."""
     if project is None or not _collects_profile(voice_session):
         return False
     pinned = _profile(project).get(PROFILE_SESSION_KEY)
-    if pinned:
-        return pinned == voice_session.id
-    return not await _project_has_narration_elsewhere(db, voice_session)
+    return pinned == voice_session.id or not await _project_has_narration_elsewhere(
+        db, voice_session, besides=pinned,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileAnswer:
+    question: str
+    answer: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileQuestionContext:
+    questions: tuple[str, ...] = ()
+    previous_answers: tuple[ProfileAnswer, ...] = ()
+
+
+async def profile_question_context_for(
+    db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
+) -> ProfileQuestionContext:
+    """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
+    toward the cap, including an opening ask the narrator left without answering. Their narration is kept too,
+    so answers not yet read can be recognized in both the opening and subsequent replies."""
+    if not await is_profile_session(db, voice_session, project):
+        return ProfileQuestionContext()
+    earlier = list((await db.scalars(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.project_id == voice_session.project_id,
+            MemoirChatMessage.voice_session_id != voice_session.id,
+        )
+        .order_by(MemoirChatMessage.created_at, MemoirChatMessage.turn_index)
+    )).all())
+    questions = profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
+    return ProfileQuestionContext(questions, _previous_profile_answers(earlier) if questions else ())
+
+
+def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[ProfileAnswer, ...]:
+    """Keep complete profile exchanges, never pairing a silent opening with another session's answer.
+
+    No-answer reminders continue the preceding question; other interviewer lines replace it.
+    At most seven asks are allowed (two per item, one for gender). Keep that many exchanges rather than
+    a tail of all messages, so unrelated stories or silent openings cannot displace the answers.
+    """
+    previous: dict[str, MemoirChatMessage] = {}
+    exchanges: dict[str, tuple[MemoirChatMessage, list[str]]] = {}
+    for message in messages:
+        if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            if message.guidance_intent != "no_answer_prompt":
+                previous[message.voice_session_id] = message
+        elif message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
+            question = previous.get(message.voice_session_id)
+            if question is not None and any(field in _LABELS for field in _asked(question)):
+                _, answers = exchanges.setdefault(question.id, (question, []))
+                answers.append(message.content_text.strip())
+    limit = sum(_ASK_LIMITS.get(field, MAX_ASKS) for field in _LABELS)
+    return tuple(
+        ProfileAnswer(question.content_text.strip(), "\n".join(answers))
+        for question, answers in list(exchanges.values())[-limit:]
+    )
 
 
 async def pin_profile_session(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> None:
@@ -160,7 +228,15 @@ async def pin_profile_session(db: AsyncSession, *, voice_session: MemoirVoiceSes
 def _has_open_fields(profile: dict) -> bool:
     """Whether a segment could still change the profile: a field is empty or was heard rather than saved."""
     inferred = profile.get(INFERRED_PROFILE_FIELDS_KEY) or {}
-    return any(_is_empty(profile.get(key)) or key in inferred for key in (*_LABELS, "narrator_gender"))
+    return any(_is_empty(profile.get(key)) or key in inferred for key in _LABELS)
+
+
+def _asked(message: MemoirChatMessage) -> list[str]:
+    """Items an interviewer line asked for; until its check finishes, every item it was offered."""
+    metadata = message.metadata_json or {}
+    if "profile_asked" in metadata:
+        return [metadata["profile_asked"]]
+    return metadata.get("profile_questions", [metadata.get("profile_question")])
 
 
 def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
@@ -170,26 +246,35 @@ def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
     """
     counts: dict[str, int] = {}
     for message in messages:
-        metadata = message.metadata_json or {}
         if message.role != MemoirChatMessageRole.ASSISTANT.value:
             continue
-        fields = (
-            [metadata["profile_asked"]]
-            if "profile_asked" in metadata
-            else metadata.get("profile_questions", [metadata.get("profile_question")])
-        )
-        # Until classification finishes, reserve an ask for every offered item. The reply may skip
-        # one already answered in the latest segment, but no item may exceed the cap meanwhile.
-        for field in fields:
+        for field in _asked(message):
             if field in _LABELS:
                 counts[field] = counts.get(field, 0) + 1
     return counts
 
 
 def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -> tuple[str, ...]:
-    """Eligible items in order; the reply skips answers not yet persisted by the background reader."""
+    """The item the next reply asks for, then the one it asks instead when the narrator has just given the
+    first; messages are in turn order. Answers may not be saved yet.
+
+    The item the latest interviewer line asked is skipped once the narrator has spoken since. If they did not
+    answer it, that line asked nothing and it is offered again.
+    """
     asks = profile_asks(messages)
-    return tuple(key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS)
+    spoke = False
+    answering: list[str] = []
+    for message in reversed(messages):
+        if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            if message.guidance_intent == "no_answer_prompt":
+                continue
+            answering = _asked(message) if spoke else []
+            break
+        spoke = spoke or bool(message.content_text.strip())
+    return tuple(
+        key for key in profile_items_to_ask(profile)
+        if asks.get(key, 0) < _ASK_LIMITS.get(key, MAX_ASKS) and key not in answering
+    )[:2]
 
 
 def ask_needs_check(fields: tuple[str, ...], text: str) -> bool:
@@ -291,6 +376,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         .where(
             MemoirChatMessage.voice_session_id == voice_session.id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
             MemoirChatMessage.turn_index < message.turn_index,
         )
         .order_by(MemoirChatMessage.turn_index.desc())
@@ -379,8 +465,6 @@ async def _load_utterance(db: AsyncSession, utterance_id: object) -> MemoirVoice
 
 def _known_profile(profile: dict) -> str:
     known = [f"{label}：{profile[key]}" for key, label in _LABELS.items() if not _is_empty(profile.get(key))]
-    if not _is_empty(profile.get("narrator_gender")):
-        known.append(f"性别：{profile['narrator_gender']}")
     return "；".join(known)
 
 
@@ -391,16 +475,19 @@ def build_profile_prompt(*, previous_line: str, segment: str, known: str, today:
         f"已经记下的资料：{known or '还没有'}\n\n"
         f"{previous}叙述者：{segment}\n\n"
         "只看叙述者这一段，记下他本人这次新说出的资料，或者明确纠正已经记下的资料：\n"
-        "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”\n"
-        "- gender：male 或 female；他明确自称或让人称呼自己为大姐、女士、阿姨、奶奶等，可记 female；"
-        "大哥、先生、叔叔、爷爷等可记 male。不能只凭普通姓名猜，家人的称呼不算\n"
+        "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”。"
+        "回答“该叫叔叔还是阿姨”这类问题，只是在说性别，name 填 null\n"
+        "- gender：male 或 female；他说自己是男的、女的，用“我们女孩子”“我当姑娘那会儿”这样的话说自己，"
+        "或者自称、让人称呼自己为大姐、女士、阿姨、奶奶等，可记 female；男的、“我们男娃”、大哥、先生、叔叔、爷爷等"
+        "可记 male。不能只凭普通姓名猜，家人的称呼不算\n"
         "- age：周岁；他说的是出生年份就按今年算\n"
         "- origin：本产品记录的是家乡，不要求他明确说出“老家”或“籍贯”二字。"
         "老家、籍贯、本人小时候住的地方或长大的地方都算。还不知道家乡时，"
         "他说“我小时候住在X”或“我在X长大”，origin 必须填写地名 X，不能因为没说籍贯而填 null，"
         "保留他说出的省、市、县。临时住处、工作地和家人的老家不算。"
         "已经记下家乡时，提到其他居住地不算纠正\n"
-        "- skip：name、age、origin 里他这段明确说不想说的；他说想自己讲、不想被问，三项都填\n"
+        "- skip：name、gender、age、origin 里他这段明确说不想说的。他说想自己讲、不想被问、别打断他，四项都填；"
+        "只是不答上一句问的那一项，接着说“咱接着讲”“说点别的”，只填那一项\n"
         "只记他自己的情况，家人的名字、年龄、老家不算。和已经记下的一样，或者这段没说到的，都填 null。\n"
         "只返回包含 name、gender、age、origin、skip 五个字段的 JSON。"
         "name 和 origin 是字符串或 null，gender 是 male、female 或 null，age 是整数或 null，skip 是数组。"

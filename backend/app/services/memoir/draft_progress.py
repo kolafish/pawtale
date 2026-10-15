@@ -157,6 +157,10 @@ async def _draft_progress_projection(
         if parent
         else automatic_book_draft.DraftProgress()
     )
+    # Older saved progress can carry a successful review through a failed chapter update.
+    # Project it safely without rewriting history or scheduling work from a read endpoint.
+    if progress.review_job_id is None or any(item.status != "ready" for item in progress.chapters.values()):
+        progress.clear_review()
     material_count, pending_material_count, needs_user_count, needs_user_detail = await _source_counts_and_needs_user(db, project_id)
     ready = sum(
         (item.status == "ready" or item.draft_version_id is not None)
