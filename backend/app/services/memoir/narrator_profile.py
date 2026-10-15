@@ -7,6 +7,8 @@ interviewer's line before it and what is already known, for anything the narrato
 about themselves. A segment is read again when its transcript changes. Asking stops after two asks (one
 for gender) or a refusal; reading does not, so a late answer is still kept. A value the user saved on the
 project page is never overwritten.
+Each message retains its versioned reading, even when a later segment supplies the same value. Retracting
+the selected source restores the newest remaining support; only a field with no support is cleared.
 The same job reads the people in a corrected segment (see narration_people).
 """
 
@@ -20,10 +22,10 @@ import logging
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select, update
+from pydantic import BaseModel, ConfigDict, ValidationError
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import contains_eager, selectinload
 
 from app.application_errors import InsufficientAICreditError
 from app.domain.memoir.types import (
@@ -64,6 +66,7 @@ _ASK_LIMITS = {"narrator_gender": 1}
 # A failed reading is tried again after these delays, then left failed.
 RETRY_DELAYS = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
 SYSTEM_PROMPT = "你从回忆录访谈里记下讲述者本人的基本资料，只记他说出来或能明确看出的内容。"
+READING_KEY = "profile_reading"
 _LABELS = {"narrator_name": "称呼", "narrator_age": "年龄", "narrator_origin": "老家", "narrator_gender": "性别"}
 _SKIP_FIELDS = {
     "name": "narrator_name", "gender": "narrator_gender", "age": "narrator_age", "origin": "narrator_origin",
@@ -97,6 +100,34 @@ class _ProfileOutput(BaseModel):
     age: int | None = None
     origin: str | None = None
     skip: list[Literal["name", "gender", "age", "origin"]] = []
+
+
+class _ProfileReading(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    transcript_version_id: str
+    output: _ProfileOutput
+
+
+def _reading(message: MemoirChatMessage) -> _ProfileReading | None:
+    stored = (message.metadata_json or {}).get(READING_KEY)
+    if not isinstance(stored, dict):
+        return None
+    try:
+        reading = _ProfileReading.model_validate(stored)
+    except ValidationError:
+        return None
+    return reading if reading.transcript_version_id == (message.transcript_version_id or "") else None
+
+
+def _profile_values(output: _ProfileOutput) -> dict[str, str | int | None]:
+    return {
+        "narrator_name": _clean(output.name, limit=40),
+        "narrator_gender": output.gender,
+        "narrator_age": output.age if output.age is not None and 0 < output.age <= 120 else None,
+        "narrator_origin": _clean(output.origin, limit=40),
+    }
 
 
 def _is_empty(value: object) -> bool:
@@ -373,17 +404,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         and existing.status != MemoirEditingJobStatus.FAILED.value
     ):
         return
-    previous_line = await db.scalar(
-        select(MemoirChatMessage.id)
-        .where(
-            MemoirChatMessage.voice_session_id == voice_session.id,
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
-            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
-            MemoirChatMessage.turn_index < message.turn_index,
-        )
-        .order_by(MemoirChatMessage.turn_index.desc())
-        .limit(1)
-    )
+    previous_line = await _previous_line_id(db, message)
     await editing_jobs.enqueue_editing_job(
         db,
         project_id=project.id,
@@ -396,6 +417,20 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         dedupe_key=dedupe_key,
         replace_completed=True,
         reschedule_running=True,
+    )
+
+
+async def _previous_line_id(db: AsyncSession, message: MemoirChatMessage) -> str | None:
+    return await db.scalar(
+        select(MemoirChatMessage.id)
+        .where(
+            MemoirChatMessage.voice_session_id == message.voice_session_id,
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
+            MemoirChatMessage.turn_index < message.turn_index,
+        )
+        .order_by(MemoirChatMessage.turn_index.desc())
+        .limit(1)
     )
 
 
@@ -507,18 +542,15 @@ def build_profile_prompt(*, previous_line: str, segment: str, known: str, today:
     )
 
 
-async def fill_narrator_profile(
+async def _extract_profile(
     db: AsyncSession,
     *,
     project: Project,
     utterance: MemoirVoiceUtterance,
-    transcript_version_id: str,
     previous_message_id: str | None,
-) -> bool:
-    """Read one segment and merge what it adds. Returns False when its transcript has changed since."""
+) -> _ProfileReading:
     message = utterance.chat_message
-    if (message.transcript_version_id or "") != transcript_version_id:
-        return False
+    version_id = message.transcript_version_id or ""
     segment = message.content_text.strip()
     previous = await db.get(MemoirChatMessage, previous_message_id) if isinstance(previous_message_id, str) else None
     ai_model = resolve_project_ai_model(project, None)
@@ -530,8 +562,6 @@ async def fill_narrator_profile(
         known=_known_profile(_profile(project), excluding_utterance_id=utterance.id),
         today=date.today(),
     )
-    turn_index = message.turn_index
-    segment_created_at = utterance.created_at
     await db.commit()
     # A failure propagates so the job is marked failed; the segment is read again when its transcript changes.
     generated = await generate_structured_with_client(
@@ -545,13 +575,92 @@ async def fill_narrator_profile(
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
+    return _ProfileReading(transcript_version_id=version_id, output=generated.value)
+
+
+def _other_segments(project_id: str, utterance_id: str) -> Select[tuple[MemoirVoiceUtterance]]:
+    return (
+        select(MemoirVoiceUtterance)
+        .join(MemoirChatMessage, MemoirVoiceUtterance.chat_message_id == MemoirChatMessage.id)
+        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+        .where(
+            MemoirChatMessage.project_id == project_id,
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+            func.trim(MemoirChatMessage.content_text) != "",
+            MemoirVoiceSession.interview_type == MemoirInterviewType.AI_INTERVIEW.value,
+            MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
+            MemoirVoiceUtterance.id != utterance_id,
+        )
+        .options(contains_eager(MemoirVoiceUtterance.chat_message))
+        .order_by(MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
+        .execution_options(populate_existing=True)
+    )
+
+
+async def _ensure_other_readings(db: AsyncSession, *, project: Project, excluding: str) -> None:
+    """On retraction only, read segments without a retained extraction of their current version.
+
+    This also covers old data and term replacements that deliberately do not queue profile jobs.
+    Save each reading so a later failure does not repeat successful calls. Never restore from old text.
+    """
+    segments = list(await db.scalars(_other_segments(project.id, excluding)))
+    for segment in segments:
+        if _reading(segment.chat_message) is not None:
+            continue
+        reading = await _extract_profile(
+            db, project=project, utterance=segment,
+            previous_message_id=await _previous_line_id(db, segment.chat_message),
+        )
+        current = await _load_utterance(db, segment.id)
+        if current is not None and current.chat_message is not None:
+            message = current.chat_message
+            await db.refresh(message, with_for_update=True)
+            if (message.transcript_version_id or "") == reading.transcript_version_id and _reading(message) is None:
+                message.metadata_json = {**(message.metadata_json or {}), READING_KEY: reading.model_dump()}
+        await db.commit()
+
+
+async def fill_narrator_profile(
+    db: AsyncSession,
+    *,
+    project: Project,
+    utterance: MemoirVoiceUtterance,
+    transcript_version_id: str,
+    previous_message_id: str | None,
+) -> bool:
+    """Retain each segment's evidence; the profile points to the latest valid supporting segment."""
+    if (utterance.chat_message.transcript_version_id or "") != transcript_version_id:
+        return False
+    reading = await _extract_profile(
+        db, project=project, utterance=utterance, previous_message_id=previous_message_id,
+    )
+    output = reading.output
+    found = _profile_values(output)
     # Serialize the read/merge/write with manual saves and other segments after the provider call.
     await db.refresh(project, with_for_update=True)
+    profile = _profile(project)
+    retracts = any(
+        isinstance(owner, dict) and owner.get("utterance_id") == utterance.id and _is_empty(found.get(key))
+        for key, owner in (profile.get(INFERRED_PROFILE_FIELDS_KEY) or {}).items()
+    ) or any(
+        owner == utterance.id and key not in {_SKIP_FIELDS[item] for item in output.skip}
+        for key, owner in (profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {}).items()
+    )
+    if retracts:
+        # Never hold project/message locks across provider calls. Recheck ownership and versions afterwards.
+        await db.commit()
+        await _ensure_other_readings(db, project=project, excluding=utterance.id)
+        await db.refresh(project, with_for_update=True)
     current = await _load_utterance(db, utterance.id)
-    if current is None or current.chat_message is None or (
-        (current.chat_message.transcript_version_id or "") != transcript_version_id
-    ):
+    if current is None or current.chat_message is None:
         return False
+    message = current.chat_message
+    await db.refresh(message, with_for_update=True)
+    if (message.transcript_version_id or "") != transcript_version_id:
+        return False
+    message.metadata_json = {**(message.metadata_json or {}), READING_KEY: reading.model_dump()}
+    turn_index = message.turn_index
+    segment_created_at = current.created_at
     profile = _profile(project)
     inferred = dict(profile.get(INFERRED_PROFILE_FIELDS_KEY) or {})
     declined = dict(profile.get(SKIPPED_PROFILE_FIELDS_KEY) or {})
@@ -564,13 +673,6 @@ async def fill_narrator_profile(
         select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at)
         .where(MemoirVoiceUtterance.id.in_(source_ids))
     )).all()) if source_ids else {}
-    output = generated.value
-    found = {
-        "narrator_name": _clean(output.name, limit=40),
-        "narrator_gender": output.gender,
-        "narrator_age": output.age if output.age is not None and 0 < output.age <= 120 else None,
-        "narrator_origin": _clean(output.origin, limit=40),
-    }
 
     def writable(key: str) -> bool:
         if _is_empty(profile.get(key)):
@@ -608,6 +710,28 @@ async def fill_narrator_profile(
         **{key: owner for key, owner in inferred.items() if key not in removed},
         **{key: source for key in changed},
     }
+    if removed or any(owner == utterance.id for owner in declined.values()):
+        # Newest narration wins regardless of job completion order. Keep all readings, including values
+        # hidden by a later source, so either correction order can recover the other valid recording.
+        for other in await db.scalars(_other_segments(project.id, utterance.id).with_for_update(
+            of=(MemoirVoiceUtterance, MemoirChatMessage),
+        )):
+            other_reading = _reading(other.chat_message)
+            if other_reading is None:
+                continue
+            for key, value in _profile_values(other_reading.output).items():
+                if key in removed and not _is_empty(value):
+                    changed[key] = value
+                    removed.pop(key)
+                    next_inferred[key] = {
+                        "utterance_id": other.id,
+                        "transcript_version_id": other_reading.transcript_version_id,
+                        "turn_index": other.chat_message.turn_index,
+                    }
+            for item in other_reading.output.skip:
+                key = _SKIP_FIELDS[item]
+                if declined.get(key) == utterance.id and key not in next_declined:
+                    next_declined[key] = other.id
     if not changed and not removed and next_declined == declined:
         await db.commit()
         return True
