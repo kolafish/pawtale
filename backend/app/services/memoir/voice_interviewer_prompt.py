@@ -92,11 +92,12 @@ def build_stream_turn_prompt(
         # The first narration ended with profile items left; ask before inviting a story.
         mode = (
             "当前是开场，叙述者以前讲过。\n"
-            f"自然地欢迎回来，然后问一句{_PROFILE_QUESTIONS[book.profile_questions[0]]}。"
-            "只问这一个问题，这次不提讲哪段故事。"
+            "自然地欢迎回来，按下面的资料规则问剩下的一项；都已经回答或拒绝了，就只欢迎回来，请他接着讲。"
+            "最多问一个问题，这次不另提故事方向。"
         )
         return _join(
-            _header(host_name, regenerate), mode, progress, _book_block(book, opening=True), policy_section, dialogue,
+            _header(host_name, regenerate), mode, _profile_question(book, opening=True), progress,
+            _book_block(book, opening=True), policy_section, dialogue,
         )
 
     if book.completion_offer is not None:
@@ -148,16 +149,22 @@ _PROFILE_QUESTIONS = {
 }
 
 
-def _profile_question(book: InterviewBookContext) -> str:
+def _profile_question(book: InterviewBookContext, *, opening: bool = False) -> str:
     if not book.profile_questions:
         return ""
     first, *rest = book.profile_questions
     instead = f"就改问：{_PROFILE_QUESTIONS[rest[0]]}（这一项也说了就不问）" if rest else "就不问资料"
-    return f"""这次要问的资料：{_PROFILE_QUESTIONS[first]}
-- 他刚回答完你上一句的问题，还没开始讲一件具体的事：先用半句接住他的回答，再问这一项
+    timing = "" if opening else """- 他刚回答完你上一句的问题，还没开始讲一件具体的事：先用半句接住他的回答，再问这一项
 - 他正讲着一件事：先听他讲完，这次不问；一件事讲完了，先问这一项，再开启新故事
+"""
+    history = "\n\n以前的资料问答原文（可能尚未写入资料；只用于识别已回答或拒绝的项，不重新提问确认）：\n" + "\n".join(
+        f"AI：{exchange.question}\n叙述者：{exchange.answer}" for exchange in book.profile_answers
+    ) if book.profile_answers else ""
+    return f"""这次要问的资料：{_PROFILE_QUESTIONS[first]}
+{timing}- 同时检查以前的资料问答和本次对话；一句回答可能包含多个资料项，以最新说法为准
+- 岁数和出生年份属于同一项年龄资料：已说“今年七十岁”就不能再问“哪年生的”，也不换个问法确认
 - 上下文里他本人已经说了这一项，或明确不想说，{instead}
-- 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
+- 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）{history}"""
 
 
 def _person_question(book: InterviewBookContext) -> str:

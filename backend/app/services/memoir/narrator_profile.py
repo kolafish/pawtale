@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 import re
@@ -146,14 +147,26 @@ async def is_profile_session(db: AsyncSession, voice_session: MemoirVoiceSession
     )
 
 
-async def profile_questions_for(
+@dataclass(frozen=True, slots=True)
+class ProfileAnswer:
+    question: str
+    answer: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileQuestionContext:
+    questions: tuple[str, ...] = ()
+    previous_answers: tuple[ProfileAnswer, ...] = ()
+
+
+async def profile_question_context_for(
     db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
-) -> tuple[str, ...]:
+) -> ProfileQuestionContext:
     """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
     toward the cap, including an opening ask the narrator left without answering. Their narration is kept too,
-    so an answer given just before leaving, and not yet read, still skips the item it answered."""
+    so answers not yet read can be recognized in both the opening and subsequent replies."""
     if not await is_profile_session(db, voice_session, project):
-        return ()
+        return ProfileQuestionContext()
     earlier = list((await db.scalars(
         select(MemoirChatMessage)
         .where(
@@ -162,7 +175,31 @@ async def profile_questions_for(
         )
         .order_by(MemoirChatMessage.created_at, MemoirChatMessage.turn_index)
     )).all())
-    return profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
+    questions = profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
+    return ProfileQuestionContext(questions, _previous_profile_answers(earlier) if questions else ())
+
+
+def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[ProfileAnswer, ...]:
+    """Keep complete profile exchanges, never pairing a silent opening with another session's answer.
+
+    At most seven asks are allowed (two per item, one for gender). Keep that many exchanges rather than
+    a tail of all messages, so unrelated stories or silent openings cannot displace the answers.
+    """
+    previous: dict[str, MemoirChatMessage] = {}
+    exchanges: dict[str, tuple[MemoirChatMessage, list[str]]] = {}
+    for message in messages:
+        if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            previous[message.voice_session_id] = message
+        elif message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
+            question = previous.get(message.voice_session_id)
+            if question is not None and any(field in _LABELS for field in _asked(question)):
+                _, answers = exchanges.setdefault(question.id, (question, []))
+                answers.append(message.content_text.strip())
+    limit = sum(_ASK_LIMITS.get(field, MAX_ASKS) for field in _LABELS)
+    return tuple(
+        ProfileAnswer(question.content_text.strip(), "\n".join(answers))
+        for question, answers in list(exchanges.values())[-limit:]
+    )
 
 
 async def pin_profile_session(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> None:
