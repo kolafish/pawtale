@@ -21,6 +21,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirSectionMaterialAssignedBy,
+    MemoirSectionStatus,
     MemoirSessionGoal,
     MemoirVoiceSessionStatus,
 )
@@ -60,7 +61,8 @@ from app.services.memoir.section_regeneration import (
     SectionRegenerationNeedsMaterial,
     regenerate_chapter_sections,
 )
-from app.services.memoir.sections import lock_plan_structure, place_material
+from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.sections import lock_chapter_structure, lock_plan_structure, place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -127,6 +129,13 @@ class DeferredSource(BaseModel):
     context_signature: str = ""
 
 
+class RecoveryMaterial(BaseModel):
+    material_id: str
+    section_id: str
+    updated_at: datetime
+    draft_version_id: str
+
+
 class GrowthBatch(BaseModel):
     original_chapter_ids: list[str] = Field(default_factory=list)
     created_chapters: dict[str, str | None] = Field(default_factory=dict)
@@ -136,6 +145,7 @@ class GrowthBatch(BaseModel):
     section_versions: dict[str, int]
     section_chapters: dict[str, str]
     chapter_updated_at: dict[str, datetime]
+    recovery_materials: dict[str, RecoveryMaterial] = Field(default_factory=dict)
 
 
 class StoryGrowthProgress(BaseModel):
@@ -388,12 +398,16 @@ async def schedule_story_tree_growth(
         or not any(is_ready_story_material(item) for item in session.utterances)
     ):
         return None
-    existing = await editing_jobs.load_project_editing_job(
-        db, project_id=project_id, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-        dedupe_key=f"organize_session:{voice_session_id}",
-    )
+    existing = await db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+        MemoirEditingJob.dedupe_key == f"organize_session:{voice_session_id}",
+    ).with_for_update().execution_options(populate_existing=True))
     if existing is not None and existing.status == MemoirEditingJobStatus.FAILED.value and source != "retry":
         return existing
+    if (existing is not None and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+            and (existing.payload_json or {}).get("source") == "retry"):
+        source = "retry"
     delay = SETTLE_SECONDS if session.status == MemoirVoiceSessionStatus.STOPPED.value else get_settings().memoir_story_settle_seconds
     return await editing_jobs.enqueue_editing_job(
         db,
@@ -548,6 +562,9 @@ async def _place_groups(
             continue
         target_section_id = group.section_id
         for utterance_id in group.utterance_ids:
+            # A retry only rechecks the content boundary; it never moves existing stories.
+            if utterance_id in batch.recovery_materials:
+                continue
             same_title_chapter_id = (
                 chapter_by_title.get(group.new_chapter_title) if group.action == "create_chapter" else None
             )
@@ -634,6 +651,106 @@ async def _position_new_chapters(db: AsyncSession, *, project_id: str, batch: Gr
     await db.flush()
 
 
+async def _recovery_materials(
+    db: AsyncSession, *, job: MemoirEditingJob, sections: list[MemoirSection],
+) -> dict[str, RecoveryMaterial]:
+    """Recheck only automatic additions that failed before reaching the saved prose."""
+    if (job.payload_json or {}).get("source") != "retry":
+        return {}
+    from app.services.memoir import automatic_book_draft, chapter_generation
+
+    parent = await db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == job.project_id,
+        MemoirEditingJob.dedupe_key == f"update-book-draft:{job.project_id}",
+    ))
+    if parent is None:
+        return {}
+    progress = automatic_book_draft.DraftProgress.model_validate(parent.result_json or {})
+    result: dict[str, RecoveryMaterial] = {}
+    for chapter_id, state in progress.chapters.items():
+        if state.status != "failed":
+            continue
+        chapter = await db.get(MemoirBookPlanChapter, chapter_id)
+        if chapter is None or not chapter.include_in_book:
+            continue
+        latest = await chapter_generation.latest_chapter_draft_version(
+            db, project_id=job.project_id, chapter_id=chapter_id,
+        )
+        if latest is None or latest.created_by == MemoirCreatedBy.USER.value:
+            continue
+        used_ids = set(latest.used_material_ids_json or [])
+        used_ids.update(item["material_id"] for item in (latest.material_snapshot_json or [])
+                        if isinstance(item, dict) and item.get("material_id"))
+        protected_sections = set()
+        for item in latest.section_snapshot_json or []:
+            if isinstance(item, dict):
+                used_ids.update(item.get("used_material_ids") or [])
+                if item.get("user_edited"):
+                    protected_sections.add(item.get("section_id"))
+        for section in sections:
+            if (section.chapter_id != chapter_id or not section.include_in_book
+                    or section.status != MemoirSectionStatus.ACTIVE.value or section.id in protected_sections):
+                continue
+            for material in section.materials:
+                if (material.assigned_by == MemoirSectionMaterialAssignedBy.AI.value
+                        and material.include_in_book and material.utterance_id not in used_ids
+                        and material.created_at > latest.created_at):
+                    result[material.utterance_id] = RecoveryMaterial(
+                        material_id=material.id, section_id=section.id, updated_at=material.updated_at,
+                        draft_version_id=latest.id,
+                    )
+    return result
+
+
+async def _remove_recovered_nonstory(
+    db: AsyncSession, *, project_id: str, batch: GrowthBatch, source_id: str,
+) -> bool:
+    from app.services.memoir.chapter_generation import latest_chapter_draft_version
+
+    recovery = batch.recovery_materials[source_id]
+    chapter_id = batch.section_chapters[recovery.section_id]
+    try:
+        await lock_plan_structure(db, project_id=project_id)
+        chapter = await lock_chapter_structure(db, project_id=project_id, chapter_id=chapter_id)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        return False
+    utterance = await db.scalar(select(MemoirVoiceUtterance).where(
+        MemoirVoiceUtterance.id == source_id,
+    ).options(selectinload(MemoirVoiceUtterance.chat_message))
+      .with_for_update().execution_options(populate_existing=True))
+    material = await db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == project_id,
+        MemoirSectionMaterial.utterance_id == source_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    section = await db.get(MemoirSection, recovery.section_id, populate_existing=True)
+    latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
+    if (material is None or utterance is None or section is None or latest is None
+            or material.id != recovery.material_id or material.section_id != recovery.section_id
+            or material.updated_at != recovery.updated_at
+            or material.transcript_version_id != batch.sources[source_id][1]
+            or material.assigned_by != MemoirSectionMaterialAssignedBy.AI.value or not material.include_in_book
+            or section.chapter_id != chapter_id or not section.include_in_book or not chapter.include_in_book
+            or section.status != MemoirSectionStatus.ACTIVE.value
+            or section.version != batch.section_versions[section.id]
+            or chapter.updated_at != batch.chapter_updated_at[chapter_id]
+            or latest.id != recovery.draft_version_id
+            or (source_text_hash(current_utterance_text(utterance)), current_transcript_version_id(utterance))
+            != batch.sources[source_id]):
+        return False
+    # Drop only the mistaken automatic association. The recording/transcript stays,
+    # and the hash-bound not_story checkpoint lets a later text edit be reconsidered.
+    await db.delete(material)
+    section.version += 1
+    section.updated_at = utcnow_naive()
+    batch.section_versions[section.id] = section.version
+    await mark_section_digests_stale(db, project_id=project_id, section_ids={section.id})
+    await db.flush()
+    db.expire(section, ["materials"])
+    return True
+
+
 async def grow_story_tree(
     db: AsyncSession,
     *,
@@ -681,6 +798,7 @@ async def grow_story_tree(
                 error_message=NO_STORY_YET,
             )
     await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
+    recovery_materials = await _recovery_materials(db, job=job, sections=before_sections)
 
     existing_material_ids = set(
         (
@@ -714,7 +832,7 @@ async def grow_story_tree(
     utterances = [
         item
         for item in project_sources
-        if item.id not in existing_material_ids
+        if (item.id not in existing_material_ids or item.id in recovery_materials)
         and not item.completion_issue_id
         and is_ready_story_material(item)
         and has_story_content(current_utterance_text(item))
@@ -742,6 +860,7 @@ async def grow_story_tree(
             section_versions={item.id: item.version for item in sections},
             section_chapters={item.id: item.chapter_id for item in sections},
             chapter_updated_at={item.id: item.updated_at for item in chapters},
+            recovery_materials={item.id: recovery_materials[item.id] for item in utterances if item.id in recovery_materials},
         )
         ai_model = await load_project_ai_model(db, job.project_id, None)
         lines = await interviewer_lines(db, (item.chat_message_id for item in utterances))
@@ -759,6 +878,16 @@ async def grow_story_tree(
         await _save_progress(db, job, progress)
     if progress.batch is not None:
         batch = progress.batch
+        for group in batch.groups:
+            if group.action == "not_story":
+                for source_id in group.utterance_ids:
+                    if source_id in batch.recovery_materials:
+                        if await _remove_recovered_nonstory(db, project_id=job.project_id, batch=batch, source_id=source_id):
+                            progress.deferred[source_id] = DeferredSource(
+                                text_hash=batch.sources[source_id][0], status="not_story", reason=group.reason,
+                                attempts=MAX_UNASSIGNED_ATTEMPTS, context_signature=batch.context_signature,
+                            )
+                            await _save_progress(db, job, progress)
 
         async def on_placed(utterance_id: str) -> None:
             progress.placed_ids.append(utterance_id)
