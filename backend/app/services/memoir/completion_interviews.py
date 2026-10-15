@@ -76,9 +76,9 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
 async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
     """For narrator messages answering an opening offer, the chapter the offered question is about.
 
-    Everything the narrator says before 小余's first follow-up answers the opening: that covers a
-    reply after a no-answer reminder, an interrupted opening and a recovered transcript, and deleting
-    a reply never moves the mark to an answer given after a follow-up. Only the chapter is given:
+    Narrator messages before 小余's first follow-up may answer the opening, including replies after
+    a no-answer reminder or an interrupted opening. Recovery retains the hint only when its saved
+    turn_index is before that follow-up; deleting a reply never moves this boundary. Only the chapter is given:
     chapter issues do not keep their section. The reply stays ordinary narration and the issue is
     untouched."""
     ids = {message_id for message_id in message_ids if message_id}
@@ -90,7 +90,7 @@ async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) 
         .where(
             follow_up.voice_session_id == MemoirChatMessage.voice_session_id,
             follow_up.role == "assistant",
-            follow_up.guidance_intent.not_in(OPENING_INTENTS),
+            or_(follow_up.guidance_intent.is_(None), follow_up.guidance_intent.not_in(OPENING_INTENTS)),
         )
         .scalar_subquery()
     )

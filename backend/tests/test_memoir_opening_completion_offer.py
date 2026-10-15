@@ -94,14 +94,15 @@ def _line(project_id, session_id, role, text, turn_index, *, parent=None, intent
                              turn_index=turn_index, parent_message_id=parent.id if parent else None, guidance_intent=intent)
 
 
-async def test_what_is_said_before_the_first_follow_up_answers_the_offer_and_deletion_never_moves_it(client, test_db):
+@pytest.mark.parametrize('follow_up_intent', ['follow_up', None])
+async def test_what_is_said_before_the_first_follow_up_answers_the_offer_and_deletion_never_moves_it(client, test_db, follow_up_intent):
     project_id, chapter, issue = await _issue(client, test_db)
     session = await _opening(client, test_db, project_id)
     await completion_interviews.offer_for_opening(test_db, voice_session=session)
     # The opening was interrupted (never saved); a no-answer reminder came before the reply.
     reminder = _line(project_id, session.id, 'assistant', '您可以接着刚才的问题慢慢说。', 0, intent='no_answer_prompt')
     reply = _line(project_id, session.id, 'user', '是我爸爸送我去的。', 1, parent=reminder)
-    follow_up = _line(project_id, session.id, 'assistant', '后来呢？', 2, intent='follow_up')
+    follow_up = _line(project_id, session.id, 'assistant', '后来呢？', 2, intent=follow_up_intent)
     later = _line(project_id, session.id, 'user', '后来我又去了工厂。', 3, parent=follow_up)
     recovered = _line(project_id, session.id, 'user', '补转写出来的另一段。', 4)
     plain = await _opening(client, test_db, project_id)
