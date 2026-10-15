@@ -271,6 +271,98 @@ async def test_rereading_an_earlier_segment_does_not_undo_a_later_correction(cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("old,old_output,corrected,new_output,age,declined", [
+    ("我七十岁。", {"age": 70}, "我母亲七十岁。", {}, None, False),
+    ("我七十岁。", {"age": 70}, "我今年七十岁。", {"age": 70}, 70, False),
+    ("我的年纪就不说了。", {"skip": ["age"]}, "母亲的年纪就不说了。", {}, None, False),
+    ("我的年纪就不说了。", {"skip": ["age"]}, "我的年纪不想说。", {"skip": ["age"]}, None, True),
+])
+async def test_corrected_segment_replaces_its_own_profile_evidence(
+    client, test_db, fake_ai, old, old_output, corrected, new_output, age, declined,
+):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    segment = await _narrate(client, test_db, await _session(client, project_id), old)
+    fake_ai.payload = old_output
+    await _run(test_db, segment.utterance_id)
+    version = await _new_version(test_db, segment.utterance_id, corrected)
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id),
+    )
+    await test_db.commit()
+    fake_ai.prompts.clear()
+    fake_ai.payload = new_output
+    await _run(test_db, segment.utterance_id)
+    _, profile = await _profile(test_db, project_id)
+    assert profile.get("narrator_age") == age
+    assert ("narrator_age" in profile.get(projects.SKIPPED_PROFILE_FIELDS_KEY, {})) == declined
+    inferred = profile.get(projects.INFERRED_PROFILE_FIELDS_KEY, {})
+    if age is None:
+        assert "narrator_age" not in inferred
+    else:
+        assert inferred["narrator_age"]["transcript_version_id"] == version
+    # An unchanged answer must be extracted again, not hidden by the "same as known => null" rule.
+    assert "已经记下的资料：还没有" in fake_ai.prompts[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protected_by", ["manual", "later_value", "later_same_value", "later_refusal"])
+async def test_source_retraction_preserves_manual_and_later_evidence(client, test_db, fake_ai, protected_by):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    session_id = await _session(client, project_id)
+    first = await _narrate(client, test_db, session_id, "我的年纪就不说了。" if protected_by == "later_refusal" else "我七十岁。")
+    fake_ai.payload = {"skip": ["age"]} if protected_by == "later_refusal" else {"age": 70}
+    await _run(test_db, first.utterance_id)
+    if protected_by == "manual":
+        assert (await client.patch(f"/api/mobile/memoir/projects/{project_id}", json={"narrator_age": 71})).status_code == 200
+    else:
+        text = "我还是不想说年纪。" if protected_by == "later_refusal" else (
+            "我七十岁。" if protected_by == "later_same_value" else "我七十一岁。"
+        )
+        later = await _narrate(client, test_db, session_id, text)
+        fake_ai.payload = {"skip": ["age"]} if protected_by == "later_refusal" else {
+            "age": 70 if protected_by == "later_same_value" else 71,
+        }
+        await _run(test_db, later.utterance_id)
+    await _new_version(test_db, first.utterance_id, "我母亲七十岁。")
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, first.utterance_id),
+    )
+    await test_db.commit()
+    fake_ai.payload = {}
+    await _run(test_db, first.utterance_id)
+    _, profile = await _profile(test_db, project_id)
+    if protected_by == "later_refusal":
+        assert profile[projects.SKIPPED_PROFILE_FIELDS_KEY]["narrator_age"] == later.utterance_id
+    else:
+        assert profile["narrator_age"] == (70 if protected_by == "later_same_value" else 71)
+        if protected_by == "manual":
+            assert "narrator_age" not in profile[projects.INFERRED_PROFILE_FIELDS_KEY]
+        else:
+            assert profile[projects.INFERRED_PROFILE_FIELDS_KEY]["narrator_age"]["utterance_id"] == later.utterance_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom_title", [False, True])
+async def test_retracting_a_name_also_retracts_only_its_automatic_book_title(client, test_db, fake_ai, custom_title):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    segment = await _narrate(client, test_db, await _session(client, project_id), "我叫王秀英。")
+    fake_ai.payload = {"name": "王秀英"}
+    await _run(test_db, segment.utterance_id)
+    if custom_title:
+        assert (await client.patch(f"/api/mobile/memoir/projects/{project_id}", json={"title": "我的岁月"})).status_code == 200
+    await _new_version(test_db, segment.utterance_id, "我母亲叫王秀英。")
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id),
+    )
+    await test_db.commit()
+    fake_ai.payload = {}
+    await _run(test_db, segment.utterance_id)
+    project, profile = await _profile(test_db, project_id)
+    assert not profile.get("narrator_name")
+    assert project.title == ("我的岁月" if custom_title else "我的回忆录")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("manually_saved", [False, True])
 async def test_deleting_a_source_segment_keeps_heard_values_correctable_but_saved_values_protected(
     client, test_db, fake_ai, manually_saved,

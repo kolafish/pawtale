@@ -465,8 +465,16 @@ async def _load_utterance(db: AsyncSession, utterance_id: object) -> MemoirVoice
     )
 
 
-def _known_profile(profile: dict) -> str:
-    known = [f"{label}：{profile[key]}" for key, label in _LABELS.items() if not _is_empty(profile.get(key))]
+def _known_profile(profile: dict, *, excluding_utterance_id: str) -> str:
+    inferred = profile.get(INFERRED_PROFILE_FIELDS_KEY) or {}
+    known = []
+    for key, label in _LABELS.items():
+        source = inferred.get(key)
+        if _is_empty(profile.get(key)) or (
+            isinstance(source, dict) and source.get("utterance_id") == excluding_utterance_id
+        ):
+            continue
+        known.append(f"{label}：{profile[key]}")
     return "；".join(known)
 
 
@@ -476,7 +484,7 @@ def build_profile_prompt(*, previous_line: str, segment: str, known: str, today:
         f"今年是 {today.year} 年。下面是回忆录访谈里的一段：“AI”是访谈主持人，“叙述者”是讲述者本人。\n"
         f"已经记下的资料：{known or '还没有'}\n\n"
         f"{previous}叙述者：{segment}\n\n"
-        "只看叙述者这一段，记下他本人这次新说出的资料，或者明确纠正已经记下的资料：\n"
+        "只看叙述者这一段，记下这一段支持的本人资料，包括再次确认的资料，或者明确纠正已经记下的资料：\n"
         "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”。"
         "回答“该叫叔叔还是阿姨”这类问题，只是在说性别，name 填 null\n"
         "- gender：male 或 female；他说自己是男的、女的，用“我们女孩子”“我当姑娘那会儿”这样的话说自己，"
@@ -488,9 +496,12 @@ def build_profile_prompt(*, previous_line: str, segment: str, known: str, today:
         "他说“我小时候住在X”或“我在X长大”，origin 必须填写地名 X，不能因为没说籍贯而填 null，"
         "保留他说出的省、市、县。临时住处、工作地和家人的老家不算。"
         "已经记下家乡时，提到其他居住地不算纠正\n"
-        "- skip：name、gender、age、origin 里他这段明确说不想说的。他说想自己讲、不想被问、别打断他，四项都填；"
+        "- skip：name、gender、age、origin 里他这段明确不想透露的本人资料。"
+        "不想透露家人或他人的资料不算拒答本人资料，比如“母亲的年纪就不说了”应填空数组，"
+        "即使 AI 上一句问的是他本人的年纪，也不能把这句变成本人的拒答。"
+        "他说想自己讲、不想被问、别打断他，四项都填；"
         "只是不答上一句问的那一项，接着说“咱接着讲”“说点别的”，只填那一项\n"
-        "只记他自己的情况，家人的名字、年龄、老家不算。和已经记下的一样，或者这段没说到的，都填 null。\n"
+        "只记他自己的情况，家人的名字、年龄、老家不算。和已经记下的一样也照填，只有这段没说到的才填 null。\n"
         "只返回包含 name、gender、age、origin、skip 五个字段的 JSON。"
         "name 和 origin 是字符串或 null，gender 是 male、female 或 null，age 是整数或 null，skip 是数组。"
     )
@@ -515,7 +526,8 @@ async def fill_narrator_profile(
     prompt = build_profile_prompt(
         previous_line=previous.content_text.strip() if previous else "",
         segment=segment,
-        known=_known_profile(_profile(project)),
+        # Re-extract this segment without letting its superseded values bias the reading.
+        known=_known_profile(_profile(project), excluding_utterance_id=utterance.id),
         today=date.today(),
     )
     turn_index = message.turn_index
@@ -547,6 +559,7 @@ async def fill_narrator_profile(
         source["utterance_id"] for source in inferred.values()
         if isinstance(source, dict) and source.get("utterance_id")
     }
+    source_ids.update(source for source in declined.values() if isinstance(source, str))
     source_times = dict((await db.execute(
         select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at)
         .where(MemoirVoiceUtterance.id.in_(source_ids))
@@ -570,32 +583,44 @@ async def fill_narrator_profile(
         # Deleting the source recording must not turn a heard value into a manually saved one.
         return source_time is None or source_time <= segment_created_at
 
+    source = {"utterance_id": utterance.id, "transcript_version_id": transcript_version_id, "turn_index": turn_index}
+    own_fields = {
+        key for key, previous_source in inferred.items()
+        if isinstance(previous_source, dict) and previous_source.get("utterance_id") == utterance.id
+    }
+    removed = {key: None for key in own_fields if key in found and _is_empty(found[key])}
     changed = {
         key: value
         for key, value in found.items()
-        if not _is_empty(value) and value != profile.get(key) and writable(key)
+        if not _is_empty(value) and writable(key)
+        and (value != profile.get(key) or inferred.get(key) != source)
     }
-    newly_declined = {
-        _SKIP_FIELDS[item]: utterance.id
-        for item in output.skip
-        if _SKIP_FIELDS[item] not in declined
-        and _SKIP_FIELDS[item] not in changed
-        and _is_empty(profile.get(_SKIP_FIELDS[item]))
+    # Only replace this segment's conclusions. Manual values and evidence owned by other segments survive.
+    next_declined = {key: owner for key, owner in declined.items() if owner != utterance.id}
+    for item in output.skip:
+        key = _SKIP_FIELDS[item]
+        owner_time = source_times.get(next_declined.get(key))
+        if key not in changed and (key in removed or _is_empty(profile.get(key))) and (
+            owner_time is None or owner_time <= segment_created_at
+        ):
+            next_declined[key] = utterance.id
+    next_inferred = {
+        **{key: owner for key, owner in inferred.items() if key not in removed},
+        **{key: source for key in changed},
     }
-    if not changed and not newly_declined:
+    if not changed and not removed and next_declined == declined:
         await db.commit()
         return True
     previous_name = str(profile.get("narrator_name") or "")
-    source = {"utterance_id": utterance.id, "transcript_version_id": transcript_version_id, "turn_index": turn_index}
+    profile.update(removed)
     profile.update(changed)
-    profile[INFERRED_PROFILE_FIELDS_KEY] = {**inferred, **{key: source for key in changed}}
-    if newly_declined:
-        profile[SKIPPED_PROFILE_FIELDS_KEY] = {**declined, **newly_declined}
+    profile[INFERRED_PROFILE_FIELDS_KEY] = next_inferred
+    profile[SKIPPED_PROFILE_FIELDS_KEY] = next_declined
     project.metadata_json = {**(project.metadata_json or {}), MEMOIR_PROFILE_METADATA_KEY: profile}
     name = changed.get("narrator_name")
     renamable = {FIRST_PROJECT_TITLE, f"{previous_name}的回忆录"} if previous_name else {FIRST_PROJECT_TITLE}
-    if name and project.title.strip() in renamable:
-        project.title = f"{name}的回忆录"
+    if (name or "narrator_name" in removed) and project.title.strip() in renamable:
+        project.title = f"{name}的回忆录" if name else FIRST_PROJECT_TITLE
         await book_outputs.synchronize_book_output_title(
             db,
             project_id=project.id,
