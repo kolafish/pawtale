@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirInterviewType,
 )
 from app.models.memoir import MemoirChatMessage
 from app.schemas.memoir_voice import (
@@ -29,6 +31,8 @@ async def create_no_answer_prompt(
     req: MemoirVoiceNoAnswerPromptRequest,
 ) -> MemoirVoiceFollowUpResponse:
     voice_session = await load_voice_session(db, voice_session_id, user_id)
+    if voice_session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value:
+        raise HTTPException(status_code=409, detail="真人访谈由采访者提问，不生成 AI 回复")
     prompt_text = NO_ANSWER_RETRY_TEXT if req.attempt <= 1 else NO_ANSWER_PAUSE_TEXT
     expects_answer = req.attempt <= 1
     message = MemoirChatMessage(

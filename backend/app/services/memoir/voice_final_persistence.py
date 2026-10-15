@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirGuidanceMode,
     MemoirInterviewType,
     MemoirSpeakerRole,
     MemoirTranscriptionStatus,
@@ -27,7 +28,7 @@ from app.services.memoir import voice_progress_notices
 from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.asr.streaming import StreamingASREvent
-from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
+from app.services.memoir.narrative import interview_policy, interview_policy_outcomes, interview_topics
 from app.services.memoir.voice_transcripts import (
     prune_transcript_versions_for_utterance,
 )
@@ -67,9 +68,10 @@ async def _assign_interview_target(
         if voice_session.current_completion_issue_id
         else None
     )
+    anchor_item_id = await interview_topics.current_framework_item_id(db, voice_session)
     framework_item = (
-        await db.get(MemoirFrameworkItem, voice_session.anchor_framework_item_id)
-        if voice_session.anchor_framework_item_id
+        await db.get(MemoirFrameworkItem, anchor_item_id)
+        if anchor_item_id
         else None
     )
     assigned = await interview_policy.assign_utterance(
@@ -88,6 +90,7 @@ async def _assign_interview_target(
         )
     if (
         assigned.framework_item_id
+        and voice_session.guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW.value
         and voice_session.anchor_framework_item_id != assigned.framework_item_id
     ):
         voice_session.anchor_framework_item_id = assigned.framework_item_id

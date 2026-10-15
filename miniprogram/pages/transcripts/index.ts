@@ -1,6 +1,7 @@
-import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
+import { NARRATION_MODES } from "../../domain/memoir-narration-mode";
 import type {
   MemoirVoiceTranscriptIncludedFilter,
+  MemoirNarrationMode,
   MemoirVoiceTranscriptItem,
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
@@ -66,7 +67,7 @@ interface TranscriptTouchEvent extends DatasetEvent {
 
 interface TranscriptSearchFilters {
   included: MemoirVoiceTranscriptIncludedFilter;
-  guidanceMode: MemoirGuidanceMode | "";
+  narrationMode: MemoirNarrationMode | "";
   module: string;
 }
 
@@ -138,7 +139,7 @@ const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
 const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
   included: "all",
-  guidanceMode: "",
+  narrationMode: "",
   module: "",
 };
 
@@ -289,7 +290,7 @@ export function highlightTranscriptText(text: string, searchQuery: string): Tran
 function normalizedSearchFilters(filters?: Partial<TranscriptSearchFilters>): TranscriptSearchFilters {
   return {
     included: filters?.included || "all",
-    guidanceMode: filters?.guidanceMode || "",
+    narrationMode: filters?.narrationMode || "",
     module: filters?.module || "",
   };
 }
@@ -298,18 +299,18 @@ function filtersFromParsedSearch(parsed: MemoirVoiceSearchQueryParseResponse): T
   const filters: MemoirVoiceSearchQueryFilters = parsed.filters || { included: "all" };
   return normalizedSearchFilters({
     included: filters.included || "all",
-    guidanceMode: filters.guidance_mode || "",
+    narrationMode: filters.narration_mode || (filters.guidance_mode ? "ai_interview" : ""),
     module: filters.module || "",
   });
 }
 
 function filtersActive(filters: TranscriptSearchFilters): boolean {
-  return filters.included !== "all" || Boolean(filters.guidanceMode) || Boolean(filters.module);
+  return filters.included !== "all" || Boolean(filters.narrationMode) || Boolean(filters.module);
 }
 
 function filtersEqual(left: TranscriptSearchFilters, right: TranscriptSearchFilters): boolean {
   return left.included === right.included
-    && left.guidanceMode === right.guidanceMode
+    && left.narrationMode === right.narrationMode
     && left.module === right.module;
 }
 
@@ -334,10 +335,9 @@ function searchChips(filters: TranscriptSearchFilters, parsed?: MemoirVoiceSearc
   } else if (filters.included === "not_included") {
     chips.push({ text: "未收录" });
   }
-  if (filters.guidanceMode === "free_narration") {
-    chips.push({ text: "慢慢讲" });
-  } else if (filters.guidanceMode === "guided_interview") {
-    chips.push({ text: "引导访谈" });
+  if (filters.narrationMode) {
+    const mode = filters.narrationMode === "ai_interview" ? "guided_interview" : filters.narrationMode;
+    chips.push({ text: NARRATION_MODES[mode].label });
   }
   if (filters.module) {
     chips.push({ text: moduleLabel(filters.module) });
@@ -546,7 +546,7 @@ definePage<TranscriptsData>()({
           projectId: activeProjectId,
           query: searchQuery || undefined,
           included: searchFilters.included,
-          guidanceMode: searchFilters.guidanceMode || undefined,
+          narrationMode: searchFilters.narrationMode || undefined,
           module: searchFilters.module || undefined,
           limit: requestLimit,
           offset,

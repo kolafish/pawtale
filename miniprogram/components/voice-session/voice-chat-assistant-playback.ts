@@ -16,7 +16,6 @@ import { readChatTTSSettings } from "../../services/tts-settings";
 import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
 import {
   assistantTranscriptState,
-  canRequestFollowUp,
   ttsAlignmentFromMetadata,
   upsertTranscriptLine,
 } from "../../services/voice-chat-state";
@@ -172,6 +171,8 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
     applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
+        interviewType: this.data.interviewType,
+        sessionGoal: this.data.sessionGoal,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
         followUpLoading: this.data.followUpLoading,
         assistantPromptText: item.text,
@@ -365,6 +366,8 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       applyVoiceChatDataPatch(this, {
         ...assistantTranscriptState(transcriptLines, {
           guidanceMode: this.data.guidanceMode,
+          interviewType: this.data.interviewType,
+          sessionGoal: this.data.sessionGoal,
           lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
           followUpLoading: false,
           assistantPromptText: "",
@@ -373,12 +376,6 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
           followUpTTSStateText: "",
           ttsAlignment: [],
           assistantExpectsAnswer: true,
-          canRequestFollowUp: canRequestFollowUp(
-            transcriptLines,
-            this.data.guidanceMode,
-            this.data.lastFollowUpSourceMessageId,
-            false,
-          ),
         }),
       });
     }

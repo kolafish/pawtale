@@ -49,7 +49,9 @@ from tests.memoir_helpers import (
 )
 
 
+@pytest.mark.parametrize("guidance_mode", ["free_narration", "guided_interview"])
 async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
+    guidance_mode,
     client,
     test_db,
     tmp_path,
@@ -63,6 +65,14 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
         guidance_mode="guided_interview",
         current_guidance_module="work",
     )
+    from app.services.memoir.voice_sessions import mark_voice_session_listening
+
+    stored = await test_db.get(MemoirVoiceSession, created["session"]["id"])
+    stored.guidance_mode = guidance_mode
+    await test_db.commit()
+    resumed = await mark_voice_session_listening(test_db, stored.id, created["user_id"])
+    assert resumed.session.guidance_mode == guidance_mode
+    assert resumed.session.status == "listening"
     await voice_progress_notices.enqueue_utterance_milestone_notice(
         test_db,
         project_id=created["session"]["project_id"],
@@ -184,6 +194,12 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
+
+    await test_db.refresh(stored)
+    assert stored.guidance_mode == guidance_mode
+    restored = await client.get(f"/api/mobile/memoir/voice-sessions/{stored.id}")
+    assert restored.status_code == 200
+    assert restored.json()["session"]["guidance_mode"] == guidance_mode
 
 
 @pytest.mark.parametrize("action", ["listen", "pause", "end"])
@@ -1575,3 +1591,27 @@ class FailingStreamingTTS(FakeStreamingTTS):
                     sample_rate=16000)
                 break
         raise HTTPException(status_code=504, detail="语音合成超时")
+
+
+async def test_human_interview_rejects_assistant_requests_before_ai_or_message_creation(client, test_db):
+    from app.services.memoir.voice_assistant_turn_stream import AssistantTurnStartRequest
+
+    created = await create_test_voice_transcript(client, test_db)
+    stored = await test_db.get(MemoirVoiceSession, created["session"]["id"])
+    stored.interview_type = "human_interview"
+    stored.guidance_mode = "free_narration"
+    await test_db.commit()
+    ai = FakeStreamingAI(["不应生成"])
+    stream = VoiceAssistantTurnStreamSession(
+        db=test_db, client=FakeTurnClient(), voice_session_id=stored.id, user_id=created["user_id"],
+        ai_client_factory=lambda model=None: ai, tts_client_factory=FakeStreamingTTS,
+    )
+    with pytest.raises(HTTPException) as exc:
+        await stream._stream_turn("test", AssistantTurnStartRequest.from_payload({}), asyncio.Event())
+    assert exc.value.status_code == 409
+    response = await client.post(f"/api/mobile/memoir/voice-sessions/{stored.id}/no-answer-prompt", json={"attempt": 1})
+    assert response.status_code == 409
+    assert ai.calls == []
+    assert await test_db.scalar(select(func.count()).select_from(MemoirChatMessage).where(
+        MemoirChatMessage.voice_session_id == stored.id, MemoirChatMessage.role == "assistant",
+    )) == 0

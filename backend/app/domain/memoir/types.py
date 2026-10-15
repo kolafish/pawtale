@@ -14,6 +14,14 @@ class MemoirInterviewType(str, Enum):
     HUMAN_INTERVIEW = "human_interview"
 
 
+class MemoirNarrationMode(str, Enum):
+    """Product search modes; legacy guidance values remain exact storage filters."""
+
+    AI_INTERVIEW = "ai_interview"
+    HUMAN_INTERVIEW = "human_interview"
+    BOOK_COMPLETION = "book_completion"
+
+
 class MemoirSpeakerRole(str, Enum):
     NARRATOR = "narrator"
     INTERVIEWER = "interviewer"

@@ -22,7 +22,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirProjectProgressSnapshotResponse
-from app.services.memoir.narrative import frameworks
+from app.services.memoir.narrative import frameworks, interview_topics
 from app.services.memoir import completion_interviews, narration_people, narrator_profile
 from app.services.memoir.projects import MEMOIR_PROFILE_METADATA_KEY
 
@@ -75,7 +75,7 @@ async def load_interview_book_context(
     topics, anchor_topic = await _life_topics(
         db,
         project_id=voice_session.project_id,
-        anchor_item_id=voice_session.anchor_framework_item_id,
+        anchor_item_id=await interview_topics.current_framework_item_id(db, voice_session),
     )
     project = await db.get(Project, voice_session.project_id)
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None

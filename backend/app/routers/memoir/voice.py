@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.memoir.types import MemoirNarrationMode
 from app.auth import get_current_user, is_admin_user
 from app.services.ai_credits import assert_ai_credit_available
 from app.database import get_db
@@ -452,6 +453,7 @@ async def parse_mobile_memoir_search_query(
         filters=MemoirVoiceSearchQueryFiltersResponse(
             included=parsed.filters.included,
             guidance_mode=parsed.filters.guidance_mode,
+            narration_mode=parsed.filters.narration_mode,
             module=parsed.filters.module,
         ),
         display_text=parsed.display_text,
@@ -469,6 +471,7 @@ async def list_mobile_memoir_voice_transcripts(
     ready_only: bool = False,
     include_empty: bool = True,
     guidance_mode: VoiceTranscriptGuidanceModeFilter | None = None,
+    narration_mode: MemoirNarrationMode | None = None,
     module: str | None = Query(None, min_length=1, max_length=80),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -487,6 +490,7 @@ async def list_mobile_memoir_voice_transcripts(
         ready_only=ready_only,
         include_empty=include_empty,
         guidance_mode=guidance_mode,
+        narration_mode=narration_mode,
         current_guidance_module=module,
         limit=limit,
         offset=offset,

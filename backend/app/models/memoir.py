@@ -111,7 +111,11 @@ class MemoirVoiceSession(Base):
     )
     guidance_mode: Mapped[str] = mapped_column(
         String(30),
-        default=MemoirGuidanceMode.FREE_NARRATION.value,
+        default=lambda context: (
+            MemoirGuidanceMode.FREE_NARRATION.value
+            if context.get_current_parameters().get("interview_type") == MemoirInterviewType.HUMAN_INTERVIEW.value
+            else MemoirGuidanceMode.GUIDED_INTERVIEW.value
+        ),
         nullable=False,
     )
     interview_type: Mapped[str] = mapped_column(

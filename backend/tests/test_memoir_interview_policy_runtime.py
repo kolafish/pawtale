@@ -262,8 +262,9 @@ async def test_active_policy_executes_low_risk_action_and_suggests_medium_action
     assert active_reply_instruction(suggest) == ""
 
 
+@pytest.mark.parametrize("guidance_mode", ["free_narration", "guided_interview"])
 async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
-    test_db,
+    test_db, guidance_mode,
 ):
     project = Project(type="memoir", title="话题策略")
     test_db.add(project)
@@ -274,7 +275,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     )
     session = MemoirVoiceSession(
         project_id=project.id,
-        guidance_mode="guided_interview",
+        guidance_mode=guidance_mode,
         session_goal="open_narration",
     )
     test_db.add(session)
@@ -356,7 +357,8 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     assert utterance.framework_item_id == selected_item.id
     assert utterance.policy_decision_id == decision.id
     await test_db.refresh(session, ["messages"])
-    assert session.anchor_framework_item_id == selected_item.id
+    assert session.guidance_mode == guidance_mode
+    assert session.anchor_framework_item_id == (selected_item.id if guidance_mode == "guided_interview" else None)
 
     continued = await prepare_active_policy_turn(
         test_db,
@@ -882,3 +884,30 @@ async def test_shadow_job_is_replayable_without_duplicate_decision(test_db):
     assert second.result_json["reused"] is True
     assert second.result_json["decision_id"] == first.result_json["decision_id"]
     assert len(decisions) == 1
+
+
+async def test_topic_offers_keep_product_boundaries_and_policy_flags_off(test_db):
+    from app.config import Settings
+    from app.services.memoir.narrative.interview_topics import topic_offer_requested
+
+    assert Settings.model_fields["memoir_interview_policy_active_enabled"].default is False
+    assert Settings.model_fields["memoir_interview_policy_shadow_enabled"].default is False
+    _, session, generated, _ = await _free_narration_turn(test_db, user_text="给我一个方向")
+    for guidance in ("free_narration", "guided_interview"):
+        session.guidance_mode = guidance
+        assert topic_offer_requested(session, None)
+        assert await prepare_active_policy_turn(
+            test_db, session=session, completion_issue_id=None, requested_ai_model=None, enabled=False,
+        ) is None
+        assert await schedule_shadow_policy_evaluation(
+            test_db, session=session, generated_message=generated, completion_issue_id=None,
+            requested_ai_model=None, enabled=False,
+        ) is None
+    session.interview_type = "human_interview"
+    assert not topic_offer_requested(session, None)
+    assert await prepare_active_policy_turn(
+        test_db, session=session, completion_issue_id=None, requested_ai_model=None, enabled=True, rollout_percent=100,
+    ) is None
+    session.interview_type = "ai_interview"
+    session.session_goal = "book_completion"
+    assert not topic_offer_requested(session, None)

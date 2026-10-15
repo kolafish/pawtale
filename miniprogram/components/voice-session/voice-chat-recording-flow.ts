@@ -184,6 +184,8 @@ export function voiceFinalTranscriptResult(
   current: {
     transcriptLines: VoiceChatTranscriptLine[];
     guidanceMode: MemoirGuidanceMode;
+    interviewType: VoiceChatData["interviewType"];
+    sessionGoal: VoiceChatData["sessionGoal"];
     lastFollowUpSourceMessageId: string;
   },
   fallbackId: string,
@@ -202,6 +204,8 @@ export function voiceFinalTranscriptResult(
       ...resetLiveTranscriptScrollPatch(),
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: current.guidanceMode,
+        interviewType: current.interviewType,
+        sessionGoal: current.sessionGoal,
         lastFollowUpSourceMessageId: current.lastFollowUpSourceMessageId,
         followUpLoading: false,
         assistantPromptText: "",

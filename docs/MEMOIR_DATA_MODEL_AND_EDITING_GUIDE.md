@@ -170,7 +170,7 @@ flowchart LR
 | 字段 | 作用 |
 | --- | --- |
 | `status` | `created / listening / speaking / stopped / failed` |
-| `guidance_mode` | `free_narration / guided_interview`，表示引导强度 |
+| `guidance_mode` | 兼容存储值：新普通 AI 访谈保存 `guided_interview`；历史 AI 的 `free_narration` 保留原值并使用相同 AI 行为，真人访谈仍保存 `free_narration`。产品方式由 `interview_type` 与 `session_goal` 判定 |
 | `interview_type` | `ai_interview / human_interview` |
 | `session_goal` | `open_narration / book_completion`，表示本次业务目标 |
 | `current_completion_issue_id` | 成书补讲时绑定的唯一当前问题 |

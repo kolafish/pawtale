@@ -1,9 +1,12 @@
 import type {
   MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSessionGoal,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayState,
 } from "../domain/memoir-voice-session";
+import { narrationModeForSession } from "../domain/memoir-narration-mode";
 import type { TTSAlignmentSegment } from "../domain/memoir-audio";
 import type { VoiceChatConnectionStatus } from "./memoir-streaming-asr";
 
@@ -133,13 +136,23 @@ export function assistantExpectsAnswer(line?: VoiceChatTranscriptLine): boolean 
   return typeof value === "boolean" ? value : true;
 }
 
+interface FollowUpSession {
+  guidanceMode: MemoirGuidanceMode;
+  interviewType: MemoirInterviewType;
+  sessionGoal: MemoirSessionGoal;
+}
+
 export function canRequestFollowUp(
   lines: VoiceChatTranscriptLine[],
-  mode: MemoirGuidanceMode,
+  session: FollowUpSession,
   lastFollowUpSourceMessageId: string,
   followUpLoading: boolean,
 ): boolean {
-  if (mode !== "guided_interview" || followUpLoading) {
+  if (narrationModeForSession({
+    guidance_mode: session.guidanceMode,
+    interview_type: session.interviewType,
+    session_goal: session.sessionGoal,
+  }) !== "guided_interview" || followUpLoading) {
     return false;
   }
   return followUpSourceMessageId(lines) !== lastFollowUpSourceMessageId;
@@ -160,9 +173,8 @@ export function assistantPanelCopy(
   };
 }
 
-export interface AssistantTranscriptStateOptions {
+export interface AssistantTranscriptStateOptions extends FollowUpSession {
   dismissedFollowUpMessageId?: string;
-  guidanceMode: MemoirGuidanceMode;
   lastFollowUpSourceMessageId: string;
   followUpLoading: boolean;
   currentFollowUpTTSStateText?: string;
@@ -209,9 +221,9 @@ export function assistantTranscriptState(
       ?? (assistantAudioFileId ? "语音已生成" : (options.currentFollowUpTTSStateText || "")),
     ttsAlignment: options.ttsAlignment ?? ttsAlignmentFromAssistantLine(assistantLine),
     totalTranscriptCharCount: totalTranscriptChars(lines),
-    canRequestFollowUp: options.canRequestFollowUp ?? canRequestFollowUp(
+    canRequestFollowUp: options.canRequestFollowUp !== false && canRequestFollowUp(
       lines,
-      options.guidanceMode,
+      options,
       options.lastFollowUpSourceMessageId,
       options.followUpLoading,
     ),
