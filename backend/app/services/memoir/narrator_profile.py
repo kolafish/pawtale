@@ -1,11 +1,12 @@
 """Fill the narrator's profile from what they say in AI interviews.
 
 A new book has no profile form. The book's first voice session where the narrator speaks becomes its
-profile session: only there does the interviewer ask for 称呼, age, hometown and gender. In every AI interview,
-each narrator segment (one recording) is read with the interviewer's line before it and what is already
-known, for anything the narrator newly says or corrects about themselves. A segment is read again
-when its transcript changes. Asking stops after two asks (one for gender) or a refusal; reading does not,
-so a late answer is still kept. A value the user saved on the project page is never overwritten.
+profile session: there, and in the next session if items are left, the interviewer asks for 称呼, age,
+hometown and gender. In every AI interview, each narrator segment (one recording) is read with the
+interviewer's line before it and what is already known, for anything the narrator newly says or corrects
+about themselves. A segment is read again when its transcript changes. Asking stops after two asks (one
+for gender) or a refusal; reading does not, so a late answer is still kept. A value the user saved on the
+project page is never overwritten.
 The same job reads the people in a corrected segment (see narration_people).
 """
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 import re
@@ -118,13 +120,15 @@ def _collects_profile(voice_session: MemoirVoiceSession) -> bool:
     )
 
 
-async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: MemoirVoiceSession) -> bool:
+async def _project_has_narration_elsewhere(
+    db: AsyncSession, voice_session: MemoirVoiceSession, *, besides: str | None = None,
+) -> bool:
     return bool(await db.scalar(
         select(1)
         .select_from(MemoirChatMessage)
         .where(
             MemoirChatMessage.project_id == voice_session.project_id,
-            MemoirChatMessage.voice_session_id != voice_session.id,
+            MemoirChatMessage.voice_session_id.not_in({voice_session.id, besides or voice_session.id}),
             MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
             MemoirChatMessage.content_text != "",
         )
@@ -133,13 +137,71 @@ async def _project_has_narration_elsewhere(db: AsyncSession, voice_session: Memo
 
 
 async def is_profile_session(db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None) -> bool:
-    """Whether this session asks for the profile; before the narrator speaks, whether it will."""
+    """Whether this session asks for the profile: the book's first session where the narrator spoke, or the one
+    after it, so a short first session does not end the asking. Before the narrator speaks, whether it will."""
     if project is None or not _collects_profile(voice_session):
         return False
     pinned = _profile(project).get(PROFILE_SESSION_KEY)
-    if pinned:
-        return pinned == voice_session.id
-    return not await _project_has_narration_elsewhere(db, voice_session)
+    return pinned == voice_session.id or not await _project_has_narration_elsewhere(
+        db, voice_session, besides=pinned,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileAnswer:
+    question: str
+    answer: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileQuestionContext:
+    questions: tuple[str, ...] = ()
+    previous_answers: tuple[ProfileAnswer, ...] = ()
+
+
+async def profile_question_context_for(
+    db: AsyncSession, voice_session: MemoirVoiceSession, project: Project | None,
+) -> ProfileQuestionContext:
+    """The item this session's next reply asks for, and its fallback. Asks in the book's other sessions count
+    toward the cap, including an opening ask the narrator left without answering. Their narration is kept too,
+    so answers not yet read can be recognized in both the opening and subsequent replies."""
+    if not await is_profile_session(db, voice_session, project):
+        return ProfileQuestionContext()
+    earlier = list((await db.scalars(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.project_id == voice_session.project_id,
+            MemoirChatMessage.voice_session_id != voice_session.id,
+        )
+        .order_by(MemoirChatMessage.created_at, MemoirChatMessage.turn_index)
+    )).all())
+    questions = profile_questions_to_ask(_profile(project), earlier + list(voice_session.messages))
+    return ProfileQuestionContext(questions, _previous_profile_answers(earlier) if questions else ())
+
+
+def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[ProfileAnswer, ...]:
+    """Keep complete profile exchanges, never pairing a silent opening with another session's answer.
+
+    No-answer reminders continue the preceding question; other interviewer lines replace it.
+    At most seven asks are allowed (two per item, one for gender). Keep that many exchanges rather than
+    a tail of all messages, so unrelated stories or silent openings cannot displace the answers.
+    """
+    previous: dict[str, MemoirChatMessage] = {}
+    exchanges: dict[str, tuple[MemoirChatMessage, list[str]]] = {}
+    for message in messages:
+        if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            if message.guidance_intent != "no_answer_prompt":
+                previous[message.voice_session_id] = message
+        elif message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
+            question = previous.get(message.voice_session_id)
+            if question is not None and any(field in _LABELS for field in _asked(question)):
+                _, answers = exchanges.setdefault(question.id, (question, []))
+                answers.append(message.content_text.strip())
+    limit = sum(_ASK_LIMITS.get(field, MAX_ASKS) for field in _LABELS)
+    return tuple(
+        ProfileAnswer(question.content_text.strip(), "\n".join(answers))
+        for question, answers in list(exchanges.values())[-limit:]
+    )
 
 
 async def pin_profile_session(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> None:
@@ -204,6 +266,8 @@ def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -
     answering: list[str] = []
     for message in reversed(messages):
         if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            if message.guidance_intent == "no_answer_prompt":
+                continue
             answering = _asked(message) if spoke else []
             break
         spoke = spoke or bool(message.content_text.strip())
@@ -312,6 +376,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         .where(
             MemoirChatMessage.voice_session_id == voice_session.id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
             MemoirChatMessage.turn_index < message.turn_index,
         )
         .order_by(MemoirChatMessage.turn_index.desc())
