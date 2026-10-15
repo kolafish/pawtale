@@ -49,7 +49,7 @@ class InterviewBookContext:
     anchor_topic: LifeTopic | None
     # Name, gender, age and hometown from the project profile, e.g. "王秀英，女，72 岁，家乡山东".
     narrator: str = ""
-    # Eligible fields in order, only in the first narration. Recent answers may not be saved yet.
+    # The one profile item to ask, only in the first narration; code picks it so the model cannot skip it.
     profile_questions: tuple[str, ...] = ()
     # People the narrator has talked about, most recently mentioned first.
     people: tuple[str, ...] = ()

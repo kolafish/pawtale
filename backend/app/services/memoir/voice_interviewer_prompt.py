@@ -130,29 +130,19 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 
 
 _PROFILE_QUESTIONS = {
-    "narrator_name": ("怎么称呼他", "您怎么称呼？"),
-    "narrator_age": ("他的年纪", "您是哪年生的？"),
-    "narrator_origin": ("他的老家", "您老家是哪里的？"),
+    "narrator_name": "怎么称呼他，比如“您怎么称呼？”",
+    "narrator_age": "他的年纪，比如“您是哪年生的？”",
+    "narrator_origin": "他的老家，比如“您老家是哪里的？”",
 }
 
 
 def _profile_question(book: InterviewBookContext) -> str:
     if not book.profile_questions:
         return ""
-    questions = "\n".join(
-        f"- {topic}，比如“{example}”" for topic, example in (_PROFILE_QUESTIONS[field] for field in book.profile_questions)
-    )
-    after_name = (
-        "如果年纪仍没说，就接着问年纪"
-        if "narrator_age" in book.profile_questions
-        else "继续补问上述剩下的第一项"
-    )
-    return f"""这本书第一次讲述，还可以问的资料按顺序是：
-{questions}
-- 后台资料可能还没记下他刚才的答案：先排除上下文里他本人已经回答或明确不想说的项，只选剩下的第一项，最多问一项
-- 他正讲着一件事时，先听他讲完，这次不问；一件事讲完了，优先问上述剩下的第一项，再开启新故事
-- 他刚才只答了称呼时，这个回答已经结束，不要重复问称呼；{after_name}
-- 候选项都已经答了或拒绝了，就不再问资料
+    return f"""这本书第一次讲述，这次要问的资料：{_PROFILE_QUESTIONS[book.profile_questions[0]]}
+- 他刚回答完你上一句的问题，还没开始讲一件具体的事：先用半句接住他的回答，再问这一项
+- 他正讲着一件事：先听他讲完，这次不问；一件事讲完了，先问这一项，再开启新故事
+- 上下文里他本人已经说了这一项，或明确不想说，就不问
 - 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）"""
 
 
@@ -176,7 +166,7 @@ def _header(host_name: str, regenerate: bool) -> str:
         "- 讲述过程中不要提记录条数、章节数、整理进度",
         "- 不要编造上下文里没有的事；以前讲过的事只能来自“以前讲过的相关原文”和“书里的人物”",
         "- 叙述者明确要换话题、暂停或不想说时，以他最新一句为准",
-        "- 称呼、年纪、老家只从本次允许的资料候选项里问；没有资料候选项时，不主动追问这些资料",
+        "- 称呼、年纪、老家只问“这次要问的资料”那一项；没有要问的资料时，不主动追问这些资料",
     ]
     if regenerate:
         lines.append("- 这次是在替换上一句回应，请换一个角度，不要重复上一句")
