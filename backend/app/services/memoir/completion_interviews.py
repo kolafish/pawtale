@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -39,6 +39,8 @@ class OpeningCompletionOffer:
 
 
 OPENING_OFFER_KEY = "opening_completion_issue_id"
+# Assistant lines that leave the narrator still answering the opening.
+OPENING_INTENTS = ("opening", "no_answer_prompt")
 
 
 async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> OpeningCompletionOffer | None:
@@ -72,22 +74,36 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
 
 
 async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
-    """For narrator messages replying to an opening offer, the chapter the offered question is about.
+    """For narrator messages answering an opening offer, the chapter the offered question is about.
 
-    A reply is recognised by the line it answers, so deleting one reply never moves the mark to a later
-    answer. Only the chapter is given: chapter issues do not keep their section. The reply stays
-    ordinary narration and the issue is untouched."""
+    Everything the narrator says before 小余's first follow-up answers the opening: that covers a
+    reply after a no-answer reminder, an interrupted opening and a recovered transcript, and deleting
+    a reply never moves the mark to an answer given after a follow-up. Only the chapter is given:
+    chapter issues do not keep their section. The reply stays ordinary narration and the issue is
+    untouched."""
     ids = {message_id for message_id in message_ids if message_id}
     if not ids:
         return {}
-    opening = aliased(MemoirChatMessage)
-    offered_issue_id = MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string()
+    follow_up = aliased(MemoirChatMessage)
+    first_follow_up = (
+        select(func.min(follow_up.turn_index))
+        .where(
+            follow_up.voice_session_id == MemoirChatMessage.voice_session_id,
+            follow_up.role == "assistant",
+            follow_up.guidance_intent.not_in(OPENING_INTENTS),
+        )
+        .scalar_subquery()
+    )
     rows = (await db.execute(
         select(MemoirChatMessage.id, MemoirCompletionIssue)
-        .join(opening, opening.id == MemoirChatMessage.parent_message_id)
         .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirChatMessage.voice_session_id)
-        .join(MemoirCompletionIssue, MemoirCompletionIssue.id == offered_issue_id)
-        .where(MemoirChatMessage.id.in_(ids), MemoirChatMessage.content_text != "", opening.guidance_intent == "opening")
+        .join(MemoirCompletionIssue, MemoirCompletionIssue.id == MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string())
+        .where(
+            MemoirChatMessage.id.in_(ids),
+            MemoirChatMessage.role == "user",
+            MemoirChatMessage.content_text != "",
+            or_(first_follow_up.is_(None), MemoirChatMessage.turn_index < first_follow_up),
+        )
     )).all()
     result = {}
     for message_id, issue in rows:

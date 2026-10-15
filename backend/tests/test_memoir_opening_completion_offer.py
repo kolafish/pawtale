@@ -94,28 +94,23 @@ def _line(project_id, session_id, role, text, turn_index, *, parent=None, intent
                              turn_index=turn_index, parent_message_id=parent.id if parent else None, guidance_intent=intent)
 
 
-async def test_replies_to_the_offer_line_point_placement_at_its_chapter_and_deletion_never_moves_it(client, test_db):
+async def test_what_is_said_before_the_first_follow_up_answers_the_offer_and_deletion_never_moves_it(client, test_db):
     project_id, chapter, issue = await _issue(client, test_db)
     session = await _opening(client, test_db, project_id)
     await completion_interviews.offer_for_opening(test_db, voice_session=session)
-    opening = _line(project_id, session.id, 'assistant', '愿意补充可以点补充这段。', 0, intent='opening')
-    test_db.add(opening)
-    await test_db.flush()
-    reply = _line(project_id, session.id, 'user', '是我爸爸送我去的。', 1, parent=opening)
-    test_db.add(reply)
-    await test_db.flush()
-    follow_up = _line(project_id, session.id, 'assistant', '后来呢？', 2, parent=reply, intent='follow_up')
-    test_db.add(follow_up)
-    await test_db.flush()
+    # The opening was interrupted (never saved); a no-answer reminder came before the reply.
+    reminder = _line(project_id, session.id, 'assistant', '您可以接着刚才的问题慢慢说。', 0, intent='no_answer_prompt')
+    reply = _line(project_id, session.id, 'user', '是我爸爸送我去的。', 1, parent=reminder)
+    follow_up = _line(project_id, session.id, 'assistant', '后来呢？', 2, intent='follow_up')
     later = _line(project_id, session.id, 'user', '后来我又去了工厂。', 3, parent=follow_up)
+    recovered = _line(project_id, session.id, 'user', '补转写出来的另一段。', 4)
     plain = await _opening(client, test_db, project_id)
-    plain_opening = _line(project_id, plain.id, 'assistant', '想从哪儿讲起？', 0, intent='opening')
-    test_db.add_all([later, plain_opening])
-    await test_db.flush()
-    other = _line(project_id, plain.id, 'user', '讲讲工厂。', 1, parent=plain_opening)
-    test_db.add(other)
+    other = _line(project_id, plain.id, 'user', '讲讲工厂。', 1)
+    for message in (reminder, reply, follow_up, later, recovered, other):
+        test_db.add(message)
+        await test_db.flush()
     await test_db.commit()
-    ids = [reply.id, later.id, other.id]
+    ids = [reply.id, later.id, recovered.id, other.id]
     assert await completion_interviews.offered_chapters(test_db, ids) == {reply.id: chapter.id}
     # Deleting a reply that already has a follow-up clears it in place (see delete_voice_transcript).
     reply.content_text = ''
