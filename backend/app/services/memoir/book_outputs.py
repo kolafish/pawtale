@@ -649,7 +649,9 @@ async def regenerate_book_output_editorial_copy(
             if ("pull_quotes" in targets and (not chapter_ids or chapter.chapter_id in chapter_ids)
                     and (state is None or "pull_quotes" not in state.manual_chapter_fields.get(chapter.chapter_id, []))):
                 chapter_snapshot = snapshots_by_id[chapter.chapter_id]
-                chapter.pull_quotes = retained_chapter_quotes(chapter.model_dump(), chapter_snapshot)
+                chapter.pull_quotes = retained_chapter_quotes(
+                    chapter.model_dump(), chapter_snapshot, polish_level=project_transcript_polish_level(project),
+                )
         _apply_editorial_copy(manuscript, editorial_copy, targets=targets, chapter_ids=chapter_ids)
     # Legacy cleanup may supply defaults for blank fields. Preserve authored
     # choices unless this request explicitly regenerates that same field.

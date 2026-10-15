@@ -35,6 +35,15 @@ class _ChapterIntroOutput(BaseModel):
     intro: str = ""
     pull_quote: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_obsolete_source_ref(cls, value: Any) -> Any:
+        # Polished copy uses excerpts. Ignore only this obsolete model habit;
+        # LOW still declares and validates the source reference normally.
+        if isinstance(value, dict) and "pull_quote_source_ref_id" not in cls.model_fields:
+            return {key: item for key, item in value.items() if key != "pull_quote_source_ref_id"}
+        return value
+
 
 class _OriginalChapterIntroOutput(_ChapterIntroOutput):
     pull_quote_source_ref_id: str = ""

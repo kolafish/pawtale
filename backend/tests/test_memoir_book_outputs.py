@@ -2059,7 +2059,7 @@ def test_retains_shorter_valid_original_quote_after_another_sentence_changes():
     stored = {"source_refs": [ref], "pull_quotes": [
         {"text": "我很高兴。", "source": "original_quote", "source_ref_ids": ["u"]}]}
     current = {"source_refs": [ref], "content": "我很高兴。那年我十六岁。我一直记得师傅教我修车的日子。"}
-    assert [item.text for item in retained_chapter_quotes(stored, current)] == ["我很高兴。"]
+    assert [item.text for item in retained_chapter_quotes(stored, current, polish_level=MemoirTranscriptPolishLevel.LOW)] == ["我很高兴。"]
 
 
 def test_polished_prose_falls_back_to_a_distinct_body_excerpt():
@@ -2153,7 +2153,7 @@ def test_quote_evidence_survives_an_unclosed_previous_paragraph(separator, speec
     for source in ('original_quote', 'editorial_generated'):
         stored = {**snapshot, 'pull_quotes': [{'text': ending, 'source': source,
             'source_ref_ids': ['u'] if source == 'original_quote' else []}]}
-        assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [ending]
+        assert [quote.text for quote in retained_chapter_quotes(stored, snapshot, polish_level=MemoirTranscriptPolishLevel.LOW)] == [ending]
 
 
 
@@ -2183,7 +2183,7 @@ async def test_quote_policy_is_shared_by_prompt_schema_validation_and_fallback(l
     assert ('original_quote_candidates' in prompt) is original
     assert ('pull_quote_source_ref_id' in prompt) is original
     payload = {'chapter_intros': [{'chapter_id': 'C1', 'pull_quote': excerpt,
-        **({'pull_quote_source_ref_id': 'M1'} if original else {})}]}
+        'pull_quote_source_ref_id': 'M1'}]}
     schema = _OriginalManuscriptCopyOutput if original else _ManuscriptCopyOutput
     result = _copy_from_payload(schema.model_validate(payload).model_dump(), snapshot=snapshot,
         prompt=prompt, model='offline', polish_level=level)
@@ -2193,3 +2193,37 @@ async def test_quote_policy_is_shared_by_prompt_schema_validation_and_fallback(l
     quote = manuscript.chapters[0].pull_quotes[0]
     assert quote.source == ('original_quote' if original else 'editorial_generated')
     assert quote.source_ref_ids == (['u'] if original else [])
+
+
+def test_low_original_quote_cannot_be_retained_from_a_different_section():
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+    text = '我十五岁那年发过洪水。'
+    snapshot = {'content': '我五岁那年发过洪水。' + text,
+        'source_refs': [{'utterance_id': 'u1', 'quote': text}],
+        'sections': [
+            {'content': '我五岁那年发过洪水。', 'used_material_ids': ['u1']},
+            {'content': text, 'used_material_ids': ['u2']},
+        ]}
+    stored = {**snapshot, 'pull_quotes': [{'text': text, 'source': 'original_quote', 'source_ref_ids': ['u1']}]}
+    assert retained_chapter_quotes(stored, snapshot, polish_level=MemoirTranscriptPolishLevel.LOW) == []
+
+
+async def test_polished_copy_ignores_only_obsolete_source_field_without_provider_retry():
+    from pydantic import ValidationError
+    from app.services.memoir.book_manuscript_ai import _ManuscriptCopyOutput
+    excerpt = '后来我们一起走过那条很长的小路。'
+    class OldShapeAI(FakeEditorialAI):
+        async def _call_llm(self, *args, **kwargs):
+            self.calls.append(True)
+            return json.dumps({'chapter_intros': [{'chapter_id': 'C1', 'intro': '一起走过的小路',
+                'pull_quote': excerpt, 'pull_quote_source_ref_id': 'M1'}]})
+    ai = OldShapeAI()
+    result = await generate_manuscript_editorial_copy(title='往事', ai_model=None, ai_client=ai, snapshot=[{
+        'chapter_id': 'c', 'chapter_title': '往事', 'content': '我记得那一天。' + excerpt,
+        'source_refs': [{'utterance_id': 'u', 'quote': excerpt}],
+    }])
+    assert result is not None and len(ai.calls) == 1
+    assert result.chapter_intros[0].pull_quote == excerpt
+    assert result.chapter_intros[0].pull_quote_source_ref_id == ''
+    with pytest.raises(ValidationError):
+        _ManuscriptCopyOutput.model_validate({'chapter_intros': [{'pull_quote': excerpt, 'unknown_field': 'value'}]})
