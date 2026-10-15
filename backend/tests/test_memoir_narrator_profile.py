@@ -379,7 +379,7 @@ def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
     for reply in replies:
         reply.metadata_json["profile_asked"] = "narrator_age"
     assert narrator_profile.profile_asks(replies) == {"narrator_age": 2}
-    assert narrator_profile.profile_questions_to_ask({}, replies) == ("narrator_name",)
+    assert narrator_profile.profile_questions_to_ask({}, replies) == ("narrator_name", "narrator_origin")
     declined = {"declined_in": {field: "segment" for field in fields}}
     assert narrator_profile.profile_questions_to_ask(declined, replies) == ()
 
@@ -537,21 +537,26 @@ def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being
         id="m1", role=MemoirChatMessageRole.USER.value, content_text="你叫我于大姐吧。", turn_index=1, created_at=None,
         metadata_json={},
     )
-    # Code picks the one item, so the reply cannot ask the hometown or follow the story instead.
-    assert narrator_profile.profile_questions_to_ask({}, [asked]) == ("narrator_name",)
+    # Code picks the item, so the reply cannot ask the hometown or follow the story instead; the hometown is
+    # only the fallback when the narrator already gave their age along with the name.
+    assert narrator_profile.profile_questions_to_ask({}, [asked]) == ("narrator_name", "narrator_age")
     questions = narrator_profile.profile_questions_to_ask({}, [asked, narrator])
-    assert questions == ("narrator_age",)
+    assert questions == ("narrator_age", "narrator_origin")
     book = InterviewBookContext(
         chapters=(("童年", 2),), last_chapter_title="童年", topics=(), anchor_topic=None, profile_questions=questions,
     )
     prompt = _prompt("s1", [asked, narrator], book)
     assert "这次要问的资料：他的年纪，比如“您是哪年生的？”" in prompt
-    assert "您老家是哪里的？" not in prompt
+    assert "就改问：他的老家，比如“您老家是哪里的？”（这一项也说了就不问）" in prompt
     assert "你叫我于大姐吧。" in prompt
+    last = InterviewBookContext(
+        chapters=(), last_chapter_title="", topics=(), anchor_topic=None, profile_questions=("narrator_origin",),
+    )
+    assert "或明确不想说，就不问资料" in _prompt("s1", [asked, narrator], last)
 
     # An ask the narrator did not answer leaves the line counted but not asking, so the item comes back.
     asked.metadata_json["profile_asked"] = None
-    assert narrator_profile.profile_questions_to_ask({}, [asked, narrator]) == ("narrator_name",)
+    assert narrator_profile.profile_questions_to_ask({}, [asked, narrator]) == ("narrator_name", "narrator_age")
 
     done = InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
     assert "这次要问的资料：" not in _prompt("s1", [narrator], done)

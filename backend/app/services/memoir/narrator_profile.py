@@ -187,10 +187,11 @@ def profile_asks(messages: list[MemoirChatMessage]) -> dict[str, int]:
 
 
 def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -> tuple[str, ...]:
-    """The one item the next reply asks for, or none; messages are in turn order.
+    """The item the next reply asks for, then the one it asks instead when the narrator has just given the
+    first; messages are in turn order. Answers may not be saved yet.
 
-    The item the latest interviewer line asked is skipped once the narrator has spoken since, because the
-    answer may not be saved yet. If they did not answer it, that line asked nothing and it is offered again.
+    The item the latest interviewer line asked is skipped once the narrator has spoken since. If they did not
+    answer it, that line asked nothing and it is offered again.
     """
     asks = profile_asks(messages)
     spoke = False
@@ -202,7 +203,7 @@ def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -
         spoke = spoke or bool(message.content_text.strip())
     return tuple(
         key for key in profile_items_to_ask(profile) if asks.get(key, 0) < MAX_ASKS and key not in answering
-    )[:1]
+    )[:2]
 
 
 def ask_needs_check(fields: tuple[str, ...], text: str) -> bool:
