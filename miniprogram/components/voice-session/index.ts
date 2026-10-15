@@ -830,7 +830,7 @@ Component({
           followUpTTSLoading: false,
           canRequestFollowUp: canRequestFollowUp(
             this.data.transcriptLines,
-            this.data.guidanceMode,
+            this.data,
             this.data.lastFollowUpSourceMessageId,
             false,
           ),
@@ -947,6 +947,8 @@ Component({
     applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
+        interviewType: this.data.interviewType,
+        sessionGoal: this.data.sessionGoal,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
         followUpLoading: false,
         assistantPromptText: "",
@@ -958,7 +960,6 @@ Component({
           && this.data.transcriptLines.some((line) => line.role === "user")
           ? false
           : true,
-        canRequestFollowUp: true,
       }),
       followUpError: message,
       followUpTTSLoading: false,
@@ -990,6 +991,8 @@ Component({
     applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
+        interviewType: this.data.interviewType,
+        sessionGoal: this.data.sessionGoal,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
         followUpLoading: true,
         assistantPromptText: text,
@@ -1037,6 +1040,8 @@ Component({
     applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
+        interviewType: this.data.interviewType,
+        sessionGoal: this.data.sessionGoal,
         lastFollowUpSourceMessageId: sourceMessageId,
         followUpLoading: true,
         assistantPromptText: event.text,

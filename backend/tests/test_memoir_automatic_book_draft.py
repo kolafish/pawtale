@@ -268,10 +268,10 @@ async def test_user_retry_survives_growth_and_coalesced_updates(client, test_db,
     response = await client.post(f"/api/mobile/memoir/projects/{project_id}/draft-progress/retry")
     assert response.status_code == 202
     await test_db.refresh(growth)
-    assert growth.status == ("pending" if growth_failed else "succeeded")
-    if growth_failed:
-        assert not await run_test_editing_job(test_db, parent_id)
-        assert await run_test_editing_job(test_db, growth.id)
+    # Failed chapters also requeue growth to recover editorial replies (bda34c7a).
+    assert growth.status == "pending"
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert await run_test_editing_job(test_db, growth.id)
     assert len(fake.prompts) == calls  # Assigned material is never reclassified.
     await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source="organized", settled=True)
     await test_db.commit()

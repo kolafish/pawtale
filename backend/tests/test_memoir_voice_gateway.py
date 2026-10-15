@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
+    MemoirVoiceSession,
 )
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import automation_event_metadata
@@ -1205,16 +1206,18 @@ async def test_voice_gateway_persistence_rejects_interviewer_role_for_ai_session
     assert utterances == []
 
 
+@pytest.mark.parametrize("guidance_mode", ["free_narration", "guided_interview"])
 async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     client,
     test_db,
     monkeypatch,
+    guidance_mode,
 ):
     async def fake_generate_cleaned_transcript_text(text: str, *, strict: bool = True, **kwargs):
         assert text == "嗯，我小时候就是住在外婆家。"
         assert strict is False
         assert kwargs["context"].scene == "voice_chat"
-        assert kwargs["context"].guidance_mode == "free_narration"
+        assert kwargs["context"].guidance_mode == guidance_mode
         assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.HIGH
         return CleanedTranscriptText(
             content="我小时候住在外婆家。",
@@ -1232,6 +1235,9 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
+    stored = await test_db.get(MemoirVoiceSession, voice_session_id)
+    stored.guidance_mode = guidance_mode
+    await test_db.commit()
     service = VoiceFinalPersistenceService(
         db=test_db,
         voice_session_id=voice_session_id,

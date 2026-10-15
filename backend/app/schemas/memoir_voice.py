@@ -8,6 +8,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirGuidanceMode,
     MemoirInterviewType,
+    MemoirNarrationMode,
     MemoirSessionGoal,
     MemoirShareVideoJobStatus,
     MemoirShareVideoCandidateStatus,
@@ -26,7 +27,7 @@ from app.services.memoir.share_video_styles import DEFAULT_SHARE_VIDEO_STYLE, Sh
 
 
 class MemoirVoiceSessionCreate(BaseModel):
-    guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.FREE_NARRATION
+    guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.GUIDED_INTERVIEW
     interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
     session_goal: MemoirSessionGoal = MemoirSessionGoal.OPEN_NARRATION
     current_completion_issue_id: str | None = Field(default=None, max_length=36)
@@ -38,6 +39,13 @@ class MemoirVoiceSessionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_interview_target(self):
+        # Normalize only new ordinary interviews; historical response values stay intact.
+        if self.session_goal == MemoirSessionGoal.OPEN_NARRATION:
+            self.guidance_mode = (
+                MemoirGuidanceMode.FREE_NARRATION
+                if self.interview_type == MemoirInterviewType.HUMAN_INTERVIEW
+                else MemoirGuidanceMode.GUIDED_INTERVIEW
+            )
         if self.current_completion_issue_id and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION:
             raise ValueError("current_completion_issue_id requires book_completion session_goal")
         if self.anchor_framework_item_id and (
@@ -680,6 +688,7 @@ class MemoirVoiceSearchQueryParseRequest(BaseModel):
 
 
 class MemoirVoiceSearchQueryFiltersResponse(BaseModel):
+    narration_mode: MemoirNarrationMode | None = None
     included: str = "all"
     guidance_mode: str | None = None
     module: str | None = None

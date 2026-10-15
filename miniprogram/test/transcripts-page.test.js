@@ -1079,3 +1079,23 @@ for (const targetPosition of [20, 500]) {
     assert.equal(requests.length, 2 + Math.ceil((targetPosition + 1) / 50));
   });
 }
+
+test("voice search sends product modes and shows unified mode chips", async () => {
+  for (const [narration_mode, label] of [["ai_interview", "AI 访谈"], ["human_interview", "真人访谈"], ["book_completion", "书稿补充"]]) {
+    const calls = [];
+    const { page } = loadTranscriptsPage({
+      authExports: { getMemoirIdentity: async () => ({ id: "user-1", active_project_id: "project-1", active_project: { id: "project-1", title: "回忆录" }, projects: [] }) },
+      voiceSearchExports: { recordMemoirVoiceSearchQuery: async (options) => { options.onRecordingEnd(); return label; } },
+      voiceApiExports: {
+        parseMemoirVoiceSearchQuery: async () => ({ query: "", keywords: [], filters: { included: "all", narration_mode }, display_text: label }),
+        listMemoirVoiceTranscripts: async (options) => { calls.push(options); return { items: [], total: 0, limit: 30, offset: 0 }; },
+      },
+    });
+    const context = pageContext(page, { activeProjectId: "project-1" });
+    await page.startVoiceSearch.call(context);
+    assert.equal(calls[0].narrationMode, narration_mode);
+    assert.equal(calls[0].guidanceMode, undefined);
+    assert.deepEqual(context.data.searchChips, [{ text: label }]);
+    assert.equal(context.data.hasSearchCriteria, true);
+  }
+});

@@ -280,7 +280,10 @@ export interface MemoirVoiceSearchTranscriptionResponse {
   transcript: string;
 }
 
+export type MemoirNarrationMode = "ai_interview" | "human_interview" | "book_completion";
+
 export interface MemoirVoiceSearchQueryFilters {
+  narration_mode?: MemoirNarrationMode | null;
   included: MemoirVoiceTranscriptIncludedFilter;
   guidance_mode?: MemoirGuidanceMode | null;
   module?: string | null;

@@ -104,6 +104,8 @@ test("derives assistant transcript patch from lines and overrides generated assi
   assert.deepEqual(
     assistantTranscriptState([userLine, assistantLine], {
       guidanceMode: "guided_interview",
+      interviewType: "ai_interview",
+      sessionGoal: "open_narration",
       lastFollowUpSourceMessageId: "message-user",
       followUpLoading: false,
       currentFollowUpTTSStateText: "等待语音",
@@ -136,6 +138,8 @@ test("derives assistant transcript patch from lines and overrides generated assi
   assert.equal(
     assistantTranscriptState([userLine, assistantLine], {
       guidanceMode: "guided_interview",
+      interviewType: "ai_interview",
+      sessionGoal: "open_narration",
       lastFollowUpSourceMessageId: "",
       followUpLoading: true,
       assistantPromptText: "覆盖后的追问",
@@ -153,6 +157,8 @@ test("derives assistant transcript patch from lines and overrides generated assi
       metadata_json: { ...assistantLine.metadata_json, expects_answer: false },
     }], {
       guidanceMode: "guided_interview",
+      interviewType: "ai_interview",
+      sessionGoal: "open_narration",
       lastFollowUpSourceMessageId: "message-user",
       followUpLoading: false,
     }).assistantExpectsAnswer,
@@ -166,10 +172,10 @@ test("derives opening follow-up source before the first user line", () => {
     assistantLoadingText: "小余正在准备第一句话",
     assistantEmptyText: "小余会先问一句，帮您开始讲。",
   });
-  assert.equal(canRequestFollowUp([], "free_narration", "", false), false);
-  assert.equal(canRequestFollowUp([], "guided_interview", "opening", false), false);
-  assert.equal(canRequestFollowUp([], "guided_interview", "", true), false);
-  assert.equal(canRequestFollowUp([], "guided_interview", "", false), true);
+  assert.equal(canRequestFollowUp([], { guidanceMode: "free_narration", interviewType: "ai_interview", sessionGoal: "open_narration" }, "", false), true);
+  assert.equal(canRequestFollowUp([], { guidanceMode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration" }, "opening", false), false);
+  assert.equal(canRequestFollowUp([], { guidanceMode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration" }, "", true), false);
+  assert.equal(canRequestFollowUp([], { guidanceMode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration" }, "", false), true);
 });
 
 test("parses valid TTS alignment metadata and drops invalid segments", () => {
@@ -222,4 +228,22 @@ test("upserts transcript lines by message or utterance identity", () => {
 test("counts transcript characters from user lines only", () => {
   assert.equal(countTextChars(" 我 想聊 外婆 "), 5);
   assert.equal(totalTranscriptChars([userLine, assistantLine]), 5);
+});
+
+test("follow-up capability follows interview purpose for historical and new sessions", () => {
+  for (const guidanceMode of ["free_narration", "guided_interview"]) {
+    const session = { guidanceMode, interviewType: "ai_interview", sessionGoal: "open_narration" };
+    assert.equal(canRequestFollowUp([], session, "", false), true);
+    assert.equal(canRequestFollowUp([], session, "opening", false), false);
+    assert.equal(canRequestFollowUp([], session, "", true), false);
+    for (const excluded of [
+      { ...session, interviewType: "human_interview" },
+      { ...session, sessionGoal: "book_completion" },
+    ]) {
+      assert.equal(canRequestFollowUp([], excluded, "", false), false);
+      assert.equal(assistantTranscriptState([], {
+        ...excluded, lastFollowUpSourceMessageId: "", followUpLoading: false, canRequestFollowUp: true,
+      }).canRequestFollowUp, false);
+    }
+  }
 });

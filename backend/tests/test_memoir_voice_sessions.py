@@ -147,7 +147,7 @@ async def test_mobile_memoir_guided_session_accepts_only_project_topic_anchor(
     assert stored is not None
     assert stored.anchor_framework_item_id == anchor.id
 
-    invalid_mode = await post_mobile_memoir_voice_session(
+    legacy_mode = await post_mobile_memoir_voice_session(
         client,
         project_id=project_id,
         json={
@@ -156,7 +156,13 @@ async def test_mobile_memoir_guided_session_accepts_only_project_topic_anchor(
             "anchor_framework_item_id": anchor.id,
         },
     )
-    assert invalid_mode.status_code == 422
+    assert legacy_mode.status_code == 201
+    assert legacy_mode.json()["session"]["guidance_mode"] == "guided_interview"
+    invalid_human = await post_mobile_memoir_voice_session(
+        client, project_id=project_id,
+        json={"interview_type": "human_interview", "anchor_framework_item_id": anchor.id},
+    )
+    assert invalid_human.status_code == 422
 
     other_project = await client.post(
         "/api/mobile/memoir/projects",
@@ -1183,3 +1189,32 @@ async def test_mobile_memoir_voice_sessions_are_user_scoped(anonymous_client):
     response = await anonymous_client.get(f"/api/mobile/memoir/voice-sessions/{voice_session_id}")
 
     assert response.status_code == 404
+
+
+async def test_creation_normalizes_new_ai_and_preserves_human_and_completion_boundaries(client, test_db):
+    from app.models.projects import Project
+
+    project_id = await ensure_mobile_memoir_project(client)
+    project = await test_db.get(Project, project_id)
+    profile = dict(project.metadata_json["memoir_profile"])
+    assert profile["default_guidance_mode"] == "guided_interview"
+    profile["default_guidance_mode"] = "free_narration"
+    project.metadata_json = {**project.metadata_json, "memoir_profile": profile}
+    await test_db.commit()
+    for payload in ({}, {"guidance_mode": "guided_interview"}, {"guidance_mode": profile["default_guidance_mode"]}):
+        response = await post_mobile_memoir_voice_session(client, project_id=project_id, json=payload)
+        assert response.status_code == 201
+        assert response.json()["session"]["guidance_mode"] == "guided_interview"
+    human = await post_mobile_memoir_voice_session(client, project_id=project_id, json={"interview_type": "human_interview"})
+    assert human.status_code == 201
+    assert human.json()["session"]["guidance_mode"] == "free_narration"
+    completion = await post_mobile_memoir_voice_session(client, project_id=project_id, json={"session_goal": "book_completion"})
+    assert completion.status_code == 409
+    wrong_target = await post_mobile_memoir_voice_session(client, project_id=project_id, json={"current_completion_issue_id": "wrong"})
+    assert wrong_target.status_code == 422
+    ai_orm = MemoirVoiceSession(project_id=project_id)
+    human_orm = MemoirVoiceSession(project_id=project_id, interview_type="human_interview")
+    test_db.add_all([ai_orm, human_orm])
+    await test_db.flush()
+    assert ai_orm.guidance_mode == "guided_interview"
+    assert human_orm.guidance_mode == "free_narration"

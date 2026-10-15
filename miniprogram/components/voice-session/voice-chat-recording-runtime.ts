@@ -376,7 +376,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, noAnswerPromptFailedPatch(
         canRequestFollowUp(
           this.data.transcriptLines,
-          this.data.guidanceMode,
+          this.data,
           this.data.lastFollowUpSourceMessageId,
           false,
         ),
@@ -589,6 +589,8 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       {
         transcriptLines: this.data.transcriptLines,
         guidanceMode: this.data.guidanceMode,
+        interviewType: this.data.interviewType,
+        sessionGoal: this.data.sessionGoal,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
       },
       `${Date.now()}-${this.data.transcriptLines.length}`,

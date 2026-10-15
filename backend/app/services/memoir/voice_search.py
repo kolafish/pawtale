@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain.memoir.types import MemoirNarrationMode
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
@@ -41,7 +42,7 @@ JSON 格式：
   "keywords": ["关键词1", "关键词2"],
   "filters": {{
     "included": "all | included | not_included",
-    "guidance_mode": "free_narration | guided_interview | null",
+    "narration_mode": "ai_interview | human_interview | book_completion | null",
     "module": "person | event | place | period | theme | family | work | chat | null"
   }}
 }}
@@ -49,9 +50,10 @@ JSON 格式：
 规则：
 - 只保留原句里明确表达的人名、地点、事件、时间、主题、物件或关键词，不要发散联想。
 - 如果用户说“已收录/写进书/章节里的”，included 用 included；如果说“未收录/没写进书/还没整理”，included 用 not_included；否则 all。
-- 如果用户明确说自由讲述，guidance_mode 用 free_narration；明确说引导访谈、主题访谈，guidance_mode 用 guided_interview；否则 null。
+- 明确筛选 AI 访谈、自由讲述、自由叙述、引导访谈、主题访谈时，narration_mode 用 ai_interview（包含新旧普通 AI 访谈）；真人访谈用 human_interview；书稿补充用 book_completion；未指定访谈方式用 null。
+- “自由”“引导”等故事中的普通关键词不是访谈方式，保留为 query，不要误设 narration_mode。访谈方式词只放筛选，不重复放入 query/keywords；“主题访谈”不代表 module=theme。
 - 如果用户明确说人物/事情/地点/时间段/主题/家庭/工作/闲聊，只在 module 中填对应英文；否则 null。
-- 如果无法提取关键词，query 使用原句去掉命令词后的核心短语。
+- 没有故事关键词、只有筛选条件时，query 用空字符串，keywords 用空数组。否则使用原句去掉命令词和筛选词后的核心短语。
 """
 
 COMMAND_WORD_RE = re.compile(
@@ -75,14 +77,18 @@ INCLUDED_ALIASES = {
     "全部": "all",
 }
 
-GUIDANCE_ALIASES = {
-    "free_narration": "free_narration",
-    "自由讲述": "free_narration",
-    "自由叙述": "free_narration",
-    "guided_interview": "guided_interview",
-    "引导访谈": "guided_interview",
-    "主题访谈": "guided_interview",
-    "强引导": "guided_interview",
+NARRATION_ALIASES = {
+    "ai_interview": "ai_interview",
+    "AI 访谈": "ai_interview",
+    "AI访谈": "ai_interview",
+    "自由讲述": "ai_interview",
+    "自由叙述": "ai_interview",
+    "引导访谈": "ai_interview",
+    "主题访谈": "ai_interview",
+    "human_interview": "human_interview",
+    "真人访谈": "human_interview",
+    "book_completion": "book_completion",
+    "书稿补充": "book_completion",
 }
 
 MODULE_ALIASES = {
@@ -113,6 +119,7 @@ MODULE_ALIASES = {
 class VoiceSearchQueryFilters:
     included: str = "all"
     guidance_mode: str | None = None
+    narration_mode: MemoirNarrationMode | None = None
     module: str | None = None
 
 
@@ -132,7 +139,7 @@ class _VoiceSearchFiltersOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     included: str = "all"
-    guidance_mode: str | None = None
+    narration_mode: MemoirNarrationMode | None = None
     module: str | None = None
 
 
@@ -293,9 +300,16 @@ def _parsed_voice_search_payload(original_text: str, payload: Any) -> ParsedVoic
     query = _normalized_query(payload.get("query")) or " ".join(keywords) or fallback.query
     filters = VoiceSearchQueryFilters(
         included=_normalized_included_filter(filters_payload.get("included")) or fallback.filters.included,
-        guidance_mode=_normalized_guidance_mode(filters_payload.get("guidance_mode")) or fallback.filters.guidance_mode,
+        narration_mode=filters_payload.get("narration_mode") or fallback.filters.narration_mode,
         module=_normalized_module(filters_payload.get("module")) or fallback.filters.module,
     )
+    # Providers sometimes echo mode names and the generic records suffix.
+    # Do not strip command substrings inside story keywords such as 寻找自由.
+    query = _remove_filter_terms(re.sub(r"(?:转写|语音)?记录$", "", query), filters)
+    keywords = _normalized_keywords([
+        _remove_filter_terms(re.sub(r"(?:转写|语音)?记录$", "", keyword), filters)
+        for keyword in keywords
+    ])
     if not keywords:
         keywords = _fallback_keywords(query)
     return ParsedVoiceSearchQuery(
@@ -309,10 +323,12 @@ def _parsed_voice_search_payload(original_text: str, payload: Any) -> ParsedVoic
 
 
 def _fallback_parse_voice_search_query(text: str) -> ParsedVoiceSearchQuery:
+    narration_mode = _scan_alias(text, NARRATION_ALIASES)
+    mode_free_text = _remove_alias_group(text, NARRATION_ALIASES) if narration_mode else text
     filters = VoiceSearchQueryFilters(
         included=_scan_alias(text, INCLUDED_ALIASES) or "all",
-        guidance_mode=_scan_alias(text, GUIDANCE_ALIASES),
-        module=_scan_alias(text, MODULE_ALIASES),
+        narration_mode=MemoirNarrationMode(narration_mode) if narration_mode else None,
+        module=_scan_alias(mode_free_text, MODULE_ALIASES),
     )
     cleaned = _remove_filter_terms(COMMAND_WORD_RE.sub(" ", text), filters)
     query = cleaned or ("" if _voice_search_filters_active(filters) else text.strip())
@@ -365,12 +381,12 @@ def _remove_filter_terms(text: str, filters: VoiceSearchQueryFilters) -> str:
     cleaned = text
     if filters.included != "all":
         cleaned = _remove_alias_group(cleaned, INCLUDED_ALIASES)
-    if filters.guidance_mode:
-        cleaned = _remove_alias_group(cleaned, GUIDANCE_ALIASES)
+    if filters.narration_mode:
+        cleaned = _remove_alias_group(cleaned, NARRATION_ALIASES)
     if filters.module:
         cleaned = _remove_alias_group(cleaned, MODULE_ALIASES)
     cleaned = cleaned.replace("相关", " ")
-    cleaned = re.sub(r"(^|[\s,，。；;、])的(?=\S)", " ", cleaned)
+    cleaned = re.sub(r"(^|[\s,，。；;、])的", " ", cleaned)
     return _normalized_query(cleaned)
 
 
@@ -379,24 +395,17 @@ def _remove_alias_group(text: str, aliases: dict[str, str]) -> str:
     for alias in sorted(aliases, key=len, reverse=True):
         if re.fullmatch(r"[a-z_]+", alias):
             continue
-        cleaned = cleaned.replace(alias, " ")
+        cleaned = re.sub(re.escape(alias), " ", cleaned, flags=re.IGNORECASE)
     return cleaned
 
 
 def _voice_search_filters_active(filters: VoiceSearchQueryFilters) -> bool:
-    return filters.included != "all" or bool(filters.guidance_mode) or bool(filters.module)
+    return filters.included != "all" or bool(filters.narration_mode) or bool(filters.module)
 
 
 def _normalized_included_filter(value: Any) -> str | None:
     normalized = _scan_alias(str(value), INCLUDED_ALIASES) if value is not None else None
     if normalized in {"all", "included", "not_included"}:
-        return normalized
-    return None
-
-
-def _normalized_guidance_mode(value: Any) -> str | None:
-    normalized = _scan_alias(str(value), GUIDANCE_ALIASES) if value is not None else None
-    if normalized in {"free_narration", "guided_interview"}:
         return normalized
     return None
 
@@ -414,7 +423,7 @@ def _scan_alias(text: str, aliases: dict[str, str]) -> str | None:
         return None
     lowered = normalized.lower()
     for alias, value in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
-        if alias.lower() == lowered or alias in normalized:
+        if alias.lower() == lowered or alias.lower() in lowered:
             return value
     return None
 
@@ -425,10 +434,12 @@ def _voice_search_display_text(query: str, filters: VoiceSearchQueryFilters) -> 
         parts.append("已收录")
     elif filters.included == "not_included":
         parts.append("未收录")
-    if filters.guidance_mode == "free_narration":
-        parts.append("自由讲述")
-    elif filters.guidance_mode == "guided_interview":
-        parts.append("引导访谈")
+    if filters.narration_mode:
+        parts.append({
+            "ai_interview": "AI 访谈",
+            "human_interview": "真人访谈",
+            "book_completion": "书稿补充",
+        }[filters.narration_mode])
     if filters.module:
         parts.append(_module_label(filters.module))
     return " · ".join(parts) or "全部记录"

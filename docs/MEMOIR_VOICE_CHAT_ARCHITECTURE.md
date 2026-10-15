@@ -37,9 +37,17 @@ VoiceSession
 | 书稿补充 | 先选待补问题，再围绕该问题补讲 | guided_interview | ai_interview | book_completion |
 | 真人访谈 | 家人朋友提问，分别记录采访者和讲述者 | free_narration | human_interview | open_narration |
 
-原来的“自由讲述”和“引导访谈”已合并为 AI 访谈，不再让用户选择。新会话一律写 `guided_interview`；
-历史会话和回忆录里保存的 `free_narration` 保留原值，展示和生成回应时都按 AI 访谈处理。
+原来的“自由讲述”和“引导访谈”已合并为 AI 访谈，不再让用户选择。新的普通 AI 访谈在创建校验前
+统一为 `guided_interview`，包括省略该字段或旧客户端显式传入 `free_narration` 的请求；真人访谈仍为
+`free_narration`，书稿补充继续校验问题目标。历史普通 AI 会话读取、恢复和继续讲述时保留原始值，
+展示、提问能力与新 AI 会话一致；加载中禁用和同一来源去重仍生效。真人访谈不生成 AI 回复，纯听写不受影响。
 `interview_type` 表达谁来访谈，`session_goal` 表达业务目标。
+
+自然语言搜索使用 `narration_mode=ai_interview / human_interview / book_completion`。AI 访谈（包括旧称
+自由讲述、引导访谈、主题访谈）检索两种底层 guidance 值的普通 AI 会话，排除真人与书稿补充；
+原有列表参数 `guidance_mode` 仍按存储值精确筛选。
+可选访谈策略的 active/shadow 开关继续默认关闭。开启后，新旧普通 AI 会话均可获得话题候选；历史会话
+接受话题后从原有素材 `framework_item_id` 读取当前话题，不改写旧模式、不放宽会话锚点数据库约束。
 
 三种讲述方式都是回忆录级默认设置，在“我的回忆录”的编辑设置页统一修改。
 首页不提供临时切换，开始时读取当前回忆录保存的 `guidance_mode`、`interview_type` 与

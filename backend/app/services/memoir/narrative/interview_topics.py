@@ -10,6 +10,7 @@ from app.domain.memoir.interview_policy import InterviewBrief
 from app.domain.memoir.narrative_types import MemoirFrameworkUserResolution
 from app.domain.memoir.types import (
     MemoirGuidanceMode,
+    MemoirInterviewType,
     MemoirSessionGoal,
 )
 from app.models.memoir import (
@@ -55,7 +56,7 @@ def topic_offer_requested(
     latest_user_message: MemoirChatMessage | None,
 ) -> bool:
     if (
-        session.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW.value
+        session.interview_type != MemoirInterviewType.AI_INTERVIEW.value
         or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
     ):
         return False
@@ -63,6 +64,29 @@ def topic_offer_requested(
         return True
     normalized = "".join(latest_user_message.content_text.split())
     return any(phrase in normalized for phrase in DIRECTION_REQUEST_PHRASES)
+
+
+async def current_framework_item_id(db: AsyncSession, session: MemoirVoiceSession) -> str | None:
+    if session.anchor_framework_item_id:
+        return session.anchor_framework_item_id
+    if (
+        session.guidance_mode != MemoirGuidanceMode.FREE_NARRATION.value
+        or session.interview_type != MemoirInterviewType.AI_INTERVIEW.value
+        or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
+    ):
+        return None
+    # Legacy sessions cannot store an anchor under the existing DB constraint.
+    # Their accepted topic already lives on the original answer material.
+    return await db.scalar(
+        select(MemoirVoiceUtterance.framework_item_id)
+        .join(MemoirChatMessage, MemoirVoiceUtterance.chat_message_id == MemoirChatMessage.id)
+        .where(
+            MemoirVoiceUtterance.voice_session_id == session.id,
+            MemoirVoiceUtterance.framework_item_id.is_not(None),
+        )
+        .order_by(MemoirChatMessage.turn_index.desc(), MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
+        .limit(1)
+    )
 
 
 async def candidate_topics(
@@ -88,18 +112,19 @@ async def candidate_topics(
         for item in project_framework.items
         if item.user_resolution == MemoirFrameworkUserResolution.NONE.value
     ]
-    if session.anchor_framework_item_id and latest_user_message is None:
+    anchor_item_id = await current_framework_item_id(db, session)
+    if anchor_item_id and latest_user_message is None:
         eligible = [
             item
             for item in eligible
-            if item.id == session.anchor_framework_item_id
+            if item.id == anchor_item_id
         ]
     elif eligible:
-        if session.anchor_framework_item_id:
+        if anchor_item_id:
             eligible = [
                 item
                 for item in eligible
-                if item.id != session.anchor_framework_item_id
+                if item.id != anchor_item_id
             ]
         if not eligible:
             return ()

@@ -18,6 +18,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirConversationAction,
+    MemoirInterviewType,
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
@@ -307,6 +308,8 @@ class VoiceAssistantTurnStreamSession:
         cancel_event: asyncio.Event,
     ) -> None:
         voice_session = await load_voice_session(self.db, self.voice_session_id, self.user_id)
+        if voice_session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value:
+            raise HTTPException(status_code=409, detail="真人访谈由采访者提问，不生成 AI 回复")
         req = replace(
             req,
             ai_model=await load_project_ai_model(

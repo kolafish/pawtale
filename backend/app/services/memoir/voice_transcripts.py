@@ -17,6 +17,8 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirInterviewType,
+    MemoirNarrationMode,
+    MemoirSessionGoal,
     MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
     MemoirTranscriptionStatus,
@@ -865,6 +867,7 @@ async def list_voice_transcripts(
     search_query: str | None = None,
     included: str = "all",
     guidance_mode: str | None = None,
+    narration_mode: MemoirNarrationMode | None = None,
     current_guidance_module: str | None = None,
     voice_session_id: str | None = None,
     manual_corrected: bool | None = None,
@@ -885,6 +888,17 @@ async def list_voice_transcripts(
     filters.extend(_search_filter(term) for term in _search_terms(search_query))
     if guidance_mode:
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
+    if narration_mode == MemoirNarrationMode.BOOK_COMPLETION:
+        filters.append(MemoirVoiceSession.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value)
+    elif narration_mode is not None:
+        filters.extend([
+            MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
+            MemoirVoiceSession.interview_type == (
+                MemoirInterviewType.HUMAN_INTERVIEW.value
+                if narration_mode == MemoirNarrationMode.HUMAN_INTERVIEW
+                else MemoirInterviewType.AI_INTERVIEW.value
+            ),
+        ])
     if current_guidance_module:
         filters.append(MemoirVoiceSession.current_guidance_module == current_guidance_module)
     if voice_session_id:

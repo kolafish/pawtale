@@ -665,3 +665,48 @@ test("opening completion offer disappears as soon as ordinary narration starts",
     assert.equal(voiceChatViewPatch({...base,...patch}).showOpeningCompletionOffer, false);
   }
 });
+
+test("restored historical AI sessions retain capability without opening human or completion follow-ups", () => {
+  const { voiceSessionSnapshotPatch } = require("../components/voice-session/voice-chat-page-state.ts");
+  for (const guidance_mode of ["free_narration", "guided_interview"]) {
+    for (const [interview_type, session_goal, expected] of [
+      ["ai_interview", "open_narration", true],
+      ["human_interview", "open_narration", false],
+      ["ai_interview", "book_completion", false],
+    ]) {
+      const detail = { session: { guidance_mode, interview_type, session_goal, status: "listening" }, messages: [], utterances: [] };
+      const current = initialVoiceChatData();
+      for (const patch of [
+        voiceSessionDetailPatch(detail, current),
+        voiceSessionSnapshotPatch({ detail, transcriptLines: [], pendingClose: false }, current),
+      ]) {
+        assert.equal(patch.canRequestFollowUp, expected);
+        assert.equal(patch.guidanceMode, guidance_mode);
+        assert.equal(patch.interviewType, interview_type);
+      }
+      assert.equal(voiceSessionDetailPatch(detail, { ...current, followUpLoading: true }).canRequestFollowUp, false);
+      assert.equal(voiceSessionDetailPatch(detail, { ...current, lastFollowUpSourceMessageId: "opening" }).canRequestFollowUp, false);
+    }
+  }
+});
+
+test("cancelling partial playback restores only eligible AI follow-ups", () => {
+  const { voiceChatAssistantPlaybackMethods } = require("../components/voice-session/voice-chat-assistant-playback.ts");
+  for (const guidanceMode of ["free_narration", "guided_interview"]) {
+    for (const interviewType of ["ai_interview", "human_interview"]) {
+      for (const lastFollowUpSourceMessageId of ["", "user-1"]) {
+        const runtime = { ttsRequestSerial: 0, assistantStreamLineId: "partial", ttsProgress: { resetStreamingAudio() {} } };
+        const host = {
+          data: { ...initialVoiceChatData(), guidanceMode, interviewType, sessionGoal: "open_narration", lastFollowUpSourceMessageId,
+            followUpLoading: true, transcriptLines: [{ id: "user-1", role: "user", text: "外婆" }, { id: "partial", role: "assistant", text: "刚才" }] },
+          runtime: () => runtime, stopFollowUpAudio() {},
+          setData(patch) { Object.assign(this.data, patch); },
+        };
+        voiceChatAssistantPlaybackMethods.cancelFollowUpTTS.call(host);
+        assert.equal(host.data.canRequestFollowUp, interviewType === "ai_interview" && !lastFollowUpSourceMessageId);
+        assert.equal(host.data.followUpLoading, false);
+        assert.deepEqual(host.data.transcriptLines.map((line) => line.id), ["user-1"]);
+      }
+    }
+  }
+});

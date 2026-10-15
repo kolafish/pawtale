@@ -217,7 +217,7 @@ async def test_parse_voice_search_query_uses_ai_json_payload():
           "keywords": ["外婆", "院子"],
           "filters": {
             "included": "not_included",
-            "guidance_mode": "guided_interview",
+            "narration_mode": "ai_interview",
             "module": "place"
           }
         }
@@ -233,7 +233,7 @@ async def test_parse_voice_search_query_uses_ai_json_payload():
     assert parsed.query == "外婆 院子"
     assert parsed.keywords == ["外婆", "院子"]
     assert parsed.filters.included == "not_included"
-    assert parsed.filters.guidance_mode == "guided_interview"
+    assert parsed.filters.narration_mode == "ai_interview"
     assert parsed.filters.module == "place"
     assert parsed.provider == "fake-ai"
     assert parsed.model == "fake-model"
@@ -309,7 +309,7 @@ async def test_parse_mobile_memoir_search_query_route(client, monkeypatch):
         "original_text": "帮我找外婆家院子",
         "query": "外婆 院子",
         "keywords": ["外婆", "院子"],
-        "filters": {"included": "included", "guidance_mode": None, "module": "place"},
+        "filters": {"included": "included", "guidance_mode": None, "narration_mode": None, "module": "place"},
         "display_text": "外婆 院子 · 已收录 · 地点",
         "used_ai": True,
         "provider": "fake-ai",
@@ -371,3 +371,88 @@ class FailingAIClient(FakeAIClient):
 
     async def _call_llm(self, *args, **kwargs):
         raise RuntimeError("provider unavailable")
+
+
+@pytest.mark.parametrize("word", ["AI访谈", "AI 访谈", "自由讲述", "引导访谈", "主题访谈"])
+async def test_legacy_search_names_select_all_ordinary_ai_interviews(word):
+    parsed = await parse_voice_search_query(f"帮我找{word}记录", ai_client=FailingAIClient())
+    assert getattr(parsed.filters, "narration_mode", None) == "ai_interview"
+    assert parsed.filters.guidance_mode is None
+    assert parsed.query == ""
+    assert parsed.display_text == "AI 访谈"
+
+
+async def test_search_modes_retrieve_legacy_and_new_ai_without_human_or_completion_leaks(client, test_db):
+    import json
+
+    from app.models.memoir import MemoirVoiceSession
+    from app.services.memoir.voice_transcripts import list_voice_transcripts
+    from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project
+
+    project_id = await ensure_mobile_memoir_project(client)
+    records = []
+    for guidance, interview, goal in [
+        ("free_narration", "ai_interview", "open_narration"),
+        ("guided_interview", "ai_interview", "open_narration"),
+        ("free_narration", "human_interview", "open_narration"),
+        ("guided_interview", "ai_interview", "book_completion"),
+    ]:
+        record = await create_test_voice_transcript(client, test_db, "外婆追求自由，老师耐心引导。", project_id=project_id)
+        stored = await test_db.get(MemoirVoiceSession, record["session"]["id"])
+        # Explicit DB fixtures preserve historical values instead of using normalized creation inputs.
+        stored.guidance_mode, stored.interview_type, stored.session_goal = guidance, interview, goal
+        await test_db.commit()
+        records.append(record)
+    ids = [record["utterance_id"] for record in records]
+    other_project = (await client.post("/api/mobile/memoir/projects", json={"title": "另一项目"})).json()["id"]
+    await create_test_voice_transcript(client, test_db, "外婆追求自由，老师耐心引导。", project_id=other_project)
+
+    cases = [
+        ("AI 访谈", "ai_interview", "", ids[:2]),
+        ("自由讲述", "ai_interview", "", ids[:2]),
+        ("引导访谈", "ai_interview", "", ids[:2]),
+        ("主题访谈", "ai_interview", "", ids[:2]),
+        ("真人访谈", "human_interview", "", ids[2:3]),
+        ("书稿补充", "book_completion", "", ids[3:]),
+        ("外婆", None, "外婆", ids),
+        ("自由", None, "自由", ids),
+        ("引导", None, "引导", ids),
+    ]
+    for phrase, mode, query, expected in cases:
+        # Fixed offline structured outputs and provider-failure parsing must lead to the same actual rows.
+        output = json.dumps({"query": query, "keywords": [query] if query else [], "filters": {"narration_mode": mode}})
+        echoed = json.dumps({"query": f"{phrase}记录", "keywords": [f"{phrase}记录"], "filters": {"narration_mode": mode}})
+        for ai_client in (FakeAIClient(output), FakeAIClient(echoed), FailingAIClient()):
+            parsed = await parse_voice_search_query(f"帮我找{phrase}记录", ai_client=ai_client)
+            assert parsed.filters.narration_mode == mode
+            assert parsed.filters.guidance_mode is None
+            assert parsed.query == query
+            params = {"project_id": project_id, "q": parsed.query, "limit": 1}
+            if parsed.filters.narration_mode:
+                params["narration_mode"] = mode
+            found = []
+            for offset in range(len(expected)):
+                response = await client.get("/api/mobile/memoir/voice-transcripts", params={**params, "offset": offset})
+                assert response.status_code == 200
+                payload = response.json()
+                assert payload["total"] == len(expected)
+                found.extend(item["id"] for item in payload["items"])
+            assert set(found) == set(expected)
+    for mode, expected in [("free_narration", [ids[0], ids[2]]), ("guided_interview", [ids[1], ids[3]])]:
+        response = await client.get("/api/mobile/memoir/voice-transcripts", params={"project_id": project_id, "guidance_mode": mode})
+        assert {item["id"] for item in response.json()["items"]} == set(expected)
+    private = await list_voice_transcripts(test_db, "another-user", project_id=project_id, narration_mode="ai_interview")
+    assert private.total == 0
+    assert private.items == []
+    legacy = await test_db.get(MemoirVoiceSession, records[0]["session"]["id"])
+    await test_db.refresh(legacy)
+    assert legacy.guidance_mode == "free_narration"
+
+
+async def test_model_story_keywords_do_not_lose_command_substrings():
+    parsed = await parse_voice_search_query(
+        "帮我找寻找自由的故事", ai_client=FakeAIClient('{"query":"寻找自由","keywords":["寻找自由"],"filters":{}}'),
+    )
+    assert parsed.query == "寻找自由"
+    assert parsed.keywords == ["寻找自由"]
+    assert parsed.filters.narration_mode is None

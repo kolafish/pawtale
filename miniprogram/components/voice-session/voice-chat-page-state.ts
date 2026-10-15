@@ -912,15 +912,15 @@ function assistantSessionPatch(
 ): VoiceChatPatch {
   const coveredSourceMessageId = coveredFollowUpSourceMessageId(lines);
   const lastFollowUpSourceMessageId = coveredSourceMessageId || current.lastFollowUpSourceMessageId;
-  const isHumanInterview = current.interviewType === "human_interview";
   return {
     guidanceMode,
     ...assistantTranscriptState(lines, {
       guidanceMode,
+      interviewType: current.interviewType,
+      sessionGoal: current.sessionGoal,
       lastFollowUpSourceMessageId,
       followUpLoading: current.followUpLoading,
       currentFollowUpTTSStateText: current.followUpTTSStateText,
-      canRequestFollowUp: isHumanInterview ? false : undefined,
     }),
     lastFollowUpSourceMessageId,
   };
@@ -942,6 +942,7 @@ export function voiceSessionSnapshotPatch(
       ...current,
       currentGuidanceModule,
       interviewType,
+      sessionGoal,
     }),
     currentGuidanceModule,
     interviewType,
@@ -993,6 +994,7 @@ export function voiceSessionDetailPatch(
       ...current,
       currentGuidanceModule,
       interviewType,
+      sessionGoal,
     }),
     currentGuidanceModule,
     interviewType,

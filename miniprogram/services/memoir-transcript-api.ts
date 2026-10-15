@@ -1,5 +1,6 @@
 import type {
   MemoirMaterialImageGenerationJob,
+  MemoirNarrationMode,
   MemoirShareVideoCandidate,
   MemoirShareVideoCandidateResponse,
   MemoirShareVideoJob,
@@ -40,6 +41,7 @@ interface VoiceTranscriptListOptions {
   query?: string;
   included?: MemoirVoiceTranscriptIncludedFilter;
   guidanceMode?: string;
+  narrationMode?: MemoirNarrationMode;
   module?: string;
   limit?: number;
   offset?: number;
@@ -97,6 +99,7 @@ export function listMemoirVoiceTranscripts(
       q: options.query?.trim() || undefined,
       included: options.included && options.included !== "all" ? options.included : undefined,
       guidance_mode: options.guidanceMode,
+      narration_mode: options.narrationMode,
       module: options.module,
       limit: options.limit,
       offset: options.offset,

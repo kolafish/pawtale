@@ -39,7 +39,7 @@ INFERRED_PROFILE_FIELDS_KEY = "inferred_from"
 SKIPPED_PROFILE_FIELDS_KEY = "declined_in"
 # The home page creates a first book under this title; it is renamed once the narrator's name is known.
 FIRST_PROJECT_TITLE = "我的回忆录"
-DEFAULT_GUIDANCE_MODE = "free_narration"
+DEFAULT_GUIDANCE_MODE = "guided_interview"
 DEFAULT_INTERVIEW_TYPE = "ai_interview"
 DEFAULT_SESSION_GOAL = "open_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
@@ -166,6 +166,11 @@ def _profile_metadata(
         profile["default_guidance_mode"] = "guided_interview"
         profile["default_interview_type"] = DEFAULT_INTERVIEW_TYPE
     elif profile["default_interview_type"] == "human_interview":
+        profile["default_guidance_mode"] = "free_narration"
+    elif include_defaults or any(
+        _field_was_set(req, field)
+        for field in ("default_guidance_mode", "default_interview_type", "default_session_goal")
+    ):
         profile["default_guidance_mode"] = DEFAULT_GUIDANCE_MODE
 
     metadata[MEMOIR_PROFILE_METADATA_KEY] = profile
