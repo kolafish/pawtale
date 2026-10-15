@@ -18,7 +18,7 @@ from app.models.memoir_jobs import MemoirEditingJob
 from app.models.projects import Project
 from app.services.ai_base import AITextServiceBase
 from app.services.asr.streaming import StreamingASREvent
-from app.services.memoir import narration_people, narrator_profile, projects, voice_transcript_correction
+from app.services.memoir import narration_people, narrator_profile, projects, voice_transcript_correction, voice_transcripts
 from app.services.memoir.interview_book_context import InterviewBookContext, load_interview_book_context
 from app.services.memoir.voice_chat_context import project_has_previous_narration
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
@@ -524,6 +524,174 @@ async def test_failed_legacy_recovery_does_not_clear_the_profile(client, test_db
     await test_db.rollback()
     _, profile = await _profile(test_db, project_id)
     assert profile["narrator_age"] == 70
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,old_text,new_text,old_value,new_value", [
+    ("age", "我七十岁。", "我今年七十一岁。", 70, 71),
+    ("name", "我叫王秀英。", "我叫王秀芳。", "王秀英", "王秀芳"),
+])
+@pytest.mark.parametrize("changes", [1, 4])
+async def test_recovery_version_change_keeps_profile_and_queues_a_continuation(
+    client, test_db, fake_ai, job_handlers, field, old_text, new_text, old_value, new_value, changes,
+):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    session_id = await _session(client, project_id)
+    first = await _narrate(client, test_db, session_id, old_text)
+    later = await _narrate(client, test_db, session_id, "后来又确认了一遍。")
+    fake_ai.payload = {field: old_value}
+    for segment in (first, later):
+        await run_test_editing_job(test_db, (await _profile_job(test_db, segment.utterance_id)).id)
+    message = await test_db.get(MemoirChatMessage, first.message_id)
+    message.metadata_json = {}
+    await _new_version(test_db, later.utterance_id, "刚才说的是母亲。")
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, later.utterance_id),
+    )
+    await test_db.commit()
+    corrections = []
+    calls = []
+
+    async def change_during_recovery(_system_prompt, user_prompt, **_kwargs):
+        calls.append(user_prompt)
+        if f"叙述者：{old_text}" in user_prompt or f"叙述者：{new_text}" in user_prompt:
+            if len(corrections) >= changes:
+                return json.dumps({field: new_value})
+            async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+                utterance = await narrator_profile._load_utterance(other, first.utterance_id)
+                _, version = await voice_transcripts.apply_corrected_writing_text(
+                    other, utterance, new_text + "我再确认一遍。" * len(corrections), project_id=project_id,
+                )
+                await other.commit()
+                corrections.append(version)
+            return json.dumps({field: old_value})
+        return "{}"
+
+    fake_ai._call_llm = change_during_recovery
+    job = await _profile_job(test_db, later.utterance_id)
+    for _ in range(changes):
+        await run_test_editing_job(test_db, job.id)
+        project, profile = await _profile(test_db, project_id)
+        assert profile[f"narrator_{field}"] == old_value
+        if field == "name":
+            assert project.title == f"{old_value}的回忆录"
+        await test_db.refresh(job)
+        assert job.status == "pending"
+        assert not job.result_json.get("failures")
+    # A writing correction deliberately does not queue A's profile job; B must carry the continuation.
+    first_job = await _profile_job(test_db, first.utterance_id)
+    await test_db.refresh(first_job)
+    assert first_job.status == "succeeded"
+    assert first_job.payload_json["transcript_version_id"] == first.transcript_version_id
+
+    await run_test_editing_job(test_db, job.id)
+    project, profile = await _profile(test_db, project_id)
+    assert profile[f"narrator_{field}"] == new_value
+    assert profile[projects.INFERRED_PROFILE_FIELDS_KEY][f"narrator_{field}"]["transcript_version_id"] == corrections[-1]
+    if field == "name":
+        assert project.title == f"{new_value}的回忆录"
+    await test_db.refresh(job)
+    assert job.status == "succeeded"
+    assert sum("叙述者：刚才说的是母亲。" in prompt for prompt in calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [False, True])
+async def test_recovery_stops_before_unrelated_older_recordings(client, test_db, fake_ai, cached):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    session_id = await _session(client, project_id)
+    await _narrate(client, test_db, session_id, "小时候我住在河边。")
+    first = await _narrate(client, test_db, session_id, "我六十九岁。")
+    later = await _narrate(client, test_db, session_id, "我七十岁。")
+    for segment, age in ((first, 69), (later, 70)):
+        fake_ai.payload = {"age": age}
+        await _run(test_db, segment.utterance_id)
+    if not cached:
+        message = await test_db.get(MemoirChatMessage, first.message_id)
+        message.metadata_json = {}
+        await test_db.commit()
+    await _new_version(test_db, later.utterance_id, "我母亲七十岁。")
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, later.utterance_id),
+    )
+    await test_db.commit()
+    calls = []
+
+    async def fail_unrelated(_system_prompt, user_prompt, **_kwargs):
+        calls.append(user_prompt)
+        if "叙述者：小时候我住在河边。" in user_prompt:
+            raise RuntimeError("unrelated provider failure")
+        return json.dumps({"age": 69} if "叙述者：我六十九岁。" in user_prompt else {})
+
+    fake_ai._call_llm = fail_unrelated
+    await _run(test_db, later.utterance_id)
+    _, profile = await _profile(test_db, project_id)
+    assert profile["narrator_age"] == 69
+    assert not any("叙述者：小时候我住在河边。" in prompt for prompt in calls)
+    assert sum("叙述者：我六十九岁。" in prompt for prompt in calls) == (0 if cached else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached_name", [False, True])
+async def test_recovery_rechecks_an_already_selected_source_after_reading_another_field(
+    client, test_db, fake_ai, job_handlers, cached_name,
+):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    session_id = await _session(client, project_id)
+    await _narrate(client, test_db, session_id, "小时候我住在河边。")
+    age = await _narrate(client, test_db, session_id, "我六十九岁。")
+    name = await _narrate(client, test_db, session_id, "我叫王秀英。")
+    later = await _narrate(client, test_db, session_id, "我叫王秀音，今年七十岁。")
+    for segment, payload in (
+        (age, {"age": 69}), (name, {"name": "王秀英"}), (later, {"age": 70, "name": "王秀音"}),
+    ):
+        fake_ai.payload = payload
+        await run_test_editing_job(test_db, (await _profile_job(test_db, segment.utterance_id)).id)
+        if segment is age or (segment is name and not cached_name):
+            message = await test_db.get(MemoirChatMessage, segment.message_id)
+            message.metadata_json = {}
+            await test_db.commit()
+    await _new_version(test_db, later.utterance_id, "刚才说的是母亲。")
+    await narrator_profile.schedule_narrator_profile(
+        test_db, utterance=await test_db.get(MemoirVoiceUtterance, later.utterance_id),
+    )
+    await test_db.commit()
+    calls = []
+
+    async def change_selected_name(_system_prompt, user_prompt, **_kwargs):
+        calls.append(user_prompt)
+        if "叙述者：我六十九岁。" in user_prompt:
+            async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+                utterance = await narrator_profile._load_utterance(other, name.utterance_id)
+                await voice_transcripts.apply_corrected_writing_text(other, utterance, "我叫王秀芳。", project_id=project_id)
+                await other.commit()
+            return '{"age":69}'
+        if "叙述者：我叫王秀英。" in user_prompt:
+            return '{"name":"王秀英"}'
+        if "叙述者：我叫王秀芳。" in user_prompt:
+            return '{"name":"王秀芳"}'
+        if "叙述者：小时候我住在河边。" in user_prompt:
+            raise RuntimeError("unrelated provider failure")
+        return "{}"
+
+    fake_ai._call_llm = change_selected_name
+    job = await _profile_job(test_db, later.utterance_id)
+    await run_test_editing_job(test_db, job.id)
+    if not cached_name:
+        await test_db.refresh(job)
+        assert job.status == "pending"
+        project, profile = await _profile(test_db, project_id)
+        assert (profile["narrator_age"], profile["narrator_name"]) == (70, "王秀音")
+        assert project.title == "王秀音的回忆录"
+        await run_test_editing_job(test_db, job.id)
+    project, profile = await _profile(test_db, project_id)
+    assert (profile["narrator_age"], profile["narrator_name"]) == (69, "王秀芳")
+    assert project.title == "王秀芳的回忆录"
+    await test_db.refresh(job)
+    assert job.status == "succeeded"
+    assert not any("叙述者：小时候我住在河边。" in prompt for prompt in calls)
+    assert sum("叙述者：刚才说的是母亲。" in prompt for prompt in calls) == 1
+    assert sum("叙述者：我六十九岁。" in prompt for prompt in calls) == 1
 
 
 @pytest.mark.asyncio
