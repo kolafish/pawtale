@@ -182,6 +182,7 @@ async def profile_question_context_for(
 def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[ProfileAnswer, ...]:
     """Keep complete profile exchanges, never pairing a silent opening with another session's answer.
 
+    No-answer reminders continue the preceding question; other interviewer lines replace it.
     At most seven asks are allowed (two per item, one for gender). Keep that many exchanges rather than
     a tail of all messages, so unrelated stories or silent openings cannot displace the answers.
     """
@@ -189,7 +190,8 @@ def _previous_profile_answers(messages: list[MemoirChatMessage]) -> tuple[Profil
     exchanges: dict[str, tuple[MemoirChatMessage, list[str]]] = {}
     for message in messages:
         if message.role == MemoirChatMessageRole.ASSISTANT.value:
-            previous[message.voice_session_id] = message
+            if message.guidance_intent != "no_answer_prompt":
+                previous[message.voice_session_id] = message
         elif message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
             question = previous.get(message.voice_session_id)
             if question is not None and any(field in _LABELS for field in _asked(question)):
@@ -264,6 +266,8 @@ def profile_questions_to_ask(profile: dict, messages: list[MemoirChatMessage]) -
     answering: list[str] = []
     for message in reversed(messages):
         if message.role == MemoirChatMessageRole.ASSISTANT.value:
+            if message.guidance_intent == "no_answer_prompt":
+                continue
             answering = _asked(message) if spoke else []
             break
         spoke = spoke or bool(message.content_text.strip())
@@ -372,6 +376,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         .where(
             MemoirChatMessage.voice_session_id == voice_session.id,
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
             MemoirChatMessage.turn_index < message.turn_index,
         )
         .order_by(MemoirChatMessage.turn_index.desc())

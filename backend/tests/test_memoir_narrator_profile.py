@@ -381,7 +381,10 @@ async def test_when_the_check_fails_plain_wording_decides(monkeypatch):
 
 def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
     fields = projects.ASKED_PROFILE_FIELDS
-    replies = [SimpleNamespace(role="assistant", metadata_json={"profile_questions": list(fields)}) for _ in range(2)]
+    replies = [
+        SimpleNamespace(role="assistant", guidance_intent=None, metadata_json={"profile_questions": list(fields)})
+        for _ in range(2)
+    ]
     assert narrator_profile.profile_questions_to_ask({}, replies) == ()
     for reply in replies:
         reply.metadata_json["profile_asked"] = "narrator_age"
@@ -406,11 +409,13 @@ def test_gender_is_asked_last_and_only_while_unknown():
     # Asked once; if the narrator tells a story instead, gender is left to what they say later.
     asked = SimpleNamespace(
         role=MemoirChatMessageRole.ASSISTANT.value, content_text="我该叫您叔叔还是阿姨呀？",
+        guidance_intent=None,
         metadata_json={"profile_questions": ["narrator_gender"], "profile_asked": "narrator_gender"},
     )
     story = SimpleNamespace(role=MemoirChatMessageRole.USER.value, content_text="那年我们去赶集……", metadata_json={})
     went_on = SimpleNamespace(
         role=MemoirChatMessageRole.ASSISTANT.value, content_text="后来呢？",
+        guidance_intent=None,
         metadata_json={"profile_questions": [], "profile_asked": None},
     )
     finished = SimpleNamespace(role=MemoirChatMessageRole.USER.value, content_text="就这些。", metadata_json={})
@@ -621,6 +626,7 @@ def _prompt(
 def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being_read():
     asked = SimpleNamespace(
         id="m0", role=MemoirChatMessageRole.ASSISTANT.value, content_text="您怎么称呼？", turn_index=0, created_at=None,
+        guidance_intent=None,
         metadata_json={"profile_questions": ["narrator_name"], "profile_asked": "narrator_name"},
     )
     narrator = SimpleNamespace(
@@ -709,6 +715,47 @@ async def test_pending_profile_answers_reach_the_next_opening_and_later_turns(cl
     assert "或明确不想说，就改问：他的老家" in followup
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempts", [(1,), (1, 2)])
+@pytest.mark.parametrize("change_topic", [False, True])
+async def test_no_answer_prompts_preserve_the_question_until_a_real_topic_change(
+    client, test_db, fake_ai, attempts, change_topic,
+):
+    project_id = (await client.post("/api/mobile/memoir/projects", json={"title": "我的回忆录"})).json()["id"]
+    first = await _session(client, project_id)
+    original = await _ask(test_db, first, "您怎么称呼？", offered="narrator_name")
+    for attempt in attempts:
+        prompt = await client.post(
+            f"/api/mobile/memoir/voice-sessions/{first}/no-answer-prompt", json={"attempt": attempt},
+        )
+        assert prompt.status_code == 200
+    previous = await _ask(test_db, first, "您小时候最喜欢做什么？") if change_topic else original
+    answer = "最喜欢玩捉迷藏。" if change_topic else "叫我余大姐，今年七十岁。"
+    segment = await _narrate(client, test_db, first, answer)
+    job = await _profile_job(test_db, segment.utterance_id)
+    assert job.status == "pending"
+    assert job.payload_json["previous_message_id"] == previous.id
+
+    session = await test_db.get(MemoirVoiceSession, first)
+    await test_db.refresh(session, ["messages"])
+    expected = ("narrator_name", "narrator_age") if change_topic else ("narrator_age", "narrator_origin")
+    assert narrator_profile.profile_questions_to_ask({}, list(session.messages)) == expected
+    assert narrator_profile.profile_asks(list(session.messages)) == {"narrator_name": 1}
+    assert (await client.post(f"/api/mobile/memoir/voice-sessions/{first}/stop", json={})).status_code == 200
+
+    latest = await test_db.get(MemoirVoiceSession, await _session(client, project_id))
+    await test_db.refresh(latest, ["messages"])
+    book = await load_interview_book_context(test_db, voice_session=latest, snapshot=None)
+    assert book.profile_questions == expected
+    if change_topic:
+        assert book.profile_answers == ()
+    else:
+        assert book.profile_answers == (narrator_profile.ProfileAnswer(original.content_text, answer),)
+        assert f"AI：{original.content_text}\n叙述者：{answer}" in _prompt(
+            latest.id, latest.messages, book, returning=True,
+        )
+
+
 def test_the_second_session_opens_by_asking_what_the_first_left():
     book = InterviewBookContext(
         chapters=(("新都县的家", 4),), last_chapter_title="新都县的家", topics=(), anchor_topic=None,
@@ -730,15 +777,17 @@ def test_the_second_session_opens_by_asking_what_the_first_left():
 
 
 def test_profile_history_keeps_complete_exchanges_without_crossing_sessions():
-    def message(session, role, text, *, field=None):
+    def message(session, role, text, *, field=None, intent=None):
         return SimpleNamespace(
             id=text, voice_session_id=session, role=role, content_text=text,
+            guidance_intent=intent,
             metadata_json={"profile_asked": field},
         )
 
     history = [
         message("first", "assistant", "您怎么称呼？", field="narrator_name"),
         message("silent", "assistant", "您是哪年生的？", field="narrator_age"),
+        message("first", "assistant", "您可以接着刚才的问题慢慢说。", intent="no_answer_prompt"),
         message("first", "user", "叫我余大姐。"),
         message("first", "user", "今年七十岁。"),
     ]
