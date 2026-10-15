@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -19,6 +20,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookPlanChapter,
+    MemoirChatMessage,
     MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
@@ -66,6 +68,35 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
         await db.flush()
         return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
     return None
+
+
+async def offered_sections(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+    """For each narrator message that was the first reply to an opening offer, the offered issue's section.
+
+    The reply stays ordinary narration; this only tells placement what the question was about."""
+    ids = {message_id for message_id in message_ids if message_id}
+    if not ids:
+        return {}
+    sessions = (await db.scalars(select(MemoirVoiceSession).where(
+        MemoirVoiceSession.id.in_(select(MemoirChatMessage.voice_session_id).where(MemoirChatMessage.id.in_(ids))),
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
+    ))).all()
+    result = {}
+    for session in sessions:
+        first_reply = await db.scalar(select(MemoirChatMessage.id).where(
+            MemoirChatMessage.voice_session_id == session.id,
+            MemoirChatMessage.role == "user",
+            MemoirChatMessage.content_text != "",
+        ).order_by(MemoirChatMessage.turn_index, MemoirChatMessage.created_at).limit(1))
+        issue = await db.get(MemoirCompletionIssue, session.metadata_json[OPENING_OFFER_KEY])
+        if first_reply not in ids or issue is None:
+            continue
+        try:
+            result[first_reply] = await _target_section_id(db, issue=issue)
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+    return result
 
 
 @dataclass(frozen=True)

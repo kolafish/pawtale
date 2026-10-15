@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models.memoir import MemoirCompletionIssue, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import MemoirChatMessage, MemoirCompletionIssue, MemoirSection, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.domain.memoir.types import MemoirCompletionIssueOutcome
 from app.services.memoir import completion_interviews, completion_issues
@@ -86,3 +86,19 @@ async def test_explicit_accept_creates_a_separate_existing_completion_session(cl
     await completion_interviews.bind_answer_segment(test_db, voice_session=bound, utterance=answer)
     assert issue.status == 'closed' and answer.completion_issue_id == issue.id
     assert len((await test_db.scalars(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id))).all()) >= 2
+
+
+async def test_only_the_first_reply_to_an_offer_points_placement_at_the_offered_section(client, test_db):
+    project_id, chapter, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id)
+    await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    replies = [MemoirChatMessage(project_id=project_id, voice_session_id=session.id, role='user', content_text=text, turn_index=index)
+               for index, text in ((1, '是我爸爸送我去的。'), (3, '后来我又去了工厂。'))]
+    plain = await _opening(client, test_db, project_id)
+    other = MemoirChatMessage(project_id=project_id, voice_session_id=plain.id, role='user', content_text='讲讲工厂。', turn_index=1)
+    test_db.add_all([*replies, other])
+    await test_db.commit()
+    section_id = await test_db.scalar(select(MemoirSection.id).where(MemoirSection.chapter_id == chapter.id))
+    assert await completion_interviews.offered_sections(test_db, [item.id for item in (*replies, other)]) == {replies[0].id: section_id}
+    await test_db.refresh(issue)
+    assert issue.status == 'open'
