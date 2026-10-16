@@ -47,7 +47,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir import automation_events, completion_interviews, editing_jobs
+from app.services.memoir import automation_events, completion_interviews, editing_jobs, narration_people
 from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
@@ -846,6 +846,12 @@ async def grow_story_tree(
         )
     ).all()
     deferred.update(progress.deferred)
+    person_answers = await narration_people.answer_sources(
+        db, project_id=job.project_id, message_ids=(item.chat_message_id for item in project_sources),
+    )
+    linked_answers = [item for item in project_sources
+                      if item.id not in existing_material_ids and is_ready_story_material(item)
+                      and item.chat_message_id in person_answers and not item.completion_issue_id]
     # Retry budgets belong to one set of evidence, not to the source forever.
     context_signature = semantic_json_signature({
         "sources": [(item.id, source_text_hash(current_utterance_text(item))) for item in project_sources],
@@ -857,6 +863,7 @@ async def grow_story_tree(
         for item in project_sources
         if (item.id not in existing_material_ids or item.id in recovery_materials)
         and not item.completion_issue_id
+        and item.chat_message_id not in person_answers
         and is_ready_story_material(item)
         and (item.id in recovery_materials or has_story_content(current_utterance_text(item)))
         and not (
@@ -906,6 +913,9 @@ async def grow_story_tree(
         await _save_progress(db, job, progress)
     if progress.batch is not None:
         batch = progress.batch
+        answer_ids = {item.id for item in project_sources if item.chat_message_id in person_answers}
+        batch.groups = [replace(group, utterance_ids=[value for value in group.utterance_ids if value not in answer_ids])
+                        for group in batch.groups]
         for group in batch.groups:
             if group.action == "not_story":
                 for source_id in group.utterance_ids:
@@ -960,6 +970,42 @@ async def grow_story_tree(
                     context_signature=batch.context_signature,
                 )
         progress.batch = None
+    # A saved person question already identifies its source. Only the original narration goes
+    # through classification; its answer follows the source's current placement afterwards.
+    for answer in linked_answers:
+        source_id = person_answers[answer.chat_message_id]
+        target = (await db.execute(
+            select(MemoirSection.id, MemoirSection.version)
+            .join(MemoirSectionMaterial, MemoirSectionMaterial.section_id == MemoirSection.id)
+            .join(MemoirBookPlanChapter, MemoirBookPlanChapter.id == MemoirSection.chapter_id)
+            .where(MemoirSectionMaterial.project_id == job.project_id,
+                   MemoirSectionMaterial.utterance_id == source_id,
+                   MemoirSectionMaterial.include_in_book.is_(True),
+                   MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+                   MemoirSection.include_in_book.is_(True), MemoirBookPlanChapter.include_in_book.is_(True))
+        )).one_or_none() if source_id else None
+        if target is not None:
+            try:
+                await place_material(
+                    db, user_id=project.user_id, project_id=job.project_id, utterance_id=answer.id,
+                    req=MemoirSectionMaterialPlacementRequest(target_section_id=target.id),
+                    assigned_by=MemoirSectionMaterialAssignedBy.AI, structure_updated_by=MemoirCreatedBy.AI,
+                    assignment_reason="person_question_answer",
+                    expected_source=(source_text_hash(current_utterance_text(answer)), current_transcript_version_id(answer)),
+                    expected_section_version=target.version, commit=False,
+                )
+            except HTTPException as exc:
+                if exc.status_code not in {404, 409}:
+                    raise
+            else:
+                progress.placed_ids.append(answer.id)
+                progress.deferred.pop(answer.id, None)
+                await _save_progress(db, job, progress)
+                continue
+        progress.deferred[answer.id] = DeferredSource(
+            text_hash=source_text_hash(current_utterance_text(answer)), status="pending",
+            reason="补充回答等待原讲述可收录后加入", context_signature=context_signature,
+        )
     # Preserve placement checkpoints before reviewing; report only the final
     # directory, not a transient chapter that the same review absorbed.
     await _save_progress(db, job, progress)
