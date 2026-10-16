@@ -334,7 +334,7 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     assert before_ids < after_ids
 
 
-@pytest.mark.parametrize('failed_update', [False, True, 'missing_intro'])
+@pytest.mark.parametrize('failed_update', [False, True])
 async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeypatch, failed_update):
     from app.domain.memoir.types import MemoirCreatedBy
     from app.services.memoir.book_output_versions import append_book_output_version
@@ -350,7 +350,7 @@ async def test_only_changed_chapter_copy_is_regenerated(client, test_db, monkeyp
         calls.append(kwargs)
         generated = _copy(kwargs['snapshot'], len(calls))
         if failed_update and len(calls) == 2:
-            return replace(generated, chapter_intros=[]) if failed_update == 'missing_intro' else None
+            return None
         return generated
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     first = await _automatic(test_db, project)
@@ -635,14 +635,22 @@ async def test_new_assembly_schedules_only_copy(client, test_db, entry):
         assert job.updated_at == scheduled_at
 
 
-@pytest.mark.parametrize("unavailable", [False, True])
-async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow(client, test_db, monkeypatch, unavailable):
+@pytest.mark.parametrize("result_kind", ["complete", "unavailable", "missing_intro"])
+async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow(client, test_db, monkeypatch, result_kind):
     from app.services.memoir import book_generation_jobs, draft_progress
     from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
     from app.services.memoir.editing_jobs import clear_editing_job_handlers
     project, _, before = await _output(client, test_db)
+    unavailable = result_kind == "unavailable"
+    calls = []
     async def generate(**kwargs):
-        return None if unavailable else _copy(kwargs["snapshot"])
+        calls.append(kwargs)
+        generated = _copy(kwargs["snapshot"])
+        if result_kind == "missing_intro":
+            generated = replace(generated, chapter_intros=[
+                replace(item, intro="") if index == 0 else item
+                for index, item in enumerate(generated.chapter_intros)])
+        return None if unavailable else generated
     monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
     await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
         user_id=project.user_id, project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
@@ -667,7 +675,16 @@ async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow
             MemoirBookOutputVersion.output_id == before.output_id).order_by(MemoirBookOutputVersion.version.desc()))
         assert latest.content == before.content
         assert latest.chapter_snapshot_json == before.chapter_snapshot_json
-        assert latest.manuscript_json["chapters"][0]["intro"] == "自动导语1"
+        expected_intro = before.manuscript_json["chapters"][0]["intro"] if result_kind == "missing_intro" else "自动导语1"
+        assert latest.manuscript_json["chapters"][0]["intro"] == expected_intro
+        assert next(s["content"] for s in latest.manuscript_json["front_matter"] if s["kind"] == "preface") == "自动前言1"
+        assert latest.manuscript_json["chapters"][1]["intro"] == "自动导语1"
+        if result_kind == "missing_intro":
+            reused = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+                user_id=project.user_id, project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(),
+                automatic=True, retry=True)
+            assert reused.latest_version.id == latest.id
+            assert len(calls) == 1
         jobs = (await test_db.scalars(select(MemoirEditingJob).where(MemoirEditingJob.project_id == project.id))).all()
         assert {item.job_type for item in jobs} == {"generate_book_editorial_copy"}
     finally:

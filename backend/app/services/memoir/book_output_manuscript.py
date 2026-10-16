@@ -626,10 +626,8 @@ def apply_editorial_copy(
         _set_preface(manuscript, editorial_copy.preface)
     if "afterword" in targets and editorial_copy.afterword:
         manuscript.back_matter.afterword.content = editorial_copy.afterword
-    if "back_cover_quote" in targets:
-        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote or fallback_back_cover_quote(
-            [chapter.model_dump(mode="json") for chapter in manuscript.chapters]
-        )
+    if "back_cover_quote" in targets and editorial_copy.back_cover_quote:
+        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote
     if editorial_copy.model:
         manuscript.render_settings.editorial_copy_model = editorial_copy.model
     generated_by_chapter = {item.chapter_id: item for item in editorial_copy.chapter_intros if item.chapter_id}

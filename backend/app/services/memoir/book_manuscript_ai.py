@@ -323,32 +323,11 @@ def _text_ai_configured(ai_model: str | None) -> bool:
 
 
 def _clean_copy_text(value: object, *, max_chars: int) -> str:
-    text = _compact_text(_string(value), max_chars)
-    forbidden = (
-        "后台",
-        "系统",
-        "AI生成",
-        "AI 生成",
-        "主题回忆录",
-        "章节规划",
-        "这一章主要记录",
-        "从口述内容看",
-        "相关的回忆",
-        "本章讲述",
-        "凡是过往皆是序章",
-        "这本书还可以继续补充",
-        "愿常翻看",
-    )
-    if any(term in text for term in forbidden):
-        return ""
-    return text
+    return _compact_text(_string(value), max_chars)
 
 
 def _clean_title(value: object) -> str:
     title = _compact_text(_string(value), 32).strip("《》「」“”\"' ")
-    forbidden = ("主题回忆录", "章节规划", "AI", "生成", "系统", "后台")
-    if not title or any(term in title for term in forbidden):
-        return ""
     return title[:32]
 
 

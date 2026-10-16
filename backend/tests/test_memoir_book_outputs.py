@@ -183,7 +183,7 @@ class FakeTemplateCopyAI(AITextServiceBase):
           "afterword": "愿常翻看。",
           "chapter_intros": [
             {
-              "chapter_id": "chapter-1",
+              "chapter_id": "C1",
               "intro": "这一章主要记录外婆家的童年相关的回忆。",
               "pull_quote": "这句不是原始口述里的金句。"
             }
@@ -241,7 +241,7 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
     assert "u1" not in fake_ai.calls[0]["user_prompt"]
 
 
-async def test_memoir_book_title_suggestions_filter_internal_names():
+async def test_memoir_book_title_suggestions_keep_nonempty_names():
     fake_ai = FakeTitleAI()
     suggestions = await generate_title_suggestions(
         title="外婆的回忆录",
@@ -261,12 +261,12 @@ async def test_memoir_book_title_suggestions_filter_internal_names():
     )
 
     assert suggestions is not None
-    assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子"]
+    assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]
     assert "一个人一生回忆" in fake_ai.calls[0]["user_prompt"]
     assert "不要只抓某个场景、物件、单章细节" in fake_ai.calls[0]["user_prompt"]
 
 
-async def test_memoir_book_editorial_copy_filters_template_language():
+async def test_memoir_book_editorial_copy_keeps_text_and_validates_quotes():
     copy = await generate_manuscript_editorial_copy(
         title="外婆的回忆录",
         snapshot=[
@@ -286,13 +286,38 @@ async def test_memoir_book_editorial_copy_filters_template_language():
     assert copy is not None
     assert copy.book_title == "外婆慢慢说"
     assert copy.cover_subtitle == "关于童年与离家的记忆"
-    assert copy.preface == ""
-    assert copy.afterword == ""
-    assert copy.chapter_intros == []
+    assert copy.preface == "这本书记录的是「爷爷主题回忆录」中的生活。"
+    assert copy.afterword == "愿常翻看。"
+    assert copy.chapter_intros[0].intro == "这一章主要记录外婆家的童年相关的回忆。"
+    assert copy.chapter_intros[0].pull_quote == ""
     assert copy.back_cover_quote == ""
 
 
-def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
+def test_generated_copy_keeps_work_terms_and_missing_fields():
+    from app.services.memoir.book_manuscript_ai import _copy_from_payload
+
+    intro = "从公共库到盘古，工作逐渐转向分布式文件系统。"
+    quote = "那时我主要负责后台研发和分布式文件系统。"
+    snapshot = [{"chapter_id": "c", "chapter_title": "工作往事", "content": f"我到了新的团队。{quote}"}]
+    generated = _copy_from_payload({"chapter_intros": [{"chapter_id": "C1", "intro": intro,
+        "pull_quote": quote}], "back_cover_quote": quote}, snapshot=snapshot, prompt="", model="offline")
+    assert generated is not None
+    assert generated.chapter_intros[0].intro == intro
+    assert generated.chapter_intros[0].pull_quote == quote
+    assert generated.back_cover_quote == quote
+    manuscript = manuscript_from_snapshot(title="工作往事", content=snapshot[0]["content"], snapshot=snapshot)
+    manuscript.render_settings.back_cover_quote = "已有的封底文案"
+    before = manuscript.model_copy(deep=True)
+    generated = _copy_from_payload({"preface": "从后台研发到分布式系统的工作经历。"},
+        snapshot=snapshot, prompt="", model="offline")
+    apply_editorial_copy(manuscript, generated, targets={"preface", "afterword", "chapter_intros", "back_cover_quote"}, chapter_ids=set())
+    assert next(section.content for section in manuscript.front_matter if section.kind == "preface") == generated.preface
+    assert manuscript.back_matter.afterword == before.back_matter.afterword
+    assert manuscript.chapters[0].intro == before.chapters[0].intro
+    assert manuscript.render_settings.back_cover_quote == "已有的封底文案"
+
+
+def test_memoir_book_manuscript_cleanup_preserves_nonempty_copy():
     manuscript = {
         "profile": {
             "title": "我的小时候",
@@ -338,15 +363,14 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
 
     assert cleaned["profile"]["title"] == "我的小时候"
     assert cleaned["profile"]["subtitle"] == "回望这一生"
-    assert "爷爷主题回忆录" not in cleaned["front_matter"][1]["content"]
-    assert "这一章主要记录" not in cleaned["chapters"][0]["intro"]
-    assert "从口述内容看" not in cleaned["chapters"][1]["intro"]
-    assert len(cleaned["back_matter"]["afterword"]["content"]) > 30
+    assert cleaned["front_matter"][1]["content"] == manuscript["front_matter"][1]["content"]
+    assert [chapter["intro"] for chapter in cleaned["chapters"]] == [chapter["intro"] for chapter in manuscript["chapters"]]
+    assert cleaned["back_matter"]["afterword"]["content"] == "愿常翻看。"
     assert cleaned["back_matter"]["interview_records"]["title"] == "口述片段"
     assert "讲述来源" not in cleaned["back_matter"]["interview_records"]["content"]
-    assert cleaned["back_matter"]["version_note"]["content"] == "本书正文采用适合阅读的整理版表达。原始口述材料已保留，便于家人日后继续核对、补充和修订。"
+    assert cleaned["back_matter"]["version_note"]["content"] == "后台保留口述片段和口述素材"
     assert cleaned["back_matter"]["source_appendix"]["title"] == "口述片段"
-    assert cleaned["render_settings"]["back_cover_quote"] == "那个院子里有一棵葡萄树。"
+    assert cleaned["render_settings"]["back_cover_quote"] == "凡是过往皆是序章"
 
 
 @pytest.fixture

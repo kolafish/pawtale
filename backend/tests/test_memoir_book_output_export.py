@@ -884,7 +884,7 @@ def test_pdf_line_wrapping_keeps_common_words_and_number_units_together():
     assert "97\n岁" not in joined_breaks
 
 
-def test_manuscript_pdf_export_sanitizes_legacy_copy_without_replacing_user_title():
+def test_manuscript_pdf_export_preserves_nonempty_editorial_copy_and_user_title():
     manuscript = _sample_manuscript("夏天的晚上，我就坐在院子里边看月亮。那个院子里有一棵葡萄树。")
     manuscript["profile"]["title"] = "我的小时候"
     manuscript["profile"]["subtitle"] = "回望这一生"
@@ -914,9 +914,8 @@ def test_manuscript_pdf_export_sanitizes_legacy_copy_without_replacing_user_titl
     all_text = "\n".join(command.text for page in pages for command in page.commands)
     assert "回望这一生" in all_text
     assert "我的小时候" in all_text
-    assert "爷爷主题回忆录" not in all_text
-    assert "从口述内容看" not in all_text
-    assert "凡是过往皆是序章" not in all_text
+    assert "爷爷主题回忆录" in all_text
+    assert "凡是过往皆是序章" in all_text
 
     export = render_book_output_export(
         title="我的小时候",
