@@ -1085,7 +1085,7 @@ test("voice search sends product modes and shows unified mode chips", async () =
     const calls = [];
     const { page } = loadTranscriptsPage({
       authExports: { getMemoirIdentity: async () => ({ id: "user-1", active_project_id: "project-1", active_project: { id: "project-1", title: "回忆录" }, projects: [] }) },
-      voiceSearchExports: { recordMemoirVoiceSearchQuery: async (options) => { options.onRecordingEnd(); return label; } },
+      voiceSearchExports: { recordMemoirVoiceSearchQuery: async (options) => { options.onRecordingEnd(); return `帮我找${label}记录`; } },
       voiceApiExports: {
         parseMemoirVoiceSearchQuery: async () => ({ query: "", keywords: [], filters: { included: "all", narration_mode }, display_text: label }),
         listMemoirVoiceTranscripts: async (options) => { calls.push(options); return { items: [], total: 0, limit: 30, offset: 0 }; },
@@ -1093,6 +1093,8 @@ test("voice search sends product modes and shows unified mode chips", async () =
     });
     const context = pageContext(page, { activeProjectId: "project-1" });
     await page.startVoiceSearch.call(context);
+    assert.equal(calls[0].query, undefined);
+    assert.equal(context.data.searchQuery, "");
     assert.equal(calls[0].narrationMode, narration_mode);
     assert.equal(calls[0].guidanceMode, undefined);
     assert.deepEqual(context.data.searchChips, [{ text: label }]);

@@ -15,9 +15,11 @@ from app.domain.memoir.narrative_types import (
 )
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
+    AudioFile,
     MemoirChatMessage,
     MemoirCompletionIssue,
     MemoirEditingJob,
+    MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -26,6 +28,8 @@ from app.models.memoir_narrative import (
     MemoirInterviewPolicyEvaluation,
 )
 from app.models.projects import Project
+from app.services.asr.streaming import StreamingASREvent
+from app.services.memoir import audio_files
 from app.services.memoir.narrative import frameworks, interview_policy
 from app.services.memoir.narrative.interview_policy_outcomes import (
     PolicyOutcomeSelectionError,
@@ -43,7 +47,7 @@ from app.services.memoir.narrative.interview_policy_runtime import (
     run_shadow_policy_evaluation_job,
     schedule_shadow_policy_evaluation,
 )
-from app.services.memoir.voice_final_persistence import _assign_interview_target
+from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService, _assign_interview_target
 
 
 class FakePolicyAI(AITextServiceBase):
@@ -264,9 +268,11 @@ async def test_active_policy_executes_low_risk_action_and_suggests_medium_action
 
 @pytest.mark.parametrize("guidance_mode", ["free_narration", "guided_interview"])
 async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
-    test_db, guidance_mode,
+    client, test_db, guidance_mode, tmp_path, monkeypatch,
 ):
-    project = Project(type="memoir", title="话题策略")
+    monkeypatch.setattr(audio_files, "MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    project = Project(type="memoir", title="话题策略", user_id=user_id)
     test_db.add(project)
     await test_db.flush()
     project_framework = await frameworks.initialize_project_framework(
@@ -379,12 +385,46 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     }
     assert continued.context.brief.target_id is None
 
+    async def save_policy_answer(turn, turn_index, text):
+        question = MemoirChatMessage(
+            project_id=project.id,
+            voice_session_id=session.id,
+            role="assistant",
+            content_text="请继续讲讲。",
+            turn_index=turn_index,
+        )
+        test_db.add(question)
+        await test_db.flush()
+        answer_decision = await persist_policy_turn_decision(
+            test_db, session=session, generated_message=question, policy_turn=turn,
+        )
+        await test_db.commit()
+        result = await VoiceFinalPersistenceService(
+            db=test_db, voice_session_id=session.id, user_id=user_id,
+        ).persist_final(
+            StreamingASREvent(type="final", text=text, start_ms=0, end_ms=1000),
+            audio=b"\x01\x00" * 16000,
+            parent_message_id=question.id,
+        )
+        saved = await test_db.get(MemoirVoiceUtterance, result.utterance_id)
+        raw = await test_db.get(MemoirTranscriptVersion, result.transcript_version_id)
+        audio = await test_db.get(AudioFile, result.audio_file_id)
+        assert saved.transcript_raw == raw.content == text
+        assert saved.audio_file_id == audio.id
+        assert audio_files.audio_file_path(audio).read_bytes() == b"\x01\x00" * 16000
+        assert saved.policy_decision_id == answer_decision.id
+        assert saved.framework_item_id == turn.context.brief.target_id
+        assert saved.completion_issue_id is None
+        await test_db.refresh(session, ["messages"])
+
+    await save_policy_answer(continued, 2, "那天我和外婆一起走到河边。")
+
     switch_message = MemoirChatMessage(
         project_id=project.id,
         voice_session_id=session.id,
         role="user",
         content_text="这一段先讲到这里，换个话题吧。",
-        turn_index=2,
+        turn_index=4,
     )
     test_db.add(switch_message)
     await test_db.commit()
@@ -404,6 +444,21 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
         candidate.action
         for candidate in switch_context.brief.candidate_actions
     }
+    switched = await prepare_active_policy_turn(
+        test_db,
+        session=session,
+        completion_issue_id=None,
+        requested_ai_model=None,
+        ai_client_factory=lambda model=None: FakePolicyAI("offer_new_topic", framework_item_id="F1"),
+        enabled=True,
+        rollout_percent=100,
+    )
+    assert switched is not None
+    assert switched.context.brief.target_id != selected_item.id
+    await save_policy_answer(switched, 5, "后来我到了另一座城市工作。")
+    assert session.anchor_framework_item_id == (
+        switched.context.brief.target_id if guidance_mode == "guided_interview" else None
+    )
 
 
 async def test_keyword_pause_is_only_a_suggestion_for_the_semantic_streamed_turn(
