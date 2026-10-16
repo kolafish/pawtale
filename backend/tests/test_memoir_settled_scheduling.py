@@ -72,3 +72,6 @@ async def test_ready_signal_during_running_job_keeps_lease_and_requests_one_reru
         assert resumed.id == parent.id and resumed.status == 'running'
         assert resumed.lease_token == 'worker-lease' and resumed.rerun_requested is True
         assert resumed.result_json['stage'] == 'drafting' and resumed.run_after == now
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")

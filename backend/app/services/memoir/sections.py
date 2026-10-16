@@ -460,6 +460,7 @@ async def create_section(
         project_id=project_id,
         chapter_id=chapter_id,
         title=req.title,
+        metadata_json={"title_updated_by": "user"},
         section_type=req.section_type.value,
         sort_order=max((item.sort_order for item in sections), default=-1) + 1,
     )
@@ -492,6 +493,7 @@ async def update_section(
         user_id,
         allow_admin=allow_admin,
     )
+    await lock_plan_structure(db, project_id=project_id)
     section = await _load_section(
         db,
         project_id=project_id,
@@ -510,6 +512,8 @@ async def update_section(
         ("include_in_book", req.include_in_book),
     ):
         if value is not None and getattr(section, field) != value:
+            if field == "title":
+                section.metadata_json = {**section.metadata_json, "title_updated_by": "user", "previous_title": section.title}
             setattr(section, field, value)
             changed = True
     if changed:
@@ -1369,7 +1373,8 @@ async def apply_section_merge_groups(
                     else "section_merge"
                 ),
             )
-        if req.title is not None:
+        if req.title is not None and req.title != target.title:
+            target.metadata_json = {**target.metadata_json, "title_updated_by": updated_by.value, "previous_title": target.title}
             target.title = req.title
             target.version += 1
             target.updated_at = utcnow_naive()

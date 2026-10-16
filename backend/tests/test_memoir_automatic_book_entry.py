@@ -73,3 +73,6 @@ async def test_reconcile_legacy_outline_only_when_automatic_writing_was_requeste
     await test_db.refresh(parent)
     assert parent.status == "pending"
     assert await automatic_book_draft.reconcile_books_omitted_by_editorial_review(test_db) == 0
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")

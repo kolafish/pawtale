@@ -284,6 +284,7 @@ async def _replace_plan(
             plan_id=plan.id,
             project_id=project_id,
             title=chapter.title.strip()[:200],
+            metadata_json={"title_updated_by": created_by.value},
             sort_order=index,
             include_in_book=chapter.include_in_book,
         )
@@ -585,6 +586,12 @@ async def activate_existing_plan_for_automatic_book(db: AsyncSession, *, project
     if await db.scalar(select(MemoirBookPlan.id).where(MemoirBookPlan.project_id == project_id)) is None:
         return False
     plan = await lock_plan_structure(db, project_id=project_id)
+    if plan.created_by == MemoirCreatedBy.USER.value:
+        chapters = (await db.scalars(select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.plan_id == plan.id))).all()
+        for chapter in chapters:
+            if not chapter.metadata_json.get("title_updated_by"):
+                chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user"}
+        await db.flush()
     if plan.status == MemoirBookPlanStatus.CONFIRMED.value:
         return False
     plan.status = MemoirBookPlanStatus.CONFIRMED.value
@@ -680,6 +687,8 @@ async def update_book_plan(
             new_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
             added_ids = new_ids - old_ids
             removed_ids = old_ids - new_ids
+            if chapter.title != chapter_update.title.strip()[:200]:
+                chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user", "previous_title": chapter.title}
             chapter.title = chapter_update.title.strip()[:200]
             chapter.sort_order = index
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
@@ -696,7 +705,7 @@ async def update_book_plan(
                 title=chapter_update.title.strip()[:200],
                 sort_order=index,
                 include_in_book=chapter_update.include_in_book,
-                metadata_json={"created_from_plan_update_at": now},
+                metadata_json={"created_from_plan_update_at": now, "title_updated_by": "user"},
             )
             db.add(chapter)
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))

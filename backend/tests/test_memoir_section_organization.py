@@ -1788,3 +1788,6 @@ async def test_waiting_for_correction_preserves_story_checkpoint(client, test_db
     waiting = await story_tree_growth.run_story_tree_growth_job(test_db, job)
     assert waiting.status.value == "pending"
     assert waiting.result_json["growth"] == progress
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")

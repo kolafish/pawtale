@@ -22,6 +22,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookOutput,
     MemoirCompletionIssue,
@@ -821,6 +822,11 @@ async def close_issue(
 
 
 async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
+    # All directory writers take plan -> chapters, matching section moves and
+    # the end-of-narration review. Reversing these locks can deadlock a rename.
+    await db.execute(select(MemoirBookPlan.id).where(
+        MemoirBookPlan.project_id == project_id,
+    ).with_for_update())
     await db.execute(select(MemoirBookPlanChapter.id).where(
         MemoirBookPlanChapter.project_id == project_id,
     ).order_by(MemoirBookPlanChapter.id).with_for_update())

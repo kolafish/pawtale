@@ -46,7 +46,7 @@ from app.services.memoir.projects import (
     MEMOIR_PROFILE_METADATA_KEY, apply_memoir_project_update, profile_inferred_sources, restore_profile_inferred_sources,
 )
 from app.services.memoir.section_regeneration import enqueue_chapter_section_regeneration
-from app.services.memoir.sections import delete_section, lock_plan_structure, merge_sections, update_section
+from app.services.memoir.sections import delete_section, merge_sections, update_section
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import delete_voice_transcript
@@ -87,6 +87,8 @@ COMPACT_PROMPT = """
 
 
 async def _story(db: AsyncSession, project_id: str, *, lock: bool = False) -> dict[str, list[dict]]:
+    if lock:
+        await lock_project_chapters(db, project_id=project_id)
     async def rows(model, statement):
         if lock:
             statement = statement.with_for_update(of=model)
@@ -792,8 +794,6 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
             .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
-        if any(op.action == "merge_sections" for op in req.operations):
-            await lock_plan_structure(db, project_id=project_id)
         story = await _story(db, project_id, lock=True)
         try:
             signatures = TypeAdapter(dict[str, str]).validate_json(req.signature)

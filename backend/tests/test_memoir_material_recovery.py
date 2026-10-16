@@ -303,3 +303,6 @@ async def test_manual_placement_overrides_cached_nonstory_without_reclassificati
     assert response.status_code == 200, response.text
     link = await test_db.scalar(select(MemoirSectionMaterial).where(MemoirSectionMaterial.utterance_id == source["utterance_id"]))
     assert link is not None and link.assigned_by == "user"
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")

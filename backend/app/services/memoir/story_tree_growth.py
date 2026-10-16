@@ -51,7 +51,7 @@ from app.services.memoir import automation_events, completion_interviews, editin
 from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
-from app.services.memoir.chapter_split import split_large_chapters
+from app.services.memoir.chapter_structure import load_structure_summaries, review_story_structure
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_lines, is_ready_story_material
@@ -74,8 +74,8 @@ from app.services.memoir.transcript_projection import (
 
 SYSTEM_PROMPT = (
     "你是一位克制而有整体感的中文回忆录结构编辑。"
-    "请把本次新讲述作为一个整体理解，只在确有新主题时生长章节或小节，"
-    "不要改名、删除、移动或重排已有结构。"
+    "请把本次新讲述作为一个整体理解。章承载人生阶段或持续主题，小节承载具体经历。只有现有章节无法容纳的新人生阶段或持续主题才新建章；新事件、新地点或新细节本身不是新建章的理由。"
+    "已有标题不限定内容归属；归类后由整体结构检查统一调整标题和拆合。"
 )
 OFFERED_CHAPTER_GUIDANCE = "offered_chapter_id 表示访谈员问的是这一章里的事：回答在补充这一章的内容就放进这一章（已有小节或新小节），讲了别的事就照常安排。"
 SETTLE_SECONDS = 3
@@ -191,6 +191,8 @@ def build_story_growth_prompt(
     sections: list[MemoirSection],
     interviewer_lines: dict[str, str],
     offered_chapters: dict[str, str] | None = None,
+    chapter_summaries: dict[str, str] | None = None,
+    section_summaries: dict[str, str] | None = None,
 ) -> tuple[str, ModelReferenceMap, ModelReferenceMap]:
     chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
@@ -218,6 +220,7 @@ def build_story_growth_prompt(
         {
             "chapter_id": chapter_refs.encode(chapter.id),
             "chapter_title": chapter.title,
+            **({"summary": chapter_summaries[chapter.id]} if chapter_summaries and chapter.id in chapter_summaries else {}),
         }
         for chapter in chapter_candidates
     ]
@@ -227,6 +230,7 @@ def build_story_growth_prompt(
             "chapter_id": chapter_refs.encode(section.chapter_id),
             "chapter_title": chapter_titles.get(section.chapter_id, ""),
             "section_title": section.title,
+            **({"summary": section_summaries[section.id]} if section_summaries and section.id in section_summaries else {}),
             "existing_material_examples": section.existing_material_examples,
         }
         for section in section_candidates
@@ -235,12 +239,12 @@ def build_story_growth_prompt(
         '请将本次全部讲述安排到故事目录中。先判断哪些是故事，再安排故事的章节和小节。\n'
         f'1. {STORY_CONTENT_GUIDANCE} 非故事标为 not_story。\n'
         '2. source_index 是不可拆分的一整条原始讲述，不是事件编号；不能复制、分割或自编 source_index。优先保证每条讲述完整且只收录一次。在能按整条讲述分组的前提下，同一事件的断续讲述合组，不同事件分组。如果同一条讲述包含多个事件，必须整体放在一个小节，使用能覆盖这些事件的共同主题标题，不能拆成多个小节重复引用该条，也不能只保留第一个事件。章节对应人生阶段或持续主题；不同原始讲述能分开的事件仍分小节，不因同属一个阶段就全部合并。\n'
-        '章节的主题由章节标题决定，已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
+        '以摘要和素材判断整章覆盖的人生阶段或持续主题；已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
         '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让相应讲述用 chapter_ref 引用它，不需要重复定义章节。\n'
         '4. 只要有明确的亲历事件或感受，就安排已有位置或建立适当的新位置；篇幅短、没有年份或与现有章节不同，均不是暂不归类的理由。不为迁就现有目录强行添加时间或人生阶段。不编造人物关系、时间或事件。\n'
         '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才标为 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
         '6. 新章可用 insert_before_chapter_id 指定插在某个现有章节前。只有明确的人生先后且现有目录按人生阶段组织时才指定；主题目录或时间不明填 null。不重排已有章节。不同新章节按拟收录先后顺序列出。time_evidence 必须是本次讲述中能支持插入位置的原文片段；没有明确时间证据时 time_evidence 和 insert_before_chapter_id 都填 null。\n'
-        '标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
+        '标题概括经历，不把单个年龄或细节当成章节主题。原话对年龄、年份有犹疑时，标题用经历主题命名，避免选一个数字写成定论。标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
         f'7. placements 必须以本次给出的 source_index 字符串为键，每个键对应一个对象且只有一个归属。不能将一个 source_index 解释成多个事件编号，也不能添加本次未给出的键。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。{OFFERED_CHAPTER_GUIDANCE if offered else ""}\n'
         '\n'
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
@@ -324,6 +328,8 @@ async def decide_story_growth(
     interviewer_lines: dict[str, str],
     ai_model: str | None,
     offered_chapters: dict[str, str] | None = None,
+    chapter_summaries: dict[str, str] | None = None,
+    section_summaries: dict[str, str] | None = None,
 ) -> list[GrowthGroup]:
     prompt, chapter_refs, section_refs = build_story_growth_prompt(
         utterances=utterances,
@@ -331,6 +337,8 @@ async def decide_story_growth(
         sections=sections,
         interviewer_lines=interviewer_lines,
         offered_chapters=offered_chapters,
+        chapter_summaries=chapter_summaries,
+        section_summaries=section_summaries,
     )
 
     class ValidatedGrowthOutput(_GrowthOutput):
@@ -447,7 +455,11 @@ async def _load_tree(
                     MemoirSection.project_id == project_id,
                     MemoirSection.chapter_id.in_([chapter.id for chapter in chapters]),
                 )
-                .options(selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.utterance))
+                .options(
+                    selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.utterance).selectinload(MemoirVoiceUtterance.chat_message),
+                    selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.transcript_version),
+                )
+                .execution_options(populate_existing=True)
                 .order_by(MemoirSection.chapter_id, MemoirSection.sort_order)
             )
         )
@@ -865,6 +877,9 @@ async def grow_story_tree(
         ai_model = await load_project_ai_model(db, job.project_id, None)
         lines = await interviewer_lines(db, (item.chat_message_id for item in utterances))
         offered = await completion_interviews.offered_chapters(db, (item.chat_message_id for item in utterances))
+        chapter_summaries, section_summaries = await load_structure_summaries(
+            db, project_id=job.project_id, chapters=chapters, sections=sections,
+        )
         await db.commit()
         batch.groups = await decide_story_growth(
             utterances=utterances,
@@ -873,6 +888,8 @@ async def grow_story_tree(
             interviewer_lines=lines,
             ai_model=ai_model,
             offered_chapters=offered,
+            chapter_summaries=chapter_summaries,
+            section_summaries=section_summaries,
         )
         progress.batch = batch
         await _save_progress(db, job, progress)
@@ -932,6 +949,11 @@ async def grow_story_tree(
                     context_signature=batch.context_signature,
                 )
         progress.batch = None
+    # Preserve placement checkpoints before reviewing; report only the final
+    # directory, not a transient chapter that the same review absorbed.
+    await _save_progress(db, job, progress)
+    if session.status == MemoirVoiceSessionStatus.STOPPED.value:
+        await review_story_structure(db, user_id=project.user_id, project_id=job.project_id)
     placed_ids = list(dict.fromkeys(progress.placed_ids))
     progress.placed_ids = []
 
@@ -969,7 +991,6 @@ async def grow_story_tree(
             },
         )
     await _save_progress(db, job, progress)
-    await split_large_chapters(db, user_id=project.user_id, project_id=job.project_id)
     return EditingJobResult(
         result_json={
             "voice_session_id": session.id,
