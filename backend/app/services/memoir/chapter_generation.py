@@ -91,7 +91,6 @@ class ChapterMaterialInput:
     material_order: int
     transcript_version_id: str | None
     text: str
-    assigned_at: datetime | None = None
     interviewer_line: str = ""
     edits: tuple[TranscriptEdit, ...] = ()
     previous_text: str | None = None
@@ -295,7 +294,7 @@ def _generated_chapter_from_checkpoint(
         if (
             not used
             or len(used) != len(raw_used)
-            or set(used) - allowed
+            or set(used) != allowed
             or used_material_ids.intersection(used)
         ):
             return None
@@ -378,6 +377,8 @@ def _preserved_draft_section(
         return None
     previous = _previous_draft_section(section, snapshot)
     if previous is None:
+        return None
+    if {material.material_id for material in section.materials} - set(previous.used_material_ids):
         return None
     if not _section_facts_current(context, section, snapshot):
         return None
@@ -492,30 +493,20 @@ def _changed_material_ids(
     context: ChapterGenerationContext,
     latest: MemoirBookChapterDraftVersion | None,
 ) -> set[str]:
-    if latest is None:
-        return set()
     saved = {
         str(item.get("material_id")): item
         for item in (getattr(latest, "material_snapshot_json", None) or [])
         if isinstance(item, dict) and item.get("material_id")
     }
-    latest_at = getattr(latest, "created_at", None)
     changed: set[str] = set()
     for material in context.materials:
         prior = saved.get(material.material_id)
-        newly_assigned = bool(
-            isinstance(latest_at, datetime)
-            and isinstance(material.assigned_at, datetime)
-            and material.assigned_at > latest_at
-        )
-        changed_text = bool(
-            prior is not None
-            and (
-                prior.get("transcript_version_id") != material.transcript_version_id
-                or prior.get("text_hash") != semantic_text_hash(material.text)
-            )
-        )
-        if newly_assigned or changed_text:
+        if (
+            prior is None
+            or prior.get("section_id") != material.section_id
+            or prior.get("transcript_version_id") != material.transcript_version_id
+            or prior.get("text_hash") != semantic_text_hash(material.text)
+        ):
             changed.add(material.material_id)
     return changed
 
@@ -856,7 +847,6 @@ def chapter_generation_context(
                 material_order=material.sort_order,
                 transcript_version_id=material.transcript_version_id,
                 text=text,
-                assigned_at=material.created_at,
                 edits=(transcript_edits or {}).get(material.transcript_version_id, ()),
                 interviewer_line=(interviewer_lines or {}).get(material.utterance.chat_message_id or "", ""),
             )
@@ -980,6 +970,17 @@ def build_chapter_generation_prompt(
     material_refs = ModelReferenceMap(
         "M",
         (material.material_id for material in context.materials),
+    )
+    required_refs = "、".join(
+        material_refs.encode(material.material_id)
+        for material in context.materials
+        if material.material_id in (changed_material_ids or set())
+    )
+    required_materials = (
+        f"本次必须融入的讲述：{required_refs}。这些讲述已归属当前小节，尚未写入正文或已更正。"
+        "请逐条将其中的真实经历、事实和感受融入正文，并在 used_material_ids 中列出实际采用的编号；"
+        "不能只列编号而省略内容。重复内容可以合并，访谈过渡语无需写入。\n\n"
+        if required_refs else ""
     )
     outline_sections = chapter_sections or context.sections
     target_section_id = (
@@ -1117,7 +1118,7 @@ def build_chapter_generation_prompt(
 {people}按既定顺序排列的允许素材：
 {blocks}
 
-输出严格 JSON：
+{required_materials}输出严格 JSON：
 {{
   "sections": [
     {{
@@ -1918,7 +1919,7 @@ async def generate_and_save_chapter_draft(
         preserved_model=plan.previous_model,
         section_continuity=continuity,
         related_section_reasons=related_reasons,
-        changed_material_ids=set() if force_refresh else changed_material_ids,
+        changed_material_ids=changed_material_ids,
     )
     db.expire_all()
     await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
