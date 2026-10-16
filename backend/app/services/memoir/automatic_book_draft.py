@@ -174,8 +174,6 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
 async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
     project_id = job.project_id
     legacy = job.result_json or {}
-    if "editorial_copy" in legacy.get("retry_stages", []):
-        job.payload_json = {**(job.payload_json or {}), "retry_editorial_copy": True}
     progress = DraftProgress.model_validate(legacy)
     dependency = await db.scalar(
         select(MemoirEditingJob.id)
@@ -192,11 +190,16 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         )
         .limit(1)
     )
+    if "editorial_copy" in legacy.get("retry_stages", []):
+        job.payload_json = {**(job.payload_json or {}), "retry_editorial_copy": True}
     if dependency:
         progress.stage = "organizing"
         return _waiting(job, progress)
     from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
-    await activate_existing_plan_for_automatic_book(db, project_id=project_id)
+    # Do not flush the legacy retry payload (and lock the job row) before the
+    # directory lock used by copy completion and other upstream writers.
+    with db.no_autoflush:
+        await activate_existing_plan_for_automatic_book(db, project_id=project_id)
     project = await db.get(Project, project_id)
     chapters = (
         await db.scalars(
@@ -274,6 +277,10 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             retry=retry_chapters,
             on_enqueued=record_child,
         )
+        # Child dispatch may commit its checkpoint and release the directory.
+        # Reacquire it before any later parent payload/output write.
+        with db.no_autoflush:
+            await completion_issues.lock_project_chapters(db, project_id=project_id)
         state.job_id = str(child["job_id"])
         state.status = (
             ("needs_review" if child.get("outcome") == "needs_review" else "needs_input")
@@ -288,16 +295,6 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     progress.retry_stages = [stage for stage in progress.retry_stages if stage != "chapters"]
     job.payload_json = {"source": "progress", "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
-    review_signature = semantic_json_signature({"book_title": project.title, "engine": book_reviews.BOOK_REVIEW_ENGINE,
-        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
-            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
-            for chapter in chapters]})
-    previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
-    if (not current or len(current) != len(progress.chapters) or previous_review is None
-            or (previous_review.payload_json or {}).get("input_signature") != review_signature):
-        # Chapter failures retain a readable book, but not a review of another input.
-        # Keep the old review job itself; normal dispatch still handles reuse and retries.
-        progress.clear_review()
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -307,6 +304,17 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         # Persist deterministic assembly before any review dispatch or external request.
         job.result_json = progress.model_dump(mode="json")
         await db.commit()
+    review_signature = semantic_json_signature({
+        "book_metadata": await book_reviews.load_book_review_metadata(db, project_id=project_id),
+        "engine": book_reviews.BOOK_REVIEW_ENGINE,
+        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
+            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
+            for chapter in chapters]})
+    previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
+    if (not current or len(current) != len(progress.chapters) or previous_review is None
+            or (previous_review.payload_json or {}).get("input_signature") != review_signature):
+        # Metadata changes invalidate the same review as chapter changes.
+        progress.clear_review()
     if any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
@@ -337,6 +345,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.retry_stages = [stage for stage in progress.retry_stages if stage != "review"]
             review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
                 req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry_review,
+                apply_structure_guidance=True,
                 on_enqueued=record_review)
             progress.review_status = str(review["status"])
             progress.review_error = str(review.get("error_message") or "")

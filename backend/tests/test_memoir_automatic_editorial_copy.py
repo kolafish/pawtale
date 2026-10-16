@@ -11,7 +11,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputUpdateRequest,
 )
-from app.services.memoir import book_outputs
+from app.services.memoir import book_outputs, book_reviews
 from app.services.memoir.book_manuscript_ai import GeneratedChapterIntro, GeneratedManuscriptCopy
 from tests.memoir_helpers import ensure_mobile_memoir_project, run_test_editing_job
 from tests.test_memoir_book_outputs import _create_confirmed_book_plan, _seed_confirmed_book_output
@@ -123,7 +123,8 @@ async def test_requested_ai_copy_predating_automation_is_also_preserved(client, 
 
 
 @pytest.mark.parametrize('explicit_retry', [False, True, 'legacy'])
-async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review(client, test_db, monkeypatch, explicit_retry):
+@pytest.mark.parametrize('copy_after_parent', [False, True])
+async def test_book_pipeline_dispatches_copy_and_reviews_changed_metadata_once(client, test_db, monkeypatch, explicit_retry, copy_after_parent):
     from app.services.memoir import automatic_book_draft
     project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
     if explicit_retry == 'legacy':
@@ -136,7 +137,7 @@ async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review
     calls = []
     async def generate(**kwargs):
         calls.append(kwargs)
-        return _copy(kwargs['snapshot'])
+        return _copy(kwargs['snapshot'], 2 if kwargs['targets'] == ['chapter_intros'] else 1)
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     assert not await run_test_editing_job(test_db, parent_id)
     parent = await test_db.get(MemoirEditingJob, parent_id)
@@ -149,17 +150,110 @@ async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review
     copy_id = copy_job.id
     review_id = parent.result_json['review_job_id']
     assert await run_test_editing_job(test_db, review_id)
+    if copy_after_parent:
+        assert await run_test_editing_job(test_db, parent_id)
+        assert parent.status == 'succeeded'
     assert await run_test_editing_job(test_db, copy_id)
+    await test_db.refresh(parent)
+    assert parent.status == 'pending'
+    # The copy job changed the actual preface/afterword seen by review. Refresh
+    # that review once, then reuse it across identical assembly versions.
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json['review_job_id'] == review_id
+    assert await run_test_editing_job(test_db, review_id)
     assert await run_test_editing_job(test_db, parent_id)
     await test_db.refresh(parent)
     await test_db.refresh(copy_job)
     assert parent.result_json['review_job_id'] == review_id
     assert copy_job.status == 'succeeded' and len(calls) == 1
     assert not copy_job.rerun_requested
+    assert await book_reviews.get_current_book_review(test_db, project_id=project_id) is not None
     await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
     await test_db.commit()
     assert await run_test_editing_job(test_db, parent_id)
     assert copy_job.status == 'succeeded' and parent.result_json['review_job_id'] == review_id
+    # Identical book copy and a changed chapter intro must not wake the parent.
+    project = await test_db.get(Project, project_id)
+    for targets in (['preface', 'afterword'], ['chapter_intros']):
+        await book_outputs.regenerate_book_output_editorial_copy(test_db, user_id=project.user_id, project_id=project_id,
+            req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=targets))
+        await test_db.refresh(parent)
+        assert parent.status == 'succeeded'
+
+
+@pytest.mark.db_independent
+@pytest.mark.parametrize('legacy_retry,child_dispatched', [(False, False), (True, False), (False, True)])
+async def test_copy_completion_and_running_parent_share_lock_order(client, test_db, monkeypatch, legacy_retry, child_dispatched):
+    import asyncio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.memoir import chapter_preparation_jobs, completion_issues, editing_jobs
+    from tests.test_memoir_continuous_book import _add_narration
+    pid, chapter_id, section_id, fake, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['chapters'][chapter_id]['job_id'])
+    assert not await run_test_editing_job(test_db, parent_id)
+    if legacy_retry:
+        parent.result_json = {**parent.result_json, 'retry_stages': ['editorial_copy']}
+    queued, release = asyncio.Event(), asyncio.Event()
+    parent_pid = None
+    if child_dispatched:
+        await _add_narration(client, test_db, pid, section_id, fake)
+        enqueue = chapter_preparation_jobs.enqueue_chapter_preparation_job
+        async def enqueue_and_pause(*args, **kwargs):
+            nonlocal parent_pid
+            result = await enqueue(*args, **kwargs)
+            # Dispatch committed; capture the connection used after that commit.
+            parent_pid = await args[0].scalar(text('SELECT pg_backend_pid()'))
+            queued.set()
+            await release.wait()
+            return result
+        monkeypatch.setattr(chapter_preparation_jobs, 'enqueue_chapter_preparation_job', enqueue_and_pause)
+    project = await test_db.get(Project, pid)
+    user_id, run_after = project.user_id, parent.run_after
+    await test_db.commit()
+    task = None
+    async with AsyncSession(test_db.bind, expire_on_commit=False) as copy_db, AsyncSession(test_db.bind, expire_on_commit=False) as parent_db:
+        lease = await editing_jobs.claim_editing_job(parent_db, parent_id, now=run_after)
+        assert lease is not None
+        parent_pid = await parent_db.scalar(text('SELECT pg_backend_pid()'))
+        if child_dispatched:
+            task = asyncio.create_task(editing_jobs.run_editing_job(parent_db, lease))
+        async def generate(**kwargs):
+            nonlocal task
+            # Pause the real parent at the same directory lock the copy save
+            # takes, then let copy completion wake that running parent.
+            if child_dispatched:
+                await asyncio.wait_for(queued.wait(), timeout=3)
+            await completion_issues.lock_project_chapters(copy_db, project_id=pid)
+            if child_dispatched:
+                release.set()
+            else:
+                task = asyncio.create_task(editing_jobs.run_editing_job(parent_db, lease))
+            async def wait_until_blocked():
+                while not await test_db.scalar(text('SELECT cardinality(pg_blocking_pids(:pid)) > 0'), {'pid': parent_pid}):
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(wait_until_blocked(), timeout=3)
+            return _copy(kwargs['snapshot'])
+        monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
+        try:
+            output = await asyncio.wait_for(book_outputs.regenerate_book_output_editorial_copy(
+                copy_db, user_id=user_id, project_id=pid,
+                req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True,
+            ), timeout=5)
+            assert output.latest_version.manuscript.back_matter.afterword.content == '自动后记1'
+            assert task is not None and not await asyncio.wait_for(task, timeout=5)
+            await test_db.refresh(parent)
+            assert parent.status == 'pending'
+            assert bool(parent.result_json['review_job_id']) is not child_dispatched
+        finally:
+            release.set()
+            await copy_db.rollback()
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_first_historical_user_version_is_preserved_without_spending_model_calls(client, test_db, monkeypatch):
@@ -208,6 +302,9 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     copy_job = await test_db.scalar(select(MemoirEditingJob).where(
         MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
     assert await run_test_editing_job(test_db, copy_job.id)
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
+    assert await run_test_editing_job(test_db, parent_id)
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == 'ready'
     current = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
@@ -366,6 +463,7 @@ async def test_copy_failure_is_retryable_without_rewriting_ready_chapters(client
         return None if len(calls) == 1 else _copy(kwargs['snapshot'])
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     project_id, chapter_id, _, _, parent = await _ready_book(client, test_db, monkeypatch)
+    parent_id = parent.id
     original_draft = parent.result_json['chapters'][chapter_id]['draft_version_id']
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == 'failed' and progress.can_retry
@@ -374,6 +472,9 @@ async def test_copy_failure_is_retryable_without_rewriting_ready_chapters(client
         MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
     assert parent.status == 'succeeded'
     assert await run_test_editing_job(test_db, copy_job.id)
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
+    assert await run_test_editing_job(test_db, parent_id)
     assert parent.result_json['chapters'][chapter_id]['draft_version_id'] == original_draft
     assert len(calls) == 2
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)

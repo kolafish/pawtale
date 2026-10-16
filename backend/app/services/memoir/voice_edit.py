@@ -46,7 +46,7 @@ from app.services.memoir.projects import (
     MEMOIR_PROFILE_METADATA_KEY, apply_memoir_project_update, profile_inferred_sources, restore_profile_inferred_sources,
 )
 from app.services.memoir.section_regeneration import enqueue_chapter_section_regeneration
-from app.services.memoir.sections import delete_section, lock_plan_structure, merge_sections, update_section
+from app.services.memoir.sections import delete_section, merge_sections, update_section
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import delete_voice_transcript
@@ -87,6 +87,8 @@ COMPACT_PROMPT = """
 
 
 async def _story(db: AsyncSession, project_id: str, *, lock: bool = False) -> dict[str, list[dict]]:
+    if lock:
+        await lock_project_chapters(db, project_id=project_id)
     async def rows(model, statement):
         if lock:
             statement = statement.with_for_update(of=model)
@@ -96,9 +98,11 @@ async def _story(db: AsyncSession, project_id: str, *, lock: bool = False) -> di
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
     chapters = await rows(MemoirBookPlanChapter, select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id).order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id))
+    # Match directory writes and transcript edits: utterance before material.
+    materials = await rows(MemoirVoiceUtterance, select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id).order_by(MemoirVoiceUtterance.id))
+    materials = sorted(materials, key=lambda material: (material.created_at, material.id))
     sections = await rows(MemoirSection, select(MemoirSection).where(MemoirSection.project_id == project_id).order_by(MemoirSection.chapter_id, MemoirSection.sort_order, MemoirSection.id))
     links = await rows(MemoirSectionMaterial, select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == project_id).order_by(MemoirSectionMaterial.id))
-    materials = await rows(MemoirVoiceUtterance, select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id).order_by(MemoirVoiceUtterance.created_at, MemoirVoiceUtterance.id))
     drafts = (await db.scalars(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.project_id == project_id).distinct(MemoirBookChapterDraftVersion.chapter_id).order_by(MemoirBookChapterDraftVersion.chapter_id, MemoirBookChapterDraftVersion.version.desc()))).all()
     section_by_material = {link.utterance_id: link.section_id for link in links}
     return {
@@ -792,8 +796,6 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
             .with_for_update(key_share=True)
             .execution_options(populate_existing=True)
         )
-        if any(op.action == "merge_sections" for op in req.operations):
-            await lock_plan_structure(db, project_id=project_id)
         story = await _story(db, project_id, lock=True)
         try:
             signatures = TypeAdapter(dict[str, str]).validate_json(req.signature)

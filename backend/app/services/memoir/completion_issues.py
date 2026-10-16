@@ -22,6 +22,7 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
+    MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookOutput,
     MemoirCompletionIssue,
@@ -721,13 +722,15 @@ async def get_issue(
     *,
     project_id: str,
     issue_id: str,
+    lock: bool = False,
 ) -> MemoirCompletionIssue:
-    issue = await db.scalar(
-        select(MemoirCompletionIssue).where(
-            MemoirCompletionIssue.project_id == project_id,
-            MemoirCompletionIssue.id == issue_id,
-        )
+    query = select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.id == issue_id,
     )
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    issue = await db.scalar(query)
     if issue is None:
         raise HTTPException(status_code=404, detail="补全问题不存在")
     return issue
@@ -743,6 +746,7 @@ async def start_issue(
         db,
         project_id=project_id,
         issue_id=issue_id,
+        lock=True,
     )
     if issue.status == MemoirCompletionIssueStatus.CLOSED.value:
         raise HTTPException(status_code=409, detail="补全问题已经结束")
@@ -821,6 +825,11 @@ async def close_issue(
 
 
 async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
+    # All directory writers take plan -> chapters, matching section moves and
+    # the end-of-narration review. Reversing these locks can deadlock a rename.
+    await db.execute(select(MemoirBookPlan.id).where(
+        MemoirBookPlan.project_id == project_id,
+    ).with_for_update())
     await db.execute(select(MemoirBookPlanChapter.id).where(
         MemoirBookPlanChapter.project_id == project_id,
     ).order_by(MemoirBookPlanChapter.id).with_for_update())

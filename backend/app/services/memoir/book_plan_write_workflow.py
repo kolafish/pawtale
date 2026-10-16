@@ -32,6 +32,7 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
 )
+from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookChapterTitleGenerateRequest,
@@ -256,14 +257,21 @@ async def _replace_plan(
     prompt_snapshot: str,
     metadata_json: dict[str, object] | None = None,
     before_commit: Callable[[], Awaitable[None]] | None = None,
+    only_if_missing: bool = False,
 ) -> MemoirBookPlanResponse:
     if len(chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
         raise HTTPException(
             status_code=400,
             detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
         )
+    # There is no plan row to lock during first creation. Serialize the short
+    # save phase on its stable parent, without blocking FK reads.
+    await db.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
     await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
+    if plan is not None and only_if_missing:
+        await db.commit()
+        return await _plan_response(db, plan)
     if not plan:
         plan = MemoirBookPlan(project_id=project_id)
         db.add(plan)
@@ -284,6 +292,7 @@ async def _replace_plan(
             plan_id=plan.id,
             project_id=project_id,
             title=chapter.title.strip()[:200],
+            metadata_json={"title_updated_by": created_by.value},
             sort_order=index,
             include_in_book=chapter.include_in_book,
         )
@@ -322,8 +331,13 @@ async def generate_book_plan(
     before_commit: Callable[[], Awaitable[None]] | None = None,
     on_not_story: Callable[[tuple[SourceSegment, ...]], Awaitable[None]] | None = None,
     excluded_source_hashes: dict[str, str] | None = None,
+    only_if_missing: bool = False,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    plan = await _load_plan(db, project_id)
+    if only_if_missing and plan is not None:
+        return await _plan_response(db, plan)
+    only_if_missing = only_if_missing or plan is None
     sources = await _source_segments(
         db,
         user_id=user_id,
@@ -360,6 +374,7 @@ async def generate_book_plan(
         created_by=MemoirCreatedBy.AI,
         model=generated.model,
         prompt_snapshot=generated.prompt,
+        only_if_missing=only_if_missing,
         metadata_json={
             "source_utterance_count": len(sources),
             "prompt_version": "memoir_book_plan_v1",
@@ -585,6 +600,12 @@ async def activate_existing_plan_for_automatic_book(db: AsyncSession, *, project
     if await db.scalar(select(MemoirBookPlan.id).where(MemoirBookPlan.project_id == project_id)) is None:
         return False
     plan = await lock_plan_structure(db, project_id=project_id)
+    if plan.created_by == MemoirCreatedBy.USER.value:
+        chapters = (await db.scalars(select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.plan_id == plan.id))).all()
+        for chapter in chapters:
+            if not chapter.metadata_json.get("title_updated_by"):
+                chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user"}
+        await db.flush()
     if plan.status == MemoirBookPlanStatus.CONFIRMED.value:
         return False
     plan.status = MemoirBookPlanStatus.CONFIRMED.value
@@ -663,6 +684,11 @@ async def update_book_plan(
         for chapter_id, chapter in existing_by_id.items()
         if chapter_id not in retained_ids
     ]
+    manual_order_changed = (
+        [chapter.id for chapter in _sorted_plan_chapters(plan) if chapter.id in retained_ids]
+        != [chapter.id for chapter in chapter_updates if chapter.id]
+        or any(chapter.id is None for chapter in chapter_updates)
+    )
 
     for index, chapter in enumerate(plan.chapters):
         chapter.sort_order = 10000 + index
@@ -680,6 +706,8 @@ async def update_book_plan(
             new_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
             added_ids = new_ids - old_ids
             removed_ids = old_ids - new_ids
+            if chapter.title != chapter_update.title.strip()[:200]:
+                chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user", "previous_title": chapter.title}
             chapter.title = chapter_update.title.strip()[:200]
             chapter.sort_order = index
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
@@ -696,7 +724,7 @@ async def update_book_plan(
                 title=chapter_update.title.strip()[:200],
                 sort_order=index,
                 include_in_book=chapter_update.include_in_book,
-                metadata_json={"created_from_plan_update_at": now},
+                metadata_json={"created_from_plan_update_at": now, "title_updated_by": "user"},
             )
             db.add(chapter)
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
@@ -729,6 +757,9 @@ async def update_book_plan(
 
     plan.title = (req.title or plan.title).strip()[:200]
     plan.created_by = MemoirCreatedBy.USER.value
+    if manual_order_changed:
+        await db.flush()
+        plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": [chapter.id for chapter, _ in pending_source_refs]}
     plan.metadata_json = _merge_metadata(
         plan.metadata_json,
         {
@@ -900,6 +931,8 @@ async def apply_book_plan_structure_command(
             await db.delete(chapter)
 
     _renumber_chapters(chapters)
+    if req.type == "move_chapter":
+        plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": [chapter.id for chapter in chapters]}
     for chapter in chapters:
         db.add(chapter)
     if selected_sections:

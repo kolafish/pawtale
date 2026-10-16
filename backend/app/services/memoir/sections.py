@@ -460,6 +460,7 @@ async def create_section(
         project_id=project_id,
         chapter_id=chapter_id,
         title=req.title,
+        metadata_json={"title_updated_by": "user"},
         section_type=req.section_type.value,
         sort_order=max((item.sort_order for item in sections), default=-1) + 1,
     )
@@ -492,6 +493,7 @@ async def update_section(
         user_id,
         allow_admin=allow_admin,
     )
+    await lock_plan_structure(db, project_id=project_id)
     section = await _load_section(
         db,
         project_id=project_id,
@@ -510,6 +512,8 @@ async def update_section(
         ("include_in_book", req.include_in_book),
     ):
         if value is not None and getattr(section, field) != value:
+            if field == "title":
+                section.metadata_json = {**section.metadata_json, "title_updated_by": "user", "previous_title": section.title}
             setattr(section, field, value)
             changed = True
     if changed:
@@ -1369,7 +1373,8 @@ async def apply_section_merge_groups(
                     else "section_merge"
                 ),
             )
-        if req.title is not None:
+        if req.title is not None and req.title != target.title:
+            target.metadata_json = {**target.metadata_json, "title_updated_by": updated_by.value, "previous_title": target.title}
             target.title = req.title
             target.version += 1
             target.updated_at = utcnow_naive()
@@ -1559,7 +1564,7 @@ async def sync_materials_to_chapters(
     assigned_by: MemoirSectionMaterialAssignedBy,
     assignment_reason: str,
 ) -> set[str]:
-    """Apply a chapter plan to the single SectionMaterial ownership table."""
+    """Apply membership changes, preserving existing sections and excluded links."""
     seen_utterances: set[str] = set()
     for utterance_ids in utterance_ids_by_chapter.values():
         chapter_utterances = set(utterance_ids)
@@ -1586,20 +1591,8 @@ async def sync_materials_to_chapters(
     sections = await _load_sections(db, project_id=project_id)
     first_by_chapter: dict[str, MemoirSection] = {}
     for section in sections:
-        first_by_chapter.setdefault(section.chapter_id, section)
-    for chapter in chapters:
-        if chapter.id in first_by_chapter:
-            continue
-        section = MemoirSection(
-            project_id=project_id,
-            chapter_id=chapter.id,
-            title=chapter.title,
-            section_type=MemoirSectionType.LIFE_FRAGMENT.value,
-            sort_order=0,
-        )
-        db.add(section)
-        await db.flush()
-        first_by_chapter[chapter.id] = section
+        if section.status == MemoirSectionStatus.ACTIVE.value and section.include_in_book:
+            first_by_chapter.setdefault(section.chapter_id, section)
 
     desired_ids = {
         utterance_id
@@ -1615,20 +1608,36 @@ async def sync_materials_to_chapters(
             )
         ).all()
     )
+    existing_by_utterance = {material.utterance_id: material for material in existing}
+    chapter_by_section = {section.id: section.chapter_id for section in sections}
+    included_sections = {section.id for section in sections if section.include_in_book and section.status == MemoirSectionStatus.ACTIVE.value}
+    removed = [material for material in existing if material.include_in_book
+        and material.section_id in included_sections
+        and chapter_by_section.get(material.section_id) in chapter_ids and material.utterance_id not in desired_ids]
     affected = {
         material.section_id
-        for material in existing
-        if material.utterance_id not in desired_ids
+        for material in removed
     }
-    for material in existing:
-        if material.utterance_id not in desired_ids:
-            await db.delete(material)
+    for material in removed:
+        await db.delete(material)
     await db.flush()
 
     for chapter in chapters:
-        utterance_ids = list(dict.fromkeys(utterance_ids_by_chapter[chapter.id]))
+        utterance_ids = [uid for uid in dict.fromkeys(utterance_ids_by_chapter[chapter.id])
+            if uid not in existing_by_utterance or chapter_by_section.get(existing_by_utterance[uid].section_id) != chapter.id]
         if not utterance_ids:
             continue
+        if chapter.id not in first_by_chapter:
+            section = MemoirSection(
+                project_id=project_id,
+                chapter_id=chapter.id,
+                title=chapter.title,
+                section_type=MemoirSectionType.LIFE_FRAGMENT.value,
+                sort_order=max((item.sort_order for item in sections if item.chapter_id == chapter.id), default=-1) + 1,
+            )
+            db.add(section)
+            await db.flush()
+            first_by_chapter[chapter.id] = section
         affected |= await _move_materials(
             db,
             project_id=project_id,

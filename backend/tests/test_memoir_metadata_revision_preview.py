@@ -22,6 +22,8 @@ async def test_metadata_only_selection_previews_without_rewriting_the_book(clien
     _install_ai(monkeypatch, fake)
     await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
                                status=MemoirBookChapterDraftStatus.CONFIRMED)
+    # The review must see the same book metadata as the preview baseline.
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
     review = await _run_book_review(client, test_db, project_id=project_id)
     actions = review.json()["review"]["editorial_actions"]
     selected = [a["id"] for a in actions if a["action_type"] == "revise_book_profile"]
@@ -105,6 +107,7 @@ async def test_revision_accepts_only_copy_updates_and_applies_on_latest_version(
     _install_ai(monkeypatch, LayeredBookAI(book_actions=True, book_profile_action=True))
     await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
                                status=MemoirBookChapterDraftStatus.CONFIRMED)
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
     review = (await _run_book_review(client, test_db, project_id=project_id)).json()["review"]
     selected = [a["id"] for a in review["editorial_actions"] if a["action_type"] == "revise_book_profile"]
     assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")

@@ -228,3 +228,29 @@ async def admin_client(client, test_db):
     user.role = "admin"
     await test_db.commit()
     return client
+
+
+@pytest.fixture
+def unchanged_story_structure(monkeypatch):
+    """Routing tests keep the editor's decision unchanged; database application
+    and real digest freshness have dedicated structure/digest coverage."""
+    import json
+    from types import SimpleNamespace
+    from app.services.memoir import chapter_structure
+
+    async def existing_digests(*args, **kwargs):
+        return None
+
+    async def keep_outline(*args, **kwargs):
+        payload = json.loads(args[2].split("当前目录：\n", 1)[1].split("\n只返回 JSON", 1)[0])
+        for chapter in payload["chapters"]:
+            chapter.pop("locked")
+            chapter.pop("summary")
+            for section in chapter["sections"]:
+                section.pop("summary")
+                section.pop("material_examples")
+        return SimpleNamespace(value=chapter_structure.StructureOutput.model_validate(payload))
+
+    monkeypatch.setattr(chapter_structure, "generate_or_reuse_chapter_digest", existing_digests)
+    monkeypatch.setattr(chapter_structure, "get_ai_service", lambda _: None)
+    monkeypatch.setattr(chapter_structure, "generate_structured_with_client", keep_outline)

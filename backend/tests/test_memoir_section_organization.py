@@ -1468,6 +1468,73 @@ async def test_concurrent_section_creation_serializes_chapter_order(
     }
 
 
+@pytest.mark.db_independent
+async def test_review1470_parallel_initial_growth_keeps_winner_and_manual_draft(client, test_db, monkeypatch):
+    import asyncio
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.clock import utcnow_naive
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirEditingJobType
+    from app.services.memoir import book_plan_write_workflow as plans, editing_jobs
+    from app.services.memoir.book_plan_ai import GeneratedBookPlan, chapters_from_payload
+    pid = await ensure_mobile_memoir_project(client)
+    _, slow_job = await _stopped_growth_job(client, test_db, pid, '小时候住在成都。')
+    _, fast_job = await _stopped_growth_job(client, test_db, pid, '后来去了北京工作。')
+    for job in (slow_job, fast_job):
+        job.status, job.run_after = 'pending', utcnow_naive()
+    await test_db.commit()
+    leases = await editing_jobs.claim_due_editing_jobs(test_db, project_id=pid, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL, limit=2)
+    by_id = {lease.job_id: lease for lease in leases}
+    entered, release = asyncio.Event(), asyncio.Event()
+    plan_calls, section_calls = 0, []
+    async def generate(**kwargs):
+        nonlocal plan_calls
+        plan_calls += 1
+        if plan_calls == 1:
+            entered.set()
+            await release.wait()
+        title, chapters = chapters_from_payload({'title': '往事', 'chapters': [
+            {'title': '童年', 'source_indices': [1]}, {'title': '工作', 'source_indices': [2]},
+        ]}, sources=kwargs['sources'])
+        return GeneratedBookPlan(title=title, chapters=chapters, model='fixture', prompt='fixture')
+    async def regenerate(_db, **kwargs):
+        section_calls.append(kwargs['chapter_id'])
+    async def no_review(*args, **kwargs):
+        return False
+    monkeypatch.setattr(plans, '_generate_book_plan_from_sources', generate)
+    monkeypatch.setattr(story_tree_growth, 'regenerate_chapter_sections', regenerate)
+    monkeypatch.setattr(story_tree_growth, 'review_story_structure', no_review)
+    monkeypatch.setitem(editing_jobs._HANDLERS, MemoirEditingJobType.ORGANIZE_MATERIAL, story_tree_growth.run_story_tree_growth_job)
+    async with AsyncSession(test_db.bind, expire_on_commit=False) as slow, AsyncSession(test_db.bind, expire_on_commit=False) as fast:
+        task = asyncio.create_task(editing_jobs.run_editing_job(slow, by_id[slow_job.id]))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            assert await editing_jobs.run_editing_job(fast, by_id[fast_job.id])
+            _, chapters, _ = await story_tree_growth._load_tree(test_db, project_id=pid)
+            winner_ids = {chapter.id for chapter in chapters}
+            chapter = chapters[0]
+            chapter.title, chapter.metadata_json = '用户已确认的童年', {'title_updated_by': 'user'}
+            draft = await create_test_chapter_draft(test_db, project_id=pid, chapter_id=chapter.id,
+                status=MemoirBookChapterDraftStatus.DRAFT, content='我亲手改过的文字。')
+            version_id = await test_db.scalar(select(MemoirBookChapterDraftVersion.id).where(MemoirBookChapterDraftVersion.draft_id == draft.id))
+            links = (await test_db.scalars(select(MemoirSectionMaterial.id).where(MemoirSectionMaterial.project_id == pid))).all()
+            release.set()
+            assert await asyncio.wait_for(task, timeout=5)
+            _, after, _ = await story_tree_growth._load_tree(test_db, project_id=pid)
+            assert {c.id for c in after} == winner_ids
+            assert after[0].title == '用户已确认的童年'
+            saved = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.id == version_id))
+            assert saved is not None and saved.content == '我亲手改过的文字。'
+            assert set((await test_db.scalars(select(MemoirSectionMaterial.id).where(MemoirSectionMaterial.project_id == pid))).all()) == set(links)
+            await test_db.refresh(slow_job)
+            assert slow_job.result_json['new_chapter_ids'] == []
+            assert plan_calls == 2 and len(section_calls) == 2
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, monkeypatch):
     from app.services.memoir import book_plan_write_workflow as plans
     from app.services.memoir.book_plan_ai import GeneratedBookPlan, chapters_from_payload
@@ -1788,3 +1855,6 @@ async def test_waiting_for_correction_preserves_story_checkpoint(client, test_db
     waiting = await story_tree_growth.run_story_tree_growth_job(test_db, job)
     assert waiting.status.value == "pending"
     assert waiting.result_json["growth"] == progress
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")

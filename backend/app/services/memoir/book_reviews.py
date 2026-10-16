@@ -63,7 +63,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v6"
+BOOK_REVIEW_ENGINE = "llm_book_review_v7"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
@@ -147,12 +147,21 @@ class _BookReviewEditorialActionOutput(BaseModel):
     )
 
 
+class BookStructureFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["chapter_structure", "section_structure", "title_scope"]
+    chapter_ids: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class _BookReviewOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
     strengths: list[str] = Field(default_factory=list)
     structure_guidance: list[str] = Field(default_factory=list)
+    structure_findings: list[BookStructureFinding] = Field(default_factory=list)
     editorial_actions: list[_BookReviewEditorialActionOutput] = Field(
         default_factory=list
     )
@@ -273,12 +282,12 @@ async def ensure_chapter_digests(
             )
 
 
-async def load_book_review_context(
+async def load_book_review_metadata(
     db: AsyncSession,
     *,
     project_id: str,
-) -> BookReviewContext:
-    plan, plan_chapters = await _plan(db, project_id=project_id)
+    fallback_title: str = "",
+) -> dict[str, str]:
     output = await db.scalar(
         select(MemoirBookOutput).where(
             MemoirBookOutput.project_id == project_id,
@@ -292,18 +301,27 @@ async def load_book_review_context(
         if output is not None
         else None
     )
-    project = await db.get(Project, project_id)
+    project = await db.get(Project, project_id, populate_existing=True)
     book_title = (
         (project.title or "").strip()
         if project is not None
-        else formal_book_title((plan.title or "").strip())
+        else formal_book_title(fallback_title.strip())
     ) or "我的回忆录"
-    book_metadata = {
+    return {
         "title": book_title,
         **stored_manuscript_metadata(
-            latest.manuscript_json if latest is not None else None
+            latest.manuscript_json if latest is not None else {}
         ),
     }
+
+
+async def load_book_review_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> BookReviewContext:
+    plan, plan_chapters = await _plan(db, project_id=project_id)
+    book_metadata = await load_book_review_metadata(db, project_id=project_id, fallback_title=plan.title or "")
     chapters: list[BookReviewChapter] = []
     decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     edits_by_chapter: dict[str, list[TranscriptEdit]] = {}
@@ -375,7 +393,7 @@ async def load_book_review_context(
     signature = semantic_json_signature(
         {
             "plan": {"id": plan.id},
-            "book_title": book_title,
+            "book_metadata": book_metadata,
             "chapters": [
                 {
                     "id": chapter.chapter_id,
@@ -437,6 +455,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   "summary": "全书目前的整体面貌",
   "strengths": ["已经成立的主线或结构优点"],
   "structure_guidance": ["确有必要时给出的可选编辑建议"],
+  "structure_findings": [{{"kind":"chapter_structure|section_structure|title_scope","chapter_ids":["相关 chapter_id"],"reason":"根据现有正文发现的具体目录问题及依据"}}],
   "editorial_actions": [
     {{
       "action_type": "remove_repetition|improve_transition|reorder_chapters|revise_book_profile",
@@ -468,8 +487,11 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 从整体阅读感受出发，没有明显影响时可以不提修改。
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
 - revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组，并在 metadata_fields 精确列出需要修改的字段；其他类型的 metadata_fields 返回空数组。
-- 不能直接执行的编辑建议写入 structure_guidance，不要求用户补讲。
-- 不得建议新建、删除、合并章节，不得改变小节数量或归属。
+- 除目录问题外，不能直接执行的其他编辑建议写入 structure_guidance，不要求用户补讲；目录问题必须写入 structure_findings。
+- 允许发现并提出章节过碎、主题混杂、章或小节需要拆合、标题范围不符、归属不合适等结构问题，填入 structure_findings，并关联涉及的已有 chapter_id。
+- structure_findings 的 kind：chapter_structure 表示章的划分或归属问题；section_structure 表示小节的划分或归属问题；title_scope 表示章名或小节名与内容范围不符。只描述有正文依据的问题，不强求每次都有发现。
+- 目录调整由统一的目录写入流程核对素材后执行，保留原始讲述关联并保护人工修改，再更新正文。不要通过正文改写制造另一份目录，不把结构问题变成要求用户补讲的事项。
+- editorial_actions 仍只返回上面声明的四种正文/成书信息编辑类型，不把拆章、合章或合节伪装成这些操作。
 - 书名、全书定位或出版陈述不合适时使用 revise_book_profile，不要把它拆成需要用户补讲的问题。
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有事实冲突、内容是否收录等确实需要用户拍板的决定，resolution 才能是 user_decision。
@@ -595,6 +617,19 @@ def normalize_book_review(
             structure_guidance.append(guidance)
         if len(structure_guidance) >= 8:
             break
+    structure_findings: list[dict[str, object]] = []
+    references = _chapter_references(context)
+    for raw in payload.get("structure_findings", []):
+        finding = BookStructureFinding.model_validate(raw)
+        chapter_ids = list(dict.fromkeys(references.decode(ref) for ref in finding.chapter_ids))
+        reason = _user_visible_text(finding.reason, context=context, limit=1000)
+        if not reason:
+            raise ValueError("结构问题缺少正文依据")
+        structure_findings.append(BookStructureFinding(
+            kind=finding.kind, chapter_ids=chapter_ids, reason=reason,
+        ).model_dump())
+        if reason not in structure_guidance:
+            structure_guidance.append(reason)
     editorial_actions: list[dict[str, object]] = []
     raw_actions = payload.get("editorial_actions")
     references = _chapter_references(context)
@@ -670,6 +705,7 @@ def normalize_book_review(
             item_limit=240,
         ),
         "structure_guidance": structure_guidance,
+        "structure_findings": structure_findings,
         "editorial_actions": editorial_actions,
         "candidate_issues": issues,
     }

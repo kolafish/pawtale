@@ -198,3 +198,6 @@ def test_offered_chapter_is_shown_only_for_its_reply_and_only_when_it_can_be_cho
     assert growth.OFFERED_CHAPTER_GUIDANCE in prompt
     plain, _, _ = growth.build_story_growth_prompt(utterances=utterances, chapters=chapters, sections=sections, interviewer_lines={})
     assert 'offered_chapter_id' not in plain
+
+
+pytestmark = pytest.mark.usefixtures("unchanged_story_structure")
