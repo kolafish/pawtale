@@ -32,11 +32,12 @@ async def test_failed_chapter_retry_rechecks_only_unpublished_automatic_addition
     original_content = latest.content
     source, job = await _stopped_growth_job(client, test_db, project_id, "可以说明一下，就这么解释一下就好了。")
     source_id = source["utterance_id"]
-    material = await sections.assign_material_to_section(
+    material, changed_ids = await sections.assign_material_to_section(
         test_db, project_id=project_id, section_id=section_id, utterance_id=source_id,
         assigned_by=MemoirSectionMaterialAssignedBy.USER if outcome == "manual" else MemoirSectionMaterialAssignedBy.AI,
         assignment_reason="旧规则误归类",
     )
+    await sections.finalize_section_changes(test_db, project_id=project_id, section_ids=changed_ids)
     job.status = "succeeded"
     parent.status = "succeeded"
     parent.result_json = automatic_book_draft.DraftProgress(chapters={

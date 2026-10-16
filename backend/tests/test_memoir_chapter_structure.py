@@ -374,8 +374,9 @@ async def test_review_feedback_uses_the_shared_writer_once_per_source_input(clie
     assert not await structure.review_story_structure(test_db, user_id=uid, project_id=pid, book_review=review)
     assert len(calls) == 1
     source = await create_test_voice_transcript(client, test_db, '妈妈后来又教我写字。', project_id=pid)
-    await section_service.assign_material_to_section(test_db, project_id=pid, section_id=sections[0].id,
+    _, changed_ids = await section_service.assign_material_to_section(test_db, project_id=pid, section_id=sections[0].id,
         utterance_id=source['utterance_id'], assigned_by=MemoirSectionMaterialAssignedBy.AI, assignment_reason='new_story')
+    await section_service.finalize_section_changes(test_db, project_id=pid, section_ids=changed_ids)
     await test_db.commit()
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     new_context = await structure.structure_context(test_db, plan, chapters, sections)

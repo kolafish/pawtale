@@ -61,8 +61,7 @@ from app.services.memoir.section_regeneration import (
     SectionRegenerationNeedsMaterial,
     regenerate_chapter_sections,
 )
-from app.services.memoir.section_digests import mark_section_digests_stale
-from app.services.memoir.sections import lock_chapter_structure, lock_plan_structure, place_material
+from app.services.memoir.sections import finalize_section_changes, lock_chapter_structure, lock_plan_structure, place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -759,7 +758,7 @@ async def _remove_recovered_nonstory(
     section.version += 1
     section.updated_at = utcnow_naive()
     batch.section_versions[section.id] = section.version
-    await mark_section_digests_stale(db, project_id=project_id, section_ids={section.id})
+    await finalize_section_changes(db, project_id=project_id, section_ids={section.id})
     await db.flush()
     db.expire(section, ["materials"])
     return True
@@ -770,10 +769,11 @@ async def grow_story_tree(
     *,
     job: MemoirEditingJob,
     session: MemoirVoiceSession,
-) -> EditingJobResult:
+) -> tuple[EditingJobResult, bool]:
+    """Return progress and whether structure review already scheduled the book."""
     project = await db.scalar(select(Project).where(Project.id == job.project_id))
     if project is None:
-        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="回忆录不存在")
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="回忆录不存在"), False
     before_plan, before_chapters, before_sections = await _load_tree(
         db,
         project_id=job.project_id,
@@ -819,7 +819,7 @@ async def grow_story_tree(
                 status=MemoirEditingJobStatus.SKIPPED,
                 result_json={"voice_session_id": session.id, "growth": progress.model_dump(mode="json")},
                 error_message=NO_STORY_YET,
-            )
+            ), False
     await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
     recovery_materials = await _recovery_materials(db, job=job, sections=before_sections)
 
@@ -963,9 +963,13 @@ async def grow_story_tree(
     # Preserve placement checkpoints before reviewing; report only the final
     # directory, not a transient chapter that the same review absorbed.
     await _save_progress(db, job, progress)
+    structure_changed = False
     if session.status == MemoirVoiceSessionStatus.STOPPED.value:
         lease_token = job.lease_token
-        await review_story_structure(db, user_id=project.user_id, project_id=job.project_id)
+        structure_changed = await review_story_structure(
+            db, user_id=project.user_id, project_id=job.project_id,
+            source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized",
+        )
         # The review crosses provider/checkpoint boundaries. Re-read task and
         # session state before accepting ownership of the final progress write.
         await db.refresh(job)
@@ -1018,7 +1022,7 @@ async def grow_story_tree(
             "new_section_ids": new_section_ids,
             "organized_utterance_ids": placed_ids,
         }
-    )
+    ), structure_changed
 
 
 async def run_story_tree_growth_job(
@@ -1055,8 +1059,9 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.PENDING,
             result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
-    result = await grow_story_tree(db, job=job, session=session)
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=job.project_id,
-        source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized", settled=True)
+    result, structure_changed = await grow_story_tree(db, job=job, session=session)
+    if not structure_changed:
+        from app.services.memoir.automatic_book_draft import schedule_book_draft
+        await schedule_book_draft(db, project_id=job.project_id,
+            source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized", settled=True)
     return result
