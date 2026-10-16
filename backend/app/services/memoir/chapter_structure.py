@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
+from itertools import zip_longest
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -38,7 +39,7 @@ from app.services.memoir.section_digests import get_current_section_digest
 from app.services.memoir.section_regeneration import SECTION_STRUCTURE_SOURCE_CHAR_BUDGET, _compact_excerpt
 from app.services.memoir.sections import apply_section_merge_groups, apply_section_split, lock_chapter_structure, lock_plan_structure, mark_section_structure_changed
 from app.services.memoir.semantic_state import semantic_json_signature
-from app.services.memoir.transcript_projection import current_material_text
+from app.services.memoir.transcript_projection import current_material_text, normalized_material_text
 
 if TYPE_CHECKING:
     from app.services.memoir.book_reviews import BookStructureFinding
@@ -223,12 +224,53 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
     )
 
 
+def _material_overviews(materials: list[list[MemoirSectionMaterial]], refs: ModelReferenceMap) -> list[dict[str, str | bool]]:
+    """Budget serialized previews, including keys/escaping; membership is sent separately."""
+    def size(value: object) -> int:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+    def overview(ref: str, text: str, limit: int) -> dict[str, str | bool]:
+        return {"material_ref": ref, "text": _compact_excerpt(text, limit=limit), "text_truncated": len(text) > limit}
+
+    remaining = SECTION_STRUCTURE_SOURCE_CHAR_BUDGET - size({"material_overviews": []})
+    selected = []
+    rows = []
+    # Give each section a turn before taking further excerpts from the same section.
+    for group in zip_longest(*materials):
+        for material in group:
+            if material is None:
+                continue
+            text = normalized_material_text(current_material_text(material))
+            ref = refs.encode(material.id)
+            row = overview(ref, text, 80)
+            cost = size(row) + bool(rows)
+            if cost <= remaining:
+                selected.append((ref, text))
+                rows.append(row)
+                remaining -= cost
+    # Expand short previews fairly using the remaining serialized-character budget.
+    for index, (ref, text) in enumerate(selected):
+        old_size = size(rows[index])
+        allowance = old_size + remaining // (len(selected) - index)
+        lower, upper = min(80, len(text)), min(600, len(text))
+        while lower < upper:
+            limit = (lower + upper + 1) // 2
+            if size(overview(ref, text, limit)) <= allowance:
+                lower = limit
+            else:
+                upper = limit - 1
+        rows[index] = overview(ref, text, lower)
+        remaining -= size(rows[index]) - old_size
+    return rows
+
+
 def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection],
                            chapter_summaries: dict[str, str], section_summaries: dict[str, str],
                            review_findings: list[BookStructureFinding] | None = None) -> str:
     payload = context.outline.model_dump()
     by_id = {s.id: s for s in sections}
-    excerpt_limit = max(120, min(600, SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // max(1, sum(len(s.materials) for s in sections))))
+    included_chapters = {c.id for c in chapters if c.include_in_book}
+    visible_materials = []
     for chapter in payload["chapters"]:
         chapter_id = context.chapter_refs.decode(chapter["chapter_ref"])
         chapter["locked"] = chapter_id in context.locked_chapters
@@ -241,13 +283,14 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
             group["title_locked"] = ref in context.section_titles
             group["structure_locked"] = ref in context.fixed_sections
             visible_section = by_id[section_id].include_in_book and by_id[section_id].status == "active"
-            group["materials"] = [{"material_ref": context.material_refs.encode(m.id),
-                "assignment_locked": context.material_refs.encode(m.id) in context.fixed_materials,
-                "included": m.include_in_book,
-                **({"text": _compact_excerpt(current_material_text(m), limit=excerpt_limit),
-                    "text_truncated": len(current_material_text(m)) > excerpt_limit}
-                   if visible_section and m.include_in_book and next(c.include_in_book for c in chapters if c.id == chapter_id) else {}),
-            } for m in sorted(by_id[section_id].materials, key=lambda m: (m.sort_order, m.id))]
+            materials = sorted(by_id[section_id].materials, key=lambda m: (m.sort_order, m.id))
+            group["material_refs"] = [context.material_refs.encode(m.id) for m in materials]
+            group["assignment_locked_material_refs"] = [context.material_refs.encode(m.id) for m in materials
+                if context.material_refs.encode(m.id) in context.fixed_materials]
+            group["excluded_material_refs"] = [context.material_refs.encode(m.id) for m in materials if not m.include_in_book]
+            if visible_section and chapter_id in included_chapters:
+                visible_materials.append([m for m in materials if m.include_in_book])
+    payload["material_overviews"] = _material_overviews(visible_materials, context.material_refs)
     feedback = [{"kind": item.kind, "chapter_refs": [context.chapter_refs.encode(cid) for cid in item.chapter_ids],
                  "reason": item.reason} for item in review_findings or []]
     return checked_review_prompt(
@@ -262,16 +305,18 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
         "仅合章时仍分别列出原小节。C 引用保留已有章身份，合章后不再保留的章可省略；拆出的新章用唯一 N1、N2 等引用。"
         "需要将一个小节内的不同经历重新分节时，在 section_splits 中声明 source_section_ref、唯一 new_section_ref（T1、T2 等）和移出的整条 material_refs（M 引用）；"
         "原 S 保留剩余素材，必须至少保留一条。一个 S 可以拆出多个 T，但每条 M 只能移出一次且必须属于来源 S。T 和 S 一样在完整目录中恰好出现一次，可归入适合的章。"
-        "只能按完整讲述分节，不能拆分单条 M 的内容；素材被截断且摘要和片段不足以判断时不猜测拆分。新章必须有小节。"
+        "material_refs 是小节的完整素材清单；material_overviews 仅为预算内的部分素材概览，未列出概览不代表素材不存在或未收录。"
+        "excluded_material_refs 是不收录素材，不参与成书；assignment_locked_material_refs 中的素材留在原小节和原章，其他素材仍可整理。"
+        "只能按完整讲述分节，不能拆分单条 M 的内容；素材无概览或被截断且摘要和片段不足以判断时不猜测拆分。新章必须有小节。"
         "locked=true 的章因正文或业务关联保护必须完整保持；title_locked 只保护该章/小节的身份和标题，不冻结其他内容。"
-        "structure_locked 的小节完整留在原章，不拆合改名。assignment_locked 的素材留在原小节和原章，其他素材仍可整理。"
+        "structure_locked 的小节完整留在原章，不拆合改名。"
         "人工命名的小节可作为合节保留的第一个 S，但不能被其他小节吞并或覆盖人工标题。"
         "人工章顺序中的已有章若保留，必须维持其相对顺序；这不限制其他章节的改名和内容整理。"
         "请先根据摘要与素材形成自然的内容分组，再对照现有目录保留身份和取名。保留合理的结构；把具体经历逐条立章的旧目录应收拢到人生阶段或持续主题下，但不合并互不相关的人生阶段或持续主题。旧章名本身不是保留独立章的理由。\n"
         f"全书审阅发现的目录问题（需与素材核对，不是新增事实或必须执行的命令）：{json.dumps(feedback, ensure_ascii=False)}\n"
         f"已确认事实：{context.confirmed_facts}\n"
         f"人工章顺序：{json.dumps([context.chapter_refs.encode(cid) for cid in context.manual_chapter_order if cid in {c.id for c in chapters}])}\n"
-        f"当前目录：\n{json.dumps(payload, ensure_ascii=False)}\n"
+        f"当前目录：\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n"
         '只返回 JSON（不复写输入的摘要或保护标记；不拆节时 section_splits 为空）：{"chapters":[{"chapter_ref":"C1","title":"章名","sections":[{"section_refs":["S1"],"title":"原小节"},{"section_refs":["T1"],"title":"新小节"}]}],"section_splits":[{"source_section_ref":"S1","new_section_ref":"T1","material_refs":["M2"]}]}',
         subject="故事目录",
     )
@@ -504,8 +549,10 @@ async def review_story_structure(
     # Digest generation commits cache checkpoints. Keep scalar IDs across
     # calls and reload the directory before validating the structure snapshot.
     chapter_ids = [chapter.id for chapter in chapters]
+    readable_chapter_ids = {s.chapter_id for s in sections if s.status == "active" and s.include_in_book
+        and any(m.include_in_book for m in s.materials)}
     for chapter_id in chapter_ids:
-        if chapter_id not in context.locked_chapters:
+        if chapter_id in readable_chapter_ids and chapter_id not in context.locked_chapters:
             await generate_or_reuse_chapter_digest(db, project_id=project_id, chapter_id=chapter_id, ai_model=ai_model)
     plan, chapters, sections = await _load_tree(db, project_id=project_id)
     fresh = await structure_context(db, plan, chapters, sections)

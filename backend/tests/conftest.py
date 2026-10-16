@@ -249,7 +249,7 @@ def unchanged_story_structure(monkeypatch):
                 for section in chapter["sections"]
             ]} for chapter in payload["chapters"]
         ]
-        return SimpleNamespace(value=chapter_structure.StructureOutput.model_validate(payload))
+        return SimpleNamespace(value=chapter_structure.StructureOutput.model_validate({"chapters": payload["chapters"]}))
 
     monkeypatch.setattr(chapter_structure, "generate_or_reuse_chapter_digest", existing_digests)
     monkeypatch.setattr(chapter_structure, "get_ai_service", lambda _: None)

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -9,6 +10,7 @@ from app.models.memoir import MemoirSectionMaterial
 from app.models.projects import Project
 from app.services.memoir import chapter_structure as structure
 from app.services.memoir.story_tree_growth import _load_tree, build_story_growth_prompt
+from app.services.ai_references import ModelReferenceMap
 from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
 
 
@@ -435,7 +437,7 @@ async def test_growth_worker_generates_real_digests_and_schedules_book(client, t
         target_chapter = next(c for c in answer['chapters'] if any(s['section_refs'] == [target_ref] for s in c['sections']))
         target_chapter['sections'].append({'section_refs': ['T1'], 'title': '课堂上的板凳'})
         answer['section_splits'] = [{'source_section_ref': target_ref, 'new_section_ref': 'T1',
-            'material_refs': [current['materials'][-1]['material_ref']]}]
+            'material_refs': [current['material_refs'][-1]]}]
         return structure.StructureOutput.model_validate(answer)
     calls = _provider(monkeypatch, split_answer if split_section else
         _merge(context, merge_sections=True) if merge_sections else context.outline)
@@ -991,11 +993,14 @@ async def test_split_prompt_uses_material_references_but_omits_excluded_text(cli
         chapter_summaries={}, section_summaries={})
     import json
     payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
-    material_payloads = [m for c in payload['chapters'] for s in c['sections'] for m in s['materials']]
-    hidden = next(m for m in material_payloads if m['material_ref'] == context.material_refs.encode(excluded.id))
-    assert hidden['assignment_locked'] and not hidden['included'] and 'text' not in hidden
-    assert len(material_payloads) == sum(len(s.materials) for s in sections)
-    assert all(m['text'] for m in material_payloads if m['included'])
+    groups = [s for c in payload['chapters'] for s in c['sections']]
+    hidden_ref = context.material_refs.encode(excluded.id)
+    hidden_group = next(g for g in groups if hidden_ref in g['material_refs'])
+    assert hidden_ref in hidden_group['assignment_locked_material_refs']
+    assert hidden_ref in hidden_group['excluded_material_refs']
+    assert hidden_ref not in {m['material_ref'] for m in payload['material_overviews']}
+    assert sum(len(g['material_refs']) for g in groups) == sum(len(s.materials) for s in sections)
+    assert all(m['text'] for m in payload['material_overviews'])
 
 
 async def test_manual_split_records_title_ownership_without_freezing_the_chapter(client, test_db, monkeypatch):
@@ -1045,3 +1050,78 @@ async def test_split_cannot_leave_a_retained_chapter_with_only_excluded_material
     plan, after_chapters, after = await _load_tree(test_db, project_id=pid)
     assert (await structure.structure_context(test_db, plan, after_chapters, after)).outline == context.outline
     assert structure.material_identity(after) == original
+
+
+@pytest.mark.parametrize('unavailable', ['empty', 'archived', 'excluded_section', 'excluded_material'])
+async def test_unreadable_chapter_does_not_block_other_chapter_review(client, test_db, monkeypatch, unavailable):
+    from app.services.memoir import chapter_digests, section_digests
+    from tests.test_memoir_chapter_pipeline import FakeChapterAI
+    pid, uid = await _book(client, test_db)
+    _, chapters, sections = await _load_tree(test_db, project_id=pid)
+    unreadable = next(s for s in sections if s.chapter_id == chapters[0].id)
+    if unavailable == 'empty':
+        await test_db.delete(unreadable.materials[0])
+    elif unavailable == 'archived':
+        unreadable.status = 'archived'
+    elif unavailable == 'excluded_section':
+        unreadable.include_in_book = False
+    else:
+        unreadable.materials[0].include_in_book = False
+    await test_db.commit()
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    original_sources = structure.material_identity(sections)
+    readable_ids = [c.id for c in chapters[1:]]
+    unreadable_group = context.outline.chapters[0].model_copy(deep=True)
+    output = context.outline.model_copy(deep=True)
+    output.chapters[-1].title = '工作岁月'
+    real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure.load_structure_summaries
+    calls = _provider(monkeypatch, output)
+    prepared = []
+    async def digest(db, **kwargs):
+        prepared.append(kwargs['chapter_id'])
+        return await real_digest(db, **kwargs)
+    monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', digest)
+    monkeypatch.setattr(structure, 'load_structure_summaries', real_summaries)
+    fake = FakeChapterAI(section_material_id='', chapter_section_id='', chapter_material_id='', draft_material_ids=[])
+    monkeypatch.setattr(chapter_digests, 'get_ai_service', lambda _: fake)
+    monkeypatch.setattr(section_digests, 'get_ai_service', lambda _: fake)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert prepared == readable_ids
+    assert len(calls) == 1
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    after = await structure.structure_context(test_db, plan, chapters, sections)
+    assert after.outline.chapters[0] == unreadable_group
+    assert chapters[-1].title == '工作岁月'
+    assert structure.material_identity(sections) == original_sources
+
+
+@pytest.mark.parametrize('count,text', [(4, '妈妈的课堂。'), (600, '童年往事。' * 1000), (2000, '\x01"\\' * 1000)],
+                         ids=['short', '600-long-materials', '2000-json-escaped-materials'])
+def test_structure_material_overviews_obey_serialized_budget(count, text):
+    sections = [SimpleNamespace(id=f's{i}', chapter_id='c', include_in_book=True, status='active', materials=[])
+                for i in range(4)]
+    for i in range(count):
+        sections[i % len(sections)].materials.append(SimpleNamespace(id=f'm{i}', sort_order=i,
+            include_in_book=True, transcript_version=SimpleNamespace(content=text)))
+    refs = ModelReferenceMap('M', (m.id for s in sections for m in s.materials))
+    context = structure.StructureContext(
+        outline=structure.StructureOutput(chapters=[structure.ChapterGroup(chapter_ref='C1', title='童年',
+            sections=[structure.SectionGroup(section_refs=[f'S{i+1}'], title='往事') for i in range(4)])]),
+        chapter_refs=ModelReferenceMap('C', ['c']), section_refs=ModelReferenceMap('S', [s.id for s in sections]),
+        locked_chapters=frozenset(), signature='', material_refs=refs,
+        fixed_materials={refs.encode('m0'): ('S1', 'C1')})
+    prompt = structure.build_structure_prompt(context, chapters=[SimpleNamespace(id='c', include_in_book=True)],
+        sections=sections, chapter_summaries={}, section_summaries={})
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
+    groups = payload['chapters'][0]['sections']
+    assert {ref for g in groups for ref in g['material_refs']} == {refs.encode(f'm{i}') for i in range(count)}
+    assert groups[0]['assignment_locked_material_refs'] == [refs.encode('m0')]
+    overviews = payload['material_overviews']
+    assert len(json.dumps({'material_overviews': overviews}, ensure_ascii=False, separators=(',', ':'))) <= 8000
+    assert len(prompt) <= 100_000
+    assert len({row['material_ref'] for row in overviews}) == len(overviews)
+    assert all(any(row['material_ref'] in g['material_refs'] for row in overviews) for g in groups)
+    assert all(row['text_truncated'] == (row['text'] != text) for row in overviews)
+    if count == 4:
+        assert len(overviews) == count and all(row['text'] == text for row in overviews)
