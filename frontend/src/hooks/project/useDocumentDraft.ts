@@ -4,6 +4,7 @@ import { projectsApi } from '../../api';
 import type { Project } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 import { useRegisterDraftSave } from './draftSaves';
+import { useTextHistory, type TextEditOptions } from '../useTextHistory';
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'conflict';
 
@@ -59,7 +60,8 @@ export function useDocumentDraft({
   refreshProject,
 }: UseDocumentDraftArgs) {
   const [documentName, setDocumentName] = useState('');
-  const [documentContent, setDocumentContent] = useState('');
+  const contentHistory = useTextHistory();
+  const { text: documentContent, setText: setDocumentContent, reset: resetContent } = contentHistory;
   const [synopsis, setSynopsis] = useState('');
   const [status, setStatus] = useState('draft');
   const [label, setLabel] = useState('');
@@ -122,10 +124,22 @@ export function useDocumentDraft({
     setDocumentName(name);
   }, []);
 
-  const updateDocumentContent = useCallback((content: string) => {
+  const updateDocumentContent = useCallback((content: string, options?: TextEditOptions) => {
     currentSnapshotRef.current = { ...currentSnapshotRef.current, content };
-    setDocumentContent(content);
-  }, []);
+    setDocumentContent(content, options);
+  }, [setDocumentContent]);
+
+  const undoDocumentContent = () => {
+    const previous = contentHistory.undo();
+    if (previous) currentSnapshotRef.current = { ...currentSnapshotRef.current, content: previous.text };
+    return previous;
+  };
+
+  const redoDocumentContent = () => {
+    const next = contentHistory.redo();
+    if (next) currentSnapshotRef.current = { ...currentSnapshotRef.current, content: next.text };
+    return next;
+  };
 
   const updateSynopsis = useCallback((nextSynopsis: string) => {
     currentSnapshotRef.current = { ...currentSnapshotRef.current, synopsis: nextSynopsis };
@@ -169,7 +183,7 @@ export function useDocumentDraft({
     contentRevisionRef.current = contentRevision;
     setSaveStatus(snapshotsEqual(snapshot, lastSavedSnapshotRef.current) ? 'saved' : 'unsaved');
     setDocumentContent(content);
-  }, []);
+  }, [setDocumentContent]);
 
   const markCurrentDocumentRenamed = useCallback((docId: string, name: string) => {
     if (useAppStore.getState().currentDocumentId !== docId) return;
@@ -183,12 +197,12 @@ export function useDocumentDraft({
   const resetDraft = useCallback(() => {
     setCurrentDocumentId(null);
     setDocumentName('');
-    setDocumentContent('');
+    resetContent('');
     setSynopsis('');
     setStatus('draft');
     setLabel('');
     markSnapshotSaved(emptySnapshot(), 0);
-  }, [markSnapshotSaved, setCurrentDocumentId]);
+  }, [markSnapshotSaved, resetContent, setCurrentDocumentId]);
 
   const setIsReviewing = useCallback((value: boolean) => {
     isReviewingRef.current = value;
@@ -232,7 +246,7 @@ export function useDocumentDraft({
       const doc = await projectsApi.getDocument(currentProject.id, docId);
       if (sequence !== loadSequenceRef.current || useAppStore.getState().currentProject?.id !== currentProject.id) return;
       setDocumentName(doc.name);
-      setDocumentContent(doc.content);
+      resetContent(doc.content);
       setSynopsis(doc.synopsis || '');
       setStatus(doc.status);
       setLabel(doc.label || '');
@@ -244,7 +258,7 @@ export function useDocumentDraft({
     } finally {
       if (sequence === loadSequenceRef.current) isLoadingDocRef.current = false;
     }
-  }, [currentProject, markSnapshotSaved, setCurrentDocumentId]);
+  }, [currentProject, markSnapshotSaved, resetContent, setCurrentDocumentId]);
 
   const switchDocument = useCallback(async (docId: string) => {
     if (docId === currentDocumentId) return;
@@ -256,7 +270,10 @@ export function useDocumentDraft({
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
     if (isReviewingRef.current || conflictRef.current) return;
     const snapshot = getCurrentSnapshot();
-    if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
+    if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) {
+      setSaveStatus('saved');
+      return;
+    }
     setSaveStatus('unsaved');
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -294,6 +311,12 @@ export function useDocumentDraft({
     setDocumentName: updateDocumentName,
     documentContent,
     setDocumentContent: updateDocumentContent,
+    canUndoContent: contentHistory.canUndo,
+    canRedoContent: contentHistory.canRedo,
+    undoDocumentContent,
+    redoDocumentContent,
+    setContentSelection: contentHistory.setSelection,
+    breakContentHistoryGroup: contentHistory.breakGroup,
     synopsis,
     setSynopsis: updateSynopsis,
     status,

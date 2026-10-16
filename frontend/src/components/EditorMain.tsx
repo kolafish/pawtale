@@ -16,11 +16,13 @@ import {
   Minus,
   Pencil,
   Quote,
+  Redo2,
   RefreshCw,
   Save,
   SquareCode,
   Strikethrough,
   Table,
+  Undo2,
   Wand2,
   Eye,
 } from 'lucide-react';
@@ -28,6 +30,7 @@ import { DiffReviewView } from './DiffReviewView';
 import { MultiModelTabBar } from './MultiModelTabBar';
 import type { DiffChunk, SelectionRange, MultiReviseResultItem } from '../types';
 import type { SaveStatus } from '../hooks/useProjectState';
+import type { TextEditOptions, TextSelection, TextSnapshot } from '../hooks/useTextHistory';
 import {
   applyMarkdownFormat,
   applyMarkdownIndent,
@@ -41,7 +44,13 @@ interface EditorMainProps {
   title: string;
   setTitle: (v: string) => void;
   editorContent: string;
-  setEditorContent: (v: string) => void;
+  setEditorContent: (v: string, options?: TextEditOptions) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => TextSnapshot | null;
+  onRedo: () => TextSnapshot | null;
+  onContentSelectionChange: (selection: TextSelection) => void;
+  onBreakHistoryGroup: () => void;
   saveStatus: SaveStatus;
   wordCount: number;
   totalWordCount: number;
@@ -123,6 +132,12 @@ export function EditorMain({
   setTitle,
   editorContent,
   setEditorContent,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onContentSelectionChange,
+  onBreakHistoryGroup,
   saveStatus,
   wordCount,
   totalWordCount,
@@ -145,6 +160,7 @@ export function EditorMain({
   onToggleAIPanel,
 }: EditorMainProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
   const [viewMode, setViewMode] = useState<EditorViewMode>('edit');
   const saveStatusLabel = saveStatus === 'saved'
     ? '已保存'
@@ -165,6 +181,7 @@ export function EditorMain({
     const target = e.currentTarget;
     const start = target.selectionStart;
     const end = target.selectionEnd;
+    onContentSelectionChange({ start, end });
     if (start !== end) {
       onSelectionChange({
         start,
@@ -176,20 +193,29 @@ export function EditorMain({
     }
   };
 
-  const applyEditResult = (result: MarkdownEditResult) => {
-    setEditorContent(result.text);
+  const restoreSelection = (text: string, selection: TextSelection) => {
+    const target = textareaRef.current;
     window.requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(result.start, result.end);
-      if (result.start !== result.end) {
-        onSelectionChange({
-          start: result.start,
-          end: result.end,
-          text: result.text.substring(result.start, result.end),
-        });
-      }
+      if (!target || textareaRef.current !== target) return;
+      target.focus();
+      target.setSelectionRange(selection.start, selection.end);
+      onSelectionChange(selection.start === selection.end ? null : {
+        ...selection,
+        text: text.substring(selection.start, selection.end),
+      });
     });
+  };
+
+  const applyEditResult = (result: MarkdownEditResult) => {
+    const after = { start: result.start, end: result.end };
+    setEditorContent(result.text, { before: currentTextareaSelection(), after });
+    restoreSelection(result.text, after);
+  };
+
+  const navigateHistory = (direction: 'undo' | 'redo') => {
+    if (viewMode === 'preview' || composingRef.current) return;
+    const result = direction === 'undo' ? onUndo() : onRedo();
+    if (result) restoreSelection(result.text, result.selection);
   };
 
   const currentTextareaSelection = () => {
@@ -205,6 +231,14 @@ export function EditorMain({
   };
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229) return;
+    onContentSelectionChange(currentTextareaSelection());
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
+      event.preventDefault();
+      navigateHistory(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+      return;
+    }
     const command = getMarkdownKeyboardCommand({
       key: event.key,
       code: event.code,
@@ -241,7 +275,29 @@ export function EditorMain({
     <textarea
       ref={textareaRef}
       value={editorContent}
-      onChange={(e) => setEditorContent(e.target.value)}
+      onChange={(event) => {
+        const { inputType } = event.nativeEvent as InputEvent;
+        if (inputType === 'historyUndo' || inputType === 'historyRedo') {
+          navigateHistory(inputType === 'historyUndo' ? 'undo' : 'redo');
+          return;
+        }
+        const group = composingRef.current || inputType === 'insertCompositionText'
+          ? 'composition'
+          : ['insertText', 'deleteContentBackward', 'deleteContentForward'].includes(inputType)
+            ? inputType
+            : undefined;
+        setEditorContent(event.target.value, {
+          after: { start: event.target.selectionStart, end: event.target.selectionEnd },
+          group,
+        });
+      }}
+      onBeforeInput={handleSelect}
+      onPaste={handleSelect}
+      onCompositionStart={() => {
+        onBreakHistoryGroup();
+        composingRef.current = true;
+      }}
+      onCompositionEnd={() => { composingRef.current = false; }}
       onKeyDown={handleEditorKeyDown}
       onSelect={handleSelect}
       onMouseUp={handleSelect}
@@ -328,6 +384,25 @@ export function EditorMain({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-pink-100 bg-white px-2 py-2">
+              <div className="flex items-center">
+                {([
+                  { direction: 'undo', label: '撤销', shortcut: 'Cmd/Ctrl+Z', enabled: canUndo, icon: Undo2 },
+                  { direction: 'redo', label: '重做', shortcut: 'Cmd/Ctrl+Shift+Z / Ctrl+Y', enabled: canRedo, icon: Redo2 },
+                ] as const).map(({ direction, label, shortcut, enabled, icon: Icon }) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    aria-label={label}
+                    title={`${label} ${shortcut}`}
+                    disabled={!enabled || viewMode === 'preview'}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => navigateHistory(direction)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 transition-[background-color,color,transform] hover:bg-pink-50 hover:text-pink-600 active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-600"
+                  >
+                    <Icon size={16} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center gap-1">
                 {MARKDOWN_TOOLS.map((tool) => {
                   const Icon = tool.icon;
