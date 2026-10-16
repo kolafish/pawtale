@@ -433,3 +433,154 @@ async def test_live_batch_combines_sessions_and_only_one_existing_job_organizes_
         assert calls == [ready]
     finally:
         await lease.release()
+
+
+@pytest.mark.parametrize('dependency', ['excluded', 'missing', 'reading_pending', 'reading_failed'])
+async def test_waiting_person_answers_do_not_starve_later_live_stories(client, test_db, monkeypatch, dependency):
+    from app.models.memoir import MemoirChatMessage, MemoirSectionMaterial, MemoirVoiceSession, MemoirVoiceUtterance
+    from app.services.asr.capacity import voice_gateway_capacity_manager
+    from app.services.memoir import narration_people
+    from app.services.memoir.transcript_projection import source_text_hash
+
+    pid, chapters, originals = await _book(client, test_db)
+    original = originals[0]
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == original['utterance_id']))
+    material.include_in_book = dependency != 'excluded'
+    source, job = await _stopped_growth_job(client, test_db, pid, '二舅当时带我去了县城。')
+    session = await test_db.get(MemoirVoiceSession, source['session']['id'])
+    session.status = 'listening'
+    person_id = f"{original['message_id']}:version:1"
+    question = MemoirChatMessage(project_id=pid, voice_session_id=session.id, role='assistant',
+        content_text='能再讲讲这位亲人吗？', metadata_json={narration_people.ASKED_KEY:
+            'deleted-message:version:1' if dependency == 'missing' else person_id})
+    test_db.add(question)
+    await test_db.flush()
+    answers = [await test_db.get(MemoirVoiceUtterance, source['utterance_id'])]
+    for index in range(4):
+        answers.append(await _add_narration(test_db, session, f'二舅帮我办的第{index + 1}件事。'))
+    deferred = {}
+    for answer in answers:
+        message = await test_db.get(MemoirChatMessage, answer.chat_message_id)
+        message.parent_message_id = question.id
+        if dependency.startswith('reading_'):
+            test_db.add(MemoirEditingJob(project_id=pid, job_type='fill_narrator_profile',
+                status='pending' if dependency == 'reading_pending' else 'failed',
+                dedupe_key=f'narrator_profile:{answer.id}', run_after=automatic_book_draft.utcnow_naive()))
+        else:
+            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
+                'question_message_id': question.id, 'source_text_hash': source_text_hash(message.content_text),
+                'story_content': True}}
+        deferred[answer.id] = story_tree_growth.DeferredSource(text_hash=source_text_hash(message.content_text),
+            status='pending', reason='等待原讲述或内容核对', question_context=story_tree_growth._question_context(message))
+    job.result_json = {'growth': story_tree_growth.StoryGrowthProgress(deferred=deferred).model_dump(mode='json')}
+    ready = {(await _add_narration(test_db, session, f'后来我去杭州的第{index + 1}段故事。')).id for index in range(5)}
+    await test_db.commit()
+    calls = []
+
+    async def decide(**kwargs):
+        calls.append({item.id for item in kwargs['utterances']})
+        return [story_tree_growth.GrowthGroup(action='create_section', chapter_id=chapters[0].id,
+            new_section_title='杭州的往事', utterance_ids=list(ready))]
+
+    async def digest(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(story_tree_growth, 'decide_story_growth', decide)
+    monkeypatch.setattr(story_tree_growth, 'generate_or_reuse_chapter_digest', digest)
+    lease = await voice_gateway_capacity_manager.acquire(source['user_id'], session.id)
+    try:
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        placed = set((await test_db.scalars(select(MemoirSectionMaterial.utterance_id).where(
+            MemoirSectionMaterial.utterance_id.in_(ready)))).all())
+        assert placed == ready and calls == [ready]
+        assert await story_tree_growth._live_batch_sources(test_db, project_id=pid,
+            progress=story_tree_growth._progress(job)) == []
+        # Once the source/reading dependency is resolved, the same answers can resume.
+        material.include_in_book = True
+        question.metadata_json = {narration_people.ASKED_KEY: person_id}
+        for answer in answers:
+            message = await test_db.get(MemoirChatMessage, answer.chat_message_id)
+            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
+                'question_message_id': question.id, 'source_text_hash': source_text_hash(message.content_text),
+                'story_content': True}}
+        await test_db.commit()
+        assert {item.id for item in await story_tree_growth._live_batch_sources(test_db, project_id=pid,
+            progress=story_tree_growth._progress(job))} == {item.id for item in answers}
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        assert calls == [ready]
+        assert set((await test_db.scalars(select(MemoirSectionMaterial.utterance_id).where(
+            MemoirSectionMaterial.utterance_id.in_([item.id for item in answers])))).all()) == {item.id for item in answers}
+    finally:
+        await lease.release()
+
+
+@pytest.mark.parametrize('saved_live_scope', [False, True])
+async def test_live_resume_checks_all_sources_in_the_saved_classification(client, test_db, monkeypatch, saved_live_scope):
+    from app.models.memoir import MemoirChatMessage, MemoirSectionMaterial, MemoirVoiceSession
+    from app.services.asr.capacity import voice_gateway_capacity_manager
+
+    pid, chapters, _ = await _book(client, test_db)
+    source, job = await _stopped_growth_job(client, test_db, pid, '第一段早年的经历。')
+    sid, jid = source['session']['id'], job.id
+    session = await test_db.get(MemoirVoiceSession, sid)
+    ids = [source['utterance_id']]
+    for index in range(6):
+        ids.append((await _add_narration(test_db, session, f'第{index + 2}段早年的经历。')).id)
+    calls = []
+
+    async def decide(**kwargs):
+        selected = [item.id for item in kwargs['utterances']]
+        calls.append(set(selected))
+        return [story_tree_growth.GrowthGroup(action='create_section', chapter_id=chapters[0].id,
+            new_section_title='早年的往事', utterance_ids=selected)]
+
+    save = story_tree_growth._save_progress
+
+    async def interrupt(db, current_job, progress):
+        await save(db, current_job, progress)
+        if progress.placed_ids == [ids[0]]:
+            raise RuntimeError('interrupted after first placement')
+
+    async def digest(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(story_tree_growth, 'decide_story_growth', decide)
+    monkeypatch.setattr(story_tree_growth, '_save_progress', interrupt)
+    monkeypatch.setattr(story_tree_growth, 'generate_or_reuse_chapter_digest', digest)
+    with pytest.raises(RuntimeError, match='interrupted'):
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    await test_db.rollback()
+    job = await test_db.get(MemoirEditingJob, jid, populate_existing=True)
+    session = await test_db.get(MemoirVoiceSession, sid, populate_existing=True)
+    session.status = 'listening'
+    if saved_live_scope:
+        progress = story_tree_growth._progress(job)
+        progress.live_source_ids = ids[1:6]
+        job.result_json = {'growth': progress.model_dump(mode='json')}
+    correction = await editing_jobs.enqueue_editing_job(test_db, project_id=pid,
+        job_type=MemoirEditingJobType.CORRECT_TRANSCRIPT, dedupe_key=f'correct_transcript:{ids[-1]}',
+        payload_json={'utterance_id': ids[-1]})
+    await test_db.commit()
+    monkeypatch.setattr(story_tree_growth, '_save_progress', save)
+    lease = await voice_gateway_capacity_manager.acquire(source['user_id'], sid)
+    try:
+        result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+        assert result.status.value == 'pending' and result.result_json['stage'] == 'waiting_for_transcripts'
+        assert set(story_tree_growth._progress(job).live_source_ids) == set(ids)
+        assert set((await test_db.scalars(select(MemoirSectionMaterial.utterance_id).where(
+            MemoirSectionMaterial.utterance_id.in_(ids)))).all()) == {ids[0]}
+        # The last source really changes during correction; its stale checkpoint must not place it.
+        correction.status = 'succeeded'
+        last = await test_db.scalar(select(MemoirChatMessage).where(
+            MemoirChatMessage.voice_session_id == sid, MemoirChatMessage.content_text == '第7段早年的经历。'))
+        from app.models.memoir import MemoirVoiceUtterance
+        utterance = await test_db.get(MemoirVoiceUtterance, ids[-1])
+        utterance.transcript_edited = last.content_text = '校正后讲的是另一段经历。'
+        await test_db.commit()
+        assert (await story_tree_growth.run_story_tree_growth_job(test_db, job)).status.value == 'pending'
+        assert calls == [set(ids)]
+        assert set((await test_db.scalars(select(MemoirSectionMaterial.utterance_id).where(
+            MemoirSectionMaterial.utterance_id.in_(ids)))).all()) == set(ids[:-1])
+    finally:
+        await lease.release()

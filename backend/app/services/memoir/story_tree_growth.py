@@ -471,11 +471,17 @@ async def _live_batch_sources(
     ))).all())
     deferred = await _deferred_sources(db, project_id)
     deferred.update(progress.deferred)
-    return [item for item in sources if is_ready_story_material(item)
+    candidates = [item for item in sources if is_ready_story_material(item)
         and has_story_content(current_utterance_text(item)) and f"correct_transcript:{item.id}" not in correcting
         and not (item.id in deferred and deferred[item.id].status in {"not_story", "needs_user"}
             and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
             and _question_context_matches(deferred[item.id].question_context, item.chat_message))]
+    person_answers = await narration_people.answer_sources(
+        db, project_id=project_id, message_ids=(item.chat_message_id for item in candidates),
+    )
+    return [item for item in candidates if item.chat_message_id not in person_answers
+        or await _person_answer_can_progress(db, project_id=project_id, answer=item,
+            source_id=person_answers[item.chat_message_id])]
 
 
 async def _deferred_sources(db: AsyncSession, project_id: str) -> dict[str, DeferredSource]:
@@ -523,6 +529,21 @@ async def _person_answer_target(db: AsyncSession, project_id: str, source_id: st
     return (row.id, row.version) if row else None
 
 
+async def _person_answer_can_progress(
+    db: AsyncSession, *, project_id: str, answer: MemoirVoiceUtterance, source_id: str | None,
+) -> bool:
+    content = narration_people.answer_story_content(answer.chat_message)
+    if content is False or await _person_answer_target(db, project_id, source_id) is None:
+        return False
+    if content is None:
+        reading_status = await db.scalar(select(MemoirEditingJob.status).where(
+            MemoirEditingJob.dedupe_key == f"narrator_profile:{answer.id}",
+        ))
+        if reading_status in {*editing_jobs.ACTIVE_EDITING_JOB_STATUSES, MemoirEditingJobStatus.FAILED.value}:
+            return False
+    return True
+
+
 async def resume_pending_person_answers(db: AsyncSession, *, project_id: str) -> bool:
     """Source edits already queue book work; resume eligible waiting answers before that writing."""
     deferred = await _deferred_sources(db, project_id)
@@ -540,16 +561,10 @@ async def resume_pending_person_answers(db: AsyncSession, *, project_id: str) ->
     sessions = set()
     for answer in answers:
         if (answer.chat_message_id not in sources or not is_ready_story_material(answer)
-            or deferred[answer.id].text_hash != source_text_hash(current_utterance_text(answer))
-            or narration_people.answer_story_content(answer.chat_message) is False):
+            or deferred[answer.id].text_hash != source_text_hash(current_utterance_text(answer))):
             continue
-        if narration_people.answer_story_content(answer.chat_message) is None:
-            reading_status = await db.scalar(select(MemoirEditingJob.status).where(
-                MemoirEditingJob.dedupe_key == f"narrator_profile:{answer.id}",
-            ))
-            if reading_status in {*editing_jobs.ACTIVE_EDITING_JOB_STATUSES, MemoirEditingJobStatus.FAILED.value}:
-                continue
-        if await _person_answer_target(db, project_id, sources[answer.chat_message_id]):
+        if await _person_answer_can_progress(db, project_id=project_id, answer=answer,
+            source_id=sources[answer.chat_message_id]):
             sessions.add(answer.voice_session_id)
     scheduled = False
     for session_id in sorted(sessions):
@@ -1265,6 +1280,14 @@ async def run_story_tree_growth_job(
                 result_json={**(job.result_json or {}), "stage": "waiting_for_batch"})
     progress = _progress(job)
     source_ids = set(progress.live_source_ids) if progress.live_source_ids is not None else None
+    if progress.batch is not None and (live or source_ids is not None):
+        # Resume the already-paid classification as one checkpoint. A new
+        # five-item selection must not hide any of its correction dependencies.
+        checkpoint_ids = set(progress.batch.sources)
+        if source_ids is None or not checkpoint_ids.issubset(source_ids):
+            source_ids = (source_ids or set()) | checkpoint_ids
+            progress.live_source_ids = sorted(source_ids)
+            await _save_progress(db, job, progress)
     if live and source_ids is None:
         candidates = await _live_batch_sources(db, project_id=job.project_id, progress=progress)
         batch_size = max(1, get_settings().memoir_story_batch_materials)
