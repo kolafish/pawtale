@@ -637,13 +637,13 @@ async def test_new_assembly_schedules_only_copy(client, test_db, entry):
         assert job.updated_at == scheduled_at
 
 
-@pytest.mark.parametrize("result_kind", ["complete", "unavailable", "missing_intro"])
+@pytest.mark.parametrize("result_kind", ["complete", "unavailable", "missing_intro", "book_title", "cover_subtitle"])
 async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow(client, test_db, monkeypatch, result_kind):
     from app.services.memoir import book_generation_jobs, draft_progress
     from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
     from app.services.memoir.editing_jobs import clear_editing_job_handlers
     project, _, before = await _output(client, test_db)
-    unavailable = result_kind == "unavailable"
+    unavailable = result_kind not in {"complete", "missing_intro"}
     calls = []
     async def generate(**kwargs):
         calls.append(kwargs)
@@ -652,7 +652,10 @@ async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow
             generated = replace(generated, chapter_intros=[
                 replace(item, intro="") if index == 0 else item
                 for index, item in enumerate(generated.chapter_intros)])
-        return None if unavailable else generated
+        if unavailable:
+            return None if result_kind == "unavailable" else replace(generated,
+                preface="", afterword="", chapter_intros=[], **{result_kind: "非请求字段"})
+        return generated
     monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
     await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
         user_id=project.user_id, project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True)
@@ -691,6 +694,47 @@ async def test_copy_only_task_preserves_body_and_can_retry_without_full_workflow
         assert {item.job_type for item in jobs} == {"generate_book_editorial_copy"}
     finally:
         clear_editing_job_handlers()
+
+
+@pytest.mark.parametrize("scope", ["other_target", "other_chapter", "protected_intro", "duplicate_chapter"])
+async def test_copy_success_requires_an_applicable_requested_field(client, test_db, monkeypatch, scope):
+    from fastapi import HTTPException
+    project, chapters, _ = await _output(client, test_db)
+    automatic = scope == "protected_intro"
+    if automatic:
+        await book_outputs.update_book_output_chapter_editorial_copy(test_db,
+            user_id=project.user_id, project_id=project.id, chapter_id=chapters[0].id,
+            req=MemoirBookOutputChapterEditorialCopyUpdateRequest(intro="自己写的导语"))
+    req = MemoirBookOutputEditorialCopyRegenerateRequest(targets=["chapter_intros"], chapter_ids=[chapters[0].id])
+    calls = []
+    async def generate(**kwargs):
+        calls.append(kwargs)
+        generated = _copy(kwargs["snapshot"])
+        if len(calls) > 1:
+            return generated
+        chapter_id = chapters[1].id if scope == "other_chapter" else chapters[0].id
+        if scope == "duplicate_chapter":
+            return replace(generated, preface="", afterword="", chapter_intros=[
+                GeneratedChapterIntro(chapter_id=chapter_id, intro="被后项覆盖的导语"),
+                GeneratedChapterIntro(chapter_id=chapter_id, intro="")])
+        return replace(generated, preface="非请求的前言" if scope == "other_target" else "", afterword="",
+            chapter_intros=[] if scope == "other_target" else [GeneratedChapterIntro(chapter_id=chapter_id, intro="新导语")])
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    if automatic:
+        first = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+            user_id=project.user_id, project_id=project.id, req=req, automatic=True)
+        assert first.latest_version.manuscript.chapters[0].intro == "自己写的导语"
+        output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project.id))
+        assert output.metadata_json["automatic_editorial_copy"]["status"] == "failed"
+    else:
+        with pytest.raises(HTTPException) as error:
+            await book_outputs.regenerate_book_output_editorial_copy(test_db,
+                user_id=project.user_id, project_id=project.id, req=req)
+        assert error.value.status_code == 503
+    result = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+        user_id=project.user_id, project_id=project.id, req=req, automatic=automatic, retry=True)
+    assert len(calls) == 2
+    assert result.latest_version.manuscript.chapters[1 if automatic else 0].intro == "自动导语1"
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
