@@ -18,6 +18,7 @@ import re
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole, MemoirInterviewType
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
@@ -239,6 +240,52 @@ async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = N
         if isinstance((metadata or {}).get(READING_KEY), dict)
         and (message_id == keep or metadata[READING_KEY].get("transcript_version_id") == (version or ""))
     )
+
+
+async def answer_sources(
+    db: AsyncSession, *, project_id: str, message_ids: Iterable[str | None],
+) -> dict[str, str | None]:
+    """Resolve an answer's saved person question to the narration that introduced that person.
+
+    Keep unresolved questions in the result: their answers must wait for the source rather than
+    becoming new, independently classified stories. A person's stable id already records the
+    introducing message (<message id>:<version>:<n>); later readings must not change that anchor.
+    """
+    ids = {value for value in message_ids if value}
+    if not ids:
+        return {}
+    question = aliased(MemoirChatMessage)
+    rows = (await db.execute(
+        select(MemoirChatMessage.id, question.metadata_json[ASKED_KEY].as_string())
+        .join(question, question.id == MemoirChatMessage.parent_message_id)
+        .where(
+            MemoirChatMessage.id.in_(ids), MemoirChatMessage.project_id == project_id,
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+            question.project_id == project_id,
+            question.voice_session_id == MemoirChatMessage.voice_session_id,
+            question.role == MemoirChatMessageRole.ASSISTANT.value,
+            question.metadata_json[ASKED_KEY].as_string().is_not(None),
+        )
+    )).all()
+    if not rows:
+        return {}
+    source_messages = {
+        answer_id: person_id.partition(":")[0] if ":" in person_id else None
+        for answer_id, person_id in rows
+    }
+    sources = (await db.execute(
+        select(MemoirVoiceUtterance.chat_message_id, MemoirVoiceUtterance.id)
+        .join(MemoirChatMessage, MemoirChatMessage.id == MemoirVoiceUtterance.chat_message_id)
+        .where(MemoirChatMessage.project_id == project_id,
+               MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+               MemoirChatMessage.id.in_({value for value in source_messages.values() if value}))
+    )).all()
+    by_message: dict[str, list[str]] = {}
+    for message_id, utterance_id in sources:
+        by_message.setdefault(message_id, []).append(utterance_id)
+    return {answer_id: by_message[source_id][0]
+            if source_id != answer_id and len(by_message.get(source_id, [])) == 1 else None
+            for answer_id, source_id in source_messages.items()}
 
 
 async def recent_people_lines(db: AsyncSession, project_id: str, *, limit: int = 12) -> tuple[str, ...]:

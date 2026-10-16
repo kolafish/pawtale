@@ -83,7 +83,7 @@ from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.sections import (
     finalize_section_changes, lock_project_chapters, mark_section_structure_changed, sync_materials_to_chapters,
 )
-from app.services.memoir import fact_decisions
+from app.services.memoir import fact_decisions, narration_people
 
 
 @dataclass(frozen=True)
@@ -357,6 +357,10 @@ async def generate_book_plan(
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
     sources = [source for source in sources if (excluded_source_hashes or {}).get(source.utterance_id) != source_text_hash(source.text)]
+    person_answers = await narration_people.answer_sources(
+        db, project_id=project_id, message_ids=(source.message_id for source in sources),
+    )
+    sources = [source for source in sources if source.message_id not in person_answers]
     if not sources:
         raise HTTPException(status_code=422, detail=NO_STORY_YET)
     project_title = project.title
