@@ -400,6 +400,7 @@ MemoirBookManuscriptTemplate = Literal[
     "modern_minimal",
     "custom",
 ]
+DEFAULT_BOOK_DESIGN: Literal["warm_journal"] = "warm_journal"
 MemoirBookCustomFontScale = Literal["standard", "large"]
 MemoirBookCustomFontFamily = Literal["auto", "serif", "sans"]
 MemoirBookCustomLineSpacing = Literal["compact", "standard", "relaxed"]
@@ -562,7 +563,7 @@ class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
 
 
 class MemoirBookManuscriptProfile(BaseModel):
-    template: MemoirBookManuscriptTemplate = "classic_family"
+    template: MemoirBookManuscriptTemplate = DEFAULT_BOOK_DESIGN
     title: str
     subtitle: str = ""
     narrator_name: str = ""
@@ -643,7 +644,7 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     show_headers: bool = True
     show_source_appendix: bool = True
     photo_mode: Literal["none", "chapter", "appendix"] = "none"
-    cover_style: MemoirBookCoverStyle = "classic_plain"
+    cover_style: MemoirBookCoverStyle = DEFAULT_BOOK_DESIGN
     cover_image: MemoirBookManuscriptIllustration | None = None
     back_cover_quote: str = ""
     editorial_copy_model: str | None = None

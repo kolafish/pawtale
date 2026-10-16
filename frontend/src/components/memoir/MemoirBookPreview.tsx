@@ -1,5 +1,6 @@
 import { FileText } from 'lucide-react';
 
+import { DEFAULT_BOOK_DESIGN } from '../../types';
 import type {
   MemoirBookOutput,
 } from '../../types';
@@ -29,7 +30,7 @@ export function MemoirBookPreview({
   const manuscript = version?.manuscript;
   if (!version) return null;
 
-  const coverStyle = manuscript?.render_settings.cover_style ?? 'classic_plain';
+  const coverStyle = manuscript?.render_settings.cover_style ?? DEFAULT_BOOK_DESIGN;
   const coverColors = COVER_COLORS[coverStyle];
   const preface = manuscript?.front_matter.find(section => section.kind === 'preface');
   const chapters = manuscript?.chapters ?? [];

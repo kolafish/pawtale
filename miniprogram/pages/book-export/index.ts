@@ -1,3 +1,6 @@
+import {
+  DEFAULT_BOOK_DESIGN,
+} from "../../domain/memoir-book";
 import type {
   MemoirBookCustomLayout,
   MemoirBookCoverStyle,
@@ -367,7 +370,7 @@ definePage<BookExportData>()({
     activeSection: "",
     pagePurpose: "files",
     bookLayoutOptions: BOOK_LAYOUT_OPTIONS,
-    bookLayoutTemplate: "classic_family",
+    bookLayoutTemplate: DEFAULT_BOOK_DESIGN,
     bookCustomLayout: DEFAULT_CUSTOM_LAYOUT,
     bookLayoutFontFamilyOptions: CUSTOM_FONT_FAMILY_OPTIONS,
     bookLayoutFontFamilyIndex: 0,
@@ -554,7 +557,7 @@ definePage<BookExportData>()({
     this.bookOutput = output;
     this.bookOutputVersion = output?.latest_version || null;
     const outputData = bookOutputData(output, this.bookOutputVersion, this.bookDraftProgress);
-    const bookLayoutTemplate = output?.latest_version?.manuscript?.profile.template || "classic_family";
+    const bookLayoutTemplate = output?.latest_version?.manuscript?.profile.template || DEFAULT_BOOK_DESIGN;
     const matchingLayout = BOOK_LAYOUT_OPTIONS.find((option) => option.value === bookLayoutTemplate);
     const bookLayoutOptions: BookLayoutOption[] = [...BOOK_LAYOUT_OPTIONS];
     if (outputData.bookManuscriptAvailable && matchingLayout?.coverStyle !== outputData.bookCoverStyle) {
@@ -944,7 +947,7 @@ definePage<BookExportData>()({
 
   async previewBookLayout(event: DatasetEvent) {
     const adjusting = datasetString(event, "template") === "adjust";
-    const template = datasetChoice(event, "template", [...BOOK_LAYOUT_TEMPLATES, "current"] as const, "heritage_classic");
+    const template = datasetChoice(event, "template", [...BOOK_LAYOUT_TEMPLATES, "current"] as const, DEFAULT_BOOK_DESIGN);
     const target = adjusting ? "adjust" : template;
     const pendingLayout = { ...this.data.bookCustomLayout };
     if (!this.data.projectId || this.data.bookLayoutBusyTarget || this.data.bookExportBusyTarget) return;
@@ -1006,7 +1009,7 @@ definePage<BookExportData>()({
   async selectBookLayout(event: DatasetEvent) {
     if (datasetString(event, "template") === "current") return;
     const adjusting = datasetString(event, "template") === "adjust";
-    const template = adjusting ? this.data.bookLayoutTemplate : datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, "heritage_classic");
+    const template = adjusting ? this.data.bookLayoutTemplate : datasetChoice(event, "template", BOOK_LAYOUT_TEMPLATES, DEFAULT_BOOK_DESIGN);
     const pendingLayout = { ...this.data.bookCustomLayout };
     const option = BOOK_LAYOUT_OPTIONS.find((candidate) => candidate.value === template);
     const coverStyle = adjusting ? undefined : option?.coverStyle;

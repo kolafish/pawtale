@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.models.memoir import MemoirBookOutputVersion
 from app.schemas.memoir_book import (
+    DEFAULT_BOOK_DESIGN,
     MemoirBookCoverStyle,
     MemoirBookCustomLayout,
     MemoirBookManuscript,
@@ -36,10 +37,6 @@ from app.services.memoir.book_manuscript_cleanup import (
 )
 
 
-DEFAULT_BOOK_COVER_STYLE = "classic_plain"
-# A book's first assembly starts with this set; later versions keep whatever the author picked.
-NEW_BOOK_TEMPLATE: MemoirBookManuscriptTemplate = "warm_journal"
-NEW_BOOK_COVER_STYLE: MemoirBookCoverStyle = "warm_journal"
 BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
 BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
 BOOK_INFORMATION_LABELS = {
@@ -172,7 +169,7 @@ def formal_book_title(raw_title: str) -> str:
 
 
 def cover_style(value: str | None) -> str:
-    return value if value in SUPPORTED_BOOK_COVER_STYLES else DEFAULT_BOOK_COVER_STYLE
+    return value if value in SUPPORTED_BOOK_COVER_STYLES else DEFAULT_BOOK_DESIGN
 
 
 def template_cover_style(template: MemoirBookManuscriptTemplate | None) -> MemoirBookCoverStyle | None:
@@ -281,7 +278,7 @@ def stored_manuscript_design(stored: object) -> tuple[MemoirBookManuscriptTempla
     profile = profile if isinstance(profile, dict) else {}
     template = profile.get("template")
     if not isinstance(template, str) or template not in BOOK_MANUSCRIPT_TEMPLATES:
-        template = "classic_family"
+        template = DEFAULT_BOOK_DESIGN
     settings = manuscript.get("render_settings")
     settings = settings if isinstance(settings, dict) else {}
     if manuscript.get("schema_version", 1) in {1, 2, 3} and template != "custom":
@@ -377,8 +374,8 @@ def manuscript_from_snapshot(
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
     polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
-    cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
-    template: MemoirBookManuscriptTemplate = "classic_family",
+    cover_style_value: str = DEFAULT_BOOK_DESIGN,
+    template: MemoirBookManuscriptTemplate = DEFAULT_BOOK_DESIGN,
     custom_layout: MemoirBookCustomLayout | None = None,
     cover_image: dict[str, object] | None = None,
     metadata: dict[str, str] | None = None,
@@ -704,8 +701,8 @@ def update_chapter_editorial_copy(
 
 def stored_cover_style(version: MemoirBookOutputVersion | None) -> str:
     if not version or not isinstance(version.manuscript_json, dict):
-        return DEFAULT_BOOK_COVER_STYLE
+        return DEFAULT_BOOK_DESIGN
     settings = version.manuscript_json.get("render_settings")
     if not isinstance(settings, dict):
-        return DEFAULT_BOOK_COVER_STYLE
+        return DEFAULT_BOOK_DESIGN
     return cover_style(settings.get("cover_style") if isinstance(settings.get("cover_style"), str) else None)

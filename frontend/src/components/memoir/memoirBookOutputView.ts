@@ -1,3 +1,4 @@
+import { DEFAULT_BOOK_DESIGN } from '../../types';
 import type {
   MemoirBookOutput,
   MemoirBookOutputForm,
@@ -12,7 +13,7 @@ const DEFAULT_FORM: MemoirBookOutputForm = {
   preface: '',
   afterword: '',
   back_cover_quote: '',
-  cover_style: 'classic_plain',
+  cover_style: DEFAULT_BOOK_DESIGN,
 };
 
 export function bookOutputForm(output: MemoirBookOutput | null | undefined): MemoirBookOutputForm {
