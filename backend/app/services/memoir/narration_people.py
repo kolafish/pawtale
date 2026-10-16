@@ -310,6 +310,25 @@ async def read_people(
     so a reorder, a renamed call or two people with one call keep their ids; anyone it no longer names is
     simply not defined here any more, and a new person gets an id no earlier version used.
     """
+    from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
+
+    if (message.transcript_version_id or "") != transcript_version_id:
+        return False
+    text_hash = source_text_hash(normalized_material_text(message.content_text))
+    stored_reading = (message.metadata_json or {}).get(READING_KEY)
+    if (isinstance(stored_reading, dict) and stored_reading.get("schema_version", 1) in {1, 2}
+        and isinstance(stored_reading.get("people"), list) and (
+        stored_reading.get("transcript_version_id") == transcript_version_id
+        or (stored_reading.get("schema_version") == 2 and stored_reading.get("source_text_hash") == text_hash)
+    )):
+        await db.refresh(message, with_for_update=True)
+        if (message.transcript_version_id or "") != transcript_version_id:
+            return False
+        message.metadata_json = {**(message.metadata_json or {}), READING_KEY: {
+            **stored_reading, "transcript_version_id": transcript_version_id,
+        }}
+        await db.commit()
+        return True
     # The segment's last reading is folded in its own place, so the people it named keep how they were
     # introduced there even when later segments only say "他".
     people = list((await load_people(db, project.id, keep=message.id)).values())
@@ -358,7 +377,8 @@ async def read_people(
     ]
     current.metadata_json = {
         **(current.metadata_json or {}),
-        READING_KEY: {"transcript_version_id": transcript_version_id, "people": stored},
+        READING_KEY: {"schema_version": 2, "transcript_version_id": transcript_version_id,
+            "source_text_hash": text_hash, "people": stored},
     }
     await db.commit()
     return True

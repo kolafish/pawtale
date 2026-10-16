@@ -83,6 +83,7 @@ async def enqueue_book_review_job(
             "requested_ai_model": selected_ai_model,
             "input_signature": input_signature,
             "apply_structure_guidance": apply_structure_guidance,
+            "retry": not automatic,
         },
     )
     job.result_json = {
@@ -159,6 +160,11 @@ async def run_book_review_job(
             error_message="服务中断时全书审阅请求尚未确认完成，请确认后重试；已有书稿可以继续阅读")
 
     structure_updated = False
+    if payload.get("apply_structure_guidance") is True:
+        from app.services.memoir.automatic_book_draft import defer_narration_work
+        waiting = await defer_narration_work(db, job)
+        if waiting:
+            return waiting
     try:
         await load_memoir_project(
             db,

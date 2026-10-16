@@ -108,6 +108,10 @@ class VoiceGatewayCapacityManager:
                 max_active_sessions_per_user=self.limits.max_active_sessions_per_user,
             )
 
+    async def has_active_session(self, session_ids: list[str]) -> bool:
+        async with self._lock:
+            return any(session_id in self._active_session_users for session_id in session_ids)
+
 
 voice_gateway_capacity_manager = VoiceGatewayCapacityManager(
     VoiceGatewayCapacityLimits.from_settings(get_settings())

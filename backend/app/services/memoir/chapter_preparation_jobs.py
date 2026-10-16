@@ -309,6 +309,7 @@ async def enqueue_chapter_preparation_job(
             "requested_ai_model": selected_ai_model,
             "input_signature": job_input_signature,
             "automatic": automatic,
+            "retry": retry,
         },
     )
     job.result_json = {
@@ -454,6 +455,12 @@ async def run_chapter_preparation_job(
     if progress.get("provider_request_pending"):
         return EditingJobResult(status=MemoirEditingJobStatus.FAILED, result_json=progress,
             error_message="服务中断时模型请求尚未确认完成，已保留进度，请确认后重试")
+
+    if payload.get("automatic") is True:
+        from app.services.memoir.automatic_book_draft import defer_narration_work
+        waiting = await defer_narration_work(db, job)
+        if waiting:
+            return waiting
 
     try:
         if operation == "rewrite":

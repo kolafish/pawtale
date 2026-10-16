@@ -55,6 +55,7 @@ from app.services.memoir.projects import (
     SKIPPED_PROFILE_FIELDS_KEY,
     profile_items_to_ask,
 )
+from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
 
 
 logger = logging.getLogger(__name__)
@@ -105,9 +106,10 @@ class _ProfileOutput(BaseModel):
 class _ProfileReading(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     transcript_version_id: str
     output: _ProfileOutput
+    source_text_hash: str | None = None
 
 
 def _reading(message: MemoirChatMessage) -> _ProfileReading | None:
@@ -118,7 +120,12 @@ def _reading(message: MemoirChatMessage) -> _ProfileReading | None:
         reading = _ProfileReading.model_validate(stored)
     except ValidationError:
         return None
-    return reading if reading.transcript_version_id == (message.transcript_version_id or "") else None
+    version_id = message.transcript_version_id or ""
+    if reading.transcript_version_id == version_id:
+        return reading
+    if reading.schema_version == 2 and reading.source_text_hash == source_text_hash(normalized_material_text(message.content_text)):
+        return reading.model_copy(update={"transcript_version_id": version_id})
+    return None
 
 
 def _profile_values(output: _ProfileOutput) -> dict[str, str | int | None]:
@@ -444,6 +451,15 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             error_message="讲述片段或回忆录不存在",
         )
     version_id = str(payload.get("transcript_version_id") or "")
+    correction = await db.scalar(select(MemoirEditingJob.id).where(
+        MemoirEditingJob.dedupe_key == f"correct_transcript:{utterance.id}",
+        MemoirEditingJob.status.in_(editing_jobs.ACTIVE_EDITING_JOB_STATUSES),
+    ))
+    if correction and not narration_people.ready(utterance, utterance.chat_message):
+        # The correction completion coalesces its final version into this same job.
+        job.run_after = utcnow_naive() + timedelta(seconds=1)
+        return editing_jobs.EditingJobResult(status=MemoirEditingJobStatus.PENDING,
+            result_json={"awaiting_transcript_correction": True})
     try:
         current = not _has_open_fields(_profile(project)) or await fill_narrator_profile(
             db,
@@ -584,7 +600,8 @@ async def _extract_profile(
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
-    return _ProfileReading(transcript_version_id=version_id, output=generated.value)
+    return _ProfileReading(transcript_version_id=version_id, output=generated.value,
+        source_text_hash=source_text_hash(normalized_material_text(segment)))
 
 
 def _other_segments(project_id: str, utterance_id: str) -> Select[tuple[MemoirVoiceUtterance]]:

@@ -1048,6 +1048,11 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="讲述会话尚未完成或不参与故事树生长",
         )
+    from app.services.memoir.automatic_book_draft import defer_narration_work
+    waiting = await defer_narration_work(db, job)
+    if waiting:
+        waiting.result_json["stage"] = "waiting_for_narration"
+        return waiting
     if await _active_corrections_exist(
         db,
         project_id=job.project_id,

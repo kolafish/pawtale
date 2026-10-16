@@ -192,6 +192,7 @@ async def _draft_progress_projection(
         result.detail = {
             "organizing": "正在整理讲述和故事结构",
             "writing_chapters": "正在更新章节正文",
+            "writing_copy": "草稿已可阅读，正在更新成书文案",
             "reviewing_book": "草稿已可阅读，正在检查全书",
         }.get(progress.stage, "讲述已经保存，离开页面后也会继续处理")
     elif failures:

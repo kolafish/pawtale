@@ -40,7 +40,7 @@ async def _ready_book(client, db, monkeypatch):
     assert await run_test_editing_job(db, parent_id)
     copy_job = await db.scalar(select(MemoirEditingJob).where(
         MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
-    if copy_job is not None:
+    if copy_job is not None and copy_job.status == 'pending':
         await run_test_editing_job(db, copy_job.id)
         await db.refresh(parent)
         if parent.status == 'pending':
