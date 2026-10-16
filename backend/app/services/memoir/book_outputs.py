@@ -650,7 +650,7 @@ async def regenerate_book_output_editorial_copy(
             for target in ("preface", "afterword", "back_cover_quote"))
         has_chapter_copy = any(
             item.chapter_id in eligible_chapters and any(
-                target in targets and getattr(item, attribute)
+                target in targets and (getattr(item, attribute) or (target == "pull_quotes" and item.valid_empty_quote))
                 and (state is None or field not in state.manual_chapter_fields.get(item.chapter_id, []))
                 for target, attribute, field in (("chapter_intros", "intro", "intro"), ("pull_quotes", "pull_quote", "pull_quotes"))
             ) for item in generated.values()
