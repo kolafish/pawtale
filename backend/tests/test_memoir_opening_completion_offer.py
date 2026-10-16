@@ -1,12 +1,16 @@
 import pytest
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.models.memoir import MemoirChatMessage, MemoirCompletionIssue, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_narrative import MemoirInterviewPolicyDecision
 from app.models.projects import Project
 from app.domain.memoir.types import MemoirCompletionIssueOutcome
 from app.services.memoir import completion_interviews, completion_issues
+from app.services.memoir.narrative import frameworks, interview_policy_runtime
 from tests.memoir_helpers import post_mobile_memoir_voice_session
 from tests.test_memoir_book_completion import _book
+from tests.test_memoir_interview_policy_runtime import FakePolicyAI
 from tests.test_memoir_voice_assistant_turn_stream import _run_stream_turn
 
 
@@ -96,6 +100,66 @@ async def test_new_story_opening_skips_old_questions_and_keeps_ordinary_follow_u
     assert await completion_interviews.bind_answer_segment(test_db, voice_session=session, utterance=utterance) is None
     await test_db.refresh(issue)
     assert issue.status == 'open' and utterance.completion_issue_id is None
+
+
+@pytest.mark.parametrize('entry', ['miniprogram_home', 'miniprogram_home_launch'])
+async def test_new_story_active_policy_waits_for_explicit_direction_request(
+    client, test_db, monkeypatch, entry,
+):
+    settings = get_settings().model_copy(update={
+        'memoir_interview_policy_active_enabled': True,
+        'memoir_interview_policy_active_rollout_percent': 100,
+    })
+    monkeypatch.setattr(interview_policy_runtime, 'get_settings', lambda: settings)
+    project_id, _, issue = await _issue(client, test_db)
+    framework = await frameworks.initialize_project_framework(test_db, project_id=project_id)
+    assert framework.items
+    session = await _opening(client, test_db, project_id, entry=entry)
+    await test_db.refresh(session, ['messages'])
+    context = await interview_policy_runtime.build_current_policy_context(
+        test_db, session=session, completion_issue_id=None,
+        policy_version=interview_policy_runtime.ACTIVE_POLICY_VERSION,
+    )
+    assert context.topic_candidates == ()
+    assert context.topic_offer_authorized is False
+    assert 'offer_new_topic' not in {item.action.value for item in context.brief.candidate_actions}
+    with pytest.raises(interview_policy_runtime.InterviewPolicySelectionError, match='action_outside_candidates'):
+        await interview_policy_runtime.prepare_active_policy_turn(
+            test_db, session=session, completion_issue_id=None, requested_ai_model=None,
+            ai_client_factory=lambda model=None: FakePolicyAI('offer_new_topic', framework_item_id='F1'),
+        )
+
+    policy_ai = FakePolicyAI('continue_listening')
+    user_id = (await test_db.get(Project, project_id)).user_id
+    stream, reply_ai, _, completed = await _run_stream_turn(
+        test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['从您自己想起的一件事开始讲就好。'], policy_ai_client=policy_ai,
+    )
+    decision = await test_db.scalar(select(MemoirInterviewPolicyDecision).where(
+        MemoirInterviewPolicyDecision.generated_message_id == completed['message_id'],
+    ))
+    assert policy_ai.calls
+    assert decision is not None and decision.execution_mode == 'active'
+    assert decision.selected_action == 'continue_listening'
+    assert decision.state_snapshot_json['framework_item_id'] is None
+    assert next(event for event in stream.sent if event['type'] == 'turn.started')['opening_completion_offer'] is None
+    assert issue.question not in reply_ai.calls[0]['user_prompt']
+
+    # The entry constraint is only for the opening: an explicit request still authorizes a topic.
+    test_db.add(_line(project_id, session.id, 'user', '我不知道讲什么，给我一个方向吧。', 1))
+    await test_db.commit()
+    await test_db.refresh(session, ['messages'])
+    _, _, _, completed = await _run_stream_turn(
+        test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['可以讲讲小时候的一件事。'],
+        policy_ai_client=FakePolicyAI('offer_new_topic', framework_item_id='F1'),
+    )
+    decision = await test_db.scalar(select(MemoirInterviewPolicyDecision).where(
+        MemoirInterviewPolicyDecision.generated_message_id == completed['message_id'],
+    ))
+    assert decision is not None and decision.execution_mode == 'active'
+    assert decision.selected_action == 'offer_new_topic'
+    assert decision.state_snapshot_json['framework_item_id'] in {item.id for item in framework.items}
 
 
 @pytest.mark.parametrize('ineligible', ['closed', 'in_progress', 'manual_review', 'excluded'])
