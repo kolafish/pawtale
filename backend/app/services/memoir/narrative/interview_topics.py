@@ -51,6 +51,14 @@ class FrameworkTopicCandidate:
     intent: str
 
 
+def is_new_story_entry(session: MemoirVoiceSession) -> bool:
+    return (
+        session.session_goal == MemoirSessionGoal.OPEN_NARRATION.value
+        and (session.metadata_json or {}).get("entry")
+        in {"miniprogram_home", "miniprogram_home_launch"}
+    )
+
+
 def topic_offer_requested(
     session: MemoirVoiceSession,
     latest_user_message: MemoirChatMessage | None,
@@ -61,7 +69,7 @@ def topic_offer_requested(
     ):
         return False
     if latest_user_message is None:
-        return True
+        return bool(session.anchor_framework_item_id) or not is_new_story_entry(session)
     normalized = "".join(latest_user_message.content_text.split())
     return any(phrase in normalized for phrase in DIRECTION_REQUEST_PHRASES)
 

@@ -83,10 +83,7 @@ async def load_interview_book_context(
     profile = profile if isinstance(profile, dict) else {}
     profile_context = await narrator_profile.profile_question_context_for(db, voice_session, project)
     profile_questions = profile_context.questions
-    starts_new_story = (
-        voice_session.session_goal == "open_narration" and anchor_topic is None
-        and (voice_session.metadata_json or {}).get("entry") in {"miniprogram_home", "miniprogram_home_launch"}
-    )
+    starts_new_story = anchor_topic is None and interview_topics.is_new_story_entry(voice_session)
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
