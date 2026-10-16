@@ -722,13 +722,15 @@ async def get_issue(
     *,
     project_id: str,
     issue_id: str,
+    lock: bool = False,
 ) -> MemoirCompletionIssue:
-    issue = await db.scalar(
-        select(MemoirCompletionIssue).where(
-            MemoirCompletionIssue.project_id == project_id,
-            MemoirCompletionIssue.id == issue_id,
-        )
+    query = select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.id == issue_id,
     )
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    issue = await db.scalar(query)
     if issue is None:
         raise HTTPException(status_code=404, detail="补全问题不存在")
     return issue
@@ -744,6 +746,7 @@ async def start_issue(
         db,
         project_id=project_id,
         issue_id=issue_id,
+        lock=True,
     )
     if issue.status == MemoirCompletionIssueStatus.CLOSED.value:
         raise HTTPException(status_code=409, detail="补全问题已经结束")

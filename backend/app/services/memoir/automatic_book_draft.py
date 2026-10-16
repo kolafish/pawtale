@@ -337,6 +337,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.retry_stages = [stage for stage in progress.retry_stages if stage != "review"]
             review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
                 req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry_review,
+                apply_structure_guidance=True,
                 on_enqueued=record_review)
             progress.review_status = str(review["status"])
             progress.review_error = str(review.get("error_message") or "")

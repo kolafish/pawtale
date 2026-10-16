@@ -670,6 +670,11 @@ async def update_book_plan(
         for chapter_id, chapter in existing_by_id.items()
         if chapter_id not in retained_ids
     ]
+    manual_order_changed = (
+        [chapter.id for chapter in _sorted_plan_chapters(plan) if chapter.id in retained_ids]
+        != [chapter.id for chapter in chapter_updates if chapter.id]
+        or any(chapter.id is None for chapter in chapter_updates)
+    )
 
     for index, chapter in enumerate(plan.chapters):
         chapter.sort_order = 10000 + index
@@ -738,6 +743,9 @@ async def update_book_plan(
 
     plan.title = (req.title or plan.title).strip()[:200]
     plan.created_by = MemoirCreatedBy.USER.value
+    if manual_order_changed:
+        await db.flush()
+        plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": [chapter.id for chapter, _ in pending_source_refs]}
     plan.metadata_json = _merge_metadata(
         plan.metadata_json,
         {
@@ -909,6 +917,8 @@ async def apply_book_plan_structure_command(
             await db.delete(chapter)
 
     _renumber_chapters(chapters)
+    if req.type == "move_chapter":
+        plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": [chapter.id for chapter in chapters]}
     for chapter in chapters:
         db.add(chapter)
     if selected_sections:

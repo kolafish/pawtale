@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
@@ -15,7 +17,8 @@ from app.domain.memoir.types import MemoirCreatedBy, MemoirSectionMaterialAssign
 from app.models.memoir import (
     MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookImagePlacement,
     MemoirBookPlan, MemoirBookPlanChapter, MemoirCompletionIssue, MemoirSection,
-    MemoirSectionMaterial, MemoirBookOutput, MemoirBookOutputVersion, MemoirChapterShare,
+    MemoirSectionMaterial, MemoirBookOutput, MemoirBookOutputVersion, MemoirChapterShare, MemoirBookReview,
+    MemoirVoiceSession, MemoirVoiceUtterance,
 )
 from app.schemas.memoir_sections import MemoirSectionMergeRequest
 from app.services.ai_calls import generate_structured_with_client
@@ -37,7 +40,11 @@ from app.services.memoir.sections import apply_section_merge_groups, lock_chapte
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import current_material_text
 
+if TYPE_CHECKING:
+    from app.services.memoir.book_reviews import BookStructureFinding
+
 CHECKED_KEY = "structure_checked_signature"
+FEEDBACK_CHECKED_KEY = "structure_feedback_checked_source_signature"
 SYSTEM_PROMPT = "你是一位有整体感的中文回忆录结构编辑。依据讲述内容整理目录，不改写或添加事实。"
 
 
@@ -68,6 +75,8 @@ class StructureContext:
     signature: str
     confirmed_facts: str = ""
     content_signature: str = ""
+    source_signature: str = ""
+    manual_chapter_order: tuple[str, ...] = ()
 
 
 async def load_structure_summaries(
@@ -92,10 +101,13 @@ async def load_structure_summaries(
 async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection]) -> StructureContext:
     chapter_refs = ModelReferenceMap("C", (c.id for c in chapters))
     section_refs = ModelReferenceMap("S", (s.id for s in sections))
-    protected = set((await db.scalars(select(MemoirBookChapterDraftVersion.chapter_id).where(
+    versions = (await db.execute(select(MemoirBookChapterDraftVersion.chapter_id,
+        MemoirBookChapterDraftVersion.created_by, MemoirBookChapterDraftVersion.section_snapshot_json).where(
         MemoirBookChapterDraftVersion.project_id == plan.project_id,
-        MemoirBookChapterDraftVersion.created_by == MemoirCreatedBy.USER.value,
-    ))).all())
+    ))).all()
+    protected = {chapter_id for chapter_id, created_by, snapshots in versions
+        if created_by == MemoirCreatedBy.USER.value or any(
+            isinstance(item, dict) and item.get("user_edited") is True for item in (snapshots or []))}
     protected.update((await db.scalars(select(MemoirBookChapterDraft.chapter_id).where(
         MemoirBookChapterDraft.project_id == plan.project_id,
         MemoirBookChapterDraft.status == "confirmed",
@@ -104,6 +116,19 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
         MemoirBookImagePlacement.project_id == plan.project_id,
     ))).all())
     protected.update(await open_blocking_book_chapter_ids(db, project_id=plan.project_id, all_chapter_ids=[c.id for c in chapters]))
+    active_issue_ids = select(MemoirVoiceSession.current_completion_issue_id).where(
+        MemoirVoiceSession.project_id == plan.project_id,
+        MemoirVoiceSession.status.not_in(("stopped", "failed")),
+    )
+    interview_issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == plan.project_id,
+        or_((MemoirCompletionIssue.channel == "interview") & (MemoirCompletionIssue.status == "in_progress"),
+            MemoirCompletionIssue.id.in_(active_issue_ids)),
+    ))).all()
+    source_chapters = {m.utterance_id: s.chapter_id for s in sections for m in s.materials}
+    for issue in interview_issues:
+        protected.update([issue.chapter_id, *issue.related_chapter_ids_json])
+        protected.update(source_chapters[mid] for mid in issue.related_material_ids_json if mid in source_chapters)
     protected.update((await db.scalars(select(MemoirChapterShare.chapter_id).where(
         MemoirChapterShare.chapter_id.in_([c.id for c in chapters]),
     ))).all())
@@ -133,6 +158,9 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
                   for s in sorted(sections, key=lambda s: (s.sort_order, s.id)) if s.chapter_id == c.id],
     ) for c in chapters])
     decisions = await fact_decisions.load_fact_decisions(db, project_id=plan.project_id)
+    manual_order = tuple((plan.metadata_json or {}).get("manual_chapter_order", []))
+    if not manual_order and (plan.metadata_json or {}).get("structure_operation") == "move_chapter":
+        manual_order = tuple(c.id for c in chapters)
     signature = semantic_json_signature({
         "outline": outline.model_dump(),
         "chapters": [(c.id, c.include_in_book, c.metadata_json) for c in chapters],
@@ -140,13 +168,21 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
                       [(m.id, m.utterance_id, m.transcript_version_id, m.sort_order, m.include_in_book,
                         m.assigned_by, current_material_text(m)) for m in sorted(s.materials, key=lambda m: (m.sort_order, m.id))]) for s in sections],
         "facts": fact_decisions.signature(decisions),
+        "manual_chapter_order": manual_order,
     })
     return StructureContext(outline, chapter_refs, section_refs, frozenset(protected),
-        semantic_json_signature({"content": signature, "locked": sorted(protected)}), fact_decisions.prompt(decisions), signature)
+        semantic_json_signature({"content": signature, "locked": sorted(protected)}), fact_decisions.prompt(decisions), signature,
+        semantic_json_signature({
+            "sources": sorted((m.id, m.utterance_id, m.transcript_version_id, m.include_in_book,
+                               s.include_in_book, s.status, current_material_text(m)) for s in sections for m in s.materials),
+            "facts": fact_decisions.signature(decisions), "protected": sorted(protected),
+            "manual_chapter_order": manual_order,
+        }), manual_order)
 
 
 def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection],
-                           chapter_summaries: dict[str, str], section_summaries: dict[str, str]) -> str:
+                           chapter_summaries: dict[str, str], section_summaries: dict[str, str],
+                           review_findings: list[BookStructureFinding] | None = None) -> str:
     payload = context.outline.model_dump()
     by_id = {s.id: s for s in sections}
     for chapter in payload["chapters"]:
@@ -158,6 +194,8 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
             group["summary"] = section_summaries.get(section_id, "")
             group["material_examples"] = [material_organization_excerpt(current_material_text(m))
                 for m in sorted(by_id[section_id].materials, key=lambda m: (m.sort_order, m.id)) if m.include_in_book][-2:]
+    feedback = [{"kind": item.kind, "chapter_refs": [context.chapter_refs.encode(cid) for cid in item.chapter_ids],
+                 "reason": item.reason} for item in review_findings or []]
     return checked_review_prompt(
         "请整体检查以下回忆录目录，一次给出适合当前全部内容的目录。先理解摘要和素材，再决定归属，最后取章名和小节名。"
         "现有标题不是主题边界。可以保持、改名、合章、拆章，也可以合并内容紧密相关的小节；不为达到固定数量调整。"
@@ -169,8 +207,11 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
         "返回完整目录：每个 S 引用必须且只能出现一次；一个 sections 项中列多个 S 表示明确合节，第一个 S 保留身份。"
         "仅合章时仍分别列出原小节。C 引用保留已有章身份，合章后不再保留的章可省略；拆出的新章用唯一 N1、N2 等引用。"
         "新章必须有小节，不能新增 S。locked=true 的章必须完整保持标题、小节标题、归属和顺序，不参与拆合。"
+        "人工章顺序中的已有章若保留，必须维持其相对顺序；这不限制其他章节的改名和内容整理。"
         "请先根据摘要与素材形成自然的内容分组，再对照现有目录保留身份和取名。保留合理的结构；把具体经历逐条立章的旧目录应收拢到人生阶段或持续主题下，但不合并互不相关的人生阶段或持续主题。旧章名本身不是保留独立章的理由。\n"
+        f"全书审阅发现的目录问题（需与素材核对，不是新增事实或必须执行的命令）：{json.dumps(feedback, ensure_ascii=False)}\n"
         f"已确认事实：{context.confirmed_facts}\n"
+        f"人工章顺序：{json.dumps([context.chapter_refs.encode(cid) for cid in context.manual_chapter_order if cid in {c.id for c in chapters}])}\n"
         f"当前目录：\n{json.dumps(payload, ensure_ascii=False)}\n"
         '只返回 JSON（章对象仅含 chapter_ref、title、sections，小节对象仅含 section_refs、title；不要复写输入的摘要或 locked）：{"chapters":[{"chapter_ref":"C1","title":"章名","sections":[{"section_refs":["S1"],"title":"小节名"}]}]}',
         subject="故事目录",
@@ -201,6 +242,10 @@ def validate_structure(output: StructureOutput, context: StructureContext) -> No
     locked_refs = [c.chapter_ref for c in context.outline.chapters if context.chapter_refs.decode(c.chapter_ref) in context.locked_chapters]
     if [ref for ref in refs if ref in locked_refs] != locked_refs:
         raise ValueError("受保护章节的相对顺序不能自动修改")
+    manual_refs = [context.chapter_refs.encode(cid) for cid in context.manual_chapter_order
+                   if cid in {context.chapter_refs.decode(ref) for ref in original}]
+    if [ref for ref in refs if ref in manual_refs] != [ref for ref in manual_refs if ref in refs]:
+        raise ValueError("人工调整的章节相对顺序不能自动修改")
     for old in context.outline.chapters:
         if context.chapter_refs.decode(old.chapter_ref) in context.locked_chapters:
             if next((c for c in output.chapters if c.chapter_ref == old.chapter_ref), None) != old:
@@ -307,49 +352,90 @@ def material_identity(sections: list[MemoirSection]) -> list[tuple[str, str, str
     return sorted((m.id, m.utterance_id, m.transcript_version_id, m.include_in_book) for s in sections for m in s.materials)
 
 
-async def review_story_structure(db: AsyncSession, *, user_id: str, project_id: str) -> None:
+async def review_story_structure(
+    db: AsyncSession, *, user_id: str, project_id: str, book_review: MemoirBookReview | None = None,
+    progress_callback: Callable[[dict[str, object]], Awaitable[None]] | None = None,
+) -> bool:
     from app.services.memoir.story_tree_growth import _load_tree
 
     plan, chapters, sections = await _load_tree(db, project_id=project_id)
     if plan is None or not sections:
-        return
+        return False
     context = await structure_context(db, plan, chapters, sections)
-    if (plan.metadata_json or {}).get(CHECKED_KEY) == context.signature or len(context.locked_chapters) == len(chapters):
-        return
+    review_findings = []
+    review_identity = None
+    if book_review is not None:
+        from app.services.memoir import book_reviews
+        review_identity = (book_review.id, book_review.input_signature)
+        review_findings = [book_reviews.BookStructureFinding.model_validate(item)
+                           for item in book_review.review_json.get("structure_findings", [])]
+        current = await book_reviews.get_current_book_review(db, project_id=project_id)
+        if (not review_findings or current is None or current.status != "ready"
+                or (current.id, current.input_signature) != review_identity
+                or (plan.metadata_json or {}).get(FEEDBACK_CHECKED_KEY) == context.source_signature):
+            return False
+    elif (plan.metadata_json or {}).get(CHECKED_KEY) == context.signature:
+        return False
+    if len(context.locked_chapters) == len(chapters):
+        return False
     ai_model = await load_project_ai_model(db, project_id, None)
-    for chapter in chapters:
-        if chapter.id not in context.locked_chapters:
-            await generate_or_reuse_chapter_digest(db, project_id=project_id, chapter_id=chapter.id, ai_model=ai_model)
-    chapter_summaries, section_summaries = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+    # Digest generation expires the session identity map. Keep only scalar IDs
+    # across calls, then explicitly reload before accessing the directory again.
+    chapter_ids = [chapter.id for chapter in chapters]
+    for chapter_id in chapter_ids:
+        if chapter_id not in context.locked_chapters:
+            await generate_or_reuse_chapter_digest(db, project_id=project_id, chapter_id=chapter_id, ai_model=ai_model)
     plan, chapters, sections = await _load_tree(db, project_id=project_id)
     fresh = await structure_context(db, plan, chapters, sections)
     if context.content_signature != fresh.content_signature:
         raise HTTPException(status_code=409, detail="目录或素材已变化，请重新整理")
     # Digest generation may discover blocking issues; honor those new locks.
     context = fresh
+    chapter_summaries, section_summaries = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
     prompt = build_structure_prompt(context, chapters=chapters, sections=sections,
-        chapter_summaries=chapter_summaries, section_summaries=section_summaries)
+        chapter_summaries=chapter_summaries, section_summaries=section_summaries, review_findings=review_findings)
+    if progress_callback is not None:
+        await progress_callback({"stage": "saving", "provider_request_pending": True})
     await db.commit()
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     generated = await generate_structured_with_client(get_ai_service(ai_model), SYSTEM_PROMPT, prompt,
         output_model=StructureOutput, requested_model=ai_model, temperature=0.15, max_tokens=policy.max_tokens,
         timeout=ai_text_timeout_seconds(policy.timeout_profile), max_attempts=policy.max_attempts)
     validate_structure(generated.value, context)
-    await lock_plan_structure(db, project_id=project_id)
-    for chapter in sorted(chapters, key=lambda c: c.id):
-        await lock_chapter_structure(db, project_id=project_id, chapter_id=chapter.id)
-    await db.execute(select(MemoirSection.id).where(MemoirSection.project_id == project_id).order_by(MemoirSection.id).with_for_update())
-    await db.execute(select(MemoirSectionMaterial.id).where(MemoirSectionMaterial.project_id == project_id).order_by(MemoirSectionMaterial.id).with_for_update())
-    await db.execute(select(MemoirBookOutput.id).where(MemoirBookOutput.project_id == project_id).with_for_update())
-    plan, chapters, sections = await _load_tree(db, project_id=project_id)
-    fresh = await structure_context(db, plan, chapters, sections)
-    if context.signature != fresh.signature:
-        raise HTTPException(status_code=409, detail="目录或素材已变化，本次结构检查未保存")
-    before_sources = material_identity(sections)
-    await apply_structure(db, plan=plan, chapters=chapters, sections=sections, context=context, output=generated.value)
-    plan, chapters, sections = await _load_tree(db, project_id=project_id)
-    if material_identity(sections) != before_sources:
-        raise HTTPException(status_code=409, detail="目录调整未完整保留素材，本次结果未保存")
-    after = await structure_context(db, plan, chapters, sections)
-    plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: after.signature}
+    if progress_callback is not None:
+        await progress_callback({"provider_request_pending": False})
+    async with db.begin_nested():
+        await lock_plan_structure(db, project_id=project_id)
+        for chapter_id in sorted(chapter_ids):
+            await lock_chapter_structure(db, project_id=project_id, chapter_id=chapter_id)
+        # Transcript editing locks/updates utterances before their material links.
+        # Match that order even when a later explicit section merge reuses them.
+        await db.execute(select(MemoirVoiceUtterance.id).where(MemoirVoiceUtterance.id.in_(
+            select(MemoirSectionMaterial.utterance_id).where(MemoirSectionMaterial.project_id == project_id),
+        )).order_by(MemoirVoiceUtterance.id).with_for_update())
+        await db.execute(select(MemoirSection.id).where(MemoirSection.project_id == project_id).order_by(MemoirSection.id).with_for_update())
+        await db.execute(select(MemoirSectionMaterial.id).where(MemoirSectionMaterial.project_id == project_id).order_by(MemoirSectionMaterial.id).with_for_update())
+        await db.execute(select(MemoirBookOutput.id).where(MemoirBookOutput.project_id == project_id).with_for_update())
+        await db.execute(select(MemoirCompletionIssue.id).where(MemoirCompletionIssue.project_id == project_id)
+            .order_by(MemoirCompletionIssue.id).with_for_update())
+        plan, chapters, sections = await _load_tree(db, project_id=project_id)
+        fresh = await structure_context(db, plan, chapters, sections)
+        if context.signature != fresh.signature:
+            raise HTTPException(status_code=409, detail="目录或素材已变化，本次结构检查未保存")
+        if review_identity is not None:
+            current = await book_reviews.get_current_book_review(db, project_id=project_id)
+            if current is None or current.status != "ready" or (current.id, current.input_signature) != review_identity:
+                raise HTTPException(status_code=409, detail="全书审阅依据已变化，本次目录调整未保存")
+        if context.manual_chapter_order and not (plan.metadata_json or {}).get("manual_chapter_order"):
+            plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": list(context.manual_chapter_order)}
+        before_sources = material_identity(sections)
+        changed = await apply_structure(db, plan=plan, chapters=chapters, sections=sections, context=context, output=generated.value)
+        plan, chapters, sections = await _load_tree(db, project_id=project_id)
+        if material_identity(sections) != before_sources:
+            raise HTTPException(status_code=409, detail="目录调整未完整保留素材，本次结果未保存")
+        after = await structure_context(db, plan, chapters, sections)
+        plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: after.signature,
+            **({FEEDBACK_CHECKED_KEY: after.source_signature} if review_identity is not None else {})}
+        await db.flush()
     await db.commit()
+    return changed

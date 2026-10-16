@@ -45,6 +45,7 @@ async def enqueue_book_review_job(
     allow_admin: bool = False,
     input_signature: str | None = None,
     automatic: bool = False,
+    apply_structure_guidance: bool = False,
     on_enqueued: Callable[[MemoirEditingJob], Awaitable[None]] | None = None,
 ) -> dict[str, object]:
     project = await load_memoir_project(
@@ -81,6 +82,7 @@ async def enqueue_book_review_job(
             "force_regenerate": req.force_regenerate,
             "requested_ai_model": selected_ai_model,
             "input_signature": input_signature,
+            "apply_structure_guidance": apply_structure_guidance,
         },
     )
     job.result_json = {
@@ -156,6 +158,7 @@ async def run_book_review_job(
         return EditingJobResult(status=MemoirEditingJobStatus.FAILED, result_json=progress,
             error_message="服务中断时全书审阅请求尚未确认完成，请确认后重试；已有书稿可以继续阅读")
 
+    structure_updated = False
     try:
         await load_memoir_project(
             db,
@@ -174,6 +177,18 @@ async def run_book_review_job(
             force_regenerate=payload.get("force_regenerate") is True,
             progress_callback=update_progress,
         )
+        if (review.status == MemoirSemanticCacheStatus.READY.value and payload.get("apply_structure_guidance") is True
+                and review.review_json.get("structure_findings")):
+            from app.services.memoir.chapter_structure import review_story_structure
+            await update_progress({"review_id": review.id, "stage": "saving"})
+            changed = await review_story_structure(
+                db, user_id=str(payload.get("user_id") or ""), project_id=project_id,
+                book_review=review, progress_callback=update_progress,
+            )
+            if changed:
+                from app.services.memoir.automatic_book_draft import schedule_book_draft
+                await schedule_book_draft(db, project_id=project_id, source="structure_review", settled=True)
+            structure_updated = changed
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
@@ -216,6 +231,7 @@ async def run_book_review_job(
         )
         or payload.get("requested_ai_model"),
         "review_id": review.id,
+        "structure_updated": structure_updated,
     }
     if review.status != MemoirSemanticCacheStatus.READY.value:
         return EditingJobResult(
