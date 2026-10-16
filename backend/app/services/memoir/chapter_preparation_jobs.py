@@ -236,7 +236,7 @@ async def enqueue_chapter_preparation_job(
     incomplete_previous_draft = bool(
         existing is not None
         and existing.status == MemoirEditingJobStatus.SUCCEEDED.value
-        and previous_result.get("outcome") == "completed"
+        and previous_result.get("outcome") in {"completed", "ready"}
         and latest is not None
         and {material.material_id for material in context.materials}
         - set(latest.used_material_ids_json or [])

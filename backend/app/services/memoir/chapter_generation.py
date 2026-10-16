@@ -1051,6 +1051,7 @@ def build_chapter_generation_prompt(
         "- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。\n"
         "- 只能使用输入中的事实和感受，可以调整顺序、合并重复。\n"
         "- 正文根据内容自然分段，段落之间用换行分隔。\n"
+        "- used_material_ids 必须完整记录本小节全部已归属讲述，包括现有正文保留的来源和本次新增或更正来源，不能只返回本次变化的编号。\n"
     )
     task = (
         f"请按已确认修改思路局部修改回忆录章节“{context.chapter_title}”中的当前小节。"
@@ -1575,6 +1576,11 @@ async def generate_chapter_section(
 ) -> GeneratedChapter:
     client = ai_client or get_ai_service(ai_model)
     section_context = _single_section_context(context, section)
+    expected_material_ids = (
+        set(required_material_ids or ())
+        if revision_instruction
+        else {material.material_id for material in section.materials}
+    )
     prompt = build_chapter_generation_prompt(
         section_context,
         editorial_guidance=editorial_guidance,
@@ -1625,10 +1631,10 @@ async def generate_chapter_section(
                     else allow_title_revision
                 ),
             )
-            if required_material_ids and not required_material_ids.issubset(
+            if not expected_material_ids.issubset(
                 generated.sections[0].used_material_ids
             ):
-                raise ValueError("本次新增或变更的讲述未纳入小节正文")
+                raise ValueError("小节正文的采用来源不完整，必须同时记录保留正文和本次增改内容使用的全部讲述")
             _reject_repeated_section_boundary(
                 previous_section_content,
                 generated.sections[0].content,
