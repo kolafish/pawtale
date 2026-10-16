@@ -233,11 +233,20 @@ async def enqueue_chapter_preparation_job(
             for section in (latest.section_snapshot_json or [])
         )
     )
+    incomplete_previous_draft = bool(
+        existing is not None
+        and existing.status == MemoirEditingJobStatus.SUCCEEDED.value
+        and previous_result.get("outcome") == "completed"
+        and latest is not None
+        and {material.material_id for material in context.materials}
+        - set(latest.used_material_ids_json or [])
+    )
     if (
         automatic
         and not retry
         and not decision_resolved
         and not obsolete_approval_candidate
+        and not incomplete_previous_draft
         and previous_result.get("outcome") != "stale"
         and existing is not None
         and (

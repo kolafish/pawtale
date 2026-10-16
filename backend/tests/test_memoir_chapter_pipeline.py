@@ -131,9 +131,7 @@ class FakeChapterAI(AITextServiceBase):
                         "used_material_ids": (
                             ["M99"]
                             if self.draft_material_ids == ["foreign-material"]
-                            else prompt_material_ids[
-                                :len(self.draft_material_ids)
-                            ]
+                            else prompt_material_ids
                         ),
                     }
                 ],
@@ -641,16 +639,9 @@ def test_retired_signatures_require_generation_and_preserve_manual_review(engine
 
 async def test_new_material_selects_only_evidence_backed_related_section(monkeypatch):
     context = _two_section_context()
-    before = datetime(2026, 9, 22, 12)
-    after = datetime(2026, 9, 23, 12)
-    context = replace(
-        context,
-        materials=(
-            replace(context.materials[0], assigned_at=before),
-            replace(context.materials[1], assigned_at=after),
-        ),
+    latest = SimpleNamespace(
+        material_snapshot_json=chapter_generation._snapshot(context, used_material_ids={"material-1"}),
     )
-    latest = SimpleNamespace(created_at=datetime(2026, 9, 23, 10), material_snapshot_json=[])
     changed = chapter_generation._changed_material_ids(context, latest)
     assert changed == {"material-2"}
     previous = chapter_generation.GeneratedChapterSection(
@@ -1078,16 +1069,17 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
     await test_db.commit()
 
     assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-    assert version.used_material_ids_json == [materials[0]["utterance_id"]]
+    assert version.used_material_ids_json == [material["utterance_id"] for material in materials]
     assert version.material_snapshot_json == [
         {
-            "material_id": materials[0]["utterance_id"],
+            "material_id": material["utterance_id"],
             "section_id": section["id"],
-            "transcript_version_id": materials[0]["transcript_version_id"],
-            "text_hash": version.material_snapshot_json[0]["text_hash"],
+            "transcript_version_id": material["transcript_version_id"],
+            "text_hash": version.material_snapshot_json[index]["text_hash"],
             "section_order": 0,
-            "material_order": 0,
+            "material_order": index,
         }
+        for index, material in enumerate(materials)
     ]
     assert version.section_snapshot_json == [
         {
@@ -1103,7 +1095,7 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
                 "朋友发来一张山桃花照片，后来我们一起去爬山。"
                 "这次见面让一段疏远的关系重新有了联系。"
             ),
-            "used_material_ids": [materials[0]["utterance_id"]],
+            "used_material_ids": [material["utterance_id"] for material in materials],
         }
     ]
     assert version.input_signature
