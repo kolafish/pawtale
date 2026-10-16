@@ -53,6 +53,7 @@ class SourceSegment:
     end_ms: int | None
     text: str
     created_at: datetime
+    parent_message_id: str | None = None
 
     def ref(self, quote: str = "") -> MemoirBookChapterSourceRef:
         return MemoirBookChapterSourceRef(
@@ -325,6 +326,7 @@ async def source_segments(
                 end_ms=utterance.end_ms,
                 text=text,
                 created_at=utterance.created_at,
+                parent_message_id=message.parent_message_id,
             )
         )
     return segments

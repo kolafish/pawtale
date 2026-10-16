@@ -29,6 +29,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChatMessage,
     MemoirEditingJob,
     MemoirSection,
     MemoirSectionMaterial,
@@ -121,11 +122,12 @@ class GrowthGroup:
 
 class DeferredSource(BaseModel):
     text_hash: str
-    # not_story: answered the interviewer without any story; kept out of the book until its text changes.
+    # Reconsider not_story only when the answer text or its parent question changes.
     status: Literal["pending", "needs_user", "not_story"]
     reason: str
     attempts: int = 0
     context_signature: str = ""
+    question_context: str = ""
 
 
 class RecoveryMaterial(BaseModel):
@@ -141,6 +143,7 @@ class GrowthBatch(BaseModel):
     context_signature: str = ""
     groups: list[GrowthGroup] = Field(default_factory=list)
     sources: dict[str, tuple[str, str | None]]
+    question_contexts: dict[str, str] = Field(default_factory=dict)
     section_versions: dict[str, int]
     section_chapters: dict[str, str]
     chapter_updated_at: dict[str, datetime]
@@ -445,7 +448,25 @@ async def _deferred_sources(db: AsyncSession, project_id: str) -> dict[str, Defe
     result: dict[str, DeferredSource] = {}
     for previous in history:
         result.update(_progress(previous).deferred)
+    if result:
+        messages = (await db.execute(select(MemoirVoiceUtterance.id, MemoirChatMessage)
+            .join(MemoirChatMessage, MemoirChatMessage.id == MemoirVoiceUtterance.chat_message_id)
+            .where(MemoirVoiceUtterance.id.in_(result)).execution_options(populate_existing=True))).all()
+        for source_id, message in messages:
+            if not _question_context_matches(result[source_id].question_context, message):
+                result.pop(source_id)
     return result
+
+
+def _question_context(message: MemoirChatMessage | None) -> str:
+    return semantic_json_signature(message.parent_message_id if message else None)
+
+
+def _question_context_matches(context: str, message: MemoirChatMessage | None) -> bool:
+    if not context:
+        # Old checkpoints have no question binding. Keep them only if the relation was never edited.
+        return message is None or "relation_updated_at" not in (message.metadata_json or {})
+    return context == _question_context(message)
 
 
 async def _person_answer_target(db: AsyncSession, project_id: str, source_id: str | None) -> tuple[str, int] | None:
@@ -546,6 +567,7 @@ async def _create_initial_tree(
             progress.deferred[source.utterance_id] = DeferredSource(
                 text_hash=source_text_hash(source.text), status="not_story", reason="资料或对话回应，不含故事",
                 attempts=MAX_UNASSIGNED_ATTEMPTS,
+                question_context=semantic_json_signature(source.parent_message_id),
             )
         await _save_progress(db, job, progress)
 
@@ -897,6 +919,11 @@ async def grow_story_tree(
         )
     ).all()
     deferred.update(progress.deferred)
+    for item in project_sources:
+        previous = deferred.get(item.id)
+        if previous and not _question_context_matches(previous.question_context, item.chat_message):
+            deferred.pop(item.id)
+            progress.deferred.pop(item.id, None)
     person_answers = await narration_people.answer_sources(
         db, project_id=job.project_id, message_ids=(item.chat_message_id for item in project_sources),
     )
@@ -921,13 +948,15 @@ async def grow_story_tree(
             from app.services.memoir.narrator_profile import schedule_narrator_profile
             await schedule_narrator_profile(db, utterance=answer, require_answer_reading=True)
             progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="pending",
-                reason="等待人物补答的内容核对", context_signature=context_signature)
+                reason="等待人物补答的内容核对", context_signature=context_signature,
+                question_context=_question_context(answer.chat_message))
         elif story_content:
             linked_answers.append(answer)
         else:
             progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="not_story",
                 reason="人物问题后的回复不含故事事实或感受", attempts=MAX_UNASSIGNED_ATTEMPTS,
-                context_signature=context_signature)
+                context_signature=context_signature,
+                question_context=_question_context(answer.chat_message))
     utterances = [
         item
         for item in project_sources
@@ -948,6 +977,12 @@ async def grow_story_tree(
             )
         )
     ]
+    if progress.batch is not None and any(
+        item.id in progress.batch.sources
+        and not _question_context_matches(progress.batch.question_contexts.get(item.id, ""), item.chat_message)
+        for item in project_sources
+    ):
+        progress.batch = None
     if progress.batch is None and utterances:
         _plan, chapters, sections = await _load_tree(db, project_id=job.project_id)
         batch = GrowthBatch(
@@ -957,6 +992,7 @@ async def grow_story_tree(
                 item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
                 for item in utterances
             },
+            question_contexts={item.id: _question_context(item.chat_message) for item in utterances},
             section_versions={item.id: item.version for item in sections},
             section_chapters={item.id: item.chapter_id for item in sections},
             chapter_updated_at={item.id: item.updated_at for item in chapters},
@@ -994,6 +1030,7 @@ async def grow_story_tree(
                             progress.deferred[source_id] = DeferredSource(
                                 text_hash=batch.sources[source_id][0], status="not_story", reason=group.reason,
                                 attempts=MAX_UNASSIGNED_ATTEMPTS, context_signature=batch.context_signature,
+                                question_context=batch.question_contexts.get(source_id, ""),
                             )
                             await _save_progress(db, job, progress)
 
@@ -1027,6 +1064,7 @@ async def grow_story_tree(
                     progress.deferred[source_id] = DeferredSource(
                         text_hash=text_hash, status="not_story", reason=group.reason, attempts=MAX_UNASSIGNED_ATTEMPTS,
                         context_signature=batch.context_signature,
+                        question_context=batch.question_contexts.get(source_id, ""),
                     )
                     continue
                 if group.action == "leave_unassigned" and group.reason:
@@ -1038,6 +1076,7 @@ async def grow_story_tree(
                     reason=group.reason if needs_user else "素材尚未归类，等待下一次整理",
                     attempts=attempts,
                     context_signature=batch.context_signature,
+                    question_context=batch.question_contexts.get(source_id, ""),
                 )
         progress.batch = None
     # A saved person question already identifies its source. Only the original narration goes
@@ -1066,6 +1105,7 @@ async def grow_story_tree(
         progress.deferred[answer.id] = DeferredSource(
             text_hash=source_text_hash(current_utterance_text(answer)), status="pending",
             reason="补充回答等待原讲述可收录后加入", context_signature=context_signature,
+            question_context=_question_context(answer.chat_message),
         )
     # Preserve placement checkpoints before reviewing; report only the final
     # directory, not a transient chapter that the same review absorbed.
