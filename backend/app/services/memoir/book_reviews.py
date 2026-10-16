@@ -280,6 +280,9 @@ async def ensure_chapter_digests(
                 status_code=422,
                 detail=digest.error_message or f"章节“{chapter_title}”审阅失败",
             )
+        # Persist each chapter checkpoint before reading through a new Session.
+        # Progress reporting must not own the digest transaction.
+        await db.commit()
 
 
 async def load_book_review_metadata(

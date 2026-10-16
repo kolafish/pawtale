@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookReview,
+    MemoirChapterDigest,
     MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirSection,
@@ -2452,6 +2453,37 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
     assert summary["active_issue"]["question"] == "这一章比赛年份的两种说法，哪一种准确？"
+
+
+@pytest.mark.parametrize("report_progress", [False, True])
+async def test_cold_book_review_does_not_depend_on_progress_callback_commits(
+    client, test_db, report_progress,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+    await test_db.commit()
+    assert await test_db.scalar(select(func.count(MemoirChapterDigest.id)).where(
+        MemoirChapterDigest.project_id == project_id,
+    )) == 0
+    progress = []
+
+    async def record_progress(patch):
+        progress.append(patch)
+
+    fake = LayeredBookAI()
+    review = await book_reviews.generate_or_reuse_book_review(
+        test_db, project_id=project_id, ai_client=fake,
+        progress_callback=record_progress if report_progress else None,
+    )
+
+    assert review.status == "ready"
+    assert sum("请通读下面这本回忆录" in prompt for prompt in fake.prompts) == 1
+    if report_progress:
+        assert any(patch.get("stage") == "reviewing" for patch in progress)
 
 
 async def test_book_review_uses_chapter_text_and_creates_book_issue(
