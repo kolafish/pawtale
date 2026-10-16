@@ -576,6 +576,91 @@ test("transcripts page searches records and clears back to the full list", async
   assert.equal(context.data.items[0].id, "utterance-all");
 });
 
+test("material tabs reset pagination while preserving search and the selected scope", async () => {
+  const calls = [];
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({ active_project_id: "project-1", active_project: { title: "我的回忆录" } }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async (options) => {
+        calls.push(options);
+        return { items: [sampleTranscript(`item-${options.offset}`)], total: 3, limit: options.limit, offset: options.offset };
+      },
+    },
+  });
+  const context = pageContext(page, { activeProjectId: "project-1", limit: 1, offset: 5,
+    searchInput: "外婆", searchQuery: "外婆", searchFilters: { included: "not_included", narrationMode: "", module: "" } });
+  const selectTab = (tab) => page.selectMaterialTab.call(context, { currentTarget: { dataset: { tab } } });
+
+  await selectTab("organized");
+  await page.loadMore.call(context);
+  assert.deepEqual(context.data.items.map((item) => item.id), ["item-0", "item-1"]);
+  await selectTab("unorganized");
+  await selectTab("unorganized");
+  await page.clearSearch.call(context);
+
+  assert.deepEqual(calls.map(({ organized, offset, query, included }) => ({ organized, offset, query, included })), [
+    { organized: true, offset: 0, query: "外婆", included: "not_included" },
+    { organized: true, offset: 1, query: "外婆", included: "not_included" },
+    { organized: false, offset: 0, query: "外婆", included: "not_included" },
+    { organized: false, offset: 0, query: undefined, included: "all" },
+  ]);
+  assert.equal(context.data.materialTab, "unorganized");
+  assert.equal(context.data.materialTabs.find((tab) => tab.selected).value, "unorganized");
+  assert.deepEqual(context.data.items.map((item) => item.id), ["item-0"]);
+});
+
+test("material tabs ignore a late response from the previous tab", async () => {
+  const organized = deferred();
+  const requested = deferred();
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({ active_project_id: "project-1" }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async (options) => {
+        if (options.organized) {
+          requested.resolve();
+          return organized.promise;
+        }
+        return { items: [sampleTranscript("unorganized")], total: 1, limit: 30, offset: 0 };
+      },
+    },
+  });
+  const context = pageContext(page, { activeProjectId: "project-1" });
+  const first = page.selectMaterialTab.call(context, { currentTarget: { dataset: { tab: "organized" } } });
+  await requested.promise;
+  await page.selectMaterialTab.call(context, { currentTarget: { dataset: { tab: "unorganized" } } });
+  organized.resolve({ items: [sampleTranscript("organized")], total: 1, limit: 30, offset: 0 });
+  await first;
+
+  assert.equal(context.data.materialTab, "unorganized");
+  assert.equal(context.data.items[0].id, "unorganized");
+  assert.equal(context.data.loading, false);
+});
+
+test("material cards distinguish pending assignment from excluded stories", async () => {
+  const assignment = { chapter_id: "chapter-1", chapter_title: "童年", chapter_sort_order: 0,
+    section_id: "section-1", section_title: "院子", section_sort_order: 0 };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({ active_project_id: "project-1" }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({ items: [
+        { ...sampleTranscript("excluded"), section_assignment: { ...assignment, requires_user_assignment: false } },
+        { ...sampleTranscript("pending"), section_assignment: { ...assignment, requires_user_assignment: true } },
+      ], total: 2, limit: 30, offset: 0 }),
+    },
+  });
+  const context = pageContext(page);
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(context.data.items[0].storyStatusText, "已收进：院子");
+  assert.equal(context.data.items[1].storyStatusText, "尚未整理");
+});
+
 test("transcripts page stores highlighted search segments on matching results", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {
@@ -1004,7 +1089,7 @@ test("empty recordings fold before pagination and can be expanded, recovered and
 });
 
 
-for (const scenario of ["empty", "deleted", "server-error", "other-project", "video", "search-without-empty", "project-changed"]) {
+for (const scenario of ["empty", "deleted", "server-error", "other-project", "video", "search-without-empty", "organized-tab", "project-changed"]) {
   test(`navigation reveals only a confirmed empty target: ${scenario}`, async () => {
     const targetId = "navigation-target";
     global.wx = {
@@ -1013,13 +1098,13 @@ for (const scenario of ["empty", "deleted", "server-error", "other-project", "vi
     };
     const calls = [];
     let detailCalls = 0;
-    const noEmpty = scenario === "search-without-empty";
+    const noEmpty = scenario === "search-without-empty" || scenario === "organized-tab";
     const { page } = loadTranscriptsPage({
       authExports: { getMemoirIdentity: async () => ({ active_project_id: "project-1", active_project: { title: "往事" } }) },
       voiceApiExports: {
         listMemoirVoiceTranscripts: async options => {
           calls.push(options);
-          const items = options.query ? [] : noEmpty ? [sampleTranscript(targetId)]
+          const items = options.query || options.organized ? [] : noEmpty ? [sampleTranscript(targetId)]
             : options.includeEmpty ? [sampleTranscript("ordinary"), { ...sampleTranscript(targetId), transcription_status: "empty" }]
             : [sampleTranscript("ordinary")];
           return { items, total: items.length, empty_count: noEmpty ? 0 : 1, limit: 30, offset: 0 };
@@ -1035,7 +1120,9 @@ for (const scenario of ["empty", "deleted", "server-error", "other-project", "vi
         },
       },
     });
-    const context = pageContext(page, { pickForVideo: scenario === "video", searchQuery: noEmpty ? "搜索词" : "" });
+    const context = pageContext(page, { activeProjectId: "project-1", pickForVideo: scenario === "video",
+      searchQuery: scenario === "search-without-empty" ? "搜索词" : "",
+      materialTab: scenario === "organized-tab" ? "organized" : "all" });
     await page.onShow.call(context);
     const expanded = scenario === "empty";
     assert.equal(context.data.showEmptyRecordings, expanded);
@@ -1043,6 +1130,10 @@ for (const scenario of ["empty", "deleted", "server-error", "other-project", "vi
     assert.equal(detailCalls, noEmpty || scenario === "video" ? 0 : 1);
     assert.equal(context.data.highlightedId, expanded || noEmpty ? targetId : "");
     if (noEmpty) assert.equal(context.data.hasSearchCriteria, false);
+    if (scenario === "organized-tab") {
+      assert.deepEqual(calls.map((call) => call.organized), [true, undefined]);
+      assert.equal(context.data.materialTab, "all");
+    }
     if (scenario === "deleted") assert.equal(context.data.error, "");
     if (scenario === "server-error") assert.equal(context.data.error, "暂时无法连接");
   });

@@ -2778,6 +2778,68 @@ async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client,
     assert not_included_response.json()["items"][0]["id"] == not_included["utterance_id"]
 
 
+async def test_mobile_memoir_filters_transcripts_by_story_assignment(client, test_db):
+    assigned = await create_test_voice_transcript(client, test_db, text="外婆家的院子。")
+    unassigned = await create_test_voice_transcript(client, test_db, text="第一次离家读书。")
+    pending = await create_test_voice_transcript(client, test_db, text="待归类的童年片段。")
+    project_id = assigned["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(assigned), memoir_source_ref(pending)],
+    )
+    section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapter.id))
+    section.include_in_book = False
+    section.status = "archived"
+    chapter.include_in_book = False
+    pending_section = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        title="待归类素材",
+        sort_order=1,
+        include_in_book=False,
+        metadata_json={"system_role": "pending_material_assignment"},
+    )
+    test_db.add(pending_section)
+    await test_db.flush()
+    materials = (await test_db.scalars(
+        select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == project_id)
+    )).all()
+    for material in materials:
+        material.include_in_book = False
+        if material.utterance_id == pending["utterance_id"]:
+            material.section_id = pending_section.id
+            material.sort_order = 0
+    await test_db.commit()
+
+    async def list_filtered(**params):
+        response = await client.get(
+            "/api/mobile/memoir/voice-transcripts",
+            params={"project_id": project_id, **params},
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    organized = await list_filtered(organized="true")
+    assert organized["total"] == 1
+    assert organized["items"][0]["id"] == assigned["utterance_id"]
+    assert organized["items"][0]["is_included_in_book"] is False
+    assert organized["items"][0]["section_assignment"]["requires_user_assignment"] is False
+
+    first_page = await list_filtered(organized="false", limit=1)
+    second_page = await list_filtered(organized="false", limit=1, offset=1)
+    assert first_page["total"] == second_page["total"] == 2
+    assert {first_page["items"][0]["id"], second_page["items"][0]["id"]} == {
+        unassigned["utterance_id"], pending["utterance_id"],
+    }
+    search = await list_filtered(organized="false", q="待归类")
+    assert search["total"] == 1
+    assert search["items"][0]["id"] == pending["utterance_id"]
+    assert search["items"][0]["section_assignment"]["requires_user_assignment"] is True
+    assert (await list_filtered(organized="true", q="待归类"))["total"] == 0
+    assert (await list_filtered())["total"] == 3
+
+
 async def test_mobile_memoir_delete_transcript_removes_section_material_and_marks_draft_stale(client, test_db):
     first = await create_test_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
     second = await create_test_voice_transcript(client, test_db, text="后来我第一次离家去县城读书。")

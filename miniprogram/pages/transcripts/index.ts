@@ -50,6 +50,7 @@ import { setPageNavigationTitle } from "../../services/page-navigation";
 
 interface TranscriptDataset {
   id?: string;
+  tab?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<TranscriptDataset>;
@@ -94,6 +95,10 @@ interface TranscriptItemView {
 
 interface TranscriptsData {
   pageClass: string;
+  materialTab: MaterialTab;
+  materialTabs: Array<{ value: MaterialTab; label: string; selected: boolean }>;
+  emptyTitleText: string;
+  emptyCopyText: string;
   // Opened from a share video entry: a tap goes straight to picking sentences.
   pickForVideo: boolean;
   loading: boolean;
@@ -137,6 +142,12 @@ interface TranscriptsData {
 
 const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
+type MaterialTab = "all" | "organized" | "unorganized";
+const MATERIAL_TABS: Array<{ value: MaterialTab; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "organized", label: "已收进" },
+  { value: "unorganized", label: "尚未整理" },
+];
 const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
   included: "all",
   narrationMode: "",
@@ -177,6 +188,9 @@ type WxWithPageScrollTo = typeof wx & {
 type TranscriptsViewPatch = Pick<
   TranscriptsData,
   | "items"
+  | "materialTabs"
+  | "emptyTitleText"
+  | "emptyCopyText"
   | "pageMetaText"
   | "showSearchClear"
   | "showSearchChips"
@@ -220,6 +234,11 @@ export function transcriptsViewPatch(state: TranscriptsData): TranscriptsViewPat
   const showListEmpty = !state.loading && !state.needsLogin && Boolean(state.activeProjectId) && itemCount === 0;
   return {
     items: state.items.map((item) => withTranscriptRuntimeState(item, state)),
+    materialTabs: MATERIAL_TABS.map((tab) => ({ ...tab, selected: tab.value === state.materialTab })),
+    emptyTitleText: state.materialTab === "organized" ? "还没有收进故事的回忆"
+      : state.materialTab === "unorganized" ? "没有尚未整理的回忆" : "暂无讲述记录",
+    emptyCopyText: state.materialTab === "organized" ? "回忆整理进故事后，会显示在这里。"
+      : state.materialTab === "unorganized" ? "已有的回忆都已收进故事。" : "完成一次语音聊天后，保存的语音和文字会显示在这里。",
     pageMetaText: `${state.projectTitle || "当前回忆录"} · ${state.total} 条讲述`,
     showSearchClear: Boolean(state.searchInput || state.hasSearchCriteria),
     showSearchChips: state.searchChips.length > 0,
@@ -380,28 +399,20 @@ function toViewItem(
   searchQuery = "",
 ): TranscriptItemView {
   const canRecoverTranscription = isPendingTranscription(item);
-  const isIncludedInBook = !canRecoverTranscription && Boolean(
-    item.is_included_in_book
-    || item.included_chapters?.some((chapter) => chapter.include_in_book !== false),
-  );
+  const hasStoryAssignment = item.section_assignment && !item.section_assignment.requires_user_assignment;
   const recovery = transcriptRecoveryText(item.transcription_status);
   const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
-  const includedChapter = [...(item.included_chapters || [])]
-    .sort((left, right) => left.sort_order - right.sort_order)[0];
   const includedLocationText = item.section_assignment?.section_title.trim()
     || item.section_assignment?.chapter_title.trim()
-    || includedChapter?.title.trim()
     || "";
   const storyStatusText = canRecoverTranscription
     ? recovery.statusText
-    : (isIncludedInBook
+    : (hasStoryAssignment
       ? `已收进：${includedLocationText || "故事树"}`
-      : (item.section_assignment
-        ? `已收进：${includedLocationText || "故事树"}`
-        : "尚未整理"));
+      : "尚未整理");
   const recordMetaText = [
     createdAtText,
     durationText,
@@ -447,6 +458,10 @@ definePage<TranscriptsData>()({
 
   data: {
     pageClass: "transcripts-page",
+    materialTab: "all",
+    materialTabs: MATERIAL_TABS.map((tab) => ({ ...tab, selected: tab.value === "all" })),
+    emptyTitleText: "暂无讲述记录",
+    emptyCopyText: "完成一次语音聊天后，保存的语音和文字会显示在这里。",
     pickForVideo: false,
     loading: false,
     needsLogin: false,
@@ -540,12 +555,14 @@ definePage<TranscriptsData>()({
         return;
       }
       const showEmptyRecordings = activeProjectId === this.data.activeProjectId && this.data.showEmptyRecordings;
+      const materialTab = activeProjectId === this.data.activeProjectId ? this.data.materialTab : "all";
       const response = await listMemoirVoiceTranscripts({
           includeEmpty: showEmptyRecordings,
           readyOnly: this.data.pickForVideo,
           projectId: activeProjectId,
           query: searchQuery || undefined,
           included: searchFilters.included,
+          organized: materialTab === "all" ? undefined : materialTab === "organized",
           narrationMode: searchFilters.narrationMode || undefined,
           module: searchFilters.module || undefined,
           limit: requestLimit,
@@ -558,6 +575,7 @@ definePage<TranscriptsData>()({
       setTranscriptsData(this, {
         needsLogin: false,
         activeProjectId,
+        materialTab,
         projectTitle,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
@@ -608,6 +626,17 @@ definePage<TranscriptsData>()({
     setTranscriptsData(this, {
       showEmptyRecordings: !this.data.showEmptyRecordings,
       items: [], total: 0, offset: 0, highlightedId: "",
+    });
+    await this.loadTranscripts(true);
+  },
+
+  async selectMaterialTab(event: DatasetEvent) {
+    const tab = MATERIAL_TABS.find((item) => item.value === datasetString(event, "tab"));
+    if (!tab || tab.value === this.data.materialTab
+        || this.data.pickForVideo || this.data.recoveringId || this.data.deletingId) return;
+    setTranscriptsData(this, {
+      materialTab: tab.value,
+      items: [], total: 0, offset: 0, highlightedId: "", openSwipeId: "",
     });
     await this.loadTranscripts(true);
   },
@@ -842,6 +871,7 @@ definePage<TranscriptsData>()({
         setTranscriptsData(this, { emptyCount: Math.max(0, this.data.emptyCount - 1) });
       }
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
+      if (this.data.materialTab !== "all") await this.loadTranscripts(true);
       wx.showToast(recovered.transcription_status === "unrecognized"
         ? { title: "没有识别出文字，录音已保留", icon: "none" }
         : { title: "录音已转成文字", icon: "success" });
@@ -874,8 +904,9 @@ definePage<TranscriptsData>()({
       return;
     }
     clearTranscriptNavigationTarget();
-    if (this.data.hasSearchCriteria) {
+    if (this.data.hasSearchCriteria || this.data.materialTab !== "all") {
       setTranscriptsData(this, {
+        materialTab: "all",
         searchInput: "",
         searchQuery: "",
         searchFilters: DEFAULT_SEARCH_FILTERS,
