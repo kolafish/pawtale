@@ -22,7 +22,6 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
-    MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookOutput,
     MemoirCompletionIssue,
@@ -769,6 +768,7 @@ async def close_issue(
 ) -> MemoirCompletionIssue:
     # Serialize answers with chapter writes/assembly so an in-flight generation
     # either sees this decision or is invalidated by it after its save.
+    from app.services.memoir.sections import lock_project_chapters
     await lock_project_chapters(db, project_id=project_id)
     issue = await db.scalar(select(MemoirCompletionIssue).where(
         MemoirCompletionIssue.project_id == project_id,
@@ -822,17 +822,6 @@ async def close_issue(
     await schedule_book_draft(db, project_id=project_id, source="decision", settled=True)
     await db.flush()
     return issue
-
-
-async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
-    # All directory writers take plan -> chapters, matching section moves and
-    # the end-of-narration review. Reversing these locks can deadlock a rename.
-    await db.execute(select(MemoirBookPlan.id).where(
-        MemoirBookPlan.project_id == project_id,
-    ).with_for_update())
-    await db.execute(select(MemoirBookPlanChapter.id).where(
-        MemoirBookPlanChapter.project_id == project_id,
-    ).order_by(MemoirBookPlanChapter.id).with_for_update())
 
 
 def issue_response(issue: MemoirCompletionIssue) -> MemoirCompletionIssueResponse:

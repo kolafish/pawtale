@@ -426,7 +426,7 @@ async def apply_writing_corrections(
     """
     from app.services.memoir.book_output_state import invalidate_book_output
     from app.services.memoir.book_output_versions import append_book_output_version
-    from app.services.memoir.completion_issues import lock_project_chapters
+    from app.services.memoir.sections import lock_project_chapters
     from app.services.memoir.projects import apply_memoir_project_update, profile_inferred_sources
     from app.services.memoir.voice_transcripts import apply_corrected_writing_text
 
@@ -565,7 +565,7 @@ async def revert_writing_corrections(db: AsyncSession, *, user_id: str, project:
     """Restore the exact pre-correction text; any newer change to a corrected object refuses the whole undo."""
     from app.services.memoir.book_output_state import invalidate_book_output
     from app.services.memoir.book_output_versions import append_book_output_version, load_latest_book_output_version
-    from app.services.memoir.completion_issues import lock_project_chapters
+    from app.services.memoir.sections import lock_project_chapters
     from app.services.memoir.projects import apply_memoir_project_update, restore_profile_inferred_sources
     from app.services.memoir.voice_transcripts import apply_corrected_writing_text
 

@@ -46,6 +46,7 @@ from app.services.memoir.book_output_snapshots import (
 from app.services.memoir.project_ai_preferences import project_transcript_polish_level
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.sections import lock_project_chapters
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.image_assets import (
     auto_place_share_video_backgrounds,
@@ -61,7 +62,7 @@ async def assemble_book_output(
     eligible_chapter_ids: set[str] | None = None,
     automatic: bool = False,
 ) -> MemoirBookAssemblyResponse:
-    await completion_issues.lock_project_chapters(db, project_id=project_id)
+    await lock_project_chapters(db, project_id=project_id)
     plan = await load_book_plan_drafts(db, project_id=project_id)
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("请先确认章节规划")

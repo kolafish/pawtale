@@ -69,6 +69,17 @@ async def _load_plan(
     return plan
 
 
+async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
+    # All directory writers take plan -> chapters, matching section moves and
+    # the end-of-narration review. Reversing these locks can deadlock a rename.
+    await db.execute(select(MemoirBookPlan.id).where(
+        MemoirBookPlan.project_id == project_id,
+    ).with_for_update())
+    await db.execute(select(MemoirBookPlanChapter.id).where(
+        MemoirBookPlanChapter.project_id == project_id,
+    ).order_by(MemoirBookPlanChapter.id).with_for_update())
+
+
 async def lock_plan_structure(
     db: AsyncSession,
     *,
@@ -1498,6 +1509,7 @@ async def bootstrap_sections(
     user_id: str,
     project_id: str,
     allow_admin: bool = False,
+    commit: bool = True,
 ) -> MemoirSectionCollectionResponse:
     await load_memoir_project(
         db,
@@ -1552,7 +1564,7 @@ async def bootstrap_sections(
         await db.flush()
         first_section_by_chapter[chapter.id] = section
 
-    await db.commit()
+    await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
 
 

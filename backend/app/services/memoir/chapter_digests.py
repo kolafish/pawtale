@@ -534,11 +534,12 @@ async def generate_or_reuse_chapter_digest(
         ai_client=ai_client,
         progress_callback=progress_callback,
     )
-    context = await load_chapter_digest_context(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
+    async with AsyncSession(bind=db.bind, expire_on_commit=False) as inputs_db:
+        context = await load_chapter_digest_context(
+            inputs_db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
     await db.execute(
         delete(MemoirChapterDigest).where(
             MemoirChapterDigest.project_id == project_id,
@@ -608,12 +609,14 @@ async def generate_or_reuse_chapter_digest(
             generated.value.model_dump(),
             section_references=_section_references(context),
         )
-        db.expire_all()
-        current_context = await load_chapter_digest_context(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-        )
+        # Validate committed inputs in a fresh identity map without expiring
+        # unrelated task/session objects owned by the calling workflow.
+        async with AsyncSession(bind=db.bind, expire_on_commit=False) as inputs_db:
+            current_context = await load_chapter_digest_context(
+                inputs_db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+            )
         if current_context.input_signature != context.input_signature:
             raise HTTPException(
                 status_code=409,

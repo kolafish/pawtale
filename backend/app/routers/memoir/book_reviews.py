@@ -40,13 +40,15 @@ async def enqueue_memoir_book_review_job(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await book_review_jobs.enqueue_book_review_job(
+        result = await book_review_jobs.enqueue_book_review_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
             req=req,
             allow_admin=is_admin_user(current_user),
         )
+        await db.commit()
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

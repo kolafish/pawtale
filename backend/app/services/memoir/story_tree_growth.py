@@ -966,8 +966,8 @@ async def grow_story_tree(
     if session.status == MemoirVoiceSessionStatus.STOPPED.value:
         lease_token = job.lease_token
         await review_story_structure(db, user_id=project.user_id, project_id=job.project_id)
-        # Digest generation expires the shared session, including these outer
-        # task objects. Restore them before progress writes and book scheduling.
+        # The review crosses provider/checkpoint boundaries. Re-read task and
+        # session state before accepting ownership of the final progress write.
         await db.refresh(job)
         await db.refresh(session)
         if job.status != MemoirEditingJobStatus.RUNNING.value or job.lease_token != lease_token:

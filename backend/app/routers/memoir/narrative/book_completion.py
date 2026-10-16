@@ -128,13 +128,15 @@ async def enqueue_memoir_chapter_preparation_job(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await chapter_preparation_jobs.enqueue_chapter_preparation_job(
+        result = await chapter_preparation_jobs.enqueue_chapter_preparation_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
             chapter_id=chapter_id,
             req=req,
         )
+        await db.commit()
+        return result
     except ValueError as exc:
         raise decision_error(exc) from exc
 

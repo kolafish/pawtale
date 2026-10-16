@@ -277,10 +277,6 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             retry=retry_chapters,
             on_enqueued=record_child,
         )
-        # Child dispatch may commit its checkpoint and release the directory.
-        # Reacquire it before any later parent payload/output write.
-        with db.no_autoflush:
-            await completion_issues.lock_project_chapters(db, project_id=project_id)
         state.job_id = str(child["job_id"])
         state.status = (
             ("needs_review" if child.get("outcome") == "needs_review" else "needs_input")

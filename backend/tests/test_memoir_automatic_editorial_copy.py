@@ -187,7 +187,7 @@ async def test_copy_completion_and_running_parent_share_lock_order(client, test_
     import asyncio
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession
-    from app.services.memoir import chapter_preparation_jobs, completion_issues, editing_jobs
+    from app.services.memoir import chapter_preparation_jobs, editing_jobs, sections
     from tests.test_memoir_continuous_book import _add_narration
     pid, chapter_id, section_id, fake, parent_id = await _setup(client, test_db, monkeypatch)
     assert not await run_test_editing_job(test_db, parent_id)
@@ -204,7 +204,7 @@ async def test_copy_completion_and_running_parent_share_lock_order(client, test_
         async def enqueue_and_pause(*args, **kwargs):
             nonlocal parent_pid
             result = await enqueue(*args, **kwargs)
-            # Dispatch committed; capture the connection used after that commit.
+            # Dispatch retains the directory lock until the parent checkpoint.
             parent_pid = await args[0].scalar(text('SELECT pg_backend_pid()'))
             queued.set()
             await release.wait()
@@ -222,19 +222,27 @@ async def test_copy_completion_and_running_parent_share_lock_order(client, test_
             task = asyncio.create_task(editing_jobs.run_editing_job(parent_db, lease))
         async def generate(**kwargs):
             nonlocal task
-            # Pause the real parent at the same directory lock the copy save
-            # takes, then let copy completion wake that running parent.
-            if child_dispatched:
-                await asyncio.wait_for(queued.wait(), timeout=3)
-            await completion_issues.lock_project_chapters(copy_db, project_id=pid)
-            if child_dispatched:
-                release.set()
-            else:
-                task = asyncio.create_task(editing_jobs.run_editing_job(parent_db, lease))
-            async def wait_until_blocked():
-                while not await test_db.scalar(text('SELECT cardinality(pg_blocking_pids(:pid)) > 0'), {'pid': parent_pid}):
+            async def wait_until_blocked(connection_pid):
+                while not await test_db.scalar(text('SELECT cardinality(pg_blocking_pids(:pid)) > 0'), {'pid': connection_pid}):
                     await asyncio.sleep(0.01)
-            await asyncio.wait_for(wait_until_blocked(), timeout=3)
+            if child_dispatched:
+                # The parent retains its lock through child dispatch. Copy
+                # completion waits until that atomic checkpoint is committed.
+                await asyncio.wait_for(queued.wait(), timeout=3)
+                copy_pid = await copy_db.scalar(text('SELECT pg_backend_pid()'))
+                lock_task = asyncio.create_task(sections.lock_project_chapters(copy_db, project_id=pid))
+                try:
+                    await asyncio.wait_for(wait_until_blocked(copy_pid), timeout=3)
+                    release.set()
+                    await asyncio.wait_for(lock_task, timeout=3)
+                finally:
+                    if not lock_task.done():
+                        lock_task.cancel()
+                    await asyncio.gather(lock_task, return_exceptions=True)
+            else:
+                await sections.lock_project_chapters(copy_db, project_id=pid)
+                task = asyncio.create_task(editing_jobs.run_editing_job(parent_db, lease))
+                await asyncio.wait_for(wait_until_blocked(parent_pid), timeout=3)
             return _copy(kwargs['snapshot'])
         monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
         try:
@@ -242,7 +250,13 @@ async def test_copy_completion_and_running_parent_share_lock_order(client, test_
                 copy_db, user_id=user_id, project_id=pid,
                 req=MemoirBookOutputEditorialCopyRegenerateRequest(), automatic=True,
             ), timeout=5)
-            assert output.latest_version.manuscript.back_matter.afterword.content == '自动后记1'
+            afterword = output.latest_version.manuscript.back_matter.afterword.content
+            if child_dispatched:
+                # Parent assembly advanced the output while copy waited for
+                # its lock; the old copy response must not overwrite it.
+                assert afterword != '自动后记1'
+            else:
+                assert afterword == '自动后记1'
             assert task is not None and not await asyncio.wait_for(task, timeout=5)
             await test_db.refresh(parent)
             assert parent.status == 'pending'
