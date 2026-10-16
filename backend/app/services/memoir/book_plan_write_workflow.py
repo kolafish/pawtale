@@ -80,10 +80,8 @@ from app.services.memoir.book_structure_commands import (
     command_chapter_id as _require_command_chapter_id,
 )
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.sections import sync_materials_to_chapters
-from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.sections import finalize_section_changes, lock_project_chapters, sync_materials_to_chapters
 from app.services.memoir import fact_decisions
-from app.services.memoir.sections import lock_project_chapters
 
 
 @dataclass(frozen=True)
@@ -308,7 +306,7 @@ async def _replace_plan(
         pending_source_refs.append((plan_chapter, [_as_dict(ref) for ref in chapter.source_refs]))
     await db.flush()
     source_refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
-    await sync_materials_to_chapters(
+    changed_ids = await sync_materials_to_chapters(
         db,
         project_id=project_id,
         utterance_ids_by_chapter={
@@ -318,6 +316,8 @@ async def _replace_plan(
         assigned_by=_material_assigned_by_for_created_by(created_by),
         assignment_reason="replace_book_plan",
     )
+    if changed_ids:
+        await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     if before_commit is not None:
         await before_commit()
     await db.commit()
@@ -745,10 +745,11 @@ async def update_book_plan(
         else:
             await db.delete(chapter)
 
+    changed_ids: set[str] = set()
     if changed_chapter_ids or newly_assigned_utterance_ids or removed_chapters:
         await db.flush()
         refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
-        await sync_materials_to_chapters(
+        changed_ids = await sync_materials_to_chapters(
             db,
             project_id=project_id,
             utterance_ids_by_chapter={
@@ -777,8 +778,7 @@ async def update_book_plan(
         },
     )
     db.add(plan)
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -829,12 +829,12 @@ async def _selected_sections_for_chapter_split(
 async def _move_split_sections(
     db: AsyncSession,
     *,
-    project_id: str,
     source_sections: list[MemoirSection],
     selected_sections: list[MemoirSection],
     new_chapter_id: str,
-) -> None:
+) -> set[str]:
     selected_ids = {section.id for section in selected_sections}
+    changed_ids = set(selected_ids)
     for index, section in enumerate(selected_sections):
         section.chapter_id = new_chapter_id
         section.sort_order = index
@@ -843,15 +843,12 @@ async def _move_split_sections(
     await db.flush()
     for index, section in enumerate(section for section in source_sections if section.id not in selected_ids):
         if section.sort_order != index:
+            changed_ids.add(section.id)
             section.sort_order = index
             section.version += 1
             db.add(section)
             await db.flush()
-    await mark_section_digests_stale(
-        db,
-        project_id=project_id,
-        section_ids=selected_ids,
-    )
+    return changed_ids
 
 
 async def apply_book_plan_structure_command(
@@ -897,6 +894,7 @@ async def apply_book_plan_structure_command(
             commit=commit,
         )
 
+    changed_ids: set[str] = set()
     chapters = _sorted_plan_chapters(plan)
     _set_temporary_chapter_orders(chapters)
     for chapter in chapters:
@@ -947,9 +945,8 @@ async def apply_book_plan_structure_command(
     if selected_sections:
         new_chapter_id = next(chapter.id for chapter in chapters if chapter.id not in old_chapter_ids)
         await db.flush()
-        await _move_split_sections(
+        changed_ids = await _move_split_sections(
             db,
-            project_id=project_id,
             source_sections=source_sections,
             selected_sections=selected_sections,
             new_chapter_id=new_chapter_id,
@@ -966,7 +963,7 @@ async def apply_book_plan_structure_command(
         # Removing an empty chapter needs no material reassignment. Rebuilding
         # every chapter's sources here would collapse unrelated section groups.
         await db.flush()
-        await sync_materials_to_chapters(
+        changed_ids |= await sync_materials_to_chapters(
             db,
             project_id=project_id,
             utterance_ids_by_chapter={
@@ -984,8 +981,7 @@ async def apply_book_plan_structure_command(
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
     await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:

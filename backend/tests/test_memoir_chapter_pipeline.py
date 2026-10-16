@@ -1207,7 +1207,7 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
         "后来我又想起了爬山路上的一件小事。",
         project_id=project_id,
     )
-    await sections.assign_material_to_section(
+    _, changed_ids = await sections.assign_material_to_section(
         test_db,
         project_id=project_id,
         section_id=second.id,
@@ -1215,6 +1215,7 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
         assigned_by=MemoirSectionMaterialAssignedBy.USER,
         assignment_reason="completion_issue_answer",
     )
+    await sections.finalize_section_changes(test_db, project_id=project_id, section_ids=changed_ids)
     await test_db.commit()
 
     progress: list[dict[str, object]] = []

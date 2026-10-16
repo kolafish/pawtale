@@ -306,7 +306,7 @@ async def bind_answer_segment(
     if not current_utterance_text(utterance):
         return issue
 
-    await sections.assign_material_to_section(
+    _, changed_ids = await sections.assign_material_to_section(
         db,
         project_id=voice_session.project_id,
         section_id=await _target_section_id(db, issue=issue),
@@ -314,7 +314,9 @@ async def bind_answer_segment(
         assigned_by=MemoirSectionMaterialAssignedBy.SYSTEM,
         assignment_reason=f"completion_issue:{issue.id}",
     )
+    from app.services.memoir.section_digests import mark_section_digests_stale
     if issue.status != MemoirCompletionIssueStatus.CLOSED.value:
+        await mark_section_digests_stale(db, project_id=voice_session.project_id, section_ids=changed_ids)
         await completion_issues.close_issue(
             db,
             project_id=voice_session.project_id,
@@ -323,6 +325,8 @@ async def bind_answer_segment(
             note="回答已保存并直接归入对应小章节",
             answered_material_id=utterance.id,
         )
+    else:
+        await sections.finalize_section_changes(db, project_id=voice_session.project_id, section_ids=changed_ids)
     return issue
 
 

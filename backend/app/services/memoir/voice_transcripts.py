@@ -66,10 +66,9 @@ from app.services.memoir.project_ai_preferences import (
     select_project_ai_model,
     text_polish_requirements,
 )
-from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
-from app.services.memoir.sections import refresh_material_transcript_version
+from app.services.memoir.sections import finalize_section_changes, refresh_material_transcript_version
 from app.services.memoir.transcript_projection import current_utterance_text, has_story_content
 from app.services.memoir.utterance_editing_pipeline import (
     claim_transcript_mutation_guard,
@@ -1346,11 +1345,6 @@ async def _mark_book_sources_deleted(
         await db.delete(material)
         section.version += 1
         db.add(section)
-    await mark_section_digests_stale(
-        db,
-        project_id=project_id,
-        section_ids=affected_section_ids,
-    )
     drafts = (
         await db.execute(
             select(MemoirBookChapterDraft).where(
@@ -1366,6 +1360,11 @@ async def _mark_book_sources_deleted(
             "status_reason": "materials_deleted",
         }
         db.add(draft)
+    await finalize_section_changes(
+        db,
+        project_id=project_id,
+        section_ids=affected_section_ids,
+    )
 
 
 async def _ensure_voice_transcript_can_be_deleted(
