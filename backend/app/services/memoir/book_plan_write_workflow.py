@@ -341,6 +341,7 @@ async def generate_book_plan(
     before_commit: Callable[[], Awaitable[None]] | None = None,
     on_not_story: Callable[[tuple[SourceSegment, ...]], Awaitable[None]] | None = None,
     excluded_source_hashes: dict[str, str] | None = None,
+    source_utterance_ids: set[str] | None = None,
     only_if_missing: bool = False,
 ) -> BookPlanWriteResult:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
@@ -354,6 +355,8 @@ async def generate_book_plan(
         project_id=project_id,
         allow_admin=allow_admin,
     )
+    if source_utterance_ids is not None:
+        sources = [source for source in sources if source.utterance_id in source_utterance_ids]
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
     sources = [source for source in sources if (excluded_source_hashes or {}).get(source.utterance_id) != source_text_hash(source.text)]

@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
 from app.domain.memoir.narrative_types import MemoirFrameworkUserResolution
 from app.domain.memoir.types import (
     MemoirChatMessageRole,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
     MemoirGuidanceMode,
     MemoirSessionGoal,
     MemoirVoiceSessionStatus,
 )
-from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_narrative import MemoirFrameworkItem, MemoirProjectFramework
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
+    MemoirVoiceConnectionState,
     MemoirVoiceProgressResponse,
     MemoirVoiceSessionListResponse,
     MemoirVoiceSessionSummaryResponse,
@@ -296,6 +300,21 @@ async def mark_voice_session_listening(
     return await get_voice_session_detail(db, voice_session.id, user_id)
 
 
+async def mark_voice_session_disconnected(
+    db: AsyncSession, voice_session_id: str, user_id: str,
+) -> None:
+    session = await db.scalar(select(MemoirVoiceSession).join(Project).where(
+        MemoirVoiceSession.id == voice_session_id, Project.user_id == user_id,
+    ).with_for_update(of=MemoirVoiceSession).execution_options(populate_existing=True))
+    if session is None:
+        raise HTTPException(status_code=404, detail="本次语音记录不存在")
+    session.metadata_json = {**(session.metadata_json or {}), "connection_state":
+        MemoirVoiceConnectionState(disconnected_at=utcnow_naive()).model_dump(mode="json")}
+    await story_tree_growth.schedule_story_tree_growth(db, project_id=session.project_id,
+        voice_session_id=session.id, source="voice_transport_closed")
+    await db.commit()
+
+
 async def stop_voice_session(
     db: AsyncSession,
     voice_session_id: str,
@@ -325,6 +344,17 @@ async def stop_voice_session(
                 voice_session_id=voice_session.id,
                 source="voice_session_stopped",
             )
+            ready_at = voice_session.stopped_at + timedelta(seconds=story_tree_growth.SETTLE_SECONDS)
+            waking_ids = (await db.scalars(select(MemoirEditingJob.id).where(
+                MemoirEditingJob.project_id == voice_session.project_id,
+                MemoirEditingJob.status == MemoirEditingJobStatus.PENDING.value,
+                MemoirEditingJob.job_type.in_([MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+                    MemoirEditingJobType.UPDATE_BOOK_DRAFT.value]),
+                MemoirEditingJob.run_after > ready_at,
+            ).with_for_update(skip_locked=True))).all()
+            await db.execute(update(MemoirEditingJob).where(
+                MemoirEditingJob.id.in_(waking_ids),
+            ).values(run_after=ready_at))
             await db.flush()
             await share_video_candidate_scheduling.schedule_share_video_candidate_evaluation(
                 db,

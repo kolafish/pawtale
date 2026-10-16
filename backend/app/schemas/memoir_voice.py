@@ -58,6 +58,10 @@ class MemoirVoiceSessionCreate(BaseModel):
         return self
 
 
+class MemoirVoiceConnectionState(BaseModel):
+    disconnected_at: datetime | None = None
+
+
 class MemoirVoiceSessionStopRequest(BaseModel):
     error_message: str | None = None
 

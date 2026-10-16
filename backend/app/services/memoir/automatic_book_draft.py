@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
+    MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -28,6 +29,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
+from app.schemas.memoir_voice import MemoirVoiceConnectionState
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
 from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
@@ -45,25 +47,43 @@ from app.services.memoir.narrative.book_output_assembly import assemble_book_out
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-async def narration_ready_at(db: AsyncSession, *, project_id: str, settle: bool = True) -> datetime:
-    """Both narration and completion interviews feed the book; only live leases block it."""
+async def has_live_narration(db: AsyncSession, *, project_id: str) -> bool:
     from app.services.asr.capacity import voice_gateway_capacity_manager
 
-    now = utcnow_naive()
-    sessions = (await db.execute(select(MemoirVoiceSession.id, MemoirVoiceSession.stopped_at).where(
+    session_ids = (await db.scalars(select(MemoirVoiceSession.id).where(
         MemoirVoiceSession.project_id == project_id,
     ))).all()
-    if await voice_gateway_capacity_manager.has_active_session([row.id for row in sessions]):
+    return await voice_gateway_capacity_manager.has_active_session(session_ids)
+
+
+async def narration_ready_at(db: AsyncSession, *, project_id: str, settle: bool = True) -> datetime:
+    """Live interviews block book work; explicit stops use the existing short queue delay."""
+    from app.services.memoir.story_tree_growth import SETTLE_SECONDS
+
+    now = utcnow_naive()
+    if await has_live_narration(db, project_id=project_id):
         return now + timedelta(seconds=max(1, get_settings().memoir_story_settle_seconds))
     seconds = get_settings().memoir_book_settle_seconds
-    if settle and seconds > 0:
-        last_narration = await db.scalar(select(func.max(MemoirVoiceUtterance.created_at)).join(
-            MemoirVoiceSession, MemoirVoiceSession.id == MemoirVoiceUtterance.voice_session_id,
-        ).where(MemoirVoiceSession.project_id == project_id))
-        last_activity = max((value for value in [last_narration, *(row.stopped_at for row in sessions)] if value), default=None)
+    if not settle or seconds <= 0:
+        return now
+    sessions = (await db.execute(select(MemoirVoiceSession.status, MemoirVoiceSession.stopped_at,
+        MemoirVoiceSession.metadata_json, func.max(MemoirVoiceUtterance.created_at)).outerjoin(
+        MemoirVoiceUtterance, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id,
+    ).where(MemoirVoiceSession.project_id == project_id).group_by(MemoirVoiceSession.id))).all()
+    last_clean_stop = max((row.stopped_at for row in sessions
+        if row.status == MemoirVoiceSessionStatus.STOPPED.value and row.stopped_at), default=None)
+    ready_at = now
+    for status, stopped_at, metadata, last_input in sessions:
+        stopped = status == MemoirVoiceSessionStatus.STOPPED.value
+        disconnected_at = None if stopped else MemoirVoiceConnectionState.model_validate(
+            (metadata or {}).get("connection_state", {}),
+        ).disconnected_at
+        last_activity = max((value for value in [last_input, stopped_at, disconnected_at] if value), default=None)
         if last_activity:
-            return max(now, last_activity + timedelta(seconds=seconds))
-    return now
+            if not stopped and last_clean_stop and last_activity <= last_clean_stop:
+                continue
+            ready_at = max(ready_at, last_activity + timedelta(seconds=SETTLE_SECONDS if stopped else seconds))
+    return ready_at
 
 
 async def defer_narration_work(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult | None:

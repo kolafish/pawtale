@@ -123,7 +123,9 @@ async def mobile_memoir_voice_gateway(
                     pending_audio_size_bytes=persistence.pending_audio_size_bytes,
                     **diagnostics_context,
                 )
-            if stop_reason != "transport_closed":
+            if stop_reason == "transport_closed" and not stop_error:
+                await memoir_voice_sessions.mark_voice_session_disconnected(db, voice_session_id, current_user_id)
+            elif stop_reason != "transport_closed":
                 await memoir_voice_sessions.stop_voice_session(
                     db,
                     voice_session_id,
