@@ -430,8 +430,6 @@ async def mark_section_digests_stale(
 ) -> int:
     if not section_ids:
         return 0
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id)
     result = await db.execute(
         delete(MemoirSectionDigest).where(
             MemoirSectionDigest.project_id == project_id,

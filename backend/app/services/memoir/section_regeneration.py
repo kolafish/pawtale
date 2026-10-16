@@ -850,14 +850,17 @@ async def regenerate_chapter_sections(
             raise SectionRegenerationConflict(
                 status_code=409, detail="本章小节已经变化，请刷新后重试",
             )
-        await apply_section_merge_groups(
+        changes = await apply_section_merge_groups(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
-            plan=plan,
             groups=merge_groups,
             assigned_by=MemoirSectionMaterialAssignedBy.AI,
             updated_by=structure_updated_by,
+        )
+        await mark_section_structure_changed(
+            db, project_id=project_id, plan=plan, chapter_ids=set(changes.chapter_ids),
+            section_ids=set(changes.section_ids), operation="merge_sections", updated_by=structure_updated_by,
         )
         return {
             "material_count": len(materials),
@@ -941,6 +944,7 @@ async def regenerate_chapter_sections(
     await db.flush()
 
     assigned_count = 0
+    changed_ids: set[str] = set()
     generation_metadata = {
         "operation": "chapter_section_regeneration",
         "model": generated_model,
@@ -982,7 +986,7 @@ async def regenerate_chapter_sections(
 
     for planned_section in planned_sections:
         for assignment in planned_section.assignments:
-            material = await assign_material_to_section(
+            material, assigned_ids = await assign_material_to_section(
                 db,
                 project_id=project_id,
                 section_id=planned_section.candidate.id,
@@ -992,6 +996,7 @@ async def regenerate_chapter_sections(
                     assignment.decision.reason or "llm_material_organization"
                 ),
             )
+            changed_ids.update(assigned_ids)
             material.assignment_confidence = assignment.decision.confidence
             material.include_in_book = assignment.material.include_in_book
             db.add(material)
@@ -999,7 +1004,7 @@ async def regenerate_chapter_sections(
 
     if pending_section_id is not None:
         for assignment in pending_assignments:
-            material = await assign_material_to_section(
+            material, assigned_ids = await assign_material_to_section(
                 db,
                 project_id=project_id,
                 section_id=pending_section_id,
@@ -1009,6 +1014,7 @@ async def regenerate_chapter_sections(
                     assignment.decision.reason or "llm_left_unassigned"
                 ),
             )
+            changed_ids.update(assigned_ids)
             material.assignment_confidence = assignment.decision.confidence
             material.include_in_book = assignment.material.include_in_book
             db.add(material)
@@ -1019,6 +1025,7 @@ async def regenerate_chapter_sections(
         plan=plan,
         chapter_ids={chapter_id},
         operation="regenerate_chapter_sections",
+        section_ids=changed_ids,
         updated_by=structure_updated_by,
     )
 

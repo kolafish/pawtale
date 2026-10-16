@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -54,6 +55,26 @@ from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.transcript_projection import (
     current_material_text, current_transcript_version_id, current_utterance_text, source_text_hash,
 )
+
+
+@dataclass(frozen=True)
+class SectionChanges:
+    section_ids: frozenset[str]
+    chapter_ids: frozenset[str]
+
+
+async def finalize_section_changes(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    section_ids: set[str],
+    source: str = "materials",
+    settled: bool = False,
+) -> None:
+    """Invalidate changed section inputs and schedule once in the caller's transaction."""
+    await mark_section_digests_stale(db, project_id=project_id, section_ids=section_ids)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source=source, settled=settled)
 
 
 async def _load_plan(
@@ -401,7 +422,7 @@ async def _set_section_order(
     db: AsyncSession,
     *,
     sections: list[MemoirSection],
-) -> None:
+) -> set[str]:
     original_orders = {section.id: section.sort_order for section in sections}
     for index, section in enumerate(sections):
         section.sort_order = -(index + 1)
@@ -417,12 +438,7 @@ async def _set_section_order(
         section.updated_at = now
         db.add(section)
     await db.flush()
-    if sections:
-        await mark_section_digests_stale(
-            db,
-            project_id=sections[0].project_id,
-            section_ids=changed_ids,
-        )
+    return changed_ids
 
 
 async def _set_material_order(
@@ -483,7 +499,9 @@ async def create_section(
         else min(req.sort_order, len(sections))
     )
     sections.insert(insert_at, section)
-    await _set_section_order(db, sections=sections)
+    changed_ids = await _set_section_order(db, sections=sections)
+    if changed_ids:
+        await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -531,7 +549,7 @@ async def update_section(
         section.version += 1
         section.updated_at = utcnow_naive()
         db.add(section)
-        await mark_section_digests_stale(
+        await finalize_section_changes(
             db,
             project_id=project_id,
             section_ids={section.id},
@@ -560,7 +578,6 @@ async def delete_section(
         project_id=project_id,
         section_id=section_id,
     )
-    await mark_section_digests_stale(db, project_id=project_id, section_ids={section.id})
     await db.delete(section)
     chapter.updated_at = utcnow_naive()
     await db.flush()
@@ -569,7 +586,7 @@ async def delete_section(
         project_id=project_id,
         chapter_id=chapter.id,
     )
-    await _set_section_order(db, sections=remaining)
+    changed_ids = {section.id} | await _set_section_order(db, sections=remaining)
     draft = await db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter.id))
     if draft:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
@@ -577,8 +594,7 @@ async def delete_section(
     output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     if output:
         invalidate_book_output(output)
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
     await (db.commit() if commit else db.flush())
 
 
@@ -614,7 +630,9 @@ async def reorder_sections(
             detail="section_ids 必须包含本章全部小章节",
         )
     ordered = [by_id[section_id] for section_id in req.section_ids]
-    await _set_section_order(db, sections=ordered)
+    changed_ids = await _set_section_order(db, sections=ordered)
+    if changed_ids:
+        await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -861,11 +879,6 @@ async def _move_materials(
         section.updated_at = now
         db.add(section)
     await db.flush()
-    await mark_section_digests_stale(
-        db,
-        project_id=project_id,
-        section_ids=affected_section_ids,
-    )
     return affected_section_ids
 
 
@@ -877,13 +890,13 @@ async def assign_material_to_section(
     utterance_id: str,
     assigned_by: MemoirSectionMaterialAssignedBy,
     assignment_reason: str,
-) -> MemoirSectionMaterial:
+) -> tuple[MemoirSectionMaterial, set[str]]:
     target = await _load_section(
         db,
         project_id=project_id,
         section_id=section_id,
     )
-    await _move_materials(
+    changed_ids = await _move_materials(
         db,
         project_id=project_id,
         target=target,
@@ -899,7 +912,7 @@ async def assign_material_to_section(
     )
     if material is None:
         raise RuntimeError("讲述素材归入小章节失败")
-    return material
+    return material, changed_ids
 
 
 async def refresh_material_transcript_version(
@@ -940,7 +953,7 @@ async def refresh_material_transcript_version(
     material.transcript_version_id = transcript_version_id
     material.updated_at = utcnow_naive()
     db.add(material)
-    await mark_section_digests_stale(
+    await finalize_section_changes(
         db,
         project_id=project_id,
         section_ids={material.section_id},
@@ -969,7 +982,7 @@ async def assign_materials(
         project_id=project_id,
         section_id=section_id,
     )
-    await _move_materials(
+    changed_ids = await _move_materials(
         db,
         project_id=project_id,
         target=target,
@@ -977,6 +990,7 @@ async def assign_materials(
         assigned_by=MemoirSectionMaterialAssignedBy.USER,
         assignment_reason="manual_assignment",
     )
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -1001,7 +1015,7 @@ async def move_material(
         project_id=project_id,
         section_id=req.target_section_id,
     )
-    await _move_materials(
+    changed_ids = await _move_materials(
         db,
         project_id=project_id,
         target=target,
@@ -1010,6 +1024,7 @@ async def move_material(
         assigned_by=MemoirSectionMaterialAssignedBy.USER,
         assignment_reason="manual_move",
     )
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -1020,7 +1035,7 @@ async def _create_section_for_placement(
     project_id: str,
     chapter_id: str,
     title: str,
-) -> MemoirSection:
+) -> tuple[MemoirSection, set[str]]:
     await lock_chapter_structure(
         db,
         project_id=project_id,
@@ -1049,8 +1064,8 @@ async def _create_section_for_placement(
         len(sections),
     )
     sections.insert(insert_at, section)
-    await _set_section_order(db, sections=sections)
-    return section
+    changed_ids = await _set_section_order(db, sections=sections)
+    return section, changed_ids
 
 
 async def mark_section_structure_changed(
@@ -1059,11 +1074,12 @@ async def mark_section_structure_changed(
     project_id: str,
     plan: MemoirBookPlan,
     chapter_ids: set[str],
+    section_ids: set[str],
     operation: str,
     updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+    source: str = "materials",
+    settled: bool = False,
 ) -> None:
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id)
     drafts = list(
         (
             await db.scalars(
@@ -1098,6 +1114,10 @@ async def mark_section_structure_changed(
         "structure_operation": operation,
     }
     db.add(plan)
+
+    await finalize_section_changes(
+        db, project_id=project_id, section_ids=section_ids, source=source, settled=settled,
+    )
 
 
 async def place_material(
@@ -1226,10 +1246,11 @@ async def place_material(
                 detail="原章节至少需要保留 1 条素材",
             )
 
+    changed_ids: set[str] = set()
     created_chapter = False
     created_section = False
     if target is None and target_chapter_id is not None:
-        target = await _create_section_for_placement(
+        target, changed_ids = await _create_section_for_placement(
             db,
             project_id=project_id,
             chapter_id=target_chapter_id,
@@ -1279,7 +1300,7 @@ async def place_material(
         )
         db.add(chapter)
         await db.flush()
-        target = await _create_section_for_placement(
+        target, changed_ids = await _create_section_for_placement(
             db,
             project_id=project_id,
             chapter_id=chapter.id,
@@ -1288,7 +1309,7 @@ async def place_material(
         created_chapter = True
         created_section = True
 
-    await _move_materials(
+    changed_ids |= await _move_materials(
         db,
         project_id=project_id,
         target=target,
@@ -1310,6 +1331,7 @@ async def place_material(
         project_id=project_id,
         plan=plan,
         chapter_ids=affected_chapter_ids,
+        section_ids=changed_ids,
         operation=(
             "create_chapter_from_material"
             if created_chapter
@@ -1338,12 +1360,11 @@ async def apply_section_merge_groups(
     *,
     project_id: str,
     chapter_id: str,
-    plan: MemoirBookPlan,
     groups: list[tuple[str, MemoirSectionMergeRequest]],
     assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
     updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
-) -> None:
-    """Apply validated groups under the caller's plan/chapter locks, without committing."""
+) -> SectionChanges:
+    """Stage merges under the caller's locks and return changes for one finalization."""
     all_ids = [
         section_id
         for target_id, req in groups
@@ -1363,6 +1384,7 @@ async def apply_section_merge_groups(
     for affected_chapter_id in sorted(affected_chapter_ids):
         await lock_chapter_structure(db, project_id=project_id, chapter_id=affected_chapter_id)
 
+    changed_ids = set(all_ids)
     for target_id, req in groups:
         target = sections_by_id[target_id]
         source_sections = [sections_by_id[section_id] for section_id in req.source_section_ids]
@@ -1372,7 +1394,7 @@ async def apply_section_merge_groups(
             for material in sorted(section.materials, key=lambda item: (item.sort_order, item.id))
         ]
         if utterance_ids:
-            await _move_materials(
+            changed_ids |= await _move_materials(
                 db,
                 project_id=project_id,
                 target=target,
@@ -1400,15 +1422,8 @@ async def apply_section_merge_groups(
 
     for affected_chapter_id in sorted(affected_chapter_ids):
         remaining = await _load_sections(db, project_id=project_id, chapter_id=affected_chapter_id)
-        await _set_section_order(db, sections=remaining)
-    await mark_section_structure_changed(
-        db,
-        project_id=project_id,
-        plan=plan,
-        chapter_ids=affected_chapter_ids,
-        operation="merge_sections",
-        updated_by=updated_by,
-    )
+        changed_ids |= await _set_section_order(db, sections=remaining)
+    return SectionChanges(frozenset(changed_ids), frozenset(affected_chapter_ids))
 
 
 async def merge_sections(
@@ -1424,12 +1439,15 @@ async def merge_sections(
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await lock_plan_structure(db, project_id=project_id)
     target = await _load_section(db, project_id=project_id, section_id=target_section_id)
-    await apply_section_merge_groups(
+    changes = await apply_section_merge_groups(
         db,
         project_id=project_id,
         chapter_id=target.chapter_id,
-        plan=plan,
         groups=[(target_section_id, req)],
+    )
+    await mark_section_structure_changed(
+        db, project_id=project_id, plan=plan, chapter_ids=set(changes.chapter_ids),
+        section_ids=set(changes.section_ids), operation="merge_sections",
     )
     await (db.commit() if commit else db.flush())
     return await _collection_response(db, project_id=project_id)
@@ -1442,7 +1460,7 @@ async def apply_section_split(
     source_section_id: str,
     req: MemoirSectionSplitRequest,
     assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
-) -> MemoirSection:
+) -> tuple[MemoirSection, SectionChanges]:
     """Split whole materials under the caller's structure locks, without committing."""
     source = await _load_section(db, project_id=project_id, section_id=source_section_id)
     current_ids = {material.utterance_id for material in source.materials}
@@ -1467,7 +1485,7 @@ async def apply_section_split(
     )
     db.add(new_section)
     await db.flush()
-    await _move_materials(
+    changed_ids = await _move_materials(
         db,
         project_id=project_id,
         target=new_section,
@@ -1479,8 +1497,8 @@ async def apply_section_split(
         index for index, section in enumerate(sections) if section.id == source.id
     )
     sections.insert(source_index + 1, new_section)
-    await _set_section_order(db, sections=sections)
-    return new_section
+    changed_ids |= await _set_section_order(db, sections=sections)
+    return new_section, SectionChanges(frozenset(changed_ids), frozenset({source.chapter_id}))
 
 
 async def split_section(
@@ -1508,9 +1526,10 @@ async def split_section(
         project_id=project_id,
         chapter_id=source.chapter_id,
     )
-    await apply_section_split(
+    _, changes = await apply_section_split(
         db, project_id=project_id, source_section_id=source_section_id, req=req,
     )
+    await finalize_section_changes(db, project_id=project_id, section_ids=set(changes.section_ids))
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -1588,7 +1607,7 @@ async def sync_materials_to_chapters(
     assigned_by: MemoirSectionMaterialAssignedBy,
     assignment_reason: str,
 ) -> set[str]:
-    """Apply membership changes, preserving existing sections and excluded links."""
+    """Stage membership changes and return section IDs for the caller to finalize."""
     seen_utterances: set[str] = set()
     for utterance_ids in utterance_ids_by_chapter.values():
         chapter_utterances = set(utterance_ids)
@@ -1669,11 +1688,5 @@ async def sync_materials_to_chapters(
             utterance_ids=utterance_ids,
             assigned_by=assigned_by,
             assignment_reason=assignment_reason,
-        )
-    if affected:
-        await mark_section_digests_stale(
-            db,
-            project_id=project_id,
-            section_ids=affected,
         )
     return affected

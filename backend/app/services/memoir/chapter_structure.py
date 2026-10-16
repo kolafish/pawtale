@@ -34,7 +34,7 @@ from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
 from app.services.memoir.completion_issues import open_blocking_book_chapter_ids
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.prompt_budget import checked_review_prompt
-from app.services.memoir.section_digests import get_current_section_digest, mark_section_digests_stale
+from app.services.memoir.section_digests import get_current_section_digest
 from app.services.memoir.section_regeneration import SECTION_STRUCTURE_SOURCE_CHAR_BUDGET, _compact_excerpt
 from app.services.memoir.sections import apply_section_merge_groups, apply_section_split, lock_chapter_structure, lock_plan_structure, mark_section_structure_changed
 from app.services.memoir.semantic_state import semantic_json_signature
@@ -358,7 +358,8 @@ def validate_structure(output: StructureOutput, context: StructureContext) -> No
 
 
 async def apply_structure(db: AsyncSession, *, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter],
-                          sections: list[MemoirSection], context: StructureContext, output: StructureOutput) -> bool:
+                          sections: list[MemoirSection], context: StructureContext, output: StructureOutput,
+                          source: str = "materials", settled: bool = False) -> bool:
     """Apply under plan/chapter/section locks; caller owns the atomic commit."""
     validate_structure(output, context)
     if output == context.outline:
@@ -383,16 +384,16 @@ async def apply_structure(db: AsyncSession, *, plan: MemoirBookPlan, chapters: l
     titles = {ref: group.title for chapter in output.chapters for group in chapter.sections for ref in group.section_refs}
     utterance_by_material = {m.id: m.utterance_id for s in sections for m in s.materials}
     for split in output.section_splits:
-        source = section_by_ref[split.source_section_ref]
-        new_section = await apply_section_split(db, project_id=plan.project_id, source_section_id=source.id,
-            req=MemoirSectionSplitRequest(title=titles[split.new_section_ref], section_type=source.section_type,
+        source_section = section_by_ref[split.source_section_ref]
+        new_section, split_changes = await apply_section_split(db, project_id=plan.project_id, source_section_id=source_section.id,
+            req=MemoirSectionSplitRequest(title=titles[split.new_section_ref], section_type=source_section.section_type,
                 utterance_ids=[utterance_by_material[context.material_refs.decode(ref)]
                     for ref in context.section_materials[split.source_section_ref] if ref in split.material_refs]),
             assigned_by=MemoirSectionMaterialAssignedBy.AI)
         section_by_ref[split.new_section_ref] = new_section
-        original_sections[new_section.id] = (source.chapter_id, -1, new_section.title)
-        changed_sections.update((source.id, new_section.id))
-        changed_chapters.add(source.chapter_id)
+        original_sections[new_section.id] = (source_section.chapter_id, -1, new_section.title)
+        changed_sections.update(split_changes.section_ids)
+        changed_chapters.update(split_changes.chapter_ids)
     set_temporary_chapter_orders(chapters)
     # Global temporary positions allow moving intact sections across chapters.
     ordered_refs = [ref for chapter in output.chapters for group in chapter.sections for ref in group.section_refs]
@@ -428,9 +429,10 @@ async def apply_structure(db: AsyncSession, *, plan: MemoirBookPlan, chapters: l
             source_section_ids=[section_by_ref[ref].id for ref in s.section_refs[1:]], title=s.title,
         )) for s in group.sections if len(s.section_refs) > 1]
         if merges:
-            await apply_section_merge_groups(db, project_id=plan.project_id, chapter_id=chapter.id, plan=plan, groups=merges,
+            changes = await apply_section_merge_groups(db, project_id=plan.project_id, chapter_id=chapter.id, groups=merges,
                 assigned_by=MemoirSectionMaterialAssignedBy.AI, updated_by=MemoirCreatedBy.AI)
-            changed_chapters.add(chapter.id)
+            changed_sections.update(changes.section_ids)
+            changed_chapters.update(changes.chapter_ids)
         targets = [section_by_ref[s.section_refs[0]] for s in group.sections]
         for order, section in enumerate(targets):
             section.sort_order = 2000000 + order
@@ -455,14 +457,14 @@ async def apply_structure(db: AsyncSession, *, plan: MemoirBookPlan, chapters: l
     await db.flush()
     await db.refresh(plan, ["chapters"])
     renumber_chapters(ordered_chapters)
-    await mark_section_digests_stale(db, project_id=plan.project_id, section_ids=changed_sections)
     manual_title_ids = {context.chapter_refs.decode(ref) for ref in context.chapter_titles}
     for chapter in ordered_chapters:
         if chapter.id in manual_title_ids and preserve_legacy_ownership and not chapter.metadata_json.get("title_updated_by"):
             chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user"}
     await mark_section_structure_changed(db, project_id=plan.project_id, plan=plan,
         chapter_ids=changed_chapters & {c.id for c in ordered_chapters},
-        operation="review_structure", updated_by=MemoirCreatedBy.AI)
+        operation="review_structure", updated_by=MemoirCreatedBy.AI,
+        section_ids=changed_sections, source=source, settled=settled)
     await db.flush()
     return True
 
@@ -474,6 +476,7 @@ def material_identity(sections: list[MemoirSection]) -> list[tuple[str, str, str
 async def review_story_structure(
     db: AsyncSession, *, user_id: str, project_id: str, book_review: MemoirBookReview | None = None,
     progress_callback: Callable[[dict[str, object]], Awaitable[None]] | None = None,
+    source: str = "structure_review", settled: bool = True,
 ) -> bool:
     from app.services.memoir.story_tree_growth import _load_tree
 
@@ -548,10 +551,16 @@ async def review_story_structure(
         if context.manual_chapter_order and not (plan.metadata_json or {}).get("manual_chapter_order"):
             plan.metadata_json = {**plan.metadata_json, "manual_chapter_order": list(context.manual_chapter_order)}
         before_sources = material_identity(sections)
-        changed = await apply_structure(db, plan=plan, chapters=chapters, sections=sections, context=context, output=generated.value)
+        readable_chapters = {s.chapter_id for s in sections if s.status == "active" and s.include_in_book
+                             and any(m.include_in_book for m in s.materials)}
+        changed = await apply_structure(db, plan=plan, chapters=chapters, sections=sections, context=context, output=generated.value,
+            source=source, settled=settled)
         plan, chapters, sections = await _load_tree(db, project_id=project_id)
         if material_identity(sections) != before_sources:
             raise HTTPException(status_code=409, detail="目录调整未完整保留素材，本次结果未保存")
+        if (readable_chapters & {c.id for c in chapters}) - {s.chapter_id for s in sections
+                if s.status == "active" and s.include_in_book and any(m.include_in_book for m in s.materials)}:
+            raise HTTPException(status_code=409, detail="目录调整不能将保留的章节移空，本次结果未保存")
         after = await structure_context(db, plan, chapters, sections)
         plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: after.signature,
             **({FEEDBACK_CHECKED_KEY: after.source_signature} if review_identity is not None else {})}

@@ -185,9 +185,6 @@ async def run_book_review_job(
                 db, user_id=str(payload.get("user_id") or ""), project_id=project_id,
                 book_review=review, progress_callback=update_progress,
             )
-            if changed:
-                from app.services.memoir.automatic_book_draft import schedule_book_draft
-                await schedule_book_draft(db, project_id=project_id, source="structure_review", settled=True)
             structure_updated = changed
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(

@@ -67,9 +67,10 @@ delete_chapter 删除该章、下属小节和章节草稿，保留原始讲述�
 明确的修改列入 operations，实质歧义才提问。用户可见 reply 和 question 用真实名称或内容片段，不使用 ref，不声称已经执行。
 严格输出 schema 定义的 JSON；operations、questions、target_refs 必须是数组，不是 JSON 字符串。"""
 UNSUPPORTED_PROMPT = """
-以上操作都不能完成的要求（例如改写或补充正文段落、纠正正文中的事实、序言后记等书稿文案、合并整章、调整小节顺序、照片或音视频），operations 和 questions 留空，unsupported_intent 选最接近的类别：text_rewrite、fact_correction、book_copy、chapter_merge、section_reorder、media、other；reply 简短说明这项修改可以在哪里完成，不声称已经修改。"""
+以上操作都不能完成的要求（例如改写或补充正文段落、纠正正文中的事实、序言后记等书稿文案、调整小节顺序、照片或音视频），operations 和 questions 留空，unsupported_intent 选最接近的类别：text_rewrite、fact_correction、book_copy、section_reorder、media、other；reply 简短说明这项修改可以在哪里完成，不声称已经修改。"""
 EXTENDED_PROMPT = """
 当前客户端还可以使用以下操作：
+merge_chapters 合并整章：target_ref 是被并入的来源章节，target_chapter_ref 是要保留的目标章节。把来源章的全部小节按原顺序接到目标章末尾，保留各小节身份、标题、讲述及收录状态，然后移除来源章；目标章名称不变，书稿会更新。不需要指定目标小节，也不要求来源章保留讲述。用户要求合章、把内容相近的多章合成一章时使用此操作；即使来源章只有一个小节，也优先使用 merge_chapters。只有用户明确要并入某个已有小节时才使用 merge_sections。用户希望根据全书内容减少章节时，直接提出有依据的合章方案供页面确认，不要宣称不能合章，也不要追问要合到哪个小节；仅在无法确定来源章或目标章时提问。多章合到一章时，每个来源章列一个操作，均指向同一个保留章，按目录顺序排列；同批中来源章不能再作为其他操作的目标章，不要组合涉及这些章节的其他修改。
 move_chapter 调整章节顺序：target_ref 是要移动的章节，只给一种目标：target_index（移动后成为第几章，从 1 开始）、target_position（first 或 last），或 relative_ref（另一章节 ref）加 relative_position（before 或 after）。一批最多移动一章，不和拆分、合并、删除章节组合。
 set_chapter_book_inclusion 设置章节是否收入本书：include_in_book 为 true 或 false；不收入只是不出现在书稿里，章节、小节和讲述都保留；至少保留一章收入本书。
 correct_term 纠正名字或词语的写法（同音字、错别字、称呼写错）：target_ref 固定为 "book"；term_from 是资料里原样出现、能唯一表示这个写法的完整词，至少两个字，term_to 是正确写法。例如用户说“于大姐的于应该是多余的余”时 term_from="于大姐"、term_to="余大姐"，不要只填单字“于”。确认后会逐字替换全书所有出现处（书名、讲述人姓名、章节和小节标题、讲述文字、章节正文、书稿文案），并记入词表供以后的讲述使用。几个写法分别列出，correct_term 只和其他 correct_term 一起出现。只用于写法，用户要改的是事实或内容时不要使用。
@@ -144,6 +145,7 @@ def _model_payload(instruction: str, title: str, story: dict, *, extended: bool)
 
 
 _TARGET_KINDS = {
+    "merge_chapters": "chapter",
     "merge_sections": "section",
     "regenerate_chapter_sections": "chapter",
     "consolidate_chapter_sections": "chapter",
@@ -187,6 +189,8 @@ def _operation_sections(story: dict, op: VoiceEditOperation) -> list[dict]:
     source_chapters = {
         s["chapter_ref"] for s in story["sections"] if s["ref"] in op.section_ids
     } if op.action == "merge_sections" else set()
+    if op.action == "merge_chapters":
+        source_chapters.add(op.target_chapter_ref)
     return [s for s in story["sections"] if (
         (kind == "chapter" and s["chapter_ref"] == op.target_ref)
         or (kind == "section" and s["ref"] == op.target_ref)
@@ -266,6 +270,8 @@ def _split_title(story: dict, op: VoiceEditOperation) -> VoiceEditOperation:
 
 def _question_touches_operation(story: dict, op: VoiceEditOperation, refs: set[str]) -> bool:
     affected = {op.target_ref, *op.utterance_ids, *op.section_ids, *([op.relative_ref] if op.relative_ref else [])}
+    if op.target_chapter_ref:
+        affected.add(op.target_chapter_ref)
     kind = _operation_target_kind(op)
     if kind in {"chapter", "section"}:
         section_ids = {s["ref"] for s in _operation_sections(story, op)}
@@ -308,6 +314,8 @@ def _operation_signature(story: dict, op: VoiceEditOperation) -> str:
     emptied_chapters = _merge_empty_chapters(story, op) if op.action == "merge_sections" else set()
     if kind == "chapter":
         chapter_ids.add(op.target_ref)
+    if op.target_chapter_ref:
+        chapter_ids.add(op.target_chapter_ref)
     return semantic_json_signature({
         "operation": op.model_dump(),
         # Most actions use stable IDs across chapter renumbering. A split uses
@@ -374,6 +382,18 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
         ) and not combined <= _COMPOSABLE_CHAPTER_ACTIONS):
             raise HTTPException(422, "同一对象出现重复或冲突的修改，请重新说明")
         actions.add(op.action)
+        if op.action == "merge_chapters":
+            if op.target_chapter_ref not in entities["chapter"]:
+                raise HTTPException(422, "目标章节不在当前故事中，请重新说明")
+            involved_chapters = {op.target_ref, op.target_chapter_ref}
+            for other in operations:
+                if other is op:
+                    continue
+                if other.action == "merge_chapters":
+                    if op.target_ref in {other.target_ref, other.target_chapter_ref} or op.target_chapter_ref == other.target_ref:
+                        raise HTTPException(422, "合章不能重复使用来源章，也不能连环合并，请选择最终保留的一章")
+                elif _question_touches_operation(story, other, involved_chapters):
+                    raise HTTPException(422, "合并章节不能和来源章或目标章的其他修改同时执行")
         if op.action == "merge_sections":
             if any(
                 ref not in entities["section"]
@@ -445,7 +465,7 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
         "correct_term": 0, "update_book_title": 1, "update_narrator_profile": 1,
         "set_chapter_book_inclusion": 1, "move_chapter": 1,
         "delete_material": 0, "rename_section": 1, "rename_chapter": 1,
-        "regenerate_chapter_sections": 2, "consolidate_chapter_sections": 2, "split_chapter": 2, "merge_sections": 2,
+        "regenerate_chapter_sections": 2, "consolidate_chapter_sections": 2, "split_chapter": 2, "merge_sections": 2, "merge_chapters": 2,
         "delete_section": 3, "delete_chapter": 4,
     }
     # Include chapters before excluding others, so a valid batch never passes through zero included chapters.
@@ -460,7 +480,7 @@ def _validate_extended_batch(story: dict, operations: list[VoiceEditOperation]) 
         term_corrections.validate_corrections([_correction(op) for op in operations])
     chapter_ids = [c["ref"] for c in story["chapters"]]
     moves = [op for op in operations if op.action == "move_chapter"]
-    if len(moves) > 1 or (moves and set(actions) & {"split_chapter", "merge_sections", "delete_chapter"}):
+    if len(moves) > 1 or (moves and set(actions) & {"split_chapter", "merge_sections", "merge_chapters", "delete_chapter"}):
         raise HTTPException(422, "一次只能调整一章的位置，也不能和拆分、合并或删除章节一起执行")
     for op in moves:
         if op.relative_ref is not None and op.relative_ref not in chapter_ids:
@@ -525,6 +545,16 @@ def _extended_item(story: dict, op: VoiceEditOperation, scans: dict[str, term_co
     chapters = {c["ref"]: c for c in story["chapters"]}
     chapter = chapters[op.target_ref]
     name = f"第{chapter['number']}章「{chapter['title']}」"
+    if op.action == "merge_chapters":
+        target = chapters[op.target_chapter_ref]
+        sections = [s for s in story["sections"] if s["chapter_ref"] == op.target_ref]
+        sections.sort(key=lambda section: (section["order"], section["ref"]))
+        return VoiceEditItem(
+            **op.model_dump(), label=f"将{name}整章合并到第{target['number']}章「{target['title']}」",
+            detail=(f"来源章的 {len(sections)} 个小节按原顺序接到目标章末尾，保留标题和收录状态："
+                    + "、".join(f"「{s['title']}」" for s in sections)
+                    + "。原始讲述、音频和文字版本保留；来源章及其章节草稿会移除，目标章名称不变，书稿将更新。本次合章不可撤销。"),
+        )
     if op.action == "set_chapter_book_inclusion":
         return VoiceEditItem(
             **op.model_dump(), label=f"{name}：{'收入本书' if op.include_in_book else '不收入本书'}",
@@ -643,6 +673,11 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
             "\n当前小程序客户端不能执行 merge_sections。遇到将已有小节移入另一个已有小节的要求时，"
             "不要转换成 split_chapter 或其他操作；operations 和 questions 均留空，"
             "reply 说明请更新小程序后再用语音合并小节。"
+        )
+    if not extended:
+        client_capability += (
+            "\n当前客户端不能执行 merge_chapters；整章合并要求的 operations 和 questions 留空，"
+            "reply 说明请更新小程序后再用语音合并整章。"
         )
     if not req.supports_composed_chapter_edits:
         client_capability += (
@@ -841,10 +876,10 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
                         req=MemoirBookPlanStructureCommandRequest(type="delete_chapter", chapter_id=chapter_id),
                         commit=False,
                     )
-            elif op.action in {"delete_chapter", "rename_chapter", "split_chapter"}:
+            elif op.action in {"delete_chapter", "rename_chapter", "split_chapter", "merge_chapters"}:
                 if op.action == "rename_chapter":
                     changes.append({"type": "chapter_title", "ref": op.target_ref, "before": chapters[op.target_ref]["title"], "after": op.new_title})
-                await apply_book_plan_structure_command(db, user_id=user_id, project_id=project_id, req=MemoirBookPlanStructureCommandRequest(type=op.action, chapter_id=op.target_ref, title=op.new_title, utterance_ids=op.utterance_ids, section_ids=op.section_ids), commit=False)
+                await apply_book_plan_structure_command(db, user_id=user_id, project_id=project_id, req=MemoirBookPlanStructureCommandRequest(type=op.action, chapter_id=op.target_ref, target_chapter_id=op.target_chapter_ref, title=op.new_title, utterance_ids=op.utterance_ids, section_ids=op.section_ids), commit=False)
             elif op.action == "move_chapter":
                 order = [chapter["ref"] for chapter in story["chapters"]]
                 changes.append({"type": "chapter_order", "ref": op.target_ref, "before": order, "after": moved_chapter_order(order, _move_request(op))})

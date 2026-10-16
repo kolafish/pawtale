@@ -16,6 +16,7 @@ BASE_VOICE_EDIT_ACTIONS = frozenset({
 })
 # Actions offered only to clients that echo previewed operations unchanged.
 EXTENDED_VOICE_EDIT_ACTIONS = frozenset({
+    "merge_chapters",
     "move_chapter",
     "set_chapter_book_inclusion",
     "correct_term",
@@ -25,7 +26,7 @@ EXTENDED_VOICE_EDIT_ACTIONS = frozenset({
 BOOK_TARGET_REF = "book"
 PROFILE_TARGET_REF = "profile"
 VoiceEditUnsupportedIntent = Literal[
-    "text_rewrite", "fact_correction", "book_copy", "chapter_merge", "section_reorder",
+    "text_rewrite", "fact_correction", "book_copy", "section_reorder",
     "media", "other",
 ]
 VoiceEditNavigationPage = Literal["section_revision", "chapter", "book_info", "project_profile", "transcripts"]
@@ -43,6 +44,7 @@ class VoiceEditOperation(BaseModel):
         "consolidate_chapter_sections",
         "split_chapter",
         "merge_sections",
+        "merge_chapters",
         "move_chapter",
         "set_chapter_book_inclusion",
         "correct_term",
@@ -50,6 +52,7 @@ class VoiceEditOperation(BaseModel):
         "update_narrator_profile",
     ]
     target_ref: str = Field(min_length=1, max_length=80)
+    target_chapter_ref: str | None = Field(default=None, min_length=1, max_length=80)
     new_title: str | None = Field(default=None, max_length=80)
     utterance_ids: list[str] = Field(default_factory=list, max_length=30)
     section_ids: list[str] = Field(default_factory=list, max_length=30)
@@ -94,6 +97,13 @@ class VoiceEditOperation(BaseModel):
         return self
 
     def _check_extended_fields(self) -> None:
+        if self.action == "merge_chapters":
+            if not self.target_chapter_ref or not self.target_chapter_ref.strip():
+                raise ValueError("合并章节必须提供目标章节")
+            if self.target_ref == self.target_chapter_ref:
+                raise ValueError("不能把章节合并到自身")
+        elif self.target_chapter_ref is not None:
+            raise ValueError("只有合并章节可以指定目标章节")
         move_fields = (self.target_index, self.target_position, self.relative_ref, self.relative_position)
         profile_fields = (self.narrator_name, self.narrator_gender, self.narrator_origin, self.narrator_age)
         if self.action == "move_chapter":

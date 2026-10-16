@@ -54,7 +54,7 @@ async def _add_narration(client, db, project_id, section_id, fake=None):
     added = await create_test_voice_transcript(
         client, db, "后来我又想起了爬山路上的一件小事。", project_id=project_id,
     )
-    await sections.assign_material_to_section(
+    _, changed_ids = await sections.assign_material_to_section(
         db, project_id=project_id, section_id=section_id, utterance_id=added["utterance_id"],
         assigned_by=MemoirSectionMaterialAssignedBy.USER, assignment_reason="user_supplement",
     )
@@ -62,7 +62,7 @@ async def _add_narration(client, db, project_id, section_id, fake=None):
         # The fake controls citation count, while the real prompt contains
         # earlier unused material as well as this new narration.
         fake.draft_material_ids = ["include-all"] * 100
-    await automatic_book_draft.schedule_book_draft(db, project_id=project_id)
+    await sections.finalize_section_changes(db, project_id=project_id, section_ids=changed_ids)
     await db.commit()
 
 
@@ -291,7 +291,7 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
     added = await create_test_voice_transcript(
         client, test_db, "后来我又讲了一次比赛经历。", project_id=project_id,
     )
-    await sections.assign_material_to_section(
+    _, changed_ids = await sections.assign_material_to_section(
         test_db,
         project_id=project_id,
         section_id=drafts[0][1].section_snapshot_json[0]["section_id"],
@@ -299,6 +299,7 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
         assigned_by=MemoirSectionMaterialAssignedBy.USER,
         assignment_reason="user_supplement",
     )
+    await sections.finalize_section_changes(test_db, project_id=project_id, section_ids=changed_ids)
     await revise_chapter(0, "本章补充。", new_material_id=added["utterance_id"])
     updated = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert not updated.preserved_manual

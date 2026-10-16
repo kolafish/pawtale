@@ -374,8 +374,9 @@ async def test_review_feedback_uses_the_shared_writer_once_per_source_input(clie
     assert not await structure.review_story_structure(test_db, user_id=uid, project_id=pid, book_review=review)
     assert len(calls) == 1
     source = await create_test_voice_transcript(client, test_db, '妈妈后来又教我写字。', project_id=pid)
-    await section_service.assign_material_to_section(test_db, project_id=pid, section_id=sections[0].id,
+    _, changed_ids = await section_service.assign_material_to_section(test_db, project_id=pid, section_id=sections[0].id,
         utterance_id=source['utterance_id'], assigned_by=MemoirSectionMaterialAssignedBy.AI, assignment_reason='new_story')
+    await section_service.finalize_section_changes(test_db, project_id=pid, section_ids=changed_ids)
     await test_db.commit()
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     new_context = await structure.structure_context(test_db, plan, chapters, sections)
@@ -961,11 +962,21 @@ async def test_multiple_splits_from_one_section_preserve_all_memberships(client,
         output['section_splits'].append({'source_section_ref': context.section_refs.encode(mixed.id),
             'new_section_ref': ref, 'material_refs': [context.material_refs.encode(material.id)]})
         output['chapters'][0]['sections'].append({'section_refs': [ref], 'title': f'童年经历{index}'})
+    from app.services.memoir import sections as section_service
+    finalizations = []
+    real_finalize = section_service.finalize_section_changes
+    async def finalize(*args, **kwargs):
+        finalizations.append(kwargs)
+        await real_finalize(*args, **kwargs)
+    monkeypatch.setattr(section_service, 'finalize_section_changes', finalize)
     _provider(monkeypatch, structure.StructureOutput.model_validate(output))
     assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
     _, _, after = await _load_tree(test_db, project_id=pid)
     assert structure.material_identity(after) == original
     assert sorted(len(s.materials) for s in after) == [1, 1, 1, 1]
+    assert len(finalizations) == 1
+    assert finalizations[0]['source'] == 'structure_review' and finalizations[0]['settled'] is True
+    assert finalizations[0]['section_ids'] >= {s.id for s in after if s.chapter_id == mixed.chapter_id}
 
 
 async def test_split_prompt_uses_material_references_but_omits_excluded_text(client, test_db):
@@ -1007,3 +1018,30 @@ async def test_manual_split_records_title_ownership_without_freezing_the_chapter
     assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
     _, _, after = await _load_tree(test_db, project_id=pid)
     assert next(s for s in after if s.id == created.id).title == '我起的课堂故事名'
+
+
+@pytest.mark.parametrize('destination', ['existing_chapter', 'new_chapter'])
+async def test_split_cannot_leave_a_retained_chapter_with_only_excluded_material(client, test_db, monkeypatch, destination):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    mixed.materials[0].include_in_book = False
+    await test_db.commit()
+    original = structure.material_identity(sections)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    output = context.outline.model_dump()
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(mixed.id),
+        'new_section_ref': 'T1', 'material_refs': [context.material_refs.encode(mixed.materials[-1].id)]}]
+    new_group = {'section_refs': ['T1'], 'title': '移出的故事'}
+    if destination == 'new_chapter':
+        output['chapters'].append({'chapter_ref': 'N1', 'title': '新主题', 'sections': [new_group]})
+    else:
+        output['chapters'][-1]['sections'].append(new_group)
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    with pytest.raises(HTTPException) as exc:
+        await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert exc.value.status_code == 409
+    await test_db.commit()
+    plan, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert (await structure.structure_context(test_db, plan, after_chapters, after)).outline == context.outline
+    assert structure.material_identity(after) == original
