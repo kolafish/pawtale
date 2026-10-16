@@ -1435,6 +1435,54 @@ async def merge_sections(
     return await _collection_response(db, project_id=project_id)
 
 
+async def apply_section_split(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    source_section_id: str,
+    req: MemoirSectionSplitRequest,
+    assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
+) -> MemoirSection:
+    """Split whole materials under the caller's structure locks, without committing."""
+    source = await _load_section(db, project_id=project_id, section_id=source_section_id)
+    current_ids = {material.utterance_id for material in source.materials}
+    requested_ids = set(req.utterance_ids)
+    if not requested_ids.issubset(current_ids):
+        raise HTTPException(status_code=400, detail="拆分素材不属于来源小章节")
+    if requested_ids == current_ids:
+        raise HTTPException(status_code=400, detail="拆分后来源小章节不能为空")
+
+    sections = await _load_sections(
+        db,
+        project_id=project_id,
+        chapter_id=source.chapter_id,
+    )
+    new_section = MemoirSection(
+        project_id=project_id,
+        chapter_id=source.chapter_id,
+        title=req.title,
+        metadata_json={"title_updated_by": assigned_by.value},
+        section_type=req.section_type.value,
+        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
+    )
+    db.add(new_section)
+    await db.flush()
+    await _move_materials(
+        db,
+        project_id=project_id,
+        target=new_section,
+        utterance_ids=req.utterance_ids,
+        assigned_by=assigned_by,
+        assignment_reason="section_split",
+    )
+    source_index = next(
+        index for index, section in enumerate(sections) if section.id == source.id
+    )
+    sections.insert(source_index + 1, new_section)
+    await _set_section_order(db, sections=sections)
+    return new_section
+
+
 async def split_section(
     db: AsyncSession,
     *,
@@ -1460,45 +1508,9 @@ async def split_section(
         project_id=project_id,
         chapter_id=source.chapter_id,
     )
-    source = await _load_section(
-        db,
-        project_id=project_id,
-        section_id=source_section_id,
+    await apply_section_split(
+        db, project_id=project_id, source_section_id=source_section_id, req=req,
     )
-    current_ids = {material.utterance_id for material in source.materials}
-    requested_ids = set(req.utterance_ids)
-    if not requested_ids.issubset(current_ids):
-        raise HTTPException(status_code=400, detail="拆分素材不属于来源小章节")
-    if requested_ids == current_ids:
-        raise HTTPException(status_code=400, detail="拆分后来源小章节不能为空")
-
-    sections = await _load_sections(
-        db,
-        project_id=project_id,
-        chapter_id=source.chapter_id,
-    )
-    new_section = MemoirSection(
-        project_id=project_id,
-        chapter_id=source.chapter_id,
-        title=req.title,
-        section_type=req.section_type.value,
-        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
-    )
-    db.add(new_section)
-    await db.flush()
-    await _move_materials(
-        db,
-        project_id=project_id,
-        target=new_section,
-        utterance_ids=req.utterance_ids,
-        assigned_by=MemoirSectionMaterialAssignedBy.USER,
-        assignment_reason="section_split",
-    )
-    source_index = next(
-        index for index, section in enumerate(sections) if section.id == source.id
-    )
-    sections.insert(source_index + 1, new_section)
-    await _set_section_order(db, sections=sections)
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 

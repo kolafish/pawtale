@@ -243,12 +243,12 @@ def unchanged_story_structure(monkeypatch):
 
     async def keep_outline(*args, **kwargs):
         payload = json.loads(args[2].split("当前目录：\n", 1)[1].split("\n只返回 JSON", 1)[0])
-        for chapter in payload["chapters"]:
-            chapter.pop("locked")
-            chapter.pop("summary")
-            for section in chapter["sections"]:
-                section.pop("summary")
-                section.pop("material_examples")
+        payload["chapters"] = [
+            {"chapter_ref": chapter["chapter_ref"], "title": chapter["title"], "sections": [
+                {"section_refs": section["section_refs"], "title": section["title"]}
+                for section in chapter["sections"]
+            ]} for chapter in payload["chapters"]
+        ]
         return SimpleNamespace(value=chapter_structure.StructureOutput.model_validate(payload))
 
     monkeypatch.setattr(chapter_structure, "generate_or_reuse_chapter_digest", existing_digests)
