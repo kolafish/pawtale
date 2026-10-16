@@ -780,11 +780,12 @@ definePage<TranscriptsData>()({
       const parsed = await parseMemoirVoiceSearchQuery(query);
       if (!isCurrent()) return;
       const parsedFilters = filtersFromParsedSearch(parsed);
-      await this.applySearch(parsed.query || query, parsedFilters, parsed);
+      const searchQuery = parsed.query || (filtersActive(parsedFilters) ? "" : query);
+      await this.applySearch(searchQuery, parsedFilters, parsed);
       if (!isCurrent()) return;
       trackAuditAction(
         "transcript.voice_search",
-        { has_filters: searchCriteriaActive(parsed.query || query, parsedFilters) },
+        { has_filters: searchCriteriaActive(searchQuery, parsedFilters) },
         { projectId: this.data.activeProjectId },
       );
       wx.showToast({ title: "已识别", icon: "success" });

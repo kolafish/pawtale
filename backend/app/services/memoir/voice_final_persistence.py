@@ -59,30 +59,37 @@ async def _assign_interview_target(
     voice_session: MemoirVoiceSession,
     utterance: MemoirVoiceUtterance,
 ) -> None:
-    completion_issue = (
-        await completion_issues.get_issue(
-            db,
-            project_id=voice_session.project_id,
-            issue_id=voice_session.current_completion_issue_id,
+    policy_decision = await interview_policy.policy_decision_for_utterance(db, utterance=utterance)
+    completion_issue = None
+    framework_item = None
+    # The question's frozen target (including no target) owns this answer.
+    # Session/history targets only apply when no active policy produced the question.
+    if policy_decision is None:
+        completion_issue = (
+            await completion_issues.get_issue(
+                db,
+                project_id=voice_session.project_id,
+                issue_id=voice_session.current_completion_issue_id,
+            )
+            if voice_session.current_completion_issue_id
+            else None
         )
-        if voice_session.current_completion_issue_id
-        else None
-    )
-    anchor_item_id = await interview_topics.current_framework_item_id(db, voice_session)
-    framework_item = (
-        await db.get(MemoirFrameworkItem, anchor_item_id)
-        if anchor_item_id
-        else None
-    )
+        anchor_item_id = await interview_topics.current_framework_item_id(db, voice_session)
+        framework_item = (
+            await db.get(MemoirFrameworkItem, anchor_item_id)
+            if anchor_item_id
+            else None
+        )
     assigned = await interview_policy.assign_utterance(
         db,
         utterance=utterance,
         completion_issue=completion_issue,
         framework_item=framework_item,
+        policy_decision=policy_decision,
     )
     if not (utterance.transcript_edited or utterance.transcript_raw).strip():
         return  # Capture the original target without claiming an answer or evaluating silence.
-    if completion_issue is not None:
+    if assigned.completion_issue_id is not None:
         await completion_interviews.bind_answer_segment(
             db,
             voice_session=voice_session,
