@@ -1564,7 +1564,7 @@ async def sync_materials_to_chapters(
     assigned_by: MemoirSectionMaterialAssignedBy,
     assignment_reason: str,
 ) -> set[str]:
-    """Apply a chapter plan to the single SectionMaterial ownership table."""
+    """Apply membership changes, preserving existing sections and excluded links."""
     seen_utterances: set[str] = set()
     for utterance_ids in utterance_ids_by_chapter.values():
         chapter_utterances = set(utterance_ids)
@@ -1620,18 +1620,23 @@ async def sync_materials_to_chapters(
             )
         ).all()
     )
+    existing_by_utterance = {material.utterance_id: material for material in existing}
+    chapter_by_section = {section.id: section.chapter_id for section in sections}
+    included_sections = {section.id for section in sections if section.include_in_book and section.status == MemoirSectionStatus.ACTIVE.value}
+    removed = [material for material in existing if material.include_in_book
+        and material.section_id in included_sections
+        and chapter_by_section.get(material.section_id) in chapter_ids and material.utterance_id not in desired_ids]
     affected = {
         material.section_id
-        for material in existing
-        if material.utterance_id not in desired_ids
+        for material in removed
     }
-    for material in existing:
-        if material.utterance_id not in desired_ids:
-            await db.delete(material)
+    for material in removed:
+        await db.delete(material)
     await db.flush()
 
     for chapter in chapters:
-        utterance_ids = list(dict.fromkeys(utterance_ids_by_chapter[chapter.id]))
+        utterance_ids = [uid for uid in dict.fromkeys(utterance_ids_by_chapter[chapter.id])
+            if uid not in existing_by_utterance or chapter_by_section.get(existing_by_utterance[uid].section_id) != chapter.id]
         if not utterance_ids:
             continue
         affected |= await _move_materials(

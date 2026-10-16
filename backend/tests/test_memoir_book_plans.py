@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from sqlalchemy import select
 
 from app.services.ai_base import AITextServiceBase
@@ -16,7 +18,45 @@ from tests.memoir_helpers import (
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    create_test_book_plan_with_chapters,
 )
+
+
+@pytest.mark.parametrize('operation', ['delete_chapter', 'split_chapter'])
+@pytest.mark.parametrize('exclusion', ['material', 'section', 'archived'])
+async def test_review1470_local_chapter_command_preserves_other_sections_and_exclusions(client, test_db, operation, exclusion):
+    from app.models.memoir import MemoirBookPlanChapter
+    pid = await ensure_mobile_memoir_project(client)
+    sources = [await create_test_voice_transcript(client, test_db, f'第{i}段童年往事。', project_id=pid) for i in range(5)]
+    _, chapters = await create_test_book_plan_with_chapters(test_db, project_id=pid, chapter_titles=['童年', '工作'],
+        source_refs_by_chapter=[[memoir_source_ref(s) for s in sources[:2]], [memoir_source_ref(s) for s in sources[2:]]])
+    source_chapter_id, other_chapter_id = [c.id for c in chapters]
+    extra = MemoirSection(project_id=pid, chapter_id=other_chapter_id, title='保留的小节', sort_order=1)
+    test_db.add(extra)
+    await test_db.flush()
+    links = (await test_db.scalars(select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == pid))).all()
+    for order, source in enumerate(sources[3:]):
+        link = next(m for m in links if m.utterance_id == source['utterance_id'])
+        link.section_id, link.sort_order = extra.id, order
+        link.include_in_book = order == 0 or exclusion != 'material'
+    extra.include_in_book = exclusion != 'section'
+    extra.status = 'archived' if exclusion == 'archived' else 'active'
+    await test_db.commit()
+    async def other_memberships():
+        return (await test_db.execute(select(MemoirSectionMaterial.id, MemoirSectionMaterial.section_id,
+            MemoirSectionMaterial.utterance_id, MemoirSectionMaterial.transcript_version_id,
+            MemoirSectionMaterial.include_in_book, MemoirSectionMaterial.sort_order,
+            MemoirSectionMaterial.assigned_by, MemoirSectionMaterial.assignment_reason).join(MemoirSection).where(
+                MemoirSection.chapter_id == other_chapter_id).order_by(MemoirSectionMaterial.id))).all()
+    before = await other_memberships()
+    payload = {'type': operation, 'chapter_id': source_chapter_id}
+    if operation == 'split_chapter':
+        payload.update(utterance_ids=[sources[1]['utterance_id']], title='离家以后')
+    response = await client.post(f'/api/mobile/memoir/projects/{pid}/book-plan/structure-commands', json=payload)
+    assert response.status_code == 200, response.text
+    assert await other_memberships() == before
+    assert len((await test_db.scalars(select(MemoirSection).where(MemoirSection.chapter_id == other_chapter_id))).all()) == 2
+    assert await test_db.get(MemoirBookPlanChapter, other_chapter_id) is not None
 
 
 class FakeBookPlanAI(AITextServiceBase):

@@ -32,6 +32,7 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
 )
+from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookChapterTitleGenerateRequest,
@@ -256,14 +257,21 @@ async def _replace_plan(
     prompt_snapshot: str,
     metadata_json: dict[str, object] | None = None,
     before_commit: Callable[[], Awaitable[None]] | None = None,
+    only_if_missing: bool = False,
 ) -> MemoirBookPlanResponse:
     if len(chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
         raise HTTPException(
             status_code=400,
             detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
         )
+    # There is no plan row to lock during first creation. Serialize the short
+    # save phase on its stable parent, without blocking FK reads.
+    await db.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
     await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
+    if plan is not None and only_if_missing:
+        await db.commit()
+        return await _plan_response(db, plan)
     if not plan:
         plan = MemoirBookPlan(project_id=project_id)
         db.add(plan)
@@ -323,8 +331,13 @@ async def generate_book_plan(
     before_commit: Callable[[], Awaitable[None]] | None = None,
     on_not_story: Callable[[tuple[SourceSegment, ...]], Awaitable[None]] | None = None,
     excluded_source_hashes: dict[str, str] | None = None,
+    only_if_missing: bool = False,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    plan = await _load_plan(db, project_id)
+    if only_if_missing and plan is not None:
+        return await _plan_response(db, plan)
+    only_if_missing = only_if_missing or plan is None
     sources = await _source_segments(
         db,
         user_id=user_id,
@@ -361,6 +374,7 @@ async def generate_book_plan(
         created_by=MemoirCreatedBy.AI,
         model=generated.model,
         prompt_snapshot=generated.prompt,
+        only_if_missing=only_if_missing,
         metadata_json={
             "source_utterance_count": len(sources),
             "prompt_version": "memoir_book_plan_v1",

@@ -94,6 +94,43 @@ async def apply(client, story, preview_data, operations=None):
     return await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/apply", json={"signature": preview_data["signature"], "operations": chosen})
 
 
+@pytest.mark.db_independent
+async def test_review1470_voice_edit_and_transcript_refresh_share_lock_order(test_db, story):
+    import asyncio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.models.memoir import MemoirTranscriptVersion
+    from app.services.memoir.sections import refresh_material_transcript_version
+    pid, utterance_id = story['pid'], story['materials'][0]
+    await test_db.commit()
+    async with AsyncSession(test_db.bind, expire_on_commit=False) as voice, AsyncSession(test_db.bind, expire_on_commit=False) as editor:
+        utterance = await editor.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == utterance_id).with_for_update())
+        voice_pid = await voice.scalar(text('SELECT pg_backend_pid()'))
+        task = asyncio.create_task(_story(voice, pid, lock=True))
+        try:
+            async def wait_until_blocked():
+                while not await test_db.scalar(text('SELECT cardinality(pg_blocking_pids(:pid)) > 0'), {'pid': voice_pid}):
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(wait_until_blocked(), timeout=3)
+            version = MemoirTranscriptVersion(voice_session_id=utterance.voice_session_id, source_artifact_id=utterance_id,
+                version_type='user_edited', created_by='user', content='用户刚校正的讲述。')
+            editor.add(version)
+            await editor.flush()
+            utterance.transcript_edited = version.content
+            await asyncio.wait_for(refresh_material_transcript_version(editor, project_id=pid, utterance_id=utterance_id,
+                transcript_version_id=version.id), timeout=3)
+            await editor.commit()
+            snapshot = await asyncio.wait_for(task, timeout=3)
+            assert next(m for m in snapshot['materials'] if m['ref'] == utterance_id)['text'] == version.content
+            assert next(m for m in snapshot['memberships'] if m['material_ref'] == utterance_id)['version'] == version.id
+        finally:
+            await editor.rollback()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await voice.rollback()
+
+
 async def test_raw_speech_context_and_both_renames(client, test_db, monkeypatch, story):
     operations = [
         {"action": "rename_chapter", "target_ref": story["chapters"][1], "new_title": "八十年代的童年"},

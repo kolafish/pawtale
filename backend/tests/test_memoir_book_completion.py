@@ -2678,6 +2678,12 @@ async def test_unrelated_book_revision_can_proceed_while_conflict_chapter_is_omi
             test_db, project_id=project_id, chapter_id=chapter.id,
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
+    # Review the actual book metadata before testing an unrelated omission.
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
+    assert (await client.patch(f"/api/mobile/memoir/projects/{project_id}/book-output", json={
+        'subtitle': '这些往事', 'narrator_name': '口述人', 'prepared_by': '家人',
+        'preface': '家人留下的回忆。', 'afterword': '这些故事留给后人。', 'back_cover_quote': '听家人慢慢讲。',
+    })).status_code == 200
     generated = await _run_book_review(client, test_db, project_id=project_id)
     assert generated.status_code == 200, generated.text
     review = await test_db.get(MemoirBookReview, generated.json()["id"])
@@ -2742,6 +2748,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
 
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
     generated = await _run_book_review(
         client,
         test_db,
@@ -3112,6 +3119,7 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
 
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
     generated = await _run_book_review(
         client,
         test_db,
@@ -3344,6 +3352,7 @@ async def test_book_review_ignores_a_stale_output_title(
         chapter_id=chapters[0].id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
+    assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
     reviewed = await _run_book_review(
         client,
         test_db,
@@ -3371,6 +3380,42 @@ async def test_book_review_ignores_a_stale_output_title(
 
     assert context.book_metadata["title"] == "测试回忆录"
     assert context.input_signature == reviewed.json()["input_signature"]
+
+
+@pytest.mark.parametrize('field', ['subtitle', 'narrator_name', 'prepared_by', 'preface', 'afterword', 'back_cover_quote'])
+@pytest.mark.parametrize('during_generation', [False, True])
+async def test_review1470_book_metadata_invalidates_cached_and_inflight_review(client, test_db, monkeypatch, field, during_generation):
+    project_id, chapters, _ = await _book(client, test_db)
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
+    await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED)
+    await book_reviews.ensure_chapter_digests(test_db, project_id=project_id, ai_model=None, ai_client=fake)
+    assembled = await client.post(f'/api/memoir/projects/{project_id}/book-output/assemble')
+    assert assembled.status_code == 200, assembled.text
+    old = await book_reviews.generate_or_reuse_book_review(test_db, project_id=project_id, ai_client=fake)
+    old_id, old_signature = old.id, old.input_signature
+    await test_db.commit()
+    value = '用户确认的新成书信息'
+    async def edit():
+        response = await client.patch(f'/api/mobile/memoir/projects/{project_id}/book-output', json={field: value})
+        assert response.status_code == 200, response.text
+    if during_generation:
+        generate = book_reviews.generate_structured_with_client
+        async def generate_while_editing(*args, **kwargs):
+            result = await generate(*args, **kwargs)
+            await edit()
+            return result
+        monkeypatch.setattr(book_reviews, 'generate_structured_with_client', generate_while_editing)
+        with pytest.raises(HTTPException) as error:
+            await book_reviews.generate_or_reuse_book_review(test_db, project_id=project_id, ai_client=fake, force_regenerate=True)
+        assert error.value.status_code == 409
+    else:
+        await edit()
+        assert await book_reviews.get_current_book_review(test_db, project_id=project_id) is None
+        fresh = await book_reviews.generate_or_reuse_book_review(test_db, project_id=project_id, ai_client=fake)
+        assert fresh.id != old_id and fresh.input_signature != old_signature
+        assert value in fake.prompts[-1]
 
 
 async def test_background_batch_recovers_after_child_dispatch_without_client_reads(client, test_db, monkeypatch):

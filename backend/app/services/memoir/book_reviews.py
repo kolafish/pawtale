@@ -282,12 +282,12 @@ async def ensure_chapter_digests(
             )
 
 
-async def load_book_review_context(
+async def load_book_review_metadata(
     db: AsyncSession,
     *,
     project_id: str,
-) -> BookReviewContext:
-    plan, plan_chapters = await _plan(db, project_id=project_id)
+    fallback_title: str = "",
+) -> dict[str, str]:
     output = await db.scalar(
         select(MemoirBookOutput).where(
             MemoirBookOutput.project_id == project_id,
@@ -301,18 +301,27 @@ async def load_book_review_context(
         if output is not None
         else None
     )
-    project = await db.get(Project, project_id)
+    project = await db.get(Project, project_id, populate_existing=True)
     book_title = (
         (project.title or "").strip()
         if project is not None
-        else formal_book_title((plan.title or "").strip())
+        else formal_book_title(fallback_title.strip())
     ) or "我的回忆录"
-    book_metadata = {
+    return {
         "title": book_title,
         **stored_manuscript_metadata(
-            latest.manuscript_json if latest is not None else None
+            latest.manuscript_json if latest is not None else {}
         ),
     }
+
+
+async def load_book_review_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> BookReviewContext:
+    plan, plan_chapters = await _plan(db, project_id=project_id)
+    book_metadata = await load_book_review_metadata(db, project_id=project_id, fallback_title=plan.title or "")
     chapters: list[BookReviewChapter] = []
     decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
     edits_by_chapter: dict[str, list[TranscriptEdit]] = {}
@@ -384,7 +393,7 @@ async def load_book_review_context(
     signature = semantic_json_signature(
         {
             "plan": {"id": plan.id},
-            "book_title": book_title,
+            "book_metadata": book_metadata,
             "chapters": [
                 {
                     "id": chapter.chapter_id,

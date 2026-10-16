@@ -288,16 +288,6 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     progress.retry_stages = [stage for stage in progress.retry_stages if stage != "chapters"]
     job.payload_json = {"source": "progress", "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
-    review_signature = semantic_json_signature({"book_title": project.title, "engine": book_reviews.BOOK_REVIEW_ENGINE,
-        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
-            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
-            for chapter in chapters]})
-    previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
-    if (not current or len(current) != len(progress.chapters) or previous_review is None
-            or (previous_review.payload_json or {}).get("input_signature") != review_signature):
-        # Chapter failures retain a readable book, but not a review of another input.
-        # Keep the old review job itself; normal dispatch still handles reuse and retries.
-        progress.clear_review()
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -307,6 +297,17 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         # Persist deterministic assembly before any review dispatch or external request.
         job.result_json = progress.model_dump(mode="json")
         await db.commit()
+    review_signature = semantic_json_signature({
+        "book_metadata": await book_reviews.load_book_review_metadata(db, project_id=project_id),
+        "engine": book_reviews.BOOK_REVIEW_ENGINE,
+        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
+            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
+            for chapter in chapters]})
+    previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
+    if (not current or len(current) != len(progress.chapters) or previous_review is None
+            or (previous_review.payload_json or {}).get("input_signature") != review_signature):
+        # Metadata changes invalidate the same review as chapter changes.
+        progress.clear_review()
     if any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
         progress.stage = "writing_chapters"
         return _waiting(job, progress)

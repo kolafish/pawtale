@@ -478,7 +478,8 @@ async def _create_initial_tree(
     job: MemoirEditingJob,
     progress: StoryGrowthProgress,
     excluded_source_hashes: dict[str, str],
-) -> None:
+) -> bool:
+    created = False
     async def checkpoint_not_story(sources: tuple[SourceSegment, ...]) -> None:
         for source in sources:
             progress.deferred[source.utterance_id] = DeferredSource(
@@ -488,6 +489,8 @@ async def _create_initial_tree(
         await _save_progress(db, job, progress)
 
     async def checkpoint_plan() -> None:
+        nonlocal created
+        created = True
         sections = (await db.scalars(select(MemoirSection).where(MemoirSection.project_id == project_id))).all()
         for section in sections:
             progress.initial_sections.setdefault(section.chapter_id, []).append(
@@ -515,7 +518,9 @@ async def _create_initial_tree(
         before_commit=checkpoint_plan,
         on_not_story=checkpoint_not_story,
         excluded_source_hashes=excluded_source_hashes,
+        only_if_missing=True,
     )
+    return created
 
 
 async def _finish_initial_sections(
@@ -798,10 +803,17 @@ async def grow_story_tree(
     initial_tree = before_plan is None or bool(progress.initial_sections)
     if before_plan is None:
         try:
-            await _create_initial_tree(
+            created = await _create_initial_tree(
                 db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress,
                 excluded_source_hashes={key: value.text_hash for key, value in deferred.items() if value.status == "not_story"},
             )
+            if not created:
+                # A parallel session initialized this project while our model
+                # was running. Continue as incremental growth on that directory.
+                before_plan, before_chapters, before_sections = await _load_tree(db, project_id=job.project_id)
+                before_chapter_ids = {chapter.id for chapter in before_chapters}
+                before_section_ids = {section.id for section in before_sections}
+                initial_tree = False
         except HTTPException as exc:
             if exc.detail != NO_STORY_YET:
                 raise

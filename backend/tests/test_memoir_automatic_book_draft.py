@@ -110,6 +110,30 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
     assert output.json()["is_stale"] is False
 
 
+async def test_review1470_automatic_review_dispatch_tracks_book_metadata(client, test_db, monkeypatch):
+    pid, chapter_id, _, fake, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json['chapters'][chapter_id]['job_id'])
+    assert not await run_test_editing_job(test_db, parent_id)
+    review_id = parent.result_json['review_job_id']
+    assert await run_test_editing_job(test_db, review_id)
+    assert await run_test_editing_job(test_db, parent_id)
+    review_job = await test_db.get(MemoirEditingJob, review_id)
+    old_signature = review_job.payload_json['input_signature']
+    response = await client.patch(f'/api/mobile/memoir/projects/{pid}/book-output', json={'subtitle': '用户的新副标题'})
+    assert response.status_code == 200, response.text
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=pid)
+    await test_db.commit()
+    assert not await run_test_editing_job(test_db, parent_id)
+    await test_db.refresh(review_job)
+    assert review_job.status == 'pending' and review_job.payload_json['input_signature'] != old_signature
+    assert await run_test_editing_job(test_db, review_id)
+    calls = len(fake.prompts)
+    assert await run_test_editing_job(test_db, parent_id)
+    assert len(fake.prompts) == calls
+
+
 async def test_failed_chapter_is_not_automatically_reissued(client, test_db, monkeypatch):
     project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
     assert not await run_test_editing_job(test_db, parent_id)

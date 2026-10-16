@@ -98,9 +98,11 @@ async def _story(db: AsyncSession, project_id: str, *, lock: bool = False) -> di
     profile = (project.metadata_json or {}).get(MEMOIR_PROFILE_METADATA_KEY) if project else None
     profile = profile if isinstance(profile, dict) else {}
     chapters = await rows(MemoirBookPlanChapter, select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id).order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id))
+    # Match directory writes and transcript edits: utterance before material.
+    materials = await rows(MemoirVoiceUtterance, select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id).order_by(MemoirVoiceUtterance.id))
+    materials = sorted(materials, key=lambda material: (material.created_at, material.id))
     sections = await rows(MemoirSection, select(MemoirSection).where(MemoirSection.project_id == project_id).order_by(MemoirSection.chapter_id, MemoirSection.sort_order, MemoirSection.id))
     links = await rows(MemoirSectionMaterial, select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == project_id).order_by(MemoirSectionMaterial.id))
-    materials = await rows(MemoirVoiceUtterance, select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(MemoirVoiceSession.project_id == project_id).order_by(MemoirVoiceUtterance.created_at, MemoirVoiceUtterance.id))
     drafts = (await db.scalars(select(MemoirBookChapterDraftVersion).where(MemoirBookChapterDraftVersion.project_id == project_id).distinct(MemoirBookChapterDraftVersion.chapter_id).order_by(MemoirBookChapterDraftVersion.chapter_id, MemoirBookChapterDraftVersion.version.desc()))).all()
     section_by_material = {link.utterance_id: link.section_id for link in links}
     return {

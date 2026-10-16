@@ -123,7 +123,7 @@ async def test_requested_ai_copy_predating_automation_is_also_preserved(client, 
 
 
 @pytest.mark.parametrize('explicit_retry', [False, True, 'legacy'])
-async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review(client, test_db, monkeypatch, explicit_retry):
+async def test_book_pipeline_dispatches_copy_and_reviews_changed_metadata_once(client, test_db, monkeypatch, explicit_retry):
     from app.services.memoir import automatic_book_draft
     project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
     if explicit_retry == 'legacy':
@@ -150,6 +150,11 @@ async def test_book_pipeline_dispatches_one_copy_job_without_invalidating_review
     review_id = parent.result_json['review_job_id']
     assert await run_test_editing_job(test_db, review_id)
     assert await run_test_editing_job(test_db, copy_id)
+    # The copy job changed the actual preface/afterword seen by review. Refresh
+    # that review once, then reuse it across identical assembly versions.
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json['review_job_id'] == review_id
+    assert await run_test_editing_job(test_db, review_id)
     assert await run_test_editing_job(test_db, parent_id)
     await test_db.refresh(parent)
     await test_db.refresh(copy_job)
