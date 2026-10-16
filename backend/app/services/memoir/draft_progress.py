@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
+    MemoirChatMessage,
     MemoirEditingJob,
     MemoirSectionMaterial,
     MemoirVoiceSession,
@@ -65,7 +66,7 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
         MemoirVoiceUtterance.transcript_raw,
     )
     sources = (
-        select(MemoirVoiceUtterance.id.label("id"), source_text.label("text"))
+        select(MemoirVoiceUtterance.id.label("id"), source_text.label("text"), MemoirVoiceUtterance.chat_message_id)
         .join(MemoirVoiceSession)
         .where(
             MemoirVoiceSession.project_id == project_id,
@@ -99,21 +100,26 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
                 deferred_value["text_hash"].as_string(),
                 sources.c.text,
                 deferred_value["reason"].as_string(),
+                deferred_value["question_context"].as_string(),
+                MemoirChatMessage,
             )
             .select_from(MemoirEditingJob)
             .join(deferred, true())
             .join(sources, sources.c.id == deferred.c.key)
+            .outerjoin(MemoirChatMessage, MemoirChatMessage.id == sources.c.chat_message_id)
             .outerjoin(assigned, assigned.c.utterance_id == sources.c.id)
             .where(
                 MemoirEditingJob.project_id == project_id,
                 MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
                 assigned.c.utterance_id.is_(None),
             )
-            .order_by(MemoirEditingJob.updated_at)
+            .order_by(MemoirEditingJob.updated_at, MemoirEditingJob.id)
         )
     ).all()
-    current = {key: (status, text, reason) for key, status, text_hash, text, reason in rows
-        if key in pending_ids and text_hash == source_text_hash(text)}
+    latest = {row[0]: row[1:] for row in rows}
+    current = {key: (status, text, reason) for key, (status, text_hash, text, reason, context, message) in latest.items()
+        if key in pending_ids and text_hash == source_text_hash(text)
+        and story_tree_growth._question_context_matches(context or "", message)}
     statuses = [value[0] for value in current.values()]
     need = next((value for value in current.values() if value[0] == "needs_user"), None)
     detail = f"关于“{need[1][:60]}”：{need[2] or '还需要一些背景信息'}。补充讲述后会自动继续整理。" if need else ""
