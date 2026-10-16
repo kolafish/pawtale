@@ -51,7 +51,7 @@ def _provider(monkeypatch, answer, *, during_call=None):
         calls.append(args[2])
         if during_call:
             await during_call()
-        return SimpleNamespace(value=answer)
+        return SimpleNamespace(value=answer(args[2]) if callable(answer) else answer)
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', digest)
     monkeypatch.setattr(structure, 'load_structure_summaries', summaries)
     monkeypatch.setattr(structure, 'get_ai_service', lambda _: None)
@@ -408,8 +408,8 @@ async def test_outdated_book_review_cannot_apply_a_structure_proposal(client, te
 
 
 @pytest.mark.parametrize('rebuild_digests', [False, True])
-@pytest.mark.parametrize('merge_sections', [False, True])
-async def test_growth_worker_generates_real_digests_and_schedules_book(client, test_db, monkeypatch, rebuild_digests, merge_sections):
+@pytest.mark.parametrize('operation', ['keep', 'merge', 'split'])
+async def test_growth_worker_generates_real_digests_and_schedules_book(client, test_db, monkeypatch, rebuild_digests, operation):
     from app.clock import utcnow_naive
     from app.domain.memoir.types import MemoirEditingJobType
     from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession
@@ -424,7 +424,21 @@ async def test_growth_worker_generates_real_digests_and_schedules_book(client, t
     original_sources = structure.material_identity(sections)
     target_section_id = sections[0].id
     real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure.load_structure_summaries
-    calls = _provider(monkeypatch, _merge(context, merge_sections=True) if merge_sections else context.outline)
+    merge_sections = operation == 'merge'
+    split_section = operation == 'split'
+    def split_answer(prompt):
+        import json
+        payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
+        target_ref = context.section_refs.encode(target_section_id)
+        current = next(s for c in payload['chapters'] for s in c['sections'] if s['section_refs'] == [target_ref])
+        answer = context.outline.model_dump()
+        target_chapter = next(c for c in answer['chapters'] if any(s['section_refs'] == [target_ref] for s in c['sections']))
+        target_chapter['sections'].append({'section_refs': ['T1'], 'title': '课堂上的板凳'})
+        answer['section_splits'] = [{'source_section_ref': target_ref, 'new_section_ref': 'T1',
+            'material_refs': [current['materials'][-1]['material_ref']]}]
+        return structure.StructureOutput.model_validate(answer)
+    calls = _provider(monkeypatch, split_answer if split_section else
+        _merge(context, merge_sections=True) if merge_sections else context.outline)
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', real_digest)
     monkeypatch.setattr(structure, 'load_structure_summaries', real_summaries)
     fake = FakeChapterAI(section_material_id='', chapter_section_id='', chapter_material_id='', draft_material_ids=[])
@@ -452,14 +466,17 @@ async def test_growth_worker_generates_real_digests_and_schedules_book(client, t
     assert job.status == 'succeeded' and not job.error_message and session.status == 'stopped'
     assert job.result_json['voice_session_id'] == session_id
     assert job.result_json['organized_utterance_ids'] == [source['utterance_id']]
-    assert job.result_json['new_chapter_ids'] == [] and job.result_json['new_section_ids'] == []
+    assert job.result_json['new_chapter_ids'] == []
+    assert len(job.result_json['new_section_ids']) == int(split_section)
     assert job.result_json['growth']['placed_ids'] == []
     assert len(fake.prompts) - prompts_before == (2 if rebuild_digests else 8)
     assert len(calls) == 1
     assert '朋友发来山桃花照片' in calls[0]  # The real section digest reached the directory prompt.
     _, chapters, sections = await _load_tree(test_db, project_id=pid)
-    assert len(chapters) == (2 if merge_sections else 4) and len(sections) == (3 if merge_sections else 4)
-    assert {c.id for c in chapters} <= set(original_chapter_ids) and {s.id for s in sections} <= original_section_ids
+    assert len(chapters) == (2 if merge_sections else 4)
+    assert len(sections) == (3 if merge_sections else 5 if split_section else 4)
+    assert {c.id for c in chapters} <= set(original_chapter_ids)
+    assert {s.id for s in sections} - original_section_ids == set(job.result_json['new_section_ids'])
     assert set(original_sources) < set(structure.material_identity(sections))
     event = await test_db.scalar(select(MemoirAutomationEvent).where(MemoirAutomationEvent.editing_job_id == job_id,
         MemoirAutomationEvent.event_type == 'story_structure_updated'))
@@ -518,7 +535,7 @@ async def test_actual_manual_move_keeps_order_independently_of_title_ownership(c
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     context = await structure.structure_context(test_db, plan, chapters, sections)
     assert context.manual_chapter_order == tuple(c.id for c in chapters)
-    assert context.locked_chapters == {moved_id}
+    assert not context.locked_chapters
     output = context.outline.model_copy(deep=True)
     output.chapters[0], output.chapters[1] = output.chapters[1], output.chapters[0]
     _provider(monkeypatch, output)
@@ -726,3 +743,305 @@ async def test_review_job_failure_cannot_commit_partial_directory_changes(client
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     assert len(chapters) == 4 and identity(sections) == before
     assert structure.FEEDBACK_CHECKED_KEY not in plan.metadata_json
+
+
+async def _mixed_section(client, db):
+    from app.services.memoir.sections import merge_sections
+    from app.schemas.memoir_sections import MemoirSectionMergeRequest
+    pid, uid = await _book(client, db)
+    plan, chapters, sections = await _load_tree(db, project_id=pid)
+    target = next(s for s in sections if s.chapter_id == chapters[0].id)
+    source = next(s for s in sections if s.chapter_id == chapters[1].id)
+    await merge_sections(db, user_id=uid, project_id=pid, target_section_id=target.id,
+        req=MemoirSectionMergeRequest(source_section_ids=[source.id]))
+    for link in (await db.scalars(select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == pid))).all():
+        link.assigned_by = 'ai'
+    plan.created_by = 'ai'
+    await db.commit()
+    return pid, uid
+
+
+async def test_automatic_review_splits_an_existing_section_without_replacing_sources(client, test_db, monkeypatch):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    original = structure.material_identity(sections)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    moved_id = mixed.materials[-1].id
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    output = context.outline.model_dump()
+    first = output['chapters'][0]
+    first['sections'][0]['title'] = '妈妈的名字'
+    first['sections'].append({'section_refs': ['T1'], 'title': '妈妈课堂里的童年'})
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(mixed.id),
+        'new_section_ref': 'T1', 'material_refs': [context.material_refs.encode(moved_id)]}]
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert structure.material_identity(after) == original
+    original_section = next(s for s in after if s.id == mixed.id)
+    added = next(s for s in after if s.title == '妈妈课堂里的童年')
+    assert [m.id for m in added.materials] == [moved_id]
+    assert moved_id not in {m.id for m in original_section.materials}
+    assert added.chapter_id == original_section.chapter_id == after_chapters[0].id
+
+
+@pytest.mark.parametrize('protection', ['chapter_title', 'section_title', 'manual_assignment'])
+async def test_field_protection_does_not_freeze_unrelated_sections(client, test_db, monkeypatch, protection):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    target = next(s for s in sections if s.chapter_id == chapters[0].id)
+    protected_id = target.materials[0].id
+    original_chapter_id, original_chapter_title, original_section_title = chapters[0].id, chapters[0].title, target.title
+    if protection == 'chapter_title':
+        chapters[0].metadata_json = {'title_updated_by': 'user'}
+    elif protection == 'section_title':
+        target.metadata_json = {'title_updated_by': 'user'}
+    else:
+        target.materials[0].assigned_by = 'user'
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    assert chapters[0].id not in context.locked_chapters
+    output = context.outline.model_dump()
+    group = output['chapters'][0]
+    group['sections'].append({'section_refs': ['T1'], 'title': '课堂经历'})
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(target.id),
+        'new_section_ref': 'T1', 'material_refs': [context.material_refs.encode(target.materials[-1].id)]}]
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    kept = next(s for s in after if s.id == target.id)
+    assert after_chapters[0].title == original_chapter_title
+    assert kept.title == original_section_title
+    if protection == 'manual_assignment':
+        link = next(m for m in kept.materials if m.id == protected_id)
+        assert link.assigned_by == 'user' and kept.chapter_id == original_chapter_id
+
+
+@pytest.mark.parametrize('protection', ['chapter_title', 'section_title', 'manual_assignment', 'excluded_material'])
+async def test_protected_field_allows_other_sections_to_join_the_chapter(client, test_db, monkeypatch, protection):
+    pid, uid = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    first = next(s for s in sections if s.chapter_id == chapters[0].id)
+    original_chapter_title, original_section_title = chapters[0].title, first.title
+    if protection == 'chapter_title':
+        chapters[0].metadata_json = {'title_updated_by': 'user'}
+    elif protection == 'section_title':
+        first.metadata_json = {'title_updated_by': 'user'}
+    elif protection == 'manual_assignment':
+        first.materials[0].assigned_by = 'user'
+    else:
+        first.materials[0].include_in_book = False
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    output = context.outline.model_copy(deep=True)
+    output.chapters[0].sections.extend(output.chapters.pop(1).sections)
+    original = structure.material_identity(sections)
+    _provider(monkeypatch, output)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert len(after_chapters) == 3 and after_chapters[0].title == original_chapter_title
+    assert next(s for s in after if s.id == first.id).title == original_section_title
+    assert structure.material_identity(after) == original
+
+
+@pytest.mark.parametrize('bad', ['all_materials', 'duplicate_material', 'foreign_material', 'missing_new_section',
+    'duplicate_new_section', 'manual_assignment', 'manual_title', 'manual_draft'])
+async def test_invalid_section_split_cannot_change_directory_or_memberships(client, test_db, monkeypatch, bad):
+    from tests.memoir_helpers import create_test_chapter_draft
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    if bad == 'manual_assignment':
+        mixed.materials[-1].assigned_by = 'user'
+    if bad == 'manual_title':
+        mixed.metadata_json = {'title_updated_by': 'user'}
+    if bad == 'manual_draft':
+        await create_test_chapter_draft(test_db, project_id=pid, chapter_id=mixed.chapter_id,
+            content='不能覆盖的人工正文。')
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    original = structure.material_identity(sections)
+    output = context.outline.model_dump()
+    refs = [context.material_refs.encode(mixed.materials[-1].id)]
+    if bad == 'all_materials':
+        refs = list(context.section_materials[context.section_refs.encode(mixed.id)])
+    elif bad == 'duplicate_material':
+        refs *= 2
+    elif bad == 'foreign_material':
+        refs = [context.material_refs.encode(next(s for s in sections if s.chapter_id == chapters[-1].id).materials[0].id)]
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(mixed.id),
+        'new_section_ref': 'T1', 'material_refs': refs}]
+    if bad != 'missing_new_section':
+        output['chapters'][0]['sections'].append({'section_refs': ['T1'], 'title': '课堂经历'})
+    if bad == 'duplicate_new_section':
+        output['chapters'][0]['sections'].append({'section_refs': ['T1'], 'title': '重复的小节'})
+    if bad == 'manual_title':
+        output['chapters'][0]['sections'][0]['title'] = '覆盖人工标题'
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    with pytest.raises(ValueError):
+        await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    await test_db.commit()
+    plan, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert (await structure.structure_context(test_db, plan, after_chapters, after)).outline == context.outline
+    assert structure.material_identity(after) == original
+
+
+async def test_section_split_can_create_a_chapter_and_rolls_back_on_later_failure(client, test_db, monkeypatch):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    original = structure.material_identity(sections)
+    moved_id = mixed.materials[-1].id
+    output = context.outline.model_dump()
+    output['chapters'].append({'chapter_ref': 'N1', 'title': '童年的课堂',
+        'sections': [{'section_refs': ['T1'], 'title': '跟妈妈上课'}]})
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(mixed.id),
+        'new_section_ref': 'T1', 'material_refs': [context.material_refs.encode(moved_id)]}]
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    real_mark = structure.mark_section_structure_changed
+    async def fail(*args, **kwargs):
+        raise RuntimeError('failure after split and chapter creation')
+    monkeypatch.setattr(structure, 'mark_section_structure_changed', fail)
+    with pytest.raises(RuntimeError):
+        await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    await test_db.commit()  # A worker may persist a failed job in this same session.
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    assert (await structure.structure_context(test_db, plan, chapters, sections)).outline == context.outline
+    assert structure.material_identity(sections) == original
+    monkeypatch.setattr(structure, 'mark_section_structure_changed', real_mark)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert structure.material_identity(after) == original
+    new_chapter = next(c for c in after_chapters if c.title == '童年的课堂')
+    assert [m.id for s in after if s.chapter_id == new_chapter.id for m in s.materials] == [moved_id]
+
+
+@pytest.mark.parametrize('protection', ['chapter_title', 'section_title', 'manual_assignment'])
+async def test_feedback_signature_tracks_field_protection_without_tracking_ai_titles(client, test_db, protection):
+    pid, _ = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    before = await structure.structure_context(test_db, plan, chapters, sections)
+    chapters[0].title = 'AI 调整后的主题'
+    sections[0].title = 'AI 调整后的小节'
+    await test_db.flush()
+    ai_changed = await structure.structure_context(test_db, plan, chapters, sections)
+    assert before.source_signature == ai_changed.source_signature
+    if protection == 'chapter_title':
+        chapters[0].metadata_json = {'title_updated_by': 'user'}
+    elif protection == 'section_title':
+        sections[0].metadata_json = {'title_updated_by': 'user'}
+    else:
+        sections[0].materials[0].assigned_by = 'user'
+    await test_db.flush()
+    protected = await structure.structure_context(test_db, plan, chapters, sections)
+    assert before.source_signature != protected.source_signature
+
+
+async def test_multiple_splits_from_one_section_preserve_all_memberships(client, test_db, monkeypatch):
+    from app.services.memoir.sections import merge_sections
+    from app.schemas.memoir_sections import MemoirSectionMergeRequest
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    source = next(s for s in sections if s.chapter_id == chapters[2].id)
+    await merge_sections(test_db, user_id=uid, project_id=pid, target_section_id=mixed.id,
+        req=MemoirSectionMergeRequest(source_section_ids=[source.id]))
+    for link in (await test_db.scalars(select(MemoirSectionMaterial).where(MemoirSectionMaterial.project_id == pid))).all():
+        link.assigned_by = 'ai'
+    plan.created_by = 'ai'
+    await test_db.commit()
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 3)
+    original = structure.material_identity(sections)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    output = context.outline.model_dump()
+    output['section_splits'] = []
+    for index, material in enumerate(mixed.materials[1:], start=1):
+        ref = f'T{index}'
+        output['section_splits'].append({'source_section_ref': context.section_refs.encode(mixed.id),
+            'new_section_ref': ref, 'material_refs': [context.material_refs.encode(material.id)]})
+        output['chapters'][0]['sections'].append({'section_refs': [ref], 'title': f'童年经历{index}'})
+    from app.services.memoir import sections as section_service
+    finalizations = []
+    real_finalize = section_service.finalize_section_changes
+    async def finalize(*args, **kwargs):
+        finalizations.append(kwargs)
+        await real_finalize(*args, **kwargs)
+    monkeypatch.setattr(section_service, 'finalize_section_changes', finalize)
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, _, after = await _load_tree(test_db, project_id=pid)
+    assert structure.material_identity(after) == original
+    assert sorted(len(s.materials) for s in after) == [1, 1, 1, 1]
+    assert len(finalizations) == 1
+    assert finalizations[0]['source'] == 'structure_review' and finalizations[0]['settled'] is True
+    assert finalizations[0]['section_ids'] >= {s.id for s in after if s.chapter_id == mixed.chapter_id}
+
+
+async def test_split_prompt_uses_material_references_but_omits_excluded_text(client, test_db):
+    pid, _ = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    excluded = mixed.materials[0]
+    excluded.include_in_book = False
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    prompt = structure.build_structure_prompt(context, chapters=chapters, sections=sections,
+        chapter_summaries={}, section_summaries={})
+    import json
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
+    material_payloads = [m for c in payload['chapters'] for s in c['sections'] for m in s['materials']]
+    hidden = next(m for m in material_payloads if m['material_ref'] == context.material_refs.encode(excluded.id))
+    assert hidden['assignment_locked'] and not hidden['included'] and 'text' not in hidden
+    assert len(material_payloads) == sum(len(s.materials) for s in sections)
+    assert all(m['text'] for m in material_payloads if m['included'])
+
+
+async def test_manual_split_records_title_ownership_without_freezing_the_chapter(client, test_db, monkeypatch):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    chapter_id = mixed.chapter_id
+    response = await client.post(f'/api/memoir/projects/{pid}/sections/{mixed.id}/split',
+        json={'title': '我起的课堂故事名', 'utterance_ids': [mixed.materials[-1].utterance_id]})
+    assert response.status_code == 200
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    created = next(s for s in sections if s.title == '我起的课堂故事名')
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    assert chapter_id not in context.locked_chapters
+    assert context.section_titles[context.section_refs.encode(created.id)] == '我起的课堂故事名'
+    output = context.outline.model_copy(deep=True)
+    chapter = next(c for c in output.chapters if context.chapter_refs.decode(c.chapter_ref) == chapter_id)
+    chapter.title = '童年与妈妈'
+    _provider(monkeypatch, output)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, _, after = await _load_tree(test_db, project_id=pid)
+    assert next(s for s in after if s.id == created.id).title == '我起的课堂故事名'
+
+
+@pytest.mark.parametrize('destination', ['existing_chapter', 'new_chapter'])
+async def test_split_cannot_leave_a_retained_chapter_with_only_excluded_material(client, test_db, monkeypatch, destination):
+    pid, uid = await _mixed_section(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    mixed = next(s for s in sections if len(s.materials) == 2)
+    mixed.materials[0].include_in_book = False
+    await test_db.commit()
+    original = structure.material_identity(sections)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    output = context.outline.model_dump()
+    output['section_splits'] = [{'source_section_ref': context.section_refs.encode(mixed.id),
+        'new_section_ref': 'T1', 'material_refs': [context.material_refs.encode(mixed.materials[-1].id)]}]
+    new_group = {'section_refs': ['T1'], 'title': '移出的故事'}
+    if destination == 'new_chapter':
+        output['chapters'].append({'chapter_ref': 'N1', 'title': '新主题', 'sections': [new_group]})
+    else:
+        output['chapters'][-1]['sections'].append(new_group)
+    _provider(monkeypatch, structure.StructureOutput.model_validate(output))
+    with pytest.raises(HTTPException) as exc:
+        await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert exc.value.status_code == 409
+    await test_db.commit()
+    plan, after_chapters, after = await _load_tree(test_db, project_id=pid)
+    assert (await structure.structure_context(test_db, plan, after_chapters, after)).outline == context.outline
+    assert structure.material_identity(after) == original
