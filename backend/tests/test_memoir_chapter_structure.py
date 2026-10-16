@@ -406,27 +406,68 @@ async def test_outdated_book_review_cannot_apply_a_structure_proposal(client, te
     assert structure.FEEDBACK_CHECKED_KEY not in plan.metadata_json
 
 
-async def test_directory_review_generates_real_digests_across_multiple_chapters(client, test_db, monkeypatch):
-    from app.models.memoir import MemoirChapterDigest, MemoirSectionDigest
-    from app.services.memoir import chapter_digests, section_digests
+@pytest.mark.parametrize('rebuild_digests', [False, True])
+@pytest.mark.parametrize('merge_sections', [False, True])
+async def test_growth_worker_generates_real_digests_and_schedules_book(client, test_db, monkeypatch, rebuild_digests, merge_sections):
+    from app.clock import utcnow_naive
+    from app.domain.memoir.types import MemoirEditingJobType
+    from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession
+    from app.services.memoir import chapter_digests, editing_jobs, section_digests, story_tree_growth as growth
     from tests.test_memoir_chapter_pipeline import FakeChapterAI
-    pid, uid = await _book(client, test_db)
+    from tests.test_memoir_section_organization import _stopped_growth_job
+    pid, _ = await _book(client, test_db)
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     context = await structure.structure_context(test_db, plan, chapters, sections)
+    original_chapter_ids = [c.id for c in chapters]
+    original_section_ids = {s.id for s in sections}
+    original_sources = structure.material_identity(sections)
+    target_section_id = sections[0].id
     real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure.load_structure_summaries
-    calls = _provider(monkeypatch, _merge(context))
+    calls = _provider(monkeypatch, _merge(context, merge_sections=True) if merge_sections else context.outline)
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', real_digest)
     monkeypatch.setattr(structure, 'load_structure_summaries', real_summaries)
     fake = FakeChapterAI(section_material_id='', chapter_section_id='', chapter_material_id='', draft_material_ids=[])
     monkeypatch.setattr(chapter_digests, 'get_ai_service', lambda _: fake)
     monkeypatch.setattr(section_digests, 'get_ai_service', lambda _: fake)
-    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
-    assert len(fake.prompts) == 8 and len(calls) == 1
+    if rebuild_digests:
+        for chapter_id in original_chapter_ids:
+            await real_digest(test_db, project_id=pid, chapter_id=chapter_id, ai_client=fake)
+    prompts_before = len(fake.prompts)
+    source, job = await _stopped_growth_job(client, test_db, pid, '小时候跟妈妈去课堂，她给我垫了板凳。')
+    session_id, job_id = source['session']['id'], job.id
+    job.status = 'pending'
+    job.run_after = utcnow_naive()
+    job.payload_json = {**job.payload_json, 'source': 'retry' if rebuild_digests else 'transcript_ready'}
+    await test_db.commit()
+    async def assign(**kwargs):
+        return [growth.GrowthGroup(utterance_ids=[source['utterance_id']], action='assign_existing', section_id=target_section_id)]
+    monkeypatch.setattr(growth, 'decide_story_growth', assign)
+    monkeypatch.setitem(editing_jobs._HANDLERS, MemoirEditingJobType.ORGANIZE_MATERIAL, growth.run_story_tree_growth_job)
+    lease, = await editing_jobs.claim_due_editing_jobs(test_db, project_id=pid, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL, limit=1)
+    assert lease.job_id == job_id
+    assert await editing_jobs.run_editing_job(test_db, lease)
+    await test_db.refresh(job)
+    session = await test_db.get(MemoirVoiceSession, session_id, populate_existing=True)
+    assert job.status == 'succeeded' and not job.error_message and session.status == 'stopped'
+    assert job.result_json['voice_session_id'] == session_id
+    assert job.result_json['organized_utterance_ids'] == [source['utterance_id']]
+    assert job.result_json['new_chapter_ids'] == [] and job.result_json['new_section_ids'] == []
+    assert job.result_json['growth']['placed_ids'] == []
+    assert len(fake.prompts) - prompts_before == (2 if rebuild_digests else 8)
+    assert len(calls) == 1
     assert '朋友发来山桃花照片' in calls[0]  # The real section digest reached the directory prompt.
     _, chapters, sections = await _load_tree(test_db, project_id=pid)
-    assert len(chapters) == 2 and len(sections) == 4
-    assert all(d.status == 'ready' for d in (await test_db.scalars(select(MemoirChapterDigest))).all())
-    assert (await test_db.scalars(select(MemoirSectionDigest))).all()
+    assert len(chapters) == (2 if merge_sections else 4) and len(sections) == (3 if merge_sections else 4)
+    assert {c.id for c in chapters} <= set(original_chapter_ids) and {s.id for s in sections} <= original_section_ids
+    assert set(original_sources) < set(structure.material_identity(sections))
+    event = await test_db.scalar(select(MemoirAutomationEvent).where(MemoirAutomationEvent.editing_job_id == job_id,
+        MemoirAutomationEvent.event_type == 'story_structure_updated'))
+    assert event.utterance_ids_json == [source['utterance_id']]
+    assert event.metadata_json['voice_session_id'] == session_id
+    book_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f'update-book-draft:{pid}'))
+    assert book_job.status == 'pending'
+    assert book_job.payload_json['source'] == ('retry' if rebuild_digests else 'organized')
+    assert book_job.run_after <= utcnow_naive()
 
 
 async def test_adopted_section_rewrite_keeps_manual_text_and_history_during_structure_review(client, test_db, monkeypatch):

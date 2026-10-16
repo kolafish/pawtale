@@ -776,6 +776,8 @@ async def grow_story_tree(
         db,
         project_id=job.project_id,
     )
+    before_chapter_ids = {chapter.id for chapter in before_chapters}
+    before_section_ids = {section.id for section in before_sections}
     if before_plan is not None:
         from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
         await activate_existing_plan_for_automatic_book(db, project_id=job.project_id)
@@ -953,7 +955,14 @@ async def grow_story_tree(
     # directory, not a transient chapter that the same review absorbed.
     await _save_progress(db, job, progress)
     if session.status == MemoirVoiceSessionStatus.STOPPED.value:
+        lease_token = job.lease_token
         await review_story_structure(db, user_id=project.user_id, project_id=job.project_id)
+        # Digest generation expires the shared session, including these outer
+        # task objects. Restore them before progress writes and book scheduling.
+        await db.refresh(job)
+        await db.refresh(session)
+        if job.status != MemoirEditingJobStatus.RUNNING.value or job.lease_token != lease_token:
+            raise editing_jobs.EditingJobProgressLost
     placed_ids = list(dict.fromkeys(progress.placed_ids))
     progress.placed_ids = []
 
@@ -961,8 +970,8 @@ async def grow_story_tree(
         db,
         project_id=job.project_id,
     )
-    new_chapter_ids = [item.id for item in after_chapters if item.id not in {value.id for value in before_chapters}]
-    new_section_ids = [item.id for item in after_sections if item.id not in {value.id for value in before_sections}]
+    new_chapter_ids = [item.id for item in after_chapters if item.id not in before_chapter_ids]
+    new_section_ids = [item.id for item in after_sections if item.id not in before_section_ids]
     if placed_ids or new_chapter_ids or new_section_ids:
         summary_parts = []
         if new_chapter_ids:
