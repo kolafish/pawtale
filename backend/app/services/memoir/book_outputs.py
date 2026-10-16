@@ -84,6 +84,7 @@ from app.services.memoir.book_output_export import (
 )
 from app.services.memoir.book_output_export_cache import PreparedBookExport, render_cached_book_export
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.sections import lock_project_chapters
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
     AUTOMATIC_EDITORIAL_COPY_KEY,
@@ -690,7 +691,7 @@ async def regenerate_book_output_editorial_copy(
     if parent_id:
         # The parent takes directory locks before writing its job/output. Keep
         # that order and commit the copy plus its wake-up together.
-        await completion_issues.lock_project_chapters(db, project_id=project_id)
+        await lock_project_chapters(db, project_id=project_id)
     await db.execute(
         select(MemoirBookOutput.id)
         .where(MemoirBookOutput.id == output.id)

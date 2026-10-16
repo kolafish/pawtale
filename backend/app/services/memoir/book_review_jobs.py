@@ -97,8 +97,8 @@ async def enqueue_book_review_job(
     db.add(job)
     if on_enqueued is not None:
         await on_enqueued(job)
-    await db.commit()
-    await db.refresh(job)
+    # The API or parent workflow commits the child and its checkpoint.
+    await db.flush()
     return editing_jobs.project_editing_job_state(project_id=project_id, job=job)
 
 

@@ -379,8 +379,8 @@ async def review_story_structure(
     if len(context.locked_chapters) == len(chapters):
         return False
     ai_model = await load_project_ai_model(db, project_id, None)
-    # Digest generation expires the session identity map. Keep only scalar IDs
-    # across calls, then explicitly reload before accessing the directory again.
+    # Digest generation commits cache checkpoints. Keep scalar IDs across
+    # calls and reload the directory before validating the structure snapshot.
     chapter_ids = [chapter.id for chapter in chapters]
     for chapter_id in chapter_ids:
         if chapter_id not in context.locked_chapters:

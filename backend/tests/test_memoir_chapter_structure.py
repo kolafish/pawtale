@@ -259,7 +259,7 @@ async def test_structure_runs_after_session_stops_not_each_material(client, test
 async def test_manual_and_automatic_directory_writers_share_lock_order(client, test_db):
     import asyncio
     from sqlalchemy import text
-    from app.services.memoir.completion_issues import lock_project_chapters
+    from app.services.memoir.sections import lock_project_chapters
     from app.services.memoir.sections import lock_plan_structure, lock_chapter_structure
     pid, _ = await _book(client, test_db)
     _, chapters, _ = await _load_tree(test_db, project_id=pid)

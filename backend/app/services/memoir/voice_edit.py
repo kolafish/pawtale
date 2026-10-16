@@ -40,7 +40,7 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automatic_book_draft import schedule_book_draft
 from app.services.memoir.book_plan_write_workflow import apply_book_plan_structure_command
 from app.services.memoir.book_structure_commands import moved_chapter_order
-from app.services.memoir.completion_issues import lock_project_chapters
+from app.services.memoir.sections import lock_project_chapters
 from app.services.memoir.project_ai_preferences import project_ai_model
 from app.services.memoir.projects import (
     MEMOIR_PROFILE_METADATA_KEY, apply_memoir_project_update, profile_inferred_sources, restore_profile_inferred_sources,

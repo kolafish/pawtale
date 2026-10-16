@@ -64,6 +64,7 @@ async def ensure_chapter_sections(
             db,
             user_id=user_id,
             project_id=project_id,
+            commit=False,
         )
 async def prepare_chapter(
     db: AsyncSession,

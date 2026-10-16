@@ -315,8 +315,8 @@ async def enqueue_chapter_preparation_job(
     db.add(job)
     if on_enqueued is not None:
         await on_enqueued(job)
-    await db.commit()
-    await db.refresh(job)
+    # The API or parent workflow commits the child and its checkpoint.
+    await db.flush()
     return _job_state(
         project_id=project_id,
         chapter_id=chapter_id,

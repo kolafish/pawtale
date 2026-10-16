@@ -3418,7 +3418,8 @@ async def test_review1470_book_metadata_invalidates_cached_and_inflight_review(c
         assert value in fake.prompts[-1]
 
 
-async def test_background_batch_recovers_after_child_dispatch_without_client_reads(client, test_db, monkeypatch):
+@pytest.mark.parametrize("after_commit", [False, True])
+async def test_background_batch_recovers_at_child_checkpoint_without_client_reads(client, test_db, monkeypatch, after_commit):
     project_id, chapters, _ = await _book(client, test_db, chapter_count=1)
     project = await test_db.get(Project, project_id)
     chapter_id, user_id = chapters[0].id, project.user_id
@@ -3427,16 +3428,36 @@ async def test_background_batch_recovers_after_child_dispatch_without_client_rea
     test_db.add(batch)
     await test_db.commit()
     enqueue = chapter_preparation_jobs.enqueue_chapter_preparation_job
+    commit = test_db.commit
+    dispatched = False
     async def stopped_after_dispatch(*args, **kwargs):
-        await enqueue(*args, **kwargs)
-        raise RuntimeError("worker stopped after child commit")
+        nonlocal dispatched
+        result = await enqueue(*args, **kwargs)
+        dispatched = True
+        if not after_commit:
+            raise RuntimeError("worker stopped before checkpoint")
+        return result
+    async def stopped_after_checkpoint():
+        await commit()
+        if dispatched:
+            raise RuntimeError("worker stopped after checkpoint")
     monkeypatch.setattr(chapter_preparation_jobs, "enqueue_chapter_preparation_job", stopped_after_dispatch)
+    monkeypatch.setattr(test_db, "commit", stopped_after_checkpoint)
     with pytest.raises(RuntimeError, match="worker stopped"):
         await book_completion_jobs.advance_book_completion_jobs(test_db)
     await test_db.rollback()
     await test_db.refresh(batch)
-    child_id = batch.chapter_job_ids_json[chapter_id]
     monkeypatch.setattr(chapter_preparation_jobs, "enqueue_chapter_preparation_job", enqueue)
+    monkeypatch.setattr(test_db, "commit", commit)
+    if not after_commit:
+        assert not batch.chapter_job_ids_json
+        assert await test_db.scalar(select(MemoirEditingJob.id).where(
+            MemoirEditingJob.chapter_id == chapter_id,
+            MemoirEditingJob.job_type == "prepare_chapter",
+        )) is None
+        await book_completion_jobs.advance_book_completion_jobs(test_db)
+        await test_db.refresh(batch)
+    child_id = batch.chapter_job_ids_json[chapter_id]
     child = await test_db.get(MemoirEditingJob, child_id)
     assert child.payload_json["user_id"] == user_id
     child.status = "succeeded"

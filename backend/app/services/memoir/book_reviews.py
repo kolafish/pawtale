@@ -753,7 +753,8 @@ async def generate_or_reuse_book_review(
         ai_client=ai_client,
         progress_callback=progress_callback,
     )
-    context = await load_book_review_context(db, project_id=project_id)
+    async with AsyncSession(bind=db.bind, expire_on_commit=False) as inputs_db:
+        context = await load_book_review_context(inputs_db, project_id=project_id)
     if progress_callback is not None:
         await progress_callback(
             {
@@ -838,8 +839,10 @@ async def generate_or_reuse_book_review(
             generated.value.model_dump(),
             context=context,
         )
-        db.expire_all()
-        current = await load_book_review_context(db, project_id=project_id)
+        # Re-read committed inputs without invalidating the caller's job,
+        # directory or voice-session objects.
+        async with AsyncSession(bind=db.bind, expire_on_commit=False) as inputs_db:
+            current = await load_book_review_context(inputs_db, project_id=project_id)
         if current.input_signature != context.input_signature:
             raise HTTPException(
                 status_code=409,

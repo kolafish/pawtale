@@ -83,7 +83,7 @@ from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.sections import sync_materials_to_chapters
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir import fact_decisions
-from app.services.memoir.completion_issues import lock_project_chapters
+from app.services.memoir.sections import lock_project_chapters
 
 
 @dataclass(frozen=True)
