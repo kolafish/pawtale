@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select, update
@@ -91,6 +92,12 @@ class ValidatedChapterUpdate:
     title: str
     include_in_book: bool
     source_refs: list[MemoirBookChapterSourceRef]
+
+
+@dataclass(frozen=True)
+class BookPlanWriteResult:
+    plan: MemoirBookPlanResponse
+    outcome: Literal["created", "replaced", "reused"]
 
 
 async def _detach_chapter_operational_references(
@@ -258,7 +265,7 @@ async def _replace_plan(
     metadata_json: dict[str, object] | None = None,
     before_commit: Callable[[], Awaitable[None]] | None = None,
     only_if_missing: bool = False,
-) -> MemoirBookPlanResponse:
+) -> BookPlanWriteResult:
     if len(chapters) > MAX_MEMOIR_BOOK_PLAN_CHAPTERS:
         raise HTTPException(
             status_code=400,
@@ -271,7 +278,8 @@ async def _replace_plan(
     plan = await _load_plan(db, project_id)
     if plan is not None and only_if_missing:
         await db.commit()
-        return await _plan_response(db, plan)
+        return BookPlanWriteResult(await _plan_response(db, plan), "reused")
+    outcome = "created" if plan is None else "replaced"
     if not plan:
         plan = MemoirBookPlan(project_id=project_id)
         db.add(plan)
@@ -316,7 +324,7 @@ async def _replace_plan(
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
-    return await _plan_response(db, refreshed)
+    return BookPlanWriteResult(await _plan_response(db, refreshed), outcome)
 
 
 async def generate_book_plan(
@@ -332,11 +340,11 @@ async def generate_book_plan(
     on_not_story: Callable[[tuple[SourceSegment, ...]], Awaitable[None]] | None = None,
     excluded_source_hashes: dict[str, str] | None = None,
     only_if_missing: bool = False,
-) -> MemoirBookPlanResponse:
+) -> BookPlanWriteResult:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if only_if_missing and plan is not None:
-        return await _plan_response(db, plan)
+        return BookPlanWriteResult(await _plan_response(db, plan), "reused")
     only_if_missing = only_if_missing or plan is None
     sources = await _source_segments(
         db,
@@ -631,7 +639,7 @@ async def confirm_book_plan(
         allow_admin=allow_admin,
     )
     chapters = _validated_chapters(req, sources)
-    return await _replace_plan(
+    result = await _replace_plan(
         db,
         project_id=project_id,
         title=req.title or f"{project.title}章节规划",
@@ -645,6 +653,7 @@ async def confirm_book_plan(
             "confirmed_by": "user",
         },
     )
+    return result.plan
 
 
 async def update_book_plan(

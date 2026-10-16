@@ -145,13 +145,13 @@ async def generate_mobile_memoir_book_plan(
 ):
     from app.domain.memoir.types import MemoirBookPlanStatus
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    plan = await memoir_book_plan_write_workflow.generate_book_plan(
+    result = await memoir_book_plan_write_workflow.generate_book_plan(
         db, user_id=current_user.id, project_id=project_id, req=req,
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     await schedule_book_draft(db, project_id=project_id, source="plan_generated")
     await db.commit()
-    return plan
+    return result.plan
 
 
 @router.put("/projects/{project_id}/book-plan", response_model=MemoirBookPlanResponse)
