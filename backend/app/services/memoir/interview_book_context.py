@@ -59,6 +59,7 @@ class InterviewBookContext:
     # One gap about a person 小余 may ask once a story is told; never while profile items are left.
     person_question: narration_people.Question | None = None
     completion_offer: completion_interviews.OpeningCompletionOffer | None = None
+    starts_new_story: bool = False
 
 
 async def load_interview_book_context(
@@ -82,6 +83,10 @@ async def load_interview_book_context(
     profile = profile if isinstance(profile, dict) else {}
     profile_context = await narrator_profile.profile_question_context_for(db, voice_session, project)
     profile_questions = profile_context.questions
+    starts_new_story = (
+        voice_session.session_goal == "open_narration" and anchor_topic is None
+        and (voice_session.metadata_json or {}).get("entry") in {"miniprogram_home", "miniprogram_home_launch"}
+    )
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
@@ -93,11 +98,12 @@ async def load_interview_book_context(
         people=await narration_people.recent_people_lines(db, voice_session.project_id),
         person_question=None if profile_questions else await narration_people.question_for(db, voice_session),
         completion_offer=(await completion_interviews.offer_for_opening(db, voice_session=voice_session))
-        if chapters and not profile_questions and anchor_topic is None
+        if chapters and not profile_questions and anchor_topic is None and not starts_new_story
         and voice_session.session_goal == "open_narration"
         and voice_session.interview_type == "ai_interview"
         and not any(message.role == "user" and message.content_text.strip() for message in voice_session.messages)
         else None,
+        starts_new_story=starts_new_story,
     )
 
 

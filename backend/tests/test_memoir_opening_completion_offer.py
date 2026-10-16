@@ -10,8 +10,10 @@ from tests.test_memoir_book_completion import _book
 from tests.test_memoir_voice_assistant_turn_stream import _run_stream_turn
 
 
-async def _opening(client, db, project_id):
-    response = await post_mobile_memoir_voice_session(client, project_id=project_id, json={'guidance_mode': 'free_narration'})
+async def _opening(client, db, project_id, *, entry=None):
+    response = await post_mobile_memoir_voice_session(client, project_id=project_id, json={
+        'guidance_mode': 'free_narration', 'metadata_json': {'entry': entry} if entry else {},
+    })
     assert response.status_code == 201
     return await db.get(MemoirVoiceSession, response.json()['session']['id'])
 
@@ -29,7 +31,7 @@ async def _issue(client, db):
 async def test_opening_offer_is_once_only_and_does_not_bind_ordinary_narration(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr('app.services.memoir.audio_files.MEMOIR_AUDIO_DIR', tmp_path / 'audio')
     project_id, _, issue = await _issue(client, test_db)
-    session = await _opening(client, test_db, project_id)
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
     user_id = (await test_db.get(Project, project_id)).user_id
     stream, ai, _, _ = await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
         chunks=['欢迎回来，愿意补充可以点补充这段，也可以直接讲别的。'])
@@ -47,6 +49,53 @@ async def test_opening_offer_is_once_only_and_does_not_bind_ordinary_narration(c
     assert source.completion_issue_id is None and issue.status == 'open'
     later = await _opening(client, test_db, project_id)
     assert await completion_interviews.offer_for_opening(test_db, voice_session=later) is None
+
+
+@pytest.mark.parametrize('entry', ['miniprogram_home', 'miniprogram_home_launch'])
+@pytest.mark.parametrize('previous_offer', [False, True])
+async def test_new_story_opening_skips_old_questions_and_keeps_ordinary_follow_up(
+    client, test_db, tmp_path, monkeypatch, entry, previous_offer,
+):
+    monkeypatch.setattr('app.services.memoir.audio_files.MEMOIR_AUDIO_DIR', tmp_path / 'audio')
+    project_id, chapter, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id, entry=entry)
+    if previous_offer:
+        session.metadata_json = {**session.metadata_json, completion_interviews.OPENING_OFFER_KEY: issue.id}
+        await test_db.commit()
+    before = dict(session.metadata_json)
+
+    async def unexpected_offer(*args, **kwargs):
+        raise AssertionError('Starting a new story must not select an old completion question')
+
+    monkeypatch.setattr(completion_interviews, 'offer_for_opening', unexpected_offer)
+    user_id = (await test_db.get(Project, project_id)).user_id
+    stream, ai, _, completed = await _run_stream_turn(
+        test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['这次想讲什么故事？从您想起的地方开始就好。'],
+    )
+    started = next(event for event in stream.sent if event['type'] == 'turn.started')
+    assert started['opening_completion_offer'] is None
+    assert issue.question not in ai.calls[0]['user_prompt']
+    assert chapter.title not in ai.calls[0]['user_prompt']
+    assert completed['primary_intent'] == 'opening'
+    await test_db.refresh(session)
+    assert session.metadata_json.get(completion_interviews.OPENING_OFFER_KEY) == before.get(completion_interviews.OPENING_OFFER_KEY)
+    assert session.current_completion_issue_id is None
+    text = '今天想讲工厂里带我的那位师傅。'
+    reply = _line(project_id, session.id, 'user', text, 1)
+    test_db.add(reply)
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(voice_session_id=session.id, chat_message_id=reply.id, transcript_raw=text)
+    test_db.add(utterance)
+    await test_db.commit()
+    _, ai, _, completed = await _run_stream_turn(
+        test_db, voice_session_id=session.id, user_id=user_id, chunks=['师傅当时是怎么带您的？'],
+    )
+    assert completed['primary_intent'] == 'follow_up'
+    assert text in ai.calls[0]['user_prompt']
+    assert await completion_interviews.bind_answer_segment(test_db, voice_session=session, utterance=utterance) is None
+    await test_db.refresh(issue)
+    assert issue.status == 'open' and utterance.completion_issue_id is None
 
 
 @pytest.mark.parametrize('ineligible', ['closed', 'in_progress', 'manual_review', 'excluded'])
@@ -73,6 +122,7 @@ async def test_explicit_accept_creates_a_separate_existing_completion_session(cl
     response = await post_mobile_memoir_voice_session(client, project_id=project_id, json={
         'guidance_mode': 'guided_interview', 'session_goal': 'book_completion',
         'current_completion_issue_id': issue.id,
+        'metadata_json': {'entry': 'miniprogram_home'},
     })
     assert response.status_code == 201, response.text
     bound = await test_db.get(MemoirVoiceSession, response.json()['session']['id'])
