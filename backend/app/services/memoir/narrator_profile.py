@@ -387,7 +387,8 @@ async def asked_profile_field(fields: tuple[str, ...], text: str, *, ai_model: s
     return asked if asked in fields else None
 
 
-async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceUtterance) -> None:
+async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceUtterance,
+                                   require_answer_reading: bool = False) -> None:
     """Queue reading each AI narration segment once per transcript version, even in later sessions."""
     # Callers load the utterance differently; read its message by id rather than through the relationship.
     message = await db.get(MemoirChatMessage, utterance.chat_message_id) if utterance.chat_message_id else None
@@ -399,7 +400,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         return
     profile = _profile(project)
     if not _collects_profile(voice_session) or not (
-        _has_open_fields(profile) or narration_people.ready(utterance, message)
+        _has_open_fields(profile) or narration_people.ready(utterance, message) or require_answer_reading
     ):
         return
     version_id = message.transcript_version_id or ""
@@ -409,6 +410,9 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         existing is not None
         and (existing.payload_json or {}).get("transcript_version_id") == version_id
         and existing.status != MemoirEditingJobStatus.FAILED.value
+        and (not require_answer_reading or (existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+             and (existing.payload_json or {}).get("require_answer_reading") is True)
+             or narration_people.answer_story_content(message) is not None)
     ):
         return
     previous_line = await _previous_line_id(db, message)
@@ -420,6 +424,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
             "utterance_id": utterance.id,
             "transcript_version_id": version_id,
             "previous_message_id": previous_line,
+            **({"require_answer_reading": True} if require_answer_reading else {}),
         },
         dedupe_key=dedupe_key,
         replace_completed=True,
@@ -477,7 +482,8 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
                 .values(rerun_requested=True, run_after=utcnow_naive())
             )
             return editing_jobs.EditingJobResult(result_json={"awaiting_profile_sources": True})
-        if current and narration_people.ready(utterance, utterance.chat_message):
+        if current and (narration_people.ready(utterance, utterance.chat_message)
+                        or payload.get("require_answer_reading") is True):
             previous = payload.get("previous_message_id")
             previous_message = await db.get(MemoirChatMessage, previous) if isinstance(previous, str) else None
             current = await narration_people.read_people(
@@ -488,6 +494,10 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
                 previous_line=previous_message.content_text.strip() if previous_message else "",
                 transcript_version_id=version_id,
             )
+            if current and narration_people.answer_story_content(utterance.chat_message) is not None:
+                from app.services.memoir.story_tree_growth import schedule_story_tree_growth
+                await schedule_story_tree_growth(db, project_id=project.id,
+                    voice_session_id=utterance.voice_session_id, source="person_answer_read")
     except InsufficientAICreditError:
         raise
     except Exception as exc:
