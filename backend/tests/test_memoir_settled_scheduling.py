@@ -79,7 +79,7 @@ pytestmark = pytest.mark.usefixtures("unchanged_story_structure")
 
 @pytest.mark.parametrize('session_goal', list(MemoirSessionGoal))
 async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, test_db, monkeypatch, session_goal):
-    from app.config import get_settings
+    from app.config import Settings, get_settings
     from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
     from app.models.projects import Project
     from app.services.asr.capacity import voice_gateway_capacity_manager
@@ -93,7 +93,7 @@ async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, te
     session.stopped_at = now
     await test_db.commit()
     clock = [now]
-    monkeypatch.setattr(get_settings(), 'memoir_book_settle_seconds', 180)
+    monkeypatch.setattr(get_settings(), 'memoir_book_settle_seconds', Settings().memoir_book_settle_seconds)
     monkeypatch.setattr(automatic_book_draft, 'utcnow_naive', lambda: clock[0])
     monkeypatch.setattr(story_tree_growth, 'utcnow_naive', lambda: clock[0])
     uid = await test_db.scalar(select(Project.user_id).where(Project.id == pid))
@@ -125,16 +125,16 @@ async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, te
     utterance = await test_db.get(MemoirVoiceUtterance, source['utterance_id'])
     utterance.created_at = now
     await test_db.commit()
-    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=180)
+    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=30)
     assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid, settle=False) == now
-    clock[0] += timedelta(seconds=60)
+    clock[0] += timedelta(seconds=10)
     utterance.created_at = clock[0]
     await test_db.commit()
-    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=240)
-    clock[0] += timedelta(seconds=60)
+    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=40)
+    clock[0] += timedelta(seconds=10)
     session.stopped_at = clock[0]
     session.status = 'stopped'
     await test_db.commit()
-    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=300)
-    clock[0] += timedelta(seconds=181)
+    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=50)
+    clock[0] += timedelta(seconds=31)
     assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == clock[0]
