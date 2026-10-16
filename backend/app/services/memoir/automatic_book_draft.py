@@ -244,6 +244,11 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     # directory lock used by copy completion and other upstream writers.
     with db.no_autoflush:
         await activate_existing_plan_for_automatic_book(db, project_id=project_id)
+    from app.services.memoir.story_tree_growth import resume_pending_person_answers
+    if await resume_pending_person_answers(db, project_id=project_id):
+        progress.clear_review()
+        progress.stage = "organizing"
+        return _waiting(job, progress)
     project = await db.get(Project, project_id)
     chapters = (
         await db.scalars(

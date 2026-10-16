@@ -29,6 +29,8 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE
+from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,21 @@ class _ReadingOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     people: list[_PersonOutput] = []
+
+
+class _AnswerReadingOutput(_ReadingOutput):
+    story_content: bool
+
+
+def answer_story_content(message: MemoirChatMessage) -> bool | None:
+    """Only a reading of this exact answer and parent question can decide content eligibility."""
+    reading = (message.metadata_json or {}).get(READING_KEY, {})
+    if (isinstance(reading, dict) and reading.get("schema_version") == 3
+        and reading.get("question_message_id") == message.parent_message_id
+        and reading.get("source_text_hash") == source_text_hash(normalized_material_text(message.content_text))
+        and isinstance(reading.get("story_content"), bool)):
+        return reading["story_content"]
+    return None
 
 
 @dataclass
@@ -304,13 +321,21 @@ async def names(db: AsyncSession, project_id: str) -> tuple[str, ...]:
     return tuple(person.name for person in (await load_people(db, project_id)).values() if person.name)
 
 
-def build_people_prompt(*, people: list[Person], narrator: str, previous_line: str, segment: str) -> str:
+def build_people_prompt(*, people: list[Person], narrator: str, previous_line: str, segment: str,
+                        classify_answer: bool = False) -> str:
     roster = "\n".join(
         f"P{index} {person.call or '?'}｜名字：{person.name or '未知'}｜"
         f"{person.relation or '关系未说明'}｜{person.note}"
         for index, person in enumerate(people, start=1)
     ) or "（还没有）"
     previous = f"小余：{previous_line}\n" if previous_line else ""
+    content_rule = (
+        f"\n这段是人物补问后的回复，还需判断整条回复是否有可入书内容。{STORY_CONTENT_GUIDANCE}"
+        "纯结束、暂停、拒答和编辑确认都不是故事；包含事实或真实感受的混合回答仍是故事。"
+        "用布尔字段 story_content 返回这个内容判断，不判断章节或小节归属。\n"
+        if classify_answer else ""
+    )
+    output_prefix = '{"story_content":true,' if classify_answer else '{'
     return (
         "你在帮一本口述回忆录记住书里出现的人。记下来有两个用处：写书时称呼和关系不出错；"
         "访谈员小余下次聊到这个人时知道他是谁。\n\n"
@@ -330,8 +355,10 @@ def build_people_prompt(*, people: list[Person], narrator: str, previous_line: s
         "relation 和讲述者的关系（用他自己的说法），note 一句话说他在这段里是谁、做了什么（30 字以内）\n"
         "- unclear：如果某一个具体的人有一件事不问清楚，读者就看不懂他是谁，而且讲述者一定知道答案，"
         "写成一句小余能直接问讲述者的话，用称呼不用编号；大多数段落没有\n\n"
+        f"{content_rule}"
         "只返回 JSON：\n"
-        '{"people":[{"ref":"P1 或 new","same_as":null,"call":null,"name":null,"relation":null,"note":null,"unclear":null}]}'
+        + output_prefix
+        + '"people":[{"ref":"P1 或 new","same_as":null,"call":null,"name":null,"relation":null,"note":null,"unclear":null}]}'
     )
 
 
@@ -357,19 +384,27 @@ async def read_people(
     so a reorder, a renamed call or two people with one call keep their ids; anyone it no longer names is
     simply not defined here any more, and a new person gets an id no earlier version used.
     """
-    from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
-
     if (message.transcript_version_id or "") != transcript_version_id:
         return False
+    question = await db.get(MemoirChatMessage, message.parent_message_id) if message.parent_message_id else None
+    classify_answer = bool(question and question.role == MemoirChatMessageRole.ASSISTANT.value
+                           and question.project_id == message.project_id
+                           and question.voice_session_id == message.voice_session_id
+                           and (question.metadata_json or {}).get(ASKED_KEY))
+    question_message_id = message.parent_message_id
+    if classify_answer:
+        previous_line = question.content_text
     text_hash = source_text_hash(normalized_material_text(message.content_text))
     stored_reading = (message.metadata_json or {}).get(READING_KEY)
-    if (isinstance(stored_reading, dict) and stored_reading.get("schema_version", 1) in {1, 2}
+    if (isinstance(stored_reading, dict) and stored_reading.get("schema_version", 1) in {1, 2, 3}
+        and (not classify_answer or answer_story_content(message) is not None)
         and isinstance(stored_reading.get("people"), list) and (
         stored_reading.get("transcript_version_id") == transcript_version_id
-        or (stored_reading.get("schema_version") == 2 and stored_reading.get("source_text_hash") == text_hash)
+        or (stored_reading.get("schema_version") in {2, 3} and stored_reading.get("source_text_hash") == text_hash)
     )):
         await db.refresh(message, with_for_update=True)
-        if (message.transcript_version_id or "") != transcript_version_id:
+        if ((message.transcript_version_id or "") != transcript_version_id
+            or (classify_answer and answer_story_content(message) is None)):
             return False
         message.metadata_json = {**(message.metadata_json or {}), READING_KEY: {
             **stored_reading, "transcript_version_id": transcript_version_id,
@@ -384,6 +419,7 @@ async def read_people(
         narrator=narrator,
         previous_line=previous_line,
         segment=message.content_text.strip(),
+        classify_answer=classify_answer,
     )
     refs = {f"P{index}": person.id for index, person in enumerate(people, start=1)}
     message_id = message.id
@@ -394,7 +430,7 @@ async def read_people(
         get_ai_service(ai_model),
         SYSTEM_PROMPT,
         prompt,
-        output_model=_ReadingOutput,
+        output_model=_AnswerReadingOutput if classify_answer else _ReadingOutput,
         requested_model=ai_model,
         temperature=0.1,
         max_tokens=policy.max_tokens,
@@ -407,7 +443,8 @@ async def read_people(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if current is None or (current.transcript_version_id or "") != transcript_version_id:
+    if (current is None or (current.transcript_version_id or "") != transcript_version_id
+        or (classify_answer and current.parent_message_id != question_message_id)):
         return False
 
     def text(value: str | None) -> str | None:
@@ -424,8 +461,10 @@ async def read_people(
     ]
     current.metadata_json = {
         **(current.metadata_json or {}),
-        READING_KEY: {"schema_version": 2, "transcript_version_id": transcript_version_id,
-            "source_text_hash": text_hash, "people": stored},
+        READING_KEY: {"schema_version": 3 if classify_answer else 2, "transcript_version_id": transcript_version_id,
+            "source_text_hash": text_hash, "people": stored,
+            **({"question_message_id": question_message_id, "story_content": generated.value.story_content}
+               if classify_answer else {})},
     }
     await db.commit()
     return True

@@ -437,6 +437,69 @@ async def _active_corrections_exist(db: AsyncSession, *, project_id: str) -> boo
     ).limit(1)) is not None
 
 
+async def _deferred_sources(db: AsyncSession, project_id: str) -> dict[str, DeferredSource]:
+    history = (await db.scalars(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+    ).order_by(MemoirEditingJob.updated_at, MemoirEditingJob.id))).all()
+    result: dict[str, DeferredSource] = {}
+    for previous in history:
+        result.update(_progress(previous).deferred)
+    return result
+
+
+async def _person_answer_target(db: AsyncSession, project_id: str, source_id: str | None) -> tuple[str, int] | None:
+    if source_id is None:
+        return None
+    row = (await db.execute(
+        select(MemoirSection.id, MemoirSection.version)
+        .join(MemoirSectionMaterial, MemoirSectionMaterial.section_id == MemoirSection.id)
+        .join(MemoirBookPlanChapter, MemoirBookPlanChapter.id == MemoirSection.chapter_id)
+        .where(MemoirSectionMaterial.project_id == project_id,
+               MemoirSectionMaterial.utterance_id == source_id,
+               MemoirSectionMaterial.include_in_book.is_(True),
+               MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+               MemoirSection.include_in_book.is_(True), MemoirBookPlanChapter.include_in_book.is_(True))
+    )).one_or_none()
+    return (row.id, row.version) if row else None
+
+
+async def resume_pending_person_answers(db: AsyncSession, *, project_id: str) -> bool:
+    """Source edits already queue book work; resume eligible waiting answers before that writing."""
+    deferred = await _deferred_sources(db, project_id)
+    pending_ids = [key for key, value in deferred.items() if value.status == "pending"]
+    if not pending_ids:
+        return False
+    answers = (await db.scalars(select(MemoirVoiceUtterance).join(MemoirVoiceSession)
+        .outerjoin(MemoirSectionMaterial, MemoirSectionMaterial.utterance_id == MemoirVoiceUtterance.id)
+        .where(MemoirVoiceSession.project_id == project_id, MemoirVoiceUtterance.id.in_(pending_ids),
+               MemoirSectionMaterial.id.is_(None), MemoirVoiceUtterance.completion_issue_id.is_(None))
+        .options(selectinload(MemoirVoiceUtterance.chat_message)))).all()
+    sources = await narration_people.answer_sources(
+        db, project_id=project_id, message_ids=(item.chat_message_id for item in answers),
+    )
+    sessions = set()
+    for answer in answers:
+        if (answer.chat_message_id not in sources or not is_ready_story_material(answer)
+            or deferred[answer.id].text_hash != source_text_hash(current_utterance_text(answer))
+            or narration_people.answer_story_content(answer.chat_message) is False):
+            continue
+        if narration_people.answer_story_content(answer.chat_message) is None:
+            reading_status = await db.scalar(select(MemoirEditingJob.status).where(
+                MemoirEditingJob.dedupe_key == f"narrator_profile:{answer.id}",
+            ))
+            if reading_status in {*editing_jobs.ACTIVE_EDITING_JOB_STATUSES, MemoirEditingJobStatus.FAILED.value}:
+                continue
+        if await _person_answer_target(db, project_id, sources[answer.chat_message_id]):
+            sessions.add(answer.voice_session_id)
+    scheduled = False
+    for session_id in sorted(sessions):
+        child = await schedule_story_tree_growth(db, project_id=project_id,
+            voice_session_id=session_id, source="person_answer_source_ready")
+        scheduled |= child is not None and child.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+    return scheduled
+
+
 async def _load_tree(
     db: AsyncSession,
     *,
@@ -784,19 +847,7 @@ async def grow_story_tree(
         from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
         await activate_existing_plan_for_automatic_book(db, project_id=job.project_id)
     progress = _progress(job)
-    deferred = {}
-    history = (
-        await db.scalars(
-            select(MemoirEditingJob)
-            .where(
-                MemoirEditingJob.project_id == job.project_id,
-                MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
-            )
-            .order_by(MemoirEditingJob.updated_at)
-        )
-    ).all()
-    for previous in history:
-        deferred.update(_progress(previous).deferred)
+    deferred = await _deferred_sources(db, job.project_id)
     initial_tree = before_plan is None or bool(progress.initial_sections)
     if before_plan is None:
         try:
@@ -849,15 +900,34 @@ async def grow_story_tree(
     person_answers = await narration_people.answer_sources(
         db, project_id=job.project_id, message_ids=(item.chat_message_id for item in project_sources),
     )
-    linked_answers = [item for item in project_sources
-                      if item.id not in existing_material_ids and is_ready_story_material(item)
-                      and item.chat_message_id in person_answers and not item.completion_issue_id]
     # Retry budgets belong to one set of evidence, not to the source forever.
     context_signature = semantic_json_signature({
         "sources": [(item.id, source_text_hash(current_utterance_text(item))) for item in project_sources],
         "chapters": [(item.id, item.title) for item in before_chapters],
         "sections": [(item.id, item.chapter_id, item.title, item.version) for item in before_sections],
     })
+    linked_answers = []
+    for answer in project_sources:
+        if (answer.id in existing_material_ids or not is_ready_story_material(answer)
+            or answer.chat_message_id not in person_answers or answer.completion_issue_id):
+            continue
+        text_hash = source_text_hash(current_utterance_text(answer))
+        previous = deferred.get(answer.id)
+        if previous and previous.text_hash == text_hash and previous.status == "not_story":
+            progress.deferred[answer.id] = previous
+            continue
+        story_content = narration_people.answer_story_content(answer.chat_message)
+        if story_content is None:
+            from app.services.memoir.narrator_profile import schedule_narrator_profile
+            await schedule_narrator_profile(db, utterance=answer, require_answer_reading=True)
+            progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="pending",
+                reason="等待人物补答的内容核对", context_signature=context_signature)
+        elif story_content:
+            linked_answers.append(answer)
+        else:
+            progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="not_story",
+                reason="人物问题后的回复不含故事事实或感受", attempts=MAX_UNASSIGNED_ATTEMPTS,
+                context_signature=context_signature)
     utterances = [
         item
         for item in project_sources
@@ -974,25 +1044,16 @@ async def grow_story_tree(
     # through classification; its answer follows the source's current placement afterwards.
     for answer in linked_answers:
         source_id = person_answers[answer.chat_message_id]
-        target = (await db.execute(
-            select(MemoirSection.id, MemoirSection.version)
-            .join(MemoirSectionMaterial, MemoirSectionMaterial.section_id == MemoirSection.id)
-            .join(MemoirBookPlanChapter, MemoirBookPlanChapter.id == MemoirSection.chapter_id)
-            .where(MemoirSectionMaterial.project_id == job.project_id,
-                   MemoirSectionMaterial.utterance_id == source_id,
-                   MemoirSectionMaterial.include_in_book.is_(True),
-                   MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
-                   MemoirSection.include_in_book.is_(True), MemoirBookPlanChapter.include_in_book.is_(True))
-        )).one_or_none() if source_id else None
+        target = await _person_answer_target(db, job.project_id, source_id)
         if target is not None:
             try:
                 await place_material(
                     db, user_id=project.user_id, project_id=job.project_id, utterance_id=answer.id,
-                    req=MemoirSectionMaterialPlacementRequest(target_section_id=target.id),
+                    req=MemoirSectionMaterialPlacementRequest(target_section_id=target[0]),
                     assigned_by=MemoirSectionMaterialAssignedBy.AI, structure_updated_by=MemoirCreatedBy.AI,
                     assignment_reason="person_question_answer",
                     expected_source=(source_text_hash(current_utterance_text(answer)), current_transcript_version_id(answer)),
-                    expected_section_version=target.version, commit=False,
+                    expected_section_version=target[1], commit=False,
                 )
             except HTTPException as exc:
                 if exc.status_code not in {404, 409}:
