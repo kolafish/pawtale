@@ -89,6 +89,7 @@ class GeneratedChapterIntro:
     intro: str
     pull_quote: str = ""
     pull_quote_source_ref_id: str = ""
+    valid_empty_quote: bool = False
 
 
 @dataclass(frozen=True)
@@ -404,6 +405,7 @@ def _copy_from_payload(
                         intro=intro,
                         pull_quote=pull_quote,
                         pull_quote_source_ref_id=pull_quote_source_ref_id,
+                        valid_empty_quote=valid_empty_quote,
                     )
                 )
     copy = GeneratedManuscriptCopy(
@@ -479,7 +481,8 @@ async def generate_manuscript_editorial_copy(
         return None
 
     return _copy_from_payload(
-        generated.value.model_dump(),
+        # Omitted quote fields must remain distinct from explicit empty results.
+        generated.value.model_dump(exclude_unset=True),
         snapshot=snapshot,
         prompt=prompt,
         model=generated.response.resolved_model,

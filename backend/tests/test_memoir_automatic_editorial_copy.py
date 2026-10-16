@@ -1,4 +1,5 @@
 import copy
+import json
 from dataclasses import replace
 
 from sqlalchemy import select
@@ -735,6 +736,61 @@ async def test_copy_success_requires_an_applicable_requested_field(client, test_
         user_id=project.user_id, project_id=project.id, req=req, automatic=automatic, retry=True)
     assert len(calls) == 2
     assert result.latest_version.manuscript.chapters[1 if automatic else 0].intro == "自动导语1"
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("reply", ["empty", "missing", "has_candidate"])
+async def test_quote_only_job_accepts_explicit_empty_without_candidates(client, test_db, monkeypatch, automatic, reply):
+    from app.services.memoir import book_generation_jobs
+    from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+    from app.services.memoir.editing_jobs import clear_editing_job_handlers
+    from tests.memoir_helpers import create_test_book_plan_with_chapters
+    from tests.test_memoir_book_outputs import FakeEditorialAI
+
+    project_id = await ensure_mobile_memoir_project(client)
+    body = "我五岁那年离开家。" + ("后来我到县城读书，认识了许多新朋友。" if reply == "has_candidate" else "")
+    _, chapters = await create_test_book_plan_with_chapters(test_db, project_id=project_id,
+        chapter_titles=["离家读书"], draft_contents=[body])
+    before = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    stored = copy.deepcopy(before.manuscript_json)
+    stored["chapters"][0]["pull_quotes"] = [{"text": "已经不在当前正文里的旧摘句。", "source": "editorial_generated", "source_ref_ids": []}]
+    before.manuscript_json = stored
+    await test_db.commit()
+    project = await test_db.get(Project, project_id)
+    calls = []
+    async def respond(*args, **kwargs):
+        calls.append(kwargs)
+        item = {"chapter_id": "C1"}
+        if reply != "missing":
+            item["pull_quote"] = ""
+        return json.dumps({"chapter_intros": [item]})
+    fake_ai = FakeEditorialAI()
+    monkeypatch.setattr(fake_ai, "_call_llm", respond)
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai._text_ai_configured", lambda model: True)
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai.get_ai_service", lambda model: fake_ai)
+    req = MemoirBookOutputEditorialCopyRegenerateRequest(targets=["pull_quotes"], chapter_ids=[chapters[0].id])
+    await book_generation_jobs.schedule_book_editorial_copy_generation(test_db,
+        user_id=project.user_id, project_id=project_id, req=req, automatic=automatic)
+    await test_db.commit()
+    job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.project_id == project_id))
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        succeeds = reply == "empty"
+        assert await run_test_editing_job(test_db, job.id) is succeeds
+        await test_db.refresh(job)
+        assert job.status == ("succeeded" if succeeds else "failed")
+        latest = await test_db.scalar(select(MemoirBookOutputVersion).where(
+            MemoirBookOutputVersion.output_id == before.output_id).order_by(MemoirBookOutputVersion.version.desc()))
+        assert latest.content == before.content
+        assert latest.manuscript_json["chapters"][0]["pull_quotes"] == ([] if succeeds else stored["chapters"][0]["pull_quotes"])
+        if succeeds and automatic:
+            reused = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+                user_id=project.user_id, project_id=project_id, req=req, automatic=True, retry=True)
+            assert reused.latest_version.id == latest.id
+        assert len(calls) == 1
+    finally:
+        clear_editing_job_handlers()
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
