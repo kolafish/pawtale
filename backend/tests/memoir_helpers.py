@@ -53,15 +53,28 @@ async def post_mobile_memoir_voice_session(
     )
 
 
-async def run_test_editing_job(test_db, job_id: str) -> bool:
+async def run_test_editing_job(test_db, job_id: str, *, advance_editorial_copy: bool = True) -> bool:
     from app.models.memoir import MemoirEditingJob
     from app.services.memoir.editing_jobs import claim_editing_job, run_editing_job
 
     job = await test_db.get(MemoirEditingJob, job_id)
     assert job is not None
+    advance_copy = advance_editorial_copy and job.job_type == 'update_book_draft'
     lease = await claim_editing_job(test_db, job_id, now=job.run_after)
     assert lease is not None
-    return await run_editing_job(test_db, lease)
+    completed = await run_editing_job(test_db, lease)
+    # Book/domain tests advance the copy dependency as the worker would. Ordering
+    # regressions opt out and explicitly control each independent queue step.
+    if not advance_copy:
+        return completed
+    job = await test_db.get(MemoirEditingJob, job_id, populate_existing=True)
+    if (job.result_json or {}).get('stage') == 'writing_copy':
+        copy_job = await test_db.scalar(select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f'automatic-editorial-copy:{job.project_id}'))
+        if copy_job and copy_job.status == 'pending':
+            await run_test_editing_job(test_db, copy_job.id, advance_editorial_copy=False)
+            return await run_test_editing_job(test_db, job_id, advance_editorial_copy=False)
+    return completed
 
 
 async def create_test_voice_transcript(

@@ -14,6 +14,43 @@ from app.services.ai_references import ModelReferenceMap
 from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
 
 
+async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_new_identity(client, test_db, monkeypatch):
+    from app.services.ai_base import AITextServiceBase
+
+    pid, uid = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    valid = _merge(context)
+    invalid = valid.model_copy(deep=True)
+    invalid.chapters[0].chapter_ref = 'N1'
+
+    class DirectoryAI(AITextServiceBase):
+        provider_name = 'test'
+        model_name = 'test-directory'
+        calls = 0
+
+        async def _call_llm(self, *_args, **_kwargs):
+            self.calls += 1
+            return (invalid if self.calls == 1 else valid).model_dump_json()
+
+    async def cached_digests(*_args, **_kwargs):
+        return None
+
+    async def summaries(*_args, **_kwargs):
+        return {}, {}
+
+    ai = DirectoryAI()
+    monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', cached_digests)
+    monkeypatch.setattr(structure, 'load_structure_summaries', summaries)
+    monkeypatch.setattr(structure, 'get_ai_service', lambda _: ai)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    _, after, _ = await _load_tree(test_db, project_id=pid)
+    assert after[0].id == chapters[0].id
+    assert ai.calls == 2
+    assert not await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert ai.calls == 2
+
+
 async def _book(client, db):
     pid = await ensure_mobile_memoir_project(client)
     texts = ['妈妈叫何进。', '小时候我在妈妈课堂上读书。', '三岁或者四岁的时候去了学前班。', '后来我在饭馆上班。']

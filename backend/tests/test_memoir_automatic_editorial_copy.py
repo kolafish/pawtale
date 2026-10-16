@@ -13,9 +13,13 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir import book_outputs, book_reviews
 from app.services.memoir.book_manuscript_ai import GeneratedChapterIntro, GeneratedManuscriptCopy
-from tests.memoir_helpers import ensure_mobile_memoir_project, run_test_editing_job
+from tests.memoir_helpers import ensure_mobile_memoir_project, run_test_editing_job as run_job
 from tests.test_memoir_book_outputs import _create_confirmed_book_plan, _seed_confirmed_book_output
 from tests.test_memoir_automatic_book_draft import _setup
+
+
+async def run_test_editing_job(db, job_id):
+    return await run_job(db, job_id, advance_editorial_copy=False)
 
 
 def _copy(snapshot, number=1):
@@ -148,18 +152,17 @@ async def test_book_pipeline_dispatches_copy_and_reviews_changed_metadata_once(c
         MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
     assert copy_job.payload_json['retry'] is bool(explicit_retry)
     copy_id = copy_job.id
-    review_id = parent.result_json['review_job_id']
-    assert await run_test_editing_job(test_db, review_id)
+    assert parent.result_json['review_job_id'] is None
+    assert parent.result_json['stage'] == 'writing_copy'
     if copy_after_parent:
-        assert await run_test_editing_job(test_db, parent_id)
-        assert parent.status == 'succeeded'
+        assert not await run_test_editing_job(test_db, parent_id)
+        assert parent.result_json['review_job_id'] is None
     assert await run_test_editing_job(test_db, copy_id)
     await test_db.refresh(parent)
     assert parent.status == 'pending'
-    # The copy job changed the actual preface/afterword seen by review. Refresh
-    # that review once, then reuse it across identical assembly versions.
+    # The first review sees final copy; there is no review of intermediate metadata.
     assert not await run_test_editing_job(test_db, parent_id)
-    assert parent.result_json['review_job_id'] == review_id
+    review_id = parent.result_json['review_job_id']
     assert await run_test_editing_job(test_db, review_id)
     assert await run_test_editing_job(test_db, parent_id)
     await test_db.refresh(parent)
@@ -260,7 +263,7 @@ async def test_copy_completion_and_running_parent_share_lock_order(client, test_
             assert task is not None and not await asyncio.wait_for(task, timeout=5)
             await test_db.refresh(parent)
             assert parent.status == 'pending'
-            assert bool(parent.result_json['review_job_id']) is not child_dispatched
+            assert parent.result_json['review_job_id'] is None
         finally:
             release.set()
             await copy_db.rollback()
@@ -311,8 +314,7 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     assert await run_test_editing_job(test_db, parent.result_json['chapters'][chapter_id]['job_id'])
     assert not await run_test_editing_job(test_db, parent_id)
     parent = await test_db.get(MemoirEditingJob, parent_id)
-    assert await run_test_editing_job(test_db, parent.result_json['review_job_id'])
-    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json['review_job_id'] is None
     copy_job = await test_db.scalar(select(MemoirEditingJob).where(
         MemoirEditingJob.dedupe_key == f"automatic-editorial-copy:{project_id}"))
     assert await run_test_editing_job(test_db, copy_job.id)

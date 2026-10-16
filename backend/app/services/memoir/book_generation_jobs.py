@@ -413,6 +413,11 @@ async def run_book_editorial_copy_generation_job(
     payload = dict(job.payload_json or {})
     label = _safe_str(payload.get("target_label")) or "成书文案"
     automatic = payload.get("automatic") is True
+    if automatic:
+        from app.services.memoir.automatic_book_draft import defer_narration_work
+        waiting = await defer_narration_work(db, job)
+        if waiting:
+            return waiting
     try:
         project = await db.get(Project, job.project_id)
         user_id = _safe_str(payload.get("user_id")) or (project.user_id if project else "")

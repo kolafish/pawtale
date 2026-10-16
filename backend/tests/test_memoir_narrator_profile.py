@@ -28,7 +28,7 @@ from app.services.memoir.voice_transcripts import CleanedTranscriptText
 from tests.memoir_helpers import (
     ensure_mobile_memoir_project,
     post_mobile_memoir_voice_session,
-    run_test_editing_job,
+    run_test_editing_job as run_job,
 )
 
 REAL_SCHEDULE = narrator_profile.schedule_narrator_profile
@@ -108,9 +108,26 @@ async def _profile_job(test_db, utterance_id: str) -> MemoirEditingJob | None:
 
 
 async def _run(test_db, utterance_id: str) -> None:
+    await _settle_correction(test_db, utterance_id)
     job = await _profile_job(test_db, utterance_id)
     assert job is not None
     await narrator_profile.run_narrator_profile_job(test_db, job)
+
+
+async def _settle_correction(test_db, utterance_id: str) -> None:
+    # Isolate profile semantics from ASR cleanup; lifecycle tests drive the real correction job.
+    correction = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.dedupe_key == f"correct_transcript:{utterance_id}"))
+    if correction and correction.status in {"pending", "running"}:
+        correction.status = "skipped"
+        await test_db.commit()
+
+
+async def run_test_editing_job(test_db, job_id):
+    job = await test_db.get(MemoirEditingJob, job_id)
+    if job and job.job_type == 'fill_narrator_profile':
+        await _settle_correction(test_db, job.payload_json['utterance_id'])
+    return await run_job(test_db, job_id)
 
 
 async def _profile(test_db, project_id: str) -> tuple[Project, dict]:
@@ -993,6 +1010,7 @@ async def test_manual_save_overlapping_profile_reading_preserves_both_updates(cl
     project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
     session_id = await _session(client, project_id)
     segment = await _narrate(client, test_db, session_id, "我叫王秀英，五二年生的，老家四川成都。")
+    await _settle_correction(test_db, segment.utterance_id)
     fake_ai.payload = {"name": "王秀英", "gender": "female", "age": 74, "origin": "四川成都"}
     manual_loaded = asyncio.Event()
     profile_completed = asyncio.Event()
@@ -1415,6 +1433,38 @@ async def test_a_book_whose_profile_was_all_saved_is_not_read(client, test_db, f
     _project, profile = await _profile(test_db, project_id)
     assert profile[projects.PROFILE_SESSION_KEY] == session_id
     assert await _profile_job(test_db, segment.utterance_id) is None
+
+
+async def test_profile_waits_for_correction_and_reuses_unchanged_final_text(client, test_db, fake_ai):
+    pid = await ensure_mobile_memoir_project(client, title='我的回忆录')
+    sid = await _session(client, pid)
+    segment = await _narrate(client, test_db, sid, '我叫王秀英。')
+    job = await _profile_job(test_db, segment.utterance_id)
+    result = await narrator_profile.run_narrator_profile_job(test_db, job)
+    assert result.status.value == 'pending' and fake_ai.prompts == []
+    await _new_version(test_db, segment.utterance_id, '我叫王秀英。')
+    await narrator_profile.schedule_narrator_profile(test_db,
+        utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id))
+    await test_db.commit()
+    fake_ai.payload = {'name': '王秀英'}
+    await narrator_profile.run_narrator_profile_job(test_db, job)
+    assert len(fake_ai.prompts) == 2  # One final profile reading, one people reading.
+    next_version = await _new_version(test_db, segment.utterance_id, ' 我叫王秀英。 ')
+    await narrator_profile.schedule_narrator_profile(test_db,
+        utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id))
+    await test_db.commit()
+    await narrator_profile.run_narrator_profile_job(test_db, job)
+    assert len(fake_ai.prompts) == 2
+    _, profile = await _profile(test_db, pid)
+    assert profile[projects.INFERRED_PROFILE_FIELDS_KEY]['narrator_name']['transcript_version_id'] == next_version
+    await _new_version(test_db, segment.utterance_id, '我叫王秀音。')
+    await narrator_profile.schedule_narrator_profile(test_db,
+        utterance=await test_db.get(MemoirVoiceUtterance, segment.utterance_id))
+    await test_db.commit()
+    fake_ai.payload = {'name': '王秀音'}
+    await narrator_profile.run_narrator_profile_job(test_db, job)
+    assert len(fake_ai.prompts) == 4
+    assert (await _profile(test_db, pid))[1]['narrator_name'] == '王秀音'
 
 
 @pytest.mark.asyncio

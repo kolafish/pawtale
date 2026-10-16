@@ -91,6 +91,13 @@ def skip_narrator_profile_extraction(monkeypatch):
     monkeypatch.setattr(narration_people, "get_ai_service", no_ai)
 
 
+@pytest.fixture(autouse=True)
+def settled_narration_inputs(monkeypatch):
+    """Most domain tests exercise settled inputs; scheduling regressions set the real quiet window."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "memoir_book_settle_seconds", 0)
+
+
 @pytest.fixture(scope="session")
 def postgres_schema():
     _assert_dedicated_postgres_test_database()
