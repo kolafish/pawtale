@@ -1591,20 +1591,8 @@ async def sync_materials_to_chapters(
     sections = await _load_sections(db, project_id=project_id)
     first_by_chapter: dict[str, MemoirSection] = {}
     for section in sections:
-        first_by_chapter.setdefault(section.chapter_id, section)
-    for chapter in chapters:
-        if chapter.id in first_by_chapter:
-            continue
-        section = MemoirSection(
-            project_id=project_id,
-            chapter_id=chapter.id,
-            title=chapter.title,
-            section_type=MemoirSectionType.LIFE_FRAGMENT.value,
-            sort_order=0,
-        )
-        db.add(section)
-        await db.flush()
-        first_by_chapter[chapter.id] = section
+        if section.status == MemoirSectionStatus.ACTIVE.value and section.include_in_book:
+            first_by_chapter.setdefault(section.chapter_id, section)
 
     desired_ids = {
         utterance_id
@@ -1639,6 +1627,17 @@ async def sync_materials_to_chapters(
             if uid not in existing_by_utterance or chapter_by_section.get(existing_by_utterance[uid].section_id) != chapter.id]
         if not utterance_ids:
             continue
+        if chapter.id not in first_by_chapter:
+            section = MemoirSection(
+                project_id=project_id,
+                chapter_id=chapter.id,
+                title=chapter.title,
+                section_type=MemoirSectionType.LIFE_FRAGMENT.value,
+                sort_order=max((item.sort_order for item in sections if item.chapter_id == chapter.id), default=-1) + 1,
+            )
+            db.add(section)
+            await db.flush()
+            first_by_chapter[chapter.id] = section
         affected |= await _move_materials(
             db,
             project_id=project_id,

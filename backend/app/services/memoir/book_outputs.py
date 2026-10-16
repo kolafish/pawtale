@@ -24,6 +24,7 @@ from app.models.memoir import (
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirEditingJob,
 )
 from app.schemas.memoir_book import (
     MemoirBookCustomLayout,
@@ -682,6 +683,14 @@ async def regenerate_book_output_editorial_copy(
         state.failed_chapter_ids = sorted(failed)
         state.status = "failed" if failed or (not editorial_copy and targets) else "succeeded"
     manuscript_json = manuscript.model_dump(mode="json") if editorial_copy else latest.manuscript_json
+    review_metadata_changed = stored_manuscript_metadata(manuscript_json) != protected_book_copy
+    parent_id = await db.scalar(select(MemoirEditingJob.id).where(
+        MemoirEditingJob.dedupe_key == f"update-book-draft:{project_id}",
+    )) if review_metadata_changed else None
+    if parent_id:
+        # The parent takes directory locks before writing its job/output. Keep
+        # that order and commit the copy plus its wake-up together.
+        await completion_issues.lock_project_chapters(db, project_id=project_id)
     await db.execute(
         select(MemoirBookOutput.id)
         .where(MemoirBookOutput.id == output.id)
@@ -725,6 +734,9 @@ async def regenerate_book_output_editorial_copy(
     if state is not None:
         state.processed_version = latest.version
         output.metadata_json = {**(output.metadata_json or {}), AUTOMATIC_EDITORIAL_COPY_KEY: state.model_dump(mode="json")}
+    if parent_id:
+        from app.services.memoir.automatic_book_draft import schedule_book_draft
+        await schedule_book_draft(db, project_id=project_id, source="editorial_copy", settled=True)
     await db.commit()
     refreshed = await _load_output(db, project_id=project_id)
     if not refreshed:

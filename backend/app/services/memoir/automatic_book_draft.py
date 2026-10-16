@@ -174,8 +174,6 @@ async def reconcile_books_omitted_by_editorial_review(db: AsyncSession) -> int:
 async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
     project_id = job.project_id
     legacy = job.result_json or {}
-    if "editorial_copy" in legacy.get("retry_stages", []):
-        job.payload_json = {**(job.payload_json or {}), "retry_editorial_copy": True}
     progress = DraftProgress.model_validate(legacy)
     dependency = await db.scalar(
         select(MemoirEditingJob.id)
@@ -192,11 +190,16 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         )
         .limit(1)
     )
+    if "editorial_copy" in legacy.get("retry_stages", []):
+        job.payload_json = {**(job.payload_json or {}), "retry_editorial_copy": True}
     if dependency:
         progress.stage = "organizing"
         return _waiting(job, progress)
     from app.services.memoir.book_plan_write_workflow import activate_existing_plan_for_automatic_book
-    await activate_existing_plan_for_automatic_book(db, project_id=project_id)
+    # Do not flush the legacy retry payload (and lock the job row) before the
+    # directory lock used by copy completion and other upstream writers.
+    with db.no_autoflush:
+        await activate_existing_plan_for_automatic_book(db, project_id=project_id)
     project = await db.get(Project, project_id)
     chapters = (
         await db.scalars(
@@ -274,6 +277,10 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             retry=retry_chapters,
             on_enqueued=record_child,
         )
+        # Child dispatch may commit its checkpoint and release the directory.
+        # Reacquire it before any later parent payload/output write.
+        with db.no_autoflush:
+            await completion_issues.lock_project_chapters(db, project_id=project_id)
         state.job_id = str(child["job_id"])
         state.status = (
             ("needs_review" if child.get("outcome") == "needs_review" else "needs_input")
