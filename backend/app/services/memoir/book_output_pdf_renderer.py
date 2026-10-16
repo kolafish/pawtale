@@ -12,6 +12,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdf_canvas
 
+from app.schemas.memoir_book import DEFAULT_BOOK_DESIGN
 from app.services.memoir.branding import BRAND_NAME
 
 PDF_SANS_FONT_NAME = "MemoirNotoSansSC"
@@ -70,7 +71,7 @@ class PDFLayout:
     reading_edition: bool = False
     mirror_body_pages: bool = False
     inner_margin_delta: int = 0
-    manuscript_template: str = "classic_family"
+    manuscript_template: str = DEFAULT_BOOK_DESIGN
     body_font_name: str | None = None
 
 

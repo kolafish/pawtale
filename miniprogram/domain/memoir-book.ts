@@ -1,6 +1,8 @@
 import type { MemoirShareLikeSummary } from "./memoir-share-likes";
 import type { TTSAlignmentSegment } from "./memoir-audio";
 
+export const DEFAULT_BOOK_DESIGN = "warm_journal" as const;
+
 export type MemoirCreatedBy = "user" | "ai" | "asr" | "system";
 export type MemoirBookPlanStatus = "draft" | "confirmed";
 export type MemoirBookChapterDraftStatus = "draft" | "confirmed";

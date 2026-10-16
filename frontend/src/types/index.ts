@@ -526,6 +526,8 @@ export type MemoirBookCoverStyle =
   | 'warm_journal'
   | 'modern_minimal';
 
+export const DEFAULT_BOOK_DESIGN = 'warm_journal' as const;
+
 export interface MemoirBookOutputTableOfContentsItem {
   chapter_id: string;
   index: number;

@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image
 
 from app.config import DATA_DIR
+from app.schemas.memoir_book import DEFAULT_BOOK_DESIGN
 from app.services.file_exports import ExportFile, safe_filename
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_output_pdf_renderer import (
@@ -181,7 +182,7 @@ def _today_month_text() -> str:
 
 
 def _cover_style(style: str) -> PDFCoverStyle:
-    return PDF_COVER_STYLES.get(style, PDF_COVER_STYLES["classic_plain"])
+    return PDF_COVER_STYLES.get(style, PDF_COVER_STYLES[DEFAULT_BOOK_DESIGN])
 
 
 CHINESE_NUMERALS = "零一二三四五六七八九"
@@ -1698,7 +1699,7 @@ def _build_manuscript_pdf_pages(
         else not layout.reading_edition and setting_source_appendix is not False
     )
     back_cover_quote = _str(settings.get("back_cover_quote"))
-    cover_style = _str(settings.get("cover_style")) or "classic_plain"
+    cover_style = _str(settings.get("cover_style")) or DEFAULT_BOOK_DESIGN
 
     toc_items = _list(manuscript.get("table_of_contents"))
     initial_entries = _chapter_toc_entries(toc_items=toc_items, chapters=chapters)
@@ -1805,7 +1806,7 @@ def render_book_output_export(
         manuscript_settings = _dict(_dict(manuscript).get("render_settings"))
         pdf_layout = configured_pdf_layout(
             pdf_layout,
-            template=_str(manuscript_profile.get("template")) or "classic_family",
+            template=_str(manuscript_profile.get("template")) or DEFAULT_BOOK_DESIGN,
             custom_layout=_dict(manuscript_settings.get("custom_layout")),
         )
         return ExportFile(

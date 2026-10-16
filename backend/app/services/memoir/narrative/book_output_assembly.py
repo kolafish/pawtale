@@ -18,7 +18,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookCustomLayout, MemoirBookOutputEditorialCopyRegenerateRequest
+from app.schemas.memoir_book import MemoirBookAssemblyResponse, MemoirBookOutputEditorialCopyRegenerateRequest
 from app.services.memoir import (
     automation_events,
     book_editorial_actions,
@@ -29,8 +29,6 @@ from app.services.memoir import (
     chapter_generation,
 )
 from app.services.memoir.book_output_manuscript import (
-    NEW_BOOK_COVER_STYLE,
-    NEW_BOOK_TEMPLATE,
     effective_book_metadata,
     manuscript_from_snapshot,
     stored_manuscript_design,
@@ -236,10 +234,9 @@ async def assemble_book_output(
         db,
         project_id=project_id,
     )
-    if previous_version:
-        template, custom_layout = stored_manuscript_design(previous_version.manuscript_json)
-    else:
-        template, custom_layout = NEW_BOOK_TEMPLATE, MemoirBookCustomLayout()
+    template, custom_layout = stored_manuscript_design(
+        previous_version.manuscript_json if previous_version else None,
+    )
     metadata = effective_book_metadata(
         project=project, stored=previous_version.manuscript_json if previous_version else None,
     )
@@ -260,7 +257,7 @@ async def assemble_book_output(
         title=title,
         content=content,
         snapshot=chapter_snapshots,
-        cover_style_value=stored_cover_style(previous_version) if previous_version else NEW_BOOK_COVER_STYLE,
+        cover_style_value=stored_cover_style(previous_version),
         template=template,
         custom_layout=custom_layout,
         cover_image=cover_image,

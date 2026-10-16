@@ -788,7 +788,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     manuscript = data["latest_version"]["manuscript"]
     assert manuscript["schema_version"] == 5
-    assert manuscript["profile"]["template"] == "classic_family"
+    assert manuscript["profile"]["template"] == "warm_journal"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
     assert [section["kind"] for section in manuscript["front_matter"]] == [
@@ -1468,7 +1468,6 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"/MediaBox [ 0 0 420 595 ]" in pdf.content
     assert b"/FontFile2" in pdf.content
     assert b"MemoirNotoSerifSC" in pdf.content
-    assert b"NotoSansSC" in pdf.content
     assert b"/Helvetica" not in pdf.content
     assert b"STSong-Light" not in pdf.content
     assert b"Adobe-GB1" not in pdf.content

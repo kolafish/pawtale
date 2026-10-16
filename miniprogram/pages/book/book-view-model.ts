@@ -1,3 +1,4 @@
+import { DEFAULT_BOOK_DESIGN } from "../../domain/memoir-book";
 import type {
   MemoirBookChapterDraft,
   MemoirBookChapterSourceRef,
@@ -489,25 +490,16 @@ function manuscriptBackSectionContent(manuscript: MemoirBookManuscript | null, k
 }
 
 function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefined): string {
-  if (template === "custom") {
-    return "自定义版式";
-  }
-  if (template === "photo_memory") {
-    return "家庭纪念版";
-  }
-  if (template === "oral_archive") {
-    return "口述档案版";
-  }
-  if (template === "heritage_classic") {
-    return "典藏文集版";
-  }
-  if (template === "warm_journal") {
-    return "家书手记版";
-  }
-  if (template === "modern_minimal") {
-    return "现代简约版";
-  }
-  return "素雅书籍版";
+  const labels: Record<MemoirBookManuscriptTemplate, string> = {
+    classic_family: "素雅书籍版",
+    photo_memory: "家庭纪念版",
+    oral_archive: "口述档案版",
+    heritage_classic: "典藏文集版",
+    warm_journal: "家书手记版",
+    modern_minimal: "现代简约版",
+    custom: "自定义版式",
+  };
+  return labels[template || DEFAULT_BOOK_DESIGN] || labels[DEFAULT_BOOK_DESIGN];
 }
 
 function manuscriptSectionKindText(kind: string): string {
@@ -671,7 +663,7 @@ function selectedBookCoverStyle(
   const manuscript = selectedBookManuscript(output, selectedVersion);
   const style = manuscript?.render_settings?.cover_style;
   const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
-  return option ? option.value : "classic_plain";
+  return option ? option.value : DEFAULT_BOOK_DESIGN;
 }
 
 function bookCoverStyleData(
@@ -680,7 +672,7 @@ function bookCoverStyleData(
 ) {
   const style = selectedBookCoverStyle(output, selectedVersion);
   const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style)
-    || BOOK_COVER_STYLE_OPTIONS[0];
+    || BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === DEFAULT_BOOK_DESIGN)!;
   return {
     bookCoverStyle: option.value,
     bookCoverStylePreviewClass: option.previewClass,
