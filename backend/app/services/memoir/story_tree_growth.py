@@ -479,7 +479,6 @@ async def _create_initial_tree(
     progress: StoryGrowthProgress,
     excluded_source_hashes: dict[str, str],
 ) -> bool:
-    created = False
     async def checkpoint_not_story(sources: tuple[SourceSegment, ...]) -> None:
         for source in sources:
             progress.deferred[source.utterance_id] = DeferredSource(
@@ -489,8 +488,6 @@ async def _create_initial_tree(
         await _save_progress(db, job, progress)
 
     async def checkpoint_plan() -> None:
-        nonlocal created
-        created = True
         sections = (await db.scalars(select(MemoirSection).where(MemoirSection.project_id == project_id))).all()
         for section in sections:
             progress.initial_sections.setdefault(section.chapter_id, []).append(
@@ -509,7 +506,7 @@ async def _create_initial_tree(
         job.result_json = {**(job.result_json or {}), "growth": progress.model_dump(mode="json")}
         db.add(job)
 
-    await generate_book_plan(
+    result = await generate_book_plan(
         db,
         user_id=user_id,
         project_id=project_id,
@@ -520,7 +517,7 @@ async def _create_initial_tree(
         excluded_source_hashes=excluded_source_hashes,
         only_if_missing=True,
     )
-    return created
+    return result.outcome == "created"
 
 
 async def _finish_initial_sections(
