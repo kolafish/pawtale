@@ -461,3 +461,22 @@ test("profile navigation opens this memoir's profile editor", async () => {
   context.openNavigation();
   assert.deepEqual(calls.routes, ["/pages/project-edit/index?projectId=p1"]);
 });
+
+test("whole chapter merges retain their destination and execute only after selection", async () => {
+  const operations = ["c2", "c3"].map(source => ({
+    action: "merge_chapters", target_ref: source, target_chapter_ref: "c1", new_title: null,
+    label: `合并 ${source} 到 c1`, detail: "保留原有小节。",
+  }));
+  const { context, calls } = setup({ preview: async () => ({
+    signature: "chapter-merge", reply: "请确认合章方案。", questions: [], operations,
+  }) });
+  await context.submitInstruction({ detail: { value: "把讲童年的几章合在一起" } });
+  assert.equal(calls.applies.length, 0);
+  context.selectOperations({ detail: { value: [context.data.items[1].selectionKey] } });
+  await context.apply();
+  assert.deepEqual(calls.applies, [["p1", "chapter-merge", [{
+    action: "merge_chapters", target_ref: "c3", target_chapter_ref: "c1", new_title: null,
+  }]]]);
+  assert.equal(context.data.preview, null);
+  assert.deepEqual(context.data.sectionTasks, []);
+});

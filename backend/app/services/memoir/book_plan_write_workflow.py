@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -80,7 +80,9 @@ from app.services.memoir.book_structure_commands import (
     command_chapter_id as _require_command_chapter_id,
 )
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.sections import finalize_section_changes, lock_project_chapters, sync_materials_to_chapters
+from app.services.memoir.sections import (
+    finalize_section_changes, lock_project_chapters, mark_section_structure_changed, sync_materials_to_chapters,
+)
 from app.services.memoir import fact_decisions
 
 
@@ -826,18 +828,19 @@ async def _selected_sections_for_chapter_split(
     return source_sections, selected, selected_source_ids
 
 
-async def _move_split_sections(
+async def _move_chapter_sections(
     db: AsyncSession,
     *,
     source_sections: list[MemoirSection],
     selected_sections: list[MemoirSection],
-    new_chapter_id: str,
+    destination_chapter_id: str,
+    start_order: int = 0,
 ) -> set[str]:
     selected_ids = {section.id for section in selected_sections}
     changed_ids = set(selected_ids)
     for index, section in enumerate(selected_sections):
-        section.chapter_id = new_chapter_id
-        section.sort_order = index
+        section.chapter_id = destination_chapter_id
+        section.sort_order = start_order + index
         section.version += 1
         db.add(section)
     await db.flush()
@@ -931,6 +934,26 @@ async def apply_book_plan_structure_command(
     )
     chapters = mutation.chapters
     await _detach_chapter_operational_references(db, mutation.deleted_chapters)
+    if req.type == "merge_chapters":
+        source_chapter = _chapter_by_id(plan, _require_command_chapter_id(req))
+        source_sections = list((await db.scalars(
+            select(MemoirSection).where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.chapter_id == source_chapter.id,
+            ).order_by(MemoirSection.sort_order, MemoirSection.id).with_for_update()
+                .execution_options(populate_existing=True)
+        )).all())
+        last_order = await db.scalar(select(func.max(MemoirSection.sort_order)).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == req.target_chapter_id,
+        ))
+        changed_ids = await _move_chapter_sections(
+            db, source_sections=source_sections,
+            selected_sections=source_sections, destination_chapter_id=req.target_chapter_id,
+            start_order=last_order + 1 if last_order is not None else 0,
+        )
+        # Refresh before delete-orphan cascades inspect the source collection.
+        await db.refresh(source_chapter, ["sections"])
     for chapter in mutation.deleted_chapters:
         if chapter in plan.chapters:
             plan.chapters.remove(chapter)
@@ -945,11 +968,11 @@ async def apply_book_plan_structure_command(
     if selected_sections:
         new_chapter_id = next(chapter.id for chapter in chapters if chapter.id not in old_chapter_ids)
         await db.flush()
-        changed_ids = await _move_split_sections(
+        changed_ids = await _move_chapter_sections(
             db,
             source_sections=source_sections,
             selected_sections=selected_sections,
-            new_chapter_id=new_chapter_id,
+            destination_chapter_id=new_chapter_id,
         )
         output = await db.scalar(
             select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
@@ -957,9 +980,9 @@ async def apply_book_plan_structure_command(
         if output is not None:
             invalidate_book_output(output)
             db.add(output)
-    elif mutation.changed_chapter_ids or any(
+    elif req.type != "merge_chapters" and (mutation.changed_chapter_ids or any(
         refs_by_chapter.get(chapter.id) for chapter in mutation.deleted_chapters
-    ):
+    )):
         # Removing an empty chapter needs no material reassignment. Rebuilding
         # every chapter's sources here would collapse unrelated section groups.
         await db.flush()
@@ -981,7 +1004,13 @@ async def apply_book_plan_structure_command(
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)
-    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
+    if req.type == "merge_chapters":
+        await mark_section_structure_changed(
+            db, project_id=project_id, plan=plan, chapter_ids={req.target_chapter_id},
+            section_ids=changed_ids, operation=req.type, source="structure",
+        )
+    else:
+        await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
     await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:

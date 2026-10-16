@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookPlan,
-    MemoirBookPlanChapter, MemoirEditingJob, MemoirSection, MemoirSectionMaterial,
+    MemoirBookPlanChapter, MemoirCompletionIssue, MemoirEditingJob, MemoirSection, MemoirSectionMaterial,
     MemoirVoiceSession, MemoirVoiceUtterance,
 )
 from app.models.projects import Project
@@ -1134,6 +1134,10 @@ async def test_provider_timeout_is_visible_and_does_not_retry_or_write(client, t
     {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "section_ids": ["s", "s"]},
     {"action": "split_chapter", "target_ref": "c", "new_title": "新章节", "section_ids": ["s"], "utterance_ids": ["u"]},
     {"action": "delete_chapter", "target_ref": "c", "section_ids": ["s"]},
+    {"action": "merge_chapters", "target_ref": "c"},
+    {"action": "merge_chapters", "target_ref": "c", "target_chapter_ref": "c"},
+    {"action": "merge_chapters", "target_ref": "c", "target_chapter_ref": "d", "section_ids": ["s"]},
+    {"action": "rename_chapter", "target_ref": "c", "new_title": "新名", "target_chapter_ref": "d"},
     {"action": "execute_sql", "target_ref": "c"},
 ])
 def test_operation_contract_rejects_unexecutable_actions(data):
@@ -1515,3 +1519,162 @@ async def test_undo_restores_heard_profile_sources(client, test_db, monkeypatch,
     profile = (await test_db.get(Project, story["pid"], populate_existing=True)).metadata_json["memoir_profile"]
     assert profile["narrator_name"] == "于大姐"
     assert profile["inferred_from"] == {"narrator_name": {"utterance_id": story["materials"][1]}}
+
+
+@pytest.mark.parametrize("entry", ["voice", "structure_command"])
+@pytest.mark.parametrize("excluded", ["section", "archived"])
+async def test_whole_chapter_merge_preserves_sections_and_all_materials(
+    client, test_db, monkeypatch, story, entry, excluded,
+):
+    source, target = story["chapters"][1:]
+    hidden = await test_db.get(MemoirSection, story["sections"][3])
+    hidden.include_in_book = excluded != "section"
+    hidden.status = "archived" if excluded == "archived" else "active"
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    material = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw="暂不收录的原始讲述。")
+    target_extra = MemoirSection(project_id=story["pid"], chapter_id=target, title="目标章第二节", sort_order=1)
+    test_db.add_all([material, target_extra])
+    await test_db.flush()
+    test_db.add(MemoirSectionMaterial(project_id=story["pid"], section_id=hidden.id, utterance_id=material.id, include_in_book=False))
+    plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == story["pid"]))
+    output = MemoirBookOutput(project_id=story["pid"], plan_id=plan.id, title="我的回忆录", status="accepted")
+    target_draft = await test_db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == target))
+    target_draft.status = "confirmed"
+    fact = MemoirCompletionIssue(
+        project_id=story["pid"], chapter_id=source, scope="chapter", issue_type="conflict",
+        channel="manual_review", status="closed", outcome="confirmed", resolution="user_decision",
+        question="童年的时间？", reason="时间待核对", priority="high",
+        fingerprint=semantic_json_signature({"chapter": source}), input_signature="test",
+        outcome_note="这段发生在小学以前。",
+    )
+    test_db.add(fact)
+    # Exercise deletion with the source's ORM collection already loaded.
+    source_chapter = await test_db.get(MemoirBookPlanChapter, source)
+    await test_db.refresh(source_chapter, ["sections"])
+    test_db.add(output)
+    await test_db.commit()
+    before = await _story(test_db, story["pid"])
+    if entry == "voice":
+        response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [{
+            "action": "merge_chapters", "target_ref": source, "target_chapter_ref": target,
+        }]}, instruction="把童年回忆这一整章合并到早晨日常，保留原有小节。")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert "童年回忆" in data["operations"][0]["label"]
+        assert "早晨日常" in data["operations"][0]["label"]
+        assert await _story(test_db, story["pid"]) == before
+        result = await apply(client, story, data, echoed(data))
+        assert result.status_code == 200, result.text
+        assert result.json()["undoable"] is False
+        assert (await apply(client, story, data, echoed(data))).status_code == 409
+    else:
+        result = await client.post(f"/api/mobile/memoir/projects/{story['pid']}/book-plan/structure-commands", json={
+            "type": "merge_chapters", "chapter_id": source, "target_chapter_id": target,
+        })
+        assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    assert [c["ref"] for c in after["chapters"]] == [c["ref"] for c in before["chapters"] if c["ref"] != source]
+    assert {s["ref"] for s in after["sections"]} == {s["ref"] for s in before["sections"]}
+    assert after["memberships"] == before["memberships"]
+    assert after["materials"] == before["materials"]
+    sections_before = {s["ref"]: s for s in before["sections"]}
+    for section in after["sections"]:
+        old = sections_before[section["ref"]]
+        moved = old["chapter_ref"] == source
+        assert section == {**old, **({"chapter_ref": target, "order": old["order"] + 2, "version": old["version"] + 1} if moved else {})}
+    await test_db.refresh(target_draft)
+    await test_db.refresh(output)
+    assert target_draft.status == output.status == "draft"
+    assert (await test_db.get(MemoirBookPlanChapter, target)).title == "早晨日常"
+    await test_db.refresh(fact)
+    assert fact.chapter_id is None
+    assert set(fact.related_material_ids_json) == {story["materials"][1], material.id}
+    assert fact.outcome_note == "这段发生在小学以前。"
+
+
+@pytest.mark.parametrize("selected", [[0], [1], [0, 1]])
+async def test_multiple_chapter_merges_can_be_confirmed_independently(client, test_db, monkeypatch, story, selected):
+    target = story["chapters"][2]
+    operations = [{"action": "merge_chapters", "target_ref": source, "target_chapter_ref": target} for source in story["chapters"][:2]]
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": operations})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    before = await _story(test_db, story["pid"])
+    chosen = [echoed(data)[index] for index in selected]
+    result = await apply(client, story, data, chosen)
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    assert len(after["chapters"]) == 3 - len(chosen)
+    assert after["memberships"] == before["memberships"]
+    expected = [s["ref"] for chapter_id in [target, *[op["target_ref"] for op in chosen]]
+                for s in sorted(before["sections"], key=lambda s: s["order"]) if s["chapter_ref"] == chapter_id]
+    actual = sorted([s for s in after["sections"] if s["chapter_ref"] == target], key=lambda s: s["order"])
+    assert [s["ref"] for s in actual] == expected
+
+
+@pytest.mark.parametrize("change", ["source", "destination", "new_section", "source_draft", "destination_deleted"])
+async def test_chapter_merge_rejects_changed_preview(client, test_db, monkeypatch, story, change):
+    source, target = story["chapters"][1:]
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [{
+        "action": "merge_chapters", "target_ref": source, "target_chapter_ref": target,
+    }]})
+    assert response.status_code == 200, response.text
+    if change == "new_section":
+        test_db.add(MemoirSection(project_id=story["pid"], chapter_id=target, title="新补的小节", sort_order=1))
+    elif change == "source_draft":
+        draft = await latest_draft(test_db, source)
+        draft.content = "确认前又修改过的原章正文。"
+    elif change == "destination_deleted":
+        await test_db.delete(await test_db.get(MemoirBookPlanChapter, target))
+    else:
+        chapter = await test_db.get(MemoirBookPlanChapter, source if change == "source" else target)
+        chapter.title = "确认前改过的标题"
+    await test_db.commit()
+    before = await _story(test_db, story["pid"])
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 409
+    assert await _story(test_db, story["pid"]) == before
+
+
+async def test_chapter_merge_rejects_conflicts_and_respects_client_capability(client, monkeypatch, story):
+    source, target = story["chapters"][1:]
+    operation = {"action": "merge_chapters", "target_ref": source, "target_chapter_ref": target}
+    for other in [
+        {"action": "delete_chapter", "target_ref": target},
+        {"action": "rename_section", "target_ref": story["sections"][3], "new_title": "新名"},
+        {"action": "merge_chapters", "target_ref": target, "target_chapter_ref": story["chapters"][0]},
+    ]:
+        response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [operation, other]})
+        assert response.status_code == 422, response.text
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [{**operation, "target_chapter_ref": "missing"}]})
+    assert response.status_code == 422
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [operation]}, extended=False)
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [operation], "questions": [{
+        "target_refs": [target], "question": "目标章节还不确定。",
+    }]})
+    assert response.status_code == 200
+    assert response.json()["operations"] == []
+
+
+async def test_chapter_merge_batch_rolls_back_if_later_merge_fails(client, test_db, monkeypatch, story):
+    response, _ = await preview_proposal(client, monkeypatch, story, {"operations": [
+        {"action": "merge_chapters", "target_ref": source, "target_chapter_ref": story["chapters"][2]}
+        for source in story["chapters"][:2]
+    ]})
+    assert response.status_code == 200, response.text
+    before = await _story(test_db, story["pid"])
+    from app.services.memoir.book_plan_write_workflow import apply_book_plan_structure_command
+    calls = 0
+
+    async def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise HTTPException(409, "模拟第二个来源章出现冲突")
+        return await apply_book_plan_structure_command(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.memoir.voice_edit.apply_book_plan_structure_command", fail_second)
+    assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 409
+    assert calls == 2
+    assert await _story(test_db, story["pid"]) == before

@@ -4,8 +4,9 @@ export interface VoiceEditOperation {
   action:
     | "delete_chapter" | "delete_section" | "delete_material" | "rename_chapter" | "rename_section"
     | "regenerate_chapter_sections" | "consolidate_chapter_sections" | "split_chapter" | "merge_sections"
-    | "move_chapter" | "set_chapter_book_inclusion" | "correct_term" | "update_book_title" | "update_narrator_profile";
+    | "merge_chapters" | "move_chapter" | "set_chapter_book_inclusion" | "correct_term" | "update_book_title" | "update_narrator_profile";
   target_ref: string;
+  target_chapter_ref?: string | null;
   new_title: string | null;
   utterance_ids?: string[];
   section_ids?: string[];
