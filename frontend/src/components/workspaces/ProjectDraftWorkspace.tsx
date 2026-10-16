@@ -56,10 +56,17 @@ export function ProjectDraftWorkspace({
     if (ps.currentDocumentId) {
       return (
         <EditorMain
+          key={`${project.id}:${ps.currentDocumentId}`}
           title={ps.documentName}
           setTitle={ps.setDocumentName}
           editorContent={ps.documentContent}
           setEditorContent={ps.setDocumentContent}
+          canUndo={ps.canUndoContent}
+          canRedo={ps.canRedoContent}
+          onUndo={ps.undoDocumentContent}
+          onRedo={ps.redoDocumentContent}
+          onContentSelectionChange={ps.setContentSelection}
+          onBreakHistoryGroup={ps.breakContentHistoryGroup}
           saveStatus={ps.saveStatus}
           wordCount={ps.wordCount}
           totalWordCount={ps.totalWordCount}
