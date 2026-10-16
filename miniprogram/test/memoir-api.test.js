@@ -87,6 +87,22 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
   };
 }
 
+test("transcript organization filters preserve false in query parameters", async () => {
+  const requests = [];
+  installBookApiWxMock({ requests });
+  resetMemoirApiModules();
+  const { listMemoirVoiceTranscripts } = require("../services/memoir-transcript-api.ts");
+
+  for (const organized of [false, true, undefined]) {
+    await listMemoirVoiceTranscripts({ projectId: "project-1", organized });
+  }
+
+  const scopes = requests.filter((item) => item.url.includes("/voice-transcripts?"))
+    .map((item) => new URL(item.url).searchParams.get("organized"));
+  assert.deepEqual(scopes, ["false", "true", null]);
+  delete global.wx;
+});
+
 test("voice no-answer prompt API posts attempt without selected AI model", async () => {
   const requests = [];
   global.wx = {

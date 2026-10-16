@@ -66,7 +66,11 @@ from app.services.memoir.project_ai_preferences import (
     select_project_ai_model,
     text_polish_requirements,
 )
-from app.services.memoir.section_roles import requires_user_assignment
+from app.services.memoir.section_roles import (
+    PENDING_ASSIGNMENT_SECTION_ROLE,
+    SECTION_SYSTEM_ROLE_KEY,
+    requires_user_assignment,
+)
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.sections import finalize_section_changes, refresh_material_transcript_version
 from app.services.memoir.transcript_projection import current_utterance_text, has_story_content
@@ -865,6 +869,7 @@ async def list_voice_transcripts(
     project_id: str | None = None,
     search_query: str | None = None,
     included: str = "all",
+    organized: bool | None = None,
     guidance_mode: str | None = None,
     narration_mode: MemoirNarrationMode | None = None,
     current_guidance_module: str | None = None,
@@ -907,6 +912,16 @@ async def list_voice_transcripts(
         filters.append(correction_exists if manual_corrected else ~correction_exists)
     if narrator_only:
         filters.append(_narrator_material_clause())
+    if organized is not None:
+        assignment_exists = select(MemoirSectionMaterial.id).join(
+            MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id,
+        ).where(
+            MemoirSectionMaterial.utterance_id == MemoirVoiceUtterance.id,
+            MemoirSectionMaterial.project_id == MemoirVoiceSession.project_id,
+            func.coalesce(MemoirSection.metadata_json[SECTION_SYSTEM_ROLE_KEY].as_string(), "")
+            != PENDING_ASSIGNMENT_SECTION_ROLE,
+        ).exists()
+        filters.append(assignment_exists if organized else ~assignment_exists)
     if included != "all":
         included_utterance_ids = await _included_utterance_ids_for_filter(
             db,

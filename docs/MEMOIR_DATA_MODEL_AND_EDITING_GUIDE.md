@@ -465,6 +465,8 @@ SectionMaterial 解决的不是“素材是什么”，而是：
 
 章节 API 返回的 `source_refs`、素材详情中的 `included_chapters` 和 `section_assignment` 都是从这条关系计算出来的读模型。
 
+“全部回忆”列表提供“全部 / 已收进 / 尚未整理”筛选：素材关联普通小节即为“已收进”，即使该章、小节或素材不收入书稿；没有归属或仍在系统“待归类素材”小节（`system_role=pending_material_assignment`）的素材属于“尚未整理”。列表接口通过 `organized=true/false` 在服务端完成筛选、计数和分页，省略时返回全部；该筛选独立于书稿收录筛选 `included`。
+
 ### 4.3 展示建议
 
 面向用户展示：

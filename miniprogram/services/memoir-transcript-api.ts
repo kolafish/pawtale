@@ -40,6 +40,7 @@ interface VoiceTranscriptListOptions {
   projectId?: string;
   query?: string;
   included?: MemoirVoiceTranscriptIncludedFilter;
+  organized?: boolean;
   guidanceMode?: string;
   narrationMode?: MemoirNarrationMode;
   module?: string;
@@ -98,6 +99,7 @@ export function listMemoirVoiceTranscripts(
       include_empty: options.includeEmpty,
       q: options.query?.trim() || undefined,
       included: options.included && options.included !== "all" ? options.included : undefined,
+      organized: options.organized,
       guidance_mode: options.guidanceMode,
       narration_mode: options.narrationMode,
       module: options.module,

@@ -5,6 +5,14 @@
 
   <text wx:if="{{pickForVideo && activeProjectId}}" class="pick-video-hint">选一段讲述，再从里面挑出想做成视频的几句话。</text>
 
+  <view wx:if="{{activeProjectId && !pickForVideo}}" class="material-tabs" aria-role="radiogroup" aria-label="回忆整理状态">
+    <view wx:for="{{materialTabs}}" wx:key="value"
+      class="material-tab {{item.selected ? 'selected' : ''}}"
+      data-tab="{{item.value}}" bindtap="selectMaterialTab"
+      hover-class="search-control-hover" aria-role="radio" aria-checked="{{item.selected}}"
+      aria-disabled="{{!!(recoveringId || deletingId)}}">{{item.label}}</view>
+  </view>
+
   <view wx:if="{{activeProjectId}}" class="search-panel">
     <view class="search-box">
       <text class="search-mark">⌕</text>
@@ -90,12 +98,12 @@
       bindtap="clearSearch"
       hover-class="empty-secondary-button-hover"
       aria-role="button"
-    >清除搜索，查看全部</view>
+    >清除搜索</view>
   </view>
 
   <view wx:elif="{{showGenericEmpty}}" class="empty-panel ui-card">
-    <text class="empty-title">暂无讲述记录</text>
-    <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
+    <text class="empty-title">{{emptyTitleText}}</text>
+    <text class="empty-copy">{{emptyCopyText}}</text>
   </view>
 
   <view
