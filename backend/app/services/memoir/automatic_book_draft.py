@@ -16,7 +16,6 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-    MemoirSessionGoal,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -47,13 +46,12 @@ from app.services.memoir.semantic_state import semantic_json_signature
 
 
 async def narration_ready_at(db: AsyncSession, *, project_id: str, settle: bool = True) -> datetime:
-    """Use live gateway leases; a disconnected resumable session is not a live interview."""
+    """Both narration and completion interviews feed the book; only live leases block it."""
     from app.services.asr.capacity import voice_gateway_capacity_manager
 
     now = utcnow_naive()
     sessions = (await db.execute(select(MemoirVoiceSession.id, MemoirVoiceSession.stopped_at).where(
         MemoirVoiceSession.project_id == project_id,
-        MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
     ))).all()
     if await voice_gateway_capacity_manager.has_active_session([row.id for row in sessions]):
         return now + timedelta(seconds=max(1, get_settings().memoir_story_settle_seconds))
@@ -61,8 +59,7 @@ async def narration_ready_at(db: AsyncSession, *, project_id: str, settle: bool 
     if settle and seconds > 0:
         last_narration = await db.scalar(select(func.max(MemoirVoiceUtterance.created_at)).join(
             MemoirVoiceSession, MemoirVoiceSession.id == MemoirVoiceUtterance.voice_session_id,
-        ).where(MemoirVoiceSession.project_id == project_id,
-            MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value))
+        ).where(MemoirVoiceSession.project_id == project_id))
         last_activity = max((value for value in [last_narration, *(row.stopped_at for row in sessions)] if value), default=None)
         if last_activity:
             return max(now, last_activity + timedelta(seconds=seconds))

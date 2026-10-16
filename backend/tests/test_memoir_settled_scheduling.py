@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirEditingJobType
+from app.domain.memoir.types import MemoirEditingJobType, MemoirSessionGoal
 from app.models.memoir import MemoirEditingJob
 from app.services.memoir import automatic_book_draft, editing_jobs, story_tree_growth
 from tests.memoir_helpers import ensure_mobile_memoir_project
@@ -77,9 +77,10 @@ async def test_ready_signal_during_running_job_keeps_lease_and_requests_one_reru
 pytestmark = pytest.mark.usefixtures("unchanged_story_structure")
 
 
-async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, test_db, monkeypatch):
+@pytest.mark.parametrize('session_goal', list(MemoirSessionGoal))
+async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, test_db, monkeypatch, session_goal):
     from app.config import get_settings
-    from app.models.memoir import MemoirVoiceSession
+    from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
     from app.models.projects import Project
     from app.services.asr.capacity import voice_gateway_capacity_manager
     from app.services.memoir import book_generation_jobs, book_review_jobs, chapter_preparation_jobs
@@ -87,6 +88,7 @@ async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, te
     pid, _, _ = await _book(client, test_db)
     source, growth = await _stopped_growth_job(client, test_db, pid, '后来我到杭州工作。')
     session = await test_db.get(MemoirVoiceSession, source['session']['id'])
+    session.session_goal = session_goal.value
     now = automatic_book_draft.utcnow_naive()
     session.stopped_at = now
     await test_db.commit()
@@ -97,11 +99,13 @@ async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, te
     uid = await test_db.scalar(select(Project.user_id).where(Project.id == pid))
     lease = await voice_gateway_capacity_manager.acquire(uid, session.id)
     try:
-        parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=pid)
+        # Saving a completion answer closes the issue and dispatches this immediate trigger.
+        parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=pid, source='decision', settled=True)
         result = await automatic_book_draft.run_book_draft_job(test_db, parent)
         assert result.status.value == 'pending' and not result.result_json['chapters']
-        result = await story_tree_growth.run_story_tree_growth_job(test_db, growth)
-        assert result.status.value == 'pending' and result.result_json['stage'] == 'waiting_for_narration'
+        if session_goal == MemoirSessionGoal.OPEN_NARRATION:
+            result = await story_tree_growth.run_story_tree_growth_job(test_db, growth)
+            assert result.status.value == 'pending' and result.result_json['stage'] == 'waiting_for_narration'
         # Previously queued children also wait, including an explicit retry during a live call.
         for handler, payload in [
             (chapter_preparation_jobs.run_chapter_preparation_job, {'automatic': True}),
@@ -117,10 +121,17 @@ async def test_live_gateway_and_later_stop_extend_the_same_book_batch(client, te
         await lease.release()
     # Persisted listening state is resumable, not proof of a live socket.
     session.status = 'listening'
+    session.stopped_at = None
+    utterance = await test_db.get(MemoirVoiceUtterance, source['utterance_id'])
+    utterance.created_at = now
     await test_db.commit()
     assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=180)
     assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid, settle=False) == now
-    clock[0] += timedelta(seconds=120)
+    clock[0] += timedelta(seconds=60)
+    utterance.created_at = clock[0]
+    await test_db.commit()
+    assert await automatic_book_draft.narration_ready_at(test_db, project_id=pid) == now + timedelta(seconds=240)
+    clock[0] += timedelta(seconds=60)
     session.stopped_at = clock[0]
     session.status = 'stopped'
     await test_db.commit()
