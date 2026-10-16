@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     memoir_editing_poll_seconds: int = 1
     memoir_story_settle_seconds: int = 30
     memoir_book_settle_seconds: int = 30
+    memoir_story_batch_materials: int = 5
     memoir_editing_batch_size: int = 5
     memoir_editing_lease_seconds: int = 300
     memoir_editing_heartbeat_seconds: int = 30

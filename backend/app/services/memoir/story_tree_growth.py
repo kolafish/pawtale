@@ -53,6 +53,7 @@ from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.chapter_structure import load_structure_summaries, review_story_structure
+from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_lines, is_ready_story_material
@@ -158,6 +159,7 @@ class StoryGrowthProgress(BaseModel):
     batch: GrowthBatch | None = None
     deferred: dict[str, DeferredSource] = Field(default_factory=dict)
     placed_ids: list[str] = Field(default_factory=list)
+    live_source_ids: list[str] | None = None
 
 
 def _progress(job: MemoirEditingJob) -> StoryGrowthProgress:
@@ -419,12 +421,21 @@ async def schedule_story_tree_growth(
             and (existing.payload_json or {}).get("source") == "retry"):
         source = "retry"
     delay = SETTLE_SECONDS if session.status == MemoirVoiceSessionStatus.STOPPED.value else get_settings().memoir_story_settle_seconds
+    if session.status != MemoirVoiceSessionStatus.STOPPED.value:
+        candidates = await _live_batch_sources(db, project_id=project_id,
+            progress=_progress(existing) if existing else StoryGrowthProgress())
+        if len(candidates) >= max(1, get_settings().memoir_story_batch_materials):
+            delay = 0
+    run_after = utcnow_naive() + timedelta(seconds=delay)
+    if existing is not None and existing.status == MemoirEditingJobStatus.PENDING.value:
+        # New inputs must not keep postponing an already queued batch check.
+        run_after = min(run_after, existing.run_after)
     return await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"voice_session_id": voice_session_id, "source": source},
-        run_after=utcnow_naive() + timedelta(seconds=delay),
+        run_after=run_after,
         dedupe_key=f"organize_session:{voice_session_id}",
         replace_completed=True,
         preserve_progress=True,
@@ -432,12 +443,39 @@ async def schedule_story_tree_growth(
     )
 
 
-async def _active_corrections_exist(db: AsyncSession, *, project_id: str) -> bool:
-    return await db.scalar(select(MemoirEditingJob.id).where(
+async def _active_corrections_exist(db: AsyncSession, *, project_id: str, source_ids: set[str] | None = None) -> bool:
+    query = select(MemoirEditingJob.id).where(
         MemoirEditingJob.project_id == project_id,
         MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
         MemoirEditingJob.status.in_(editing_jobs.ACTIVE_EDITING_JOB_STATUSES),
-    ).limit(1)) is not None
+    )
+    if source_ids is not None:
+        query = query.where(MemoirEditingJob.dedupe_key.in_([f"correct_transcript:{key}" for key in source_ids]))
+    return await db.scalar(query.limit(1)) is not None
+
+
+async def _live_batch_sources(
+    db: AsyncSession, *, project_id: str, progress: StoryGrowthProgress,
+) -> list[MemoirVoiceUtterance]:
+    sources = (await db.scalars(select(MemoirVoiceUtterance).join(MemoirVoiceSession).outerjoin(MemoirSectionMaterial,
+        MemoirSectionMaterial.utterance_id == MemoirVoiceUtterance.id).where(
+        MemoirVoiceSession.project_id == project_id, MemoirSectionMaterial.id.is_(None),
+        MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
+        MemoirVoiceUtterance.completion_issue_id.is_(None),
+    ).options(selectinload(MemoirVoiceUtterance.chat_message)).order_by(
+        MemoirVoiceUtterance.created_at, MemoirVoiceUtterance.id))).all()
+    correcting = set((await db.scalars(select(MemoirEditingJob.dedupe_key).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
+        MemoirEditingJob.status.in_(editing_jobs.ACTIVE_EDITING_JOB_STATUSES),
+    ))).all())
+    deferred = await _deferred_sources(db, project_id)
+    deferred.update(progress.deferred)
+    return [item for item in sources if is_ready_story_material(item)
+        and has_story_content(current_utterance_text(item)) and f"correct_transcript:{item.id}" not in correcting
+        and not (item.id in deferred and deferred[item.id].status in {"not_story", "needs_user"}
+            and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
+            and _question_context_matches(deferred[item.id].question_context, item.chat_message))]
 
 
 async def _deferred_sources(db: AsyncSession, project_id: str) -> dict[str, DeferredSource]:
@@ -561,6 +599,7 @@ async def _create_initial_tree(
     job: MemoirEditingJob,
     progress: StoryGrowthProgress,
     excluded_source_hashes: dict[str, str],
+    source_ids: set[str] | None = None,
 ) -> bool:
     async def checkpoint_not_story(sources: tuple[SourceSegment, ...]) -> None:
         for source in sources:
@@ -599,6 +638,7 @@ async def _create_initial_tree(
         before_commit=checkpoint_plan,
         on_not_story=checkpoint_not_story,
         excluded_source_hashes=excluded_source_hashes,
+        source_utterance_ids=source_ids,
         only_if_missing=True,
     )
     return result.outcome == "created"
@@ -854,6 +894,7 @@ async def grow_story_tree(
     *,
     job: MemoirEditingJob,
     session: MemoirVoiceSession,
+    source_ids: set[str] | None = None,
 ) -> tuple[EditingJobResult, bool]:
     """Return progress and whether structure review already scheduled the book."""
     project = await db.scalar(select(Project).where(Project.id == job.project_id))
@@ -876,6 +917,7 @@ async def grow_story_tree(
             created = await _create_initial_tree(
                 db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress,
                 excluded_source_hashes={key: value.text_hash for key, value in deferred.items() if value.status == "not_story"},
+                source_ids=source_ids,
             )
             if not created:
                 # A parallel session initialized this project while our model
@@ -918,6 +960,8 @@ async def grow_story_tree(
             .execution_options(populate_existing=True)
         )
     ).all()
+    if source_ids is not None:
+        project_sources = [item for item in project_sources if item.id in source_ids]
     deferred.update(progress.deferred)
     for item in project_sources:
         previous = deferred.get(item.id)
@@ -1111,7 +1155,17 @@ async def grow_story_tree(
     # directory, not a transient chapter that the same review absorbed.
     await _save_progress(db, job, progress)
     structure_changed = False
-    if session.status == MemoirVoiceSessionStatus.STOPPED.value:
+    if source_ids is not None:
+        # Reuse the same digest caches as the final directory review, without
+        # rebuilding prose or changing the whole directory during a live call.
+        chapter_ids = set((await db.scalars(select(MemoirSection.chapter_id).join(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.utterance_id.in_(progress.placed_ids),
+            MemoirSection.project_id == job.project_id,
+        ))).all())
+        ai_model = await load_project_ai_model(db, job.project_id, None)
+        for chapter_id in sorted(chapter_ids):
+            await generate_or_reuse_chapter_digest(db, project_id=job.project_id, chapter_id=chapter_id, ai_model=ai_model)
+    elif session.status == MemoirVoiceSessionStatus.STOPPED.value:
         lease_token = job.lease_token
         structure_changed = await review_story_structure(
             db, user_id=project.user_id, project_id=job.project_id,
@@ -1125,6 +1179,7 @@ async def grow_story_tree(
             raise editing_jobs.EditingJobProgressLost
     placed_ids = list(dict.fromkeys(progress.placed_ids))
     progress.placed_ids = []
+    progress.live_source_ids = None
 
     _after_plan, after_chapters, after_sections = await _load_tree(
         db,
@@ -1195,14 +1250,41 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="讲述会话尚未完成或不参与故事树生长",
         )
-    from app.services.memoir.automatic_book_draft import defer_narration_work
-    waiting = await defer_narration_work(db, job)
-    if waiting:
-        waiting.result_json["stage"] = "waiting_for_narration"
-        return waiting
+    from app.services.memoir.automatic_book_draft import defer_narration_work, has_live_narration
+    live = await has_live_narration(db, project_id=job.project_id)
+    if live:
+        owner = await db.scalar(select(MemoirEditingJob.id).where(
+            MemoirEditingJob.project_id == job.project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+            MemoirEditingJob.status.in_(editing_jobs.ACTIVE_EDITING_JOB_STATUSES),
+        ).order_by(MemoirEditingJob.created_at, MemoirEditingJob.id).limit(1))
+        if owner != job.id:
+            job.run_after = utcnow_naive() + timedelta(seconds=SETTLE_SECONDS)
+            job.first_started_at = None
+            return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
+                result_json={**(job.result_json or {}), "stage": "waiting_for_batch"})
+    progress = _progress(job)
+    source_ids = set(progress.live_source_ids) if progress.live_source_ids is not None else None
+    if live and source_ids is None:
+        candidates = await _live_batch_sources(db, project_id=job.project_id, progress=progress)
+        batch_size = max(1, get_settings().memoir_story_batch_materials)
+        if len(candidates) < batch_size:
+            job.run_after = utcnow_naive() + timedelta(seconds=max(1, get_settings().memoir_story_settle_seconds))
+            job.first_started_at = None
+            return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
+                result_json={**(job.result_json or {}), "stage": "waiting_for_batch"})
+        progress.live_source_ids = [item.id for item in candidates[:batch_size]]
+        source_ids = set(progress.live_source_ids)
+        await _save_progress(db, job, progress)
+    elif not live:
+        waiting = await defer_narration_work(db, job)
+        if waiting:
+            waiting.result_json["stage"] = "waiting_for_narration"
+            return waiting
     if await _active_corrections_exist(
         db,
         project_id=job.project_id,
+        source_ids=source_ids,
     ):
         job.run_after = utcnow_naive() + timedelta(seconds=SETTLE_SECONDS)
         db.add(job)
@@ -1211,7 +1293,18 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.PENDING,
             result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
-    result, structure_changed = await grow_story_tree(db, job=job, session=session)
+    result, structure_changed = await grow_story_tree(db, job=job, session=session, source_ids=source_ids)
+    if source_ids is not None:
+        progress = _progress(job)
+        if progress.live_source_ids is not None:
+            progress.live_source_ids = None
+            await _save_progress(db, job, progress)
+        # Keep the same task pending for the next batch and the final directory
+        # review, including when Stop arrived while this snapshot was running.
+        job.run_after = utcnow_naive() + timedelta(seconds=SETTLE_SECONDS)
+        job.first_started_at = None
+        return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
+            result_json={**(job.result_json or {}), "stage": "waiting_for_batch"})
     if not structure_changed:
         from app.services.memoir.automatic_book_draft import schedule_book_draft
         await schedule_book_draft(db, project_id=job.project_id,

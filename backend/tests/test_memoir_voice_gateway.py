@@ -844,7 +844,8 @@ async def test_mobile_voice_gateway_rejects_missing_voice_consent(monkeypatch):
     }]
 
 
-async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch):
+@pytest.mark.parametrize("flush_error", [False, True])
+async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch, flush_error):
     from app.routers.memoir import voice_gateway as voice_gateway_router
 
     calls: dict[str, Any] = {"logs": []}
@@ -907,7 +908,9 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
             return {}
 
         async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
-            raise RuntimeError("database unavailable")
+            if flush_error:
+                raise RuntimeError("database unavailable")
+            return None
 
         async def discard_pending_audio(self) -> None:
             self.discard_calls += 1
@@ -950,6 +953,10 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
         "get_voice_session_detail",
         fake_get_voice_session_detail,
     )
+    async def disconnected(db, session_id, user_id):
+        calls["disconnected"] = (db, session_id, user_id)
+
+    monkeypatch.setattr(voice_gateway_router.memoir_voice_sessions, "mark_voice_session_disconnected", disconnected)
     monkeypatch.setattr(voice_gateway_router.memoir_voice_sessions, "stop_voice_session", fake_stop_voice_session)
     monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
     monkeypatch.setattr(voice_gateway_router, "VoiceGatewayPersistence", FakePersistence)
@@ -960,15 +967,19 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
 
     persistence = calls["persistence"]
     assert websocket.accepted
-    assert persistence.discard_calls == 0
+    assert persistence.discard_calls == (0 if flush_error else 1)
     assert lease.released
     assert calls["released_before_stopped"] is True
     assert "stop" not in calls
     assert calls["logs"][0]["event"] == "websocket.accepted"
-    assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
-    assert calls["logs"][1]["pending_audio_size_bytes"] == 4096
-    assert calls["logs"][2]["event"] == "pending_audio.preserved"
-    assert calls["logs"][2]["pending_audio_path"] == "/tmp/recoverable.pcm.part"
+    if flush_error:
+        assert "disconnected" not in calls
+        assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
+        assert calls["logs"][1]["pending_audio_size_bytes"] == 4096
+        assert calls["logs"][2]["event"] == "pending_audio.preserved"
+        assert calls["logs"][2]["pending_audio_path"] == "/tmp/recoverable.pcm.part"
+    else:
+        assert calls["disconnected"] == (db, "voice-1", "user-1")
     assert calls["gateway_kwargs"]["text_normalizer"]("现在有几个张杰啊？") == "现在有几个章节啊？"
     assert calls["gateway_kwargs"]["allowed_speaker_roles"] == {"narrator", "interviewer"}
     assert calls["gateway_kwargs"]["diagnostic_log_prefix"] == "memoir_voice_gateway"
