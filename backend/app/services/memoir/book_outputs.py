@@ -642,6 +642,21 @@ async def regenerate_book_output_editorial_copy(
         feedback=req.feedback,
         polish_level=project_transcript_polish_level(project),
     ) if targets else None
+    if editorial_copy:
+        generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
+        eligible_chapters = {chapter.chapter_id for chapter in manuscript.chapters
+            if not chapter_ids or chapter.chapter_id in chapter_ids}
+        has_book_copy = any(target in targets and getattr(editorial_copy, target)
+            for target in ("preface", "afterword", "back_cover_quote"))
+        has_chapter_copy = any(
+            item.chapter_id in eligible_chapters and any(
+                target in targets and getattr(item, attribute)
+                and (state is None or field not in state.manual_chapter_fields.get(item.chapter_id, []))
+                for target, attribute, field in (("chapter_intros", "intro", "intro"), ("pull_quotes", "pull_quote", "pull_quotes"))
+            ) for item in generated.values()
+        )
+        if not has_book_copy and not has_chapter_copy:
+            editorial_copy = None
     if not editorial_copy and not automatic:
         raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")
 
@@ -710,7 +725,6 @@ async def regenerate_book_output_editorial_copy(
             return _output_response(output)
         raise HTTPException(status_code=409, detail="生成期间文案选择已更新，请重试")
     if not automatic and editorial_copy:
-        generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
         claim_editorial_copy_fields(output,
             targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in targets
                 and getattr(editorial_copy, key)],

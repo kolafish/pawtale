@@ -1359,7 +1359,8 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     project_id = await ensure_mobile_memoir_project(client)
-    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    plan, chapters = await create_test_book_plan_with_chapters(test_db, project_id=project_id,
+        draft_contents=["那年我住在外婆家。我小时候常在外婆家的院子里晒太阳。", "后来我第一次离家去县城读书，心里很紧张。"])
     chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
     await _add_output_source_link(
         test_db,
@@ -1415,7 +1416,10 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
         .order_by(MemoirBookOutputVersion.version.desc())
     )
     assert event.metadata_json["result_version_id"] == version.id
-    assert version.manuscript_json["chapters"][0]["pull_quotes"] == []
+    quotes = version.manuscript_json["chapters"][0]["pull_quotes"]
+    assert len(quotes) == 1
+    assert quotes[0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert quotes[0]["source"] == "editorial_generated"
     assert "本次生成目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]
     assert "用户本次反馈：只换章首引语" in fake_ai.calls[0]["user_prompt"]
 
@@ -1975,6 +1979,29 @@ async def test_export_info_reuses_pdf_and_changes_with_effective_settings(client
     assert historical == {**info, "ready": True}
     conflict = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
     assert conflict.status_code == 409
+
+
+async def test_export_renderer_upgrade_ignores_legacy_pdf_cache(client, test_db, monkeypatch):
+    from app.services.file_exports import ExportFile
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
+    base = f"/api/mobile/memoir/projects/{project_id}/book-output/export"
+    with monkeypatch.context() as legacy:
+        legacy.setattr(book_output_export_cache, "BOOK_EXPORT_RENDER_REVISION", 7)
+        legacy.setattr(book_outputs, "render_book_output_export", lambda **kwargs: ExportFile(
+            "legacy.pdf", "application/pdf", b"%PDF-legacy\n%%EOF\n"))
+        old_info = (await client.get(base + "/info?format=pdf")).json()
+        old_pdf = await client.get(base + f"?format=pdf&cache_key={old_info['cache_key']}")
+        assert old_pdf.status_code == 200
+    info = (await client.get(base + "/info?format=pdf")).json()
+    assert info["version_id"] == old_info["version_id"] == version.id
+    assert info["cache_key"] != old_info["cache_key"]
+    assert info["ready"] is False
+    stale = await client.get(base + f"?format=pdf&cache_key={old_info['cache_key']}")
+    assert stale.status_code == 409
+    current = await client.get(base + f"?format=pdf&cache_key={info['cache_key']}")
+    assert current.status_code == 200 and current.content != old_pdf.content
 
 
 async def test_concurrent_export_and_timeout_retry_share_one_render(client, test_db, monkeypatch):
