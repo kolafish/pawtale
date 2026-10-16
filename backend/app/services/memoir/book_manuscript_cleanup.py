@@ -5,21 +5,6 @@ import re
 from typing import Any
 
 
-TEMPLATE_COPY_FORBIDDEN_TERMS = (
-    "爷爷主题回忆录",
-    "主题回忆录",
-    "章节规划",
-    "这一章主要记录",
-    "从口述内容看",
-    "相关的回忆",
-    "本章讲述",
-    "凡是过往皆是序章",
-    "后台",
-    "系统生成",
-    "AI生成",
-    "AI 生成",
-)
-
 BACK_COVER_QUOTE_HINTS = (
     "一想起",
     "想起来",
@@ -33,7 +18,6 @@ BACK_COVER_QUOTE_HINTS = (
     "家乡",
     "小时候",
 )
-SHORT_DEFAULT_AFTERWORDS = {"这本书还可以继续补充。", "愿常翻看。", "愿常翻看"}
 
 
 def _safe_str(value: object) -> str:
@@ -69,8 +53,7 @@ def first_sentence(text: str, *, max_chars: int) -> str:
 
 def usable_quote(value: str, *, min_chars: int = 2) -> bool:
     return (len(re.sub(r"[\W_]", "", value)) >= min_chars
-        and not any(char in value for char in "“”‘’「」『』\"'")
-        and not contains_template_language(value))
+        and not any(char in value for char in "“”‘’「」『』\"'"))
 
 
 def _sentences(value: str) -> list[str]:
@@ -165,11 +148,6 @@ def short_topic(title: str) -> str:
     return topic[:8]
 
 
-def contains_template_language(text: object) -> bool:
-    value = _safe_str(text)
-    return any(term in value for term in TEMPLATE_COPY_FORBIDDEN_TERMS)
-
-
 def fallback_preface(chapter_titles: list[str]) -> str:
     topics = []
     for title in chapter_titles:
@@ -221,7 +199,7 @@ def _quote_candidates(chapters: list[Any]) -> list[str]:
         candidates.extend(body_excerpt_candidates(_safe_str(chapter.get("content")), max_chars=45))
     result: list[str] = []
     for candidate in candidates:
-        if candidate and candidate not in result and not contains_template_language(candidate):
+        if candidate and candidate not in result:
             result.append(candidate)
     return result
 
@@ -269,7 +247,6 @@ def _rewrite_source_terms(text: str) -> str:
     return (
         text.replace("讲述来源", "口述片段")
         .replace("章节来源", "口述片段")
-        .replace("后台保留章节来源和口述素材", default_version_note())
     )
 
 
@@ -298,21 +275,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
         if kind == "cover":
             section["title"] = normalized_title
             section["content"] = "\n".join(part for part in [normalized_title, normalized_subtitle] if part)
-        elif kind == "title_page" and contains_template_language(section.get("content")):
-            prepared_by = _safe_str(profile.get("prepared_by")) or "家人整理"
-            narrator_name = _safe_str(profile.get("narrator_name"))
-            lines = [
-                normalized_subtitle,
-                f"口述：{narrator_name}" if narrator_name else "",
-                f"整理：{prepared_by}" if prepared_by else "",
-            ]
-            section["content"] = "\n\n".join(line for line in lines if line)
-        elif kind == "generation_note" and contains_template_language(section.get("content")):
-            section["content"] = default_generation_note()
-        elif kind == "preface" and (
-            not _safe_str(section.get("content"))
-            or contains_template_language(section.get("content"))
-        ):
+        elif kind == "preface" and not _safe_str(section.get("content")):
             section["content"] = fallback_preface(chapter_titles)
 
     for raw_chapter in chapters:
@@ -320,16 +283,11 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
         if not chapter:
             continue
         intro = _safe_str(chapter.get("intro"))
-        if not intro or contains_template_language(intro):
+        if not intro:
             chapter["intro"] = fallback_chapter_intro(
                 _safe_str(chapter.get("title")),
                 _safe_str(chapter.get("content")),
             )
-        chapter["pull_quotes"] = [
-            quote
-            for quote in _list(chapter.get("pull_quotes"))
-            if not contains_template_language(_safe_str(_dict(quote).get("text")))
-        ]
 
     back_matter = _dict(cleaned.get("back_matter"))
     if back_matter:
@@ -337,30 +295,18 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
         source_count = sum(_chapter_source_count(_dict(chapter)) for chapter in chapters)
         afterword = _dict(back_matter.get("afterword"))
         afterword_content = _safe_str(afterword.get("content"))
-        if afterword and (
-            not afterword_content
-            or afterword_content in SHORT_DEFAULT_AFTERWORDS
-            or contains_template_language(afterword_content)
-        ):
+        if afterword and not afterword_content:
             afterword["content"] = expanded_afterword()
         interview_records = _dict(back_matter.get("interview_records"))
         if interview_records:
             interview_records["title"] = "口述片段"
             content = _rewrite_source_terms(_safe_str(interview_records.get("content")))
-            interview_records["content"] = (
-                content
-                if content and not contains_template_language(content)
-                else interview_records_note(chapter_count=chapter_count, source_count=source_count)
-            )
+            interview_records["content"] = content or interview_records_note(chapter_count=chapter_count, source_count=source_count)
         version_note = _dict(back_matter.get("version_note"))
         if version_note:
             version_note["title"] = "版本与修订"
             content = _rewrite_source_terms(_safe_str(version_note.get("content")))
-            version_note["content"] = (
-                content
-                if content and not contains_template_language(content)
-                else default_version_note()
-            )
+            version_note["content"] = content or default_version_note()
         source_appendix = _dict(back_matter.get("source_appendix"))
         if source_appendix:
             source_appendix["title"] = "口述片段"
@@ -370,7 +316,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
     settings = _dict(cleaned.get("render_settings"))
     if settings is not None:
         quote = _safe_str(settings.get("back_cover_quote"))
-        if not quote or contains_template_language(quote):
+        if not quote:
             settings["back_cover_quote"] = fallback_back_cover_quote(chapters)
         cleaned["render_settings"] = settings
     return cleaned

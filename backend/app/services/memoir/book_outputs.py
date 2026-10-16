@@ -677,10 +677,6 @@ async def regenerate_book_output_editorial_copy(
         failed = set(state.failed_chapter_ids) - chapter_ids
         if not editorial_copy and targets:
             failed |= chapter_ids
-        elif editorial_copy and "chapter_intros" in targets:
-            generated_intros = {item.chapter_id for item in editorial_copy.chapter_intros if item.intro}
-            failed |= {chapter_id for chapter_id in chapter_ids if chapter_id not in generated_intros
-                and "intro" not in state.manual_chapter_fields.get(chapter_id, [])}
         state.failed_chapter_ids = sorted(failed)
         state.status = "failed" if failed or (not editorial_copy and targets) else "succeeded"
     manuscript_json = manuscript.model_dump(mode="json") if editorial_copy else latest.manuscript_json
@@ -717,7 +713,7 @@ async def regenerate_book_output_editorial_copy(
         generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
         claim_editorial_copy_fields(output,
             targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in targets
-                and (key == "back_cover_quote" or getattr(editorial_copy, key))],
+                and getattr(editorial_copy, key)],
             chapter_fields={chapter.chapter_id: [field for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes"))
                 if target in targets and (field == "pull_quotes" or generated[chapter.chapter_id].intro)]
                 for chapter in manuscript.chapters if chapter.chapter_id in generated
