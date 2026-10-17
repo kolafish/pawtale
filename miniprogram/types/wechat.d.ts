@@ -527,6 +527,7 @@ declare namespace WechatMiniprogram {
     requestVirtualPayment?(option: RequestVirtualPaymentOption): void;
     getDeviceInfo?(): DeviceInfo;
     getAppBaseInfo?(): AppBaseInfo;
+    canIUse?(schema: string): boolean;
     request<T = unknown>(option: RequestOption<T>): void;
     downloadFile(option: DownloadFileOption): void;
     uploadFile(option: UploadFileOption): void;

@@ -3850,3 +3850,24 @@ test("declining an opening completion offer keeps the ordinary session and start
   assert.equal(starts,1);
   assert.deepEqual(context.events,[]);
 });
+
+test("recorder configuration and automatic interruption evidence reach the session audit", t => {
+  const page = loadVoiceChatPage();
+  const audit = require("../services/audit-tracker.ts");
+  const calls = [];
+  t.mock.method(audit, "trackAuditAction", (...args) => calls.push(args));
+  const configuration = { capturePurpose: "barge_in", platform: "ohos", wechatVersion: "8.0.22",
+    sdkVersion: "3.17.3", nativeVoiceChatSupported: true, requestedAudioMode: "voiceChat" };
+  const context = { data: { voiceSessionId: "voice-incident" } };
+  const base = { frameCount: 0, audioBytesSent: 0, recordingElapsedMs: 0,
+    autoStopped: false, autoStopReason: "" };
+  page.handleClientEvent.call(context, { ...base, type: "recorder_start_requested",
+    recorderConfiguration: configuration });
+  page.handleClientEvent.call(context, { ...base, type: "barge_in_confirmed",
+    bargeInStartMs: 0, retainedAudioMs: 856 });
+  assert.deepEqual(calls.map(([feature, , options]) => [feature, options.voiceSessionId]),
+    [["voice_chat.client_event", "voice-incident"], ["voice_chat.client_event", "voice-incident"]]);
+  assert.deepEqual(calls[0][1].recorder_configuration, configuration);
+  assert.equal(calls[1][1].barge_in_start_ms, 0);
+  assert.equal(calls[1][1].retained_audio_ms, 856);
+});

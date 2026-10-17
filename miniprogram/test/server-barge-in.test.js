@@ -4,7 +4,7 @@ const test = require("node:test");
 const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
 const { WechatRecorderResource } = require("../services/recorder-resource.ts");
 
-function harness(t, sdkVersion = "3.17.3") {
+function harness(t, sdkVersion = "3.17.3", nativeVoiceChatSupported = true) {
   const native = { starts: 0, stops: 0, callbacks: {},
     onStart(fn) { this.callbacks.start = fn; }, onFrameRecorded(fn) { this.callbacks.frame = fn; },
     onStop(fn) { this.callbacks.stop = fn; }, onError(fn) { this.callbacks.error = fn; },
@@ -14,10 +14,16 @@ function harness(t, sdkVersion = "3.17.3") {
   global.wx = {
     getStorageSync() { return ""; },
     getAppBaseInfo() { return { version: "8.0.68", SDKVersion: sdkVersion }; },
+    getDeviceInfo() { return { platform: "ios", system: "iOS 18" }; },
+    canIUse(schema) {
+      assert.equal(schema, "RecorderManager.start.object.audioMode.voiceChat");
+      return nativeVoiceChatSupported;
+    },
   };
-  const events = [], errors = [];
+  const events = [], errors = [], clientEvents = [];
   const client = new MemoirStreamingAsrClient({ voiceSessionId: "test", guidanceMode: "free_narration",
-    callbacks: { onStatus() {}, onEvent() {}, onPartial() {}, onFinal() {}, onError: msg => errors.push(msg) },
+    callbacks: { onStatus() {}, onEvent() {}, onPartial() {}, onFinal() {}, onError: msg => errors.push(msg),
+      onClientEvent: event => clientEvents.push(event) },
   }, new WechatRecorderResource(() => native));
   client.socketOpen = true;
   client.socketTask = { send: ({ data }) => events.push(JSON.parse(data)), close() {} };
@@ -32,7 +38,7 @@ function harness(t, sdkVersion = "3.17.3") {
     type: "barge_in.speech", monitor_id, start_ms,
   }));
   t.after(() => client.close({ force: true }));
-  return { client, native, events, errors, callbacks, start, frame, speech };
+  return { client, native, events, errors, clientEvents, callbacks, start, frame, speech };
 }
 
 test("server confirmation promotes the same recorder and sends the exact retained opening once", t => {
@@ -42,6 +48,8 @@ test("server confirmation promotes the same recorder and sends the exact retaine
   assert.equal(h.events.some(e => e.type === "audio.frame"), false);
   h.speech(128); h.speech(128);
   assert.equal(h.callbacks.hits, 1);
+  assert.deepEqual(h.clientEvents.filter(e => e.type === "barge_in_confirmed").map(e =>
+    [e.bargeInStartMs, e.retainedAudioMs]), [[128, 256]]);
   const whileAuthorizing = h.frame(40);
   void h.client.stopBargeInMonitoring(); // playback cancellation preserves confirmed capture
   assert.equal(h.client.startRecording(), true);
@@ -50,6 +58,39 @@ test("server confirmation promotes the same recorder and sends the exact retaine
     [opening, word, whileAuthorizing]);
   assert.equal(h.events.filter(e => e.type === "session.start").length, 1);
   assert.ok(h.events.findIndex(e => e.type === "session.start") < h.events.findIndex(e => e.type === "audio.frame"));
+});
+
+for (const nativeSupport of [false, null]) {
+  test(`new SDK with native AEC capability ${nativeSupport} does not start passive capture`, t => {
+    const h = harness(t, "3.17.3", nativeSupport);
+    if (nativeSupport === null) delete global.wx.canIUse;
+    global.wx.getDeviceInfo = () => ({ platform: "ohos", system: "HarmonyOS" });
+    global.wx.getAppBaseInfo = () => ({ version: "8.0.22", SDKVersion: "3.17.3" });
+    assert.equal(h.client.startBargeInMonitoring(h.callbacks), false);
+    assert.equal(h.native.starts, 0);
+    assert.deepEqual(h.events, []);
+    assert.match(h.callbacks.errors[0], /点按钮回答/);
+    const configuration = h.clientEvents.find(e => e.type === "barge_in_unavailable").recorderConfiguration;
+    assert.deepEqual(configuration, { capturePurpose: "barge_in", platform: "ohos",
+      wechatVersion: "8.0.22", sdkVersion: "3.17.3", nativeVoiceChatSupported: nativeSupport,
+      requestedAudioMode: "default" });
+
+    assert.equal(h.client.startRecording(), true);
+    h.native.callbacks.start(); h.frame(30);
+    assert.equal(Object.hasOwn(h.native.options, "audioMode"), false);
+    assert.equal(h.events.filter(e => e.type === "audio.frame").length, 1);
+    assert.deepEqual(h.errors, []);
+  });
+}
+
+test("recording diagnostics include the runtime platform, versions and requested audio mode", t => {
+  const h = harness(t); h.start();
+  const requested = h.clientEvents.find(e => e.type === "recorder_start_requested");
+  assert.deepEqual(requested.recorderConfiguration, {
+    capturePurpose: "barge_in", platform: "ios", wechatVersion: "8.0.68", sdkVersion: "3.17.3",
+    nativeVoiceChatSupported: true, requestedAudioMode: "voiceChat",
+  });
+  assert.equal(h.native.options.audioMode, requested.recorderConfiguration.requestedAudioMode);
 });
 
 for (const sdkVersion of ["3.17.2", "2.32.3", "", "unknown", null]) {

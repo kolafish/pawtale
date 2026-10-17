@@ -45,12 +45,32 @@ const BARGE_IN_PREFIX_BYTES = 16000 * 2 * 2;
 const BARGE_IN_PREPARE_TIMEOUT_MS = 10000;
 const BARGE_IN_MAX_PENDING_BYTES = 16000 * 2 * 12;
 
-function supportsVoiceChatRecording(): boolean {
-  // RecorderManager.start.audioMode enables native AEC from base library 3.17.3.
-  const version = (wx.getAppBaseInfo?.().SDKVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
-  if (!version) return false;
-  const [major, minor, patch] = version.slice(1).map(Number);
-  return major > 3 || (major === 3 && (minor > 17 || (minor === 17 && patch >= 3)));
+export interface MemoirRecorderConfiguration {
+  capturePurpose: "barge_in" | "utterance";
+  platform: string;
+  wechatVersion: string;
+  sdkVersion: string;
+  nativeVoiceChatSupported: boolean | null;
+  requestedAudioMode: "voiceChat" | "default";
+}
+
+function recorderConfiguration(
+  capturePurpose: MemoirRecorderConfiguration["capturePurpose"],
+): MemoirRecorderConfiguration {
+  const app = wx.getAppBaseInfo?.();
+  const sdkVersion = app?.SDKVersion || "";
+  const version = sdkVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const [major, minor, patch] = version ? version.slice(1).map(Number) : [0, 0, 0];
+  const sdkSupported = major > 3 || (major === 3 && (minor > 17 || (minor === 17 && patch >= 3)));
+  const nativeVoiceChatSupported = wx.canIUse?.("RecorderManager.start.object.audioMode.voiceChat") ?? null;
+  return {
+    capturePurpose,
+    platform: wx.getDeviceInfo?.().platform || "",
+    wechatVersion: app?.version || "",
+    sdkVersion,
+    nativeVoiceChatSupported,
+    requestedAudioMode: sdkSupported && nativeVoiceChatSupported === true ? "voiceChat" : "default",
+  };
 }
 
 export interface BargeInCallbacks {
@@ -90,6 +110,9 @@ export type MemoirStreamingAsrClientEventType =
   | "socket_close"
   | "socket_send_fail"
   | "recorder_error"
+  | "recorder_start_requested"
+  | "barge_in_unavailable"
+  | "barge_in_confirmed"
   | "recording_auto_stop"
   | "audio_end_sent"
   | "wait_timeout";
@@ -120,6 +143,9 @@ export interface MemoirStreamingAsrClientEvent {
   autoStopReason: MemoirAutoStopReason | "";
   errorKind?: VoiceChatErrorInfo["kind"];
   errorCode?: string;
+  recorderConfiguration?: MemoirRecorderConfiguration;
+  bargeInStartMs?: number;
+  retainedAudioMs?: number;
 }
 
 export interface MemoirStreamingAsrOptions {
@@ -319,7 +345,9 @@ export class MemoirStreamingAsrClient {
 
   startBargeInMonitoring(callbacks: BargeInCallbacks): boolean {
     if (!this.socketOpen || this.recording || this.bargeInMode || this.acceptingFrames) return false;
-    if (!supportsVoiceChatRecording()) {
+    const configuration = recorderConfiguration("barge_in");
+    if (configuration.requestedAudioMode !== "voiceChat") {
+      this.emitClientEvent("barge_in_unavailable", { recorderConfiguration: configuration });
       callbacks.onError("当前微信版本不支持自动打断，请点按钮回答");
       return false;
     }
@@ -417,6 +445,8 @@ export class MemoirStreamingAsrClient {
   private startNativeRecorder(maxDurationMs: number): boolean {
     this.recorderStarted = false;
     try {
+      const configuration = recorderConfiguration(this.bargeInMode === "monitoring" ? "barge_in" : "utterance");
+      this.emitClientEvent("recorder_start_requested", { recorderConfiguration: configuration });
       const started = this.recorderResource.start(this.recorderOwnerId, {
         duration: Math.min(STREAMING_RECORDING_DURATION_MS, Math.max(1000, maxDurationMs)),
         sampleRate: 16000,
@@ -424,7 +454,7 @@ export class MemoirStreamingAsrClient {
         encodeBitRate: STREAMING_ENCODE_BIT_RATE,
         format: "PCM",
         frameSize: STREAMING_FRAME_SIZE_KB,
-        ...(supportsVoiceChatRecording() ? { audioMode: "voiceChat" as const } : {}),
+        ...(configuration.requestedAudioMode === "voiceChat" ? { audioMode: "voiceChat" as const } : {}),
       }, {
         onStart: () => this.handleRecorderStarted(),
         onFrame: (result) => this.handleFrame(result.frameBuffer, result.isLastFrame),
@@ -657,6 +687,10 @@ export class MemoirStreamingAsrClient {
           discardBytes -= size;
         }
         this.bargeInMode = "pending";
+        this.emitClientEvent("barge_in_confirmed", {
+          bargeInStartMs: startByte / 32,
+          retainedAudioMs: this.bargeInBytes / 32,
+        });
         this.sendJson({ type: "barge_in.stop", monitor_id: this.bargeInId });
         if (!this.socketOpen) return;
         this.bargeInPrepareTimer = setTimeout(() => {
