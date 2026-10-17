@@ -72,7 +72,7 @@ async def mobile_memoir_voice_gateway(
         return
 
     persistence: VoiceGatewayPersistence | None = None
-    discard_pending_audio = True
+    discard_pending_audio = False
     connection_id = str(uuid.uuid4())
     diagnostics_context = {
         "gateway": "memoir_voice_session",
@@ -103,6 +103,7 @@ async def mobile_memoir_voice_gateway(
             stop_error = error_message
             try:
                 flushed = await persistence.flush_unfinalized_audio()
+                discard_pending_audio = True
                 if flushed:
                     _log_voice_gateway_router_event(
                         "unfinalized_audio.flushed",
@@ -112,8 +113,9 @@ async def mobile_memoir_voice_gateway(
                         **diagnostics_context,
                     )
             except Exception as exc:
-                stop_error = stop_error or str(exc)
                 discard_pending_audio = False
+                await db.rollback()
+                stop_error = stop_error or "unfinalized_audio_persistence_failed"
                 _log_voice_gateway_router_event(
                     "unfinalized_audio.flush_failed",
                     connection_id=connection_id,
@@ -125,7 +127,7 @@ async def mobile_memoir_voice_gateway(
                 )
             if stop_reason == "transport_closed" and not stop_error:
                 await memoir_voice_sessions.mark_voice_session_disconnected(db, voice_session_id, current_user_id)
-            elif stop_reason != "transport_closed":
+            else:
                 await memoir_voice_sessions.stop_voice_session(
                     db,
                     voice_session_id,

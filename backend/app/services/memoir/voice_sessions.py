@@ -29,6 +29,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
 )
+from app.services.asr.capacity import voice_gateway_capacity_manager
 from app.services.memoir import (
     completion_interviews,
     completion_issues,
@@ -55,13 +56,18 @@ async def _load_voice_session(
     db: AsyncSession,
     voice_session_id: str,
     user_id: str,
+    *,
+    for_update: bool = False,
 ) -> MemoirVoiceSession:
-    result = await db.execute(
+    query = (
         select(MemoirVoiceSession)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(MemoirVoiceSession.id == voice_session_id, Project.user_id == user_id)
         .options(*_detail_options())
     )
+    if for_update:
+        query = query.with_for_update(of=MemoirVoiceSession).execution_options(populate_existing=True)
+    result = await db.execute(query)
     voice_session = result.scalar_one_or_none()
     if not voice_session:
         raise HTTPException(status_code=404, detail="本次语音记录不存在")
@@ -292,7 +298,12 @@ async def mark_voice_session_listening(
     voice_session_id: str,
     user_id: str,
 ) -> MemoirVoiceSessionDetailResponse:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    voice_session = await _load_voice_session(db, voice_session_id, user_id, for_update=True)
+    if voice_session.status in {MemoirVoiceSessionStatus.STOPPED.value, MemoirVoiceSessionStatus.FAILED.value}:
+        raise HTTPException(status_code=409, detail="本次讲述已结束，请重新开始")
+    # A previous connection's flush cannot confirm audio from this new turn.
+    voice_session.metadata_json = {**(voice_session.metadata_json or {}),
+        "connection_state": MemoirVoiceConnectionState().model_dump(mode="json")}
     if voice_session.status == MemoirVoiceSessionStatus.CREATED.value:
         voice_session.status = MemoirVoiceSessionStatus.LISTENING.value
         voice_session.error_message = ""
@@ -320,8 +331,18 @@ async def stop_voice_session(
     voice_session_id: str,
     user_id: str,
     req: MemoirVoiceSessionStopRequest,
+    *,
+    require_gateway_finished: bool = False,
 ) -> MemoirVoiceSessionDetailResponse:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    voice_session = await _load_voice_session(db, voice_session_id, user_id, for_update=True)
+    if require_gateway_finished:
+        if await voice_gateway_capacity_manager.has_active_session([voice_session_id]) or (
+            voice_session.status in {MemoirVoiceSessionStatus.LISTENING.value, MemoirVoiceSessionStatus.SPEAKING.value}
+            and MemoirVoiceConnectionState.model_validate(
+                (voice_session.metadata_json or {}).get("connection_state") or {},
+            ).disconnected_at is None
+        ):
+            raise HTTPException(status_code=409, detail="最后一段录音仍在保存，请稍后再结束讲述。")
     if voice_session.status not in {
         MemoirVoiceSessionStatus.STOPPED.value,
         MemoirVoiceSessionStatus.FAILED.value,

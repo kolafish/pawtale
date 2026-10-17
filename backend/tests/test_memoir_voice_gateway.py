@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text as sql_text
 from starlette.websockets import WebSocketDisconnect
 
 from app.domain.memoir.types import (
@@ -845,144 +845,117 @@ async def test_mobile_voice_gateway_rejects_missing_voice_consent(monkeypatch):
 
 
 @pytest.mark.parametrize("flush_error", [False, True])
-async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch, flush_error):
+async def test_transport_close_rest_stop_waits_for_gateway_audio_outcome(
+    client, test_db, tmp_path, monkeypatch, flush_error,
+):
+    from app.database import async_session_maker
     from app.routers.memoir import voice_gateway as voice_gateway_router
+    from app.services.asr.capacity import voice_gateway_capacity_manager
+    from app.services.memoir.audio_files import audio_file_path
 
-    calls: dict[str, Any] = {"logs": []}
+    monkeypatch.setattr(memoir_audio_files, "MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    created = await post_mobile_memoir_voice_session(client, json={})
+    session_id = created.json()["session"]["id"]
+    shutdown_started, resume_shutdown = asyncio.Event(), asyncio.Event()
+    flush_started, resume_flush = asyncio.Event(), asyncio.Event()
+    buffers = []
+    pcm = b"unfinished-last-utterance"
 
-    class FakeUser:
-        id = "user-1"
+    async def authenticate(_websocket, _db):
+        return type("User", (), {"id": user_id})()
 
-    class FakeWebSocket:
-        def __init__(self) -> None:
-            self.accepted = False
-
-        async def accept(self) -> None:
-            self.accepted = True
-
-    async def fake_authenticate(websocket: Any, db: Any) -> FakeUser:
-        calls["auth"] = (websocket, db)
-        return FakeUser()
-
-    async def fake_get_voice_session_detail(db: Any, voice_session_id: str, user_id: str) -> object:
-        calls["detail"] = (db, voice_session_id, user_id)
-        return object()
-
-    async def fake_stop_voice_session(db: Any, voice_session_id: str, user_id: str, request: Any) -> object:
-        calls["stop"] = (db, voice_session_id, user_id, request.error_message)
-        return object()
-
-    class FakeLease:
-        def __init__(self) -> None:
-            self.released = False
-
-        async def release(self) -> None:
-            self.released = True
-
-    lease = FakeLease()
-
-    class FakeCapacityManager:
-        async def acquire(self, user_id: str, session_id: str) -> FakeLease:
-            calls["capacity"] = (user_id, session_id)
-            return lease
-
-    class FakePersistence:
-        pending_audio_path = "/tmp/recoverable.pcm.part"
-        pending_audio_size_bytes = 4096
-
-        def __init__(self, **kwargs: Any) -> None:
-            calls["persistence_kwargs"] = kwargs
-            self.discard_calls = 0
-            calls["persistence"] = self
-
-        async def set_turn_context(self, _context: Any) -> None:
-            return None
-
-        async def record_audio_frame(self, _audio: bytes) -> None:
-            return None
-
-        async def finish_audio(self, _speech_detected: bool | None) -> None:
-            return None
-
-        async def persist_final(self, _event: StreamingASREvent) -> dict[str, Any]:
-            return {}
-
-        async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
-            if flush_error:
-                raise RuntimeError("database unavailable")
-            return None
-
-        async def discard_pending_audio(self) -> None:
-            self.discard_calls += 1
-
-    class FakeGatewaySession:
-        def __init__(self, **kwargs: Any) -> None:
-            calls["gateway_kwargs"] = kwargs
-
-        async def run(self) -> None:
-            await calls["gateway_kwargs"]["on_stop"](None, "transport_closed")
-            calls["released_before_stopped"] = lease.released
-
-    def fake_log(event: str, **payload: Any) -> None:
-        calls["logs"].append({"event": event, **payload})
-
-    websocket = FakeWebSocket()
-    db = object()
-    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+    async def authorized(*_args):
+        return True
 
     async def credit_available(_user_id):
         return None
 
+    class DelayedPersistence(VoiceGatewayPersistence):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            buffers.append(self)
+
+        async def flush_unfinalized_audio(self):
+            flush_started.set()
+            await resume_flush.wait()
+            if flush_error:
+                # A failed SQL write leaves the transaction unusable until rollback.
+                await self.db.execute(sql_text("SELECT 1 / 0"))
+            return await super().flush_unfinalized_audio()
+
+    class ClosingGateway:
+        def __init__(self, **kwargs):
+            self.callbacks = kwargs
+
+        async def run(self):
+            await self.callbacks["on_start"]()
+            await self.callbacks["on_audio_frame"](pcm)
+            shutdown_started.set()
+            await resume_shutdown.wait()
+            await self.callbacks["on_stop"](None, "transport_closed")
+
+    class DisconnectedWebSocket:
+        async def accept(self):
+            pass
+
+    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", authenticate)
     monkeypatch.setattr(voice_gateway_router, "assert_ai_credit_available", credit_available)
+    monkeypatch.setattr(voice_gateway_router.memoir_voice_authorization,
+                        "has_current_voice_authorization_consent", authorized)
+    monkeypatch.setattr(voice_gateway_router, "VoiceGatewayPersistence", DelayedPersistence)
+    monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", ClosingGateway)
 
-    async def authorized(_db: Any, _user_id: str) -> bool:
-        return True
+    async with async_session_maker() as gateway_db:
+        task = asyncio.create_task(voice_gateway_router.mobile_memoir_voice_gateway(
+            DisconnectedWebSocket(), session_id, gateway_db,
+        ))
+        try:
+            await asyncio.wait_for(shutdown_started.wait(), 5)
+            pending_path = buffers[0].pending_audio_path
+            assert pending_path is not None and pending_path.read_bytes() == pcm
+            for stage in ("shutdown", "flush"):
+                if stage == "flush":
+                    resume_shutdown.set()
+                    await asyncio.wait_for(flush_started.wait(), 5)
+                assert await voice_gateway_capacity_manager.has_active_session([session_id])
+                response = await client.post(
+                    f"/api/mobile/memoir/voice-sessions/{session_id}/stop", json={},
+                )
+                assert response.status_code == 409
+                await test_db.rollback()
+                detail = (await client.get(
+                    f"/api/mobile/memoir/voice-sessions/{session_id}",
+                )).json()
+                assert detail["session"]["status"] == "listening"
+                assert detail["utterances"] == []
+                await test_db.rollback()
+            resume_flush.set()
+            await asyncio.wait_for(task, 5)
+        finally:
+            resume_shutdown.set()
+            resume_flush.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
-    monkeypatch.setattr(
-        voice_gateway_router.memoir_voice_authorization,
-        "has_current_voice_authorization_consent",
-        authorized,
+    assert not await voice_gateway_capacity_manager.has_active_session([session_id])
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop", json={},
     )
-    monkeypatch.setattr(
-        voice_gateway_router.memoir_voice_authorization,
-        "audio_authorizer",
-        lambda _db, _user_id: authorized,
-    )
-    monkeypatch.setattr(
-        voice_gateway_router.memoir_voice_sessions,
-        "get_voice_session_detail",
-        fake_get_voice_session_detail,
-    )
-    async def disconnected(db, session_id, user_id):
-        calls["disconnected"] = (db, session_id, user_id)
-
-    monkeypatch.setattr(voice_gateway_router.memoir_voice_sessions, "mark_voice_session_disconnected", disconnected)
-    monkeypatch.setattr(voice_gateway_router.memoir_voice_sessions, "stop_voice_session", fake_stop_voice_session)
-    monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
-    monkeypatch.setattr(voice_gateway_router, "VoiceGatewayPersistence", FakePersistence)
-    monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", FakeGatewaySession)
-    monkeypatch.setattr(voice_gateway_router, "_log_voice_gateway_router_event", fake_log)
-
-    await voice_gateway_router.mobile_memoir_voice_gateway(websocket, "voice-1", db)
-
-    persistence = calls["persistence"]
-    assert websocket.accepted
-    assert persistence.discard_calls == (0 if flush_error else 1)
-    assert lease.released
-    assert calls["released_before_stopped"] is True
-    assert "stop" not in calls
-    assert calls["logs"][0]["event"] == "websocket.accepted"
+    assert response.status_code == 200
+    detail = response.json()
     if flush_error:
-        assert "disconnected" not in calls
-        assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
-        assert calls["logs"][1]["pending_audio_size_bytes"] == 4096
-        assert calls["logs"][2]["event"] == "pending_audio.preserved"
-        assert calls["logs"][2]["pending_audio_path"] == "/tmp/recoverable.pcm.part"
+        assert detail["session"]["status"] == "failed"
+        assert detail["session"]["error_message"] == "unfinalized_audio_persistence_failed"
+        assert detail["utterances"] == []
+        assert pending_path.read_bytes() == pcm
     else:
-        assert calls["disconnected"] == (db, "voice-1", "user-1")
-    assert calls["gateway_kwargs"]["text_normalizer"]("现在有几个张杰啊？") == "现在有几个章节啊？"
-    assert calls["gateway_kwargs"]["allowed_speaker_roles"] == {"narrator", "interviewer"}
-    assert calls["gateway_kwargs"]["diagnostic_log_prefix"] == "memoir_voice_gateway"
+        assert detail["session"]["status"] == "stopped"
+        assert len(detail["utterances"]) == 1
+        audio = await test_db.get(AudioFile, detail["utterances"][0]["audio_file_id"])
+        assert audio is not None and audio_file_path(audio).read_bytes() == pcm
+        assert not pending_path.exists()
 
 
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
