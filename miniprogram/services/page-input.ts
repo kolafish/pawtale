@@ -1,11 +1,5 @@
 export type PageQuery = Record<string, string | undefined>;
 
-export interface PageFormSubmitEvent<TValue> {
-  detail: {
-    value: TValue;
-  };
-}
-
 export interface PageDatasetEvent<TDataset = Record<string, unknown>> {
   currentTarget: {
     dataset: TDataset;

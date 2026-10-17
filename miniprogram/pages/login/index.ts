@@ -7,12 +7,18 @@ import {
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
 import { relaunchHome } from "../../services/navigation";
-import { queryParam, type PageFormSubmitEvent, type PageQuery } from "../../services/page-input";
+import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
 import { openWechatPrivacyContract } from "../../services/wechat-privacy";
 import { uploadBackendAvatar } from "../../services/user-profile";
 
 const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
+
+interface InputEvent {
+  detail: {
+    value: string;
+  };
+}
 
 interface ChooseAvatarEvent {
   detail: {
@@ -27,6 +33,7 @@ interface LoginData {
   // Logging in to tell a story never stops here: avatar and nickname only matter to likes.
   profileMode: boolean;
   profileSaving: boolean;
+  profileDisplayName: string;
   profileAvatarPath: string;
   error: string;
 }
@@ -37,6 +44,7 @@ definePage<LoginData>()({
     wechatLoading: false,
     profileMode: false,
     profileSaving: false,
+    profileDisplayName: "",
     profileAvatarPath: "",
     error: "",
   },
@@ -55,8 +63,8 @@ definePage<LoginData>()({
     wx.navigateBack();
   },
 
-  clearProfileError() {
-    this.setData({ error: "" });
+  changeProfileDisplayName(event: InputEvent) {
+    this.setData({ profileDisplayName: event.detail.value, error: "" });
   },
 
   chooseWeChatAvatar(event: ChooseAvatarEvent) {
@@ -92,13 +100,13 @@ definePage<LoginData>()({
     }
   },
 
-  async saveWeChatProfile(event: PageFormSubmitEvent<{ nickname: string }>) {
+  async saveWeChatProfile() {
     if (this.data.profileSaving) {
       return;
     }
-    const displayName = event.detail.value.nickname.trim();
+    const displayName = this.data.profileDisplayName.trim();
     if (!displayName) {
-      this.setData({ error: "请填写昵称" });
+      this.setData({ error: "请填写昵称；点击输入框可直接选择微信昵称" });
       return;
     }
     this.setData({ profileSaving: true, error: "" });
