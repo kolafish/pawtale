@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
@@ -268,6 +270,29 @@ async def test_mobile_memoir_voice_session_stop_and_failure_states(client):
     failed = failed_response.json()["session"]
     assert failed["status"] == "failed"
     assert failed["error_message"] == "provider disconnected"
+
+
+async def test_rest_stop_requires_current_disconnect_confirmation(client, test_db):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    created = await post_mobile_memoir_voice_session(client, json={})
+    session_id = created.json()["session"]["id"]
+    for _ in range(2):
+        await memoir_voice_sessions.mark_voice_session_listening(test_db, session_id, user_id)
+        # An absent local lease (e.g. after a restart) does not prove audio committed.
+        response = await client.post(
+            f"/api/mobile/memoir/voice-sessions/{session_id}/stop", json={},
+        )
+        assert response.status_code == 409
+        await test_db.rollback()
+        await memoir_voice_sessions.mark_voice_session_disconnected(test_db, session_id, user_id)
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop", json={},
+    )
+    assert response.status_code == 200
+    assert response.json()["session"]["status"] == "stopped"
+    with pytest.raises(HTTPException) as exc_info:
+        await memoir_voice_sessions.mark_voice_session_listening(test_db, session_id, user_id)
+    assert exc_info.value.status_code == 409
 
 
 async def test_stopping_narration_schedules_one_session_story_growth_job(
