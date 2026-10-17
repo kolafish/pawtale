@@ -79,6 +79,7 @@
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-body);
   line-height: var(--ui-line-body);
+  text-align: center;
 }
 
 .topic-panel {
@@ -1963,7 +1964,9 @@
 }
 .voice-chat-page.voice-session-embedded {
   min-height: 0;
-  padding: 0;
+  padding-top: 0;
+  padding-right: 0;
+  padding-left: 0;
   background: transparent;
 }
 

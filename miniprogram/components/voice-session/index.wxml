@@ -13,7 +13,6 @@
     </button>
     <view class="top-copy">
       <text class="mode-label">{{topModeLabel}}</text>
-      <text class="top-subtitle">{{topSubtitle}}</text>
     </view>
     <button
       id="voice-finish-action"
@@ -25,6 +24,7 @@
       {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
     </button>
   </view>
+  <text class="top-subtitle">{{topSubtitle}}</text>
 
   <view wx:if="{{!recording || sessionGoal !== 'book_completion'}}" class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>

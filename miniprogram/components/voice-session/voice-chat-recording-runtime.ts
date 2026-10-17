@@ -405,7 +405,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         saved = await this.refreshVoiceSessionSnapshot();
       } else {
         saved = await this.refreshVoiceSessionSnapshot();
-        if (saved?.session.status === "created") {
+        if (saved && saved.session.status !== "stopped" && saved.session.status !== "failed") {
           await stopMemoirVoiceSession(this.data.voiceSessionId);
           saved = await this.refreshVoiceSessionSnapshot();
         }
