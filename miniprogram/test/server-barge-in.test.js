@@ -4,13 +4,17 @@ const test = require("node:test");
 const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
 const { WechatRecorderResource } = require("../services/recorder-resource.ts");
 
-function harness(t) {
+function harness(t, sdkVersion = "3.17.3") {
   const native = { starts: 0, stops: 0, callbacks: {},
     onStart(fn) { this.callbacks.start = fn; }, onFrameRecorded(fn) { this.callbacks.frame = fn; },
     onStop(fn) { this.callbacks.stop = fn; }, onError(fn) { this.callbacks.error = fn; },
-    start() { this.starts++; }, stop() { this.stops++; queueMicrotask(() => this.callbacks.stop()); },
+    start(options) { this.starts++; this.options = options; },
+    stop() { this.stops++; queueMicrotask(() => this.callbacks.stop()); },
   };
-  global.wx = { getStorageSync() { return ""; } };
+  global.wx = {
+    getStorageSync() { return ""; },
+    getAppBaseInfo() { return { version: "8.0.68", SDKVersion: sdkVersion }; },
+  };
   const events = [], errors = [];
   const client = new MemoirStreamingAsrClient({ voiceSessionId: "test", guidanceMode: "free_narration",
     callbacks: { onStatus() {}, onEvent() {}, onPartial() {}, onFinal() {}, onError: msg => errors.push(msg) },
@@ -33,6 +37,7 @@ function harness(t) {
 
 test("server confirmation promotes the same recorder and sends the exact retained opening once", t => {
   const h = harness(t); h.start();
+  assert.equal(h.native.options.audioMode, "voiceChat");
   h.frame(10); const opening = h.frame(20); const word = h.frame(30);
   assert.equal(h.events.some(e => e.type === "audio.frame"), false);
   h.speech(128); h.speech(128);
@@ -46,6 +51,36 @@ test("server confirmation promotes the same recorder and sends the exact retaine
   assert.equal(h.events.filter(e => e.type === "session.start").length, 1);
   assert.ok(h.events.findIndex(e => e.type === "session.start") < h.events.findIndex(e => e.type === "audio.frame"));
 });
+
+for (const sdkVersion of ["3.17.2", "2.32.3", "", "unknown", null]) {
+  test(`unsupported or unknown base library ${JSON.stringify(sdkVersion)} keeps manual recording available`, t => {
+    const h = harness(t, sdkVersion);
+    if (sdkVersion === null) delete global.wx.getAppBaseInfo;
+    assert.equal(h.client.startBargeInMonitoring(h.callbacks), false);
+    assert.equal(h.client.isBargeInMonitoring(), false);
+    assert.equal(h.native.starts, 0);
+    assert.deepEqual(h.events, []);
+    assert.match(h.callbacks.errors[0], /点按钮回答/);
+    assert.deepEqual(h.errors, []);
+
+    assert.equal(h.client.startRecording(), true);
+    h.native.callbacks.start();
+    const opening = h.frame(30);
+    assert.equal(Object.hasOwn(h.native.options, "audioMode"), false);
+    assert.equal(h.events.filter(e => e.type === "session.start").length, 1);
+    assert.deepEqual(h.events.filter(e => e.type === "audio.frame").map(e => Buffer.from(e.audio, "base64")),
+      [opening]);
+  });
+}
+
+for (const sdkVersion of ["3.17.3", "3.18.0", "4.0.0"]) {
+  test(`base library ${sdkVersion} enables native echo cancellation for ordinary recording too`, t => {
+    const h = harness(t, sdkVersion);
+    assert.equal(h.client.startRecording(), true);
+    h.native.callbacks.start();
+    assert.equal(h.native.options.audioMode, "voiceChat");
+  });
+}
 
 test("a stopped playback cannot interrupt a newer playback", async t => {
   const h = harness(t); h.start(); const oldId = h.client.bargeInId;

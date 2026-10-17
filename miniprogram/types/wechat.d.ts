@@ -199,6 +199,7 @@ declare namespace WechatMiniprogram {
     encodeBitRate?: number;
     format?: "mp3" | "aac" | "wav" | "PCM";
     frameSize?: number;
+    audioMode?: "default" | "voiceChat" | "voiceRecognition" | "recording";
   }
 
   interface RecorderManagerStopCallbackResult {
@@ -511,6 +512,7 @@ declare namespace WechatMiniprogram {
 
   interface AppBaseInfo {
     version: string;
+    SDKVersion: string;
   }
 
   interface MemoryWarningResult {

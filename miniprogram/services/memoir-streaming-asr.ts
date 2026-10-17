@@ -45,6 +45,14 @@ const BARGE_IN_PREFIX_BYTES = 16000 * 2 * 2;
 const BARGE_IN_PREPARE_TIMEOUT_MS = 10000;
 const BARGE_IN_MAX_PENDING_BYTES = 16000 * 2 * 12;
 
+function supportsVoiceChatRecording(): boolean {
+  // RecorderManager.start.audioMode enables native AEC from base library 3.17.3.
+  const version = (wx.getAppBaseInfo?.().SDKVersion || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!version) return false;
+  const [major, minor, patch] = version.slice(1).map(Number);
+  return major > 3 || (major === 3 && (minor > 17 || (minor === 17 && patch >= 3)));
+}
+
 export interface BargeInCallbacks {
   onBargeIn(): void;
   onError(message: string): void;
@@ -311,6 +319,10 @@ export class MemoirStreamingAsrClient {
 
   startBargeInMonitoring(callbacks: BargeInCallbacks): boolean {
     if (!this.socketOpen || this.recording || this.bargeInMode || this.acceptingFrames) return false;
+    if (!supportsVoiceChatRecording()) {
+      callbacks.onError("当前微信版本不支持自动打断，请点按钮回答");
+      return false;
+    }
     if (this.recorderResource.isBusy()) {
       callbacks.onError("麦克风正在使用中");
       return false;
@@ -412,6 +424,7 @@ export class MemoirStreamingAsrClient {
         encodeBitRate: STREAMING_ENCODE_BIT_RATE,
         format: "PCM",
         frameSize: STREAMING_FRAME_SIZE_KB,
+        ...(supportsVoiceChatRecording() ? { audioMode: "voiceChat" as const } : {}),
       }, {
         onStart: () => this.handleRecorderStarted(),
         onFrame: (result) => this.handleFrame(result.frameBuffer, result.isLastFrame),
