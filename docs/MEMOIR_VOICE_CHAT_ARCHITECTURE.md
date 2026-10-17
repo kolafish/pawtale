@@ -289,11 +289,14 @@ turn.cancelled
 
 自动打断复用已认证的语音 gateway。小程序发送 `barge_in.start/frame/stop`（含
 `monitor_id`），音频格式仍为 16 kHz、单声道 PCM16；监听帧不送 ASR，也不写入音频证据。
-基础库 3.17.3 及以上的共享实时录音链路设置 `audioMode: "voiceChat"`，由微信原生录音
+基础库 3.17.3 及以上且 `wx.canIUse("RecorderManager.start.object.audioMode.voiceChat")`
+明确返回 true 时，共享实时录音链路设置 `audioMode: "voiceChat"`，请求微信原生录音
 启用回声消除、噪声抑制和自动增益；监听升级为正式录音时继续使用同一录音器和模式。
-低于该版本或无法确认版本时，不启动播放期间的自动打断监听，沿用点击按钮回答和
+低于该版本、端能力不可用或无法确认时，不启动播放期间的自动打断监听，沿用点击按钮回答和
 播放结束后的自动接听；普通录音仍可使用，不传入旧版本不支持的 `audioMode` 参数。
 接口版本与模式定义见 [RecorderManager.start 官方文档](https://developers.weixin.qq.com/miniprogram/dev/api/media/recorder/RecorderManager.start.html)。
+能力检查使用 [wx.canIUse](https://developers.weixin.qq.com/miniprogram/dev/api/base/wx.canIUse.html)，
+微信应用版本与基础库版本分别记录，鸿蒙应用版本不能套用 Android 的版本序列判断。
 ECS 后端加载随代码固定、校验 SHA256 的 Silero ONNX 模型，共享权重，每次监听独立
 维护模型状态。前 640 ms 标定当前播放音量，之后连续 160 ms 的人声概率 ≥ 0.8 且音量
 超过播放基线时发送 `barge_in.speech`。音量门槛只用于播放回声标定，不再使用固定
@@ -308,6 +311,10 @@ ECS 后端加载随代码固定、校验 SHA256 的 Silero ONNX 模型，共享�
 该播放基线不是声学回声消除，不能替代原生 `voiceChat` 模式。系统回声消除对当前播放
 链路的效果，以及首次标定期内的讲话、外放音量改变、强回声、小声插话和录屏开关两种
 情况仍需要真机验证。真实往返延迟也会增加打断时间，160 ms 是模型确认窗口，不是总延迟。
+现有 `voice_chat.client_event` 审计链路记录 `recorder_start_requested` 和
+`barge_in_unavailable` 的平台、微信版本、基础库版本、端能力判断、采集用途及请求的
+录音模式；`barge_in_confirmed` 记录服务端起点和保留缓存时长，区分自动打断与播放结束
+后的收音。请求参数和能力声明不代表回声消除效果已经通过真机验证。
 模型固定在 `backend/app/services/asr/models/`，在现有后端进程内使用 CPU 推理，无需
 额外服务、端口或云端模型 API；启动失败或模型校验失败会阻止后端启动。
 

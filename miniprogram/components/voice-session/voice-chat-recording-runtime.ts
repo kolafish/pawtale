@@ -485,6 +485,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         auto_stop_reason: event.autoStopReason || "",
         error_kind: event.errorKind || "",
         error_code: event.errorCode || "",
+        ...(event.recorderConfiguration ? { recorder_configuration: event.recorderConfiguration } : {}),
+        ...(event.bargeInStartMs !== undefined ? { barge_in_start_ms: event.bargeInStartMs } : {}),
+        ...(event.retainedAudioMs !== undefined ? { retained_audio_ms: event.retainedAudioMs } : {}),
       },
       { voiceSessionId: this.data.voiceSessionId },
     );
