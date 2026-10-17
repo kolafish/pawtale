@@ -314,7 +314,7 @@ test("me opens the dedicated login page from the guest entry", () => {
   assert.deepEqual(navigations, ["/pages/login/index"]);
 });
 
-test("me profile exposes WeChat avatar and nickname controls", () => {
+test("me profile submits the native WeChat nickname field", () => {
   const pageWxml = fs.readFileSync(
     path.join(__dirname, "../pages/me/index.wxml"),
     "utf8",
@@ -322,7 +322,64 @@ test("me profile exposes WeChat avatar and nickname controls", () => {
 
   assert.match(pageWxml, /open-type="chooseAvatar"/);
   assert.match(pageWxml, /bindchooseavatar="chooseWeChatAvatar"/);
-  assert.match(pageWxml, /type="nickname"/);
+  assert.match(pageWxml, /<form\b[^>]*bindsubmit="saveDisplayName"/);
+  assert.match(pageWxml, /<input\b[^>]*type="nickname"[^>]*name="nickname"/);
+  assert.match(pageWxml, /<button\b[^>]*form-type="submit"/);
+});
+
+test("me saves a form nickname without an input event or cached draft", async () => {
+  const updates = [];
+  const toasts = [];
+  let identityRefreshes = 0;
+  global.wx = { showToast: ({ title }) => toasts.push(title) };
+  const { page } = loadMePage({
+    authExports: {
+      updateBackendProfile: async (input) => {
+        updates.push(input);
+        return {
+          display_name: input.display_name,
+          email: "wechat_x@wechat.local",
+          password_login_enabled: false,
+        };
+      },
+      getMemoirIdentity: async () => { identityRefreshes += 1; },
+    },
+  });
+  const context = pageContext(page, {
+    loggedIn: true,
+    editingName: true,
+    displayName: "原昵称",
+  });
+
+  await page.saveDisplayName.call(context, {
+    detail: { value: { nickname: " 微信昵称 " } },
+  });
+
+  assert.deepEqual(updates, [{ display_name: "微信昵称" }]);
+  assert.equal(identityRefreshes, 1);
+  assert.equal(context.data.displayName, "微信昵称");
+  assert.equal(context.data.avatarText, "微");
+  assert.equal(context.data.editingName, false);
+  assert.equal(context.data.savingName, false);
+  assert.deepEqual(toasts, ["已保存"]);
+});
+
+test("me rejects an empty form nickname instead of saving the previous name", async () => {
+  const { page } = loadMePage();
+  const context = pageContext(page, {
+    loggedIn: true,
+    editingName: true,
+    displayName: "原昵称",
+  });
+
+  await page.saveDisplayName.call(context, {
+    detail: { value: { nickname: " " } },
+  });
+
+  assert.equal(context.data.error, "昵称不能为空");
+  assert.equal(context.data.displayName, "原昵称");
+  assert.equal(context.data.editingName, true);
+  assert.equal(context.data.savingName, false);
 });
 
 test("me saves the local large text preference", () => {

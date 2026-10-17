@@ -39,7 +39,7 @@
   </block>
 
   <block wx:if="{{loggedIn}}">
-    <view class="profile-panel ui-card ui-card-borderless">
+    <form class="profile-panel ui-card ui-card-borderless" bindsubmit="saveDisplayName">
       <button
         class="profile-avatar-picker"
         open-type="chooseAvatar"
@@ -59,11 +59,12 @@
           <input
             class="name-input support-form-input"
             type="nickname"
-            value="{{nameDraft}}"
+            name="nickname"
+            value="{{displayName}}"
             maxlength="40"
-            placeholder="点击选择微信昵称"
+            placeholder="请输入昵称"
             focus="{{editingName}}"
-            bindinput="changeNameDraft"
+            bindinput="clearProfileError"
           />
         </view>
         <text wx:else class="profile-name">{{displayName || "作者"}}</text>
@@ -72,12 +73,12 @@
       </view>
       <view wx:if="{{editingName}}" class="profile-actions">
         <button class="mini-button ghost support-action ui-pressable" disabled="{{savingName}}" bindtap="cancelEditName">取消</button>
-        <button class="mini-button primary support-action ui-pressable" loading="{{savingName}}" disabled="{{savingName}}" bindtap="saveDisplayName">
+        <button class="mini-button primary support-action ui-pressable" loading="{{savingName}}" disabled="{{savingName}}" form-type="submit">
           保存
         </button>
       </view>
       <button wx:else class="edit-name-button support-action ui-pressable" disabled="{{loading}}" bindtap="startEditName">编辑</button>
-    </view>
+    </form>
 
     <view class="section">
       <view class="setting-header">

@@ -25,7 +25,7 @@ function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
   return loadPageModule("../pages/login/index.ts");
 }
 
-test("login profile setup uses WeChat avatar and nickname components", () => {
+test("login profile setup submits the native WeChat nickname field", () => {
   const template = fs.readFileSync(
     path.join(__dirname, "../pages/login/index.wxml"),
     "utf8",
@@ -33,7 +33,9 @@ test("login profile setup uses WeChat avatar and nickname components", () => {
 
   assert.match(template, /open-type="chooseAvatar"/);
   assert.match(template, /bindchooseavatar="chooseWeChatAvatar"/);
-  assert.match(template, /type="nickname"/);
+  assert.match(template, /<form\b[^>]*bindsubmit="saveWeChatProfile"/);
+  assert.match(template, /<input\b[^>]*type="nickname"[^>]*name="nickname"/);
+  assert.match(template, /<button\b[^>]*form-type="submit"/);
 });
 
 test("login page offers WeChat as its only sign-in action", () => {
@@ -73,7 +75,7 @@ test("a new wechat user goes straight home without the avatar and nickname step"
   assert.equal(context.data.wechatLoading, false);
 });
 
-test("after a first like the chosen nickname and avatar are saved before returning", async () => {
+test("after a first like the form nickname is saved without an input event", async () => {
   const profileUpdates = [];
   const avatarUploads = [];
   const backs = [];
@@ -109,15 +111,28 @@ test("after a first like the chosen nickname and avatar are saved before returni
   });
   const context = pageContext(page, {
     profileMode: true,
-    profileDisplayName: " 微信昵称 ",
     profileAvatarPath: "wxfile://chosen-avatar",
   });
 
-  await page.saveWeChatProfile.call(context);
+  await page.saveWeChatProfile.call(context, {
+    detail: { value: { nickname: " 微信昵称 " } },
+  });
 
   assert.deepEqual(profileUpdates, [{ display_name: "微信昵称" }]);
   assert.deepEqual(avatarUploads, ["wxfile://chosen-avatar"]);
   assert.deepEqual(backs, [true]);
+  assert.equal(context.data.profileSaving, false);
+});
+
+test("profile setup rejects an empty nickname cleared by WeChat", async () => {
+  const { page } = loadLoginPage();
+  const context = pageContext(page, { profileMode: true });
+
+  await page.saveWeChatProfile.call(context, {
+    detail: { value: { nickname: " " } },
+  });
+
+  assert.equal(context.data.error, "请填写昵称");
   assert.equal(context.data.profileSaving, false);
 });
 

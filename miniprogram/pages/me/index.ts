@@ -19,7 +19,7 @@ import {
   type CreditPack,
 } from "../../services/billing";
 import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
-import { type PageTextInputEvent } from "../../services/page-input";
+import { type PageFormSubmitEvent } from "../../services/page-input";
 import {
   aiModelLabel,
   readSelectedAIModel,
@@ -93,7 +93,6 @@ interface MeData {
   creditPurchasing: boolean;
   error: string;
   displayName: string;
-  nameDraft: string;
   avatarText: string;
   avatarUrl: string;
   email: string;
@@ -110,8 +109,6 @@ interface MeData {
   voiceAuthorizationStatusText: string;
   largeTextEnabled: boolean;
 }
-
-type InputEvent = PageTextInputEvent;
 
 interface SwitchChangeEvent {
   detail: {
@@ -291,7 +288,6 @@ function loggedOutData(): Partial<MeData> {
     creditSelectedPackId: "",
     creditPurchasing: false,
     displayName: "",
-    nameDraft: "",
     avatarText: "作",
     avatarUrl: "",
     avatarSaving: false,
@@ -339,7 +335,6 @@ definePage<MeData>()({
     creditPurchasing: false,
     error: "",
     displayName: "",
-    nameDraft: "",
     avatarText: "作",
     avatarUrl: "",
     email: "",
@@ -382,7 +377,6 @@ definePage<MeData>()({
       this.setData({
         loggedIn: true,
         displayName,
-        nameDraft: displayName,
         editingName: false,
         avatarText: Array.from(displayName)[0] || "作",
         avatarUrl: resolveBackendAvatarUrl(identity.avatar_url),
@@ -428,11 +422,11 @@ definePage<MeData>()({
     if (this.data.loading || this.data.savingName) {
       return;
     }
-    this.setData({ editingName: true, nameDraft: this.data.displayName, error: "" });
+    this.setData({ editingName: true, error: "" });
   },
 
-  changeNameDraft(event: InputEvent) {
-    this.setData({ nameDraft: event.detail.value, error: "" });
+  clearProfileError() {
+    this.setData({ error: "" });
   },
 
   async chooseWeChatAvatar(event: ChooseAvatarEvent) {
@@ -464,14 +458,14 @@ definePage<MeData>()({
     if (this.data.savingName) {
       return;
     }
-    this.setData({ editingName: false, nameDraft: this.data.displayName, error: "" });
+    this.setData({ editingName: false, error: "" });
   },
 
-  async saveDisplayName() {
+  async saveDisplayName(event: PageFormSubmitEvent<{ nickname: string }>) {
     if (this.data.savingName) {
       return;
     }
-    const displayName = this.data.nameDraft.trim();
+    const displayName = event.detail.value.nickname.trim();
     if (!displayName) {
       this.setData({ error: "昵称不能为空" });
       return;
@@ -483,7 +477,6 @@ definePage<MeData>()({
       const normalizedName = userDisplayName(user.display_name, user.email);
       this.setData({
         displayName: normalizedName,
-        nameDraft: normalizedName,
         avatarText: Array.from(normalizedName)[0] || "作",
         email: user.email,
         accountEmailText: accountEmailText(user.email, user.password_login_enabled),
