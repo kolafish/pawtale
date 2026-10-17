@@ -3534,7 +3534,8 @@ test("ASR failure during finish exits to saved records when server confirms fail
   assert.notEqual(context.data.persistenceStateText, "已保存");
 });
 
-test("a created voice session stops through REST when the first WebSocket never connected", async () => {
+for (const status of ["created", "listening", "speaking"]) {
+test(`a ${status} voice session stops through REST after the WebSocket is gone`, async () => {
   const stops = [];
   let refreshes = 0;
   const page = loadVoiceChatPage({
@@ -3552,8 +3553,8 @@ test("a created voice session stops through REST when the first WebSocket never 
       hasClient: () => false,
     },
     refreshVoiceSessionSnapshot: async () => ({
-      session: { status: ++refreshes === 1 ? "created" : "stopped" },
-      utterances: [],
+      session: { status: ++refreshes === 1 ? status : "stopped" },
+      utterances: [{ transcript_raw: "哈哈哈哈哈哈", transcript_edited: "哈哈哈哈哈哈", audio_file_id: "audio-1" }],
     }),
     stopCompletionIssueRefresh() {},
     cancelFollowUpTTS() {},
@@ -3565,6 +3566,37 @@ test("a created voice session stops through REST when the first WebSocket never 
   assert.equal(refreshes, 2);
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(context.events[0]?.detail.destination, "story");
+  assert.equal(context.events[0]?.detail.narrationSaved, true);
+});
+}
+
+test("a disconnected session stays on the page if REST stop fails or remains unconfirmed", async () => {
+  for (const stopFails of [false, true]) {
+    const stops = [], errors = [];
+    const page = loadVoiceChatPage({ voiceApiExports: {
+      stopMemoirVoiceSession: async (id) => {
+        stops.push(id);
+        if (stopFails) throw Error("结束请求失败");
+      },
+    } });
+    const context = {
+      ...page,
+      data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+      setData(patch) { this.data = { ...this.data, ...patch }; },
+      voiceStreaming: { hasClient: () => false },
+      refreshVoiceSessionSnapshot: async () => ({ session: { status: "listening" }, utterances: [] }),
+      stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
+      handleError: message => errors.push(message),
+    };
+
+    await context.finishSession();
+
+    assert.deepEqual(stops, ["voice-1"]);
+    assert.deepEqual(context.events, []);
+    assert.equal(context.data.finishingSession, false);
+    assert.notEqual(context.data.persistenceStateText, "已保存");
+    assert.equal(errors.length, 1);
+  }
 });
 
 test("viewing records after disconnect exits only after the server confirms the session stopped", async () => {
