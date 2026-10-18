@@ -293,7 +293,6 @@ class LayeredBookAI(AITextServiceBase):
                 ],
             }
         else:
-            section_materials = _prompt_section_materials(user_prompt)
             is_revision = "用户修改要求：" in user_prompt
             current_title = (
                 user_prompt.partition("当前小节标题：\n")[2].splitlines()[0]
@@ -301,29 +300,20 @@ class LayeredBookAI(AITextServiceBase):
                 else ""
             )
             payload = {
-                "sections": [
-                    {
-                        "section_id": section_id,
-                        "title": (
-                            self.section_revision_title or current_title
-                            if is_revision
-                            else ""
-                        ),
-                        "content": (
-                            self.section_revision_content
-                            if is_revision and self.section_revision_content is not None
-                            else (
-                                ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
-                                + "这段经历让我一直记得，也让我第一次认真看待输赢。"
-                            )
-                        ),
-                        "used_material_ids": allowed_material_ids,
-                    }
-                    for section_id, allowed_material_ids in section_materials
-                ],
+                "content": (
+                    self.section_revision_content
+                    if is_revision and self.section_revision_content is not None
+                    else (
+                        ("那天刮着风，我参加了学校比赛。" if is_revision else "那年，我参加了学校比赛。")
+                        + "这段经历让我一直记得，也让我第一次认真看待输赢。"
+                    )
+                ),
+                "used_material_ids": material_ids,
                 "missing_source_candidates": [],
                 "editor_notes": [],
             }
+            if is_revision:
+                payload["title"] = self.section_revision_title or current_title
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1050,18 +1040,6 @@ def test_section_revision_job_validates_each_operation_input():
 def _prompt_ids(prompt: str, key: str) -> list[str]:
     prefix = f"{key}: "
     return [line.removeprefix(prefix).strip() for line in prompt.splitlines() if line.startswith(prefix)]
-
-
-def _prompt_section_materials(prompt: str) -> list[tuple[str, list[str]]]:
-    result: list[tuple[str, list[str]]] = []
-    current_materials: list[str] | None = None
-    for line in prompt.splitlines():
-        if line.startswith("section_id: "):
-            current_materials = []
-            result.append((line.removeprefix("section_id: ").strip(), current_materials))
-        elif line.startswith("material_id: ") and current_materials is not None:
-            current_materials.append(line.removeprefix("material_id: ").strip())
-    return result
 
 
 def _install_ai(
