@@ -300,7 +300,7 @@ export function initialVoiceChatData(): VoiceChatData {
     showHistoryLines: false,
     historyToggleText: "查看",
     transcriptLineViews: [],
-    controlHintText: "现在可以说了",
+    controlHintText: "点麦克风开始讲述",
     micButtonClass: "mic-button disabled",
     micButtonDisabled: true,
     micButtonProcessing: false,
@@ -605,13 +605,15 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   ].filter(Boolean).join(" ");
   let controlHintText = isHumanInterview
     ? ""
-    : (isBookCompletion ? "只说您记得的部分就可以" : "现在可以说了");
+    : (state.primaryActionText === "继续说话" ? "已暂停，点麦克风继续讲" : "点麦克风开始讲述");
   if (interactionPhase === "recording") {
-    controlHintText = isHumanInterview ? "" : "讲完这段后，可以点这里";
+    controlHintText = "正在录音";
+  } else if (state.recordingStarting) {
+    controlHintText = "正在打开麦克风";
   } else if (!isHumanInterview && interactionPhase === "assistant_preparing") {
     controlHintText = "小余先问一句，稍等一下";
   } else if (!isHumanInterview && interactionPhase === "assistant_responding") {
-    controlHintText = "听完就可以开始说";
+    controlHintText = "小余正在回应";
   }
   if (completionRoundFinished) {
     controlHintText = "";
@@ -630,7 +632,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   } else if (completionUnavailable && !state.recording) {
     micButtonText = "请先保存离开";
   } else if (state.recording) {
-    micButtonText = isHumanInterview ? "说完了，保存这段" : "讲完这段，请小余接话";
+    micButtonText = isHumanInterview ? "说完了，保存这段" : "讲完了，小余接话";
   } else if (!isHumanInterview && (
     interactionPhase === "assistant_preparing"
     || interactionPhase === "assistant_responding"
