@@ -270,7 +270,6 @@ async def _generate_candidate(
             else str(target.snapshot.get("content") or "").strip()
         ),
         revision_instruction=instruction,
-        allow_title_revision=True,
         ai_model=ai_model,
     )
 

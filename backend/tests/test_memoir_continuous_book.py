@@ -132,8 +132,8 @@ async def test_book_design_changes_allow_future_automatic_prose(client, test_db,
 
     async def new_prose(*args, **kwargs):
         value = json.loads(await original(*args, **kwargs))
-        if "sections" in value:
-            value["sections"][0]["content"] += "后来我又记起了爬山路上的一件小事。"
+        if "content" in value:
+            value["content"] += "后来我又记起了爬山路上的一件小事。"
         return json.dumps(value, ensure_ascii=False)
 
     monkeypatch.setattr(fake, "_call_llm", new_prose)

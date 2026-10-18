@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
-from typing import Any
 
 from fastapi import HTTPException
 import httpx
@@ -161,18 +160,14 @@ class ChapterDraftGenerationPlan:
 class _GeneratedChapterSectionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    section_id: str
-    title: str | None = Field(default=None, max_length=200)
     content: str
-    used_material_ids: list[str] = Field(default_factory=list)
-
-
-class _GeneratedChapterOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    sections: list[_GeneratedChapterSectionOutput] = Field(min_length=1)
+    used_material_ids: list[str]
     missing_source_candidates: list[str] = Field(default_factory=list)
     editor_notes: list[str] = Field(default_factory=list)
+
+
+class _RevisedChapterSectionOutput(_GeneratedChapterSectionOutput):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class _RelatedSectionTarget(BaseModel):
@@ -963,10 +958,7 @@ def build_chapter_generation_prompt(
     changed_material_ids: set[str] | None = None,
     previous_material_ids: set[str] | None = None,
 ) -> str:
-    section_refs = ModelReferenceMap(
-        "S",
-        (section.section_id for section in context.sections),
-    )
+    section, = context.sections
     material_refs = ModelReferenceMap(
         "M",
         (material.material_id for material in context.materials),
@@ -983,52 +975,43 @@ def build_chapter_generation_prompt(
         if required_refs else ""
     )
     outline_sections = chapter_sections or context.sections
-    target_section_id = (
-        context.sections[0].section_id
-        if len(context.sections) == 1
-        else ""
-    )
     outline = "\n".join(
         (
-            f"{index + 1}. {section.title}"
-            f"{'（本次生成）' if section.section_id == target_section_id else ''}"
+            f"{index + 1}. {item.title}"
+            f"{'（本次生成）' if item.section_id == section.section_id else ''}"
         )
-        for index, section in enumerate(outline_sections)
+        for index, item in enumerate(outline_sections)
     )
     edit_cutoff = current_section_user_edited_at or context.previous_draft_at
-    blocks = "\n\n".join(
-        "\n".join(
-            [
-                f"section_id: {section_refs.encode(section.section_id)}",
-                f"小节标题: {section.title}",
-                f"小节类型: {section.section_type}",
-                fact_decisions.prompt(
-                    tuple(decision for decision in section.decisions if not (
-                        current_section_user_edited and edit_cutoff
-                        and (decision.confirmed_at is None or decision.confirmed_at <= edit_cutoff)
-                    )),
-                    edits=tuple(edit for material in section.materials for edit in material.edits if not (
-                        current_section_user_edited and edit_cutoff
-                        and edit.edited_at <= edit_cutoff
-                    )),
-                ),
-                "允许素材：",
-                *[
-                    (
-                        f"material_id: {material_refs.encode(material.material_id)}\n"
-                        + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
-                        + (
-                            _confirmed_material_update(material, material.material_id in (changed_material_ids or set()))
-                            if current_section_user_edited and current_section_content
-                            and previous_material_ids is not None and material.material_id in previous_material_ids
-                            else f"原始讲述{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
-                        )
+    blocks = "\n".join(
+        [
+            f"小节标题: {section.title}",
+            f"小节类型: {section.section_type}",
+            fact_decisions.prompt(
+                tuple(decision for decision in section.decisions if not (
+                    current_section_user_edited and edit_cutoff
+                    and (decision.confirmed_at is None or decision.confirmed_at <= edit_cutoff)
+                )),
+                edits=tuple(edit for material in section.materials for edit in material.edits if not (
+                    current_section_user_edited and edit_cutoff
+                    and edit.edited_at <= edit_cutoff
+                )),
+            ),
+            "允许素材：",
+            *[
+                (
+                    f"material_id: {material_refs.encode(material.material_id)}\n"
+                    + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
+                    + (
+                        _confirmed_material_update(material, material.material_id in (changed_material_ids or set()))
+                        if current_section_user_edited and current_section_content
+                        and previous_material_ids is not None and material.material_id in previous_material_ids
+                        else f"原始讲述{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
                     )
-                    for material in section.materials
-                ],
-            ]
-        )
-        for section in context.sections
+                )
+                for material in section.materials
+            ],
+        ]
     )
     people = (
         "书中人物（讲述者讲过的人，只用来统一称呼、看懂“他”“她”指谁，不据此增加情节）：\n"
@@ -1056,13 +1039,7 @@ def build_chapter_generation_prompt(
     task = (
         f"请按已确认修改思路局部修改回忆录章节“{context.chapter_title}”中的当前小节。"
         if revision_instruction
-        else f"请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。"
-    )
-    generation_scope = (
-        "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项；"
-        "不得复述其他小节的内容。\n"
-        if target_section_id
-        else "- 一次输出完整章节，并严格按输入顺序返回每个小节。\n"
+        else f"请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”中的当前小节。"
     )
     revision = ""
     if revision_instruction:
@@ -1103,6 +1080,10 @@ def build_chapter_generation_prompt(
 本次局部更新原因：{reason}
 请在现有正文基础上融入下方素材或调整必要的衔接。{ownership}只改与本次变化有关的文字。标题保持输入标题。
 """
+    title_output = (
+        '  "title": "小节完整标题，修改要求未涉及标题时保持输入标题",\n'
+        if revision_instruction else ""
+    )
     return f"""{task}
 
 本章完整小节顺序：
@@ -1121,28 +1102,21 @@ def build_chapter_generation_prompt(
 
 {required_materials}输出严格 JSON：
 {{
-  "sections": [
-    {{
-      "section_id": "输入中的 section_id",
-      "title": "小节完整标题，修改要求未涉及标题时保持输入标题",
-      "content": "这一小节完整、连贯、第一人称的正文",
-      "used_material_ids": ["这一小节正文实际使用的 material_id"]
-    }}
-  ],
+{title_output}  "content": "当前小节完整、连贯、第一人称的正文",
+  "used_material_ids": ["当前小节正文实际使用的 material_id"],
   "missing_source_candidates": ["想表达但现有素材没有支持的内容，只列出，不写入正文"],
   "editor_notes": ["可选的简短编辑说明"]
 }}
 
 要求：
-{generation_scope}- 严格按输入顺序返回小节。
-- section_id 和 material_id 都是本次请求内的短编号，必须原样返回。
-- 每个输入 section_id 必须出现且只能出现一次，不新增、删除或合并小节。
+- 本次只生成标记为“本次生成”的一个小节，不得复述其他小节的内容。
+- material_id 是本次请求内的短编号，必须原样返回。
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
-- 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
+- 只能使用当前小节的允许素材，不能把素材移动到其他小节。
 - 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
 {writing_rules}- 不要为了完整而虚构时间、地点、人物、因果或心理活动。
 - “小余刚才说”是访谈员的话，只用来理解原始讲述在回答什么，事实以讲述者说的为准；小余的话，以及只是在回应小余、没有经历或感受的话（比如怎么称呼、寒暄、不想聊），都不写进正文。
-- 不在正文中{"新增" if revision_instruction else "出现"} section_id、material_id、编辑指令、“叙述者”等后台术语。
+- 不在正文中{"新增" if revision_instruction else "出现"} material_id、编辑指令、“叙述者”等后台术语。
 """
 
 
@@ -1250,125 +1224,53 @@ def previous_section_context(
     )
 
 
-def normalize_generated_chapter(
-    payload: Any,
+def normalize_generated_section(
+    payload: _GeneratedChapterSectionOutput,
     *,
-    context: ChapterGenerationContext,
+    section: ChapterSectionInput,
     model: str | None,
-    allow_title_revision: bool = False,
 ) -> GeneratedChapter:
-    if not isinstance(payload, dict):
-        raise ValueError("chapter generation AI did not return a JSON object")
-    raw_sections = payload.get("sections")
-    if not isinstance(raw_sections, list):
-        raise ValueError("chapter generation returned no sections")
-    allowed_sections = {
-        section.section_id: section for section in context.sections
-    }
-    section_refs = ModelReferenceMap("S", allowed_sections)
-    material_refs = ModelReferenceMap(
-        "M",
-        (material.material_id for material in context.materials),
+    title = (
+        payload.title.strip()
+        if isinstance(payload, _RevisedChapterSectionOutput)
+        else section.title
     )
-    seen_sections: set[str] = set()
-    seen_materials: set[str] = set()
-    generated_sections: list[GeneratedChapterSection] = []
-    for raw_section in raw_sections:
-        if not isinstance(raw_section, dict):
-            raise ValueError("chapter generation returned invalid section")
-        section_id = section_refs.decode(raw_section.get("section_id"))
-        section = allowed_sections.get(section_id)
-        if section is None:
-            raise ValueError("chapter generation used section outside allowlist")
-        if section_id in seen_sections:
-            raise ValueError("chapter generation returned duplicate section")
-        title_value = raw_section.get("title")
-        if allow_title_revision and not isinstance(title_value, str):
-            raise ValueError("chapter section title is missing")
-        title = (
-            title_value.strip()
-            if allow_title_revision and isinstance(title_value, str)
-            else section.title
-        )
-        if allow_title_revision and not title:
-            raise ValueError("chapter section title is empty")
-        if len(title) > 200:
-            raise ValueError("chapter section title is too long")
-        content_value = raw_section.get("content")
-        content = (
-            content_value.strip() if isinstance(content_value, str) else ""
-        )
-        if not content:
-            raise ValueError("chapter section content is empty")
-        allowed_material_ids = {
-            material.material_id for material in section.materials
-        }
-        used = material_refs.decode_many(
-            raw_section.get("used_material_ids"),
-            limit=len(allowed_material_ids),
-        )
-        if not used:
-            raise ValueError("chapter section returned no used material")
-        if set(used) - allowed_material_ids:
-            raise ValueError(
-                "chapter generation used material outside allowlist for section"
-            )
-        if seen_materials.intersection(used):
-            raise ValueError(
-                "chapter generation reused material across sections"
-            )
-        internal_ids = set(allowed_sections) | {
-            material.material_id for material in context.materials
-        }
-        if any(
-            internal_id in value
-            for internal_id in internal_ids
-            for value in (title, content)
-        ):
-            raise ValueError("chapter section exposed internal id")
-        seen_sections.add(section_id)
-        seen_materials.update(used)
-        generated_sections.append(
-            GeneratedChapterSection(
-                section_id=section_id,
-                title=title,
-                content=content,
-                used_material_ids=tuple(used),
-            )
-        )
-    expected_section_ids = [
-        section.section_id for section in context.sections
-    ]
-    if [section.section_id for section in generated_sections] != (
-        expected_section_ids
+    if not title:
+        raise ValueError("chapter section title is empty")
+    content = payload.content.strip()
+    if not content:
+        raise ValueError("chapter section content is empty")
+    allowed_material_ids = {material.material_id for material in section.materials}
+    material_refs = ModelReferenceMap(
+        "M", (material.material_id for material in section.materials),
+    )
+    used = material_refs.decode_many(
+        payload.used_material_ids, limit=len(allowed_material_ids),
+    )
+    if not used:
+        raise ValueError("chapter section returned no used material")
+    internal_ids = allowed_material_ids | {section.section_id}
+    if any(
+        internal_id in value
+        for internal_id in internal_ids
+        for value in (title, content)
     ):
-        raise ValueError(
-            "chapter generation did not preserve complete section order"
-        )
-    content = "\n\n".join(
-        section.content for section in generated_sections
+        raise ValueError("chapter section exposed internal id")
+    generated = GeneratedChapterSection(
+        section_id=section.section_id,
+        title=title,
+        content=content,
+        used_material_ids=tuple(used),
     )
     return GeneratedChapter(
-        sections=tuple(generated_sections),
+        sections=(generated,),
         content=content,
-        used_material_ids=tuple(
-            material_id
-            for section in generated_sections
-            for material_id in section.used_material_ids
-        ),
+        used_material_ids=generated.used_material_ids,
         missing_source_candidates=tuple(
-            _string_list(
-                payload.get("missing_source_candidates"),
-                limit=8,
-                item_limit=240,
-            )
+            _string_list(payload.missing_source_candidates, limit=8, item_limit=240)
         ),
         editor_notes=tuple(
-            _string_list(
-                payload.get("editor_notes"),
-                limit=8,
-                item_limit=240,
-            )
+            _string_list(payload.editor_notes, limit=8, item_limit=240)
         ),
         model=model,
     )
@@ -1570,7 +1472,6 @@ async def generate_chapter_section(
     source_update_reason: str = "",
     required_material_ids: set[str] | None = None,
     previous_material_ids: set[str] | None = None,
-    allow_title_revision: bool | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedChapter:
@@ -1614,22 +1515,20 @@ async def generate_chapter_section(
                     else CHAPTER_GENERATION_SYSTEM_PROMPT
                 ),
                 attempt_prompt,
-                output_model=_GeneratedChapterOutput,
+                output_model=(
+                    _RevisedChapterSectionOutput
+                    if revision_instruction else _GeneratedChapterSectionOutput
+                ),
                 requested_model=ai_model,
                 temperature=0.2 if revision_instruction else 0.3,
                 max_tokens=policy.max_tokens,
                 timeout=ai_text_timeout_seconds(policy.timeout_profile),
                 max_attempts=1,
             )
-            generated = normalize_generated_chapter(
-                generated_result.value.model_dump(),
-                context=section_context,
+            generated = normalize_generated_section(
+                generated_result.value,
+                section=section,
                 model=generated_result.response.resolved_model,
-                allow_title_revision=(
-                    bool(revision_instruction)
-                    if allow_title_revision is None
-                    else allow_title_revision
-                ),
             )
             if not expected_material_ids.issubset(
                 generated.sections[0].used_material_ids

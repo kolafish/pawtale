@@ -121,20 +121,15 @@ class FakeChapterAI(AITextServiceBase):
             }
         else:
             payload = {
-                "sections": [
-                    {
-                        "section_id": prompt_section_ids[0],
-                        "content": (
-                            "朋友发来一张山桃花照片，后来我们一起去爬山。"
-                            "这次见面让一段疏远的关系重新有了联系。"
-                        ),
-                        "used_material_ids": (
-                            ["M99"]
-                            if self.draft_material_ids == ["foreign-material"]
-                            else prompt_material_ids
-                        ),
-                    }
-                ],
+                "content": (
+                    "朋友发来一张山桃花照片，后来我们一起去爬山。"
+                    "这次见面让一段疏远的关系重新有了联系。"
+                ),
+                "used_material_ids": (
+                    ["M99"]
+                    if self.draft_material_ids == ["foreign-material"]
+                    else prompt_material_ids
+                ),
                 "missing_source_candidates": [],
                 "editor_notes": ["合并了重复描述。"],
             }
@@ -227,32 +222,39 @@ def _two_section_context() -> chapter_generation.ChapterGenerationContext:
     )
 
 
-def test_chapter_generation_preserves_explicit_section_boundaries():
-    generated = chapter_generation.normalize_generated_chapter(
-        {
-            "sections": [
-                {
-                    "section_id": "S1",
-                    "content": "那天我从家里出发。",
-                    "used_material_ids": ["M1"],
-                },
-                {
-                    "section_id": "S2",
-                    "content": "傍晚时我终于抵达。",
-                    "used_material_ids": ["M2"],
-                },
-            ]
-        },
-        context=_two_section_context(),
-        model="test",
+async def test_chapter_generation_binds_third_section_without_model_identifier():
+    class SectionAI(AITextServiceBase):
+        provider_name = "test"
+        model_name = "test-bound-section"
+
+        async def _call_llm(self, *args, **kwargs):
+            return json.dumps({
+                "content": "后来我又继续出发了。",
+                "used_material_ids": ["M1"],
+            }, ensure_ascii=False)
+
+    context = _two_section_context()
+    material = replace(context.materials[1], material_id="material-3", section_id="section-3",
+                       section_title="再出发", section_order=2, text="后来我又继续出发了。")
+    third = replace(context.sections[1], section_id="section-3", title="再出发",
+                    sort_order=2, materials=(material,))
+    full_sections = (*context.sections, third)
+    preserved = tuple(chapter_generation.GeneratedChapterSection(
+        section_id=section.section_id, title=section.title, content=section.materials[0].text,
+        used_material_ids=(section.materials[0].material_id,),
+    ) for section in context.sections)
+    generated = await chapter_generation.generate_chapter(
+        chapter_generation._single_section_context(context, third),
+        editorial_guidance=[], chapter_sections=full_sections,
+        preserved_sections=preserved, ai_client=SectionAI(),
     )
 
-    assert [section.section_id for section in generated.sections] == [
-        "section-1",
-        "section-2",
-    ]
-    assert generated.content == "那天我从家里出发。\n\n傍晚时我终于抵达。"
-    assert generated.used_material_ids == ("material-1", "material-2")
+    assert generated.sections[:2] == preserved
+    assert generated.sections[2] == chapter_generation.GeneratedChapterSection(
+        section_id=third.section_id, title=third.title, content="后来我又继续出发了。",
+        used_material_ids=(material.material_id,),
+    )
+    assert generated.used_material_ids == ("material-1", "material-2", "material-3")
 
 
 def test_chapter_generation_prompt_requests_natural_paragraphs():
@@ -261,7 +263,7 @@ def test_chapter_generation_prompt_requests_natural_paragraphs():
         polish_level=MemoirTranscriptPolishLevel.HIGH,
     )
     prompt = chapter_generation.build_chapter_generation_prompt(
-        context,
+        chapter_generation._single_section_context(context, context.sections[0]),
         editorial_guidance=[],
     )
 
@@ -269,50 +271,6 @@ def test_chapter_generation_prompt_requests_natural_paragraphs():
     assert "可较大幅度重组句式与表达层次" in prompt
     assert "按时间、场景、事件推进或感受转折" not in prompt
     assert "不把一条 Material 拆散后穿插到多处" not in prompt
-
-
-def test_chapter_generation_rejects_reordered_sections():
-    with pytest.raises(ValueError, match="complete section order"):
-        chapter_generation.normalize_generated_chapter(
-            {
-                "sections": [
-                    {
-                        "section_id": "S2",
-                        "content": "傍晚时我终于抵达。",
-                        "used_material_ids": ["M2"],
-                    },
-                    {
-                        "section_id": "S1",
-                        "content": "那天我从家里出发。",
-                        "used_material_ids": ["M1"],
-                    },
-                ]
-            },
-            context=_two_section_context(),
-            model="test",
-        )
-
-
-def test_chapter_generation_rejects_cross_section_material():
-    with pytest.raises(ValueError, match="outside allowlist"):
-        chapter_generation.normalize_generated_chapter(
-            {
-                "sections": [
-                    {
-                        "section_id": "S1",
-                        "content": "傍晚时我终于抵达。",
-                        "used_material_ids": ["M2"],
-                    },
-                    {
-                        "section_id": "S2",
-                        "content": "那天我从家里出发。",
-                        "used_material_ids": ["M1"],
-                    },
-                ]
-            },
-            context=_two_section_context(),
-            model="test",
-        )
 
 
 async def test_chapter_generation_retries_only_the_invalid_section():
@@ -334,11 +292,6 @@ async def test_chapter_generation_retries_only_the_invalid_section():
             return_raw=False,
         ):
             self.prompts.append(user_prompt)
-            section_id = next(
-                line.removeprefix("section_id: ").strip()
-                for line in user_prompt.splitlines()
-                if line.startswith("section_id: ")
-            )
             material_id = next(
                 line.removeprefix("material_id: ").strip()
                 for line in user_prompt.splitlines()
@@ -356,17 +309,12 @@ async def test_chapter_generation_retries_only_the_invalid_section():
                 used_material_ids = []
             return json.dumps(
                 {
-                    "sections": [
-                        {
-                            "section_id": section_id,
-                            "content": (
-                                "第一小节的正文"
-                                if target == "section-1"
-                                else "第二小节的正文"
-                            ),
-                            "used_material_ids": used_material_ids,
-                        }
-                    ],
+                    "content": (
+                        "第一小节的正文"
+                        if target == "section-1"
+                        else "第二小节的正文"
+                    ),
+                    "used_material_ids": used_material_ids,
                     "missing_source_candidates": [],
                     "editor_notes": [],
                 },
@@ -405,11 +353,6 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
 
         async def _call_llm(self, system_prompt, user_prompt, **kwargs):
             self.prompts.append(user_prompt)
-            section_id = next(
-                line.removeprefix("section_id: ").strip()
-                for line in user_prompt.splitlines()
-                if line.startswith("section_id: ")
-            )
             material_id = next(
                 line.removeprefix("material_id: ").strip()
                 for line in user_prompt.splitlines()
@@ -417,15 +360,12 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
             )
             return json.dumps(
                 {
-                    "sections": [{
-                        "section_id": section_id,
-                        "content": (
-                            "那天我从家里出发。"
-                            if "小节标题: 出发" in user_prompt
-                            else "傍晚时我终于抵达。"
-                        ),
-                        "used_material_ids": [material_id],
-                    }],
+                    "content": (
+                        "那天我从家里出发。"
+                        if "小节标题: 出发" in user_prompt
+                        else "傍晚时我终于抵达。"
+                    ),
+                    "used_material_ids": [material_id],
                     "missing_source_candidates": [],
                     "editor_notes": [],
                 },
@@ -466,7 +406,6 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
     assert len(second.prompts) == 1
     assert "小节标题: 抵达" in second.prompts[0]
     assert "小节标题: 出发" not in second.prompts[0]
-    assert "section_id: S1" in second.prompts[0]
     assert [section.section_id for section in completed.sections] == [
         "section-1",
         "section-2",
@@ -483,11 +422,6 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
 
         async def _call_llm(self, system_prompt, user_prompt, **kwargs):
             self.prompts.append(user_prompt)
-            section_id = next(
-                line.removeprefix("section_id: ").strip()
-                for line in user_prompt.splitlines()
-                if line.startswith("section_id: ")
-            )
             material_ids = [
                 line.removeprefix("material_id: ").strip()
                 for line in user_prompt.splitlines()
@@ -495,11 +429,8 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
             ]
             return json.dumps(
                 {
-                    "sections": [{
-                        "section_id": section_id,
-                        "content": "这是补充素材整理后的第二小节正文。",
-                        "used_material_ids": material_ids,
-                    }],
+                    "content": "这是补充素材整理后的第二小节正文。",
+                    "used_material_ids": material_ids,
                     "missing_source_candidates": [],
                     "editor_notes": [],
                 },
@@ -605,7 +536,6 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
 
     assert len(fake.prompts) == 1
     assert "小节标题: 抵达" in fake.prompts[0]
-    assert "section_id: S1" in fake.prompts[0]
     assert "material_id: M1" in fake.prompts[0]
     assert "material-1" not in fake.prompts[0]
     assert "material-2" not in fake.prompts[0]
@@ -703,11 +633,6 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
 
         async def _call_llm(self, system_prompt, user_prompt, **kwargs):
             self.prompts.append(user_prompt)
-            section_id = next(
-                line.removeprefix("section_id: ").strip()
-                for line in user_prompt.splitlines()
-                if line.startswith("section_id: ")
-            )
             material_id = next(
                 line.removeprefix("material_id: ").strip()
                 for line in user_prompt.splitlines()
@@ -725,11 +650,8 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
             )
             return json.dumps(
                 {
-                    "sections": [{
-                        "section_id": section_id,
-                        "content": content,
-                        "used_material_ids": [material_id],
-                    }],
+                    "content": content,
+                    "used_material_ids": [material_id],
                     "missing_source_candidates": [],
                     "editor_notes": [],
                 },
@@ -1124,11 +1046,6 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
 
         async def _call_llm(self, system_prompt, user_prompt, **kwargs):
             self.prompts.append(user_prompt)
-            section_id = next(
-                line.removeprefix("section_id: ").strip()
-                for line in user_prompt.splitlines()
-                if line.startswith("section_id: ")
-            )
             material_ids = [
                 line.removeprefix("material_id: ").strip()
                 for line in user_prompt.splitlines()
@@ -1136,13 +1053,10 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
             ]
             return json.dumps(
                 {
-                    "sections": [{
-                        "section_id": section_id,
-                        "content": (
-                            f"这一小节使用了 {len(material_ids)} 条素材。"
-                        ),
-                        "used_material_ids": material_ids,
-                    }],
+                    "content": (
+                        f"这一小节使用了 {len(material_ids)} 条素材。"
+                    ),
+                    "used_material_ids": material_ids,
                     "missing_source_candidates": [],
                     "editor_notes": [],
                 },
@@ -1227,7 +1141,6 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
     await test_db.commit()
 
     assert len(update_ai.prompts) == 1
-    assert "section_id: S1" in update_ai.prompts[0]
     assert first.id not in update_ai.prompts[0]
     assert second.id not in update_ai.prompts[0]
     updated_sections = {
