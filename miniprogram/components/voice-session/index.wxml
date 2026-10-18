@@ -1,5 +1,5 @@
 <view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}} {{embedded ? 'voice-session-embedded' : ''}}">
-  <view class="top-bar {{embedded ? '' : 'top-bar-balanced'}}">
+  <view class="top-bar {{embedded ? 'top-bar-balanced' : ''}}">
     <button
       wx:if="{{embedded}}"
       id="voice-home-action"
@@ -14,15 +14,6 @@
     <view class="top-copy">
       <text class="mode-label">{{topModeLabel}}</text>
     </view>
-    <button
-      id="voice-finish-action"
-      class="finish-button ui-button"
-      loading="{{finishingSession}}"
-      disabled="{{finishingSession}}"
-      bindtap="finishSession"
-    >
-      {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
-    </button>
   </view>
   <text class="top-subtitle">{{topSubtitle}}</text>
 
@@ -168,6 +159,25 @@
       <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
     </view>
     <text wx:if="{{followUpTTSError}}" class="tts-error">{{followUpTTSError}}</text>
+    <view wx:if="{{showAssistantActions}}" class="assistant-actions">
+      <button
+        wx:if="{{assistantPromptText}}"
+        class="assistant-button ghost {{followUpTTSLoading ? 'is-disabled' : ''}}"
+        loading="{{followUpTTSLoading}}"
+        disabled="{{followUpTTSLoading}}"
+        bindtap="playFollowUpAudio"
+      >
+        {{replayButtonText}}
+      </button>
+      <button
+        class="assistant-button {{followUpLoading ? 'is-disabled' : ''}}"
+        loading="{{followUpLoading}}"
+        disabled="{{followUpLoading}}"
+        bindtap="regenerateFollowUp"
+      >
+        {{followUpButtonText}}
+      </button>
+    </view>
   </view>
 
   <button
@@ -253,44 +263,39 @@
     </view>
   </view>
 
-  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
-    <text class="control-hint {{controlHintText ? '' : 'is-empty'}}">{{controlHintText || ' '}}</text>
-    <view
-      id="voice-primary-action"
-      class="{{micButtonClass}}"
-      bindtap="toggleRecording"
-      aria-role="button"
-      aria-disabled="{{micButtonDisabled}}"
-      aria-label="{{micButtonText}}"
-    >
-      <view class="mic-icon-shell">
-        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-        <view class="mic-processing-indicator" aria-hidden="true">
-          <view class="mic-processing-spinner"></view>
-        </view>
-      </view>
-      <text class="mic-button-text">{{micButtonText}}</text>
+  <view class="control-bar ui-fixed-action-dock">
+    <view wx:if="{{showControlBar}}" class="control-hint {{recording ? 'is-recording' : ''}} {{controlHintText ? '' : 'is-empty'}}">
+      <view wx:if="{{recording}}" class="recording-status-dot" aria-hidden="true"></view>
+      <text>{{controlHintText || ' '}}</text>
+      <text wx:if="{{recording}}" class="recording-duration">{{captureDurationText}}</text>
     </view>
-    <view class="assistant-actions-slot">
-      <view wx:if="{{showAssistantActions}}" class="assistant-actions">
-        <button
-          wx:if="{{assistantPromptText}}"
-          class="assistant-button ghost {{followUpTTSLoading ? 'is-disabled' : ''}}"
-          loading="{{followUpTTSLoading}}"
-          disabled="{{followUpTTSLoading}}"
-          bindtap="playFollowUpAudio"
-        >
-          {{replayButtonText}}
-        </button>
-        <button
-          class="assistant-button {{followUpLoading ? 'is-disabled' : ''}}"
-          loading="{{followUpLoading}}"
-          disabled="{{followUpLoading}}"
-          bindtap="regenerateFollowUp"
-        >
-          {{followUpButtonText}}
-        </button>
+    <view class="recording-actions">
+      <view
+        wx:if="{{showControlBar}}"
+        id="voice-primary-action"
+        class="{{micButtonClass}}"
+        bindtap="toggleRecording"
+        aria-role="button"
+        aria-disabled="{{micButtonDisabled}}"
+        aria-label="{{micButtonText}}"
+      >
+        <view class="mic-icon-shell">
+          <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+          <view class="mic-processing-indicator" aria-hidden="true">
+            <view class="mic-processing-spinner"></view>
+          </view>
+        </view>
+        <text class="mic-button-text">{{micButtonText}}</text>
       </view>
+      <button
+        id="voice-finish-action"
+        class="finish-button ui-button"
+        loading="{{finishingSession}}"
+        disabled="{{finishingSession}}"
+        bindtap="finishSession"
+      >
+        {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
+      </button>
     </view>
   </view>
 

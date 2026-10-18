@@ -1,5 +1,5 @@
 .voice-chat-page {
-  --ui-fixed-action-space: 370rpx;
+  --ui-fixed-action-space: 330rpx;
   --live-caption-line-height: 71rpx;
   --live-caption-window-height: 284rpx;
   padding-top: 26rpx;
@@ -8,7 +8,7 @@
 }
 
 .voice-chat-page.no-control-bar {
-  --ui-fixed-action-space: 60rpx;
+  --ui-fixed-action-space: 180rpx;
 }
 
 .top-bar {
@@ -19,7 +19,7 @@
   gap: 12rpx;
 }
 
-.top-bar-balanced::before {
+.top-bar-balanced::after {
   content: "";
   flex: 0 0 144rpx;
 }
@@ -226,12 +226,12 @@
 
 .finish-button {
   box-sizing: border-box;
-  width: 144rpx;
-  min-width: 144rpx;
-  height: 80rpx;
+  width: 190rpx;
+  min-width: 190rpx;
+  min-height: 44px;
   margin: 0;
-  padding: 0 4rpx;
-  flex: 0 0 144rpx;
+  padding: 0 20rpx;
+  flex: 0 0 auto;
   white-space: nowrap;
   border-radius: var(--ui-radius-control);
   background: transparent;
@@ -536,7 +536,7 @@
 
 .assistant-actions {
   width: 100%;
-  margin-top: 0;
+  margin-top: 26rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -548,7 +548,7 @@
   width: auto;
   min-width: 190rpx;
   max-width: 100%;
-  min-height: 88rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0 24rpx;
   border: 0;
@@ -1012,20 +1012,19 @@
 .control-bar {
   --ui-fixed-action-top: 8rpx;
   --ui-fixed-action-bottom: 12rpx;
-  min-height: 348rpx;
+  min-height: 300rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
 }
 
-.assistant-actions-slot {
+.recording-actions {
   width: 100%;
-  min-height: 80rpx;
-  margin-top: 4rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 24rpx;
 }
 
 .human-record-panel {
@@ -1170,10 +1169,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow:
-    0 0 0 20rpx rgba(182, 93, 73, 0.07),
-    0 0 0 40rpx rgba(182, 93, 73, 0.035),
-    0 14rpx 28rpx rgba(120, 66, 52, 0.12);
+  box-shadow: 0 14rpx 28rpx rgba(120, 66, 52, 0.12);
   transition-property: transform, background-color, box-shadow;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
@@ -1189,15 +1185,31 @@
     0 0 0 20rpx rgba(182, 93, 73, 0.16),
     0 0 0 40rpx rgba(182, 93, 73, 0.08),
     0 14rpx 30rpx rgba(120, 66, 52, 0.2);
-  animation: mic-recording-pulse 1600ms ease-in-out infinite;
 }
 
-@keyframes mic-recording-pulse {
-  50% {
-    box-shadow:
-      0 0 0 26rpx rgba(182, 93, 73, 0.12),
-      0 0 0 52rpx rgba(182, 93, 73, 0.05),
-      0 14rpx 30rpx rgba(120, 66, 52, 0.2);
+.mic-button.recording .mic-icon-shell::before,
+.mic-button.recording .mic-icon-shell::after {
+  content: "";
+  position: absolute;
+  inset: -18rpx;
+  border: 3rpx solid rgba(148, 69, 53, 0.6);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: mic-recording-ripple 1800ms ease-out infinite;
+}
+
+.mic-button.recording .mic-icon-shell::after {
+  animation-delay: -900ms;
+}
+
+@keyframes mic-recording-ripple {
+  from {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
   }
 }
 
@@ -1269,13 +1281,37 @@
 }
 
 .control-hint {
-  display: block;
-  min-height: 42rpx;
-  margin: 0 0 4rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  min-height: 54rpx;
+  margin: 0 0 28rpx;
+  padding: 4rpx 20rpx;
+  border-radius: 999rpx;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-body);
   line-height: 42rpx;
   text-align: center;
+}
+
+.control-hint.is-recording {
+  margin-bottom: 62rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  font-weight: 700;
+}
+
+.recording-status-dot {
+  flex: 0 0 16rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.recording-duration {
+  font-variant-numeric: tabular-nums;
 }
 
 .control-hint.is-empty {
@@ -1426,10 +1462,9 @@
 }
 
 .voice-chat-page.large-text .finish-button {
-  width: 144rpx;
-  min-width: 144rpx;
-  flex-basis: 144rpx;
-  height: 92rpx;
+  width: 220rpx;
+  min-width: 220rpx;
+  min-height: 96rpx;
   font-size: var(--ui-font-large-body);
 }
 
@@ -1670,7 +1705,7 @@
 }
 
 .voice-chat-page.large-text.no-control-bar {
-  --ui-fixed-action-space: 60rpx;
+  --ui-fixed-action-space: 180rpx;
 }
 
 .voice-chat-page.large-text .human-record-panel {
@@ -1716,11 +1751,6 @@
   padding: 0;
   font-size: 38rpx;
   line-height: 54rpx;
-}
-
-.voice-chat-page.large-text .assistant-actions-slot {
-  min-height: 92rpx;
-  margin-top: 6rpx;
 }
 
 .voice-chat-page.large-text .mic-icon-shell {
@@ -1922,9 +1952,8 @@
   min-height: 342rpx;
 }
 
-.voice-chat-page.large-text.capture-focus .assistant-actions-slot {
-  min-height: 36rpx;
-  margin-top: 0;
+.voice-chat-page.large-text.capture-focus {
+  --ui-fixed-action-space: 450rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .level-track {
@@ -2003,4 +2032,9 @@
 .voice-chat-page.voice-session-embedded.large-text .mic-icon {
   width: 108rpx;
   height: 108rpx;
+}
+
+.voice-chat-page.no-control-bar .control-bar {
+  min-height: 132rpx;
+  justify-content: center;
 }

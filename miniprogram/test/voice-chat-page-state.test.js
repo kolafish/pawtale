@@ -171,9 +171,9 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
     ["transcript-line user", "我"],
   ]);
-  assert.equal(patch.controlHintText, "讲完这段后，可以点这里");
+  assert.equal(patch.controlHintText, "正在录音");
   assert.equal(patch.micButtonClass, "mic-button recording");
-  assert.equal(patch.micButtonText, "讲完这段，请小余接话");
+  assert.equal(patch.micButtonText, "讲完了，小余接话");
 });
 
 test("recording keeps the last question visible without replay actions or duplicate completion questions", () => {
@@ -185,6 +185,35 @@ test("recording keeps the last question visible without replay actions or duplic
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.showTranscriptStage, true);
   assert.equal(voiceChatViewPatch({...data, sessionGoal: "book_completion"}).showAssistantPanel, false);
+});
+
+test("recording feedback follows manual and automatic capture, including silence and pause", () => {
+  const { voiceRecordingStartRequestedPatch, voiceRecordingStartedPatch, voiceRecordingStoppedPatch }
+    = require("../components/voice-session/voice-chat-recording-flow.ts");
+  const context = {
+    data: { ...initialVoiceChatData(), voiceAuthorizationAgreed: true, status: "ready" },
+    setData(patch) { Object.assign(this.data, patch); },
+  };
+  for (const autoTriggered of [false, true]) {
+    applyVoiceChatDataPatch(context, voiceRecordingStartRequestedPatch());
+    const preparingHint = context.data.controlHintText;
+    assert.equal(context.data.recording, false);
+
+    applyVoiceChatDataPatch(context, voiceRecordingStartedPatch(autoTriggered));
+    const recordingHint = context.data.controlHintText;
+    assert.notEqual(recordingHint, preparingHint);
+    applyVoiceChatDataPatch(context, voiceCaptureStatsPatch({
+      recordingElapsedMs: 12000, audioLevel: 0, gatewayState: "listening",
+      autoStopped: false,
+    }, { noAnswerPromptAlreadyHandled: false }).patch);
+    assert.equal(context.data.recording, true);
+    assert.equal(context.data.controlHintText, recordingHint);
+    assert.equal(context.data.captureDurationText, "00:12");
+
+    applyVoiceChatDataPatch(context, voiceRecordingStoppedPatch());
+    assert.equal(context.data.recording, false);
+    assert.notEqual(context.data.controlHintText, recordingHint);
+  }
 });
 
 test("voice chat only expands saved history when the user asks to review it", () => {
@@ -263,7 +292,7 @@ test("voice chat switches to the assistant as soon as the next question starts p
   assert.equal(patch.assistantDisplayText, question);
   assert.equal(patch.showAssistantTTS, true);
   assert.equal(patch.stageStatusText, "小余正在读问题");
-  assert.equal(patch.controlHintText, "听完就可以开始说");
+  assert.equal(patch.controlHintText, "小余正在回应");
   assert.equal(patch.micButtonClass, "mic-button");
   assert.equal(patch.micButtonDisabled, false);
   assert.equal(patch.micButtonProcessing, false);
@@ -333,7 +362,7 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
   assert.equal(recordingPatch.showStageStatus, false);
   assert.equal(recordingPatch.showCaptureStrip, true);
-  assert.equal(recordingPatch.controlHintText, "");
+  assert.equal(recordingPatch.controlHintText, "正在录音");
   assert.equal(recordingPatch.liveDisplayText, "等待转写...");
   assert.equal(recordingPatch.liveTextClass, "live-text placeholder");
   assert.equal(recordingPatch.micButtonText, "说完了，保存这段");
