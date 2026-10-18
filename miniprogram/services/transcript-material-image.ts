@@ -154,8 +154,10 @@ export class TranscriptMaterialImageController {
     }
     this.patchState({
       materialImagePolling: true,
-      materialImageStatusText: "正在生成图片",
-      materialImageStatusClass: "running",
+      ...(!this.state.materialImageStatusText ? {
+        materialImageStatusText: "正在生成图片",
+        materialImageStatusClass: "running",
+      } : {}),
     });
     try {
       const job = await this.options.getJob(jobId);
