@@ -54,11 +54,18 @@ test("a scanned mini program code opens the clip and forwards the same card", as
     assert.equal(context.data.posterUrl, "https://api.example.com/api/mobile/memoir/share-video/shares/abc/video?variant=poster");
 
     // Playback ends on the closing card instead of returning to the cover; replay starts over.
+    const playbackRates = [];
+    global.wx.createVideoContext = () => ({ playbackRate: (rate) => playbackRates.push(rate) });
+    context.changeVideoPlaybackRate({ currentTarget: { dataset: { rate: 1.5 } } });
+    context.toggleVideoSpeedMenu();
     page.holdEndFrame.call(context);
     assert.equal(context.data.ended, true);
+    assert.equal(context.data.videoSpeedMenuOpen, false);
     assert.equal(context.data.endFrameUrl, "https://api.example.com/api/mobile/memoir/share-video/shares/abc/video?variant=end");
     page.replayVideo.call(context);
     assert.equal(context.data.ended, false);
+    context.applyVideoPlaybackRate();
+    assert.deepEqual(playbackRates, [1.5, 1.5]);
 
     page.openBook.call(context);
     assert.deepEqual(navigations, ["/pages/book-reader/index?shareToken=book-token"]);

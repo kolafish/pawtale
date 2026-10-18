@@ -39,6 +39,7 @@ import {
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { formatBeijingDateTimeShort } from "../../services/time";
+import { initialVideoPlaybackData, videoPlaybackMethods, type VideoPlaybackData } from "../../services/video-playback";
 import {
   buildStoryMediaIndex,
   type StoryVideoAsset,
@@ -76,7 +77,7 @@ interface VideoAssetView {
 
 type StoryMaterialScope = "" | "chapter" | "section" | "unassigned";
 
-interface ImageAssetsData {
+interface ImageAssetsData extends VideoPlaybackData {
   pageClass: string;
   loading: boolean;
   error: string;
@@ -299,7 +300,10 @@ definePage<ImageAssetsData>()({
     videoPreviewPath: "",
     videoPreviewTitle: "",
     videoPreviewPortrait: true,
+    ...initialVideoPlaybackData(),
   },
+
+  ...videoPlaybackMethods,
 
   onLoad(options: PageQuery = {}) {
     const scopeValue = queryParam(options, "scope");
@@ -561,6 +565,7 @@ definePage<ImageAssetsData>()({
       this.setData({
         videoPreviewPath: path,
         videoPreviewTitle: video?.title || "分享视频",
+        videoSpeedMenuOpen: false,
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "视频预览失败" });
@@ -574,7 +579,7 @@ definePage<ImageAssetsData>()({
   },
 
   closeVideoPreview() {
-    this.setData({ videoPreviewPath: "", videoPreviewTitle: "" });
+    this.setData({ videoPreviewPath: "", videoPreviewTitle: "", videoSpeedMenuOpen: false });
   },
 
   remakeVideo(event: DatasetEvent) {

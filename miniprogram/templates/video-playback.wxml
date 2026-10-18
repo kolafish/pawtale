@@ -1,0 +1,24 @@
+<template name="videoPlaybackSpeed">
+  <!-- Keep the cover views inside video so the control follows native fullscreen. -->
+  <cover-view class="video-speed {{videoSpeedMenuOpen ? 'is-open' : ''}}">
+    <cover-view
+      class="video-speed-toggle"
+      catchtap="toggleVideoSpeedMenu"
+      hover-class="video-speed-pressed"
+      aria-role="button"
+      aria-label="播放速度 {{videoPlaybackRate}} 倍，点击切换"
+    >倍速 {{videoPlaybackRate}}×</cover-view>
+    <cover-view wx:if="{{videoSpeedMenuOpen}}" class="video-speed-options">
+      <cover-view
+        wx:for="{{videoPlaybackRates}}"
+        wx:key="*this"
+        class="video-speed-option {{videoPlaybackRate === item ? 'is-selected' : ''}}"
+        data-rate="{{item}}"
+        catchtap="changeVideoPlaybackRate"
+        hover-class="video-speed-pressed"
+        aria-role="button"
+        aria-label="{{videoPlaybackRate === item ? '当前速度，' : ''}}{{item}} 倍速"
+      >{{item}}×</cover-view>
+    </cover-view>
+  </cover-view>
+</template>

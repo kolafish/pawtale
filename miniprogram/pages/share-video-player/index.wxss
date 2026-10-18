@@ -1,4 +1,5 @@
 @import "../../templates/share-likes.wxss";
+@import "../../templates/video-playback.wxss";
 @import "../../styles/transcript-record.wxss";
 
 .shared-video {

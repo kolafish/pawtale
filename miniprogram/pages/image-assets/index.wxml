@@ -1,3 +1,4 @@
+<import src="../../templates/video-playback.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{contextText}}</text>
@@ -42,14 +43,20 @@
       <button class="action-button video-preview-close ui-button" bindtap="closeVideoPreview">关闭</button>
     </view>
     <video
+      id="memoir-video"
       class="video-preview {{videoPreviewPortrait ? 'is-portrait' : ''}}"
       src="{{videoPreviewPath}}"
       bindloadedmetadata="markVideoPreviewShape"
+      bindplay="applyVideoPlaybackRate"
+      bindfullscreenchange="closeVideoSpeedMenu"
+      bindended="closeVideoSpeedMenu"
       controls
       show-center-play-btn
       show-fullscreen-btn
       object-fit="contain"
-    />
+    >
+      <template is="videoPlaybackSpeed" data="{{videoPlaybackRate, videoPlaybackRates, videoSpeedMenuOpen}}" />
+    </video>
   </view>
 
   <view wx:if="{{loading && !items.length && !videos.length}}" class="empty-card">

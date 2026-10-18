@@ -7,8 +7,9 @@ import { setPageNavigationTitle } from "../../services/page-navigation";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
+import { initialVideoPlaybackData, videoPlaybackMethods, type VideoPlaybackData } from "../../services/video-playback";
 
-interface SharedVideoPlayerData extends ShareLikeData {
+interface SharedVideoPlayerData extends ShareLikeData, VideoPlaybackData {
   pageClass: string;
   loading: boolean;
   error: string;
@@ -35,10 +36,12 @@ definePage<SharedVideoPlayerData>()({
     endFrameUrl: "",
     ended: false,
     portrait: true,
+    ...initialVideoPlaybackData(),
     ...INITIAL_SHARE_LIKE_DATA,
   },
 
   ...shareLikeMethods,
+  ...videoPlaybackMethods,
 
   async onLoad(options?: PageQuery) {
     // Cards pass code; the printed mini program code passes it as scene.
@@ -64,7 +67,7 @@ definePage<SharedVideoPlayerData>()({
       this.setData({ loading: false, error: "这个链接不完整，请让家人重新转发" });
       return;
     }
-    this.setData({ loading: true, error: "", videoUrl: "", ended: false });
+    this.setData({ loading: true, error: "", videoUrl: "", ended: false, videoSpeedMenuOpen: false });
     try {
       const video = await readMemoirSharedVideo(this.shareCode);
       // The backend answers byte ranges, so the player streams instead of waiting for the whole file.
@@ -86,7 +89,7 @@ definePage<SharedVideoPlayerData>()({
 
   holdEndFrame() {
     if (this.data.endFrameUrl) {
-      this.setData({ ended: true });
+      this.setData({ ended: true, videoSpeedMenuOpen: false });
     }
   },
 
