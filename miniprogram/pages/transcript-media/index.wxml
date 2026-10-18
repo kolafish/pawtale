@@ -296,6 +296,9 @@
           >
             {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}
           </button>
+          <view wx:if="{{shareVideoSelectedText && !shareVideoSelectedCanGenerate}}" class="share-video-error" aria-live="polite">
+            <text>{{shareVideoStatusText}}，请调整所选句子后再生成视频。</text>
+          </view>
           <button
             class="primary-button"
             bindtap="createShareVideo"

@@ -259,6 +259,10 @@
   background: var(--ui-surface);
 }
 
+.share-video-actions .share-video-error {
+  margin-bottom: 0;
+}
+
 .material-image-button {
   color: var(--ui-accent-strong);
 }
