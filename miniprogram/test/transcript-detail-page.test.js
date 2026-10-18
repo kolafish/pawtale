@@ -976,6 +976,45 @@ test("transcript detail page creates a chapter while assigning material", async 
   }]);
 });
 
+test("overlong video selection shows an error beside generation and keeps it until a valid reselection", async () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/transcript-media/index.wxml"), "utf8");
+  const footer = template.slice(template.indexOf('class="actions-row share-video-actions"'));
+  assert.match(footer, /wx:if="\{\{shareVideoSelectedText && !shareVideoSelectedCanGenerate\}\}"/);
+  assert.match(footer, /\{\{shareVideoStatusText\}\}/);
+  assert.ok(footer.indexOf("{{shareVideoStatusText}}") < footer.indexOf('bindtap="createShareVideo"'));
+
+  const shareContext = sampleShareVideoContext();
+  shareContext.duration_ms = 103880;
+  shareContext.segments[0].start_ms = 1352;
+  shareContext.segments[0].end_ms = 4812;
+  shareContext.segments[1].start_ms = 4812;
+  shareContext.segments[1].end_ms = 103880;
+  const createCalls = [];
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    getMemoirTranscriptShareVideoContext: async () => shareContext,
+    createMemoirTranscriptShareVideoJob: async (...args) => createCalls.push(args),
+  } });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-share" });
+  assert.equal(context.data.shareVideoSelectedText, "");
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 1 } } });
+  assert.equal(context.data.shareVideoSelectedCanGenerate, false);
+  const selectionError = context.data.shareVideoStatusText;
+  assert.match(selectionError, /1 分 30 秒/);
+  await page.createShareVideo.call(context);
+  assert.deepEqual(createCalls, []);
+  page.selectShareVideoBackgroundStyle.call(context, { currentTarget: { dataset: { backgroundStyle: "ink_paper" } } });
+  page.selectShareVideoBackgroundMode.call(context, { currentTarget: { dataset: { backgroundMode: "single" } } });
+  assert.equal(context.data.shareVideoStatusText, selectionError);
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
+  assert.equal(context.data.shareVideoSelectedCanGenerate, true);
+  assert.notEqual(context.data.shareVideoStatusText, selectionError);
+  page.clearShareVideoSelection.call(context);
+  assert.equal(context.data.shareVideoSelectedText, "");
+});
+
 test("transcript media page creates share video from selected corrected segments", async () => {
   const contextCalls = [];
   const createCalls = [];
