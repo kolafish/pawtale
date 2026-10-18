@@ -302,6 +302,10 @@ declare namespace WechatMiniprogram {
     onClose(callback: (result: GeneralCallbackResult) => void): void;
   }
 
+  interface VideoContext {
+    playbackRate(rate: number): void;
+  }
+
   interface InnerAudioContext {
     src: string;
     playbackRate: number;
@@ -539,6 +543,7 @@ declare namespace WechatMiniprogram {
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;
     createInnerAudioContext(): InnerAudioContext;
+    createVideoContext(id: string, component?: object): VideoContext;
     createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyCallbackOption): void;

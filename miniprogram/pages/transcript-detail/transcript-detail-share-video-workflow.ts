@@ -1,4 +1,5 @@
 import type { ShareLikerView } from "../../services/share-likes";
+import type { VideoPlaybackData } from "../../services/video-playback";
 import {
   MEMOIR_SHARE_VIDEO_STYLES,
   normalizeMemoirShareVideoStyle,
@@ -42,7 +43,7 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
 }>;
 
 export interface TranscriptMediaData
-  extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
+  extends TranscriptShareVideoData, TranscriptMaterialImageTaskState, VideoPlaybackData {
   viewMode: "create" | "video";
   shareVideoDeleting: boolean;
   // Share videos are portrait since the vertical renderer; older ones are landscape.

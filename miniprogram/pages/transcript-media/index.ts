@@ -29,6 +29,7 @@ import {
 } from "../../services/share";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readMemoirShareLikes } from "../../services/memoir-share-like-api";
+import { initialVideoPlaybackData, videoPlaybackMethods } from "../../services/video-playback";
 import { shareLikerViews } from "../../services/share-likes";
 import { shareVideoDeleteConfirmation } from "../../services/share-video-delete";
 import {
@@ -80,7 +81,10 @@ definePage<TranscriptMediaData>()({
     shareVideoLikers: [],
     ...initialTranscriptShareVideoData(),
     ...initialTranscriptMaterialImageTaskState(),
+    ...initialVideoPlaybackData(),
   },
+
+  ...videoPlaybackMethods,
 
   async onLoad(options?: PageQuery) {
     this.shareVideoController.setStateListener((patch) => {

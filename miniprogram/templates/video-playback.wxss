@@ -1,0 +1,51 @@
+.video-speed {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  width: 100px;
+  color: #fff;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.video-speed.is-open {
+  width: 144px;
+}
+
+.video-speed-toggle {
+  width: 100px;
+  margin-left: auto;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.68);
+  line-height: 44px;
+  text-align: center;
+}
+
+.video-speed-options {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.video-speed-option {
+  width: 72px;
+  line-height: 44px;
+  text-align: center;
+}
+
+.video-speed-option.is-selected {
+  background: rgba(255, 255, 255, 0.24);
+  font-weight: 700;
+}
+
+.video-speed-pressed {
+  opacity: 0.75;
+}
+
+.large-text .video-speed {
+  font-size: 16px;
+}

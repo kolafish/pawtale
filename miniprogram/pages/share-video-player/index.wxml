@@ -1,4 +1,5 @@
 <import src="../../templates/share-likes.wxml" />
+<import src="../../templates/video-playback.wxml" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{loading && !video}}" class="empty-panel">
     <text class="empty-copy">正在打开视频</text>
@@ -24,18 +25,23 @@
     </block>
     <video
       wx:else
+      id="memoir-video"
       class="shared-video {{portrait ? 'is-portrait' : ''}}"
       src="{{videoUrl}}"
       poster="{{posterUrl}}"
       bindloadedmetadata="markVideoShape"
       bindended="holdEndFrame"
       binderror="markVideoError"
+      bindplay="applyVideoPlaybackRate"
+      bindfullscreenchange="closeVideoSpeedMenu"
       controls
       autoplay
       show-center-play-btn
       enable-progress-gesture
       object-fit="contain"
-    />
+    >
+      <template is="videoPlaybackSpeed" data="{{videoPlaybackRate, videoPlaybackRates, videoSpeedMenuOpen}}" />
+    </video>
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
