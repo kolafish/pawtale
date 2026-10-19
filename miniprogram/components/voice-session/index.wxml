@@ -15,7 +15,7 @@
       <text class="mode-label">{{topModeLabel}}</text>
     </view>
   </view>
-  <text class="top-subtitle">{{topSubtitle}}</text>
+  <text wx:if="{{topSubtitle && !showCompletionIssuePanel}}" class="top-subtitle">{{topSubtitle}}</text>
 
   <view wx:if="{{!recording || sessionGoal !== 'book_completion'}}" class="topic-panel">
     <view class="topic-leaf" aria-hidden="true"><view class="topic-leaf-shape"></view></view>
@@ -146,7 +146,6 @@
       </view>
     </view>
     <view wx:if="{{showAssistantOpening}}" class="assistant-opening">
-      <text class="assistant-context">今天可以接着讲，也可以换个方向。想不起来也没关系。</text>
       <text class="assistant-question">{{assistantQuestionText}}</text>
     </view>
     <view wx:elif="{{showAssistantTTS}}" class="assistant-tts-text">
@@ -191,14 +190,9 @@
   </button>
 
   <view wx:if="{{showTranscriptStage}}" class="transcript-stage">
-    <view class="transcript-stage-head">
+    <view wx:if="{{showStageStatus || showReturnToLatest}}" class="transcript-stage-head">
       <view wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
         <text class="stage-status-text centered-control-label">{{stageStatusText}}</text>
-      </view>
-      <view wx:if="{{recording}}" class="capture-summary">
-        <view class="capture-dot"></view>
-        <text>已说 {{captureDurationText}}</text>
-        <text wx:if="{{showLiveCharCount}}">· {{liveCharCount}} 字</text>
       </view>
       <button
         wx:if="{{showReturnToLatest}}"
@@ -225,7 +219,7 @@
     </view>
     <view wx:if="{{showCaptureStrip && !recording}}" class="{{captureStripClass}}">
       <view class="capture-dot"></view>
-      <text>说完后点“说完了”，我会帮您整理成文字。</text>
+      <text>点麦克风开始，讲完再次点击。</text>
     </view>
     <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">

@@ -45,7 +45,6 @@
 
 .page-kicker,
 .page-title,
-.page-detail,
 .progress-text,
 .chapter-title,
 .chapter-headline,
@@ -69,14 +68,6 @@
   line-height: 1.4;
   letter-spacing: 0.02em;
   text-wrap: balance;
-}
-
-.page-detail {
-  margin-top: 12rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-body);
-  line-height: 42rpx;
-  text-wrap: pretty;
 }
 
 .progress-text {
@@ -110,7 +101,6 @@
     var(--ui-card-shadow);
 }
 
-.book-review-kicker,
 .book-review-title,
 .book-review-summary,
 .review-group-title,
@@ -118,13 +108,6 @@
 .review-complete {
   display: block;
   overflow-wrap: anywhere;
-}
-
-.book-review-kicker {
-  color: var(--ui-accent);
-  font-size: var(--ui-font-meta);
-  font-weight: 700;
-  line-height: 34rpx;
 }
 
 .book-review-title {
@@ -534,6 +517,7 @@
 }
 .automation-head {
   gap: 18rpx;
+  flex-wrap: wrap;
 }
 .automation-title {
   display: block;
@@ -543,7 +527,6 @@
   font-weight: 700;
   line-height: 1.35;
 }
-.automation-meta,
 .automation-error,
 .automation-item-summary,
 .automation-item-detail,
@@ -552,15 +535,10 @@
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
-.automation-meta {
-  margin-top: 6rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-caption);
-  line-height: 1.4;
-}
 .automation-head-actions {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8rpx;
 }
 .automation-count {
@@ -575,6 +553,8 @@
   font-variant-numeric: tabular-nums;
 }
 .automation-clear {
+  width: auto;
+  flex: 0 0 auto;
   min-width: 120rpx;
   min-height: 80rpx;
   margin: 0;
@@ -697,7 +677,6 @@
 .completion-page.large-text .automation-item-title {
   font-size: var(--ui-font-large-body);
 }
-.completion-page.large-text .automation-meta,
 .completion-page.large-text .automation-item-summary,
 .completion-page.large-text .automation-item-detail,
 .completion-page.large-text .automation-ack,

@@ -168,7 +168,7 @@ function stateFixtures() {
         hasProject: false,
         hasStories: false,
         headerSubtitleText: "每一个故事，都从一颗种子开始。",
-        primaryVoiceButtonTitle: "种下我的故事",
+        primaryVoiceButtonTitle: "开始讲述",
         story: story(),
       },
     },

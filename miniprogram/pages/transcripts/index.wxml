@@ -3,7 +3,7 @@
     <text class="ui-page-context">{{pageMetaText}}</text>
   </view>
 
-  <text wx:if="{{pickForVideo && activeProjectId}}" class="pick-video-hint">选一段讲述，再从里面挑出想做成视频的几句话。</text>
+  <text wx:if="{{pickForVideo && activeProjectId}}" class="pick-video-hint">选一段讲述做视频。</text>
 
   <view wx:if="{{activeProjectId && !pickForVideo}}" class="material-tabs" aria-role="radiogroup" aria-label="回忆整理状态">
     <view wx:for="{{materialTabs}}" wx:key="value"
@@ -68,7 +68,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <text class="empty-title">浏览讲述记录</text>
-    <text class="empty-copy">登录后可以查看语音聊天保存的识别原文、整理文字、音频时长和是否已收录到章节。</text>
+    <text class="empty-copy">登录后查看讲述文字和原音。</text>
     <view
       class="login-button ui-block-action ui-pressable"
       aria-role="button"
@@ -78,7 +78,6 @@
 
   <view wx:elif="{{showNoProjectPanel}}" class="empty-panel ui-card">
     <text class="empty-title">还没有回忆录</text>
-    <text class="empty-copy">先创建一本回忆录，完成语音聊天后，讲述记录会显示在这里。</text>
     <view
       class="login-button ui-block-action ui-pressable"
       aria-role="button"
@@ -91,7 +90,6 @@
   </view>
 
   <view wx:elif="{{showSearchEmpty}}" class="empty-panel ui-card">
-    <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
     <view
       class="empty-secondary-button ui-block-action"

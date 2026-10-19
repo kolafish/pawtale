@@ -10,7 +10,7 @@
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">浏览书稿</text>
-    <text class="empty-copy">讲述保存后会在后台整理成可读草稿，登录后可以阅读、编辑和导出。</text>
+    <text class="empty-copy">登录后阅读、编辑和导出书稿。</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="openLogin">登录后整理</button>
       <button class="ghost-button" bindtap="openHome">返回首页</button>
@@ -21,7 +21,6 @@
   <view wx:if="{{!projectId}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">还没有回忆录</text>
-    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音聊天后再整理书稿。</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="createProject">创建回忆录</button>
       <button class="ghost-button" bindtap="openHome">返回首页</button>
@@ -71,7 +70,7 @@
 
   <view class="book-operation-list ui-card">
     <view class="book-operation-row ui-pressable {{stage !== 'drafting' ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{stage !== 'drafting'}}" bindtap="openBookCompletion">
-      <view class="book-operation-copy"><text class="book-operation-title">书稿建议</text><text wx:if="{{blockingIssueCount}}" class="book-operation-notice">{{blockingIssueCount}} 项需要核对，处理后相关章节才能收入全书</text></view><text class="book-row-arrow">›</text>
+      <view class="book-operation-copy"><text class="book-operation-title">书稿建议</text><text wx:if="{{blockingIssueCount}}" class="book-operation-notice">{{blockingIssueCount}} 项待核对，相关章节暂未入书</text></view><text class="book-row-arrow">›</text>
     </view>
     <view class="book-operation-row ui-pressable" aria-role="button" data-action="settings" bindtap="openBookExportPage">
       <view class="book-operation-copy"><text class="book-operation-title">书的设置</text></view><text class="book-row-arrow">›</text>
@@ -87,8 +86,7 @@
 
   <view wx:elif="{{stage === 'empty'}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
-    <text class="empty-title">讲述会自动整理成书</text>
-    <text class="empty-copy">讲完后，小余会在后台整理章节和正文。您可以先离开，稍后回来阅读。</text>
+    <text class="empty-title">讲述后会自动整理成书</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="openHome">去讲述</button>
       <button class="ghost-button" bindtap="continueBookDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft || !projectId}}">继续整理已有讲述</button>
@@ -97,7 +95,7 @@
 
   <view wx:else class="section">
     <view wx:if="{{planNeedsActivation}}" class="empty-panel ui-card">
-      <text class="empty-copy">已有目录会原样保留，小余可以继续整理正文。</text>
+      <text class="empty-copy">保留目录，继续整理正文。</text>
       <button class="primary-button" bindtap="continueBookDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理成书</button>
     </view>
     <view class="section-head chapter-section-head">

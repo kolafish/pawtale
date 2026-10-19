@@ -1,14 +1,9 @@
 <view class="ui-page-shell {{pageClass}}">
-  <view class="ui-page-context-row">
-    <text class="ui-page-context">资料、访谈方式和润色强度只用于这本回忆录</text>
-  </view>
-
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="form-panel ui-card">
     <view class="field">
       <text class="field-label">回忆录名称</text>
-      <text class="field-hint">首页、封面和导出都会使用这个名字</text>
       <input
         id="project-title-input"
         class="text-input support-form-input"
@@ -76,7 +71,7 @@
 
     <view class="field">
       <text class="field-label">默认访谈方式</text>
-      <text class="mode-desc">以后从首页开始会使用这个方式；书稿补充会先进入待补问题列表，进行中的讲述不会改变。</text>
+      <text class="mode-desc">用于之后的讲述；书稿补充先选问题。</text>
       <view class="mode-list" aria-role="radiogroup" aria-label="默认访谈方式">
         <view
           wx:for="{{narrationOptions}}"
@@ -98,7 +93,7 @@
 
     <view class="field">
       <text class="field-label">素材与正文润色强度</text>
-      <text class="mode-desc">用于这本回忆录之后新增或重新处理的内容，已经生成的文字不会自动改写。</text>
+      <text class="mode-desc">用于新增或重新处理的文字，已有文字不变。</text>
       <view class="mode-list" aria-role="radiogroup" aria-label="素材与正文润色强度">
         <view
           wx:for="{{transcriptPolishOptions}}"
@@ -119,7 +114,7 @@
     </view>
     <view class="field">
       <text class="field-label">默认分享视频风格</text>
-      <text class="mode-desc">用于这本回忆录之后制作的分享视频，每次制作时也可以重新选择。</text>
+      <text class="mode-desc">制作视频时可重新选择。</text>
       <view class="mode-list" aria-role="radiogroup" aria-label="默认分享视频风格">
         <view
           wx:for="{{shareVideoStyleOptions}}"

@@ -42,7 +42,6 @@ test("story voice edit opts into the shared automatic dictation flow", () => {
     "utf8",
   );
   assert.match(template, /automatic-voice-command="\{\{true\}\}"/);
-  assert.match(template, /给童年回忆重新整理小节/);
 });
 
 test("raw transcribed request reaches the model; selected existing operations execute only on tap", async () => {

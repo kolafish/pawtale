@@ -39,7 +39,6 @@
         <text wx:if="{{item.active}}" class="active-badge">当前</text>
       </view>
       <text class="project-meta">{{item.profileSummary || "资料未填写"}} · {{item.wordCountText}} · {{item.updatedText || "刚刚"}}</text>
-      <text class="project-hint">{{item.active ? "当前正在使用" : "点击卡片切换为当前回忆录"}}</text>
     </view>
 
     <view class="project-actions">

@@ -586,8 +586,8 @@ test("home start action follows account, project, story and completion states", 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
   assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
-  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "种下我的故事");
-  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "种下我的故事");
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "开始讲述");
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, true);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);
@@ -890,8 +890,7 @@ test("home keeps first-visit context while presenting the seed state", async () 
   await page.loadHome.call(context);
 
   assert.equal(context.data.launchVariant, "first_visit");
-  assert.equal(context.data.primaryVoiceButtonTitle, "种下我的故事");
-  assert.equal(context.data.headerSubtitleText, "每一个故事，都从一颗种子开始。");
+  assert.equal(context.data.primaryVoiceButtonTitle, "开始讲述");
 });
 
 test("home dismisses one-time new-project launch markers", () => {

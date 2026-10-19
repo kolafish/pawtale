@@ -2,11 +2,11 @@
   <view class="edit-intro">
     <text class="edit-book">{{projectTitle || '当前回忆录'}}</text>
     <text class="edit-title">{{splitConfirmation ? '确认这次调整' : '说说你想怎么改'}}</text>
-    <text class="edit-hint">{{splitConfirmation ? '请核对要移走的内容和新章节名，确认前不会修改。' : '进入页面后直接说，停顿后会自动理解；确认前不会修改。'}}</text>
+    <text class="edit-hint">{{splitConfirmation ? '核对内容和新章节名后确认。' : '直接说出修改要求，停顿后自动理解；确认后生效。'}}</text>
   </view>
   <view hidden="{{splitConfirmation !== null}}">
     <voice-text-editor value="{{instruction}}" gateway-url="{{gatewayUrl}}" maxlength="2000"
-      placeholder="比如：给童年回忆重新整理小节，或把于大姐改成余大姐。"
+      placeholder="例如：把于大姐改成余大姐。"
       submit-text="发送" busy-text="正在理解…" busy="{{loading}}" disabled="{{applying || !projectId || splitConfirmation !== null}}"
       automatic-voice-command="{{true}}"
       bind:change="changeInstruction" bind:submit="submitInstruction" />
@@ -25,7 +25,7 @@
   <view wx:elif="{{preview}}" class="edit-result ui-card" aria-live="polite">
     <text class="edit-reply">{{preview.reply}}</text>
     <view wx:for="{{preview.questions}}" wx:key="*this" class="edit-question">{{item}}</view>
-    <text wx:if="{{preview.questions.length}}" class="edit-hint">请回答上面的问题：点「语音输入」再说，或在上方文字末尾补充后点「发送」。之前的要求会一起保留。</text>
+    <text wx:if="{{preview.questions.length}}" class="edit-hint">请补充回答，之前的要求会保留。</text>
     <checkbox-group bindchange="selectOperations">
       <label wx:for="{{items}}" wx:key="selectionKey" class="edit-operation">
         <checkbox value="{{item.selectionKey}}" checked="{{item.selected}}" disabled="{{applying}}" color="#b65d49" />
@@ -35,7 +35,7 @@
         </view>
       </label>
     </checkbox-group>
-    <button wx:if="{{items.length}}" class="edit-apply ui-button ui-block-action" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">执行所选修改（{{selectedCount}}）</button>
+    <button wx:if="{{items.length}}" class="edit-apply ui-button ui-block-action" bindtap="apply" disabled="{{!selectedCount || applying}}" loading="{{applying}}">确认修改（{{selectedCount}}）</button>
     <button wx:if="{{!items.length && preview.navigation}}" class="edit-apply ui-button ui-block-action" bindtap="openNavigation">{{preview.navigation.label}}</button>
   </view>
   <view wx:if="{{message}}" class="edit-result edit-message {{sectionTasks.length ? 'has-section-tasks' : ''}} ui-card" aria-live="polite">

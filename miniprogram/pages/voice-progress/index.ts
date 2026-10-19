@@ -67,7 +67,6 @@ interface OverviewData {
   progress: MemoirVoiceProgressResponse;
   sessions: VoiceSessionSummaryView[];
   topicHeadline: string;
-  topicDetail: string;
   topicModules: TopicMapModuleView[];
   savingItemId: string;
   creatingItemId: string;
@@ -183,10 +182,9 @@ export function topicMapViewPatch(
   topicMap: MemoirTopicMap,
   savingItemId = "",
   creatingItemId = "",
-): Pick<OverviewData, "topicHeadline" | "topicDetail" | "topicModules"> {
+): Pick<OverviewData, "topicHeadline" | "topicModules"> {
   return {
     topicHeadline: topicMap.headline,
-    topicDetail: topicMap.detail,
     topicModules: topicMap.modules.map((module) => ({
       ...module,
       items: module.items.map((item) => topicMapItemView(
@@ -245,7 +243,6 @@ definePage<OverviewData>()({
     progress: EMPTY_PROGRESS,
     sessions: [],
     topicHeadline: "人生话题",
-    topicDetail: "它不是章节目录，也没有必须全部讲完。",
     topicModules: [],
     savingItemId: "",
     creatingItemId: "",

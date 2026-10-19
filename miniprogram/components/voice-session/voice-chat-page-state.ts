@@ -149,7 +149,6 @@ export interface VoiceChatData {
   returnToLatestText: string;
   showCaptureStrip: boolean;
   captureStripClass: string;
-  showLiveCharCount: boolean;
   showInlineHelp: boolean;
   historyExpanded: boolean;
   historyCountText: string;
@@ -248,7 +247,7 @@ export function initialVoiceChatData(): VoiceChatData {
     progressNoticeDetail: "",
     narrationMode: "guided_interview",
     topModeLabel: NARRATION_MODES.guided_interview.label,
-    topSubtitle: "想讲什么就讲什么，小余在旁边听",
+    topSubtitle: "",
     topicTitleText: "这段回忆",
     showHumanRecordActions: false,
     showControlBar: true,
@@ -292,7 +291,6 @@ export function initialVoiceChatData(): VoiceChatData {
     returnToLatestText: "回到最新",
     showCaptureStrip: true,
     captureStripClass: "capture-strip",
-    showLiveCharCount: false,
     showInlineHelp: false,
     historyExpanded: false,
     historyCountText: "0 段 · 0 字",
@@ -387,7 +385,6 @@ export type VoiceChatViewPatch = Pick<
   | "returnToLatestText"
   | "showCaptureStrip"
   | "captureStripClass"
-  | "showLiveCharCount"
   | "showInlineHelp"
   | "historyCountText"
   | "showHistoryPanel"
@@ -543,9 +540,10 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     (total, line) => total + Array.from(line.text.trim()).length,
     0,
   );
-  const showStageStatus = !isHumanInterview || Boolean(state.error);
-  const showCaptureStrip = (!isHumanInterview || state.recording)
-    && !completionRoundFinished;
+  const showStageStatus = !isHumanInterview && !state.recording && !assistantBusy
+    && !showTranscriptProcessing && !state.error;
+  const showCaptureStrip = !isHumanInterview && !hasSavedNarration
+    && !assistantBusy && !state.error && !completionRoundFinished;
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
@@ -696,9 +694,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     topModeLabel: NARRATION_MODES[narrationMode].label,
     topSubtitle: isBookCompletion
       ? "一次只补一个重点"
-      : (isHumanInterview
-        ? "实时记录采访者和被访者"
-        : "想讲什么就讲什么，小余在旁边听"),
+      : "",
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
@@ -762,7 +758,6 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     returnToLatestText: pendingLiveChars > 0 ? `回到最新 · 新增 ${pendingLiveChars} 字` : "回到最新",
     showCaptureStrip,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
-    showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),
     historyCountText: `${savedNarrationLines.length} 段 · ${savedNarrationCharCount} 字`,
     showHistoryPanel: hasSavedNarration,

@@ -1,6 +1,6 @@
 <view class="ai-task-status">
   <text class="ai-task-title">{{title}}</text>
-  <text class="ai-task-detail">{{detail}}</text>
+  <text wx:if="{{detail && detail !== title}}" class="ai-task-detail">{{detail}}</text>
   <view
     wx:if="{{mode !== 'hidden'}}"
     class="ai-task-track"

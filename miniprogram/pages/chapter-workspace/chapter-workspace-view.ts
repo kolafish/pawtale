@@ -443,17 +443,17 @@ export function chapterWorkspaceViewPatch(
   return {
     nextAction,
     chapterHeroKicker: chapterHasReadableDraft
-      ? "这一章已经整理成"
+      ? "已整理"
       : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
     chapterStoryCountText: narrativeSectionCount
       ? `${narrativeSectionCount} 个故事`
       : "暂无故事",
     chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
-      ? "本章有新变化，当前正文仍可阅读，相关内容待更新。"
+      ? "有新回忆待整理，当前正文仍可阅读。"
       : summary.state === "draft_ready"
-        ? "本章正文已整理好，可以随时阅读或修改。"
+        ? ""
         : chapterHasReadableDraft
-          ? "您讲过的生活片段，已经整理成可以慢慢读的一章。"
+          ? ""
           : emptyDraftDetail,
     chapterHasReadableDraft,
     chapterEditingHint: pendingAssignmentCount

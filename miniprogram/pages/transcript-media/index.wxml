@@ -9,7 +9,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后制作图片和视频</text>
-    <text class="empty-copy">登录后可以从讲述中选择片段，生成插图或带字幕的分享视频。</text>
+    <text class="empty-copy">登录后选择讲述片段制作。</text>
     <view class="primary-button login-entry-action ui-block-action ui-pressable" aria-role="button" bindtap="openLogin">
       前往登录
     </view>
@@ -26,7 +26,7 @@
 
   <view wx:elif="{{viewMode === 'create' && item.canRecoverTranscription}}" class="empty-panel">
     <text class="empty-title">转写完成后再制作</text>
-    <text class="empty-copy">原始音频已经保存，文字恢复完成后才能选择片段制作图片或视频。</text>
+    <text class="empty-copy">原音已保存，文字恢复后即可制作。</text>
   </view>
 
   <block wx:else>
@@ -118,14 +118,14 @@
 
     <view wx:if="{{viewMode === 'create'}}" class="hero-panel">
       <text class="record-title">做成图片或视频</text>
-      <text class="record-meta">从“{{item.titleText}}”中选一段话，可以生成一张插图，也可以制作带原音和字幕的视频。</text>
+      <text class="record-meta">来自“{{item.titleText}}”</text>
     </view>
 
     <view wx:if="{{viewMode === 'create'}}" class="section-card share-video-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">选择文字片段</text>
-          <text class="section-hint">点选开头和结尾的句子，中间会自动选上</text>
+          <text class="section-hint">点选起止句，中间自动选上</text>
         </view>
         <text class="section-count share-video-count {{(materialImageCreating || materialImagePolling) ? materialImageStatusClass : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? shareVideoStatusClass : (materialImageStatusClass || shareVideoStatusClass))}}">
           {{(materialImageCreating || materialImagePolling) ? (materialImageStatusText || "图片生成中") : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? (shareVideoStatusText || "视频生成中") : (materialImageStatusText || shareVideoStatusText || "未生成"))}}
@@ -217,12 +217,12 @@
           <view class="share-video-background-head">
             <text class="voice-edit-label">人物背景（选填）</text>
           </view>
-          <text class="share-video-background-help">写清楚画面里的人是谁，插图会按这里画人物的性别、年龄和关系。</text>
+          <text class="share-video-background-help">人物身份、年龄和关系（选填）。</text>
           <textarea
             class="share-video-note-input"
             value="{{shareVideoBackgroundNote}}"
             bindinput="changeShareVideoBackgroundNote"
-            placeholder="例如：讲述者是女性，“我们”是我和妹妹，那年我十岁左右"
+            placeholder="例如：我和妹妹，那年我十岁"
             maxlength="300"
             auto-height
             cursor-spacing="24"
@@ -235,7 +235,7 @@
             <text class="voice-edit-label">插图风格</text>
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
-          <text class="share-video-background-help">同一画面的画风示意，实际配图按你的讲述生成。</text>
+          <text class="share-video-background-help">画风示意，内容按讲述生成。</text>
           <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
             <view
               wx:for="{{shareVideoBackgroundStyleOptions}}"
@@ -326,7 +326,7 @@
         <view wx:elif="{{materialImageJob}}" class="share-video-job {{materialImageStatusClass}} material-image-job">
           <view class="material-image-job-copy">
             <text class="share-video-job-title">{{materialImageStatusText}}</text>
-            <text wx:if="{{materialImageJob.status === 'succeeded'}}" class="share-video-job-meta">默认不收入书稿，可在图片素材中编辑说明并决定放置位置。</text>
+            <text wx:if="{{materialImageJob.status === 'succeeded'}}" class="share-video-job-meta">尚未入书，可到图片素材中选择位置。</text>
           </view>
           <button
             wx:if="{{materialImageJob.status === 'succeeded'}}"

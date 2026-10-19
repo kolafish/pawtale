@@ -304,20 +304,16 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const readyPrimaryAction = await elementById(page, "voice-primary-action");
     const readyPrimarySize = await readyPrimaryAction.size();
     assert.ok(readyPrimarySize.width >= 40 && readyPrimarySize.height >= 40, "主操作满足最小触控区域");
-    const topBar = await page.$(".top-bar");
-    const topBarOffset = await topBar.offset();
-    const topBarSize = await topBar.size();
     const finishAction = await elementById(page, "voice-finish-action");
-    const homeActionSize = await (await elementById(page, "voice-home-action")).size();
     const finishActionOffset = await finishAction.offset();
     const finishActionSize = await finishAction.size();
+    const viewport = await session.miniProgram.systemInfo();
+    assert.ok(finishActionSize.width >= 40 && finishActionSize.height >= 40, "结束讲述操作满足最小触控区域");
     assert.ok(
-      Math.abs(homeActionSize.width - finishActionSize.width) <= 1,
-      `顶部左右操作等宽，模式标题保持居中（首页 ${homeActionSize.width}，结束 ${finishActionSize.width}）`,
-    );
-    assert.ok(
-      finishActionOffset.left + finishActionSize.width <= topBarOffset.left + topBarSize.width + 1,
-      `结束讲述按钮完整位于顶部栏内（按钮右侧 ${finishActionOffset.left + finishActionSize.width}，顶部栏右侧 ${topBarOffset.left + topBarSize.width}）`,
+      finishActionOffset.left >= 0 && finishActionOffset.top >= 0
+        && finishActionOffset.left + finishActionSize.width <= viewport.windowWidth + 1
+        && finishActionOffset.top + finishActionSize.height <= viewport.windowHeight + 1,
+      "结束讲述操作完整可见",
     );
     const readyMicIconSize = await (await page.$(".mic-icon")).size();
     assert.ok(
@@ -387,11 +383,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       `实时文字卡不被固定操作区遮挡（卡片底部 ${recordingStageOffset.top + recordingStageSize.height}，操作区顶部 ${recordingDockOffset.top}）`,
     );
     assert.equal(await page.$("#session-narration-modes"), null);
-    await assertVerticallyCentered(
-      await page.$(".stage-status"),
-      await page.$(".stage-status-text"),
-      "正在倾听状态标签",
-    );
+    assert.equal(await page.$(".stage-status"), null, "录音状态只在固定操作区显示");
+    assert.equal((await page.$$(".recording-duration")).length, 1, "录音只显示一处计时");
+    assert.ok(await page.$(".control-hint.is-recording"), "固定操作区持续显示正在录音");
     const longTranscript = "那时候每天早上起来以后，我先收拾屋子，再去院子里忙一会儿。".repeat(12);
     const transcriptSnapshots = [];
     for (const length of [40, 80, 120, 200, 300]) {
@@ -563,11 +557,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     const largeTranscript = "小时候家门口有一条小路，每次出门都能遇见熟悉的人。".repeat(14).slice(0, 300);
     await next.callMethod("handlePartial", largeTranscript);
     await assertMeasuredTranscriptScroll(next, largeTranscript, "大字模式300字实时讲述");
-    await assertVerticallyCentered(
-      await next.$(".stage-status"),
-      await next.$(".stage-status-text"),
-      "大字模式正在倾听状态标签",
-    );
+    assert.equal(await next.$(".stage-status"), null, "录音状态只在固定操作区显示");
+    assert.equal((await next.$$(".recording-duration")).length, 1, "录音只显示一处计时");
+    assert.ok(await next.$(".control-hint.is-recording"), "固定操作区持续显示正在录音");
     const largeStage = await next.$(".transcript-stage");
     const largeDock = await next.$(".control-bar");
     const [largeStageOffset, largeStageSize, largeDockOffset] = await Promise.all([

@@ -19,11 +19,11 @@
             gateway-url="{{requiredAnswerGatewayUrl}}"
             voice-session-id="{{answeringIssueId}}"
             maxlength="1000"
-            placeholder="可以写下来，也可以直接说给小余听。"
-            submit-text="保存这段回答"
+            placeholder="写下或说出您的回答。"
+            submit-text="保存回答"
             busy-text="正在保存…"
             cancel-text="稍后再说"
-            hint="您的原话会和这个故事一起保存。"
+            hint="原话会随故事保存。"
             aria-label="填写或说出问题的回答或处理说明"
             disabled="{{disabled}}"
             busy="{{busyIssueId !== ''}}"
@@ -71,7 +71,7 @@
 <view wx:for="{{requiredIssueGroups}}" wx:for-item="group" wx:key="id" class="issue-group {{group.className}}">
   <text class="group-title">{{group.title}} · {{group.issues.length}} 项</text>
   <text class="group-detail">
-    {{group.detail || (allowRequiredConfirmation ? "可以回答、说明或选择不处理；已保存的草稿仍可阅读。" : "涉及事实冲突或内容取舍，需要处理后才能确认本章。")}}
+    {{group.detail || (allowRequiredConfirmation ? "可回答、说明或选择不处理，草稿仍可阅读。" : "处理事实或取舍问题后可确认本章。")}}
   </text>
   <view wx:for="{{group.issues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
@@ -101,11 +101,11 @@
           gateway-url="{{requiredAnswerGatewayUrl}}"
           voice-session-id="{{answeringIssueId}}"
           maxlength="1000"
-          placeholder="请写下您的回答、选择，或希望怎样处理这件事。"
+          placeholder="写下回答或处理意见。"
           submit-text="保存回答并处理"
           busy-text="正在保存…"
           cancel-text="稍后再填"
-          hint="您的原话会作为这项问题的处理说明保存。"
+          hint="原话会作为处理说明保存。"
           aria-label="填写或说出问题的回答或处理说明"
           disabled="{{disabled}}"
           busy="{{busyIssueId !== ''}}"
@@ -123,7 +123,7 @@
 
 <view wx:if="{{optionalIssues.length}}" class="issue-group optional">
   <text class="group-title">{{chapterId ? (optionalIssues.length === 1 ? "还有一件事想听您讲讲" : "还有 " + optionalIssues.length + " 件事，可以以后慢慢聊") : "可以完善 · " + optionalIssues.length + " 项"}}</text>
-  <text class="group-detail">{{chapterId ? "想聊时可以直接语音回答；暂时不想聊，也可以先放一放。" : "可以补讲、标记已处理或跳过，不会阻塞成书。"}}</text>
+  <text class="group-detail">{{chapterId ? "想聊时再补充。" : "可补讲或跳过，不影响成书。"}}</text>
   <view wx:for="{{optionalIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
     <text class="reason">{{item.reason}}</text>

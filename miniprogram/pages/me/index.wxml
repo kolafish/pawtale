@@ -1,15 +1,10 @@
 <view class="ui-page-shell ui-accessible-page {{pageClass}}">
-  <view class="ui-page-context-row">
-    <text class="ui-page-context">{{loggedIn ? "管理回忆录、语音工具和个人偏好" : "登录并继续记录家里的故事"}}</text>
-  </view>
-
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <block wx:if="{{!loggedIn}}">
     <view class="guest-login-panel ui-card ui-card-borderless">
       <view class="guest-login-mark">余</view>
       <text class="panel-title">登录后管理你的回忆录</text>
-      <text class="panel-copy">讲述记录、成书进度和个人设置都会跟随账号保存。</text>
       <view
         class="primary-button support-action ui-block-action ui-pressable"
         aria-role="button"
@@ -25,7 +20,6 @@
         <view class="switch-row">
           <view class="switch-copy">
             <text class="action-title">大字模式</text>
-            <text class="action-meta">放大主要页面的文字和操作区域。</text>
           </view>
           <switch
             checked="{{largeTextEnabled}}"
@@ -68,7 +62,6 @@
         </view>
         <text wx:else class="profile-name">{{displayName || "作者"}}</text>
         <text class="profile-email">{{accountEmailText || email || "正在加载账号"}}</text>
-        <text wx:if="{{!editingName}}" class="profile-avatar-hint">点击头像可选择微信头像</text>
       </view>
       <view wx:if="{{editingName}}" class="profile-actions">
         <button class="mini-button ghost support-action ui-pressable" disabled="{{savingName}}" bindtap="cancelEditName">取消</button>
@@ -88,9 +81,7 @@
         <view class="project-overview-head">
           <view class="project-overview-main">
             <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
-            <text class="action-meta">
-              {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 段文字讲述") : "还没有文字讲述")) : "创建第一本回忆录并设置讲述资料"}}
-            </text>
+            <text wx:if="{{!projectCount}}" class="action-meta">创建第一本回忆录</text>
           </view>
         </view>
 
@@ -112,7 +103,7 @@
             <text class="overview-stat-label">录音</text>
           </view>
         </view>
-        <text class="overview-stats-hint">这里统计已转成文字的讲述；尚未生成文字的录音也会显示在讲述记录列表中。</text>
+        <text class="overview-stats-hint">段数仅统计已转文字的讲述，录音时长含未转写录音。</text>
 
       </view>
     </view>
@@ -193,9 +184,7 @@
         >
           <view class="settings-row-copy">
             <text class="action-title">{{projectCount ? "管理回忆录" : "创建回忆录"}}</text>
-            <text class="action-meta">
-              {{projectCount ? ("切换当前回忆录、编辑设置 · 共 " + projectCount + " 本") : "创建第一本回忆录后开始访谈"}}
-            </text>
+            <text wx:if="{{projectCount}}" class="action-meta">共 {{projectCount}} 本</text>
           </view>
           <text class="row-chevron">›</text>
         </view>
@@ -214,7 +203,7 @@
         >
           <view class="settings-row-copy">
             <text class="action-title">语音授权</text>
-            <text class="action-meta">{{voiceAuthorizationAgreed ? "已完成授权，点击查看协议详情。" : "开始语音前需要阅读并同意协议。"}}</text>
+            <text wx:if="{{!voiceAuthorizationAgreed}}" class="action-meta">录音前请先授权</text>
           </view>
           <view class="settings-row-tail">
             <text class="status-pill {{voiceAuthorizationAgreed ? 'ok' : 'warn'}}">{{voiceAuthorizationStatusText}}</text>
@@ -231,7 +220,6 @@
         >
           <view class="settings-row-copy">
             <text class="action-title">语音与 AI</text>
-            <text class="action-meta">模型、音色、语速与访谈环境。</text>
           </view>
           <view class="settings-row-tail">
             <text class="row-value">{{aiModelLabel}}</text>
@@ -247,7 +235,6 @@
         <view class="switch-row">
           <view class="switch-copy">
             <text class="action-title">大字模式</text>
-            <text class="action-meta">放大主要页面的文字和操作区域。</text>
           </view>
           <switch
             checked="{{largeTextEnabled}}"

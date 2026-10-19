@@ -481,14 +481,6 @@
   margin-top: 18rpx;
 }
 
-.assistant-context {
-  display: block;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-body);
-  line-height: 1.55;
-  text-wrap: pretty;
-}
-
 .assistant-question {
   display: block;
   margin-top: 18rpx;
@@ -650,29 +642,6 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 14rpx 20rpx;
-}
-
-.capture-summary {
-  min-height: 54rpx;
-  margin-left: auto;
-  padding: 6rpx 16rpx;
-  border-radius: 999rpx;
-  background: var(--ui-surface-subtle);
-  color: var(--ui-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  font-size: var(--ui-font-body);
-  font-weight: 600;
-  line-height: 36rpx;
-  font-variant-numeric: tabular-nums;
-}
-
-.capture-summary .capture-dot {
-  width: 12rpx;
-  height: 12rpx;
-  background: var(--ui-accent);
-  box-shadow: 0 0 0 7rpx rgba(182, 93, 73, 0.10);
 }
 
 .live-caption-shell {
@@ -1591,11 +1560,6 @@
   line-height: 64rpx;
 }
 
-.voice-chat-page.large-text .assistant-context {
-  font-size: 38rpx;
-  line-height: 62rpx;
-}
-
 .voice-chat-page.large-text .assistant-question {
   font-size: 64rpx;
   line-height: 88rpx;
@@ -1629,13 +1593,6 @@
 .voice-chat-page.large-text .live-text {
   font-size: 64rpx;
   line-height: var(--live-caption-line-height);
-}
-
-.voice-chat-page.large-text .capture-summary {
-  min-height: 64rpx;
-  padding: 8rpx 18rpx;
-  font-size: var(--ui-font-large-body);
-  line-height: 44rpx;
 }
 
 .voice-chat-page.large-text .return-to-latest {
@@ -1826,11 +1783,6 @@
   line-height: 54rpx;
 }
 
-.voice-chat-page.large-text.assistant-focus .assistant-context {
-  font-size: 40rpx;
-  line-height: 64rpx;
-}
-
 .voice-chat-page.large-text.assistant-focus .assistant-question {
   font-size: 72rpx;
   line-height: 98rpx;
@@ -1906,17 +1858,6 @@
 .voice-chat-page.large-text.capture-focus .stage-status-text {
   font-size: 36rpx;
   line-height: 54rpx;
-  white-space: nowrap;
-}
-
-.voice-chat-page.large-text.capture-focus .capture-summary {
-  min-width: 0;
-  min-height: 60rpx;
-  padding: 6rpx 8rpx;
-  flex: 0 1 auto;
-  gap: 4rpx;
-  font-size: var(--ui-font-large-meta);
-  line-height: 42rpx;
   white-space: nowrap;
 }
 
@@ -2002,11 +1943,6 @@
 .voice-chat-page.voice-session-embedded.large-text.assistant-focus .assistant-panel {
   min-height: 0;
   padding: 30rpx 30rpx 34rpx;
-}
-
-.voice-chat-page.voice-session-embedded.large-text.assistant-focus .assistant-context {
-  font-size: 34rpx;
-  line-height: 52rpx;
 }
 
 .voice-chat-page.voice-session-embedded.large-text.assistant-focus .assistant-question {

@@ -29,8 +29,7 @@
 .panel-eyebrow,
 .panel-title,
 .panel-copy,
-.profile-field-title,
-.profile-field-hint {
+.profile-field-title {
   display: block;
 }
 
@@ -210,14 +209,6 @@
 
 .profile-name-field {
   margin-top: 24rpx;
-}
-
-.profile-field-hint {
-  margin-top: 7rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-body);
-  line-height: var(--ui-line-body);
-  text-wrap: pretty;
 }
 
 .profile-name-input {

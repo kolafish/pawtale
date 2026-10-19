@@ -158,11 +158,10 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.showTranscriptStage, true);
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusClass, "stage-status listening");
-  assert.equal(patch.stageStatusText, "我在听，您慢慢说");
+  assert.equal(patch.showStageStatus, false);
   assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
   assert.equal(patch.liveTextClass, "live-text");
   assert.equal(patch.captureStripClass, "capture-strip active");
-  assert.equal(patch.showLiveCharCount, true);
   assert.equal(patch.showInlineHelp, true);
   assert.equal(patch.historyCountText, "1 段 · 6 字");
   assert.equal(patch.showHistoryPanel, true);
@@ -361,7 +360,7 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
   assert.equal(recordingPatch.showStageStatus, false);
-  assert.equal(recordingPatch.showCaptureStrip, true);
+  assert.equal(recordingPatch.showCaptureStrip, false);
   assert.equal(recordingPatch.controlHintText, "正在录音");
   assert.equal(recordingPatch.liveDisplayText, "等待转写...");
   assert.equal(recordingPatch.liveTextClass, "live-text placeholder");
