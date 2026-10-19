@@ -1,5 +1,6 @@
 .voice-chat-page {
-  --ui-fixed-action-space: 330rpx;
+  --ui-fixed-action-space: 248rpx;
+  --voice-action-height: 56px;
   --live-caption-line-height: 71rpx;
   --live-caption-window-height: 284rpx;
   padding-top: 26rpx;
@@ -226,19 +227,19 @@
 
 .finish-button {
   box-sizing: border-box;
-  width: 190rpx;
-  min-width: 190rpx;
-  min-height: 44px;
+  min-width: 0;
+  min-height: var(--voice-action-height);
   margin: 0;
-  padding: 0 20rpx;
-  flex: 0 0 auto;
+  padding: 12rpx;
+  flex: 2 1 0;
   white-space: nowrap;
   border-radius: var(--ui-radius-control);
-  background: transparent;
-  color: var(--ui-section-title);
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
   font-size: 30rpx;
   font-weight: 600;
-  box-shadow: 0 0 0 1rpx var(--ui-accent-border) inset;
+  line-height: 1.4;
+  box-shadow: var(--ui-control-shadow);
 }
 
 .transcript-stage {
@@ -701,7 +702,7 @@
 
 .live-text.placeholder {
   color: var(--ui-text-muted);
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .live-text-end {
@@ -979,9 +980,9 @@
 }
 
 .control-bar {
-  --ui-fixed-action-top: 8rpx;
-  --ui-fixed-action-bottom: 12rpx;
-  min-height: 300rpx;
+  --ui-fixed-action-top: 24rpx;
+  --ui-fixed-action-bottom: 20rpx;
+  --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), #f5f1ea 24rpx);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -991,9 +992,9 @@
 .recording-actions {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 24rpx;
+  gap: 20rpx;
 }
 
 .human-record-panel {
@@ -1075,20 +1076,21 @@
 .mic-button {
   position: relative;
   box-sizing: border-box;
-  width: 270rpx;
-  min-height: 190rpx;
+  flex: 3 1 0;
+  min-width: 0;
+  min-height: var(--voice-action-height);
   margin: 0;
   border: 0;
-  border-radius: var(--ui-radius-card);
-  background: transparent;
-  color: var(--ui-text-primary);
-  box-shadow: none;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-accent-strong);
+  color: var(--ui-on-accent);
+  box-shadow: 0 8rpx 20rpx rgba(148, 69, 53, 0.16);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 22rpx;
-  padding: 0;
+  gap: 10rpx;
+  padding: 12rpx;
   font-size: 30rpx;
   font-weight: 700;
   line-height: 42rpx;
@@ -1099,7 +1101,6 @@
 
 .mic-button-text {
   display: block;
-  width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -1108,14 +1109,10 @@
   word-break: keep-all;
 }
 
-.mic-button.recording {
-  color: var(--ui-accent-strong);
-  background: transparent;
-  box-shadow: none;
-}
-
 .mic-button.processing {
+  background: var(--ui-surface-subtle);
   color: var(--ui-text-secondary);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .mic-button.disabled {
@@ -1131,81 +1128,23 @@
 
 .mic-icon-shell {
   position: relative;
-  width: 116rpx;
-  height: 116rpx;
-  border-radius: 999rpx;
-  background: var(--ui-accent);
+  width: 48rpx;
+  height: 48rpx;
+  flex: 0 0 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 14rpx 28rpx rgba(120, 66, 52, 0.12);
-  transition-property: transform, background-color, box-shadow;
-  transition-duration: 180ms;
-  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-
-.mic-button.disabled .mic-icon-shell {
-  background: var(--ui-accent-surface);
-}
-
-.mic-button.recording .mic-icon-shell {
-  background: var(--ui-accent-strong);
-  box-shadow:
-    0 0 0 20rpx rgba(182, 93, 73, 0.16),
-    0 0 0 40rpx rgba(182, 93, 73, 0.08),
-    0 14rpx 30rpx rgba(120, 66, 52, 0.2);
-}
-
-.mic-button.recording .mic-icon-shell::before,
-.mic-button.recording .mic-icon-shell::after {
-  content: "";
-  position: absolute;
-  inset: -18rpx;
-  border: 3rpx solid rgba(148, 69, 53, 0.6);
-  border-radius: 50%;
-  pointer-events: none;
-  animation: mic-recording-ripple 1800ms ease-out infinite;
-}
-
-.mic-button.recording .mic-icon-shell::after {
-  animation-delay: -900ms;
-}
-
-@keyframes mic-recording-ripple {
-  from {
-    transform: scale(0.9);
-    opacity: 0.9;
-  }
-  to {
-    transform: scale(1.4);
-    opacity: 0;
-  }
-}
-
-.mic-button.processing .mic-icon-shell {
-  background: #f1ede7;
-  box-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.04),
-    0 10rpx 24rpx rgba(78, 65, 55, 0.08);
 }
 
 .mic-icon {
-  width: 84rpx;
-  height: 84rpx;
+  width: 48rpx;
+  height: 48rpx;
   opacity: 1;
   transform: scale(1);
   filter: brightness(0) invert(1);
   transition-property: transform, opacity, filter;
   transition-duration: 300ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-}
-
-.mic-button.disabled .mic-icon {
-  filter: none;
-}
-
-.mic-button.recording .mic-icon {
-  filter: brightness(0) invert(1);
 }
 
 .mic-button.processing .mic-icon {
@@ -1237,9 +1176,9 @@
 
 .mic-processing-spinner {
   box-sizing: border-box;
-  width: 48rpx;
-  height: 48rpx;
-  border: 6rpx solid rgba(182, 93, 73, 0.18);
+  width: 36rpx;
+  height: 36rpx;
+  border: 4rpx solid rgba(182, 93, 73, 0.18);
   border-top-color: var(--ui-accent);
   border-radius: 999rpx;
   animation: mic-processing-spin 900ms linear infinite;
@@ -1254,10 +1193,9 @@
   align-items: center;
   justify-content: center;
   gap: 12rpx;
-  min-height: 54rpx;
-  margin: 0 0 28rpx;
-  padding: 4rpx 20rpx;
-  border-radius: 999rpx;
+  min-height: 42rpx;
+  margin: 0 0 16rpx;
+  padding: 0;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-body);
   line-height: 42rpx;
@@ -1265,16 +1203,14 @@
 }
 
 .control-hint.is-recording {
-  margin-bottom: 62rpx;
-  background: var(--ui-accent-surface);
   color: var(--ui-accent-strong);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .recording-status-dot {
-  flex: 0 0 16rpx;
-  width: 16rpx;
-  height: 16rpx;
+  flex: 0 0 12rpx;
+  width: 12rpx;
+  height: 12rpx;
   border-radius: 50%;
   background: currentColor;
 }
@@ -1408,7 +1344,8 @@
 }
 
 .voice-chat-page.large-text {
-  --ui-fixed-action-space: 420rpx;
+  --ui-fixed-action-space: 280rpx;
+  --voice-action-height: 64px;
   --live-caption-line-height: 92rpx;
   --live-caption-window-height: 368rpx;
   padding-top: 28rpx;
@@ -1431,9 +1368,6 @@
 }
 
 .voice-chat-page.large-text .finish-button {
-  width: 220rpx;
-  min-width: 220rpx;
-  min-height: 96rpx;
   font-size: var(--ui-font-large-body);
 }
 
@@ -1655,10 +1589,7 @@
 }
 
 .voice-chat-page.large-text .control-bar {
-  --ui-fixed-action-top: 8rpx;
   --ui-fixed-action-inline: 24rpx;
-  --ui-fixed-action-bottom: 14rpx;
-  min-height: 398rpx;
 }
 
 .voice-chat-page.large-text.no-control-bar {
@@ -1694,30 +1625,20 @@
 }
 
 .voice-chat-page.large-text .mic-button {
-  width: 310rpx;
-  min-height: 210rpx;
-  max-width: none;
-  gap: 24rpx;
-  padding: 0;
-  font-size: 38rpx;
-  line-height: 54rpx;
-}
-
-.voice-chat-page.large-text .mic-button.recording {
-  max-width: none;
-  padding: 0;
+  gap: 12rpx;
   font-size: 38rpx;
   line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .mic-icon-shell {
-  width: 132rpx;
-  height: 132rpx;
+  width: 56rpx;
+  height: 56rpx;
+  flex-basis: 56rpx;
 }
 
 .voice-chat-page.large-text .mic-icon {
-  width: 96rpx;
-  height: 96rpx;
+  width: 56rpx;
+  height: 56rpx;
 }
 
 .voice-chat-page.large-text .voice-auth-title {
@@ -1889,14 +1810,6 @@
   line-height: 52rpx;
 }
 
-.voice-chat-page.large-text.capture-focus .control-bar {
-  min-height: 342rpx;
-}
-
-.voice-chat-page.large-text.capture-focus {
-  --ui-fixed-action-space: 450rpx;
-}
-
 .voice-chat-page.large-text.capture-focus .level-track {
   height: 18rpx;
 }
@@ -1950,27 +1863,12 @@
   line-height: 76rpx;
 }
 
-.voice-chat-page.voice-session-embedded.large-text .control-bar {
-  --ui-fixed-action-top: 16rpx;
-  --ui-fixed-action-bottom: 22rpx;
-}
-
-.voice-chat-page.voice-session-embedded.large-text .mic-button {
-  min-height: 260rpx;
-  gap: 46rpx;
-}
-
-.voice-chat-page.voice-session-embedded.large-text .mic-icon-shell {
-  width: 154rpx;
-  height: 154rpx;
-}
-
-.voice-chat-page.voice-session-embedded.large-text .mic-icon {
-  width: 108rpx;
-  height: 108rpx;
-}
-
 .voice-chat-page.no-control-bar .control-bar {
   min-height: 132rpx;
   justify-content: center;
+}
+
+.voice-chat-page.no-control-bar .finish-button {
+  flex: 0 1 auto;
+  min-width: 220rpx;
 }

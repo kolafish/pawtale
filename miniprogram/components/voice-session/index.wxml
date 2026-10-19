@@ -219,7 +219,7 @@
     </view>
     <view wx:if="{{showCaptureStrip && !recording}}" class="{{captureStripClass}}">
       <view class="capture-dot"></view>
-      <text>点麦克风开始，讲完再次点击。</text>
+      <text>点「开始讲」就能讲述。</text>
     </view>
     <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">
@@ -271,7 +271,7 @@
         bindtap="toggleRecording"
         aria-role="button"
         aria-disabled="{{micButtonDisabled}}"
-        aria-label="{{micButtonText}}"
+        aria-label="{{recording ? (interviewType === 'human_interview' ? '保存这一段录音' : '讲完这一段，让小余接话') : micButtonText}}"
       >
         <view class="mic-icon-shell">
           <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
@@ -287,8 +287,9 @@
         loading="{{finishingSession}}"
         disabled="{{finishingSession}}"
         bindtap="finishSession"
+        aria-label="{{sessionGoal === 'book_completion' ? '保存本次补充并离开' : '保存并结束本次访谈'}}"
       >
-        {{embedded && !finishingSession ? '结束讲述' : finishButtonText}}
+        {{finishButtonText}}
       </button>
     </view>
   </view>

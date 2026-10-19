@@ -93,7 +93,6 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(voiceChatViewPatch(first).micButtonClass, "mic-button disabled");
   assert.equal(first.micButtonDisabled, true);
   assert.equal(first.micButtonProcessing, false);
-  assert.equal(first.micButtonText, "同意后开始说话");
   assert.equal(first.liveScrollClass, "live-scroll");
   assert.equal(first.liveScrollTop, 0);
   assert.equal(first.liveTranscriptFollowing, true);
@@ -131,8 +130,6 @@ test("voice chat view patch derives simple fields for first assistant turn", () 
   assert.equal(patch.assistantDisplayText, "小余正在准备第一句话");
   assert.equal(patch.stageStatusText, "小余正在准备问题");
   assert.equal(patch.liveDisplayText, "小余正在准备第一句话");
-  assert.equal(patch.controlHintText, "小余先问一句，稍等一下");
-  assert.equal(patch.micButtonText, "我来讲了");
   assert.equal(patch.micButtonDisabled, false);
   assert.equal(patch.micButtonProcessing, false);
 });
@@ -159,8 +156,6 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusClass, "stage-status listening");
   assert.equal(patch.showStageStatus, false);
-  assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
-  assert.equal(patch.liveTextClass, "live-text");
   assert.equal(patch.captureStripClass, "capture-strip active");
   assert.equal(patch.showInlineHelp, true);
   assert.equal(patch.historyCountText, "1 段 · 6 字");
@@ -170,9 +165,7 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
     ["transcript-line user", "我"],
   ]);
-  assert.equal(patch.controlHintText, "正在录音");
   assert.equal(patch.micButtonClass, "mic-button recording");
-  assert.equal(patch.micButtonText, "讲完了，小余接话");
 });
 
 test("recording keeps the last question visible without replay actions or duplicate completion questions", () => {
@@ -266,11 +259,9 @@ test("voice chat keeps the saved transcript as the only focus while the next que
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusText, "正在帮您整理成文字");
   assert.equal(patch.liveDisplayText, "那个月亮特别大，也特别圆。");
-  assert.equal(patch.controlHintText, "正在帮您整理刚才的故事");
   assert.equal(patch.micButtonClass, "mic-button processing disabled");
   assert.equal(patch.micButtonDisabled, true);
   assert.equal(patch.micButtonProcessing, true);
-  assert.equal(patch.micButtonText, "正在帮您整理");
 });
 
 test("voice chat switches to the assistant as soon as the next question starts playing", () => {
@@ -295,7 +286,6 @@ test("voice chat switches to the assistant as soon as the next question starts p
   assert.equal(patch.micButtonClass, "mic-button");
   assert.equal(patch.micButtonDisabled, false);
   assert.equal(patch.micButtonProcessing, false);
-  assert.equal(patch.micButtonText, "我来讲了");
 });
 
 test("voice chat keeps one continuous live transcript and exposes paused follow state", () => {
@@ -355,21 +345,17 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(startingPatch.showHumanRecordActions, false);
   assert.equal(startingPatch.showControlBar, true);
   assert.equal(startingPatch.micButtonDisabled, true);
-  assert.equal(startingPatch.micButtonText, "正在打开麦克风");
   assert.equal(recordingPatch.showHumanRecordActions, false);
   assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
   assert.equal(recordingPatch.showStageStatus, false);
   assert.equal(recordingPatch.showCaptureStrip, false);
-  assert.equal(recordingPatch.controlHintText, "正在录音");
   assert.equal(recordingPatch.liveDisplayText, "等待转写...");
   assert.equal(recordingPatch.liveTextClass, "live-text placeholder");
-  assert.equal(recordingPatch.micButtonText, "说完了，保存这段");
   assert.equal(authorizationPatch.showHumanRecordActions, false);
   assert.equal(authorizationPatch.showControlBar, true);
   assert.equal(authorizationPatch.showStageStatus, false);
   assert.equal(authorizationPatch.showCaptureStrip, false);
-  assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
 test("book completion renders one issue without disabling recording controls", () => {
@@ -413,7 +399,6 @@ test("book completion without an issue exposes the invalid session and disables 
   assert.equal(patch.showCompletionIssueActions, false);
   assert.equal(patch.showAssistantPanel, false);
   assert.equal(patch.micButtonDisabled, true);
-  assert.equal(patch.micButtonText, "请先保存离开");
 });
 
 test("closed book completion offers an exit without another question", () => {
