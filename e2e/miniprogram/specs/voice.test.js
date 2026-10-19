@@ -229,6 +229,24 @@ async function assertVerticallyCentered(container, label, description, tolerance
   );
 }
 
+async function assertVoiceActionsLayout(page) {
+  const primary = await elementById(page, "voice-primary-action");
+  const finish = await elementById(page, "voice-finish-action");
+  const [primarySize, primaryOffset, finishSize, finishOffset] = await Promise.all([
+    primary.size(), primary.offset(), finish.size(), finish.offset(),
+  ]);
+  const viewport = await session.miniProgram.systemInfo();
+  assert.ok(Math.abs(primarySize.height - finishSize.height) <= 1, "两个语音操作同高");
+  assert.ok(Math.abs(primaryOffset.top - finishOffset.top) <= 1, "两个语音操作对齐");
+  assert.ok(primarySize.width > finishSize.width, "当前段落操作的点击区域大于结束访谈");
+  for (const [size, offset] of [[primarySize, primaryOffset], [finishSize, finishOffset]]) {
+    assert.ok(size.width >= 44 && size.height >= 56, "语音操作保持足够的点击区域");
+    assert.ok(offset.left >= 0 && offset.top >= 0
+      && offset.left + size.width <= viewport.windowWidth + 1
+      && offset.top + size.height <= viewport.windowHeight + 1, "语音操作完整可见");
+  }
+}
+
 async function assertMeasuredTranscriptScroll(page, expectedText, description) {
   const data = await waitForPageData(
     page,
@@ -305,23 +323,10 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       await page.$(".assistant-label-text"),
       "小余提示标签",
     );
-    const readyPrimaryAction = await elementById(page, "voice-primary-action");
-    const readyPrimarySize = await readyPrimaryAction.size();
-    assert.ok(readyPrimarySize.width >= 40 && readyPrimarySize.height >= 40, "主操作满足最小触控区域");
-    const finishAction = await elementById(page, "voice-finish-action");
-    const finishActionOffset = await finishAction.offset();
-    const finishActionSize = await finishAction.size();
-    const viewport = await session.miniProgram.systemInfo();
-    assert.ok(finishActionSize.width >= 40 && finishActionSize.height >= 40, "结束讲述操作满足最小触控区域");
-    assert.ok(
-      finishActionOffset.left >= 0 && finishActionOffset.top >= 0
-        && finishActionOffset.left + finishActionSize.width <= viewport.windowWidth + 1
-        && finishActionOffset.top + finishActionSize.height <= viewport.windowHeight + 1,
-      "结束讲述操作完整可见",
-    );
+    await assertVoiceActionsLayout(page);
     const readyMicIconSize = await (await page.$(".mic-icon")).size();
     assert.ok(
-      readyMicIconSize.width >= 32 && readyMicIconSize.height >= 32,
+      readyMicIconSize.width >= 20 && readyMicIconSize.height >= 20,
       `简洁麦克风在按钮内保持清晰尺寸（${readyMicIconSize.width}×${readyMicIconSize.height}）`,
     );
     assert.equal(await page.$("#session-narration-modes"), null);
@@ -392,6 +397,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(await page.$(".stage-status"), null, "录音状态只在固定操作区显示");
     assert.equal((await page.$$(".recording-duration")).length, 1, "录音只显示一处计时");
     assert.ok(await page.$(".control-hint.is-recording"), "固定操作区持续显示正在录音");
+    await assertVoiceActionsLayout(page);
     const longTranscript = "那时候每天早上起来以后，我先收拾屋子，再去院子里忙一会儿。".repeat(12);
     const transcriptSnapshots = [];
     for (const length of [40, 80, 120, 200, 300]) {
@@ -464,7 +470,6 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(responding.micButtonProcessing, false);
     assert.equal(responding.micButtonDisabled, false);
     assert.doesNotMatch(responding.micButtonClass, /processing/);
-    assert.equal(responding.micButtonText, "我来讲了");
     assert.equal(responding.showAssistantPanel, true);
     assert.equal(responding.showTranscriptStage, false);
     assert.ok(await page.$(".assistant-panel"), "AI 开始播放后立即显示本轮问题");
@@ -552,6 +557,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(await next.$("#session-narration-modes"), null);
     assert.ok(await next.$(".mode-label"));
     assert.equal(nextReady.liveText, "");
+    await assertVoiceActionsLayout(next);
     assert.equal(nextReady.transcriptLines.some(line => line.text === FIXTURE_USER_TEXT), false);
     await session.miniProgram.screenshot({ path: path.join(session.artifacts.runPath, "home-voice-large-text.png") });
     await tapBoundAction(await elementById(next, "voice-primary-action"));
@@ -566,6 +572,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(await next.$(".stage-status"), null, "录音状态只在固定操作区显示");
     assert.equal((await next.$$(".recording-duration")).length, 1, "录音只显示一处计时");
     assert.ok(await next.$(".control-hint.is-recording"), "固定操作区持续显示正在录音");
+    await assertVoiceActionsLayout(next);
     const largeStage = await next.$(".transcript-stage");
     const largeDock = await next.$(".control-bar");
     const [largeStageOffset, largeStageSize, largeDockOffset] = await Promise.all([

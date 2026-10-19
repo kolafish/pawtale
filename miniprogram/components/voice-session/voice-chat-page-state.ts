@@ -238,7 +238,7 @@ export function initialVoiceChatData(): VoiceChatData {
     canReconnect: false,
     canFinishAfterDisconnect: false,
     recorderSettingsRequired: false,
-    finishButtonText: "保存离开",
+    finishButtonText: "结束访谈",
     storyGrowthNoticeState: "hidden",
     storyGrowthNoticeTitle: "",
     storyGrowthNoticeDetail: "",
@@ -298,11 +298,11 @@ export function initialVoiceChatData(): VoiceChatData {
     showHistoryLines: false,
     historyToggleText: "查看",
     transcriptLineViews: [],
-    controlHintText: "点麦克风开始讲述",
+    controlHintText: "",
     micButtonClass: "mic-button disabled",
     micButtonDisabled: true,
     micButtonProcessing: false,
-    micButtonText: "同意后开始说话",
+    micButtonText: "请先授权",
     largeTextEnabled: false,
     autoBargeInEnabled: true,
     voiceChatPageClass: "voice-chat-page",
@@ -566,7 +566,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   }
   let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "现在可以说了";
   if (interactionPhase === "recording") {
-    liveDisplayText = state.liveText || (isHumanInterview ? "等待转写..." : "直接说就行，我会帮您记下来");
+    liveDisplayText = state.liveText || (isHumanInterview ? "等待转写..." : "请慢慢讲");
   } else if (interactionPhase === "transcript_processing") {
     liveDisplayText = state.liveText || state.latestTranscriptText;
   } else if (interactionPhase === "assistant_preparing") {
@@ -601,43 +601,41 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     state.liveScrollClass.split(" ").includes("long") ? "long" : "",
     state.liveTranscriptFollowing ? "" : "reviewing",
   ].filter(Boolean).join(" ");
-  let controlHintText = isHumanInterview
-    ? ""
-    : (state.primaryActionText === "继续说话" ? "已暂停，点麦克风继续讲" : "点麦克风开始讲述");
+  let controlHintText = state.primaryActionText === "继续说话" ? "已暂停" : "";
   if (interactionPhase === "recording") {
-    controlHintText = "正在录音";
+    controlHintText = "录音中";
   } else if (state.recordingStarting) {
     controlHintText = "正在打开麦克风";
   } else if (!isHumanInterview && interactionPhase === "assistant_preparing") {
-    controlHintText = "小余先问一句，稍等一下";
+    controlHintText = "小余正在准备问题";
   } else if (!isHumanInterview && interactionPhase === "assistant_responding") {
     controlHintText = "小余正在回应";
   }
   if (completionRoundFinished) {
     controlHintText = "";
   } else if (showTranscriptProcessing) {
-    controlHintText = "正在帮您整理刚才的故事";
+    controlHintText = "正在整理这一段";
   }
   let micButtonText = state.primaryActionText;
   if (showTranscriptProcessing) {
-    micButtonText = "正在帮您整理";
+    micButtonText = "整理中…";
   } else if (!state.voiceAuthorizationAgreed) {
-    micButtonText = "同意后开始说话";
+    micButtonText = "请先授权";
   } else if (state.recordingStarting) {
-    micButtonText = "正在打开麦克风";
+    micButtonText = "准备中…";
   } else if (state.status === "connecting") {
-    micButtonText = "正在准备";
+    micButtonText = "准备中…";
   } else if (completionUnavailable && !state.recording) {
-    micButtonText = "请先保存离开";
+    micButtonText = "暂不可用";
   } else if (state.recording) {
-    micButtonText = isHumanInterview ? "说完了，保存这段" : "讲完了，小余接话";
+    micButtonText = isHumanInterview ? "保存这段" : "讲完了";
   } else if (!isHumanInterview && (
     interactionPhase === "assistant_preparing"
     || interactionPhase === "assistant_responding"
   )) {
-    micButtonText = "我来讲了";
+    micButtonText = "我来讲";
   } else if (state.primaryActionText === "开始说话") {
-    micButtonText = isHumanInterview ? `记录${speakerRoleLabel(state.speakerRole)}` : "我来讲了";
+    micButtonText = "开始讲";
   } else if (state.primaryActionText === "继续说话") {
     micButtonText = "继续讲";
   }
@@ -690,7 +688,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   return {
     narrationMode,
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
-    finishButtonText: state.finishingSession ? "保存中" : "保存离开",
+    finishButtonText: state.finishingSession ? "保存中" : (isBookCompletion ? "保存离开" : "结束访谈"),
     topModeLabel: NARRATION_MODES[narrationMode].label,
     topSubtitle: isBookCompletion
       ? "一次只补一个重点"
@@ -751,7 +749,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     stageStatusText,
     liveDisplayText,
     liveCurrentText: liveDisplayText,
-    liveTextClass: isHumanInterview && state.recording && !state.liveText ? "live-text placeholder" : "live-text",
+    liveTextClass: state.recording && !state.liveText ? "live-text placeholder" : "live-text",
     liveScrollClass,
     liveScrollTop: state.liveScrollTop,
     showReturnToLatest,

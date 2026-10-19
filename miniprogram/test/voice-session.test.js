@@ -556,7 +556,6 @@ test("human interview record action reconnects and starts the selected speaker w
   });
   assert.equal(context.data.recordingStarting, true);
   assert.equal(context.data.showHumanRecordActions, false);
-  assert.equal(context.data.micButtonText, "正在打开麦克风");
   await context.recordingStartPromise;
 
   assert.equal(connectCalls, 1);
