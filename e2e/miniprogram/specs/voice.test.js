@@ -129,6 +129,10 @@ before(async () => {
   });
   session.artifacts.mark("voice:setup:model-settings-stored");
   await session.miniProgram.mockWxMethod("getRecorderManager", deterministicRecorderManager);
+  // The fixture supplies voiceChat capture as well as deterministic PCM frames.
+  await session.miniProgram.mockWxMethod("canIUse", (schema) => (
+    schema === "RecorderManager.start.object.audioMode.voiceChat"
+  ));
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
   session.artifacts.mark("voice:setup:privacy-mocked");
@@ -159,7 +163,7 @@ after(async () => {
       } catch (error) {
         teardownError = error;
       }
-      for (const method of ["getRecorderManager", "getPrivacySetting", "getSetting", "openSetting", "showModal"]) {
+      for (const method of ["getRecorderManager", "canIUse", "getPrivacySetting", "getSetting", "openSetting", "showModal"]) {
         try {
           await session.miniProgram.restoreWxMethod(method);
         } catch {
@@ -369,7 +373,9 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
       20000,
     );
     assert.equal(recording.status, "listening");
-    assert.equal(await page.$(".assistant-panel"), null, "讲述态不再保留小余问题卡");
+    const recordingQuestion = await page.$(".assistant-panel");
+    assert.ok(recordingQuestion, "讲述时仍可查看当前问题");
+    assert.ok((await recordingQuestion.text()).includes(recording.assistantPromptText), "保留真实问题作为讲述参考");
     const recordingTranscriptStage = await page.$(".transcript-stage");
     assert.ok(recordingTranscriptStage, "讲述态以实时文字卡为主角");
     assert.equal(await page.$(".live-text-context"), null, "讲述态不再拆出容易误解的灰色上一段");
