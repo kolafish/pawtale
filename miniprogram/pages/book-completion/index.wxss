@@ -519,6 +519,13 @@
   gap: 18rpx;
   flex-wrap: wrap;
 }
+.automation-details-toggle {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  color: var(--ui-text-secondary);
+}
 .automation-title {
   display: block;
   color: var(--ui-text-primary);

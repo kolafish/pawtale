@@ -224,11 +224,11 @@
 
   <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">
     <view class="automation-head">
-      <view>
+      <view class="automation-details-toggle ui-pressable" bindtap="toggleAutomationDetails" aria-role="button" aria-expanded="{{automationDetailsExpanded}}" aria-label="{{automationDetailsExpanded ? '收起整理进度详情' : '展开整理进度详情'}}">
         <text class="automation-title">整理进度</text>
+        <text aria-hidden="true">{{automationDetailsExpanded ? '⌃' : '⌄'}}</text>
       </view>
       <view class="automation-head-actions">
-        <button class="automation-clear" bindtap="toggleAutomationDetails" aria-expanded="{{automationDetailsExpanded}}">{{automationDetailsExpanded ? '收起详情' : '查看详情'}}</button>
         <button
           wx:if="{{automationDismissibleCount}}"
           class="automation-clear"
