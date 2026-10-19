@@ -2,7 +2,7 @@ import type { MemoirVoiceSessionSummary } from "./memoir-voice-session";
 
 const AI_INTERVIEW = {
   label: "AI 访谈",
-  description: "想讲什么就讲什么，小余在旁边听；一段讲完了，会陪您想想接下来聊什么。",
+  description: "自由讲述，小余适时追问。",
   action: "开始讲述",
 };
 
@@ -10,8 +10,8 @@ export const NARRATION_MODES = {
   guided_interview: AI_INTERVIEW,
   // Free narration and guided interview are one AI interview now; the key stays for older sessions and projects.
   free_narration: AI_INTERVIEW,
-  book_completion: { label: "书稿补充", description: "先选书稿中的待补问题，再围绕问题补讲。", action: "选择待补问题" },
-  human_interview: { label: "真人访谈", description: "家人朋友来提问，分别记录采访者与讲述者。", action: "开始真人访谈" },
+  book_completion: { label: "书稿补充", description: "选择待补问题，再补讲。", action: "选择待补问题" },
+  human_interview: { label: "真人访谈", description: "家人提问，分别记录双方。", action: "开始真人访谈" },
 };
 
 export type NarrationMode = keyof typeof NARRATION_MODES;

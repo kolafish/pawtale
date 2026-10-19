@@ -1,6 +1,6 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">访谈语音和成书朗读可以分别设置，选择后立即保存。</text>
+    <text class="ui-page-context">更改后自动保存。</text>
   </view>
 
   <view class="section first-section">
@@ -9,7 +9,7 @@
       <view class="switch-row">
         <view class="switch-copy">
           <text class="option-label">自动检测我说话</text>
-          <text class="option-desc">环境嘈杂时可以关闭，改成点击按钮后再回答。</text>
+          <text class="option-desc">嘈杂时可关闭，改为手动录音。</text>
         </view>
         <switch
           checked="{{autoBargeInEnabled}}"

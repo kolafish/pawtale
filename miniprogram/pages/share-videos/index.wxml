@@ -15,7 +15,7 @@
 
   <view wx:elif="{{!projectId && !loading}}" class="empty-panel">
     <text class="empty-title">还没有回忆录</text>
-    <text class="empty-copy">创建回忆录并完成讲述后，就可以制作分享视频。</text>
+    <text class="empty-copy">创建回忆录并讲述后即可制作。</text>
   </view>
 
   <block wx:else>
@@ -45,7 +45,7 @@
     </view>
     <view wx:elif="{{!items.length && !taskItems.length && !error}}" class="empty-panel">
       <text class="empty-title">还没有分享视频</text>
-      <text class="empty-copy">挑一段讲述，配上原声、插图和字幕，做成可以转发给家人的视频。</text>
+      <text class="empty-copy">挑一段讲述，做成视频发给家人。</text>
     </view>
 
     <view wx:if="{{items.length}}" class="video-library-list">

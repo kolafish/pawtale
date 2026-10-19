@@ -7,6 +7,7 @@ export interface BookAutomationEventView {
   eventIds: string[];
   eventIdsText: string;
   eventType: MemoirAutomationEvent["event_type"];
+  status: MemoirAutomationEvent["status"];
   actionKind: "acknowledge" | "none";
   primaryUtteranceId: string;
   titleText: string;
@@ -129,6 +130,7 @@ export function buildAutomationEventViews(
         eventIds: [event.id],
         eventIdsText: event.id,
         eventType: event.event_type,
+        status: event.status,
         actionKind,
         primaryUtteranceId: automationEventPrimaryUtteranceId(event),
         titleText: automationEventTitle(event),

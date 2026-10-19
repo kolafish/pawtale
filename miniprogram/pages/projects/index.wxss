@@ -84,8 +84,7 @@
   font-weight: 700;
 }
 
-.project-meta,
-.project-hint {
+.project-meta {
   display: block;
   line-height: 1.4;
   text-wrap: pretty;
@@ -95,17 +94,6 @@
   margin-top: 10rpx;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
-}
-
-.project-hint {
-  margin-top: 12rpx;
-  color: var(--ui-accent);
-  font-size: var(--ui-font-body);
-  font-weight: 600;
-}
-
-.project-card.active .project-hint {
-  color: var(--ui-success-text);
 }
 
 .project-actions {

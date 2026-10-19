@@ -1,14 +1,13 @@
 <view class="ui-page-shell {{pageClass}}">
   <view class="flow-context">
-    <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 书稿建议</text>
+    <text class="flow-context-label">{{projectTitle || "我的回忆录"}}</text>
     <button class="flow-context-action ui-pressable" bindtap="openBookHome">‹ 书稿首页</button>
   </view>
 
   <view class="page-intro">
     <text class="page-title">书稿建议</text>
-    <text class="page-detail">核对事实，或按需要完善衔接、表述与细节。</text>
     <text wx:if="{{bulkCheckVisible || blockingIssueCount || bookReviewProgress.visible}}" class="progress-text">{{progressText}}</text>
-    <text wx:if="{{blockingIssueCount}}" class="confirmation-notice">有 {{blockingIssueCount}} 项必须处理：涉及事实冲突，处理后相关章节才能收入全书。其余建议可按需要处理。</text>
+    <text wx:if="{{blockingIssueCount}}" class="confirmation-notice">{{blockingIssueCount}} 项待核对，相关章节暂未入书。</text>
   </view>
 
   <view wx:if="{{error}}" class="error-strip">{{error}}</view>
@@ -16,9 +15,8 @@
 
   <view wx:else class="chapter-list">
     <view wx:if="{{canReviewBook || bookReview || bookReviewProgress.visible || requiredBookIssues.length || optionalBookIssues.length}}" class="book-review">
-      <text class="book-review-kicker">全书审阅</text>
       <text class="book-review-title">
-        检查跨章衔接与取舍
+        全书审阅
       </text>
 
       <view
@@ -37,33 +35,36 @@
       </view>
 
       <block wx:if="{{bookReview && bookReview.status === 'ready'}}">
-        <text class="book-review-summary">{{bookReview.review.summary}}</text>
+        <button class="flow-context-action" bindtap="toggleReviewDetails" aria-expanded="{{reviewDetailsExpanded}}">{{reviewDetailsExpanded ? '收起审阅详情' : '查看审阅详情'}}</button>
+        <view wx:if="{{reviewDetailsExpanded}}">
+          <text class="book-review-summary">{{bookReview.review.summary}}</text>
 
-        <view wx:if="{{bookReview.review.strengths.length}}" class="review-group">
-          <text class="review-group-title">已经成立的部分</text>
-          <text
-            wx:for="{{bookReview.review.strengths}}"
-            wx:key="*this"
-            class="review-list-item"
-          >{{index + 1}}. {{item}}</text>
+          <view wx:if="{{bookReview.review.strengths.length}}" class="review-group">
+            <text class="review-group-title">已经成立的部分</text>
+            <text
+              wx:for="{{bookReview.review.strengths}}"
+              wx:key="*this"
+              class="review-list-item"
+            >{{index + 1}}. {{item}}</text>
+          </view>
+
+          <view wx:if="{{bookReview.review.structure_guidance.length}}" class="review-group">
+            <text class="review-group-title">可以完善</text>
+            <text
+              wx:for="{{bookReview.review.structure_guidance}}"
+              wx:key="*this"
+              class="review-list-item"
+            >{{index + 1}}. {{item}}</text>
+          </view>
+
         </view>
-
-        <view wx:if="{{bookReview.review.structure_guidance.length}}" class="review-group">
-          <text class="review-group-title">可以完善</text>
-          <text
-            wx:for="{{bookReview.review.structure_guidance}}"
-            wx:key="*this"
-            class="review-list-item"
-          >{{index + 1}}. {{item}}</text>
-        </view>
-
         <view
           wx:if="{{editorialActionViews.length || (revisionJob && revisionJob.answer_count && !revisionJob.already_applied)}}"
           class="editorial-actions"
         >
-          <text class="review-group-title">选择这次要处理的内容</text>
+          <text class="review-group-title">选择要处理的内容</text>
           <text class="editorial-actions-detail">
-            已保存的回答可以整组选择，编辑建议可以逐条选择。只改成书信息时直接预览，涉及正文或结构时先查看修改思路。
+            选择后先预览，再确认修改。
           </text>
           <view
             wx:if="{{revisionJob && revisionJob.answer_count && !revisionJob.already_applied}}"
@@ -77,7 +78,6 @@
               <text class="editorial-action-check">{{includeBookReviewAnswers ? "已选择" : "选择"}}</text>
             </view>
             <text class="editorial-action-title">使用已保存的 {{revisionJob.answer_count}} 条回答</text>
-            <text class="editorial-action-reason">AI 会结合这些回答判断哪些内容需要调整。</text>
           </view>
           <view
             wx:for="{{editorialActionViews}}"
@@ -128,7 +128,7 @@
             aria-disabled="{{(!includeBookReviewAnswers && !selectedEditorialActionIds.length) || generatingRevision || revisionCancelling}}"
             bindtap="generateBookRevision"
           >
-            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "处理已选内容" : "请先选择要处理的内容"}}</text>
+            <text>{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "处理已选内容" : "请先选择内容"}}</text>
             <text class="row-action-mark">›</text>
           </view>
         </view>
@@ -136,14 +136,14 @@
         <text
           wx:if="{{!requiredBookIssues.length && !optionalBookIssues.length}}"
           class="review-complete"
-        >没有需要用户处理的跨章问题。</text>
+        >没有待处理的跨章问题。</text>
       </block>
 
       <text wx:elif="{{bookReview}}" class="book-review-summary">
         {{bookReview.error_message || "本次全书检查没有完成，可以重新检查。"}}
       </text>
       <text wx:else class="book-review-summary">
-        检查跨章重复、衔接断裂、人物交代不清和篇幅失衡，必要时请您做出取舍。
+        检查全书重复、衔接和内容取舍。
       </text>
 
       <completion-issue-list
@@ -213,7 +213,7 @@
         <text class="chapter-state">{{item.stateText}}</text>
       </view>
       <text class="chapter-title">{{item.title}}</text>
-      <text wx:if="{{item.blocking_issue_count}}" class="confirmation-notice">本章有 {{item.blocking_issue_count}} 项必须处理，处理后才能收入全书。</text>
+      <text wx:if="{{item.blocking_issue_count}}" class="confirmation-notice">{{item.blocking_issue_count}} 项待核对，处理后可入书。</text>
       <text class="chapter-headline">{{item.headline}}</text>
       <text class="chapter-detail">{{item.detail}}</text>
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
@@ -224,9 +224,9 @@
 
   <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">
     <view class="automation-head">
-      <view>
+      <view class="automation-details-toggle ui-pressable" bindtap="toggleAutomationDetails" aria-role="button" aria-expanded="{{automationDetailsExpanded}}" aria-label="{{automationDetailsExpanded ? '收起整理进度详情' : '展开整理进度详情'}}">
         <text class="automation-title">整理进度</text>
-        <text class="automation-meta">书稿整理状态会在这里汇总</text>
+        <text aria-hidden="true">{{automationDetailsExpanded ? '⌃' : '⌄'}}</text>
       </view>
       <view class="automation-head-actions">
         <button
@@ -248,9 +248,9 @@
           <text class="automation-item-title">{{item.titleText}}</text>
           <text class="automation-item-status">{{item.statusText}}</text>
         </view>
-        <text class="automation-item-summary">{{item.summaryText}}</text>
+        <text wx:if="{{automationDetailsExpanded || item.status === 'needs_review'}}" class="automation-item-summary">{{item.summaryText}}</text>
         <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
-        <text class="automation-item-meta">{{item.metaText}}</text>
+        <text wx:if="{{automationDetailsExpanded}}" class="automation-item-meta">{{item.metaText}}</text>
       </view>
       <button
         class="automation-ack"

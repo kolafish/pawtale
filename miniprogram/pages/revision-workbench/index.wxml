@@ -4,18 +4,18 @@
   <block wx:if="{{proposal}}">
     <view class="revision-intro ui-card ui-card-borderless">
       <text class="revision-kicker">{{proposal.phase === "plan_ready" ? (scope === "chapter_section" ? "小节修改思路" : "书稿修改思路") : (scope === "chapter_section" ? "小节修改预览" : "书稿修改预览")}}</text>
-      <text class="revision-title">{{proposal.phase === "plan_ready" ? "先确认怎么改，再生成修改稿" : (scope === "chapter_section" ? "确认前，当前小节不会改变" : "确认前，当前书稿不会改变")}}</text>
+      <text wx:if="{{proposal.status === 'ready'}}" class="revision-title">{{proposal.phase === "plan_ready" ? "确认思路后生成修改稿" : "确认后生效"}}</text>
       <text class="revision-summary">{{proposal.summary}}</text>
       <text wx:if="{{proposal.phase === 'plan_ready'}}" class="revision-meta ui-tabular">共 {{proposal.revision_plan ? proposal.revision_plan.items.length : 0}} 项修改安排</text>
       <text wx:else class="revision-meta ui-tabular">{{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节{{metadataChanges.length ? "；成书信息 " + metadataChanges.length + " 项" : ""}}</text>
       <text wx:if="{{proposal.status === 'stale'}}" class="status-notice error">
-        当前书稿已经变化，这版预览不能再确认，请返回后重新生成。
+        书稿已变化，请返回重新生成预览。
       </text>
       <text wx:elif="{{proposal.status === 'applied'}}" class="status-notice success">
-        这版修改已经写入书稿，并保留了修改前版本。
+        修改已生效，原版本已保留。
       </text>
       <text wx:elif="{{proposal.status === 'dismissed'}}" class="status-notice">
-        这版修改已经放弃，当前书稿没有改变。
+        已放弃修改，书稿未改变。
       </text>
     </view>
 
@@ -27,9 +27,9 @@
       >
         <text class="chapter-label">修改安排 {{index + 1}}</text>
         <text class="chapter-title">{{item.title}}</text>
-        <text class="plan-field-label">为什么这样改</text>
+        <text class="plan-field-label">修改原因</text>
         <text class="revision-summary plan-field">{{item.reason}}</text>
-        <text class="plan-field-label">准备怎么改</text>
+        <text class="plan-field-label">修改方式</text>
         <text class="revision-summary plan-field">{{item.approach}}</text>
         <view wx:if="{{item.targets.length}}" class="plan-targets">
           <text
@@ -54,7 +54,7 @@
         wx:if="{{(!proposal.revision_plan || !proposal.revision_plan.items.length) && !metadataChanges.length}}"
         class="state-card ui-card ui-card-borderless"
       >
-        当前思路认为不需要改动正文。您仍可在下方补充意见。
+        无需修改正文，可在下方补充意见。
       </view>
     </view>
 
@@ -141,7 +141,7 @@
         wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed && !metadataChanges.length}}"
         class="state-card ui-card ui-card-borderless"
       >
-        这版没有产生实际修改，不能确认使用。请继续调整修改思路或放弃这版修改。
+        没有实际改动，请继续调整或放弃修改。
       </view>
       </view>
 
@@ -185,21 +185,21 @@
       <text wx:if="{{!proposal && sectionTitle}}" class="chapter-title">{{sectionTitle}}</text>
       <text class="revision-summary">
         {{!proposal
-          ? "说出或输入修改要求，AI 会直接生成修改预览。看过前后对照后确认保存，修改前版本仍会保留。"
+          ? "查看对比后确认保存，原版本会保留。"
           : (proposal.revision_plan
             ? (proposal.phase === "draft_ready"
               ? (scope === "chapter_section"
-                ? "输入或说出意见后，AI 会先更新完整修改思路，不会直接改写当前小节。"
-                : "输入或说出意见后，AI 会先更新整体修改思路，不会直接改写书稿。")
-              : "输入或说出意见，AI 会返回下一版完整修改思路。")
-            : "输入或说出意见，AI 会更新当前预览；确认使用前不会写入正式书稿。")}}
+                ? "补充意见后先更新思路，当前小节不变。"
+                : "补充意见后先更新思路，书稿不变。")
+              : "补充意见，更新修改思路。")
+            : "补充意见后更新预览。")}}
       </text>
       <voice-text-editor
         value="{{feedbackText}}"
         gateway-url="{{feedbackDictationUrl}}"
         voice-session-id="{{proposalId || sectionId}}"
         maxlength="1000"
-        placeholder="{{proposal ? '请输入希望保留或继续调整的内容' : '例如：保留事情经过，把语气写得更平实；删掉重复表达，但不要增加新事实。'}}"
+        placeholder="{{proposal ? '请输入希望保留或继续调整的内容' : '例如：语气平实些，不增加新事实'}}"
         submit-text="{{proposal ? (proposal.revision_plan ? '更新修改思路' : '按意见调整') : '生成修改预览'}}"
         busy-text="{{proposal ? '正在调整…' : '正在生成修改预览…'}}"
         disabled="{{busy || draftBusy}}"
@@ -240,21 +240,21 @@
         aria-role="button"
         aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="generateDraft"
-      >{{draftBusy ? "正在生成修改稿…" : "按这个思路生成修改稿"}}</view>
+      >{{draftBusy ? "正在生成修改稿…" : "生成修改稿"}}</view>
       <view
         wx:elif="{{proposal.can_apply}}"
         class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="applyRevision"
-      >{{feedbackBusy ? "请等待调整完成" : (busy ? "正在确认…" : "确认使用这版修改稿")}}</view>
+      >{{feedbackBusy ? "请等待调整完成" : (busy ? "正在确认…" : "采用修改稿")}}</view>
       <view
         wx:if="{{proposal.can_dismiss}}"
         class="secondary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="dismissRevision"
-      >放弃这版修改</view>
+      >放弃修改</view>
       <view
         wx:if="{{proposal.status === 'applied'}}"
         class="primary-action ui-block-action ui-pressable"

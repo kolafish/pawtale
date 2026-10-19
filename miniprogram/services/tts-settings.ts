@@ -32,30 +32,30 @@ export const TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
   {
     value: "",
     label: "默认音色",
-    description: "使用后端当前默认配置",
+    description: "跟随系统设置",
   },
   {
     value: "zh_female_vv_uranus_bigtts",
     label: "通用女声",
-    description: "火山 V3 大模型音色，支持文字高亮时间轴",
+    description: "支持朗读文字高亮",
   },
   {
     value: "zh_female_xiaohe_uranus_bigtts",
     label: "小荷女声",
-    description: "清晰自然，适合陪伴式交流",
+    description: "清晰自然",
   },
   {
     value: "zh_male_m191_uranus_bigtts",
     label: "通用男声",
-    description: "火山 V3 大模型音色，适合访谈引导",
+    description: "适合访谈引导",
   },
 ];
 
 export const BOOK_TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
-  { value: "", label: "默认音色", description: "温柔女声，适合长篇叙述" },
-  { value: "wenrounvsheng", label: "温柔女声", description: "柔和舒缓，适合回忆录朗读" },
-  { value: "linjiajiejie", label: "邻家女声", description: "亲切自然，适合故事讲述" },
-  { value: "cixingnansheng", label: "磁性男声", description: "沉稳温暖，适合长篇朗读" },
+  { value: "", label: "默认音色", description: "温柔女声" },
+  { value: "wenrounvsheng", label: "温柔女声", description: "柔和舒缓" },
+  { value: "linjiajiejie", label: "邻家女声", description: "亲切自然" },
+  { value: "cixingnansheng", label: "磁性男声", description: "沉稳温暖" },
 ];
 
 const LEGACY_BOOK_VOICES: Record<string, string> = {

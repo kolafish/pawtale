@@ -1,5 +1,5 @@
 <view class="story-home ui-accessible-page {{largeText ? 'large-text' : ''}} {{demoMode ? 'is-demo' : ''}}">
-  <view class="story-hero ui-card ui-card-borderless {{canOpenBook && story.overview.hasChapters && showBookHint ? 'has-book-hint' : ''}}">
+  <view class="story-hero ui-card ui-card-borderless">
     <view
       id="active-project-action"
       class="hero-heading {{canSwitchProject ? 'ui-pressable' : ''}}"
@@ -57,9 +57,8 @@
         </view>
         <text wx:if="{{!demoMode || item.readable}}" class="theme-tag-arrow" aria-hidden="true">›</text>
       </view>
-      <view wx:if="{{canOpenBook && story.overview.hasChapters}}" class="hero-book-badge" aria-hidden="true">{{demoMode ? '阅读示例章节' : '翻开整本书'}} ›</view>
+      <view wx:if="{{canOpenBook && story.overview.hasChapters}}" class="hero-book-badge" aria-hidden="true">{{demoMode ? '阅读示例章节' : (showBookHint ? '点树，翻开整本书' : '翻开整本书')}} ›</view>
     </view>
-    <text wx:if="{{canOpenBook && story.overview.hasChapters && showBookHint}}" class="hero-book-hint">{{demoMode ? '点这棵树，可以阅读示例章节' : '点这棵树，可以翻看整本书'}}</text>
 
     <view
       wx:if="{{story.overview.hasChapters}}"

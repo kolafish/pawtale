@@ -7,7 +7,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后查看讲述</text>
-    <text class="empty-copy">登录后可以核对原始讲述、成书文字和音频资料。</text>
+    <text class="empty-copy">登录后查看文字和原音。</text>
     <view
       class="primary-button login-entry-action ui-block-action ui-pressable"
       aria-role="button"
@@ -54,7 +54,6 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">成书文字</text>
-          <text class="section-hint">整理后会用于书稿</text>
         </view>
         <text wx:if="{{item.canRecoverTranscription}}" class="section-count">{{item.displayCountText}}</text>
         <button
@@ -78,7 +77,7 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">编辑成书文字</text>
-          <text class="section-hint">可直接修改，也可以让小余按要求调整</text>
+          <text class="section-hint">修改后请保存</text>
         </view>
         <text class="section-count">{{editPreviewVersion === 'before' ? item.displayCountText : item.editingCharCount + ' 字'}}</text>
       </view>
@@ -114,7 +113,7 @@
       <view class="edit-assistant">
         <view>
           <text class="edit-assistant-title">让小余帮我改</text>
-          <text class="edit-assistant-hint">进入编辑后直接说，停顿后会自动生成修改后文字；也可以输入</text>
+          <text class="edit-assistant-hint">直接说修改要求，停顿后自动生成预览</text>
         </view>
         <voice-text-editor
           value="{{voiceEditInstructionText}}"
@@ -124,7 +123,7 @@
           placeholder="例如：把‘清流二村’改成‘清流一村’"
           submit-text="生成修改后文字"
           busy-text="正在修改…"
-          hint="结果会放到上方“修改后”草稿，保存前可与修改前对比。"
+          hint="保存前可对比修改。"
           disabled="{{saving || deleting || convertingQuestionToAnswer}}"
           busy="{{voiceEditLoading}}"
           automatic-voice-command="{{true}}"
@@ -140,7 +139,7 @@
         bindtap="toggleEditReference"
         aria-expanded="{{editReferenceExpanded}}"
       >
-        {{editReferenceExpanded ? "收起原始讲述" : "查看原始讲述作为参考"}}
+        {{editReferenceExpanded ? "收起原始讲述" : "查看原始讲述"}}
       </view>
       <view wx:if="{{editReferenceExpanded}}" class="edit-reference-panel">
         <text class="edit-reference-label">原始讲述</text>
@@ -167,7 +166,6 @@
             <text class="section-title">原始讲述</text>
             <text class="raw-inline-count">· {{item.rawCountText}}</text>
           </view>
-          <text class="section-hint">保留您当时说话的样子</text>
         </view>
       </view>
       <text class="body-text raw-text {{!rawExpanded && item.rawCanExpand ? 'collapsed' : ''}}">
@@ -190,7 +188,6 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">{{item.questionTitleText}}</text>
-          <text class="section-hint">这段讲述当时回答的问题</text>
         </view>
         <text class="section-count">{{item.canPlayQuestionAudio ? "有提问语音" : "无提问语音"}}</text>
       </view>
@@ -335,7 +332,6 @@
     >
       <view class="media-tools-copy">
         <text class="section-title">做成图片或视频</text>
-        <text class="section-hint">把这段回忆做成可以分享的内容</text>
       </view>
       <text class="media-tools-action">制作 ›</text>
     </view>

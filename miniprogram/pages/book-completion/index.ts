@@ -93,6 +93,8 @@ function activeTaskProgress(title: string, detail: string): TaskProgressView {
 }
 
 interface BookCompletionData {
+  reviewDetailsExpanded: boolean;
+  automationDetailsExpanded: boolean;
   automationEventItems: BookAutomationEventView[];
   automationEventBusyTarget: string;
   automationDismissibleCount: number;
@@ -471,6 +473,8 @@ definePage<BookCompletionData>()({
   pageVisible: false,
 
   data: {
+    reviewDetailsExpanded: false,
+    automationDetailsExpanded: false,
     automationEventItems: [],
     automationEventBusyTarget: "",
     automationDismissibleCount: 0,
@@ -548,6 +552,14 @@ definePage<BookCompletionData>()({
 
   openBookHome() {
     returnToBook();
+  },
+
+  toggleReviewDetails() {
+    this.setData({ reviewDetailsExpanded: !this.data.reviewDetailsExpanded });
+  },
+
+  toggleAutomationDetails() {
+    this.setData({ automationDetailsExpanded: !this.data.automationDetailsExpanded });
   },
 
   openBookRevision() {

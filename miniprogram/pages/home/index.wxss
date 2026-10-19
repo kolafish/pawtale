@@ -326,7 +326,6 @@
 .home-share-module-title,
 .home-share-candidate-title,
 .home-share-candidate-meta,
-.home-share-candidate-hint,
 .home-share-candidate-error {
   display: block;
 }
@@ -398,14 +397,12 @@
   line-height: 1;
 }
 
-.home-share-candidate-meta,
-.home-share-candidate-hint {
+.home-share-candidate-meta {
   margin-top: 4rpx;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-caption);
   line-height: 1.4;
 }
-.home-share-candidate-hint { color: var(--ui-text-muted); }
 
 .home-share-candidate-error {
   margin-top: 12rpx;
@@ -664,7 +661,6 @@
 .large-text .home-share-candidate-title { font-size: var(--ui-font-large-list-title); }
 .large-text .narration-choice-text,
 .large-text .narration-choice-action,
-.large-text .home-share-candidate-hint,
 .large-text .home-share-candidate-error,
 .large-text .home-share-candidate-primary,
 .large-text .home-share-candidate-secondary,

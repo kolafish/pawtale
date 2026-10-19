@@ -186,7 +186,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
   const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
-    : state.needsLogin || !state.hasProject ? "种下我的故事"
+    : state.needsLogin || !state.hasProject ? "开始讲述"
     : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
     : state.selectedMode === "book_completion" ? choice.action
@@ -195,10 +195,10 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: `你好，${state.displayName || "作者"}`,
     headerSubtitleText: state.loading ? "正在看看您的故事树。"
-      : state.needsLogin ? "先看看这本示例回忆录，再种下您自己的故事。"
-      : !state.hasProject ? "每一个故事，都从一颗种子开始。"
+      : state.needsLogin ? "先读示例，再讲自己的故事。"
+      : !state.hasProject ? "从一段回忆开始。"
       : state.hasStories ? ""
-      : "从一段回忆开始，让故事慢慢发芽。",
+      : "想起什么，就讲什么。",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
@@ -318,10 +318,10 @@ definePage<HomeData>()({
     voiceAuthorizationRequested: false,
     voiceAuthorizationSaving: false,
     greetingText: "你好，作者",
-    headerSubtitleText: "每一个故事，都从一颗种子开始。",
+    headerSubtitleText: "从一段回忆开始。",
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
-    primaryVoiceButtonTitle: "种下我的故事",
+    primaryVoiceButtonTitle: "开始讲述",
     showNarrationChoiceCard: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,

@@ -61,12 +61,11 @@
 
   <view wx:if="{{loading && !items.length && !videos.length}}" class="empty-card">
     <text class="empty-title">正在同步素材</text>
-    <text class="empty-copy">根据讲述生成的图片和分享视频都会自动收集到这里。</text>
   </view>
 
   <view wx:elif="{{!items.length && !videos.length}}" class="empty-card">
     <text class="empty-title">{{isStoryMaterialView ? "这里还没有素材" : "还没有图片素材"}}</text>
-    <text class="empty-copy">{{isStoryMaterialView ? "返回故事页可以继续查看其他章节和小节。" : "可在讲述详情选择内容直接生成插图；分享视频背景和封面候选也会自动出现在这里。"}}</text>
+    <text wx:if="{{!isStoryMaterialView}}" class="empty-copy">到讲述详情选一段话生成插图。</text>
   </view>
 
   <text wx:if="{{isStoryMaterialView && items.length}}" class="asset-section-title">图片</text>
@@ -103,13 +102,13 @@
             <text class="asset-title">{{item.titleText}}</text>
             <text class="asset-status {{item.include_in_book ? 'included' : ''}}">{{item.statusText}}</text>
           </view>
-          <text class="asset-meta">{{item.sourceLabel}} · {{item.createdAtText}}</text>
           <text class="asset-placement">{{item.placementText}}</text>
-          <text wx:if="{{item.source_quote}}" class="asset-source">来源：{{item.source_quote}}</text>
         </view>
       </view>
 
       <view wx:if="{{item.detailsExpanded}}" class="caption-box">
+        <text class="asset-meta">{{item.sourceLabel}} · {{item.createdAtText}}</text>
+        <text wx:if="{{item.source_quote}}" class="asset-source">来源：{{item.source_quote}}</text>
         <text class="caption-label">图片说明</text>
         <textarea
           class="caption-input"
@@ -195,7 +194,7 @@
         aria-expanded="{{item.detailsExpanded}}"
         bindtap="toggleAssetDetails"
       >
-        {{item.detailsExpanded ? "收起图片说明与更多操作" : "编辑图片说明与更多操作"}}
+        {{item.detailsExpanded ? "收起详情" : "图片说明与更多"}}
       </view>
     </view>
   </view>

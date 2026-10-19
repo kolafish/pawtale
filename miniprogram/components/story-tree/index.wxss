@@ -200,15 +200,6 @@
   white-space: nowrap;
 }
 
-.hero-book-hint {
-  display: block;
-  margin-top: 10rpx;
-  color: var(--ui-text-secondary);
-  font-size: var(--ui-font-caption);
-  line-height: 1.4;
-  text-align: center;
-}
-
 .hero-summary {
   display: block;
   color: var(--ui-text-primary);
@@ -485,9 +476,7 @@
 .large-text .hero-title { font-size: 42rpx; }
 .large-text .hero-profile-text { font-size: var(--ui-font-large-caption); }
 .large-text .hero-visual { height: 430rpx; }
-.large-text .has-book-hint .hero-visual { height: 390rpx; }
-.large-text .hero-book-badge,
-.large-text .hero-book-hint { font-size: var(--ui-font-large-caption); }
+.large-text .hero-book-badge { font-size: var(--ui-font-large-caption); }
 .large-text .theme-tag { max-width: 240rpx; min-height: 66rpx; }
 .large-text .theme-tag-text { font-size: var(--ui-font-large-body); }
 .large-text .theme-reading-status,

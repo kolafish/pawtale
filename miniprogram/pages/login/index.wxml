@@ -9,7 +9,7 @@
 
   <view wx:if="{{!profileMode}}" class="login-panel">
     <text class="panel-title">欢迎登录</text>
-    <text class="panel-copy">用微信登录，您的讲述和书稿会跟随账号保存。头像和昵称由您选择是否填写。</text>
+    <text class="panel-copy">登录后保存您的讲述和书稿。</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
@@ -31,7 +31,7 @@
   <view wx:else class="login-panel profile-setup-panel">
     <text class="panel-eyebrow">已点赞</text>
     <text class="panel-title">让家人知道是谁点的赞</text>
-    <text class="panel-copy">头像和昵称会显示在点赞的家人里，也可以跳过。</text>
+    <text class="panel-copy">头像昵称用于展示点赞，可跳过。</text>
 
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
@@ -54,7 +54,6 @@
       </button>
       <view class="profile-avatar-copy">
         <text class="profile-field-title">微信头像</text>
-        <text class="profile-field-hint">点击头像，从微信头像或相册中选择</text>
       </view>
     </view>
 
@@ -68,7 +67,6 @@
         placeholder="点击选择微信昵称"
         bindinput="changeProfileDisplayName"
       />
-      <text class="profile-field-hint">点击输入框，微信会提供当前昵称供您选择。</text>
     </view>
 
     <view

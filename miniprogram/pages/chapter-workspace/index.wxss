@@ -710,10 +710,6 @@
   line-height: 36rpx;
 }
 
-.structure-tools {
-  margin-top: 14rpx;
-}
-
 .structure-tools-detail {
   display: block;
   color: var(--ui-text-secondary);

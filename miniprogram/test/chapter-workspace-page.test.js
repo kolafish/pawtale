@@ -310,7 +310,6 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
-  assert.equal(context.data.chapterHeroKicker, "这一章已经整理成");
   assert.equal(context.data.chapterStoryCountText, "1 个故事");
   assert.equal(context.data.chapterHasReadableDraft, true);
   assert.equal(context.data.chapterEditingHint, "");

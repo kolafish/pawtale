@@ -7,7 +7,7 @@
     <view wx:if="{{bookVersionNotice && activeSection === 'history'}}" class="notice">{{bookVersionNotice}}</view>
 
     <view wx:if="{{!bookContent && pagePurpose !== 'settings'}}" class="state-card ui-card">
-      <text>这本书还没有完成。完成书稿后，就可以在这里阅读和导出。</text>
+      <text>书稿完成后即可导出。</text>
       <view class="state-action ui-pressable" aria-role="button" bindtap="openBookHome">返回书稿</view>
     </view>
     <block wx:else>
@@ -15,15 +15,15 @@
       <block wx:if="{{!activeSection}}">
         <view wx:if="{{pagePurpose === 'files'}}" class="overview-card ui-card">
           <text class="section-title">导出这本书</text>
-          <text class="section-description">{{exportNotice || "生成文件，留存或分享给家人。"}}</text>
+          <text wx:if="{{exportNotice}}" class="section-description">{{exportNotice}}</text>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="pdf" data-layout="standard" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">阅读版 PDF</text><text class="row-detail">适合手机和平板阅读</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">阅读版 PDF</text><text class="row-detail">手机阅读</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="pdf" data-layout="large_print" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">打印版 PDF</text><text class="row-detail">适合打印和装订</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">打印版 PDF</text><text class="row-detail">打印装订</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row export-row ui-pressable {{bookStaleNotice || bookExportBusyTarget ? 'is-disabled' : ''}}" aria-role="button" aria-disabled="{{bookStaleNotice || bookExportBusyTarget}}" data-format="txt" bindtap="downloadBookOutputExport">
-            <view class="row-copy"><text class="row-title">纯文本</text><text class="row-detail">方便继续修改和保存</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:txt:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
+            <view class="row-copy"><text class="row-title">纯文本</text><text class="row-detail">继续编辑</text></view><text wx:if="{{bookExportBusyTarget === 'book-export:txt:standard'}}" class="row-busy">{{bookExportBusyText}}</text><text wx:else class="row-arrow">›</text>
           </view>
           <view class="list-row section-entry ui-pressable" aria-role="button" data-section="export" bindtap="openSection">
             <view class="row-copy"><text class="row-title">导出设置</text><text class="row-detail">是否附上整理记录与来源信息</text></view><text class="row-arrow">›</text>
@@ -55,7 +55,7 @@
 
         <view wx:if="{{activeSection === 'title'}}" class="detail-card ui-card">
           <view class="detail-heading"><text class="section-title">书名与信息</text><text class="save-status">{{bookDesignSaveStatusText}}</text></view>
-          <text class="book-title-sync-hint">这里修改的书名，也会同步为回忆录名称</text>
+          <text class="book-title-sync-hint">书名会同步为回忆录名称</text>
         <view class="book-title-editor">
           <input
             class="book-title-input"
@@ -131,7 +131,7 @@
           aria-disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
           bindtap="saveBookDesignSettings"
         >
-          {{bookTitleSaving ? "正在保存…" : "保存书名与信息"}}
+          {{bookTitleSaving ? "正在保存…" : "保存"}}
         </view>
         </view>
 
@@ -231,7 +231,7 @@
 
         <view wx:if="{{activeSection === 'layout'}}" class="detail-card ui-card">
           <text class="section-title">封面与版式</text>
-          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">选择整体版式，再按需要上传自己的封面图片。预览 PDF 不会保存版式选择。</text>
+          <text wx:if="{{bookManuscriptAvailable}}" class="section-description">预览不保存版式，选定后点“使用此版式”。</text>
           <text wx:else class="section-description">这份旧书稿还没有版式结构。请先更新书稿，再选择或预览版式。</text>
           <text wx:if="{{bookManuscriptAvailable && bookStaleNotice}}" class="layout-preview-note">章节已有更新；预览使用上次保存的书稿。</text>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-current"><text>当前版式</text><text>{{bookManuscriptTemplateLabel}}</text></view>
@@ -324,7 +324,7 @@
           </view>
           <view wx:if="{{bookManuscriptAvailable}}" class="layout-custom-panel">
             <text class="layout-option-title">正文排版</text>
-            <text class="layout-option-description">默认跟随所选版式，微调后保留当前封面与版式风格。</text>
+            <text class="layout-option-description">可微调正文，保留封面风格。</text>
             <view class="layout-custom-controls">
               <picker mode="selector" range="{{bookLayoutFontFamilyOptions}}" range-key="label" value="{{bookLayoutFontFamilyIndex}}" data-key="font_family" bindchange="changeBookCustomLayout" disabled="{{bookLayoutBusyTarget !== ''}}">
                 <view class="layout-custom-row"><text>正文字体</text><text>{{bookLayoutFontFamilyOptions[bookLayoutFontFamilyIndex].label}} ›</text></view>
@@ -338,7 +338,7 @@
               <picker mode="selector" range="{{bookLayoutPageMarginOptions}}" range-key="label" value="{{bookLayoutPageMarginIndex}}" data-key="page_margin" bindchange="changeBookCustomLayout" disabled="{{bookLayoutBusyTarget !== ''}}">
                 <view class="layout-custom-row"><text>页边距</text><text>{{bookLayoutPageMarginOptions[bookLayoutPageMarginIndex].label}} ›</text></view>
               </picker>
-              <text wx:if="{{bookLayoutCustomChanged}}" class="layout-custom-hint">调整尚未保存，预览满意后点保存调整。</text>
+              <text wx:if="{{bookLayoutCustomChanged}}" class="layout-custom-hint">调整未保存，预览后请保存。</text>
             </view>
             <view class="layout-option-actions">
               <button class="layout-action preview ui-button" data-template="adjust" bindtap="previewBookLayout" loading="{{bookLayoutBusyTarget === 'preview:adjust'}}" disabled="{{bookLayoutBusyTarget !== '' || bookExportBusyTarget !== ''}}">预览 PDF</button>
@@ -354,7 +354,7 @@
 
         <view wx:if="{{activeSection === 'history'}}" class="detail-card ui-card">
           <text class="section-title">历史版本</text>
-          <text class="section-description">选择旧版本阅读，不会改动当前书稿。</text>
+          <text class="section-description">阅读旧版本，不改变当前书稿。</text>
           <picker mode="selector" range="{{bookVersionOptions}}" range-key="label" value="{{bookSelectedVersionIndex}}" disabled="{{bookExportBusyTarget === 'book-version'}}" bindchange="changeBookOutputVersion">
             <view class="list-row section-entry"><text class="row-title">{{bookVersionText}}</text><text class="row-arrow">›</text></view>
           </picker>
@@ -363,7 +363,7 @@
 
         <view wx:if="{{activeSection === 'advanced'}}" class="detail-card ui-card">
           <text class="section-title">重新整理书稿</text>
-          <view class="advanced-action"><text class="row-title">重新整理书稿</text><text class="row-detail">根据各章确认正文生成新版本，旧版本会保留。</text>
+          <view class="advanced-action"><text class="row-title">重新整理书稿</text><text class="row-detail">生成新书稿，保留旧版本。</text>
             <button class="detail-action ui-button" loading="{{generatingBook}}" disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}" bindtap="generateBook">重新整理书稿</button>
           </view>
         </view>

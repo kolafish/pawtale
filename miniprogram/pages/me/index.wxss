@@ -169,8 +169,7 @@
   line-height: 1.3;
 }
 
-.profile-email,
-.profile-avatar-hint {
+.profile-email {
   display: block;
   line-height: 1.4;
 }
@@ -180,13 +179,6 @@
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
   overflow-wrap: anywhere;
-}
-
-.profile-avatar-hint {
-  margin-top: 5rpx;
-  color: var(--ui-accent);
-  font-size: var(--ui-font-caption);
-  font-weight: 700;
 }
 
 .name-input {

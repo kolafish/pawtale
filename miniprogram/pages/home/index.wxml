@@ -139,7 +139,6 @@
               <view class="home-share-candidate-heading">
                 <text class="home-share-candidate-title">{{shareCandidate.status === 'ready' ? shareCandidate.selected_text : '《' + (shareCandidateJob ? shareCandidateJob.title : '讲述片段') + '》'}}</text>
                 <text class="home-share-candidate-meta ui-tabular">{{shareCandidate.status === 'ready' ? '待制作' : (shareCandidateJob && shareCandidateJob.status === 'succeeded' ? '刚刚生成' : (shareCandidateJob && shareCandidateJob.status === 'failed' ? '制作未完成' : '制作中'))}}{{shareCandidateDurationText ? ' · ' + shareCandidateDurationText : ''}}</text>
-                <text class="home-share-candidate-hint">{{shareCandidate.reason || '来自最近的一段讲述'}}</text>
               </view>
             </view>
             <text wx:if="{{shareCandidateError}}" class="home-share-candidate-error" aria-live="polite">{{shareCandidateError}}</text>
@@ -168,7 +167,7 @@
             </view>
           </block>
           <view wx:else class="home-share-pick">
-            <text class="home-share-pick-copy">{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount ? '做好的视频都在这里，点开可以预览和转发。' : '把一段讲述配上原声和字幕，做成视频发给家人。'}}</text>
+            <text class="home-share-pick-copy">{{shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount ? '预览或转发做好的视频。' : '挑一段讲述，做成视频。'}}</text>
           </view>
         </view>
 
@@ -183,7 +182,7 @@
                 hover-class="ui-subtle-action-hover" aria-role="button" aria-label="查看语音采集与处理授权">《语音采集与处理授权》</view>
             </view>
           </checkbox-group>
-          <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别、保存原始音频和整理故事。</text>
+          <text class="voice-auth-hint">同意后开启麦克风，上传语音用于识别、保存原音和整理故事。</text>
         </view>
 
       </view>

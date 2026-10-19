@@ -274,7 +274,6 @@ test("transcript correction uses the shared automatic voice command flow", () =>
   );
 
   assert.match(template, /automatic-voice-command="\{\{true\}\}"/);
-  assert.match(template, /进入编辑后直接说，停顿后会自动生成修改后文字/);
 });
 
 test("transcript detail page loads a single transcript", async () => {
