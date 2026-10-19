@@ -243,7 +243,7 @@ Component({
     wx.setKeepScreenOn({
       keepScreenOn: keepScreenOn && Boolean(this.data.voiceSessionId)
         && !runtime.pageSuspended && !runtime.disposed
-        && !runtime.sessionStopConfirmed && this.data.status !== "closed",
+        && !runtime.sessionStopConfirmed,
       fail: (error) => console.warn("set voice session screen on failed", error),
     });
   },
