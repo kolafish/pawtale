@@ -1298,6 +1298,53 @@ for (const scenario of [
   });
 }
 
+for (const reconnectFirst of [false, true]) {
+  test(`screen stays awake after a background socket close and ${reconnectFirst ? "explicit reconnect" : "recording reconnect"}`, async () => {
+    const screenRequests = [];
+    const clients = [];
+    let recordingStarts = 0;
+    global.wx = { setKeepScreenOn: ({ keepScreenOn }) => screenRequests.push(keepScreenOn) };
+    const page = loadVoiceChatPage({
+      voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true },
+      streamingExports: { MemoirStreamingAsrClient: class {
+        constructor(options) { this.options = options; clients.push(this); }
+        async connect() { this.options.callbacks.onStatus("ready"); }
+        close() {}
+        isBargeInMonitoring() { return false; }
+        async stopBargeInMonitoring() {}
+        startRecording() { recordingStarts += 1; return true; }
+        stopRecording() {}
+      } },
+    });
+    const context = componentContext(page.definition, {}, {
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+    });
+    context.syncVoiceAuthorizationForSession = async () => true;
+    await context.connectGateway();
+    page.definition.pageLifetimes.show.call(context);
+    assert.equal(await context.startRecordingAfterPrivacy(), true);
+    assert.equal(screenRequests.at(-1), true);
+
+    page.definition.pageLifetimes.hide.call(context);
+    assert.equal(screenRequests.at(-1), false);
+    clients[0].options.callbacks.onStatus("closed");
+    assert.equal(context.data.status, "closed");
+    assert.equal(context.runtime().sessionStopConfirmed, false);
+    assert.equal(context.runtime().voiceStreaming.hasClient(), false);
+
+    page.definition.pageLifetimes.show.call(context);
+    if (reconnectFirst) await context.reconnectGateway();
+    assert.equal(await context.startRecordingAfterPrivacy(), true);
+    assert.equal(clients.length, 2);
+    assert.equal(recordingStarts, 2);
+    assert.equal(context.data.recording, true);
+    assert.equal(screenRequests.at(-1), true, "a recoverable transport close must not disable screen wakefulness");
+    page.definition.lifetimes.detached.call(context);
+    assert.equal(screenRequests.at(-1), false);
+  });
+}
+
 test("embedded voice chat finishes the session before returning home", async () => {
   const page = loadVoiceChatPage();
   const context = componentContext(page.definition, { embedded: true }, {
