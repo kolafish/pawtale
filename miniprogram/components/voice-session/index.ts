@@ -109,6 +109,7 @@ Component({
   exitSession(detail: VoiceSessionExit) {
     const runtime = this.runtime();
     if (runtime.disposed) return;
+    this.setSessionScreenOn(false);
     if (runtime.pageSuspended) {
       runtime.pendingExit = detail;
     } else {
@@ -171,6 +172,7 @@ Component({
       return;
     }
     this.hydrateVoiceSessionSnapshot();
+    this.setSessionScreenOn(true);
     await this.refreshVoiceSessionSnapshot();
     if (
       this.data.voiceAuthorizationAgreed
@@ -193,6 +195,7 @@ Component({
       this.exitSession(pendingExit);
       return;
     }
+    this.setSessionScreenOn(true);
     this.startProgressNoticeWatch();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
@@ -235,9 +238,20 @@ Component({
     this.runtime().voiceStreaming.close();
   },
 
+  setSessionScreenOn(keepScreenOn: boolean) {
+    const runtime = this.runtime();
+    wx.setKeepScreenOn({
+      keepScreenOn: keepScreenOn && Boolean(this.data.voiceSessionId)
+        && !runtime.pageSuspended && !runtime.disposed
+        && !runtime.sessionStopConfirmed && this.data.status !== "closed",
+      fail: (error) => console.warn("set voice session screen on failed", error),
+    });
+  },
+
   suspendVoiceChat(reason: "hide" | "unload") {
     const runtime = this.runtime();
     runtime.pageSuspended = true;
+    this.setSessionScreenOn(false);
     this.stopCompletionIssueRefresh();
     runtime.recordingStartGeneration += 1;
     runtime.followUpRequestSerial += 1;
@@ -460,6 +474,7 @@ Component({
       }
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.runtime().sessionStopConfirmed = detail.session.status === "stopped" || detail.session.status === "failed";
+      if (this.runtime().sessionStopConfirmed) this.setSessionScreenOn(false);
       this.applyVoiceSessionDetail(detail);
       await this.refreshCompletionIssue();
       this.reconcilePendingClose(detail);

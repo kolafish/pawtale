@@ -559,6 +559,10 @@ declare namespace WechatMiniprogram {
     enableAlertBeforeUnload?(option: { message: string }): void;
     disableAlertBeforeUnload?(option?: Record<string, never>): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
+    setKeepScreenOn(option: {
+      keepScreenOn: boolean;
+      fail?(result: GeneralCallbackResult): void;
+    }): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;

@@ -24,6 +24,7 @@ function loadVoiceChatPage({
   ttsTextProgressExports = {},
   accessibilityExports = {},
 } = {}) {
+  global.wx = { setKeepScreenOn() {}, ...global.wx };
   mockModule("../services/accessibility-settings.ts", {
     readAccessibilitySettings: () => ({
       largeTextEnabled: false,
@@ -568,6 +569,8 @@ test("human interview record action reconnects and starts the selected speaker w
 
 test("voice chat does not connect a stopped voice session", async () => {
   let connectCalls = 0;
+  const screenRequests = [];
+  global.wx = { setKeepScreenOn: ({ keepScreenOn }) => screenRequests.push(keepScreenOn) };
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
@@ -616,6 +619,9 @@ test("voice chat does not connect a stopped voice session", async () => {
   assert.equal(context.data.statusText, "closed");
   assert.equal(context.data.primaryActionText, "已保存");
   assert.equal(context.data.persistenceStateText, "已保存");
+  assert.equal(screenRequests.at(-1), false);
+  page.onShow.call(context);
+  assert.equal(screenRequests.at(-1), false, "returning to a stopped session cannot keep the screen awake");
 });
 
 test("voice chat starts the opening assistant turn after a normal session load", async () => {
@@ -1259,6 +1265,38 @@ test("voice chat refreshes session on show only after page suspension", () => {
   assert.equal(refreshCalls, 1);
   assert.equal(context.pageSuspended, false);
 });
+
+for (const scenario of [
+  { embedded: true, interviewType: "ai_interview", sessionGoal: "open_narration" },
+  { embedded: true, interviewType: "human_interview", sessionGoal: "open_narration" },
+  { embedded: false, interviewType: "ai_interview", sessionGoal: "book_completion" },
+]) {
+  test(`voice session keeps the screen on throughout ${scenario.interviewType}/${scenario.sessionGoal}`, async () => {
+    const screenRequests = [];
+    global.wx = { setKeepScreenOn: ({ keepScreenOn }) => screenRequests.push(keepScreenOn) };
+    const page = loadVoiceChatPage();
+    const context = componentContext(page.definition, { embedded: scenario.embedded });
+    context.refreshVoiceSessionSnapshot = async () => null;
+
+    await context.onLoad({ voiceSessionId: "voice-1", ...scenario });
+    assert.deepEqual(screenRequests, [true], "preparing the session already prevents sleep");
+    context.handleStatus("listening");
+    context.handleStatus("ready");
+    context.setData({ followUpLoading: true });
+    context.setData({ followUpLoading: false, followUpTTSPlaying: true });
+    context.setData({ followUpTTSPlaying: false });
+    assert.deepEqual(screenRequests, [true], "recording, AI playback and gaps retain screen wakefulness");
+
+    page.definition.pageLifetimes.hide.call(context);
+    assert.equal(screenRequests.at(-1), false);
+    page.definition.pageLifetimes.show.call(context);
+    assert.equal(screenRequests.at(-1), true);
+    context.exitSession({ destination: "transcripts" });
+    assert.equal(screenRequests.at(-1), false);
+    page.definition.lifetimes.detached.call(context);
+    assert.equal(screenRequests.at(-1), false);
+  });
+}
 
 test("embedded voice chat finishes the session before returning home", async () => {
   const page = loadVoiceChatPage();
@@ -3628,6 +3666,8 @@ test("viewing records after disconnect exits only after the server confirms the 
 test("detaching a voice component during hydration cannot connect or update a later instance", async () => {
   let resolveSnapshot;
   let connects = 0;
+  const screenRequests = [];
+  global.wx = { setKeepScreenOn: ({ keepScreenOn }) => screenRequests.push(keepScreenOn) };
   const page = loadVoiceChatPage({
     voiceApiExports: { getMemoirVoiceSession: () => new Promise(resolve => { resolveSnapshot = resolve; }) },
     voiceAuthorizationExports: { readVoiceAuthorizationConsent: () => true },
@@ -3651,6 +3691,7 @@ test("detaching a voice component during hydration cannot connect or update a la
   assert.equal(second.runtime().disposed, false);
   assert.equal(second.data.voiceSessionId, "");
   assert.deepEqual(first.events, []);
+  assert.deepEqual(screenRequests, [true, false], "a late snapshot cannot restore wakefulness after leaving");
 });
 
 test("a consent response received after hiding the component cannot open its gateway", async () => {
