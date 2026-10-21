@@ -291,3 +291,7 @@ PYTHONPATH=. venv/bin/python -m scripts.review_memoir_interview summarize \
 
 `packet` 可传两次 `--run` 比较相同输入与重复次数的两个版本；未完成或输入不同的运行会拒绝配对。
 评分后若源结果或身份映射改变，会拒绝复用旧评分。人、Agent、模型三类评分分开汇总，未填评分保持空值。
+
+首轮候选的实验提交、实际对比与采用决定见[第一轮候选报告](./MEMOIR_INTERVIEW_ITERATION_1_REPORT.md)。
+该候选未达到采用标准，代码留在实验分支，主分支合入报告；线上仍使用原 Prompt。
+后续以新的来源分组继续验证，而不是反复调同一批评测输入。
