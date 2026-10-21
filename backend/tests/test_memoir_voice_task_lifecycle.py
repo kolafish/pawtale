@@ -5,6 +5,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.config import Settings
+from app.services.memoir.interview_agent import InterviewConfig, InterviewInput, prepare_interview_turn
+from app.services.memoir.voice_followup_ai import InterviewDialogue
 from app.services.memoir.voice_assistant_turn_stream import (
     AssistantTurnArtifacts,
     AssistantTurnStartRequest,
@@ -50,7 +52,7 @@ async def test_assistant_stream_finishes_both_tasks(ending, monkeypatch):
     monkeypatch.setattr(session, "_stream_text", text_stream)
     monkeypatch.setattr(session, "_stream_audio_from_text_queue", audio_stream)
     task = asyncio.create_task(session._stream_text_and_audio(
-        ai_client=None, tts_client=None, system_prompt="", prompt="", max_tokens=1, turn_id="turn",
+        ai_client=None, tts_client=None, prepared=prepare_interview_turn(InterviewInput(InterviewDialogue("open_narration", ())), InterviewConfig()), turn_id="turn",
         req=AssistantTurnStartRequest(), artifacts=AssistantTurnArtifacts(),
         cancel_event=asyncio.Event(),
     ))
@@ -345,7 +347,7 @@ async def test_client_send_failure_closes_text_upstream(monkeypatch):
     session = VoiceAssistantTurnStreamSession(db=None, client=Client(), voice_session_id="session", user_id="user")
     with pytest.raises(ConnectionError):
         await session._stream_text(
-            ai_client=AI(), system_prompt="", prompt="", req=AssistantTurnStartRequest(), max_tokens=10,
+            ai_client=AI(), prepared=prepare_interview_turn(InterviewInput(InterviewDialogue("open_narration", ())), InterviewConfig()),
             turn_id="turn", artifacts=AssistantTurnArtifacts(), cancel_event=asyncio.Event(), text_queue=asyncio.Queue(),
         )
     assert closed

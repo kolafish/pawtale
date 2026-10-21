@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Sequence
+from datetime import datetime
 import logging
 import re
 
@@ -49,6 +51,24 @@ class InterviewerTurn:
     @property
     def expects_answer(self) -> bool:
         return self.conversation_action == MemoirConversationAction.LISTEN
+
+
+@dataclass(frozen=True)
+class InterviewMessage:
+    role: str
+    content_text: str
+    turn_index: int
+    id: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class InterviewDialogue:
+    session_goal: str
+    messages: tuple[InterviewMessage, ...]
+
+
+Message = MemoirChatMessage | InterviewMessage
 
 
 @dataclass(frozen=True)
@@ -211,11 +231,11 @@ def _chapter_progress_lines(snapshot: MemoirProjectProgressSnapshotResponse) -> 
     return lines
 
 
-def _ordered_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessage]:
+def _ordered_messages(messages: Sequence[Message]) -> list[Message]:
     return sorted(messages, key=lambda message: (message.turn_index, message.created_at, message.id))
 
 
-def _message_context(messages: list[MemoirChatMessage]) -> str:
+def _message_context(messages: Sequence[Message]) -> str:
     lines: list[str] = []
     for message in messages:
         content = message.content_text.strip()
@@ -226,22 +246,22 @@ def _message_context(messages: list[MemoirChatMessage]) -> str:
     return "\n".join(lines)
 
 
-def recent_context_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessage]:
+def recent_context_messages(messages: Sequence[Message]) -> list[Message]:
     return _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
 
 
-def _recent_context(messages: list[MemoirChatMessage]) -> str:
+def _recent_context(messages: Sequence[Message]) -> str:
     return _message_context(recent_context_messages(messages)) or "暂无对话。"
 
 
-def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
+def _has_user_message(messages: Sequence[Message]) -> bool:
     return any(
         message.role == MemoirChatMessageRole.USER.value and message.content_text.strip() for message in messages
     )
 
 
 def _llm_max_tokens(
-    voice_session: MemoirVoiceSession,
+    voice_session: MemoirVoiceSession | InterviewDialogue,
     *,
     has_user_message: bool,
     regenerate: bool,
