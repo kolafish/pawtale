@@ -225,11 +225,6 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
 
 function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: () => void): void {
   const nextData: HomeData = { ...context.data, ...patch };
-  if (patch.progress && patch.progress.status !== "failed" && patch.progress.status !== "needs_input"
-    && nextData.noticeReadState.attentionId) {
-    nextData.noticeReadState = { ...nextData.noticeReadState, attentionId: "" };
-    rememberHomeNoticeReadState(nextData.userId, nextData.projectId, nextData.noticeReadState);
-  }
   const notices = homeNoticeQueue(nextData);
   context.setData({
     ...patch,

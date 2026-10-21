@@ -136,9 +136,9 @@ export function homeStorySnapshotData(
     || (!snapshot.progress && includedChapters.length > 0 && readable === includedChapters.length);
   return {
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
-    reviewNoticeScope: JSON.stringify([snapshot.book_manual_edit_preserved, snapshot.book_issues.review_count,
-      snapshot.chapters.filter(chapter => chapter.issues.review_count || chapter.candidate_job_id)
-        .map(chapter => [chapter.id, chapter.issues.review_count, chapter.candidate_job_id])]),
+    reviewNoticeScope: JSON.stringify([snapshot.book_manual_edit_preserved, snapshot.review_issue_signature,
+      snapshot.chapters.filter(chapter => chapter.candidate_job_id).sort((a, b) => a.id.localeCompare(b.id))
+        .map(chapter => [chapter.id, chapter.candidate_job_id])]),
     readableNoticeText: hasReadableDraft ? (fullyReadable ? "书稿已可阅读" : "已有部分书稿可阅读") : "",
     growthNotices: [...pendingGrowthEvents]
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
