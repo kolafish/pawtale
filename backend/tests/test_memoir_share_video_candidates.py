@@ -1,6 +1,8 @@
 import json
+from io import BytesIO
 from types import SimpleNamespace
 
+from PIL import Image
 import pytest
 from sqlalchemy import select
 
@@ -10,7 +12,7 @@ from app.models.memoir import (
     AudioFile, MemoirEditingJob, MemoirMaterialShareVideo, MemoirShareVideoCandidate,
     MemoirShareVideoOutput, MemoirVoiceUtterance,
 )
-from app.services.memoir import share_video_candidates
+from app.services.memoir import image_assets, share_video_candidates
 from app.services.memoir.share_video_jobs import fallback_share_video_title
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_job
@@ -87,6 +89,17 @@ async def test_completed_narration_can_be_accepted_for_video(client, test_db, mo
     assert candidate["duration_ms"] >= 15_000
     assert candidate["selected_text"] == STORY
     assert candidate["reason"] == "讲了雪天父亲把围巾给我"
+
+    # Opening the editor consumes the suggestion even when no video is submitted.
+    consumed = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/share-video-candidates/{candidate['id']}/dismiss",
+    )
+    assert consumed.status_code == 200
+    assert consumed.json()["selected_text"] == STORY
+    assert (await client.get(url)).json()["candidate"] is None
+    evaluation = await test_db.get(MemoirEditingJob, job_id, populate_existing=True)
+    assert (await share_video_candidates.run_share_video_candidate_job(test_db, evaluation)).status == MemoirEditingJobStatus.SKIPPED
+    assert len(prompts) == 1
 
     create_url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidates/{candidate['id']}/create-video"
     created_job = await client.post(create_url, json={"background_source": "classic"})
@@ -165,6 +178,84 @@ async def test_recommendation_follows_latest_manual_video_for_its_source_range(
     if accept_original:
         await test_db.refresh(old_job)
         assert old_job.status == "failed"
+
+
+@pytest.mark.parametrize("video_status", ["pending", "running", "succeeded"])
+async def test_edited_recommendation_with_uploaded_photo_stays_linked_to_its_video(
+    client, test_db, monkeypatch, tmp_path, video_status,
+):
+    created, evaluation_id = await _stopped_story(client, test_db)
+    prompts = _model_picks(monkeypatch)
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, evaluation_id)
+    project_id = created["session"]["project_id"]
+    url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidate"
+    candidate = (await client.get(url)).json()["candidate"]
+
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    picture = BytesIO()
+    Image.new("RGB", (8, 8), "blue").save(picture, format="PNG")
+    uploaded = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets",
+        files={"file": ("picture.png", picture.getvalue(), "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    create_url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    # Editing the recommendation's range sends the ordinary transcript request.
+    selection = {
+        "start_char": 0, "end_char": STORY.index("。") + 1,
+        "video_style": "uploaded", "photo_asset_ids": [uploaded.json()["id"]],
+    }
+    made = await client.post(create_url, json=selection)
+    assert made.status_code == 201, made.text
+    assert made.json()["end_char"] < candidate["end_char"]
+    old_job = await test_db.get(MemoirMaterialShareVideo, made.json()["id"])
+    old_job.status = video_status
+    if video_status == "succeeded":
+        old_job.output = MemoirShareVideoOutput(
+            job_id=old_job.id, project_id=project_id,
+            storage_path=f"memoir/share-videos/{old_job.user_id}/{old_job.id}.mp4",
+            mime_type="video/mp4", size_bytes=1024,
+        )
+    await test_db.commit()
+    current = (await client.get(url)).json()["candidate"]
+    assert current["status"] == "accepted"
+    assert current["video_job_id"] == made.json()["id"]
+    stored = await test_db.get(MemoirShareVideoCandidate, candidate["id"], populate_existing=True)
+    assert stored.status == "accepted"
+    assert stored.video_job_id == made.json()["id"]
+    # A delayed evaluation must not select and recommend the original range again.
+    evaluation = await test_db.get(MemoirEditingJob, evaluation_id, populate_existing=True)
+    assert (await share_video_candidates.run_share_video_candidate_job(test_db, evaluation)).status == MemoirEditingJobStatus.SKIPPED
+    assert len(prompts) == 1
+
+    if old_job.output is not None:
+        await test_db.delete(old_job.output)
+        old_job.output = None
+    old_job.status = "failed"
+    await test_db.commit()
+    remade = await client.post(create_url, json=selection)
+    assert remade.status_code == 201, remade.text
+    assert remade.json()["id"] != old_job.id
+    assert (await client.get(url)).json()["candidate"]["video_job_id"] == remade.json()["id"]
+
+
+async def test_nonoverlapping_video_does_not_consume_recommendation(client, test_db, monkeypatch):
+    created, evaluation_id = await _stopped_story(client, test_db)
+    _model_picks(monkeypatch, start_sentence_id=2, end_sentence_id=2)
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, evaluation_id)
+    project_id = created["session"]["project_id"]
+    url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidate"
+    candidate = (await client.get(url)).json()["candidate"]
+    made = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": candidate["start_char"], "background_source": "classic"},
+    )
+    assert made.status_code == 201, made.text
+    current = (await client.get(url)).json()["candidate"]
+    assert current["status"] == "ready"
+    assert current["video_job_id"] is None
 
 
 @pytest.mark.parametrize(("pick", "reason_code"), [
