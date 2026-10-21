@@ -38,7 +38,7 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
 )
-from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_calls import AITextCallResult, AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
@@ -544,6 +544,7 @@ async def select_policy_action(
     *,
     context: InterviewPolicyContext,
     ai_client: AITextClient,
+    on_response: Callable[[AITextCallResult], None] | None = None,
 ) -> InterviewPolicySelection:
     framework_ids = [
         candidate.item_id for candidate in context.topic_candidates
@@ -556,20 +557,27 @@ async def select_policy_action(
         framework_ids.append(context.brief.target_id)
     framework_refs = ModelReferenceMap("F", framework_ids)
     policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
-    generated = await generate_structured_with_client(
-        ai_client,
-        (
-            "你是回忆录访谈策略分类器。"
-            "你只选择系统提供的受控动作，不生成问题，不修改事实或用户决定。"
-        ),
-        _selection_prompt(context, framework_refs=framework_refs),
-        output_model=_InterviewPolicySelectionOutput,
-        requested_model=getattr(ai_client, "model_name", None),
-        temperature=0.0,
-        max_tokens=policy.max_tokens,
-        timeout=ai_text_timeout_seconds(policy.timeout_profile),
-        max_attempts=policy.max_attempts,
-    )
+    try:
+        generated = await generate_structured_with_client(
+            ai_client,
+            (
+                "你是回忆录访谈策略分类器。"
+                "你只选择系统提供的受控动作，不生成问题，不修改事实或用户决定。"
+            ),
+            _selection_prompt(context, framework_refs=framework_refs),
+            output_model=_InterviewPolicySelectionOutput,
+            requested_model=getattr(ai_client, "model_name", None),
+            temperature=0.0,
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
+        )
+    except AIStructuredOutputError as exc:
+        if on_response is not None and exc.response is not None:
+            on_response(exc.response)
+        raise
+    if on_response is not None:
+        on_response(generated.response)
     raw_action = generated.value.selected_action.strip()
     try:
         selected_action = MemoirInterviewAction(raw_action)
@@ -744,6 +752,7 @@ async def select_policy_turn(
     resolve_context: Callable[
         [InterviewPolicyContext, InterviewPolicySelection], Awaitable[InterviewPolicyContext]
     ] | None = None,
+    on_response: Callable[[AITextCallResult], None] | None = None,
 ) -> ActivePolicyTurn:
     """Shared selection/application boundary; the adapter validates selected topics.
 
@@ -753,6 +762,7 @@ async def select_policy_turn(
     selection = await select_policy_action(
         context=context,
         ai_client=ai_client,
+        on_response=on_response,
     )
     if resolve_context is not None:
         context = await resolve_context(context, selection)
