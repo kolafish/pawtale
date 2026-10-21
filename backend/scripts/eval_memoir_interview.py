@@ -253,7 +253,10 @@ async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, polic
 
     try:
         completion_answered = bool(snapshot.completion_context and snapshot.completion_context.answered)
-        if policy_mode != "off" and not completion_answered:
+        policy_available = (
+            snapshot.dialogue.session_goal == "open_narration" or snapshot.completion_context is not None
+        )
+        if policy_mode != "off" and policy_available and not completion_answered:
             context = policy_context_for(case, shadow=policy_mode == "shadow")
             if live and policy_mode == "active":
                 selected = await select_turn()

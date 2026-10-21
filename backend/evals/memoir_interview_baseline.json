@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "dataset_commit": "7120a0f",
+  "dataset_manifest_sha256": "763b9ba1e8414964115321124eac95135f265cafb51fc255e73a222388e309ca",
+  "status": "pending_human_review",
+  "mode": "autonomous",
+  "policy_mode": "shadow",
+  "model": "deepseek-flash",
+  "temperature": 0.72,
+  "repeat": 1,
+  "dev_ids": [
+    "interview-zh-003",
+    "interview-zh-011",
+    "interview-zh-118",
+    "interview-zh-130",
+    "interview-zh-173",
+    "interview-zh-174",
+    "interview-zh-175",
+    "interview-zh-176",
+    "interview-zh-177",
+    "interview-zh-178",
+    "interview-zh-179",
+    "interview-zh-180",
+    "interview-zh-181",
+    "interview-zh-182",
+    "interview-zh-205",
+    "interview-zh-206"
+  ],
+  "eval_ids": [
+    "interview-zh-109",
+    "interview-zh-152",
+    "interview-zh-163",
+    "interview-zh-164",
+    "interview-zh-165",
+    "interview-zh-166",
+    "interview-zh-167",
+    "interview-zh-168",
+    "interview-zh-169",
+    "interview-zh-170",
+    "interview-zh-171",
+    "interview-zh-172",
+    "interview-zh-203",
+    "interview-zh-204"
+  ],
+  "product_case_ids": [
+    "product-first-opening",
+    "product-new-story",
+    "product-topic-opening",
+    "product-profile-answered",
+    "product-completion-answer",
+    "product-completion-done",
+    "product-user-end",
+    "product-unknown-motive"
+  ],
+  "budget": {
+    "planned_reply_calls": 76,
+    "policy_calls_additional": true,
+    "policy_retries": "shared REALTIME_STRUCTURED workload"
+  },
+  "selection_reason": "保留原分组；开发集覆盖六类困难行为与四个真实窗口，评测集在候选冻结后才运行；产品样本是合成边界，不代表真实用户。"
+}
