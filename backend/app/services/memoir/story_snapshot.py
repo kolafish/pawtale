@@ -37,6 +37,7 @@ from app.services.memoir.automatic_book_draft import DraftProgress
 from app.services.memoir.project_revisions import project_data_revision
 from app.services.memoir.read_snapshots import _empty_automation_events
 from app.services.memoir.story_growth_projection import story_growth_events
+from app.services.memoir.semantic_state import semantic_json_signature
 
 
 async def chapter_rows(db: AsyncSession, project_id: str):
@@ -135,6 +136,21 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
             issue_counts[chapter_id].review_count = count
         else:
             issue_counts[chapter_id].supplement_count = count
+    # Identify actual unresolved manual decisions, independently of aggregate job status.
+    # Exclude workflow timestamps/status so opening a question or background work does not notify again.
+    review_issues = (await db.execute(select(
+        MemoirCompletionIssue.id,
+        MemoirCompletionIssue.chapter_id,
+        MemoirCompletionIssue.issue_type,
+        MemoirCompletionIssue.question,
+        MemoirCompletionIssue.reason,
+        MemoirCompletionIssue.resolution,
+    ).where(
+        MemoirCompletionIssue.project_id == project.id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+    ).order_by(MemoirCompletionIssue.id))).mappings().all()
+    result.review_issue_signature = semantic_json_signature([dict(issue) for issue in review_issues]) if review_issues else ""
     # The book workspace only offers optional questions from the current ready
     # review. Manual decisions stay active across regenerated reviews.
     if issue_counts[None].supplement_count:

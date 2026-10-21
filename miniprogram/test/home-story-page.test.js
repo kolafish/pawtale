@@ -15,7 +15,7 @@ function snapshot(patch = {}) {
   return {
     identity: { id: "user-1", email: "test@example.com", display_name: "作者", active_project_id: "project-1", active_project: { id: "project-1", title: "余仲尤的回忆录" } },
     progress: progress(), book_readable: true, book_char_count: 200, book_chapter_count: 1,
-    book_issues: { review_count: 0, supplement_count: 0 }, book_manual_edit_preserved: false,
+    book_issues: { review_count: 0, supplement_count: 0 }, book_manual_edit_preserved: false, review_issue_signature: "",
     updated_at: "2026-09-05T00:00:00Z",
     chapters: [1, 2].map((n) => ({ id: `chapter-${n}`, title: `章节 ${n}`, include_in_book: n === 1,
       material_count: 2, char_count: n === 1 ? 200 : 0, readable: n === 1,
@@ -625,21 +625,40 @@ test("failures and required confirmation stay visible without re-notifying for s
     current = snapshot({ updated_at: "2026-09-06T00:00:00Z", progress: progress({ status: "failed", stage: "different-stage", can_retry: true }) });
     await context.loadHome(true);
     assert.equal(context.data.notice, null);
-    current = snapshot({ progress: progress({ status: "needs_input", needs_user_material_count: 3 }) });
+    current = snapshot({ progress: progress({ status: "needs_input", needs_user_material_count: 3 }), review_issue_signature: "issue-a" });
     await context.loadHome(true);
     assert.equal(context.data.notice.action, "review");
     await context.dismissNotice();
     assert.equal(context.data.notice, null);
     // A genuinely different required review remains notifyable while needs_input persists.
-    current = snapshot({ progress: progress({ status: "needs_input" }), book_issues: { review_count: 1, supplement_count: 0 } });
+    current = snapshot({ progress: progress({ status: "needs_input" }), review_issue_signature: "issue-b", book_issues: { review_count: 1, supplement_count: 0 } });
     await context.loadHome(true);
     assert.equal(context.data.notice.action, "review");
     await context.dismissNotice();
-    current = snapshot({ progress: progress({ status: "processing" }) });
+    current = snapshot({ progress: progress({ status: "processing" }), review_issue_signature: "issue-b", book_issues: { review_count: 1, supplement_count: 0 } });
     await context.loadHome(true);
     assert.equal(context.data.notice, null);
-    current = snapshot({ progress: progress({ status: "needs_input" }) });
+    current = snapshot({ progress: progress({ status: "needs_input" }), review_issue_signature: "issue-b", book_issues: { review_count: 1, supplement_count: 0 } });
     await context.loadHome(true);
-    assert.equal(context.data.notice.action, "review");
+    assert.equal(context.data.notice, null, "background processing must not make the same review unread again");
   } finally { context.onHide(); }
+});
+
+
+test("replacing a required issue with another in the same scope and count notifies after page recreation", async () => {
+  const storage = {};
+  const sameScope = snapshot({ progress: progress({ status: "needs_input" }),
+    book_issues: { review_count: 1, supplement_count: 0 } });
+  const first = pageContext(loadStoryPage({ storage, current: { ...sameScope, review_issue_signature: "old-issue" } }).page);
+  await first.onShow();
+  assert.equal(first.data.notice.action, "review");
+  await first.dismissNotice();
+  await first.dismissNotice(); // First readability.
+  assert.equal(first.data.notice, null);
+  first.onUnload();
+  const second = pageContext(loadStoryPage({ storage, current: { ...sameScope, review_issue_signature: "replacement-issue" } }).page);
+  try {
+    await second.onShow();
+    assert.equal(second.data.notice?.action, "review", "a different issue must not inherit the old issue's read state");
+  } finally { second.onHide(); }
 });

@@ -116,6 +116,7 @@ class MemoirStoryGrowthEvent(BaseModel):
 class MemoirStorySnapshotResponse(MemoirHomeSnapshotResponse):
     book_issues: MemoirStoryIssueCounts = Field(default_factory=MemoirStoryIssueCounts)
     book_manual_edit_preserved: bool = False
+    review_issue_signature: str = ""
     book_chapter_count: int = Field(default=0, ge=0)
     progress: MemoirDraftProgressResponse | None = None
     chapters: list[MemoirStoryChapterResponse] = Field(default_factory=list)

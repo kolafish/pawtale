@@ -147,3 +147,75 @@ async def test_closed_issue_clears_even_when_generation_outcome_is_old(
     assert data["chapters"][0]["readable"]
     assert data["book_manual_edit_preserved"]
     assert fake.prompts == []
+
+
+@pytest.mark.parametrize("book_scope", [False, True])
+async def test_review_identity_changes_for_replacement_and_content_but_not_optional_or_closed_issues(
+    client, test_db, book_scope
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await create_test_book_plan_with_chapters(test_db, project_id=project_id)
+    chapter_id = None if book_scope else chapters[0].id
+    original = issue(project_id, "original", chapter_id=chapter_id)
+    test_db.add(original)
+    await test_db.commit()
+    before = await read_snapshot(client)
+    signature = before["review_issue_signature"]
+    assert signature
+    counts = before["book_issues"] if book_scope else before["chapters"][0]["issues"]
+    assert counts["review_count"] == 1
+
+    # Workflow activity and optional questions do not represent a new decision.
+    original.status = "in_progress"
+    test_db.add(issue(project_id, "optional", channel="interview", chapter_id=chapter_id))
+    test_db.add(issue(project_id, "old-closed", status="closed", outcome="confirmed", chapter_id=chapter_id))
+    other_user = User(email="review-identity@example.com", password_hash="unused", display_name="另一位作者")
+    test_db.add(other_user)
+    await test_db.flush()
+    other_project = Project(user_id=other_user.id, type="memoir", title="其他回忆录")
+    test_db.add(other_project)
+    await test_db.flush()
+    test_db.add(issue(other_project.id, "foreign"))
+    await test_db.commit()
+    assert (await read_snapshot(client))["review_issue_signature"] == signature
+
+    original.question = "第一次离开家是哪一年？"
+    await test_db.commit()
+    content_changed = (await read_snapshot(client))["review_issue_signature"]
+    assert content_changed != signature
+    original.status, original.outcome = "closed", "confirmed"
+    replacement = issue(project_id, "replacement", chapter_id=chapter_id)
+    test_db.add(replacement)
+    await test_db.commit()
+    after = await read_snapshot(client)
+    same_counts = after["book_issues"] if book_scope else after["chapters"][0]["issues"]
+    assert same_counts["review_count"] == counts["review_count"]
+    assert after["review_issue_signature"] not in {signature, content_changed}
+    replacement.status, replacement.outcome = "closed", "confirmed"
+    await test_db.commit()
+    assert (await read_snapshot(client))["review_issue_signature"] == ""
+
+
+async def test_review_identity_survives_processing_that_masks_unresolved_decisions(client, test_db, monkeypatch):
+    project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
+    await test_db.execute(update(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id).values(status="succeeded"))
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    parent.result_json = automatic_book_draft.DraftProgress(
+        chapters={chapter_id: automatic_book_draft.ChapterProgress(status="needs_review")},
+    ).model_dump(mode="json")
+    test_db.add(issue(project_id, "still-open", chapter_id=chapter_id))
+    await test_db.commit()
+    before = await read_snapshot(client)
+    assert before["progress"]["status"] == "needs_input"
+    assert before["review_issue_signature"]
+    parent.status = "pending"
+    await test_db.commit()
+    processing = await read_snapshot(client)
+    assert processing["progress"]["status"] == "processing"
+    assert processing["review_issue_signature"] == before["review_issue_signature"]
+    parent.status = "succeeded"
+    await test_db.commit()
+    after = await read_snapshot(client)
+    assert after["progress"]["status"] == "needs_input"
+    assert after["review_issue_signature"] == before["review_issue_signature"]

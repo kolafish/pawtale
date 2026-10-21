@@ -88,6 +88,7 @@ export interface MemoirStoryGrowthEvent {
 export interface MemoirStorySnapshot extends MemoirHomeSnapshot {
   book_issues: MemoirStoryIssueCounts;
   book_manual_edit_preserved: boolean;
+  review_issue_signature: string;
   book_chapter_count: number;
   progress: MemoirDraftProgress | null;
   chapters: MemoirStoryChapter[];
