@@ -246,3 +246,30 @@ TTS 与真实听感延迟在语音 smoke 中单列。样本量不足时展示原
 人工正文保护、来源可追溯及可读性。先验证章节生成和修订，再扩展归类、摘要和审阅。
 访谈只通过现有素材、事实与 CompletionIssue 和写作协作，不新增全局协调 Agent，
 也不因成书字段未填满就强迫用户继续回答。
+
+## 11 已实现入口与复跑方式
+
+PR #1527 已抽出 `interview_agent.py` 的类型化文本核心及共享 `select_policy_turn`。
+`scripts/eval_memoir_interview.py` 提供数据集适配与快照重放，默认 dry-run；`--live` 才调用付费模型。
+现有来源边界/转写更正评测共用最小的样本筛选和 JSON 输出辅助，不建立新的通用评测框架。
+
+在 `backend/` 下执行（本地 `.env` 若仍是旧数据库配置，显式指定隔离测试 PostgreSQL URL；此入口不读写业务数据库）：
+
+```bash
+PYTHONPATH=. venv/bin/python -m scripts.eval_memoir_interview \
+  --dataset /Users/jin/interview_data/assets/interview-agent-v1 \
+  --split dev --track observed_interview --mode autonomous \
+  --policy-mode shadow --ai-model deepseek-flash --max-cases 10 \
+  --output /tmp/interview-dry-run
+```
+
+用 `--cases <上次输出目录>/inputs.jsonl` 可重放已保存的输入；输出目录必须是新目录，避免覆盖既有尝试。
+支持 `--case`、`--repeat` 和 `--max-cases` 限定范围。每个样本每次调用一个回应模型，
+active/shadow 另有策略调用及共享 structured workload 的重试预算；实际调用和失败须看运行记录。
+shadow 在回应后运行，不修改回应 Prompt；报告区分首段文本、回应结束和包含影子调用的总耗时。
+2026-10-21 核对线上为 active 关闭、shadow 开启；实验时显式选择模式，不静默套用本机配置。
+
+输出包含 `manifest.json`、`inputs.jsonl`、`results.jsonl` 和 `summary.json`，记录代码/差异与源文件哈希、
+输入快照、实际 Prompt、回应、策略生效状态、用量及失败。缺少 usage 的失败费用保持未知。
+外部访谈没有真实书稿/素材状态，策略上下文标为 `visible_dialogue_only`；它不能证明数据库上下文加载或检索质量。
+产品特有场景可使用带版本的 `EvalCase` 快照及冻结策略上下文，不从评分标注推导这些事实。

@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 import time
 
+from scripts.memoir_eval_io import select_cases, write_json
+
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
@@ -18,11 +20,7 @@ from app.services.memoir.voice_transcripts import (
 async def evaluate(args: argparse.Namespace) -> int:
     fixture = Path(__file__).resolve().parents[1] / "evals/memoir_self_correction.json"
     cases = json.loads(fixture.read_text())["cases"]
-    if args.case:
-        known = {case["id"] for case in cases}
-        if unknown := set(args.case) - known:
-            raise ValueError(f"Unknown case IDs: {sorted(unknown)}")
-        cases = [case for case in cases if case["id"] in args.case]
+    cases = select_cases(cases, args.case)
     results = []
     for case in cases:
         started = time.monotonic()
@@ -57,8 +55,7 @@ async def evaluate(args: argparse.Namespace) -> int:
             "failures": failures,
         }
         results.append(row)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
+        write_json(args.output, results)
         print(json.dumps(row, ensure_ascii=False), flush=True)
     failed = sum(bool(row["failures"]) for row in results)
     print(f"Fragment checks: {len(results) - failed}/{len(results)} passed; manually review all outputs.")

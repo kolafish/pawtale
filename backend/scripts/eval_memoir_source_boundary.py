@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import time
 
+from scripts.memoir_eval_io import select_cases, write_json
+
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
 from app.services.ai_factory import get_ai_service
 from app.services.memoir.chapter_generation import (
@@ -18,11 +20,7 @@ from app.services.memoir.chapter_generation import (
 async def evaluate(args: argparse.Namespace) -> int:
     fixture = Path(__file__).resolve().parents[1] / "evals/memoir_interview_source_boundary.json"
     cases = json.loads(fixture.read_text())["cases"]
-    if args.case:
-        unknown = set(args.case) - {case["id"] for case in cases}
-        if unknown:
-            raise ValueError(f"Unknown case IDs: {sorted(unknown)}")
-        cases = [case for case in cases if case["id"] in args.case]
+    cases = select_cases(cases, args.case)
     client = get_ai_service(args.ai_model)
     results = []
     levels = args.polish_level or ["low", "medium", "high"]
@@ -64,8 +62,7 @@ async def evaluate(args: argparse.Namespace) -> int:
                     "seconds": round(time.monotonic() - started, 3), "failures": failures,
                 }
                 results.append(row)
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
+                write_json(args.output, results)
                 print(json.dumps(row, ensure_ascii=False), flush=True)
     failed = sum(bool(row["failures"]) for row in results)
     print(f"Fragment checks: {len(results) - failed}/{len(results)}; manually review every output.")
