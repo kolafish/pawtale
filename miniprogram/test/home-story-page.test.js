@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { flushAsyncWork, loadPageModule, mockModule, pageContext } = require("./page-harness");
 const { storyViewData } = require("../components/story-tree/story-view-adapter.ts");
+const { ApiError } = require("../services/request.ts");
 
 function progress(patch = {}) {
   return { project_id: "project-1", status: "ready", title: "可读草稿已更新", detail: "全书检查已完成",
@@ -492,6 +493,48 @@ test("a failed acknowledgement keeps the current notification available for an e
     await context.dismissNotice();
     assert.equal(context.data.notice.eventId, "second");
     assert.equal(context.data.storyError, "");
+  } finally { context.onHide(); }
+});
+
+test("a completed event reused by a pending job releases the old card and can notify on completion again", async () => {
+  const editorial = { ...growth("editorial-copy"), changes: [{ kind: "book_updated" }] };
+  let current = snapshot({ progress: null, growth_events: [editorial] });
+  let requeued = false;
+  let refreshes = 0;
+  const { page, calls } = loadStoryPage({
+    getSnapshot: async () => { refreshes++; return current; },
+    acknowledge: async id => {
+      if (requeued && id === editorial.event_id) {
+        throw new ApiError(400, "自动处理记录仍需处理，不能直接确认隐藏", { detail: "自动处理记录仍需处理，不能直接确认隐藏" });
+      }
+    },
+  });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    assert.equal(context.data.notice.eventId, editorial.event_id);
+    context.onHide();
+    requeued = true;
+    // story_snapshot excludes the reused event while its job is pending.
+    current = snapshot({ progress: progress({ status: "processing" }), growth_events: [growth("other-update")] });
+    await context.onShow();
+    const beforeAcknowledgement = refreshes;
+    await context.dismissNotice();
+    assert.equal(context.data.notice.eventId, "other-update");
+    assert.equal(context.data.storyError, "");
+    assert.equal(context.data.dismissingGrowth, false);
+    assert.equal(refreshes, beforeAcknowledgement + 1);
+    await context.dismissNotice();
+    assert.deepEqual(calls.acknowledgedEventIds, [editorial.event_id, "other-update"]);
+    assert.equal(context.data.notice.kind, "progress");
+    await context.dismissNotice();
+    assert.equal(context.data.notice, null);
+    requeued = false;
+    current = snapshot({ progress: null, growth_events: [editorial] });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.eventId, editorial.event_id);
+    await context.dismissNotice();
+    assert.equal(context.data.notice, null);
   } finally { context.onHide(); }
 });
 

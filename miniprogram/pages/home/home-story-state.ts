@@ -64,6 +64,11 @@ export class HomeGrowthTracker {
     this.queued.delete(eventId);
   }
 
+  invalidate(eventId: string): void {
+    this.queued.delete(eventId);
+    this.seen.delete(eventId);
+  }
+
   pending(events: MemoirStoryGrowthEvent[]): MemoirStoryGrowthEvent[] {
     // Snapshot history is bounded; keep messages already queued until the user reads them.
     for (const event of events) {
