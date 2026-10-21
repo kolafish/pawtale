@@ -17,16 +17,14 @@ from app.application_errors import ApplicationError
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
-    MemoirConversationAction,
     MemoirInterviewType,
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
-from app.services.ai_calls import stream_text_with_client
 from app.services.ai_costs import estimate_text_cost
 from app.services.ai_usage_records import record_ai_usage, record_ai_usage_in_background
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AIProviderTimeoutError, AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
@@ -39,9 +37,21 @@ from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audi
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.interview_book_context import load_interview_book_context
+from app.services.memoir.interview_agent import (
+    STREAM_PROMPT_VERSION,
+    STREAM_TEXT_TEMPERATURE,
+    InterviewConfig,
+    InterviewInput,
+    InterviewRun,
+    PreparedInterviewTurn,
+    prepare_interview_turn,
+    stream_interview_turn,
+)
 from app.services.memoir.voice_followup_ai import (
     PROGRESS_PROMPT_VERSION,
     InterviewerTurn,
+    InterviewDialogue,
+    InterviewMessage,
     ProgressPromptContext,
     build_progress_prompt_context,
     _has_user_message,
@@ -49,9 +59,6 @@ from app.services.memoir.voice_followup_ai import (
     _question_mark_count,
     recent_context_messages,
     interviewer_persona_for_voice,
-    strip_streaming_speaker_label_prefix,
-    split_interviewer_control_prefix,
-    system_prompt_for_persona,
 )
 from app.services.memoir.streaming_tts_events import (
     STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME,
@@ -65,7 +72,6 @@ from app.services.memoir.voice_chat_context import (
     next_turn_index,
     project_has_previous_narration,
 )
-from app.services.memoir.voice_interviewer_prompt import build_stream_turn_prompt
 from app.services.memoir.voice_tts import get_tts_client
 from app.services.memoir.voice_tts_types import (
     DEFAULT_TTS_SPEED_RATIO,
@@ -74,8 +80,6 @@ from app.services.memoir.voice_tts_types import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v10"
-STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
 
@@ -123,15 +127,7 @@ class AssistantTurnStartRequest:
 
 
 @dataclass
-class AssistantTurnArtifacts:
-    text: str = ""
-    conversation_action: MemoirConversationAction | None = None
-    finish_reason: str | None = None
-    usage: dict = field(default_factory=dict)
-    ai_provider: str | None = None
-    requested_ai_model: str | None = None
-    resolved_ai_model: str | None = None
-    response_ai_model: str | None = None
+class AssistantTurnArtifacts(InterviewRun):
     audio_chunks: list[bytes] = field(default_factory=list)
     audio_failed: bool = False
     audio_mime_type: str | None = None
@@ -324,7 +320,6 @@ class VoiceAssistantTurnStreamSession:
         )
         messages = list(voice_session.messages)
         has_user_message = _has_user_message(messages)
-        fallback_intent = "follow_up" if has_user_message else "opening"
         max_tokens = _llm_max_tokens(
             voice_session,
             has_user_message=has_user_message,
@@ -456,45 +451,43 @@ class VoiceAssistantTurnStreamSession:
                     turn_id,
                 )
 
-        prompt = build_stream_turn_prompt(
-            voice_session,
-            has_previous_project_narration=has_previous_project_narration,
-            activation_context=activation_context,
-            regenerate=req.regenerate,
-            progress_context=project_progress_context,
-            persona=persona,
-            completion_prompt_context=completion_prompt_context,
-            book_context=book_context,
-            policy_instruction=interview_policy_runtime.active_reply_instruction(policy_turn),
+        prepared = prepare_interview_turn(
+            InterviewInput(
+                dialogue=InterviewDialogue(
+                    session_goal=voice_session.session_goal,
+                    messages=tuple(
+                        InterviewMessage(
+                            role=item.role, content_text=item.content_text, turn_index=item.turn_index,
+                            id=item.id, created_at=item.created_at,
+                        ) for item in voice_session.messages
+                    ),
+                ),
+                has_previous_project_narration=has_previous_project_narration,
+                activation_context=activation_context,
+                progress_context=project_progress_context,
+                persona=persona,
+                completion_context=completion_prompt_context,
+                book_context=book_context,
+                policy_instruction=interview_policy_runtime.active_reply_instruction(policy_turn),
+            ),
+            InterviewConfig(requested_model=req.ai_model, temperature=req.temperature, regenerate=req.regenerate),
         )
 
         await self._stream_text_and_audio(
             ai_client=ai_client,
             tts_client=tts_client,
-            system_prompt=system_prompt_for_persona(persona),
-            prompt=prompt,
+            prepared=prepared,
             req=req,
-            max_tokens=max_tokens,
             turn_id=turn_id,
             artifacts=artifacts,
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
             return
-        action = artifacts.conversation_action
-        if action is None:
-            raise HTTPException(status_code=502, detail="AI 未返回有效的会话动作，请重试")
-        if book_completion and has_user_message and action == MemoirConversationAction.LISTEN:
-            action = MemoirConversationAction.PAUSE
-        intent = fallback_intent if action == MemoirConversationAction.LISTEN else "acknowledge"
-        turn = InterviewerTurn(
-            primary_intent=intent,
-            intent_tags=[intent],
-            speech_text=artifacts.text.strip(),
-            conversation_action=action,
-        )
-        if not turn.speech_text:
-            raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
+        try:
+            turn = artifacts.completed_turn(prepared.input)
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         profile_questions = book_context.profile_questions if book_context else ()
         person_question = book_context.person_question if book_context else None
         message, audio_file_id = await self._persist_completed_turn(
@@ -622,10 +615,8 @@ class VoiceAssistantTurnStreamSession:
         *,
         ai_client: AITextClient,
         tts_client: TTSClient,
-        system_prompt: str,
-        prompt: str,
+        prepared: PreparedInterviewTurn,
         req: AssistantTurnStartRequest,
-        max_tokens: int,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
@@ -645,10 +636,7 @@ class VoiceAssistantTurnStreamSession:
         async def produce_text() -> None:
             await self._stream_text(
                 ai_client=ai_client,
-                system_prompt=system_prompt,
-                prompt=prompt,
-                req=req,
-                max_tokens=max_tokens,
+                prepared=prepared,
                 turn_id=turn_id,
                 artifacts=artifacts,
                 cancel_event=cancel_event,
@@ -672,67 +660,28 @@ class VoiceAssistantTurnStreamSession:
         self,
         *,
         ai_client: AITextClient,
-        system_prompt: str,
-        prompt: str,
-        req: AssistantTurnStartRequest,
-        max_tokens: int,
+        prepared: PreparedInterviewTurn,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
         text_queue: asyncio.Queue[str | None],
     ) -> None:
-        control_buffer = ""
-        initial_text_buffer = ""
-        initial_text_resolved = False
-        async with contextlib.aclosing(stream_text_with_client(
-            ai_client,
-            system_prompt,
-            prompt,
-            requested_model=req.ai_model,
-            temperature=req.temperature,
-            max_tokens=max_tokens,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
-            text_timeout=ai_text_timeout_seconds(AITextTimeoutProfile.REALTIME),
+        async with contextlib.aclosing(stream_interview_turn(
+            prepared, ai_client=ai_client, run=artifacts, cancel_event=cancel_event,
         )) as stream:
             async for chunk in stream:
-                if cancel_event.is_set():
-                    return
-                artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
-                if chunk.usage:
-                    artifacts.usage.update(chunk.usage)
-                artifacts.ai_provider = chunk.provider or artifacts.ai_provider
-                artifacts.requested_ai_model = chunk.requested_model or artifacts.requested_ai_model
-                artifacts.resolved_ai_model = chunk.resolved_model or artifacts.resolved_ai_model
-                artifacts.response_ai_model = chunk.response_model or artifacts.response_ai_model
                 if not chunk.text_delta:
                     continue
-                text_delta = chunk.text_delta
-                if artifacts.conversation_action is None:
-                    control_buffer += text_delta
-                    text_delta, artifacts.conversation_action = split_interviewer_control_prefix(control_buffer)
-                    if artifacts.conversation_action is None:
-                        continue
-                if not initial_text_resolved:
-                    initial_text_buffer += text_delta
-                    text_delta, initial_text_resolved = strip_streaming_speaker_label_prefix(initial_text_buffer)
-                    if not initial_text_resolved:
-                        continue
-                if not text_delta:
-                    continue
-                artifacts.text += text_delta
-                await text_queue.put(text_delta)
+                await text_queue.put(chunk.text_delta)
                 await self.client.send_json(
                     {
                         "type": "text.delta",
                         "turn_id": turn_id,
                         "voice_session_id": self.voice_session_id,
-                        "text_delta": text_delta,
+                        "text_delta": chunk.text_delta,
                         "text": artifacts.text,
                     }
                 )
-
-        if artifacts.conversation_action is None:
-            raise ValueError("AI 访谈回复的会话动作不完整，请重试")
 
     async def _stream_audio_from_text_queue(
         self,

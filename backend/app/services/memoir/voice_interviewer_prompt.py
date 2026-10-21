@@ -15,6 +15,7 @@ from app.services.memoir.interview_book_context import InterviewBookContext, Lif
 from app.services.memoir.narrative.frameworks import FrameworkTopicLevel
 from app.services.memoir.voice_followup_ai import (
     INTERVIEWER_TURN_OUTPUT_RULES,
+    InterviewDialogue,
     InterviewerPersona,
     ProgressPromptContext,
     _has_user_message,
@@ -31,7 +32,7 @@ _LEVEL_LABELS = {
 
 
 def build_stream_turn_prompt(
-    voice_session: MemoirVoiceSession,
+    voice_session: MemoirVoiceSession | InterviewDialogue,
     *,
     has_previous_project_narration: bool,
     activation_context: str,
@@ -250,7 +251,7 @@ def _join(*parts: str) -> str:
 
 
 def _book_completion_prompt(
-    voice_session: MemoirVoiceSession,
+    voice_session: MemoirVoiceSession | InterviewDialogue,
     *,
     has_user_message: bool,
     host_name: str,

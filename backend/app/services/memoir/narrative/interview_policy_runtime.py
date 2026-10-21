@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections.abc import Awaitable, Callable
 import hashlib
 import json
 from typing import Mapping
@@ -729,15 +730,34 @@ async def prepare_active_policy_turn(
         or settings.memoir_interview_policy_active_model.strip()
     )
     client = ai_client_factory(selected_model or None)
+
+    async def resolve_context(context: InterviewPolicyContext, selection: InterviewPolicySelection):
+        return await _context_for_selection(db, context=context, selection=selection)
+
+    return await select_policy_turn(context=context, ai_client=client, resolve_context=resolve_context)
+
+
+async def select_policy_turn(
+    *,
+    context: InterviewPolicyContext,
+    ai_client: AITextClient,
+    resolve_context: Callable[
+        [InterviewPolicyContext, InterviewPolicySelection], Awaitable[InterviewPolicyContext]
+    ] | None = None,
+) -> ActivePolicyTurn:
+    """Shared selection/application boundary; the adapter validates selected topics.
+
+    Live runs revalidate topics against the database after selection. Offline runs
+    supply a frozen context resolver; a missing topic snapshot is an explicit error.
+    """
     selection = await select_policy_action(
         context=context,
-        ai_client=client,
+        ai_client=ai_client,
     )
-    context = await _context_for_selection(
-        db,
-        context=context,
-        selection=selection,
-    )
+    if resolve_context is not None:
+        context = await resolve_context(context, selection)
+    elif selection.action == MemoirInterviewAction.OFFER_NEW_TOPIC:
+        raise InterviewPolicySelectionError("interview_policy_missing_topic_context")
     return ActivePolicyTurn(
         context=context,
         selected_action=selection.action,
@@ -745,8 +765,8 @@ async def prepare_active_policy_turn(
             context,
             selection.action,
         ),
-        model_provider=client.provider_name,
-        model_name=client.model_name,
+        model_provider=ai_client.provider_name,
+        model_name=ai_client.model_name,
     )
 
 

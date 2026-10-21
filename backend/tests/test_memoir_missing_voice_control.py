@@ -4,8 +4,10 @@ import asyncio
 import pytest
 
 from app.domain.memoir.types import MemoirConversationAction
+from app.services.memoir.interview_agent import InterviewConfig, InterviewInput, prepare_interview_turn
+from app.services.memoir.voice_followup_ai import InterviewDialogue
 from app.services.memoir.voice_assistant_turn_stream import (
-    AssistantTurnArtifacts, AssistantTurnStartRequest, VoiceAssistantTurnStreamSession,
+    AssistantTurnArtifacts, VoiceAssistantTurnStreamSession,
 )
 from tests.test_memoir_voice_assistant_turn_stream import FakeStreamingAI, FakeTurnClient
 
@@ -29,7 +31,7 @@ async def test_control_boundary_preserves_speech_for_every_chunk_split(prefix, b
         queue = asyncio.Queue()
         await session._stream_text(
             ai_client=FakeStreamingAI([raw[:split], raw[split:]], control_chunks=()),
-            system_prompt="synthetic", prompt="synthetic", req=AssistantTurnStartRequest(), max_tokens=100,
+            prepared=prepare_interview_turn(InterviewInput(InterviewDialogue("open_narration", ())), InterviewConfig()),
             turn_id="synthetic", artifacts=artifacts, cancel_event=asyncio.Event(), text_queue=queue,
         )
         spoken = "".join([queue.get_nowait() for _ in range(queue.qsize())])
@@ -47,8 +49,8 @@ async def test_incomplete_control_or_structured_output_never_becomes_speech(raw)
     queue = asyncio.Queue()
     with pytest.raises(ValueError):
         await session._stream_text(
-            ai_client=FakeStreamingAI(list(raw), control_chunks=()), system_prompt="synthetic", prompt="synthetic",
-            req=AssistantTurnStartRequest(), max_tokens=100, turn_id="synthetic", artifacts=artifacts,
+            ai_client=FakeStreamingAI(list(raw), control_chunks=()), prepared=prepare_interview_turn(InterviewInput(InterviewDialogue("open_narration", ())), InterviewConfig()),
+            turn_id="synthetic", artifacts=artifacts,
             cancel_event=asyncio.Event(), text_queue=queue,
         )
     assert queue.empty() and not client.sent and not artifacts.text
