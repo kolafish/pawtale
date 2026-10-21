@@ -282,6 +282,7 @@
         <text class="mic-button-text">{{micButtonText}}</text>
       </view>
       <button
+        wx:if="{{!embedded}}"
         id="voice-finish-action"
         class="finish-button ui-button"
         loading="{{finishingSession}}"

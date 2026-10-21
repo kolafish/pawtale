@@ -25,8 +25,8 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
     return {
       id: chapter.id,
       hasSections: chapter.sections.length > 0,
-      title: chapter.title || "未命名故事",
-      storyCountText: chapter.sections.length ? `${chapter.sections.length} 个故事` : "正在长成故事",
+      title: chapter.title || "未命名章节",
+      storyCountText: chapter.sections.length ? `${chapter.sections.length} 小节` : "正在整理小节",
       readable: chapter.readable,
       state: chapter.state,
       tone: STORY_TONES[index % STORY_TONES.length],
@@ -35,7 +35,7 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
       growthAnimating: false,
       sections: chapter.sections.map((section) => ({
         id: section.id,
-        title: section.title || "未命名故事",
+        title: section.title || "未命名小节",
         highlighted: false,
         growthLabel: "",
         growthAnimating: false,
@@ -59,7 +59,7 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
     overview: {
       title: memoirHomepageTitle(project?.title || ""),
       summaryText: chapters.length
-        ? `${chapters.length} 个主题 · ${storyCount} 个故事`
+        ? `${chapters.length} 章 · ${storyCount} 小节`
         : materialCount ? "回忆正在整理成故事" : "故事树还在等待第一段回忆",
       growthStage,
       growthImageSrc: STORY_TREE_STAGE_IMAGES[growthStage],

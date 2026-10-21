@@ -1027,7 +1027,7 @@ function chapterSummaryMetaText(
   >,
 ): string {
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
-  const sectionText = `${chapter.sectionCount} 个故事`;
+  const sectionText = `${chapter.sectionCount} 小节`;
   return `${inclusionText}${sectionText}${chapter.draftAvailable ? ` · ${chapter.draftCharCount.toLocaleString("en-US")} 字` : ""}`;
 }
 

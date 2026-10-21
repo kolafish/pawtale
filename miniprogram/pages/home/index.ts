@@ -36,8 +36,18 @@ import { formatTranscriptDurationSeconds } from "../../services/transcript-view-
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
-import { emptyHomeStoryData, homeStorySnapshotData, clearStoryGrowthAnimation, HomeGrowthTracker, type HomeStoryData } from "./home-story-state";
-import type { StoryTreeChapterEvent, StoryTreeHandle, StoryTreeFocusEvent } from "../../components/story-tree/events";
+import {
+  emptyHomeStoryData,
+  homeStorySnapshotData,
+  clearStoryGrowthAnimation,
+  HomeGrowthTracker,
+  homeNoticeQueue,
+  readDismissedProgressNotice,
+  rememberDismissedProgressNotice,
+  type HomeStoryData,
+  type HomeNotice,
+} from "./home-story-state";
+import type { StoryTreeChapterEvent } from "../../components/story-tree/events";
 import {
   dismissHomeLaunch,
   homeBookOpened,
@@ -132,6 +142,9 @@ interface HomeData extends HomeStoryData {
   shareVideoFailedCount: number;
   // Family likes on forwarded stories that the author has not acknowledged yet.
   shareLikeNotice: ShareLikeNotice | null;
+  notices: HomeNotice[];
+  notice: HomeNotice | null;
+  dismissedProgressNoticeId: string;
 }
 
 interface CheckboxChangeEvent {
@@ -211,9 +224,11 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
 
 function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: () => void): void {
   const nextData: HomeData = { ...context.data, ...patch };
+  const notices = homeNoticeQueue(nextData);
   context.setData({
     ...patch,
     ...homeViewPatch(nextData),
+    notices, notice: notices[0] || null,
   }, callback);
 }
 
@@ -252,6 +267,8 @@ function applyHomeSnapshotData(
     narratorProfileText: hasProject && identity.active_project ? narratorProfileLine(identity.active_project) : "",
     ...(changedProject ? {
       ...emptyHomeStoryData(),
+      notices: [],
+      dismissedProgressNoticeId: readDismissedProgressNotice(identity.id, identity.active_project_id),
       showContinueNarration: false,
       voiceEntry: null,
       voiceAuthorizationRequested: false,
@@ -337,6 +354,9 @@ definePage<HomeData>()({
     shareVideoActiveCount: 0,
     shareVideoFailedCount: 0,
     shareLikeNotice: null,
+    notices: [],
+    notice: null,
+    dismissedProgressNoticeId: "",
     ...emptyHomeStoryData(),
   },
 
@@ -369,7 +389,7 @@ definePage<HomeData>()({
     this.shareLikeNoticeRequestSequence += 1;
     this.homeRefreshTimer.cancel();
     this.growthAnimationTimer.cancel();
-    this.setData({ story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
+    setHomeData(this, { story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
   },
 
   onUnload() {
@@ -449,7 +469,7 @@ definePage<HomeData>()({
       this.storyNavigationTarget = null;
       const validTarget = target && (!target.projectId || target.projectId === this.data.projectId);
       setHomeData(this, {
-        ...homeStorySnapshotData(snapshot, this.data.story, freshEvents),
+        ...homeStorySnapshotData({ ...snapshot, growth_events: this.growthTracker.pending(snapshot.growth_events) }, freshEvents),
         ...(validTarget ? { narrationSaved: target.narrationSaved } : {}),
       }, () => {
         if (loadSequence !== this.homeLoadSequence) return;
@@ -470,6 +490,8 @@ definePage<HomeData>()({
         this.growthTracker.reset();
         setHomeData(this, {
           ...emptyHomeStoryData(),
+          notices: [],
+          dismissedProgressNoticeId: "",
           needsLogin: true,
           demoReadableChapterIds: [],
           voiceEntry: null,
@@ -595,20 +617,13 @@ definePage<HomeData>()({
     if (!this.homeVisible || !userId || !projectId || this.data.needsLogin) return;
     try {
       const notice = await loadShareLikeNotice(userId, projectId);
-      if (requestSequence !== this.shareLikeNoticeRequestSequence || this.data.projectId !== projectId) return;
-      this.setData({ shareLikeNotice: notice });
+      if (requestSequence !== this.shareLikeNoticeRequestSequence || this.data.userId !== userId || this.data.projectId !== projectId) return;
+      setHomeData(this, { shareLikeNotice: notice });
     } catch (error) {
       if (requestSequence === this.shareLikeNoticeRequestSequence) {
         console.warn("share like notice refresh failed", error);
       }
     }
-  },
-
-  dismissShareLikeNotice() {
-    const notice = this.data.shareLikeNotice;
-    if (!notice) return;
-    markShareLikeNoticeSeen(this.data.userId, this.data.projectId, notice.latestAt);
-    this.setData({ shareLikeNotice: null });
   },
 
   // Opens the same settings page as a hand-picked clip, with the recommended range already selected.
@@ -707,17 +722,6 @@ definePage<HomeData>()({
     this.setData({ story: clearStoryGrowthAnimation(this.data.story) });
   },
 
-  viewStoryGrowth() {
-    const target = this.data.growthTarget;
-    if (!target) return;
-    this.selectComponent<StoryTreeHandle>("#story-tree")?.focusGrowth(target.chapterId);
-    void this.dismissGrowthNotice();
-  },
-
-  focusStoryGrowth(event: StoryTreeFocusEvent) {
-    wx.pageScrollTo({ scrollTop: Math.max(0, this.homeScrollTop + event.detail.top - 16), duration: 250 });
-  },
-
   async continueNarration() {
     await this.startPrimaryVoiceChat();
   },
@@ -739,28 +743,38 @@ definePage<HomeData>()({
     await this.loadHome();
   },
 
-  async dismissGrowthNotice() {
-    const projectId = this.data.projectId;
-    const eventIds = this.data.growthEvents.map((event) => event.event_id);
-    if (!projectId || !eventIds.length || this.data.dismissingGrowth) return;
-    this.setData({ dismissingGrowth: true });
-    try {
-      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(projectId, id)));
-      if (this.homeVisible && this.data.projectId === projectId) {
-        this.setData({
-          growthEvents: [],
-          growthNoticeTitle: "",
-          growthNoticeText: "",
-          growthNoticeContext: "",
-          growthTarget: null,
-        });
+  async dismissNotice() {
+    const notice = this.data.notice;
+    const { userId, projectId } = this.data;
+    if (!notice || !projectId || this.data.dismissingGrowth) return;
+    if (notice.kind === "progress") {
+      rememberDismissedProgressNotice(userId, projectId, notice.id);
+      setHomeData(this, { dismissedProgressNoticeId: notice.id });
+    } else if (notice.kind === "like") {
+      // Invalidate a like refresh started before this acknowledgement.
+      this.shareLikeNoticeRequestSequence += 1;
+      markShareLikeNoticeSeen(userId, projectId, notice.people.latestAt);
+      setHomeData(this, { shareLikeNotice: null });
+    } else if (notice.kind === "saved") {
+      setHomeData(this, { narrationSaved: false });
+    } else {
+      this.setData({ dismissingGrowth: true });
+      try {
+        await acknowledgeMemoirAutomationEvent(projectId, notice.eventId);
+        if (this.data.userId === userId && this.data.projectId === projectId) {
+          this.growthTracker.acknowledge(notice.eventId);
+          setHomeData(this, {
+            storyError: "",
+            growthNotices: this.data.growthNotices.filter(item => item.id !== notice.id),
+          });
+        }
+      } catch (error) {
+        if (this.data.userId === userId && this.data.projectId === projectId) {
+          this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+        }
+      } finally {
+        if (this.data.userId === userId && this.data.projectId === projectId) this.setData({ dismissingGrowth: false });
       }
-    } catch (error) {
-      if (this.homeVisible && this.data.projectId === projectId) {
-        this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
-      }
-    } finally {
-      this.setData({ dismissingGrowth: false });
     }
   },
 
@@ -771,7 +785,7 @@ definePage<HomeData>()({
     try {
       const progress = await retryMemoirDraftProgress(projectId);
       if (this.homeVisible && projectId === this.data.projectId) {
-        this.setData({ progress });
+        setHomeData(this, { progress });
         await this.loadHome(true);
       }
     } catch (error) {

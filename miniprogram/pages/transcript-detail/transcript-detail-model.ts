@@ -282,11 +282,11 @@ export function toViewItem(
   const hasLocation = !canRecoverTranscription && Boolean(assignment || includedChapter);
   const chapterLocationText = assignment?.chapter_title.trim()
     || includedChapter?.title.trim()
-    || "未命名故事";
+    || "未命名章节";
   const sectionLocationText = assignment
     ? (assignment.requires_user_assignment
       ? "还没有选择具体位置"
-      : (assignment.section_title.trim() || "未命名故事"))
+      : (assignment.section_title.trim() || "未命名小节"))
     : "";
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);

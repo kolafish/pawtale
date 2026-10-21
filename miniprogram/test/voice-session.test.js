@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const {
   flushAsyncWork,
@@ -1345,7 +1347,10 @@ for (const reconnectFirst of [false, true]) {
   });
 }
 
-test("embedded voice chat finishes the session before returning home", async () => {
+test("embedded voice chat uses home as its only finish action and saves before returning", async () => {
+  const template = fs.readFileSync(path.join(__dirname, "../components/voice-session/index.wxml"), "utf8");
+  assert.match(template, /wx:if="\{\{!embedded\}\}"\s+id="voice-finish-action"/);
+  assert.match(template, /id="voice-home-action"[\s\S]*?bindtap="returnToHome"/);
   const page = loadVoiceChatPage();
   const context = componentContext(page.definition, { embedded: true }, {
     voiceSessionId: "voice-1",

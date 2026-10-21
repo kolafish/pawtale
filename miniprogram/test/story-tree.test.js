@@ -86,35 +86,3 @@ test("tree template folds the complete story list into the hero without timeline
   assert.match(template, /name="afterHero"/);
   assert.doesNotMatch(template, /chapter-node-number|小节|时间线/);
 });
-
-test("tree reports the parent theme position for growth feedback", () => {
-  const context = tree();
-  let rect = { top: 175 };
-  const targets = [];
-  context.createSelectorQuery = () => ({ select: selector => {
-    targets.push(selector);
-    return { boundingClientRect: callback => ({ exec: () => callback(rect) }) };
-  } });
-  context.focusGrowth("childhood");
-  assert.deepEqual(context.events, [{ name: "focusgrowth", detail: { top: 175 } }]);
-  rect = null;
-  context.focusGrowth("deleted");
-  assert.equal(context.events.length, 1);
-  assert.deepEqual(targets, ["#story-chapter-childhood", "#story-chapter-deleted"]);
-});
-
-test("tree expands the theme list before measuring its growth position", () => {
-  const context = tree({
-    ...emptyStoryViewData(),
-    chapters: [{ id: "later" }],
-  });
-  const targets = [];
-  context.createSelectorQuery = () => ({ select: selector => {
-    targets.push(selector);
-    return { boundingClientRect: callback => ({ exec: () => callback({ top: 240 }) }) };
-  } });
-  context.focusGrowth("later");
-  assert.equal(context.data.showAllChapters, true);
-  assert.deepEqual(targets, ["#story-chapter-later"]);
-  assert.deepEqual(context.events, [{ name: "focusgrowth", detail: { top: 240 } }]);
-});

@@ -217,7 +217,7 @@ function readerData(
       ...chapter,
       expanded: false,
       storyCountText: chapter.sections.length
-        ? `${chapter.sections.length}个故事`
+        ? `${chapter.sections.length}小节`
         : "整章正文",
     })),
     readerTitle,

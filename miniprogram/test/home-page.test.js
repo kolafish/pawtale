@@ -441,7 +441,6 @@ test("home combines new-story and resume actions without mixing their routes", (
   assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
   assert.match(pageWxml, /id="resume-story-action"[\s\S]*?bindtap="resumeLastStory"/);
   assert.match(pageWxml, /wx:if="\{\{showNarrationChoiceCard\}\}"/);
-  assert.match(pageWxml, /wx:if="\{\{narrationSaved && !growthNoticeText\}\}"/);
   assert.doesNotMatch(pageWxml, /resume-card|接着上次说/);
   assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
   assert.match(pageWxml, /<voice-session[\s\S]*?bindexit="exitVoiceSession"/);
@@ -456,12 +455,11 @@ test("home keeps interview-engine notices out of the story overview", () => {
   assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
 
-test("home surfaces each non-idle progress state with the existing recovery and reading actions", () => {
+test("home notification actions keep their existing recovery routes", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(pageWxml, /wx:if="\{\{progress && progress\.status !== 'idle'\}\}"/);
-  assert.match(pageWxml, /progress\.status === 'needs_input'[\s\S]*bindtap="openReviewIssues"/);
-  assert.match(pageWxml, /progress\.status === 'partial_ready'[\s\S]*bindtap="openBook"/);
+  assert.match(pageWxml, /notice\.action === 'review'[\s\S]*?bindtap="openReviewIssues"/);
+  assert.match(pageWxml, /notice\.action === 'supplement'[\s\S]*?bindtap="supplementPendingMaterial"/);
   assert.match(pageWxml, /bindtap="retryDraft"/);
 });
 

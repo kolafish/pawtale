@@ -310,10 +310,10 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
-  assert.equal(context.data.chapterStoryCountText, "1 个故事");
+  assert.equal(context.data.chapterStoryCountText, "1 小节");
   assert.equal(context.data.chapterHasReadableDraft, true);
   assert.equal(context.data.chapterEditingHint, "");
-  assert.equal(context.data.sectionStructureSummary, "1 个故事 · 1 段回忆");
+  assert.equal(context.data.sectionStructureSummary, "1 小节 · 1 段回忆");
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].indexText, "01");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
@@ -450,16 +450,16 @@ test("focused story detail keeps reading content before memory summaries", () =>
   const storyCard = focusedTemplate.indexOf('class="focused-story-card');
   const memoryCard = focusedTemplate.indexOf('class="focused-memories-card');
 
-  assert.ok(focusedStart >= 0, "应复用章节工作台中的聚焦故事详情态");
-  assert.ok(storyCard >= 0 && memoryCard > storyCard, "整理后的故事应先于讲过的回忆");
-  assert.match(focusedTemplate, />整理后的故事/);
+  assert.ok(focusedStart >= 0, "应复用章节工作台中的聚焦小节详情态");
+  assert.ok(storyCard >= 0 && memoryCard > storyCard, "整理后的小节应先于讲过的回忆");
+  assert.match(focusedTemplate, />整理后的小节/);
   assert.match(focusedTemplate, />讲过的回忆</);
   assert.match(focusedTemplate, /bindtap="toggleFocusedStory"/);
   assert.match(focusedTemplate, /draftCanExpand && !focusedStoryExpanded/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/speaker\.svg/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/pencil\.svg/);
   assert.match(focusedTemplate, /assets\/chapter-workspace\/wand\.svg/);
-  assert.doesNotMatch(focusedTemplate, />这个故事</);
+  assert.doesNotMatch(focusedTemplate, />这小节</);
   assert.doesNotMatch(focusedTemplate, />查看与修改/);
 });
 
@@ -551,11 +551,11 @@ test("chapter workspace routes browse and editing story entries to one detail st
   assert.match(overviewTemplate, /bindtap="openStorySection"/);
   assert.match(entryMarkTemplate, /editing-entry-chevron/);
   assert.doesNotMatch(entryMarkTemplate, /收起/);
-  assert.match(template, />故事与回忆</);
-  assert.doesNotMatch(template, /故事、回忆与正文|>改名</);
-  assert.ok(regroupStart > sectionListStart, "重新分组应位于故事编辑列表之后");
+  assert.match(template, />小节与回忆</);
+  assert.doesNotMatch(template, /小节、回忆与正文|>改名</);
+  assert.ok(regroupStart > sectionListStart, "重新分组应位于小节编辑列表之后");
   assert.match(editingSectionTemplate, /bindtap="openStorySection"/);
-  assert.match(editingSectionTemplate, />查看与编辑故事</);
+  assert.match(editingSectionTemplate, />查看与编辑小节</);
   assert.doesNotMatch(editingSectionTemplate, /class="draft-section-(?:actions|body)/);
   assert.match(template, />本章正文已更新</);
 });
@@ -819,7 +819,7 @@ test("chapter workspace renames a section through the existing section update AP
     "出发前的准备",
     1,
   ]]);
-  assert.equal(toasts.at(-1).title, "故事标题已更新");
+  assert.equal(toasts.at(-1).title, "小节标题已更新");
   assert.equal(context.data.operationKind, "");
 });
 
@@ -877,8 +877,8 @@ test("confirmed chapter can reopen its editing tools and merge with the previous
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "section-1", "section-2"]]);
-  assert.equal(modals.at(-1).title, "与上一个故事合并？");
-  assert.equal(toasts.at(-1).title, "故事已合并");
+  assert.equal(modals.at(-1).title, "与上一小节合并？");
+  assert.equal(toasts.at(-1).title, "小节已合并");
 });
 
 test("chapter workspace regenerates the current section structure after confirmation", async () => {
@@ -924,7 +924,7 @@ test("chapter workspace regenerates the current section structure after confirma
     "chapter-1",
     [{ id: "section-1", version: 1 }],
   ]]);
-  assert.equal(toasts.at(-1).title, "已整理为2个故事");
+  assert.equal(toasts.at(-1).title, "已整理为2小节");
   assert.equal(context.data.operationKind, "");
   assert.equal(context.data.sectionRegenerationJob, null);
 });
@@ -1025,7 +1025,7 @@ test("section regeneration opens pending material instead of running a stale nex
 
   assert.deepEqual(
     modals.map((modal) => modal.title),
-    ["重新整理故事分组", "有回忆暂未归类"],
+    ["重新整理小节分组", "有回忆暂未归类"],
   );
   assert.deepEqual(prepareCalls, []);
   assert.notEqual(context.data.nextAction.kind, "review_sections");
@@ -1065,7 +1065,7 @@ test("chapter workspace keeps pending materials optional and opens their editor"
   );
   assert.equal(
     context.data.sectionStructureSummary,
-    "1 个故事 · 1 段回忆 · 1 段待整理",
+    "1 小节 · 1 段回忆 · 1 段待整理",
   );
   assert.equal(context.data.chapterEditingHint, "1 段回忆待整理");
   assert.equal(context.data.chapterHasReadableDraft, true);
@@ -1099,7 +1099,7 @@ test("chapter workspace keeps pending materials optional and opens their editor"
     "utterance-pending",
     { target_section_id: "section-1" },
   ]]);
-  assert.equal(toasts.at(-1).title, "已选择故事");
+  assert.equal(toasts.at(-1).title, "已选择小节");
   assert.equal(context.data.operationKind, "");
 });
 
@@ -1139,7 +1139,7 @@ test("chapter workspace creates a small section while assigning pending material
       new_section_title: "山桃花开的心动",
     },
   ]]);
-  assert.equal(toasts.at(-1).title, "已新建故事");
+  assert.equal(toasts.at(-1).title, "已新建小节");
 });
 
 test("chapter workspace opens the shared answer editor before confirming a fact", async () => {
@@ -1209,15 +1209,15 @@ test("chapter workspace separates optional suggestions from required decisions",
   assert.equal(context.data.optionalIssues.length, 1);
   assert.equal(
     context.data.readinessDetail,
-    "第1个故事“离家前的准备”之后需要补充。",
+    "第1小节“离家前的准备”之后需要补充。",
   );
   assert.equal(
     context.data.optionalIssues[0].question,
-    "第1个故事“离家前的准备”之后的第一晚是什么感受？",
+    "第1小节“离家前的准备”之后的第一晚是什么感受？",
   );
   assert.equal(
     context.data.optionalIssues[0].reason,
-    "补充第1个故事“离家前的准备”之后的感受会让这一段更丰富。",
+    "补充第1小节“离家前的准备”之后的感受会让这一段更丰富。",
   );
 });
 
@@ -1273,7 +1273,7 @@ test("chapter workspace edits one small section with optimistic version control"
       ],
     },
   ]]);
-  assert.equal(toasts[0].title, "故事已保存");
+  assert.equal(toasts[0].title, "小节已保存");
 });
 
 test("chapter workspace opens the shared revision workbench for AI edits", async () => {
@@ -1409,11 +1409,11 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.equal(
     context.data.draftRecoveryTitle,
-    "现在可以更新相关故事",
+    "现在可以更新相关小节",
   );
   assert.equal(
     context.data.draftRecoveryActionText,
-    "更新相关故事",
+    "更新相关小节",
   );
   assert.equal(context.data.draftRecoveryActionKind, "rewrite");
 
@@ -1456,8 +1456,8 @@ test("chapter rewrite reports persisted section progress at its action surface",
   });
 
   assert.equal(context.data.operationKind, "rewrite_chapter");
-  assert.equal(context.data.chapterPreparationTitle, "正在更新相关故事");
-  assert.match(context.data.chapterPreparationDetail, /已更新 3\/9 个故事/);
+  assert.equal(context.data.chapterPreparationTitle, "正在更新相关小节");
+  assert.match(context.data.chapterPreparationDetail, /已更新 3\/9 小节/);
   assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
   assert.equal(context.data.chapterPreparationProgress, 33);
   assert.equal(context.data.chapterPreparationProgressMode, "determinate");
@@ -1503,11 +1503,11 @@ test("chapter workspace explains that an old draft is preserved after regrouping
     chapterId: "chapter-1",
   });
 
-  assert.equal(context.data.rewriteNoticeTitle, "现有正文仍按原来的故事保留");
+  assert.equal(context.data.rewriteNoticeTitle, "现有正文仍按原来的小节保留");
   assert.match(context.data.rewriteNoticeDetail, /旧正文没有丢失/);
   assert.match(
     context.data.rewriteNoticeDetail,
-    /1 个故事的素材或结构发生变化/,
+    /1 小节的素材或结构发生变化/,
   );
 });
 
@@ -1600,8 +1600,8 @@ test("chapter workspace derives readable review text without mutating the API re
   assert.equal(apiWorkspace.completion_summary.detail, "请核对 S1。");
   assert.equal(apiWorkspace.completion_summary.next_action.detail, "先查看 S1。");
   assert.equal(apiWorkspace.completion_summary.active_issue.question, "S1 是否准确？");
-  assert.match(context.data.workspace.completion_summary.detail, /第1个故事/);
-  assert.match(context.data.workspace.completion_summary.active_issue.question, /第1个故事/);
+  assert.match(context.data.workspace.completion_summary.detail, /第1小节/);
+  assert.match(context.data.workspace.completion_summary.active_issue.question, /第1小节/);
 });
 
 test("chapter workspace can rewrite while optional suggestions remain open", async () => {
@@ -1667,14 +1667,14 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   assert.equal(context.data.narrativeSectionCount, 4);
   assert.equal(
     context.data.rewriteDraftActionText,
-    "更新相关故事",
+    "更新相关小节",
   );
   assert.equal(
     context.data.rewriteDraftBusyText,
-    "正在更新相关故事…",
+    "正在更新相关小节…",
   );
   assert.match(context.data.rewriteNoticeDetail, /重点更新相关内容/);
-  assert.match(context.data.rewriteNoticeDetail, /有联系的故事衔接/);
+  assert.match(context.data.rewriteNoticeDetail, /有联系的小节衔接/);
   context.data.operationKind = "prepare";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
@@ -1684,8 +1684,8 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
-  assert.equal(modals.at(-1).title, "更新相关故事");
-  assert.match(modals.at(-1).content, /有联系的故事衔接/);
+  assert.equal(modals.at(-1).title, "更新相关小节");
+  assert.match(modals.at(-1).content, /有联系的小节衔接/);
   assert.equal(modals.at(-1).confirmText, "更新正文");
   assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
@@ -1725,7 +1725,7 @@ test("candidate remains separate from edited draft and only acceptance writes it
   assert.equal(context.data.candidateComparisonAvailable, true);
   assert.equal(context.data.candidateMode, "changes");
   assert.equal(context.data.candidatePreviewVersion, "after");
-  assert.match(context.data.candidateSummaryText, /1 个故事有变化/);
+  assert.match(context.data.candidateSummaryText, /1 小节有变化/);
   assert.deepEqual(
     context.data.candidateDiffSegments.map(({ kind, text }) => ({ kind, text })),
     candidate.candidate_diff_segments,

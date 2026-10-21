@@ -132,7 +132,7 @@
     </view>
 
     <view wx:if="{{!focusedSectionId && !editingToolsExpanded && sectionViews.length}}" class="content-card story-overview-card ui-card ui-card-borderless">
-      <text class="friendly-section-title">这一章的故事</text>
+      <text class="friendly-section-title">这一章的小节</text>
       <view class="story-overview-list">
         <view
           wx:for="{{sectionViews}}"
@@ -141,7 +141,7 @@
           class="story-overview-row ui-pressable"
           data-id="{{item.id}}"
           aria-role="button"
-          aria-label="查看故事 {{item.title}}"
+          aria-label="查看小节 {{item.title}}"
           bindtap="openStorySection"
         >
           <text class="story-overview-index">{{item.indexText}}</text>
@@ -173,7 +173,7 @@
 
     <block wx:if="{{focusedSectionId && focusedSection}}">
       <view class="story-detail-summary">
-        <text class="story-detail-summary-text">{{focusedSection.visibleMaterials.length}} 段回忆 · {{focusedSection.hasDraft ? "已整理成故事" : (workspace.completion_summary.state === "preparing" ? "故事整理中" : "尚无正文")}}</text>
+        <text class="story-detail-summary-text">{{focusedSection.visibleMaterials.length}} 段回忆 · {{focusedSection.hasDraft ? "已整理成小节" : (workspace.completion_summary.state === "preparing" ? "小节整理中" : "尚无正文")}}</text>
         <view
           class="story-media-action ui-pressable"
           aria-role="button"
@@ -187,7 +187,7 @@
       </view>
 
       <view class="focused-story-card ui-card ui-card-borderless" id="focused-story">
-        <text class="focused-card-label">整理后的故事{{focusedSection.draftNeedsUpdate ? "（待更新）" : ""}}</text>
+        <text class="focused-card-label">整理后的小节{{focusedSection.draftNeedsUpdate ? "（待更新）" : ""}}</text>
 
         <block wx:if="{{editingSectionId === focusedSection.id && editingMode === 'manual'}}">
           <textarea
@@ -195,7 +195,7 @@
             value="{{editingSectionContent}}"
             maxlength="-1"
             cursor-spacing="24"
-            aria-label="编辑故事 {{focusedSection.title}}"
+            aria-label="编辑小节 {{focusedSection.title}}"
             bindinput="changeDraftSectionContent"
           />
           <view class="edit-actions">
@@ -209,7 +209,7 @@
               loading="{{operationKind === 'save_draft_section'}}"
               disabled="{{operationKind === 'save_draft_section'}}"
               bindtap="saveDraftSectionEdit"
-            >保存这个故事</button>
+            >保存本小节</button>
           </view>
         </block>
 
@@ -220,7 +220,7 @@
             class="focused-story-expand ui-pressable"
             aria-role="button"
             aria-expanded="{{focusedStoryExpanded}}"
-            aria-label="{{focusedStoryExpanded ? '收起故事正文' : '展开故事全文'}}"
+            aria-label="{{focusedStoryExpanded ? '收起小节正文' : '展开小节全文'}}"
             bindtap="toggleFocusedStory"
           >
             <text>{{focusedStoryExpanded ? "收起" : "展开全文"}}</text>
@@ -261,7 +261,7 @@
         </block>
 
         <view wx:else class="focused-story-empty">
-          <text class="empty-detail">{{workspace.completion_summary.state === "failed" || focusedSection.visibleMaterials.length ? readinessDetail : "这个故事还需要素材，请回到首页补充相关的回忆。"}}</text>
+          <text class="empty-detail">{{workspace.completion_summary.state === "failed" || focusedSection.visibleMaterials.length ? readinessDetail : "本小节还需要素材，请回到首页补充相关的回忆。"}}</text>
         </view>
       </view>
 
@@ -293,7 +293,7 @@
     <view wx:if="{{!focusedSectionId && editingToolsExpanded}}" class="content-card draft-card ui-card ui-card-borderless" id="chapter-sections">
       <view class="draft-heading">
         <view>
-          <text class="section-title">故事与回忆</text>
+          <text class="section-title">小节与回忆</text>
           <text class="section-structure-summary">{{sectionStructureSummary}}</text>
         </view>
         <view class="draft-heading-actions">
@@ -310,7 +310,7 @@
       <view wx:if="{{workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
-        <text wx:if="{{retainedDraftSectionCount}}" class="rewrite-notice-detail">{{retainedDraftSectionCount}} 个旧故事的正文保留在历史版本中。</text>
+        <text wx:if="{{retainedDraftSectionCount}}" class="rewrite-notice-detail">{{retainedDraftSectionCount}} 个旧小节的正文保留在历史版本中。</text>
         <view
           wx:if="{{chapterPreparationJob && chapterPreparationJob.operation === 'rewrite'}}"
           class="rewrite-task-status"
@@ -344,7 +344,7 @@
             class="section-toggle ui-pressable"
             data-id="{{item.id}}"
             aria-role="button"
-            aria-label="{{item.expanded ? '收起' : '展开'}}故事 {{item.title}}的管理项"
+            aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}的管理项"
             bindtap="toggleSection"
           >
             <view class="section-index"><text>{{item.indexText}}</text></view>
@@ -364,10 +364,10 @@
               data-id="{{item.id}}"
               aria-role="button"
               aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-              aria-label="查看与编辑故事 {{item.title}}"
+              aria-label="查看与编辑小节 {{item.title}}"
               bindtap="openStorySection"
             >
-              <text>查看与编辑故事</text>
+              <text>查看与编辑小节</text>
               <text>›</text>
             </view>
             <view
@@ -380,7 +380,7 @@
               aria-label="编辑{{item.title}}的标题"
               bindtap="renameSection"
             >
-              <text>编辑故事标题</text>
+              <text>编辑小节标题</text>
               <text>›</text>
             </view>
             <view wx:if="{{item.requires_user_assignment}}" class="section-material-list">
@@ -412,7 +412,7 @@
                     class="material-assignment-action ui-pressable {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                     aria-role="button"
                     aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-                  >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择所属故事"}}</view>
+                  >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择所属小节"}}</view>
                 </picker>
               </view>
             </view>
@@ -429,7 +429,7 @@
                 aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                 bindtap="mergeSectionIntoPrevious"
               >
-                <text class="section-merge-action-title">并入上一个故事</text>
+                <text class="section-merge-action-title">并入上一小节</text>
                 <text class="section-merge-action-detail">并入“{{item.mergeTargetTitle}}”</text>
               </view>
             </block>
@@ -444,7 +444,7 @@
           aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
           bindtap="regenerateSections"
         >
-          <text>{{operationKind === "regenerate_sections" ? "正在重新整理…" : "重新整理故事分组"}}</text>
+          <text>{{operationKind === "regenerate_sections" ? "正在重新整理…" : "重新整理小节分组"}}</text>
           <text class="structure-regenerate-arrow">›</text>
         </view>
       </view>
