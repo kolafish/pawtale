@@ -12,7 +12,7 @@ from app.models.memoir import (
     AudioFile, MemoirEditingJob, MemoirMaterialShareVideo, MemoirShareVideoCandidate,
     MemoirShareVideoOutput, MemoirVoiceUtterance,
 )
-from app.services.memoir import image_assets, share_video_candidates
+from app.services.memoir import image_assets, share_video_candidates, share_video_jobs
 from app.services.memoir.share_video_jobs import fallback_share_video_title
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_job
@@ -238,6 +238,65 @@ async def test_edited_recommendation_with_uploaded_photo_stays_linked_to_its_vid
     assert remade.status_code == 201, remade.text
     assert remade.json()["id"] != old_job.id
     assert (await client.get(url)).json()["candidate"]["video_job_id"] == remade.json()["id"]
+
+
+@pytest.mark.parametrize("with_replacement", [False, True])
+async def test_deleting_linked_manual_video_finishes_or_relinks_consumed_recommendation(
+    client, test_db, monkeypatch, tmp_path, with_replacement,
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
+    created, evaluation_id = await _stopped_story(client, test_db)
+    prompts = _model_picks(monkeypatch)
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, evaluation_id)
+    project_id = created["session"]["project_id"]
+    url = f"/api/mobile/memoir/projects/{project_id}/share-video-candidate"
+    candidate = (await client.get(url)).json()["candidate"]
+    create_url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs"
+    selection = {"start_char": 0, "end_char": STORY.index("。") + 1, "background_source": "classic"}
+    made = await client.post(create_url, json=selection)
+    assert made.status_code == 201, made.text
+    video_id = made.json()["id"]
+    video = await test_db.get(MemoirMaterialShareVideo, video_id)
+    video.status = "succeeded"
+    video.output = MemoirShareVideoOutput(
+        job_id=video_id, project_id=project_id,
+        storage_path=f"memoir/share-videos/{video.user_id}/{video_id}.mp4",
+        mime_type="video/mp4", size_bytes=1024,
+    )
+    await test_db.commit()
+    current = (await client.get(url)).json()["candidate"]
+    assert current["status"] == "accepted"
+    assert current["video_job_id"] == video_id
+    stored = await test_db.get(MemoirShareVideoCandidate, candidate["id"], populate_existing=True)
+    assert stored.video_job_id == video_id
+
+    replacement_id = None
+    if with_replacement:
+        replacement = await client.post(create_url, json={**selection, "hook_text": "拿出一颗糖"})
+        assert replacement.status_code == 201, replacement.text
+        replacement_id = replacement.json()["id"]
+        assert replacement_id != video_id
+    # Delete through the same API as the video library, allowing the FK to set the link to NULL.
+    library = await client.get(f"/api/mobile/memoir/projects/{project_id}/share-video/jobs")
+    assert [item["id"] for item in library.json()["items"]] == [video_id]
+    removed = await client.request(
+        "DELETE", f"/api/mobile/memoir/share-video/jobs/{video_id}", json={"confirm": True},
+    )
+    assert removed.status_code == 204, removed.text
+    current = (await client.get(url)).json()["candidate"]
+    await test_db.refresh(stored)
+    if with_replacement:
+        assert current["status"] == "accepted"
+        assert current["video_job_id"] == replacement_id
+        assert stored.video_job_id == replacement_id
+    else:
+        assert current is None
+        assert stored.status == "dismissed"
+        assert (await client.get(url)).json()["candidate"] is None
+    evaluation = await test_db.get(MemoirEditingJob, evaluation_id, populate_existing=True)
+    assert (await share_video_candidates.run_share_video_candidate_job(test_db, evaluation)).status == MemoirEditingJobStatus.SKIPPED
+    assert len(prompts) == 1
 
 
 async def test_nonoverlapping_video_does_not_consume_recommendation(client, test_db, monkeypatch):
