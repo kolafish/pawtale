@@ -36,6 +36,7 @@ import { formatTranscriptDurationSeconds } from "../../services/transcript-view-
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
+import { ApiError } from "../../services/request";
 import {
   emptyHomeStoryData,
   homeStorySnapshotData,
@@ -770,7 +771,18 @@ definePage<HomeData>()({
         }
       } catch (error) {
         if (this.data.userId === userId && this.data.projectId === projectId) {
-          this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+          if (error instanceof ApiError && error.statusCode === 400) {
+            // A reused event can be pending/needs_review again and no longer acknowledgeable.
+            // Drop the old completion without marking the next completion as read.
+            this.growthTracker.invalidate(notice.eventId);
+            setHomeData(this, {
+              storyError: "",
+              growthNotices: this.data.growthNotices.filter(item => item.id !== notice.id),
+            });
+            if (this.homeVisible) void this.loadHome(true);
+          } else {
+            this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+          }
         }
       } finally {
         if (this.data.userId === userId && this.data.projectId === projectId) this.setData({ dismissingGrowth: false });
