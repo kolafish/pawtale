@@ -5,7 +5,6 @@ const path = require("node:path");
 const test = require("node:test");
 const { flushAsyncWork, loadPageModule, mockModule, pageContext } = require("./page-harness");
 const { storyViewData } = require("../components/story-tree/story-view-adapter.ts");
-const { ApiError } = require("../services/request.ts");
 
 function progress(patch = {}) {
   return { project_id: "project-1", status: "ready", title: "可读草稿已更新", detail: "全书检查已完成",
@@ -130,7 +129,7 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("knowing about growth acknowledges only the displayed event and advances the shared queue", async () => {
+test("only added chapters and sections, first readability and aggregated likes enter the shared queue", async () => {
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [
     { ...growth("later", "chapter_updated", "chapter-1"), created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 386 },
     growth("earlier"),
@@ -143,13 +142,10 @@ test("knowing about growth acknowledges only the displayed event and advances th
     assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
     await context.dismissNotice();
     assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
-    assert.equal(context.data.notice.text, "新增 386 字");
+    assert.equal(context.data.notice.kind, "readable");
     // A response fetched before acknowledgement must not reinsert an already read event.
     await context.loadHome(true);
-    assert.equal(context.data.notice.eventId, "later");
-    await context.dismissNotice();
-    assert.deepEqual(calls.acknowledgedEventIds, ["earlier", "later"]);
-    assert.equal(context.data.notice.kind, "progress");
+    assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
     assert.equal(context.data.notice.text, "书稿已可阅读");
     await context.dismissNotice();
     assert.equal(context.data.notice.kind, "like");
@@ -311,7 +307,7 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters.length, 2);
   assert.equal(context.data.story.chapters[1].sections.length, 1);
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
-  assert.equal(context.data.notice.text, "章节内容已更新");
+  assert.equal(context.data.growthNotices.length, 0);
   context.onHide();
 });
 
@@ -321,11 +317,9 @@ test("saved return scrolls once for its project; settings returns and foreign pr
     const context = pageContext(page), scrolls = [];
     global.wx.pageScrollTo = options => scrolls.push(options);
     await context.onShow();
-    assert.equal(context.data.narrationSaved, projectId === "project-1");
     assert.equal(scrolls.length, projectId === "project-1" ? 1 : 0);
     context.onHide();
     await context.onShow();
-    assert.equal(context.data.narrationSaved, false);
     assert.equal(scrolls.length, projectId === "project-1" ? 1 : 0);
     context.onHide();
   }
@@ -417,7 +411,7 @@ test("home keeps chapter and book issue counts out of the story presentation", (
   assert.equal("reviewNoticeText" in homeData, false);
 });
 
-test("growth messages show chapter and section additions or the exact word delta in one sentence", () => {
+test("growth messages retain only valid added chapters and sections and ignore word and manuscript updates", () => {
   const current = snapshot({ growth_events: [
     { event_id: "structure", summary_text: "故事树已更新", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 426,
       changes: [{ kind: "chapter_added", chapter_id: "chapter-1" }, { kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }] },
@@ -429,7 +423,7 @@ test("growth messages show chapter and section additions or the exact word delta
   const view = storyViewData(current);
   const data = homeStorySnapshotData(current);
   assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
-  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节", "新增 286 字", "书稿已更新"]);
+  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节"]);
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -464,12 +458,13 @@ test("home binds the shared notice queue and keeps the tree as the book entry", 
 });
 
 test("polling appends growth messages without replacing the current card, including bounded history", async () => {
-  let current = snapshot({ progress: null, growth_events: [growth("first")] });
+  let current = snapshot({ progress: null, book_readable: false,
+    chapters: snapshot().chapters.map(chapter => ({ ...chapter, readable: false })), growth_events: [growth("first")] });
   const { page } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   try {
     await context.onShow();
-    current = snapshot({ progress: null, growth_events: [{ ...growth("second"), created_at: "2026-09-05T01:00:00Z" }] });
+    current = { ...current, growth_events: [{ ...growth("second"), created_at: "2026-09-05T01:00:00Z" }] };
     await context.loadHome(true);
     assert.equal(context.data.notice.eventId, "first");
     assert.deepEqual(context.data.notices.map(item => item.eventId), ["first", "second"]);
@@ -496,72 +491,76 @@ test("a failed acknowledgement keeps the current notification available for an e
   } finally { context.onHide(); }
 });
 
-test("a completed event reused by a pending job releases the old card and can notify on completion again", async () => {
+test("reused editorial events stay silent before, during and after being requeued", async () => {
   const editorial = { ...growth("editorial-copy"), changes: [{ kind: "book_updated" }] };
-  let current = snapshot({ progress: null, growth_events: [editorial] });
-  let requeued = false;
-  let refreshes = 0;
-  const { page, calls } = loadStoryPage({
-    getSnapshot: async () => { refreshes++; return current; },
-    acknowledge: async id => {
-      if (requeued && id === editorial.event_id) {
-        throw new ApiError(400, "自动处理记录仍需处理，不能直接确认隐藏", { detail: "自动处理记录仍需处理，不能直接确认隐藏" });
-      }
-    },
-  });
+  let current = snapshot({ growth_events: [editorial] });
+  const { page, calls } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   try {
     await context.onShow();
-    assert.equal(context.data.notice.eventId, editorial.event_id);
-    context.onHide();
-    requeued = true;
-    // story_snapshot excludes the reused event while its job is pending.
+    await context.dismissNotice(); // First readability only.
     current = snapshot({ progress: progress({ status: "processing" }), growth_events: [growth("other-update")] });
-    await context.onShow();
-    const beforeAcknowledgement = refreshes;
-    await context.dismissNotice();
-    assert.equal(context.data.notice.eventId, "other-update");
-    assert.equal(context.data.storyError, "");
-    assert.equal(context.data.dismissingGrowth, false);
-    assert.equal(refreshes, beforeAcknowledgement + 1);
-    await context.dismissNotice();
-    assert.deepEqual(calls.acknowledgedEventIds, [editorial.event_id, "other-update"]);
-    assert.equal(context.data.notice.kind, "progress");
-    await context.dismissNotice();
-    assert.equal(context.data.notice, null);
-    requeued = false;
-    current = snapshot({ progress: null, growth_events: [editorial] });
     await context.loadHome(true);
-    assert.equal(context.data.notice.eventId, editorial.event_id);
+    assert.equal(context.data.notice.eventId, "other-update");
     await context.dismissNotice();
     assert.equal(context.data.notice, null);
+    current = snapshot({ growth_events: [editorial] });
+    await context.loadHome(true);
+    assert.equal(context.data.notice, null);
+    assert.deepEqual(calls.acknowledgedEventIds, ["other-update"]);
   } finally { context.onHide(); }
 });
 
-test("read status survives page recreation, stays scoped, and a new draft can notify again", async () => {
+test("first partial readability stays read across full readiness, new versions and page recreation, scoped by user and memoir", async () => {
   const storage = {};
-  const first = pageContext(loadStoryPage({ storage }).page);
+  let current = snapshot({ progress: progress({ status: "partial_ready" }) });
+  const first = pageContext(loadStoryPage({ storage, getSnapshot: async () => current }).page);
   await first.onShow();
+  assert.equal(first.data.notice.kind, "readable");
+  assert.equal(first.data.notice.text, "已有部分书稿可阅读");
   await first.dismissNotice();
   assert.equal(first.data.notice, null);
   first.onUnload();
-  let current = snapshot();
+  current = snapshot({ updated_at: "2026-09-06T00:00:00Z" });
   const second = pageContext(loadStoryPage({ storage, getSnapshot: async () => current }).page);
   try {
     await second.onShow();
     assert.equal(second.data.notice, null);
-    current = snapshot({ updated_at: "2026-09-06T00:00:00Z" });
-    await second.loadHome(true);
-    assert.equal(second.data.notice.text, "书稿已可阅读");
-    await second.dismissNotice();
+    for (const status of ["partial_ready", "ready"]) {
+      current = snapshot({ updated_at: "2026-09-07T00:00:00Z", progress: progress({ status }) });
+      await second.loadHome(true);
+      assert.equal(second.data.notice, null);
+    }
     current = snapshot({ identity: { ...current.identity, active_project_id: "project-2", active_project: { id: "project-2" } } });
     await second.loadHome(true);
-    assert.equal(second.data.notice.kind, "progress");
+    assert.equal(second.data.notice.kind, "readable");
     await second.dismissNotice();
+    current = snapshot();
+    await second.loadHome(true);
+    assert.equal(second.data.notice, null);
     current = snapshot({ identity: { ...current.identity, id: "user-2" } });
     await second.loadHome(true);
-    assert.equal(second.data.notice.kind, "progress");
+    assert.equal(second.data.notice.kind, "readable");
   } finally { second.onHide(); }
+});
+
+test("first readability requires a readable draft, independently of background processing or failure", async () => {
+  let current = snapshot({ book_readable: false,
+    chapters: snapshot().chapters.map(chapter => ({ ...chapter, readable: false })) });
+  const { page } = loadStoryPage({ getSnapshot: async () => current });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    assert.equal(context.data.notice, null);
+    current = snapshot({ progress: progress({ status: "processing" }), book_readable: false });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.kind, "readable");
+    await context.dismissNotice();
+    current = snapshot({ progress: progress({ status: "failed", can_retry: true }) });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.kind, "progress");
+    assert.equal(context.data.notice.action, "retry");
+  } finally { context.onHide(); }
 });
 
 test("an acknowledgement completed after an account switch cannot remove the new account's message", async () => {
@@ -583,16 +582,64 @@ test("an acknowledgement completed after an account switch cannot remove the new
   } finally { context.onHide(); }
 });
 
-test("status actions and saved narration use the same notification queue", async () => {
-  const { page } = loadStoryPage({ current: snapshot({ progress: progress({ status: "failed", can_retry: true }) }),
+test("normal narration, saved returns, word growth and optional supplements stay silent after first readability", async () => {
+  const updates = [
+    { ...growth("section-edit", "section_updated"), book_char_count_delta: 0 },
+    { ...growth("draft", "chapter_updated"), book_char_count_delta: 386 },
+    { ...growth("book"), changes: [{ kind: "book_updated" }] },
+    { ...growth("copy"), changes: [{ kind: "book_updated" }] },
+    { ...growth("no-additions"), summary_text: "讲述已整理", changes: [] },
+  ];
+  let current = snapshot();
+  const { page, calls } = loadStoryPage({ getSnapshot: async () => current,
     navigationTarget: { projectId: "project-1", narrationSaved: true } });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    assert.deepEqual(context.data.notices.map(notice => notice.kind), ["readable"]);
+    await context.dismissNotice();
+    for (const [status, stage] of [["idle", "queued"], ["processing", "organizing"], ["processing", "writing_chapters"],
+      ["processing", "writing_copy"], ["processing", "reviewing_book"], ["no_change", "needs_attention"],
+      ["partial_ready", "partial_ready"], ["ready", "ready"]]) {
+      current = snapshot({ growth_events: updates, updated_at: `${status}/${stage}`,
+        progress: progress({ status, stage, can_retry: status === "no_change", needs_user_material_count: 3 }),
+        book_issues: { review_count: 0, supplement_count: 3 } });
+      await context.loadHome(true);
+      assert.equal(context.data.notice, null, `${status}/${stage} must stay silent`);
+    }
+    assert.deepEqual(calls.acknowledgedEventIds, []);
+    assert.deepEqual(context.growthTracker.pending([]), []);
+  } finally { context.onHide(); }
+});
+
+test("failures and required confirmation stay visible without re-notifying for stage or revision changes", async () => {
+  let current = snapshot({ progress: progress({ status: "failed", can_retry: true }) });
+  const { page } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   try {
     await context.onShow();
     assert.equal(context.data.notice.action, "retry");
     await context.dismissNotice();
-    assert.equal(context.data.notice.kind, "saved");
+    assert.equal(context.data.notice.kind, "readable");
+    await context.dismissNotice();
+    current = snapshot({ updated_at: "2026-09-06T00:00:00Z", progress: progress({ status: "failed", stage: "different-stage", can_retry: true }) });
+    await context.loadHome(true);
+    assert.equal(context.data.notice, null);
+    current = snapshot({ progress: progress({ status: "needs_input", needs_user_material_count: 3 }) });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.action, "review");
     await context.dismissNotice();
     assert.equal(context.data.notice, null);
+    // A genuinely different required review remains notifyable while needs_input persists.
+    current = snapshot({ progress: progress({ status: "needs_input" }), book_issues: { review_count: 1, supplement_count: 0 } });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.action, "review");
+    await context.dismissNotice();
+    current = snapshot({ progress: progress({ status: "processing" }) });
+    await context.loadHome(true);
+    assert.equal(context.data.notice, null);
+    current = snapshot({ progress: progress({ status: "needs_input" }) });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.action, "review");
   } finally { context.onHide(); }
 });

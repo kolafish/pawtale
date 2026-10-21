@@ -5,26 +5,36 @@ import type { ShareLikeNotice } from "../../services/share-likes";
 
 export type HomeNotice =
   | { id: string; kind: "growth"; text: string; eventId: string }
-  | { id: string; kind: "progress"; text: string; action: "retry" | "review" | "supplement" | "" }
-  | { id: string; kind: "saved"; text: string }
+  | { id: string; kind: "progress"; text: string; action: "retry" | "review" | "" }
+  | { id: string; kind: "readable"; text: string }
   | { id: string; kind: "like"; text: string; people: ShareLikeNotice };
 
-const PROGRESS_NOTICE_KEY = "pawtale_home_progress_notice_v1";
+// v2 replaces the old timestamp-based progress read marker; old values are invalidated.
+const NOTICE_READ_STATE_KEY = "pawtale_home_notice_read_state_v2";
 
-function progressNoticeKey(userId: string, projectId: string): string {
-  return `${PROGRESS_NOTICE_KEY}:${userId}:${projectId}`;
+export interface HomeNoticeReadState {
+  readableSeen: boolean;
+  attentionId: string;
 }
 
-export function readDismissedProgressNotice(userId: string, projectId: string): string {
+function noticeReadStateKey(userId: string, projectId: string): string {
+  return `${NOTICE_READ_STATE_KEY}:${userId}:${projectId}`;
+}
+
+export function readHomeNoticeReadState(userId: string, projectId: string): HomeNoticeReadState {
   try {
-    const value: unknown = wx.getStorageSync(progressNoticeKey(userId, projectId));
-    return typeof value === "string" ? value : "";
-  } catch { return ""; }
+    const value: unknown = wx.getStorageSync(noticeReadStateKey(userId, projectId));
+    if (value && typeof value === "object" && "readableSeen" in value && "attentionId" in value
+      && typeof value.readableSeen === "boolean" && typeof value.attentionId === "string") {
+      return { readableSeen: value.readableSeen, attentionId: value.attentionId };
+    }
+  } catch { /* Keep unread messages available if storage is unavailable. */ }
+  return { readableSeen: false, attentionId: "" };
 }
 
-export function rememberDismissedProgressNotice(userId: string, projectId: string, id: string): void {
-  try { wx.setStorageSync(progressNoticeKey(userId, projectId), id); }
-  catch { /* The status can be shown again if storage is unavailable. */ }
+export function rememberHomeNoticeReadState(userId: string, projectId: string, state: HomeNoticeReadState): void {
+  try { wx.setStorageSync(noticeReadStateKey(userId, projectId), state); }
+  catch { /* The message can be shown again if storage is unavailable. */ }
 }
 
 export interface HomeStoryData {
@@ -33,9 +43,9 @@ export interface HomeStoryData {
   hasStories: boolean;
   storyError: string;
   progress: MemoirDraftProgress | null;
-  progressNoticeRevision: string;
+  readableNoticeText: string;
+  reviewNoticeScope: string;
   growthNotices: HomeNotice[];
-  narrationSaved: boolean;
   dismissingGrowth: boolean;
   retryingDraft: boolean;
 }
@@ -64,15 +74,13 @@ export class HomeGrowthTracker {
     this.queued.delete(eventId);
   }
 
-  invalidate(eventId: string): void {
-    this.queued.delete(eventId);
-    this.seen.delete(eventId);
-  }
-
   pending(events: MemoirStoryGrowthEvent[]): MemoirStoryGrowthEvent[] {
     // Snapshot history is bounded; keep messages already queued until the user reads them.
     for (const event of events) {
-      if (!this.acknowledged.has(event.event_id)) this.queued.set(event.event_id, event);
+      if (!this.acknowledged.has(event.event_id)
+        && event.changes.some(change => change.kind === "chapter_added" || change.kind === "section_added")) {
+        this.queued.set(event.event_id, event);
+      }
     }
     return [...this.queued.values()];
   }
@@ -82,8 +90,8 @@ export class HomeGrowthTracker {
 
 export function emptyHomeStoryData(): HomeStoryData {
   return {
-    story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null, progressNoticeRevision: "",
-    growthNotices: [], narrationSaved: false,
+    story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null, readableNoticeText: "", reviewNoticeScope: "",
+    growthNotices: [],
     dismissingGrowth: false, retryingDraft: false,
   };
 }
@@ -91,6 +99,7 @@ export function emptyHomeStoryData(): HomeStoryData {
 export function homeStorySnapshotData(
   snapshot: MemoirStorySnapshot,
   freshEventIds: Set<string> = new Set(),
+  pendingGrowthEvents: MemoirStoryGrowthEvent[] = snapshot.growth_events,
 ): Partial<HomeStoryData> {
   const story = storyViewData(snapshot);
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
@@ -120,16 +129,27 @@ export function homeStorySnapshotData(
   story.overview.growthAnimating = freshGrowth || snapshot.growth_events.some(event => (
     freshEventIds.has(event.event_id) && event.book_char_count_delta > 0
   ));
+  const includedChapters = snapshot.chapters.filter(chapter => chapter.include_in_book);
+  const readable = includedChapters.filter(chapter => chapter.readable).length;
+  const hasReadableDraft = snapshot.book_readable || readable > 0;
+  const fullyReadable = snapshot.progress?.status === "ready"
+    || (!snapshot.progress && includedChapters.length > 0 && readable === includedChapters.length);
   return {
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
-    progressNoticeRevision: snapshot.updated_at,
-    growthNotices: [...snapshot.growth_events]
+    reviewNoticeScope: JSON.stringify([snapshot.book_manual_edit_preserved, snapshot.book_issues.review_count,
+      snapshot.chapters.filter(chapter => chapter.issues.review_count || chapter.candidate_job_id)
+        .map(chapter => [chapter.id, chapter.issues.review_count, chapter.candidate_job_id])]),
+    readableNoticeText: hasReadableDraft ? (fullyReadable ? "书稿已可阅读" : "已有部分书稿可阅读") : "",
+    growthNotices: [...pendingGrowthEvents]
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .map(event => growthNotice(event, story)),
+      .flatMap(event => {
+        const notice = growthNotice(event, story);
+        return notice ? [notice] : [];
+      }),
   };
 }
 
-function growthNotice(event: MemoirStoryGrowthEvent, story: StoryViewData): HomeNotice {
+function growthNotice(event: MemoirStoryGrowthEvent, story: StoryViewData): HomeNotice | null {
   const addedChapters = new Set<string>(), addedSections = new Set<string>();
   for (const change of event.changes) {
     if (change.kind === "book_updated") continue;
@@ -144,16 +164,14 @@ function growthNotice(event: MemoirStoryGrowthEvent, story: StoryViewData): Home
     addedChapters.size ? `${addedChapters.size} 章` : "",
     addedSections.size ? `${addedSections.size} 小节` : "",
   ].filter(Boolean).join("，");
-  const text = additions ? `新增 ${additions}`
-    : event.book_char_count_delta > 0 ? `新增 ${event.book_char_count_delta} 字`
-    : event.changes.some(change => change.kind === "book_updated") ? "书稿已更新"
-    : event.changes.length ? "章节内容已更新" : event.summary_text.trim() || "讲述已整理";
-  return { id: `growth:${event.event_id}`, kind: "growth", text, eventId: event.event_id };
+  return additions
+    ? { id: `growth:${event.event_id}`, kind: "growth", text: `新增 ${additions}`, eventId: event.event_id }
+    : null;
 }
 
 interface HomeNoticeSource extends HomeStoryData {
   notices: HomeNotice[];
-  dismissedProgressNoticeId: string;
+  noticeReadState: HomeNoticeReadState;
   shareLikeNotice: ShareLikeNotice | null;
 }
 
@@ -161,22 +179,20 @@ interface HomeNoticeSource extends HomeStoryData {
 export function homeNoticeQueue(state: HomeNoticeSource): HomeNotice[] {
   const candidates: HomeNotice[] = [...state.growthNotices];
   const progress = state.progress;
-  if (progress && progress.status !== "idle") {
-    const action = progress.can_retry ? "retry" : progress.status === "needs_input" ? "review"
-      : progress.needs_user_material_count > 0 && progress.status !== "processing" ? "supplement" : "";
-    const id = `progress:${JSON.stringify([state.progressNoticeRevision, progress.status, progress.stage, progress.title, action])}`;
-    if (id !== state.dismissedProgressNoticeId) {
-      const text = progress.status === "ready" ? "书稿已可阅读"
-        : progress.status === "partial_ready" ? "已有部分书稿可阅读"
-        : [progress.title, progress.detail].filter(Boolean).join("，").replace(/故事结构/g, "章节结构");
-      candidates.push({ id, kind: "progress", text, action });
-    }
+  if (progress && (progress.status === "failed" || progress.status === "needs_input")) {
+    const action = progress.status === "needs_input" ? "review" : progress.can_retry ? "retry" : "";
+    const text = [progress.title, progress.detail].filter(Boolean).join("，");
+    const id = `attention:${JSON.stringify([progress.status, text, action,
+      progress.status === "needs_input" ? state.reviewNoticeScope : ""])}`;
+    if (id !== state.noticeReadState.attentionId) candidates.push({ id, kind: "progress", text, action });
+  }
+  if (state.readableNoticeText && !state.noticeReadState.readableSeen) {
+    candidates.push({ id: "readable", kind: "readable", text: state.readableNoticeText });
   }
   if (state.shareLikeNotice) {
     candidates.push({ id: `like:${state.shareLikeNotice.latestAt}`, kind: "like",
       text: state.shareLikeNotice.text, people: state.shareLikeNotice });
   }
-  if (state.narrationSaved) candidates.push({ id: "saved", kind: "saved", text: "这段讲述已保存。" });
   const pending = new Map(candidates.map(notice => [notice.id, notice]));
   const queue: HomeNotice[] = [];
   for (const notice of state.notices) {

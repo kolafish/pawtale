@@ -36,15 +36,15 @@ import { formatTranscriptDurationSeconds } from "../../services/transcript-view-
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
-import { ApiError } from "../../services/request";
 import {
   emptyHomeStoryData,
   homeStorySnapshotData,
   clearStoryGrowthAnimation,
   HomeGrowthTracker,
   homeNoticeQueue,
-  readDismissedProgressNotice,
-  rememberDismissedProgressNotice,
+  readHomeNoticeReadState,
+  rememberHomeNoticeReadState,
+  type HomeNoticeReadState,
   type HomeStoryData,
   type HomeNotice,
 } from "./home-story-state";
@@ -98,7 +98,7 @@ const RESUME_HINT_CHAR_LIMIT = 28;
 // The first story starts without a setup form; the title can be changed later.
 const FIRST_PROJECT_TITLE = "我的回忆录";
 
-type HomeVoiceEntry = "home" | "home_launch" | "home_resume" | "home_supplement";
+type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
 
 interface HomeData extends HomeStoryData {
   loading: boolean;
@@ -145,7 +145,7 @@ interface HomeData extends HomeStoryData {
   shareLikeNotice: ShareLikeNotice | null;
   notices: HomeNotice[];
   notice: HomeNotice | null;
-  dismissedProgressNoticeId: string;
+  noticeReadState: HomeNoticeReadState;
 }
 
 interface CheckboxChangeEvent {
@@ -225,10 +225,16 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
 
 function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: () => void): void {
   const nextData: HomeData = { ...context.data, ...patch };
+  if (patch.progress && patch.progress.status !== "failed" && patch.progress.status !== "needs_input"
+    && nextData.noticeReadState.attentionId) {
+    nextData.noticeReadState = { ...nextData.noticeReadState, attentionId: "" };
+    rememberHomeNoticeReadState(nextData.userId, nextData.projectId, nextData.noticeReadState);
+  }
   const notices = homeNoticeQueue(nextData);
   context.setData({
     ...patch,
     ...homeViewPatch(nextData),
+    noticeReadState: nextData.noticeReadState,
     notices, notice: notices[0] || null,
   }, callback);
 }
@@ -269,7 +275,7 @@ function applyHomeSnapshotData(
     ...(changedProject ? {
       ...emptyHomeStoryData(),
       notices: [],
-      dismissedProgressNoticeId: readDismissedProgressNotice(identity.id, identity.active_project_id),
+      noticeReadState: readHomeNoticeReadState(identity.id, identity.active_project_id),
       showContinueNarration: false,
       voiceEntry: null,
       voiceAuthorizationRequested: false,
@@ -357,7 +363,7 @@ definePage<HomeData>()({
     shareLikeNotice: null,
     notices: [],
     notice: null,
-    dismissedProgressNoticeId: "",
+    noticeReadState: { readableSeen: false, attentionId: "" },
     ...emptyHomeStoryData(),
   },
 
@@ -390,7 +396,7 @@ definePage<HomeData>()({
     this.shareLikeNoticeRequestSequence += 1;
     this.homeRefreshTimer.cancel();
     this.growthAnimationTimer.cancel();
-    setHomeData(this, { story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
+    setHomeData(this, { story: clearStoryGrowthAnimation(this.data.story) });
   },
 
   onUnload() {
@@ -470,8 +476,7 @@ definePage<HomeData>()({
       this.storyNavigationTarget = null;
       const validTarget = target && (!target.projectId || target.projectId === this.data.projectId);
       setHomeData(this, {
-        ...homeStorySnapshotData({ ...snapshot, growth_events: this.growthTracker.pending(snapshot.growth_events) }, freshEvents),
-        ...(validTarget ? { narrationSaved: target.narrationSaved } : {}),
+        ...homeStorySnapshotData(snapshot, freshEvents, this.growthTracker.pending(snapshot.growth_events)),
       }, () => {
         if (loadSequence !== this.homeLoadSequence) return;
         if (!background) this.measureNarration();
@@ -492,7 +497,7 @@ definePage<HomeData>()({
         setHomeData(this, {
           ...emptyHomeStoryData(),
           notices: [],
-          dismissedProgressNoticeId: "",
+          noticeReadState: { readableSeen: false, attentionId: "" },
           needsLogin: true,
           demoReadableChapterIds: [],
           voiceEntry: null,
@@ -727,11 +732,6 @@ definePage<HomeData>()({
     await this.startPrimaryVoiceChat();
   },
 
-  async supplementPendingMaterial() {
-    // Unassigned narration needs more context, not a chapter-bound book interview.
-    await this.startSelectedNarration("home_supplement");
-  },
-
   openSettings() {
     navigateToMe();
   },
@@ -748,16 +748,17 @@ definePage<HomeData>()({
     const notice = this.data.notice;
     const { userId, projectId } = this.data;
     if (!notice || !projectId || this.data.dismissingGrowth) return;
-    if (notice.kind === "progress") {
-      rememberDismissedProgressNotice(userId, projectId, notice.id);
-      setHomeData(this, { dismissedProgressNoticeId: notice.id });
+    if (notice.kind === "progress" || notice.kind === "readable") {
+      const noticeReadState = { ...this.data.noticeReadState,
+        ...(notice.kind === "readable" ? { readableSeen: true } : { attentionId: notice.id }),
+      };
+      rememberHomeNoticeReadState(userId, projectId, noticeReadState);
+      setHomeData(this, { noticeReadState });
     } else if (notice.kind === "like") {
       // Invalidate a like refresh started before this acknowledgement.
       this.shareLikeNoticeRequestSequence += 1;
       markShareLikeNoticeSeen(userId, projectId, notice.people.latestAt);
       setHomeData(this, { shareLikeNotice: null });
-    } else if (notice.kind === "saved") {
-      setHomeData(this, { narrationSaved: false });
     } else {
       this.setData({ dismissingGrowth: true });
       try {
@@ -771,18 +772,7 @@ definePage<HomeData>()({
         }
       } catch (error) {
         if (this.data.userId === userId && this.data.projectId === projectId) {
-          if (error instanceof ApiError && error.statusCode === 400) {
-            // A reused event can be pending/needs_review again and no longer acknowledgeable.
-            // Drop the old completion without marking the next completion as read.
-            this.growthTracker.invalidate(notice.eventId);
-            setHomeData(this, {
-              storyError: "",
-              growthNotices: this.data.growthNotices.filter(item => item.id !== notice.id),
-            });
-            if (this.homeVisible) void this.loadHome(true);
-          } else {
-            this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
-          }
+          this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
         }
       } finally {
         if (this.data.userId === userId && this.data.projectId === projectId) this.setData({ dismissingGrowth: false });
@@ -957,8 +947,7 @@ definePage<HomeData>()({
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {
-    const mode = entry === "home_supplement" && this.data.selectedMode === "book_completion"
-      ? "guided_interview" : this.data.selectedMode;
+    const mode = this.data.selectedMode;
     if (mode === "book_completion") {
       this.openBookSupplementInterview();
       return;
@@ -1106,7 +1095,7 @@ definePage<HomeData>()({
     setHomeData(this, { voiceEntry: target.entry, selectedMode: narrationModeForSession({
       guidance_mode: target.entry.mode || "guided_interview", interview_type: target.entry.interviewType || "ai_interview",
       session_goal: target.entry.sessionGoal || "open_narration",
-    }), showContinueNarration: false, narrationSaved: false }, () => {
+    }), showContinueNarration: false }, () => {
       wx.pageScrollTo({ scrollTop: 0, duration: 250 });
     });
   },
