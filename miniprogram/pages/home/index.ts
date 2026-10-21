@@ -225,6 +225,13 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
 
 function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: () => void): void {
   const nextData: HomeData = { ...context.data, ...patch };
+  // Processing can temporarily mask an unresolved failure; only a settled snapshot clears it.
+  // Required confirmations keep their own identity-based read marker across processing.
+  if (patch.progress && patch.progress.status !== "failed" && patch.progress.status !== "processing"
+    && nextData.noticeReadState.attentionId.startsWith('attention:["failed",')) {
+    nextData.noticeReadState = { ...nextData.noticeReadState, attentionId: "" };
+    rememberHomeNoticeReadState(nextData.userId, nextData.projectId, nextData.noticeReadState);
+  }
   const notices = homeNoticeQueue(nextData);
   context.setData({
     ...patch,
