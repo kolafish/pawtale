@@ -273,3 +273,21 @@ shadow 在回应后运行，不修改回应 Prompt；报告区分首段文本、
 输入快照、实际 Prompt、回应、策略生效状态、用量及失败。缺少 usage 的失败费用保持未知。
 外部访谈没有真实书稿/素材状态，策略上下文标为 `visible_dialogue_only`；它不能证明数据库上下文加载或检索质量。
 产品特有场景可使用带版本的 `EvalCase` 快照及冻结策略上下文，不从评分标注推导这些事实。
+
+评分工具为 `scripts/review_memoir_interview.py`，基线选择与产品场景快照位于 `backend/evals/`。
+首轮实测及未解决问题见[基线记录](./MEMOIR_INTERVIEW_BASELINE_REPORT.md)。复跑示例（在 `backend/` 下）：
+
+```bash
+PYTHONPATH=. venv/bin/python -m scripts.review_memoir_interview freeze \
+  --dataset /Users/jin/interview_data/assets/interview-agent-v1 --split dev --output /tmp/dev.inputs.jsonl
+PYTHONPATH=. venv/bin/python -m scripts.eval_memoir_interview \
+  --cases /tmp/dev.inputs.jsonl --policy-mode shadow --ai-model deepseek-flash \
+  --max-cases 24 --live --output /tmp/baseline-run
+PYTHONPATH=. venv/bin/python -m scripts.review_memoir_interview packet \
+  --run /tmp/baseline-run --output /tmp/baseline-review
+PYTHONPATH=. venv/bin/python -m scripts.review_memoir_interview summarize \
+  --packet /tmp/baseline-review --ratings /tmp/baseline-review/ratings.jsonl --output /tmp/baseline-summary.json
+```
+
+`packet` 可传两次 `--run` 比较相同输入与重复次数的两个版本；未完成或输入不同的运行会拒绝配对。
+评分后若源结果或身份映射改变，会拒绝复用旧评分。人、Agent、模型三类评分分开汇总，未填评分保持空值。
