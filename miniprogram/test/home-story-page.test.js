@@ -645,6 +645,37 @@ test("failures and required confirmation stay visible without re-notifying for s
 });
 
 
+test("a recovered failure can notify again with the same message after page recreation", async () => {
+  const storage = {};
+  const failure = snapshot({ progress: progress({ status: "failed", can_retry: true,
+    detail: "成书文案生成失败，可以继续整理重试。" }) });
+  let current = failure;
+  const first = pageContext(loadStoryPage({ storage, getSnapshot: async () => current }).page);
+  try {
+    await first.onShow();
+    assert.equal(first.data.notice.action, "retry");
+    await first.dismissNotice();
+    await first.dismissNotice(); // First readability.
+    current = snapshot({ progress: progress({ status: "processing" }) });
+    await first.loadHome(true);
+    current = failure;
+    await first.loadHome(true);
+    assert.equal(first.data.notice, null, "processing alone does not prove the old failure recovered");
+    current = snapshot({ progress: progress({ status: "ready" }) });
+    await first.loadHome(true);
+    assert.equal(first.data.notice, null, "recovery itself stays silent");
+  } finally { first.onUnload(); }
+
+  const second = pageContext(loadStoryPage({ storage, current: failure }).page);
+  try {
+    await second.onShow();
+    assert.equal(second.data.notice?.action, "retry", "a new failure must not inherit a recovered failure's read state");
+    await second.dismissNotice();
+    await second.loadHome(true);
+    assert.equal(second.data.notice, null, "repeated snapshots of the new failure stay read");
+  } finally { second.onHide(); }
+});
+
 test("replacing a required issue with another in the same scope and count notifies after page recreation", async () => {
   const storage = {};
   const sameScope = snapshot({ progress: progress({ status: "needs_input" }),
