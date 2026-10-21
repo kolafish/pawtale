@@ -443,7 +443,8 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       });
       return;
     }
-    const candidate = this.data.shareVideoCandidate?.status === "ready"
+    const candidate = this.data.shareVideoCandidate
+      && ["ready", "dismissed"].includes(this.data.shareVideoCandidate.status)
       && this.data.shareVideoCandidate.start_char === this.data.shareVideoSelectedStartChar
       && this.data.shareVideoCandidate.end_char === this.data.shareVideoSelectedEndChar
       ? this.data.shareVideoCandidate

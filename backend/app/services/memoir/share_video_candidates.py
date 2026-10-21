@@ -8,7 +8,7 @@ import re
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -487,6 +487,7 @@ async def get_latest_share_video_candidate(
         .where(MemoirShareVideoCandidate.project_id == project_id)
         .order_by(MemoirShareVideoCandidate.created_at.desc(), MemoirShareVideoCandidate.id.desc())
         .limit(1)
+        .with_for_update()
     )
     if (
         candidate is None
@@ -501,8 +502,19 @@ async def get_latest_share_video_candidate(
         candidate.status = MemoirShareVideoCandidateStatus.STALE.value
         await db.commit()
         return None
-    # Remakes use the transcript endpoint and retain the original job. Resolve
-    # the latest version of this exact source range instead of its first job.
+    # Editing a recommendation uses the transcript endpoint. Remember the
+    # overlapping video, then follow remakes of its actual range thereafter.
+    linked_job = (
+        await db.get(MemoirMaterialShareVideo, candidate.video_job_id)
+        if candidate.video_job_id else None
+    )
+    source = linked_job or candidate
+    exact_range = and_(
+        MemoirMaterialShareVideo.start_char == source.start_char,
+        MemoirMaterialShareVideo.end_char == source.end_char,
+        MemoirMaterialShareVideo.start_ms == source.start_ms,
+        MemoirMaterialShareVideo.end_ms == source.end_ms,
+    )
     latest_job_id = await db.scalar(
         select(MemoirMaterialShareVideo.id)
         .where(
@@ -510,19 +522,24 @@ async def get_latest_share_video_candidate(
             MemoirMaterialShareVideo.utterance_id == candidate.utterance_id,
             MemoirMaterialShareVideo.audio_file_id == candidate.audio_file_id,
             MemoirMaterialShareVideo.text_hash == candidate.text_hash,
-            MemoirMaterialShareVideo.start_char == candidate.start_char,
-            MemoirMaterialShareVideo.end_char == candidate.end_char,
-            MemoirMaterialShareVideo.start_ms == candidate.start_ms,
-            MemoirMaterialShareVideo.end_ms == candidate.end_ms,
+            exact_range if linked_job else and_(
+                MemoirMaterialShareVideo.start_char < candidate.end_char,
+                MemoirMaterialShareVideo.end_char > candidate.start_char,
+                MemoirMaterialShareVideo.start_ms < candidate.end_ms,
+                MemoirMaterialShareVideo.end_ms > candidate.start_ms,
+            ),
         )
-        .order_by(MemoirMaterialShareVideo.created_at.desc(), MemoirMaterialShareVideo.id.desc())
+        .order_by(exact_range.desc(), MemoirMaterialShareVideo.created_at.desc(), MemoirMaterialShareVideo.id.desc())
         .limit(1)
     )
-    response = _response(candidate)
-    if latest_job_id:
-        response.status = MemoirShareVideoCandidateStatus.ACCEPTED
-        response.video_job_id = latest_job_id
-    return response
+    if latest_job_id and (
+        candidate.status != MemoirShareVideoCandidateStatus.ACCEPTED.value
+        or candidate.video_job_id != latest_job_id
+    ):
+        candidate.status = MemoirShareVideoCandidateStatus.ACCEPTED.value
+        candidate.video_job_id = latest_job_id
+        await db.commit()
+    return _response(candidate)
 
 
 async def dismiss_share_video_candidate(
@@ -543,9 +560,11 @@ async def create_candidate_share_video(
     req: MemoirShareVideoCandidateCreateVideoRequest,
 ) -> MemoirShareVideoJobResponse:
     candidate = await _owned_candidate(db, user_id=user_id, project_id=project_id, candidate_id=candidate_id)
+    # Opening the editor consumes the home suggestion before a video exists.
     if candidate.status not in {
         MemoirShareVideoCandidateStatus.READY.value,
         MemoirShareVideoCandidateStatus.ACCEPTED.value,
+        MemoirShareVideoCandidateStatus.DISMISSED.value,
     } or candidate.created_at < utcnow_naive() - CANDIDATE_AGE_LIMIT:
         raise HTTPException(status_code=409, detail="分享片段已失效")
     utterance = await _load_current_utterance(db, candidate, for_update=True)

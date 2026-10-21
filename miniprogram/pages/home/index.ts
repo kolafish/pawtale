@@ -635,11 +635,13 @@ definePage<HomeData>()({
   },
 
   // Opens the same settings page as a hand-picked clip, with the recommended range already selected.
-  openShareCandidateEditor() {
+  async openShareCandidateEditor() {
     const candidate = this.data.shareCandidate;
     if (!candidate || candidate.status !== "ready" || !candidate.utterance_id
       || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
-    this.setData({ shareCandidateError: "" });
+    // A click consumes the suggestion even if the author leaves without making a video.
+    if (!await this.dismissShareCandidate() || !this.homeVisible
+      || this.data.projectId !== candidate.project_id || this.data.voiceEntry) return;
     wx.navigateTo({ url: pageUrl("/pages/transcript-media/index", {
       id: candidate.utterance_id,
       candidateId: candidate.id,
@@ -690,7 +692,7 @@ definePage<HomeData>()({
   async dismissShareCandidate() {
     const candidate = this.data.shareCandidate;
     const projectId = this.data.projectId;
-    if (!candidate || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
+    if (!candidate || this.data.voiceEntry || this.data.shareCandidateDismissing) return false;
     this.shareCandidateRequestSequence += 1;
     this.setData({ shareCandidateDismissing: true, shareCandidateError: "" });
     try {
@@ -700,10 +702,12 @@ definePage<HomeData>()({
         this.setData({ shareCandidate: null, shareCandidateDurationText: "", shareCandidateJob: null, shareCandidateThumbnailPath: "" });
         void this.refreshShareVideos(projectId);
       }
+      return true;
     } catch (error) {
       if (this.homeVisible && this.data.projectId === projectId) {
         this.setData({ shareCandidateError: error instanceof Error ? error.message : "暂时无法关闭提示" });
       }
+      return false;
     } finally {
       if (this.data.projectId === projectId) this.setData({ shareCandidateDismissing: false });
     }

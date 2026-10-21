@@ -7,9 +7,9 @@ import {
   createMemoirTranscriptShareVideoJob,
   downloadMemoirShareVideoJob,
   deleteMemoirShareVideoJob,
+  dismissMemoirShareVideoCandidate,
   getMemoirMaterialImageGenerationJob,
   getMemoirShareVideoJob,
-  getMemoirShareVideoCandidate,
   getMemoirVoiceTranscript,
   memoirSharedVideoUrl,
 } from "../../services/memoir-transcript-api";
@@ -153,14 +153,15 @@ definePage<TranscriptMediaData>()({
       } else {
         await this.openShareVideoPanel(!this.requestedShareVideoCandidateId, !this.requestedShareVideoCandidateId);
         if (this.requestedShareVideoCandidateId) {
-          const { candidate } = await getMemoirShareVideoCandidate(item.project_id);
+          // Read the consumed suggestion by id; it no longer appears in the home feed.
+          const candidate = await dismissMemoirShareVideoCandidate(item.project_id, this.requestedShareVideoCandidateId);
           if (requestToken !== this.loadToken) {
             return;
           }
           const context = this.data.shareVideoContext;
           if (!context || !candidate || candidate.id !== this.requestedShareVideoCandidateId
             || candidate.project_id !== item.project_id || candidate.utterance_id !== item.id
-            || candidate.status !== "ready" || candidate.text_hash !== context.text_hash) {
+            || candidate.status !== "dismissed" || candidate.text_hash !== context.text_hash) {
             throw new Error("推荐片段已更新，请从这段讲述重新选择内容");
           }
           const startIndex = context.segments.findIndex((segment) => segment.start_char === candidate.start_char);

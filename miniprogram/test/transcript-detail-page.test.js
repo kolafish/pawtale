@@ -1566,16 +1566,17 @@ test("video deletion cancels safely, deletes only the confirmed version, and pre
 test("transcript media recommendation opens with editable range and styles, and creates only on confirmation", async () => {
   const candidate = {
     id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
-    status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "",
+    status: "dismissed", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "",
   };
   for (const style of ["uploaded", "illustrated"]) {
     const calls = [];
     const { page } = loadTranscriptMediaPage({ voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
       getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { default_video_style: style }),
-      getMemoirShareVideoCandidate: async (projectId) => {
+      dismissMemoirShareVideoCandidate: async (projectId, candidateId) => {
         assert.equal(projectId, "project-1");
-        return { candidate };
+        assert.equal(candidateId, candidate.id);
+        return candidate;
       },
       createMemoirShareVideoCandidateJob: async (...args) => {
         calls.push(args);
@@ -1615,10 +1616,10 @@ test("a recommended clip opens its settings with the recommended opening line", 
   const { page } = loadTranscriptMediaPage({ voiceApiExports: {
     getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
     getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, { default_video_style: "illustrated" }),
-    getMemoirShareVideoCandidate: async () => ({ candidate: {
+    dismissMemoirShareVideoCandidate: async () => ({
       id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
-      status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "爷爷退休后还在帮公司做事。",
-    } }),
+      status: "dismissed", text_hash: "hash-1", start_char: 0, end_char: 13, hook_text: "爷爷退休后还在帮公司做事。",
+    }),
     createMemoirShareVideoCandidateJob: async (...args) => {
       calls.push(args);
       return sampleShareVideoJob({ utterance_id: "utterance-share", status: "pending", output: null });
@@ -1649,10 +1650,10 @@ test("transcript media does not restore stale or foreign candidate selections", 
     const { page } = loadTranscriptMediaPage({ voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
       getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
-      getMemoirShareVideoCandidate: async () => ({ candidate: {
+      dismissMemoirShareVideoCandidate: async () => ({
         id: "candidate-1", project_id: "project-1", utterance_id: "utterance-share",
-        status: "ready", text_hash: "hash-1", start_char: 0, end_char: 13, ...overrides,
-      } }),
+        status: "dismissed", text_hash: "hash-1", start_char: 0, end_char: 13, ...overrides,
+      }),
     } });
     const context = pageContext(page);
     await page.onLoad.call(context, { id: "utterance-share", candidateId: "candidate-1" });

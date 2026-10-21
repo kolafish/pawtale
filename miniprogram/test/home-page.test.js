@@ -194,7 +194,7 @@ test("home exposes mini program share entry points", () => {
   });
 });
 
-test("home recommendation opens the editor immediately without creating or accepting a video", async () => {
+test("home consumes a clicked recommendation before opening the editor without creating a video", async () => {
   const candidate = {
     id: "candidate-1", project_id: "p1", voice_session_id: "session-1",
     utterance_id: "utterance-1", selected_text: "父亲把围巾围在我脖子上。",
@@ -202,13 +202,17 @@ test("home recommendation opens the editor immediately without creating or accep
   };
   const created = [];
   const navigations = [];
+  let consumed = false;
   const { page } = loadHomePage({ voiceApiExports: {
-    getMemoirShareVideoCandidate: async () => ({ candidate }),
+    getMemoirShareVideoCandidate: async () => ({ candidate: consumed ? null : candidate }),
     createMemoirShareVideoCandidateJob: async (...args) => {
       created.push(args);
       return new Promise(() => {});
     },
-    dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
+    dismissMemoirShareVideoCandidate: async () => {
+      consumed = true;
+      return { ...candidate, status: "dismissed" };
+    },
   } });
   const context = pageContext(page, { userId: "u1", projectId: "p1", hasProject: true });
   global.wx = { navigateTo({ url }) { navigations.push(url); } };
@@ -216,10 +220,14 @@ test("home recommendation opens the editor immediately without creating or accep
   await context.refreshShareCandidate("p1");
   assert.equal(context.data.shareCandidate.id, "candidate-1");
   assert.equal(context.data.shareCandidateDurationText, "30 秒");
-  context.openShareCandidateEditor();
+  await context.openShareCandidateEditor();
   assert.deepEqual(created, []);
-  assert.equal(context.data.shareCandidate.status, "ready");
+  assert.equal(consumed, true);
+  assert.equal(context.data.shareCandidate, null);
   assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+  // Returning without making a video must not show the same recommendation again.
+  await context.refreshShareCandidate("p1");
+  assert.equal(context.data.shareCandidate, null);
 
   context.setData({ shareCandidate: { ...candidate, status: "accepted", video_job_id: "video-1" } });
   context.openShareCandidateVideo();
@@ -269,7 +277,7 @@ test("home replaces a cached failed recommendation job with the latest remake an
   assert.deepEqual(thumbnails, ["remade-video"]);
 });
 
-test("home editor entry keeps voice and dismiss guards", () => {
+test("home editor entry keeps voice and dismiss guards", async () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   // One entry: the recommendation opens the same settings as a hand-picked clip instead of starting at once.
   assert.doesNotMatch(pageWxml, /data-create|>调整</);
@@ -281,17 +289,35 @@ test("home editor entry keeps voice and dismiss guards", () => {
   };
   const { page } = loadHomePage({ voiceApiExports: {
     createMemoirShareVideoCandidateJob: async (...args) => { created.push(args); },
+    dismissMemoirShareVideoCandidate: async () => ({ ...candidate, status: "dismissed" }),
   } });
   global.wx = { navigateTo({ url }) { navigations.push(url); } };
   const context = pageContext(page, { projectId: "p1", hasProject: true, shareCandidate: candidate });
-  context.openShareCandidateEditor();
-  assert.equal(context.data.shareCandidate.status, "ready");
-  context.setData({ voiceEntry: { voiceSessionId: "session-1" } });
-  context.openShareCandidateEditor();
+  await context.openShareCandidateEditor();
+  assert.equal(context.data.shareCandidate, null);
+  context.setData({ shareCandidate: candidate, voiceEntry: { voiceSessionId: "session-1" } });
+  await context.openShareCandidateEditor();
   context.setData({ voiceEntry: null, shareCandidateDismissing: true });
-  context.openShareCandidateEditor();
+  await context.openShareCandidateEditor();
   assert.deepEqual(created, []);
   assert.deepEqual(navigations, ["/pages/transcript-media/index?id=utterance-1&candidateId=candidate-1"]);
+});
+
+test("home keeps the recommendation and reports a failed consume request", async () => {
+  const navigations = [];
+  const candidate = {
+    id: "candidate-1", project_id: "p1", utterance_id: "utterance-1", status: "ready",
+  };
+  const { page } = loadHomePage({ voiceApiExports: {
+    dismissMemoirShareVideoCandidate: async () => { throw new Error("请求未送达"); },
+  } });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  const context = pageContext(page, { projectId: "p1", shareCandidate: candidate });
+  await context.openShareCandidateEditor();
+  assert.deepEqual(navigations, []);
+  assert.equal(context.data.shareCandidate.id, candidate.id);
+  assert.equal(context.data.shareCandidateError, "请求未送达");
+  assert.equal(context.data.shareCandidateDismissing, false);
 });
 
 test("home keeps completed videos in the library after handling the latest suggestion", async () => {
