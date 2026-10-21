@@ -4,6 +4,8 @@
 
 本文是回忆录产品的主架构文档，统一定义事实来源、主题讲述、成书补全、客户端缓存、请求超时和 AI 模型上下文。实时语音协议见 `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`，当前物理数据结构和编辑入口见 `MEMOIR_DATA_MODEL_AND_EDITING_GUIDE.md`。
 
+访谈与写作 Agent 的自建数据集、离线评测及渐进改造提案见[回忆录 Agent 与数据集迭代设计](./MEMOIR_AGENT_DATASET_DESIGN.md)；该提案不改变本文的现行规则。
+
 ## 一、事实与状态不变量
 
 - 原始音频、VoiceUtterance、ASR 原文和历史 TranscriptVersion 是事实来源；
