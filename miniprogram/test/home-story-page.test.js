@@ -129,7 +129,7 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("only added chapters and sections, first readability and aggregated likes enter the shared queue", async () => {
+test("added chapters, sections and words, first readability and aggregated likes enter the shared queue", async () => {
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [
     { ...growth("later", "chapter_updated", "chapter-1"), created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 386 },
     growth("earlier"),
@@ -142,10 +142,12 @@ test("only added chapters and sections, first readability and aggregated likes e
     assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
     await context.dismissNotice();
     assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
+    assert.equal(context.data.notice.text, "新增 386 字");
+    await context.dismissNotice();
     assert.equal(context.data.notice.kind, "readable");
     // A response fetched before acknowledgement must not reinsert an already read event.
     await context.loadHome(true);
-    assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
+    assert.deepEqual(calls.acknowledgedEventIds, ["earlier", "later"]);
     assert.equal(context.data.notice.text, "书稿已可阅读");
     await context.dismissNotice();
     assert.equal(context.data.notice.kind, "like");
@@ -411,7 +413,7 @@ test("home keeps chapter and book issue counts out of the story presentation", (
   assert.equal("reviewNoticeText" in homeData, false);
 });
 
-test("growth messages retain only valid added chapters and sections and ignore word and manuscript updates", () => {
+test("growth messages combine added chapters, sections and words while ignoring updates without growth", () => {
   const current = snapshot({ growth_events: [
     { event_id: "structure", summary_text: "故事树已更新", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 426,
       changes: [{ kind: "chapter_added", chapter_id: "chapter-1" }, { kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }] },
@@ -419,11 +421,13 @@ test("growth messages retain only valid added chapters and sections and ignore w
       changes: [{ kind: "chapter_updated", chapter_id: "chapter-2" }] },
     { event_id: "book", summary_text: "书稿已更新", created_at: "2026-09-05T00:02:00Z", book_char_count_delta: 0,
       changes: [{ kind: "book_updated" }] },
+    { event_id: "shorter-draft", summary_text: "正文已更新", created_at: "2026-09-05T00:03:00Z", book_char_count_delta: -80,
+      changes: [{ kind: "chapter_updated", chapter_id: "chapter-1" }] },
   ], book_char_count: 12_400 });
   const view = storyViewData(current);
   const data = homeStorySnapshotData(current);
   assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
-  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节"]);
+  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节，426 字", "新增 286 字"]);
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -459,7 +463,8 @@ test("home binds the shared notice queue and keeps the tree as the book entry", 
 
 test("polling appends growth messages without replacing the current card, including bounded history", async () => {
   let current = snapshot({ progress: null, book_readable: false,
-    chapters: snapshot().chapters.map(chapter => ({ ...chapter, readable: false })), growth_events: [growth("first")] });
+    chapters: snapshot().chapters.map(chapter => ({ ...chapter, readable: false })),
+    growth_events: [{ ...growth("first", "chapter_updated", "chapter-1"), book_char_count_delta: 386 }] });
   const { page } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   try {
@@ -582,10 +587,11 @@ test("an acknowledgement completed after an account switch cannot remove the new
   } finally { context.onHide(); }
 });
 
-test("normal narration, saved returns, word growth and optional supplements stay silent after first readability", async () => {
+test("normal narration, saved returns, updates without word growth and optional supplements stay silent after first readability", async () => {
   const updates = [
     { ...growth("section-edit", "section_updated"), book_char_count_delta: 0 },
-    { ...growth("draft", "chapter_updated"), book_char_count_delta: 386 },
+    { ...growth("draft", "chapter_updated"), book_char_count_delta: 0 },
+    { ...growth("shorter-draft", "chapter_updated"), book_char_count_delta: -80 },
     { ...growth("book"), changes: [{ kind: "book_updated" }] },
     { ...growth("copy"), changes: [{ kind: "book_updated" }] },
     { ...growth("no-additions"), summary_text: "讲述已整理", changes: [] },
