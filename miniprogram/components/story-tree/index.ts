@@ -21,23 +21,6 @@ Component({
   data: { showAllChapters: false },
 
   methods: {
-    focusGrowth(chapterId: string) {
-      const measure = () => {
-        this.createSelectorQuery().select(`#story-chapter-${chapterId}`).boundingClientRect(rect => {
-          if (rect) this.triggerEvent("focusgrowth", { top: rect.top });
-        }).exec();
-      };
-      const chapters = Object.values(
-        (this.properties.story as ReturnType<typeof emptyStoryViewData>).chapters || {},
-      );
-      const targetExists = chapters.some(chapter => chapter.id === chapterId);
-      if (targetExists && !this.data.showAllChapters) {
-        this.setData({ showAllChapters: true }, measure);
-        return;
-      }
-      measure();
-    },
-
     toggleAllChapters() {
       this.setData({ showAllChapters: !this.data.showAllChapters });
     },

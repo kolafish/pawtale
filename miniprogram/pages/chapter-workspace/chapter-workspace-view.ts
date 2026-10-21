@@ -126,7 +126,7 @@ export function chapterCandidateViewPatch(
   const changed = [
     ...candidateSections.map((section) => ({
       section_id: section.section_id,
-      title: section.title || beforeById.get(section.section_id)?.title || "故事正文",
+      title: section.title || beforeById.get(section.section_id)?.title || "小节正文",
       before_content: beforeById.get(section.section_id)?.content || "",
       after_content: section.content,
     })),
@@ -151,7 +151,7 @@ export function chapterCandidateViewPatch(
     candidatePreviewVersion: previewVersion,
     candidateComparisonAvailable: true,
     candidateSummaryText: hasTextChanges
-      ? `与当前稿相比：${changed.length ? `${changed.length} 个故事有变化` : "正文有变化"} · ${deltaText}`
+      ? `与当前稿相比：${changed.length ? `${changed.length} 小节有变化` : "正文有变化"} · ${deltaText}`
       : "新稿正文与当前稿相同。",
     candidateDiffSegments,
     candidateWholeContent: previewVersion === "before"
@@ -190,7 +190,7 @@ function visibleSectionViews(
     }));
   assignmentOptions.push({
     id: "",
-    title: "＋ 新建故事",
+    title: "＋ 新建小节",
     action: "create_section",
   });
   const visibleSections = [...(workspace.sections || [])]
@@ -249,12 +249,12 @@ function visibleSectionViews(
           : String(sectionIndex + 1).padStart(2, "0"),
         typeText: section.requires_user_assignment
           ? "暂不纳入正文"
-          : SECTION_TYPE_TEXT[section.section_type] || "故事",
+          : SECTION_TYPE_TEXT[section.section_type] || "小节",
         metaText: section.requires_user_assignment
           ? `${visibleMaterials.length} 段待整理的回忆`
-          : `${visibleMaterials.length} 段回忆${draftNeedsUpdate ? " · 故事待更新" : ""}`,
+          : `${visibleMaterials.length} 段回忆${draftNeedsUpdate ? " · 小节待更新" : ""}`,
         assignmentHint: section.requires_user_assignment
-          ? "这些回忆暂未归入故事，因此不会纳入本章正文。您可以稍后归类，也可以点击回忆进入编辑或删除。"
+          ? "这些回忆暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击回忆进入编辑或删除。"
           : "",
         mergeTargetId: mergeTarget?.id || "",
         mergeTargetTitle: mergeTarget?.title || "",
@@ -348,7 +348,7 @@ function rewriteNoticeTitle(
     return `${newCount} 段新增回忆尚未写入正文`;
   }
   if (structureChanged) {
-    return "现有正文仍按原来的故事保留";
+    return "现有正文仍按原来的小节保留";
   }
   return "本章回忆已经变化";
 }
@@ -387,7 +387,7 @@ function draftRecoveryPatch(
   if (nextAction.actionText) {
     return {
       draftRecoveryTitle: "先完成本章当前一步",
-      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“${rewriteDraftActionText}”。“重新整理故事分组”不是当前必做步骤。`,
+      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“${rewriteDraftActionText}”。“重新整理小节分组”不是当前必做步骤。`,
       draftRecoveryActionText: nextAction.actionText,
       draftRecoveryActionKind: "next",
       draftRecoveryActionDisabled: nextAction.disabled,
@@ -395,7 +395,7 @@ function draftRecoveryPatch(
   }
   return {
     draftRecoveryTitle: "先查看本章当前步骤",
-    draftRecoveryDetail: `完成页面顶部要求处理的事项后，即可在这里${rewriteDraftActionText}。“重新整理故事分组”不是当前必做步骤。`,
+    draftRecoveryDetail: `完成页面顶部要求处理的事项后，即可在这里${rewriteDraftActionText}。“重新整理小节分组”不是当前必做步骤。`,
     draftRecoveryActionText: "查看当前步骤",
     draftRecoveryActionKind: "status",
     draftRecoveryActionDisabled: false,
@@ -415,11 +415,11 @@ export function chapterWorkspaceViewPatch(
     (section) => !section.requires_user_assignment,
   ).length;
   const affectedSectionCount = changedDraftSectionCount(workspace);
-  const rewriteDraftActionText = "更新相关故事";
-  const rewriteDraftBusyText = "正在更新相关故事…";
+  const rewriteDraftActionText = "更新相关小节";
+  const rewriteDraftBusyText = "正在更新相关小节…";
   const rewriteDraftScopeDetail = affectedSectionCount
-    ? `本章有 ${affectedSectionCount} 个故事的素材或结构发生变化。会重点更新相关内容，并按需要调整有联系的故事衔接；旧正文保留在历史版本中。`
-    : "会根据当前故事整理相关内容，并按需要调整衔接；旧正文保留在历史版本中。";
+    ? `本章有 ${affectedSectionCount} 小节的素材或结构发生变化。会重点更新相关内容，并按需要调整有联系的小节衔接；旧正文保留在历史版本中。`
+    : "会根据当前小节整理相关内容，并按需要调整衔接；旧正文保留在历史版本中。";
   const includedMaterialCount = sectionViews.reduce(
     (total, section) => (
       section.requires_user_assignment
@@ -446,8 +446,8 @@ export function chapterWorkspaceViewPatch(
       ? "已整理"
       : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
     chapterStoryCountText: narrativeSectionCount
-      ? `${narrativeSectionCount} 个故事`
-      : "暂无故事",
+      ? `${narrativeSectionCount} 小节`
+      : "暂无小节",
     chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
       ? "有新回忆待整理，当前正文仍可阅读。"
       : summary.state === "draft_ready"
@@ -459,7 +459,7 @@ export function chapterWorkspaceViewPatch(
     chapterEditingHint: pendingAssignmentCount
       ? `${pendingAssignmentCount} 段回忆待整理`
       : workspace.draft_needs_rewrite
-        ? "有新回忆等待写进故事"
+        ? "有新回忆等待写进小节"
         : "",
     readinessTitle: chapterHasReadableDraft ? summary.headline : emptyDraftTitle,
     readinessDetail: chapterHasReadableDraft ? summary.detail : emptyDraftDetail,
@@ -473,7 +473,7 @@ export function chapterWorkspaceViewPatch(
       : (
         workspace.can_rewrite_draft
           ? `可以继续补充，也可以现在生成。${rewriteDraftScopeDetail}`
-          : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分故事。`
+          : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分小节。`
       ),
     ...draftRecoveryPatch(
       workspace,
@@ -483,7 +483,7 @@ export function chapterWorkspaceViewPatch(
     ),
     narrativeSectionCount,
     sectionStructureSummary: [
-      `${narrativeSectionCount} 个故事`,
+      `${narrativeSectionCount} 小节`,
       `${includedMaterialCount} 段回忆`,
       ...(pendingAssignmentCount
         ? [`${pendingAssignmentCount} 段待整理`]

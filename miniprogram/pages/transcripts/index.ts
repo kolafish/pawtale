@@ -235,10 +235,10 @@ export function transcriptsViewPatch(state: TranscriptsData): TranscriptsViewPat
   return {
     items: state.items.map((item) => withTranscriptRuntimeState(item, state)),
     materialTabs: MATERIAL_TABS.map((tab) => ({ ...tab, selected: tab.value === state.materialTab })),
-    emptyTitleText: state.materialTab === "organized" ? "还没有收进故事的回忆"
+    emptyTitleText: state.materialTab === "organized" ? "还没有收进小节的回忆"
       : state.materialTab === "unorganized" ? "没有尚未整理的回忆" : "暂无讲述记录",
-    emptyCopyText: state.materialTab === "organized" ? "回忆整理进故事后，会显示在这里。"
-      : state.materialTab === "unorganized" ? "已有的回忆都已收进故事。" : "完成一次语音聊天后，保存的语音和文字会显示在这里。",
+    emptyCopyText: state.materialTab === "organized" ? "回忆整理进小节后，会显示在这里。"
+      : state.materialTab === "unorganized" ? "已有的回忆都已收进小节。" : "完成一次语音聊天后，保存的语音和文字会显示在这里。",
     pageMetaText: `${state.projectTitle || "当前回忆录"} · ${state.total} 条讲述`,
     showSearchClear: Boolean(state.searchInput || state.hasSearchCriteria),
     showSearchChips: state.searchChips.length > 0,

@@ -104,7 +104,7 @@ definePage<ChapterWorkspacePageData>()({
     workspace: null,
     nextAction: LOADING_NEXT_ACTION,
     chapterHeroKicker: "这一章正在慢慢长大",
-    chapterStoryCountText: "故事正在生长",
+    chapterStoryCountText: "小节正在生长",
     chapterStoryDetail: "讲过的回忆都在这里，整理好后就可以慢慢读了。",
     chapterHasReadableDraft: false,
     chapterEditingHint: "",
@@ -119,8 +119,8 @@ definePage<ChapterWorkspacePageData>()({
     draftRecoveryActionDisabled: true,
     narrativeSectionCount: 0,
     sectionStructureSummary: "",
-    rewriteDraftActionText: "更新有变化的故事",
-    rewriteDraftBusyText: "正在更新故事…",
+    rewriteDraftActionText: "更新有变化的小节",
+    rewriteDraftBusyText: "正在更新小节…",
     rewriteDraftScopeDetail: "",
     editingToolsExpanded: false,
     requiredIssues: [],
@@ -290,7 +290,7 @@ definePage<ChapterWorkspacePageData>()({
     if (enabled === this.draftSectionUnloadAlertEnabled) return;
     this.draftSectionUnloadAlertEnabled = enabled;
     if (enabled) {
-      wx.enableAlertBeforeUnload({ message: "尚未保存的故事正文会丢失，确定离开吗？" });
+      wx.enableAlertBeforeUnload({ message: "尚未保存的小节正文会丢失，确定离开吗？" });
     } else {
       wx.disableAlertBeforeUnload?.();
     }
@@ -303,7 +303,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     wx.showModal({
       title: "放弃当前修改？",
-      content: "当前故事的修改还没有完成，离开后这些内容会丢失。",
+      content: "当前小节的修改还没有完成，离开后这些内容会丢失。",
       confirmText: "放弃修改",
       cancelText: "继续编辑",
       success: (result) => {
@@ -497,7 +497,7 @@ definePage<ChapterWorkspacePageData>()({
     if (!sectionId || !expectedVersion || this.data.operationKind) {
       return;
     }
-    const title = await promptRequiredText("编辑故事标题", currentTitle || "请输入故事标题");
+    const title = await promptRequiredText("编辑小节标题", currentTitle || "请输入小节标题");
     if (!title || title === currentTitle || !this.beginOperation("rename_section", sectionId)) {
       return;
     }
@@ -509,13 +509,13 @@ definePage<ChapterWorkspacePageData>()({
         expectedVersion,
       );
       await this.loadPageData(true);
-      wx.showToast({ title: "故事标题已更新", icon: "success" });
+      wx.showToast({ title: "小节标题已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "故事标题更新失败",
+        error: error instanceof Error ? error.message : "小节标题更新失败",
       });
     } finally {
       this.finishOperation("rename_section", sectionId);
@@ -772,7 +772,7 @@ definePage<ChapterWorkspacePageData>()({
           void this.performMaterialPlacement(
             utteranceId,
             { target_section_id: target.id },
-            "已选择故事",
+            "已选择小节",
           );
         }
       },
@@ -780,7 +780,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async createSectionForMaterial(utteranceId: string) {
-    const title = await promptRequiredText("新建故事", "请输入故事标题");
+    const title = await promptRequiredText("新建小节", "请输入小节标题");
     if (!title) {
       return;
     }
@@ -790,7 +790,7 @@ definePage<ChapterWorkspacePageData>()({
         target_chapter_id: this.data.chapterId,
         new_section_title: title,
       },
-      "已新建故事",
+      "已新建小节",
     );
   },
 

@@ -72,7 +72,7 @@ test("book reader page loads the finished book by project id", async () => {
   assert.equal(context.data.bookPreviewChapters.length, 1);
   assert.equal(context.data.readerChapterTotal, 2);
   assert.equal(context.data.bookPreviewTocItems[0].expanded, false);
-  assert.equal(context.data.bookPreviewTocItems[0].storyCountText, "2个故事");
+  assert.equal(context.data.bookPreviewTocItems[0].storyCountText, "2小节");
   assert.deepEqual(
     context.data.bookPreviewTocItems[0].sections.map((section) => section.title),
     ["院子里的日子", "外婆的身影"],
@@ -268,7 +268,7 @@ test("book reader expands stories and jumps from the table of contents to the te
       indexText: "1",
       title: "外婆家的童年",
       metaText: "",
-      storyCountText: "1个故事",
+      storyCountText: "1小节",
       expanded: false,
       sections: [{ id: "section-1" }],
     }, {

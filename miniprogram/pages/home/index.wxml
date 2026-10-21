@@ -36,7 +36,6 @@
       profile-text="{{narratorProfileText}}"
       can-voice-edit="{{hasProject && (hasLastStoryHint || story.overview.hasChapters)}}"
       show-book-hint="{{showBookHint}}"
-      bind:focusgrowth="focusStoryGrowth"
       bind:openbook="openBook"
       bind:openprojects="openProjects"
       bind:openprofile="openNarratorProfile"
@@ -93,25 +92,19 @@
       </view>
 
       <view slot="afterHero" id="home-narration-end" class="after-hero">
-        <text wx:if="{{narrationSaved && !growthNoticeText}}" class="home-saved-notice" aria-live="polite">这段讲述已保存。</text>
-
-        <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
-          <view class="home-growth-copy">
-            <text class="home-growth-title">{{growthNoticeTitle}}</text>
-            <text class="home-growth-value ui-tabular">{{growthNoticeText}}</text>
-            <text wx:if="{{growthNoticeContext}}" class="home-growth-context">{{growthNoticeContext}}</text>
-          </view>
+        <view wx:if="{{notice}}" class="home-growth-notice" aria-live="polite">
+          <template wx:if="{{notice.kind === 'like'}}" is="shareLikePeople" data="{{avatars: notice.people.avatars, text: notice.text}}" />
+          <text wx:else class="home-growth-value ui-tabular">{{notice.text}}</text>
           <view class="home-growth-actions">
-            <button wx:if="{{growthTarget}}" id="view-story-growth" size="mini" class="home-inline-action ui-button"
-              bindtap="viewStoryGrowth">看看变化</button>
-            <button size="mini" class="home-inline-action is-secondary ui-button" bindtap="dismissGrowthNotice"
+            <button wx:if="{{notice.kind === 'progress' && notice.action === 'retry'}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft"
+              loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
+            <button wx:elif="{{notice.kind === 'progress' && notice.action === 'review'}}" size="mini"
+              class="home-inline-action ui-button" bindtap="openReviewIssues">查看待确认 ›</button>
+            <button wx:elif="{{notice.kind === 'progress' && notice.action === 'supplement'}}" size="mini"
+              class="home-inline-action ui-button" bindtap="supplementPendingMaterial">补充讲述 ›</button>
+            <button size="mini" class="home-inline-action is-secondary ui-button" bindtap="dismissNotice"
               loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
           </view>
-        </view>
-
-        <view wx:if="{{shareLikeNotice}}" class="home-growth-notice home-like-notice" aria-live="polite">
-          <template is="shareLikePeople" data="{{avatars: shareLikeNotice.avatars, text: shareLikeNotice.text}}" />
-          <button size="mini" class="home-inline-action is-secondary ui-button" bindtap="dismissShareLikeNotice">知道了</button>
         </view>
 
         <view
@@ -192,20 +185,6 @@
     <button wx:if="{{storyError}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
 
-    <view wx:if="{{progress && progress.status !== 'idle'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
-      <view class="home-review-copy">
-        <text class="home-story-progress-title">{{progress.title}}</text>
-        <text class="home-story-progress-detail">{{progress.detail}}</text>
-      </view>
-      <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft"
-        loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
-      <button wx:elif="{{progress.status === 'needs_input'}}" size="mini"
-        class="home-inline-action ui-button" bindtap="openReviewIssues">查看待确认 ›</button>
-      <button wx:elif="{{progress.needs_user_material_count > 0 && progress.status !== 'processing'}}" size="mini"
-        class="home-inline-action ui-button" bindtap="supplementPendingMaterial">补充讲述 ›</button>
-      <button wx:elif="{{progress.status === 'ready' || progress.status === 'partial_ready'}}" size="mini"
-        class="home-inline-action ui-button" bindtap="openBook">阅读书稿 ›</button>
-    </view>
 
   </view>
 

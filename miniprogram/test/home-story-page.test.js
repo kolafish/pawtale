@@ -27,8 +27,8 @@ function snapshot(patch = {}) {
     unassigned_image_count: 2, unassigned_video_count: 1, growth_events: [], latest_transcript: null, ...patch,
   };
 }
-function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null, bookOpened = false } = {}) {
-  const calls = { acknowledgedEventIds: [], bookNavigations: 0, bookOpenedMarks: [] };
+function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null, bookOpened = false, acknowledge, storage = {}, likeNotice = null } = {}) {
+  const calls = { acknowledgedEventIds: [], bookNavigations: 0, bookOpenedMarks: [], seenLikes: [] };
   mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", { readCachedMemoirHome: () => ({status:"miss"}), readCachedMemoirIdentity: () => null, writeCachedMemoirHome: () => {} });
   mockModule("../services/home-launch-state.ts", {
@@ -42,7 +42,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     retryMemoirDraftProgress: retry || (async () => progress({ status: "processing" })),
   });
   mockModule("../services/memoir-voice-session-api.ts", {
-    acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); },
+    acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); if (acknowledge) await acknowledge(id); },
   });
   mockModule("../services/navigation.ts", {
     consumeHomeVoiceTarget: () => null,
@@ -52,7 +52,13 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     isAuthError: (error) => [401, 403].includes(error?.statusCode),
     navigateToBook: () => { calls.bookNavigations += 1; }, navigateToLogin: () => {}, navigateToTranscripts: () => {},
   });
+  mockModule("../services/share-likes.ts", {
+    loadShareLikeNotice: async () => likeNotice,
+    markShareLikeNoticeSeen: (...args) => calls.seenLikes.push(args),
+  });
   global.wx = {
+    getStorageSync: key => storage[key],
+    setStorageSync: (key, value) => { storage[key] = value; },
     pageScrollTo: () => {},
     createSelectorQuery: () => ({select: () => ({boundingClientRect: callback => ({exec: () => callback({bottom:600})})})}),
   };
@@ -68,10 +74,10 @@ test("story maps server content into the hero, themes and book summary", () => {
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
   assert.deepEqual(view.overview.themeTags.map(tag => tag.readable), [true, false]);
   assert.equal(view.chapters[0].hasSections, true);
-  assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
+  assert.equal(view.overview.summaryText, "2 章 · 2 小节");
   assert.equal(view.overview.growthAnimating, false);
   assert.equal("growthText" in view.overview, false);
-  assert.equal(view.chapters[0].storyCountText, "1 个故事");
+  assert.equal(view.chapters[0].storyCountText, "1 小节");
   assert.equal("statusText" in view.chapters[0], false);
   assert.equal(view.chapters[0].readable, true);
 
@@ -83,8 +89,8 @@ test("story maps server content into the hero, themes and book summary", () => {
     id: "section-extra", title: "另一个故事", material_count: 2, image_count: 0, video_count: 0,
   });
   const countedView = storyViewData(counted);
-  assert.equal(countedView.overview.summaryText, "2 个主题 · 3 个故事");
-  assert.deepEqual(countedView.chapters.map(chapter => chapter.storyCountText), ["2 个故事", "1 个故事"]);
+  assert.equal(countedView.overview.summaryText, "2 章 · 3 小节");
+  assert.deepEqual(countedView.chapters.map(chapter => chapter.storyCountText), ["2 小节", "1 小节"]);
 });
 
 test("story distinguishes empty, organizing and section-less states", () => {
@@ -123,46 +129,33 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("story turns new sections into reader-facing growth results and focuses them on request", async () => {
-  const event = { event_id: "growth-1", created_at: "2026-09-05T00:00:00Z", summary_text: "新长出了一个小节", book_char_count_delta: 0, changes: [{kind:"section_added",chapter_id:"chapter-2",section_id:"section-2"}] };
-  const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
+test("knowing about growth acknowledges only the displayed event and advances the shared queue", async () => {
+  const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [
+    { ...growth("later", "chapter_updated", "chapter-1"), created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 386 },
+    growth("earlier"),
+  ] }), likeNotice: { latestAt: "2026-09-05T02:00:00Z", text: "三姑给书稿点了赞", avatars: [] } });
   const context = pageContext(page);
-  await context.onShow();
-  await flushAsyncWork();
-  assert.equal(context.data.growthNoticeTitle, "您的书又长了一点");
-  assert.equal(context.data.growthNoticeText, "新增 1 个故事");
-  assert.equal(context.data.growthNoticeContext, "章节 2等内容已更新");
-  const targets = [];
-  context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
-  context.viewStoryGrowth();
-  assert.deepEqual(targets, [["chapter-2"]]);
-  assert.equal(context.data.story.chapters[1].highlighted, true);
-  assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
-  await flushAsyncWork();
-  assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
-  assert.equal(context.data.growthNoticeText, "");
-  assert.equal(context.data.growthTarget, null);
-  context.onHide();
-});
-
-test("knowing about story growth acknowledges it and removes the notice", async () => {
-  const event = {
-    event_id: "growth-dismissed",
-    created_at: "2026-09-05T00:00:00Z",
-    summary_text: "新长出了一个小节",
-    book_char_count_delta: 0,
-    changes: [{ kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }],
-  };
-  const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
-  const context = pageContext(page);
-  await context.onShow();
-
-  await context.dismissGrowthNotice();
-
-  assert.deepEqual(calls.acknowledgedEventIds, ["growth-dismissed"]);
-  assert.equal(context.data.growthNoticeText, "");
-  assert.equal(context.data.growthTarget, null);
-  context.onHide();
+  try {
+    await context.onShow();
+    await flushAsyncWork();
+    assert.equal(context.data.notice.text, "新增 1 小节");
+    assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
+    await context.dismissNotice();
+    assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
+    assert.equal(context.data.notice.text, "新增 386 字");
+    // A response fetched before acknowledgement must not reinsert an already read event.
+    await context.loadHome(true);
+    assert.equal(context.data.notice.eventId, "later");
+    await context.dismissNotice();
+    assert.deepEqual(calls.acknowledgedEventIds, ["earlier", "later"]);
+    assert.equal(context.data.notice.kind, "progress");
+    assert.equal(context.data.notice.text, "书稿已可阅读");
+    await context.dismissNotice();
+    assert.equal(context.data.notice.kind, "like");
+    await context.dismissNotice();
+    assert.deepEqual(calls.seenLikes, [["user-1", "project-1", "2026-09-05T02:00:00Z"]]);
+    assert.equal(context.data.notice, null);
+  } finally { context.onHide(); }
 });
 
 test("story stops polling on hide, rejects old responses and resumes on reentry", async () => {
@@ -277,7 +270,7 @@ test("home shows a later readable draft after an earlier structure event was ack
   await context.loadHome(true);
   assert.equal(context.data.progress.status, "ready");
   assert.equal(context.data.story.chapters[0].growthLabel, "");
-  assert.doesNotMatch(context.data.growthNoticeText, /新长出/);
+  assert.doesNotMatch(context.data.notice.text, /新长出/);
   assert.deepEqual(calls.acknowledgedEventIds, []);
   context.onHide();
 });
@@ -317,9 +310,7 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters.length, 2);
   assert.equal(context.data.story.chapters[1].sections.length, 1);
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
-  assert.equal(context.data.growthNoticeTitle, "这段回忆刚刚又丰富了一些");
-  assert.equal(context.data.growthNoticeText, "补充 1 个已有故事");
-  assert.equal(context.data.growthNoticeContext, "章节 2等内容已更新");
+  assert.equal(context.data.notice.text, "章节内容已更新");
   context.onHide();
 });
 
@@ -418,68 +409,26 @@ test("home keeps chapter and book issue counts out of the story presentation", (
       issues: { review_count: i ? 0 : 2, supplement_count: i ? 1 : 0 } })),
   });
   const view = storyViewData(current);
-  assert.equal(view.overview.summaryText, "2 个主题 · 2 个故事");
+  assert.equal(view.overview.summaryText, "2 章 · 2 小节");
   assert.equal("growthText" in view.overview, false);
   assert.equal("statusText" in view.chapters[0], false);
-  const homeData = homeStorySnapshotData(current, view);
+  const homeData = homeStorySnapshotData(current);
   assert.equal("reviewNoticeText" in homeData, false);
 });
 
-test("home combines story and manuscript deltas without double counting assembly events", () => {
+test("growth messages show chapter and section additions or the exact word delta in one sentence", () => {
   const current = snapshot({ growth_events: [
-    {
-      event_id: "structure", summary_text: "故事树已更新", created_at: "2026-09-05T00:00:00Z",
-      book_char_count_delta: 0,
-      changes: [{ kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }],
-    },
-    {
-      event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z",
-      book_char_count_delta: 386,
-      changes: [{ kind: "chapter_updated", chapter_id: "chapter-2" }],
-    },
-    {
-      event_id: "book", summary_text: "书稿已更新", created_at: "2026-09-05T00:02:00Z",
-      book_char_count_delta: 0,
-      changes: [{ kind: "book_updated" }],
-    },
-  ] });
-  const homeData = homeStorySnapshotData(current, storyViewData(current));
-  assert.equal(homeData.growthNoticeTitle, "您的书又长了一点");
-  assert.equal(homeData.growthNoticeText, "新增 1 个故事 · 书稿 +386 字");
-  assert.equal(homeData.growthNoticeContext, "章节 2等内容已更新");
-});
-
-test("growth feedback keeps theme and story counts on one primary line", () => {
-  const current = snapshot({ growth_events: [{
-    event_id: "structure",
-    summary_text: "故事树已更新",
-    created_at: "2026-09-05T00:00:00Z",
-    book_char_count_delta: 426,
-    changes: [
-      { kind: "chapter_added", chapter_id: "chapter-1" },
-      { kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" },
-    ],
-  }] });
-
-  const homeData = homeStorySnapshotData(current, storyViewData(current));
-
-  assert.equal(homeData.growthNoticeText, "新增 1 个主题 · 1 个故事");
-  assert.equal(homeData.growthNoticeContext, "章节 1等内容已更新");
-  assert.doesNotMatch(homeData.growthNoticeText, /426/);
-});
-
-test("growth feedback keeps large book totals compact while preserving the exact delta", () => {
-  const current = snapshot({
-    book_char_count: 12_400,
-    growth_events: [{
-      event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z",
-      book_char_count_delta: 286, changes: [{ kind: "book_updated" }],
-    }],
-  });
+    { event_id: "structure", summary_text: "故事树已更新", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 426,
+      changes: [{ kind: "chapter_added", chapter_id: "chapter-1" }, { kind: "section_added", chapter_id: "chapter-2", section_id: "section-2" }] },
+    { event_id: "draft", summary_text: "正文已更新", created_at: "2026-09-05T00:01:00Z", book_char_count_delta: 286,
+      changes: [{ kind: "chapter_updated", chapter_id: "chapter-2" }] },
+    { event_id: "book", summary_text: "书稿已更新", created_at: "2026-09-05T00:02:00Z", book_char_count_delta: 0,
+      changes: [{ kind: "book_updated" }] },
+  ], book_char_count: 12_400 });
   const view = storyViewData(current);
-  const homeData = homeStorySnapshotData(current, view);
+  const data = homeStorySnapshotData(current);
   assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
-  assert.equal(homeData.growthNoticeText, "书稿 +286 字");
+  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节", "新增 286 字", "书稿已更新"]);
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -488,7 +437,7 @@ test("closed issues disappear despite an old needs_input job; five readable draf
     progress: progress({status: "needs_input", readable_chapter_count: 0, needs_user_material_count: 0}),
     book_readable: false, book_chapter_count: 0, book_issues: {review_count: 1, supplement_count: 0},
   });
-  assert.equal(storyViewData(current).overview.summaryText, "5 个主题 · 5 个故事");
+  assert.equal(storyViewData(current).overview.summaryText, "5 章 · 5 小节");
   assert.equal(storyViewData(current).memoir.bookMetaText, "5 章 · 200 字");
   current.book_readable = true;
   current.book_chapter_count = 3;
@@ -506,10 +455,101 @@ test("home story template exposes growth and counts without internal completion 
   assert.doesNotMatch(template, /树上的故事/);
 });
 
-test("home growth notice keeps one primary metric line and two lightweight actions", () => {
+test("home binds the shared notice queue and keeps the tree as the book entry", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  assert.match(template, /class="home-growth-value ui-tabular"/);
-  assert.match(template, />看看变化<\/button>/);
-  assert.match(template, />知道了<\/button>/);
-  assert.doesNotMatch(template, /growthNoticeDetail|growthNoticeMeta/);
+  assert.match(template, /bindtap="dismissNotice"/);
+  assert.match(template, /bind:openbook="openBook"/);
+  assert.doesNotMatch(template, /growthNoticeTitle|growthNoticeContext|viewStoryGrowth|dismissShareLikeNotice|home-story-progress/);
+});
+
+test("polling appends growth messages without replacing the current card, including bounded history", async () => {
+  let current = snapshot({ progress: null, growth_events: [growth("first")] });
+  const { page } = loadStoryPage({ getSnapshot: async () => current });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    current = snapshot({ progress: null, growth_events: [{ ...growth("second"), created_at: "2026-09-05T01:00:00Z" }] });
+    await context.loadHome(true);
+    assert.equal(context.data.notice.eventId, "first");
+    assert.deepEqual(context.data.notices.map(item => item.eventId), ["first", "second"]);
+    await context.dismissNotice();
+    assert.equal(context.data.notice.eventId, "second");
+  } finally { context.onHide(); }
+});
+
+test("a failed acknowledgement keeps the current notification available for an explicit retry", async () => {
+  let shouldFail = true;
+  const { page } = loadStoryPage({ current: snapshot({ progress: null, growth_events: [growth("first"), growth("second")] }),
+    acknowledge: async () => { if (shouldFail) throw Error("offline"); } });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    await context.dismissNotice();
+    assert.equal(context.data.notice.eventId, "first");
+    assert.equal(context.data.dismissingGrowth, false);
+    assert.equal(context.data.storyError, "offline");
+    shouldFail = false;
+    await context.dismissNotice();
+    assert.equal(context.data.notice.eventId, "second");
+    assert.equal(context.data.storyError, "");
+  } finally { context.onHide(); }
+});
+
+test("read status survives page recreation, stays scoped, and a new draft can notify again", async () => {
+  const storage = {};
+  const first = pageContext(loadStoryPage({ storage }).page);
+  await first.onShow();
+  await first.dismissNotice();
+  assert.equal(first.data.notice, null);
+  first.onUnload();
+  let current = snapshot();
+  const second = pageContext(loadStoryPage({ storage, getSnapshot: async () => current }).page);
+  try {
+    await second.onShow();
+    assert.equal(second.data.notice, null);
+    current = snapshot({ updated_at: "2026-09-06T00:00:00Z" });
+    await second.loadHome(true);
+    assert.equal(second.data.notice.text, "书稿已可阅读");
+    await second.dismissNotice();
+    current = snapshot({ identity: { ...current.identity, active_project_id: "project-2", active_project: { id: "project-2" } } });
+    await second.loadHome(true);
+    assert.equal(second.data.notice.kind, "progress");
+    await second.dismissNotice();
+    current = snapshot({ identity: { ...current.identity, id: "user-2" } });
+    await second.loadHome(true);
+    assert.equal(second.data.notice.kind, "progress");
+  } finally { second.onHide(); }
+});
+
+test("an acknowledgement completed after an account switch cannot remove the new account's message", async () => {
+  let current = snapshot({ progress: null, growth_events: [growth("same-event")] });
+  let finishAcknowledgement;
+  const { page } = loadStoryPage({ getSnapshot: async () => current,
+    acknowledge: () => new Promise(resolve => { finishAcknowledgement = resolve; }) });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    const pending = context.dismissNotice();
+    current = snapshot({ ...current, identity: { ...current.identity, id: "user-2" } });
+    await context.loadHome(true);
+    finishAcknowledgement();
+    await pending;
+    assert.equal(context.data.userId, "user-2");
+    assert.equal(context.data.notice.eventId, "same-event");
+    assert.equal(context.data.dismissingGrowth, false);
+  } finally { context.onHide(); }
+});
+
+test("status actions and saved narration use the same notification queue", async () => {
+  const { page } = loadStoryPage({ current: snapshot({ progress: progress({ status: "failed", can_retry: true }) }),
+    navigationTarget: { projectId: "project-1", narrationSaved: true } });
+  const context = pageContext(page);
+  try {
+    await context.onShow();
+    assert.equal(context.data.notice.action, "retry");
+    await context.dismissNotice();
+    assert.equal(context.data.notice.kind, "saved");
+    await context.dismissNotice();
+    assert.equal(context.data.notice, null);
+  } finally { context.onHide(); }
 });

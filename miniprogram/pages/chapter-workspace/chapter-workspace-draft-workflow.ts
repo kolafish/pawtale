@@ -102,7 +102,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     if (workspace.draft_needs_rewrite) {
-      wx.showToast({ title: "请先更新有变化的故事", icon: "none" });
+      wx.showToast({ title: "请先更新有变化的小节", icon: "none" });
       return;
     }
     if (this.data.operationKind || this.data.editingSectionId) {
@@ -140,7 +140,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     if (!content) {
-      wx.showToast({ title: "故事正文不能为空", icon: "none" });
+      wx.showToast({ title: "小节正文不能为空", icon: "none" });
       return;
     }
     if (content === currentSection.content.trim()) {
@@ -167,7 +167,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       this.setData(CLOSED_DRAFT_SECTION_EDITOR);
       this.syncDraftSectionUnloadAlert();
       await this.loadPageData(true);
-      wx.showToast({ title: "故事已保存", icon: "success" });
+      wx.showToast({ title: "小节已保存", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -189,7 +189,7 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
     await this.playDraftAudio(
       sectionId,
       { kind: "section", chapterId: this.data.chapterId, sectionId, versionId: this.data.workspace?.draft_version_id || undefined },
-      "故事朗读失败",
+      "小节朗读失败",
     );
   },
 

@@ -109,7 +109,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       return;
     }
     wx.showModal({
-      title: "重新整理故事分组",
+      title: "重新整理小节分组",
       content: "AI 会重新划分本章回忆的分组和顺序。原始回忆、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
       confirmText: "开始整理",
       cancelText: "暂不整理",
@@ -142,7 +142,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       return;
     }
     wx.showModal({
-      title: "与上一个故事合并？",
+      title: "与上一小节合并？",
       content: `“${sourceTitle}”中的回忆会并入“${targetTitle}”。现有正文会保留为历史版本，合并后需要重新生成本章正文并再次确认。`,
       confirmText: "确认合并",
       cancelText: "暂不合并",
@@ -171,13 +171,13 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         },
       });
       await this.loadPageData(true);
-      wx.showToast({ title: "故事已合并", icon: "success" });
+      wx.showToast({ title: "小节已合并", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "故事合并失败",
+        error: error instanceof Error ? error.message : "小节合并失败",
       });
     } finally {
       this.finishOperation("merge_sections", sourceId);
@@ -208,7 +208,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       }
       this.finishOperation("regenerate_sections");
       this.setData({
-        error: error instanceof Error ? error.message : "故事重新整理失败",
+        error: error instanceof Error ? error.message : "小节重新整理失败",
       });
     }
   },
@@ -299,7 +299,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       }
       await this.loadPageData(true);
       wx.showToast({
-        title: job.operation === "rewrite" ? "故事正文已更新" : "本章处理完成",
+        title: job.operation === "rewrite" ? "小节正文已更新" : "本章处理完成",
         icon: "success",
       });
       return;
@@ -455,7 +455,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       if (job.unassigned_count > 0) {
         wx.showModal({
           title: "有回忆暂未归类",
-          content: `已整理为 ${job.section_count} 个故事；另有 ${job.unassigned_count} 段回忆暂不纳入本章正文。您可以稍后归类，也可以进入回忆详情编辑或删除。`,
+          content: `已整理为 ${job.section_count} 小节；另有 ${job.unassigned_count} 段回忆暂不纳入本章正文。您可以稍后归类，也可以进入回忆详情编辑或删除。`,
           showCancel: true,
           confirmText: "查看回忆",
           cancelText: "稍后处理",
@@ -467,7 +467,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         });
       } else {
         wx.showToast({
-          title: `已整理为${job.section_count}个故事`,
+          title: `已整理为${job.section_count}小节`,
           icon: "success",
         });
       }
@@ -500,7 +500,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     this.setData({
       sectionRegenerationJob: { ...job, can_cancel: false },
       sectionRegenerationTitle: "正在取消整理",
-      sectionRegenerationDetail: "正在停止后续处理，原故事结构会保持不变",
+      sectionRegenerationDetail: "正在停止后续处理，原小节结构会保持不变",
       sectionRegenerationProgressMode: "indeterminate",
     });
     try {

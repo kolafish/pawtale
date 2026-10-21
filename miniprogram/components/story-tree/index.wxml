@@ -48,7 +48,7 @@
         bindtap="openChapter"
         hover-class="{{demoMode && !item.readable ? 'none' : 'theme-tag-hover'}}"
         aria-role="button"
-        aria-label="{{demoMode ? item.title + '，' + (item.readable ? '示例阅读' : '暂未开放') : '打开主题：' + item.title}}"
+        aria-label="{{demoMode ? item.title + '，' + (item.readable ? '示例阅读' : '暂未开放') : '打开章节：' + item.title}}"
       >
         <view class="theme-tag-leaf" aria-hidden="true"></view>
         <view class="theme-tag-copy">
@@ -68,7 +68,7 @@
       hover-class="ui-subtle-action-hover"
       aria-role="button"
       aria-expanded="{{showAllChapters}}"
-      aria-label="{{story.overview.summaryText}}，{{showAllChapters ? '收起全部主题' : '查看全部主题'}}"
+      aria-label="{{story.overview.summaryText}}，{{showAllChapters ? '收起全部章节' : '查看全部章节'}}"
     >
       <text class="hero-summary ui-tabular">{{story.overview.summaryText}}</text>
       <view class="story-summary-toggle">
