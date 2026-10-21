@@ -29,7 +29,7 @@ from app.services.ai_usage_records import current_ai_usage_context
 from app.services.memoir import completion_interviews, narrator_profile, narration_people  # noqa: F401
 from app.services.memoir.completion_interviews import CompletionIssuePromptContext  # noqa: F401
 from app.services.memoir.interview_agent import (
-    STREAM_PROMPT_VERSION, InterviewConfig, InterviewInput, InterviewRun,
+    STREAM_PROMPT_VERSION, SUPPORTED_PROMPT_VARIANTS, InterviewConfig, InterviewInput, InterviewRun,
     prepare_interview_turn, stream_interview_turn,
 )
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic  # noqa: F401
@@ -205,7 +205,7 @@ async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, polic
     def result(status, **extra):
         return {
             "schema_version": 1, "case": case.model_dump(mode="json"),
-            "config": asdict(config), "prompt_version": STREAM_PROMPT_VERSION,
+            "config": asdict(config), "prompt_version": prepared.prompt_version if prepared else STREAM_PROMPT_VERSION,
             "policy_mode": policy_mode,
             "policy_error": policy_error,
             "policy_context_origin": "frozen" if case.policy_context else "visible_dialogue_only",
@@ -308,7 +308,7 @@ async def evaluate(args: argparse.Namespace) -> int:
     cases = cases[:args.max_cases]
     if not cases:
         raise ValueError("No evaluation cases selected")
-    config = InterviewConfig(requested_model=args.ai_model, temperature=args.temperature)
+    config = InterviewConfig(requested_model=args.ai_model, temperature=args.temperature, prompt_variant=args.prompt_variant)
     repo = Path(__file__).resolve().parents[2]
     tracked_diff = git_output(repo, "diff", "HEAD", "--", "backend")
     manifest = {
@@ -350,6 +350,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=["autonomous", "guided"], default="autonomous")
     parser.add_argument("--policy-mode", choices=["off", "active", "shadow"], required=True)
     parser.add_argument("--ai-model", required=True)
+    parser.add_argument("--prompt-variant", choices=SUPPORTED_PROMPT_VARIANTS, default="baseline")
     parser.add_argument("--temperature", type=float, default=0.72)
     parser.add_argument("--case", action="append")
     parser.add_argument("--max-cases", type=int, default=10)

@@ -95,3 +95,17 @@ async def test_missing_control_prefix_keeps_existing_safe_pause_behavior():
     ):
         pass
     assert run.completed_turn(prepared.input).conversation_action == MemoirConversationAction.PAUSE
+
+
+def test_experimental_prompt_is_opt_in_and_preserves_completion_contract():
+    baseline = prepare_interview_turn(snapshot(), InterviewConfig())
+    candidate = prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="grounded_v1"))
+    assert baseline.prompt_version != candidate.prompt_version
+    assert baseline.prompt != candidate.prompt
+    completion = snapshot("book_completion")
+    original = prepare_interview_turn(completion, InterviewConfig())
+    candidate_completion = prepare_interview_turn(completion, InterviewConfig(prompt_variant="grounded_v1"))
+    assert original.prompt == candidate_completion.prompt
+    assert original.prompt_version == candidate_completion.prompt_version
+    with pytest.raises(ValueError, match="Unsupported interview prompt variant"):
+        prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="typo"))
