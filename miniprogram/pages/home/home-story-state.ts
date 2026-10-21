@@ -78,7 +78,8 @@ export class HomeGrowthTracker {
     // Snapshot history is bounded; keep messages already queued until the user reads them.
     for (const event of events) {
       if (!this.acknowledged.has(event.event_id)
-        && event.changes.some(change => change.kind === "chapter_added" || change.kind === "section_added")) {
+        && (event.book_char_count_delta > 0
+          || event.changes.some(change => change.kind === "chapter_added" || change.kind === "section_added"))) {
         this.queued.set(event.event_id, event);
       }
     }
@@ -163,6 +164,7 @@ function growthNotice(event: MemoirStoryGrowthEvent, story: StoryViewData): Home
   const additions = [
     addedChapters.size ? `${addedChapters.size} 章` : "",
     addedSections.size ? `${addedSections.size} 小节` : "",
+    event.book_char_count_delta > 0 ? `${event.book_char_count_delta} 字` : "",
   ].filter(Boolean).join("，");
   return additions
     ? { id: `growth:${event.event_id}`, kind: "growth", text: `新增 ${additions}`, eventId: event.event_id }
