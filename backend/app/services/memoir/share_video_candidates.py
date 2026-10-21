@@ -532,6 +532,11 @@ async def get_latest_share_video_candidate(
         .order_by(exact_range.desc(), MemoirMaterialShareVideo.created_at.desc(), MemoirMaterialShareVideo.id.desc())
         .limit(1)
     )
+    if latest_job_id is None and candidate.status == MemoirShareVideoCandidateStatus.ACCEPTED.value:
+        # Deleting the last matching video ends the consumed suggestion; it must not return as ready.
+        candidate.status = MemoirShareVideoCandidateStatus.DISMISSED.value
+        await db.commit()
+        return None
     if latest_job_id and (
         candidate.status != MemoirShareVideoCandidateStatus.ACCEPTED.value
         or candidate.video_job_id != latest_job_id
