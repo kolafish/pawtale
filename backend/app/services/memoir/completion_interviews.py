@@ -40,6 +40,9 @@ class OpeningCompletionOffer:
 
 OPENING_OFFER_KEY = "opening_completion_issue_id"
 OPENING_OFFER_TRIGGER_MESSAGE_KEY = "opening_completion_trigger_message_id"
+OPENING_OFFER_STATUS_KEY = "opening_completion_offer_status"
+OPENING_OFFER_PENDING = "pending"
+OPENING_OFFER_CONSUMED = "consumed"
 OPENING_OFFER_DECLINED_KEY = "opening_completion_offer_declined"
 SUPPLEMENT_DECLINE_PHRASES = (
     "不想补充",
@@ -56,17 +59,43 @@ OPENING_INTENTS = ("opening", "no_answer_prompt")
 
 
 async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> OpeningCompletionOffer | None:
-    """Recommend once, without starting an issue or binding any narration."""
+    """Prepare one retryable offer without starting an issue or binding narration."""
     metadata = voice_session.metadata_json or {}
-    if metadata.get(OPENING_OFFER_KEY) or metadata.get(OPENING_OFFER_DECLINED_KEY):
+    if metadata.get(OPENING_OFFER_DECLINED_KEY):
         return None
-    previously_offered = set((await db.scalars(select(
+    current_issue_id = metadata.get(OPENING_OFFER_KEY)
+    current_status = metadata.get(OPENING_OFFER_STATUS_KEY)
+    if current_issue_id and current_status != OPENING_OFFER_PENDING:
+        # Older sessions have no status field; their existing offer was already shown.
+        return None
+    if current_issue_id and current_status == OPENING_OFFER_PENDING:
+        pending_issue = await db.get(MemoirCompletionIssue, current_issue_id)
+        if pending_issue is not None and pending_issue.channel == "interview" and pending_issue.status == "open":
+            latest_user_message = await _latest_user_message(db, voice_session.id)
+            pending_metadata = {
+                **metadata,
+                OPENING_OFFER_STATUS_KEY: OPENING_OFFER_PENDING,
+            }
+            if latest_user_message is not None:
+                pending_metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
+            voice_session.metadata_json = pending_metadata
+            await db.flush()
+            return OpeningCompletionOffer(issue_id=pending_issue.id, question=pending_issue.question)
+        await clear_pending_opening_offer(db, voice_session=voice_session)
+        metadata = voice_session.metadata_json or {}
+    offered_rows = await db.execute(select(
         MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_STATUS_KEY].as_string(),
     ).where(
         MemoirVoiceSession.project_id == voice_session.project_id,
         MemoirVoiceSession.id != voice_session.id,
         MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
-    ).distinct())).all())
+    ))
+    previously_offered = {
+        issue_id
+        for issue_id, status in offered_rows.all()
+        if status != OPENING_OFFER_PENDING
+    }
     eligible_sections = set((await db.scalars(select(MemoirSection.id).join(MemoirBookPlanChapter).where(
         MemoirSection.project_id == voice_session.project_id,
         MemoirSection.status == "active", MemoirSection.include_in_book.is_(True),
@@ -82,27 +111,77 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
             if exc.status_code == 409:
                 continue
             raise
-        latest_user_message = await db.scalar(
-            select(MemoirChatMessage)
-            .where(
-                MemoirChatMessage.voice_session_id == voice_session.id,
-                MemoirChatMessage.role == "user",
-                MemoirChatMessage.content_text != "",
-            )
-            .order_by(
-                MemoirChatMessage.turn_index.desc(),
-                MemoirChatMessage.created_at.desc(),
-                MemoirChatMessage.id.desc(),
-            )
-            .limit(1)
-        )
-        metadata = {**(voice_session.metadata_json or {}), OPENING_OFFER_KEY: issue.id}
+        latest_user_message = await _latest_user_message(db, voice_session.id)
+        metadata = {
+            **(voice_session.metadata_json or {}),
+            OPENING_OFFER_KEY: issue.id,
+            OPENING_OFFER_STATUS_KEY: OPENING_OFFER_PENDING,
+        }
         if latest_user_message is not None:
             metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
         voice_session.metadata_json = metadata
         await db.flush()
         return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
     return None
+
+
+async def _latest_user_message(
+    db: AsyncSession,
+    voice_session_id: str,
+) -> MemoirChatMessage | None:
+    return await db.scalar(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.voice_session_id == voice_session_id,
+            MemoirChatMessage.role == "user",
+            MemoirChatMessage.content_text != "",
+        )
+        .order_by(
+            MemoirChatMessage.turn_index.desc(),
+            MemoirChatMessage.created_at.desc(),
+            MemoirChatMessage.id.desc(),
+        )
+        .limit(1)
+    )
+
+
+async def consume_opening_offer(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+    issue_id: str,
+) -> None:
+    metadata = voice_session.metadata_json or {}
+    if (
+        metadata.get(OPENING_OFFER_KEY) != issue_id
+        or metadata.get(OPENING_OFFER_STATUS_KEY) != OPENING_OFFER_PENDING
+    ):
+        return
+    voice_session.metadata_json = {
+        **metadata,
+        OPENING_OFFER_STATUS_KEY: OPENING_OFFER_CONSUMED,
+    }
+    await db.flush()
+
+
+async def clear_pending_opening_offer(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+) -> bool:
+    metadata = voice_session.metadata_json or {}
+    if metadata.get(OPENING_OFFER_STATUS_KEY) != OPENING_OFFER_PENDING:
+        return False
+    next_metadata = dict(metadata)
+    for key in (
+        OPENING_OFFER_KEY,
+        OPENING_OFFER_TRIGGER_MESSAGE_KEY,
+        OPENING_OFFER_STATUS_KEY,
+    ):
+        next_metadata.pop(key, None)
+    voice_session.metadata_json = next_metadata
+    await db.flush()
+    return True
 
 
 def explicitly_declines_supplement(text: str) -> bool:
