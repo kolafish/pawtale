@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -167,3 +168,39 @@ async def test_product_scene_snapshots_are_valid_and_terminal_completion_skips_p
         assert result["status"] == "dry_run", result.get("error")
         if case.id == "product-completion-done":
             assert result["policy_input"] is None
+
+
+@pytest.mark.parametrize("invalid_labels", [False, True])
+async def test_batch_judge_preserves_anonymous_response_identity_and_failed_attempts(tmp_path, monkeypatch, invalid_labels):
+    from scripts import judge_memoir_interview_batch as judge
+
+    runs = [make_run(tmp_path / "a", text="a"), make_run(tmp_path / "b", text="b")]
+
+    async def generate(client, system, prompt, **kwargs):
+        candidates = json.loads(prompt)["candidates"]
+        results = [{
+            "label": "wrong" if invalid_labels else candidate["label"], "unsupported_premises": [],
+            "scores": dict(continuity=2, value=2, grounding=1 if candidate["speech_text"] == "a" else 2,
+                           boundaries=2, non_repetition=2),
+            "severe_failures": [], "rationale": "test rationale",
+        } for candidate in reversed(candidates)]
+        return SimpleNamespace(value=judge.JudgmentBatch(results=results),
+                               response=SimpleNamespace(content=json.dumps(results), diagnostics=lambda: {}))
+
+    monkeypatch.setattr(judge, "get_ai_service", lambda model: SimpleNamespace())
+    monkeypatch.setattr(judge, "generate_structured_with_client", generate)
+    output = tmp_path / "judged"
+    assert await judge.main(SimpleNamespace(run=runs, output=output, case=None, model="test")) == int(invalid_labels)
+    for run, expected_grounding in zip(runs, [1, 2]):
+        review = output / run.name
+        rating = Rating.model_validate_json((review / "ratings.model.jsonl").read_text())
+        summary = summarize(review, review / "ratings.model.jsonl")
+        assert summary["human_checked_items"] == 0
+        if invalid_labels:
+            assert rating.scores is None and rating.reviewer_kind == "pending"
+        else:
+            assert rating.scores.grounding == expected_grounding
+            assert rating.reviewer_kind == "model"
+    logs = [json.loads(s) for s in (output / "judge.results.jsonl").read_text().splitlines()]
+    assert len(logs) == 1 and logs[0]["status"] == ("failed" if invalid_labels else "completed")
+    assert logs[0]["response"]

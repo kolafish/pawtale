@@ -1,3 +1,5 @@
+import argparse
+import asyncio
 import json
 
 import pytest
@@ -6,6 +8,7 @@ from app.services.ai_base import AITextServiceBase
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir.interview_agent import InterviewConfig
 from scripts.eval_memoir_interview import EvalCase, load_dataset, run_case
+from scripts import eval_memoir_interview as evaluator
 
 
 def dataset(tmp_path, *, mode="autonomous", role="interviewee_candidate"):
@@ -128,3 +131,35 @@ async def test_policy_failure_preserves_live_reply_fallback_and_exposes_failure(
     assert result["policy_error"]["type"] == "ConnectionError"
     assert result["policy_decision"] is None
     assert result["turn"]["speech_text"]
+
+
+async def test_concurrent_evaluation_retains_all_repeats_and_failures(tmp_path, monkeypatch):
+    first = dataset(tmp_path)
+    second = first.model_copy(update={"id": "case-2"})
+    inputs = tmp_path / "inputs.jsonl"
+    inputs.write_text(first.model_dump_json() + "\n" + second.model_dump_json() + "\n")
+    active = 0
+    maximum = 0
+
+    async def fake_run(case, config, **kwargs):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"case": {"id": case.id}, "status": "failed" if case.id == "case-2" else "completed",
+                "policy_error": None, "seconds": 0.01}
+
+    monkeypatch.setattr(evaluator, "run_case", fake_run)
+    monkeypatch.setattr(evaluator, "git_output", lambda *args: "test-snapshot")
+    output = tmp_path / "run"
+    args = argparse.Namespace(dataset=None, cases=inputs, split="dev", case=None, max_cases=10,
+                              ai_model="test", temperature=0.72, prompt_variant="baseline",
+                              policy_mode="shadow", live=True, output=output, repeat=2, concurrency=2)
+    assert await evaluator.evaluate(args) == 1
+    rows = evaluator.read_jsonl(output / "results.jsonl")
+    assert {(row["case"]["id"], row["repeat"]) for row in rows} == {
+        (identifier, repeat) for identifier in ("case-1", "case-2") for repeat in range(2)
+    }
+    assert len(rows) == 4 and maximum == 2
+    assert json.loads((output / "summary.json").read_text()) == {"attempts": 4, "failed": 2, "policy_failed": 0}

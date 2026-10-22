@@ -7,7 +7,8 @@ import pytest
 from app.domain.memoir.types import MemoirConversationAction
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir.interview_agent import (
-    InterviewConfig, InterviewInput, InterviewRun, prepare_interview_turn, stream_interview_turn,
+    SUPPORTED_PROMPT_VARIANTS, InterviewConfig, InterviewInput, InterviewRun,
+    prepare_interview_turn, stream_interview_turn,
 )
 from app.services.memoir.voice_followup_ai import InterviewDialogue, InterviewMessage
 
@@ -95,3 +96,18 @@ async def test_missing_control_prefix_keeps_existing_safe_pause_behavior():
     ):
         pass
     assert run.completed_turn(prepared.input).conversation_action == MemoirConversationAction.PAUSE
+
+
+def test_experimental_prompt_is_opt_in_and_preserves_completion_contract():
+    baseline = prepare_interview_turn(snapshot(), InterviewConfig())
+    completion = snapshot("book_completion")
+    original = prepare_interview_turn(completion, InterviewConfig())
+    for variant in SUPPORTED_PROMPT_VARIANTS[1:]:
+        candidate = prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant=variant))
+        assert baseline.prompt_version != candidate.prompt_version
+        assert (baseline.system_prompt, baseline.prompt) != (candidate.system_prompt, candidate.prompt)
+        candidate_completion = prepare_interview_turn(completion, InterviewConfig(prompt_variant=variant))
+        assert (original.system_prompt, original.prompt) == (candidate_completion.system_prompt, candidate_completion.prompt)
+        assert original.prompt_version == candidate_completion.prompt_version
+    with pytest.raises(ValueError, match="Unsupported interview prompt variant"):
+        prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="typo"))

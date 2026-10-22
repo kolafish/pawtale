@@ -29,7 +29,7 @@ from app.services.ai_usage_records import current_ai_usage_context
 from app.services.memoir import completion_interviews, narrator_profile, narration_people  # noqa: F401
 from app.services.memoir.completion_interviews import CompletionIssuePromptContext  # noqa: F401
 from app.services.memoir.interview_agent import (
-    STREAM_PROMPT_VERSION, InterviewConfig, InterviewInput, InterviewRun,
+    STREAM_PROMPT_VERSION, SUPPORTED_PROMPT_VARIANTS, InterviewConfig, InterviewInput, InterviewRun,
     prepare_interview_turn, stream_interview_turn,
 )
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic  # noqa: F401
@@ -205,7 +205,7 @@ async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, polic
     def result(status, **extra):
         return {
             "schema_version": 1, "case": case.model_dump(mode="json"),
-            "config": asdict(config), "prompt_version": STREAM_PROMPT_VERSION,
+            "config": asdict(config), "prompt_version": prepared.prompt_version if prepared else STREAM_PROMPT_VERSION,
             "policy_mode": policy_mode,
             "policy_error": policy_error,
             "policy_context_origin": "frozen" if case.policy_context else "visible_dialogue_only",
@@ -308,7 +308,7 @@ async def evaluate(args: argparse.Namespace) -> int:
     cases = cases[:args.max_cases]
     if not cases:
         raise ValueError("No evaluation cases selected")
-    config = InterviewConfig(requested_model=args.ai_model, temperature=args.temperature)
+    config = InterviewConfig(requested_model=args.ai_model, temperature=args.temperature, prompt_variant=args.prompt_variant)
     repo = Path(__file__).resolve().parents[2]
     tracked_diff = git_output(repo, "diff", "HEAD", "--", "backend")
     manifest = {
@@ -317,23 +317,31 @@ async def evaluate(args: argparse.Namespace) -> int:
         "tracked_backend_dirty": bool(tracked_diff),
         "source_files": {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
         "config": asdict(config), "policy_mode": args.policy_mode, "live": args.live,
-        "case_ids": [case.id for case in cases], "repeat": args.repeat,
+        "case_ids": [case.id for case in cases], "repeat": args.repeat, "concurrency": args.concurrency,
     }
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / "manifest.json", manifest)
+    (args.output / "code.patch").write_text(tracked_diff)
     (args.output / "inputs.jsonl").write_text("".join(case.model_dump_json() + "\n" for case in cases))
     failed = 0
     policy_failed = 0
+    semaphore = asyncio.Semaphore(args.concurrency)
+
+    async def execute(case, repeat):
+        async with semaphore:
+            row = await run_case(case, config, live=args.live, policy_mode=args.policy_mode)
+            return {**row, "repeat": repeat}
+
     with (args.output / "results.jsonl").open("x") as out:
-        for case in cases:
-            for repeat in range(args.repeat):
-                row = await run_case(case, config, live=args.live, policy_mode=args.policy_mode)
-                row["repeat"] = repeat
-                out.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-                out.flush()
-                failed += row["status"] == "failed"
-                policy_failed += bool(row["policy_error"])
-                print(json.dumps({"id": case.id, "repeat": repeat, "status": row["status"], "seconds": row["seconds"]}), flush=True)
+        tasks = [execute(case, repeat) for case in cases for repeat in range(args.repeat)]
+        for task in asyncio.as_completed(tasks):
+            row = await task
+            out.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+            out.flush()
+            failed += row["status"] == "failed"
+            policy_failed += bool(row["policy_error"])
+            print(json.dumps({"id": row["case"]["id"], "repeat": row["repeat"],
+                              "status": row["status"], "seconds": row["seconds"]}), flush=True)
     write_json(args.output / "summary.json", {
         "attempts": len(cases) * args.repeat, "failed": failed, "policy_failed": policy_failed,
     })
@@ -350,10 +358,12 @@ def main() -> int:
     parser.add_argument("--mode", choices=["autonomous", "guided"], default="autonomous")
     parser.add_argument("--policy-mode", choices=["off", "active", "shadow"], required=True)
     parser.add_argument("--ai-model", required=True)
+    parser.add_argument("--prompt-variant", choices=SUPPORTED_PROMPT_VARIANTS, default="baseline")
     parser.add_argument("--temperature", type=float, default=0.72)
     parser.add_argument("--case", action="append")
     parser.add_argument("--max-cases", type=int, default=10)
     parser.add_argument("--repeat", type=int, choices=range(1, 6), default=1)
+    parser.add_argument("--concurrency", type=int, choices=range(1, 9), default=1)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

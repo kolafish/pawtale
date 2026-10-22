@@ -10,6 +10,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
+from typing import Literal
 
 from app.domain.memoir.types import MemoirConversationAction, MemoirSessionGoal
 from app.services.ai_calls import stream_text_with_client
@@ -34,6 +35,38 @@ from app.services.memoir.voice_interviewer_prompt import build_stream_turn_promp
 
 STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v10"
 STREAM_TEXT_TEMPERATURE = 0.72
+SUPPORTED_PROMPT_VARIANTS = ("baseline", "grounded_v1", "grounded_v2", "grounded_v3", "grounded_v4")
+_GROUNDED_INTERVIEW_INSTRUCTION = """本轮承接与提问的事实边界：
+- 事实只来自讲述者明确说过的内容或给定资料。访谈员的问题、猜测和未获确认的总结不算讲述者的经历。
+- 礼貌承接也要有依据；不要从年龄、职业或说话方式推断健康、性格、情绪和长期心理。可以承接已经表达的感受，不替他补感受。
+- 问题的前提同样不能添写经历：尚未讲过的离开、转行、迁居或遭遇不能当成已发生。只沿已知内容邀请展开，允许对方否认或说不知道。
+- “不知道、从未问过、没有证据”保留为未知，不改成忘记，不猜原因、他人动机或讲述者的心理。"""
+_GROUNDED_V2_INSTRUCTION = """本轮先核对事实，再接话（只输出访谈员的话，不输出核对过程）：
+- 事实仅来自讲述者明确说过的内容或给定资料。访谈员的猜测、问题和未被确认的总结不能算成讲述者的经历；也不能根据年龄、职业、说话方式补出健康、性格、情绪或“经历肯定很多”等评价。
+- 对每个承接句和问题前提，分别核对谁、做了什么、对谁、何时何地以及结果。不同经历不合并，遇见某人不等于向他学习，做过一件事不等于取得某种结果。缺少依据就删掉该前提，不靠“是不是”给猜测披上问题形式。
+- 用户最新的否定和更正优先；改正被否定的那一部分，保留其余已明确的信息。已经确认的更正后续继续沿用，不重问已说清的事实。
+- 不知道、没问过、缺乏证据保持原样，不转换成忘记，不要求回忆从未知道的事，不猜别人动机或替讲述者补心理。
+- 接话保持朴素自然，最多一个问题。用户还在展开就让他继续；需要邀请展开时，沿他明确提到的一件事问一个尚未说过的具体细节。若对方刚纠正你，先准确接住这次纠正，不强行换到另一段经历。"""
+_GROUNDED_V3_INSTRUCTION = _GROUNDED_V2_INSTRUCTION + """
+本轮落点：先在讲述者最新一两句话里选一个明确说到的事、原话或细节。需要追问时，就让他把这个细节展开，不跨到尚未提及的后续人生。
+- 优先问当时具体怎样、某句原话指的是什么、已提到的一件事怎样发生；只有用户已明确开启后续阶段，才跟着往后问。
+- 不用“后来您怎么离开/转向/走出/放下”等问法，除非用户已明确说发生了该变化；不要借“后来”自动补出新的经历或心理结局。
+- 用户正在给出一个尚未展开的概念或场景，就接住这个入口，不替他说完；用户已经说明的感受、结果或原因，不再换成确认问题。
+- 不需要为了凑字数先评价或复述。一个有依据、好回答的问题可以独立成句；语气自然，不播报规则。"""
+_GROUNDED_V4_INSTRUCTION = """访谈原则：让讲述者把自己的事讲清楚，事实与节奏比热情的套话更重要。请遵循输入中的控制标记协议，只输出标记与自然口语，不输出思考过程。
+回应前按以下顺序判断：
+1. 用户此刻要结束、暂停、不聊某件事或纠正你，先尊重这一意思。更正只替换被否定的内容，保留其他已经明确的信息；后续不再索取已确认的答案。
+2. 从用户最新讲述里选一个明确的事件、原话或细节作落点。话未说完或明确想自己讲，就简短接住让他继续；已经给出清楚入口，就邀请展开当前这件事，不自动跳到未提及的“后来”。
+3. 要问就只问一件事，给一个容易回答的开放入口。不用二选一串出两种猜测，不把“怎么接触的”和“有什么影响”等两个问题塞在一句里。先检查答案是否已经说过；已说过就不要再确认。
+4. 检查回应每个断言和问题前提：主体、动作、对象、地点、时间、结果、心理状态都需要讲述者或给定资料的明确依据。两件事分别出现，不代表它们之间存在因果或师生等关系；提到某人的机构不代表讲述者到过那里。不得添写停下脚步、后来重逢、离开转行、走出伤痛等未说过的动作或变化；疑问句也不能豁免这些前提。
+5. 不知道、从未问过、没有证据保持为未知，不等于忘记。可以邀请讲自己的亲历，不要求猜测未知原因或他人动机。礼貌承接也不推断健康、性格、人生经历或情绪；朴素接话即可，不为凑字数复述、夸赞或补心理。
+若一个问题必须先补出未说事实才能成立，就删掉这个前提，回到用户原话里的落点。"""
+_PROMPT_INSTRUCTIONS = {
+    "grounded_v1": _GROUNDED_INTERVIEW_INSTRUCTION,
+    "grounded_v2": _GROUNDED_V2_INSTRUCTION,
+    "grounded_v3": _GROUNDED_V3_INSTRUCTION,
+    "grounded_v4": _GROUNDED_V4_INSTRUCTION,
+}
 
 
 @dataclass(frozen=True)
@@ -53,6 +86,7 @@ class InterviewConfig:
     requested_model: str | None = None
     temperature: float = STREAM_TEXT_TEMPERATURE
     regenerate: bool = False
+    prompt_variant: Literal["baseline", "grounded_v1", "grounded_v2", "grounded_v3", "grounded_v4"] = "baseline"
 
 
 @dataclass(frozen=True)
@@ -62,24 +96,37 @@ class PreparedInterviewTurn:
     system_prompt: str
     prompt: str
     max_tokens: int
+    prompt_version: str = STREAM_PROMPT_VERSION
 
 
 def prepare_interview_turn(snapshot: InterviewInput, config: InterviewConfig) -> PreparedInterviewTurn:
+    if config.prompt_variant not in SUPPORTED_PROMPT_VARIANTS:
+        raise ValueError(f"Unsupported interview prompt variant: {config.prompt_variant}")
+    prompt = build_stream_turn_prompt(
+        snapshot.dialogue,
+        has_previous_project_narration=snapshot.has_previous_project_narration,
+        activation_context=snapshot.activation_context,
+        regenerate=config.regenerate,
+        progress_context=snapshot.progress_context,
+        persona=snapshot.persona,
+        completion_prompt_context=snapshot.completion_context,
+        book_context=snapshot.book_context,
+        policy_instruction=snapshot.policy_instruction,
+    )
+    version = STREAM_PROMPT_VERSION
+    system_prompt = system_prompt_for_persona(snapshot.persona)
+    if config.prompt_variant != "baseline" and snapshot.dialogue.session_goal == MemoirSessionGoal.OPEN_NARRATION.value:
+        if config.prompt_variant == "grounded_v4":
+            system_prompt += "\n\n" + _PROMPT_INSTRUCTIONS[config.prompt_variant]
+        else:
+            prompt += "\n\n" + _PROMPT_INSTRUCTIONS[config.prompt_variant]
+        version += "/" + config.prompt_variant.replace("_", "-")
     return PreparedInterviewTurn(
         input=snapshot,
         config=config,
-        system_prompt=system_prompt_for_persona(snapshot.persona),
-        prompt=build_stream_turn_prompt(
-            snapshot.dialogue,
-            has_previous_project_narration=snapshot.has_previous_project_narration,
-            activation_context=snapshot.activation_context,
-            regenerate=config.regenerate,
-            progress_context=snapshot.progress_context,
-            persona=snapshot.persona,
-            completion_prompt_context=snapshot.completion_context,
-            book_context=snapshot.book_context,
-            policy_instruction=snapshot.policy_instruction,
-        ),
+        system_prompt=system_prompt,
+        prompt=prompt,
+        prompt_version=version,
         max_tokens=_llm_max_tokens(
             snapshot.dialogue,
             has_user_message=_has_user_message(snapshot.dialogue.messages),
