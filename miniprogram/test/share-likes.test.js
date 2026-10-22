@@ -26,7 +26,7 @@ test("book and chapter share panels receive the full liker list", () => {
   }
 });
 
-function loadPlayer({ likeApi = {}, loginWithWeChat = unmockedAsync("loginWithWeChat") } = {}) {
+function loadPlayer({ likeApi = {}, loginWithWeChat = unmockedAsync("loginWithWeChat"), reading = false } = {}) {
   mockMemoirApiModules({
     readMemoirSharedVideo: async () => ({
       title: "外婆家的冬天",
@@ -52,7 +52,7 @@ function loadPlayer({ likeApi = {}, loginWithWeChat = unmockedAsync("loginWithWe
     resolveBackendAvatarUrl: (url) => (url ? `https://api.example.com${url}` : ""),
   });
   clearModule("../services/share-likes.ts");
-  return loadPageModule("../pages/share-video-player/index.ts");
+  return loadPageModule(reading ? "../pages/book-reader/index.ts" : "../pages/share-video-player/index.ts");
 }
 
 function likes(patch = {}) {
@@ -70,22 +70,23 @@ function installWx(navigations, storage = {}) {
   };
 }
 
-test("a visitor likes a forwarded video by tapping, then is asked once for avatar and name", async () => {
+test("a visitor must consent before video-like authentication, then can complete the like and profile flow", async () => {
   const navigations = [];
   const storage = {};
   installWx(navigations, storage);
   const calls = [];
   let signedIn = false;
+  let currentLikes = likes({ count: 1, likers: [{ display_name: "三姑", avatar_url: "/api/auth/avatars/a/1.jpg" }] });
   const { page } = loadPlayer({
     likeApi: {
       readMemoirShareLikes: async (target) => {
         calls.push(["read", target]);
-        return likes({ count: 1, likers: [{ display_name: "三姑", avatar_url: "/api/auth/avatars/a/1.jpg" }] });
+        return currentLikes;
       },
       setMemoirShareLike: async (target, liked) => {
         calls.push(["set", target, liked]);
         if (!signedIn) throw new ApiError(401, "请先登录", {});
-        return likes({
+        currentLikes = likes({
           count: liked ? 2 : 1,
           liked,
           profile_missing: liked,
@@ -94,6 +95,7 @@ test("a visitor likes a forwarded video by tapping, then is asked once for avata
             { display_name: "三姑", avatar_url: "/api/auth/avatars/a/1.jpg" },
           ],
         });
+        return currentLikes;
       },
     },
     loginWithWeChat: async () => {
@@ -111,27 +113,60 @@ test("a visitor likes a forwarded video by tapping, then is asked once for avata
   assert.deepEqual(context.data.shareLikeAvatars, [{ key: "0", url: "https://api.example.com/api/auth/avatars/a/1.jpg" }]);
 
   await page.toggleShareLike.call(context);
-  assert.deepEqual(calls.slice(1), [
+  assert.equal(signedIn, false);
+  assert.deepEqual(calls.slice(1), [["set", { video_code: CODE }, true]]);
+  assert.equal(context.data.shareLiked, false);
+  assert.equal(context.data.shareLikeBusy, false);
+  assert.equal(navigations.length, 1);
+  const loginUrl = new URL(navigations[0], "https://miniprogram.example");
+  assert.equal(loginUrl.pathname, "/pages/login/index");
+
+  const { page: login } = loadPageModule("../pages/login/index.ts");
+  const loginContext = pageContext(login);
+  login.onLoad.call(loginContext, Object.fromEntries(loginUrl.searchParams));
+  assert.equal(loginContext.data.profileMode, false);
+  assert.equal(loginContext.data.privacyAgreed, false);
+  await loginContext.submitWeChat();
+  assert.equal(signedIn, false);
+  assert.equal(calls.length, 2);
+
+  // Returning without consent never resumes the pending like.
+  await context.loadShareLikes(context.shareLikeTarget);
+  assert.equal(context.data.shareLiked, false);
+  assert.equal(signedIn, false);
+
+  loginContext.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  await loginContext.submitWeChat();
+  assert.equal(signedIn, true);
+  assert.equal(loginContext.data.profileMode, true);
+  assert.equal(loginContext.data.wechatLoading, false);
+  const backs = [];
+  global.wx.navigateBack = () => backs.push(true);
+  loginContext.skipWeChatProfile();
+  assert.deepEqual(backs, [true]);
+  // The share page reloads the persisted like after returning from login/profile setup.
+  await context.loadShareLikes(context.shareLikeTarget);
+  const completedLike = calls.filter(([method]) => method === "set");
+  assert.deepEqual(completedLike, [
     ["set", { video_code: CODE }, true],
     ["set", { video_code: CODE }, true],
   ]);
+
   assert.equal(context.data.shareLiked, true);
-  assert.equal(context.data.shareLikeBusy, false);
   assert.equal(context.data.shareLikeText, "三姑等 2 位家人觉得好");
   assert.deepEqual(context.data.shareLikeAvatars.map((avatar) => avatar.url), ["", "https://api.example.com/api/auth/avatars/a/1.jpg"]);
-  assert.deepEqual(navigations, ["/pages/login/index?from=like"]);
+  assert.equal(navigations.length, 1);
   // Skipping the form leaves a way back to it, since the author would only see "未留名".
   assert.equal(context.data.shareLikeProfileMissing, true);
   page.openShareLikeProfile.call(context);
-  assert.deepEqual(navigations, ["/pages/login/index?from=like", "/pages/login/index?from=like"]);
+  assert.equal(navigations[1], "/pages/login/index?from=like");
   navigations.length = 1;
 
   // Unliking and liking again never asks a second time.
-  signedIn = false;
   await page.toggleShareLike.call(context);
   await page.toggleShareLike.call(context);
   assert.equal(context.data.shareLiked, true);
-  assert.deepEqual(navigations, ["/pages/login/index?from=like"]);
+  assert.equal(navigations.length, 1);
 });
 
 test("the author sees who liked their video without a like button", async () => {
@@ -152,6 +187,70 @@ test("the author sees who liked their video without a like button", async () => 
   assert.equal(context.data.shareLikeText, "还没有家人点赞");
   await page.toggleShareLike.call(context);
   assert.equal(context.data.shareLiked, false);
+});
+
+test("a shared-book visitor consents before authentication and can retry a failed like without losing the target", async () => {
+  const { sampleBookOutput } = require("./book-fixtures");
+  const navigations = [];
+  const backs = [];
+  installWx(navigations);
+  global.wx.navigateBack = () => backs.push(true);
+  global.wx.reLaunch = () => assert.fail("share login must return to the shared book");
+  let loginCalls = 0;
+  let liked = false;
+  let failLike = true;
+  const mutations = [];
+  const { page } = loadPlayer({
+    reading: true,
+    likeApi: {
+      readMemoirBookShare: async () => sampleBookOutput(),
+      readMemoirShareLikes: async () => likes({ liked }),
+      setMemoirShareLike: async (target, value) => {
+        if (!loginCalls) throw new ApiError(401, "请先登录", {});
+        mutations.push([target, value]);
+        if (failLike) throw new ApiError(503, "点赞暂时不可用", {});
+        liked = value;
+        return likes({ liked });
+      },
+    },
+    loginWithWeChat: async () => {
+      loginCalls += 1;
+      return { user: { display_name: "三姑", avatar_url: "/avatar.jpg" } };
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "family-token" });
+  await context.toggleShareLike();
+  assert.equal(loginCalls, 0);
+  assert.equal(liked, false);
+
+  const loginUrl = new URL(navigations[0], "https://miniprogram.example");
+  const { page: login } = loadPageModule("../pages/login/index.ts");
+  const loginContext = pageContext(login);
+  loginContext.onLoad(Object.fromEntries(loginUrl.searchParams));
+  assert.equal(loginContext.data.profileMode, false);
+  await loginContext.submitWeChat();
+  assert.equal(loginCalls, 0);
+  assert.deepEqual(mutations, []);
+
+  loginContext.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  await loginContext.submitWeChat();
+  assert.match(loginContext.data.error, /点赞暂时不可用/);
+  assert.equal(liked, false);
+  assert.equal(loginContext.data.wechatLoading, false);
+  assert.deepEqual(backs, []);
+
+  failLike = false;
+  await loginContext.submitWeChat();
+  assert.deepEqual(mutations, [
+    [{ reading_token: "family-token" }, true],
+    [{ reading_token: "family-token" }, true],
+  ]);
+  assert.equal(loginContext.data.profileMode, false);
+  assert.equal(loginContext.data.error, "");
+  assert.deepEqual(backs, [true]);
+  await context.loadShareLikes(context.shareLikeTarget);
+  assert.equal(context.data.shareLiked, true);
 });
 
 test("the home notice names who liked which story", () => {

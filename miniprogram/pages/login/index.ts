@@ -10,6 +10,8 @@ import { relaunchHome } from "../../services/navigation";
 import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
 import { openWechatPrivacyContract } from "../../services/wechat-privacy";
+import { completeShareLikeLogin } from "../../services/share-likes";
+import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import { uploadBackendAvatar } from "../../services/user-profile";
 
 const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
@@ -46,6 +48,9 @@ interface LoginData {
 }
 
 definePage<LoginData>()({
+  shareLikeTarget: null as MemoirShareLikeTarget | null,
+  shareLikeValue: false,
+
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     wechatLoading: false,
@@ -59,7 +64,12 @@ definePage<LoginData>()({
 
   onLoad(query: PageQuery = {}) {
     if (queryParam(query, "from") === "like") {
-      this.setData({ profileMode: true });
+      const videoCode = queryParam(query, "video_code");
+      const readingToken = queryParam(query, "reading_token");
+      this.shareLikeTarget = videoCode ? { video_code: videoCode }
+        : readingToken ? { reading_token: readingToken } : null;
+      this.shareLikeValue = queryParam(query, "liked") === "1";
+      this.setData({ profileMode: !this.shareLikeTarget });
     }
   },
 
@@ -108,7 +118,17 @@ definePage<LoginData>()({
     }
     this.setData({ wechatLoading: true, error: "" });
     try {
-      await loginWithWeChat();
+      const { user } = await loginWithWeChat();
+      if (this.shareLikeTarget) {
+        const profileMode = await completeShareLikeLogin(this.shareLikeTarget, this.shareLikeValue, user);
+        this.shareLikeTarget = null;
+        if (profileMode) {
+          this.setData({ profileMode: true });
+        } else {
+          this.finishProfile();
+        }
+        return;
+      }
       relaunchHome();
     } catch (error) {
       this.setData({
