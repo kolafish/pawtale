@@ -304,10 +304,12 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
     assert assistant_message.metadata_json["memory_activation_trace_id"] is None
 
 
-async def test_follow_up_listens_with_life_topics_but_no_retrieval(
+@pytest.mark.parametrize("prompt_variant", ["v3_improved", "v3_plus", "v4"])
+async def test_follow_up_includes_shared_context_for_each_prompt_variant(
     client,
     test_db,
     monkeypatch,
+    prompt_variant,
 ):
     created = await create_test_voice_transcript(
         client,
@@ -321,12 +323,15 @@ async def test_follow_up_listens_with_life_topics_but_no_retrieval(
     )
     await test_db.commit()
 
-    async def unexpected_activation(*args, **kwargs):
-        raise AssertionError("the AI interview must not retrieve earlier material mid-story")
+    async def fake_activate(*args, **kwargs):
+        return MemoryActivationResult(
+            trace_id="ordinary-activation", status="succeeded",
+            context="候选原文：院子里住着赵师傅。", injected_count=1,
+        )
 
     monkeypatch.setattr(
         "app.services.memoir.memory_activation.activate_memory_for_turn",
-        unexpected_activation,
+        fake_activate,
     )
 
     _, ai_client, _, completed = await _run_stream_turn(
@@ -334,6 +339,7 @@ async def test_follow_up_listens_with_life_topics_but_no_retrieval(
         voice_session_id=created["session"]["id"],
         user_id=created["user_id"],
         chunks=["搬进大杂院，日子一下子热闹起来了。后来呢？"],
+        prompt_variant=prompt_variant,
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
@@ -341,9 +347,11 @@ async def test_follow_up_listens_with_life_topics_but_no_retrieval(
     assert completed["progress_update"] is None
     assert "叙述者：那年我们全家搬进了县城的大杂院。" in prompt
     assert "这个项目已经留下 1 条讲述记录" not in prompt
-    assert "不另起问题" in prompt
     assert "人生话题（按人生先后" in prompt
-    assert "历史讲述候选" not in prompt
+    assert "候选原文：院子里住着赵师傅。" in prompt
+    message = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert message.metadata_json["prompt_variant"] == prompt_variant
+    assert message.metadata_json["memory_activation_trace_id"] == "ordinary-activation"
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 260
 
 
@@ -1396,6 +1404,7 @@ async def _run_stream_turn(
     voice: str | None = None,
     policy_ai_client=None,
     control_chunks: tuple[str, ...] = ("[listen]\n",),
+    prompt_variant: str | None = None,
 ) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
     stream_client = FakeTurnClient()
     ai_client = FakeStreamingAI(chunks, control_chunks=control_chunks)
@@ -1416,6 +1425,8 @@ async def _run_stream_turn(
     payload: dict[str, Any] = {"type": "turn.start", "regenerate": regenerate}
     if voice:
         payload["voice"] = voice
+    if prompt_variant:
+        payload["prompt_variant"] = prompt_variant
     await stream_client.push(payload)
     completed = await _wait_for_event(stream_client, "turn.completed")
     await asyncio.wait_for(run_task, timeout=1)

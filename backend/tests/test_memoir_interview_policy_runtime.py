@@ -364,7 +364,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     assert utterance.policy_decision_id == decision.id
     await test_db.refresh(session, ["messages"])
     assert session.guidance_mode == guidance_mode
-    assert session.anchor_framework_item_id == (selected_item.id if guidance_mode == "guided_interview" else None)
+    assert session.anchor_framework_item_id == selected_item.id
 
     continued = await prepare_active_policy_turn(
         test_db,
@@ -456,9 +456,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     assert switched is not None
     assert switched.context.brief.target_id != selected_item.id
     await save_policy_answer(switched, 5, "后来我到了另一座城市工作。")
-    assert session.anchor_framework_item_id == (
-        switched.context.brief.target_id if guidance_mode == "guided_interview" else None
-    )
+    assert session.anchor_framework_item_id == switched.context.brief.target_id
 
 
 async def test_keyword_pause_is_only_a_suggestion_for_the_semantic_streamed_turn(

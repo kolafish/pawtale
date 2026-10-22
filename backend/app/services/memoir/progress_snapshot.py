@@ -98,7 +98,6 @@ async def _voice_progress_metrics(
         func.nullif(session.current_guidance_module, ""),
         case(
             (session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value, "human_interview"),
-            (session.guidance_mode == "free_narration", "free_narration"),
             else_="unassigned",
         ),
     ).label("module")

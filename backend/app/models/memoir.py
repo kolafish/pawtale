@@ -91,7 +91,7 @@ class MemoirVoiceSession(Base):
         ),
         CheckConstraint(
             "anchor_framework_item_id IS NULL OR "
-            "(guidance_mode = 'guided_interview' "
+            "(interview_type = 'ai_interview' "
             "AND session_goal = 'open_narration')",
             name="ck_memoir_voice_sessions_anchor_mode",
         ),

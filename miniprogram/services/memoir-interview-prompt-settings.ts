@@ -1,4 +1,4 @@
-export type MemoirInterviewPromptVariant = "v3_improved" | "standalone" | "v3_plus";
+export type MemoirInterviewPromptVariant = "v3_improved" | "v4" | "v3_plus";
 
 export interface MemoirInterviewPromptOption {
   value: MemoirInterviewPromptVariant;
@@ -18,9 +18,9 @@ export const MEMOIR_INTERVIEW_PROMPT_OPTIONS: MemoirInterviewPromptOption[] = [
     description: "当前真机 baseline，保留产品访谈约束并加强事实边界",
   },
   {
-    value: "standalone",
-    label: "全新 Prompt",
-    description: "更强调倾听、故事线索和自然节奏",
+    value: "v4",
+    label: "v4",
+    description: "更强调顺着故事自然继续，并保留事实边界",
   },
   {
     value: "v3_plus",

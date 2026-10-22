@@ -11,7 +11,6 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirGuidanceMode,
     MemoirInterviewType,
     MemoirSpeakerRole,
     MemoirTranscriptionStatus,
@@ -97,7 +96,7 @@ async def _assign_interview_target(
         )
     if (
         assigned.framework_item_id
-        and voice_session.guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW.value
+        and voice_session.interview_type == MemoirInterviewType.AI_INTERVIEW.value
         and voice_session.anchor_framework_item_id != assigned.framework_item_id
     ):
         voice_session.anchor_framework_item_id = assigned.framework_item_id

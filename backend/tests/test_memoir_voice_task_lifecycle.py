@@ -18,9 +18,9 @@ from tests.test_memoir_voice_tts import FakeBidirectionalConnection, bidi_server
 
 
 def test_assistant_turn_start_request_accepts_prompt_variant():
-    request = AssistantTurnStartRequest.from_payload({"prompt_variant": "v3_plus"})
+    request = AssistantTurnStartRequest.from_payload({"prompt_variant": "v4"})
 
-    assert request.prompt_variant == "v3_plus"
+    assert request.prompt_variant == "v4"
 
 
 @pytest.mark.parametrize("ending", ["cancel", "text_error", "audio_error", "normal"])
