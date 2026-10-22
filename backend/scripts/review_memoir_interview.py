@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from scripts.eval_memoir_interview import EvalCase, git_output, load_dataset, read_jsonl
 from scripts.memoir_eval_io import write_json
-from app.services.memoir.voice_followup_ai import recent_context_messages
 
 
 class Scores(BaseModel):
@@ -27,6 +26,7 @@ class Scores(BaseModel):
 
 class Rating(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    packet_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     item_id: str
     reviewer_kind: Literal["pending", "human", "agent", "model"] = "pending"
     reviewer: str = ""
@@ -58,6 +58,11 @@ def load_run(path: Path):
     return indexed
 
 
+def packet_fingerprint(manifest: dict) -> str:
+    content = {key: value for key, value in manifest.items() if key != "packet_sha256"}
+    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
 def packet(runs: list[Path], output: Path, seed: int):
     if len(runs) not in {1, 2}:
         raise ValueError("Review one baseline or compare two runs")
@@ -70,11 +75,11 @@ def packet(runs: list[Path], output: Path, seed: int):
     output.mkdir(parents=True, exist_ok=False)
     rng = random.Random(seed)
     mapping = {}
-    templates = []
     lines = [
         "# 访谈回应匿名评审", "",
         "每项 0–2 分：承接、价值、不预设、尊重边界、不重复。允许适时倾听；机械鼓励不自动得满分。",
         "只根据实际可见上下文评分，不使用隐藏后续推测信息收益。严重失败单列，并写依据。",
+        "每个候选分别展示其实际 system_prompt 与 prompt；不要把另一候选的任务或事实当作本候选输入。",
         "在 ratings.jsonl 填分，明确 human/agent/model；未审核保持 pending。input_checked 表示核对过来源与输入。", "",
     ]
     review_cases = []
@@ -83,16 +88,8 @@ def packet(runs: list[Path], output: Path, seed: int):
         if any(other[key]["case"] != indexed[0][key]["case"] for other in indexed[1:]):
             raise ValueError(f"Input snapshot mismatch: {key}")
         lines.extend([f"## {index + 1}. {case.id} / repeat {key[1]}", "", f"场景：{case.scenario}；来源：{case.track}", ""])
-        visible = [
-            {"role": msg.role, "text": msg.content_text}
-            for msg in recent_context_messages(case.snapshot.dialogue.messages)
-        ]
         context = {
-            "dialogue": visible,
             "input_mode": case.mode,
-            # The first run supplies the shared task/context, including the actual
-            # crop and any guided target. No hidden full-book state is shown.
-            "observed_prompt": indexed[0][key].get("prompt"),
             "source_url": case.source_url,
         }
         lines.extend(["```json", json.dumps(context, ensure_ascii=False, indent=2), "```", ""])
@@ -108,30 +105,49 @@ def packet(runs: list[Path], output: Path, seed: int):
                 "track": case.track, "scenario": case.scenario, "split_group": case.split_group,
                 "status": row["status"],
             }
-            templates.append(Rating(item_id=item_id).model_dump())
+            observed_input = {"system_prompt": row.get("system_prompt"), "prompt": row.get("prompt")}
             answer = row.get("turn")
             speech = answer["speech_text"] if answer else "[本次没有完成回应]"
             action = answer["conversation_action"] if answer else "failed"
-            lines.extend([f"### {label}", "", f"动作：{action}", "", speech, ""])
-            candidates.append({"item_id": item_id, "speech_text": speech, "action": action})
+            lines.extend([
+                f"### {label}", "", "实际模型输入（null 表示该次运行未记录）：", "", "```json",
+                json.dumps(observed_input, ensure_ascii=False, indent=2), "```", "",
+                f"动作：{action}", "", speech, "",
+            ])
+            candidates.append({
+                "item_id": item_id, "observed_input": observed_input, "speech_text": speech, "action": action,
+            })
         review_cases.append({"case_id": case.id, "repeat": key[1], "context": context, "candidates": candidates})
     write_json(output / "mapping.private.json", mapping)
     write_json(output / "review.json", review_cases)
     (output / "review.md").write_text("\n".join(lines) + "\n")
-    (output / "ratings.jsonl").write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in templates))
-    write_json(output / "manifest.json", {
-        "schema_version": 1, "seed": seed,
-        "mapping_sha256": hashlib.sha256((output / "mapping.private.json").read_bytes()).hexdigest(),
+    manifest = {
+        "schema_version": 2, "seed": seed,
+        "content_sha256": {
+            name: hashlib.sha256((output / name).read_bytes()).hexdigest()
+            for name in ("mapping.private.json", "review.json", "review.md")
+        },
         "source_result_sha256": {
             str(path.resolve()): hashlib.sha256((path / "results.jsonl").read_bytes()).hexdigest() for path in runs
         },
-    })
+    }
+    manifest["packet_sha256"] = packet_fingerprint(manifest)
+    write_json(output / "manifest.json", manifest)
+    (output / "ratings.jsonl").write_text("".join(
+        Rating(item_id=item_id, packet_sha256=manifest["packet_sha256"]).model_dump_json() + "\n"
+        for item_id in mapping
+    ))
 
 
 def summarize(packet_dir: Path, ratings_file: Path):
     manifest = json.loads((packet_dir / "manifest.json").read_text())
-    if hashlib.sha256((packet_dir / "mapping.private.json").read_bytes()).hexdigest() != manifest["mapping_sha256"]:
-        raise ValueError("Review mapping changed after packet creation")
+    if manifest.get("schema_version") != 2:
+        raise ValueError("Regenerate the review packet and re-review; legacy ratings have no packet fingerprint")
+    if packet_fingerprint(manifest) != manifest["packet_sha256"]:
+        raise ValueError("Review packet manifest changed after creation")
+    for name, expected in manifest["content_sha256"].items():
+        if hashlib.sha256((packet_dir / name).read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Review packet content changed after creation: {name}")
     for path, expected in manifest["source_result_sha256"].items():
         if hashlib.sha256((Path(path) / "results.jsonl").read_bytes()).hexdigest() != expected:
             raise ValueError("Source results changed after packet creation")
@@ -142,6 +158,8 @@ def summarize(packet_dir: Path, ratings_file: Path):
     severe = []
     human_checked = set()
     for rating in ratings:
+        if rating.packet_sha256 != manifest["packet_sha256"]:
+            raise ValueError(f"Rating belongs to a different review packet: {rating.item_id}")
         if rating.item_id not in mapping:
             raise ValueError(f"Unknown review item: {rating.item_id}")
         identity = (rating.item_id, rating.reviewer_kind, rating.reviewer)
@@ -186,7 +204,8 @@ def summarize(packet_dir: Path, ratings_file: Path):
         })
         runtime[-1]["unknown_cost_items"] += sum(bool(row["policy_error"]) and not row["policy_calls"] for row in rows)
     return {
-        "schema_version": 1, "review_items": len(mapping), "human_checked_items": len(human_checked),
+        "schema_version": 2, "packet_sha256": manifest["packet_sha256"],
+        "review_items": len(mapping), "human_checked_items": len(human_checked),
         "human_review_complete": len(human_checked) == len(mapping),
         "groups": group_rows, "aggregates": aggregates, "severe_failures": severe, "runtime": runtime,
     }
