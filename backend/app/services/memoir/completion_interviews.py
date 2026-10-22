@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -41,8 +41,10 @@ class OpeningCompletionOffer:
 OPENING_OFFER_KEY = "opening_completion_issue_id"
 OPENING_OFFER_TRIGGER_MESSAGE_KEY = "opening_completion_trigger_message_id"
 OPENING_OFFER_STATUS_KEY = "opening_completion_offer_status"
+OPENING_OFFER_PENDING_AT_KEY = "opening_completion_offer_pending_at"
 OPENING_OFFER_PENDING = "pending"
 OPENING_OFFER_CONSUMED = "consumed"
+OPENING_OFFER_PENDING_TTL = timedelta(minutes=15)
 OPENING_OFFER_DECLINED_KEY = "opening_completion_offer_declined"
 SUPPLEMENT_DECLINE_PHRASES = (
     "不想补充",
@@ -74,8 +76,14 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
     )
     if current_issue_id and current_status == OPENING_OFFER_PENDING:
         pending_issue = await db.get(MemoirCompletionIssue, current_issue_id)
+        pending_started_at = _pending_offer_started_at(
+            metadata,
+            fallback=voice_session.updated_at,
+        )
         if (
-            pending_issue is not None
+            pending_started_at is not None
+            and not _pending_offer_expired(metadata, fallback=voice_session.updated_at)
+            and pending_issue is not None
             and pending_issue.project_id == voice_session.project_id
             and pending_issue.channel == MemoirCompletionIssueChannel.INTERVIEW.value
             and pending_issue.status == MemoirCompletionIssueStatus.OPEN.value
@@ -89,6 +97,7 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
             pending_metadata = {
                 **metadata,
                 OPENING_OFFER_STATUS_KEY: OPENING_OFFER_PENDING,
+                OPENING_OFFER_PENDING_AT_KEY: pending_started_at.isoformat(),
             }
             if latest_user_message is not None:
                 pending_metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
@@ -136,6 +145,7 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
             **(voice_session.metadata_json or {}),
             OPENING_OFFER_KEY: locked_issue.id,
             OPENING_OFFER_STATUS_KEY: OPENING_OFFER_PENDING,
+            OPENING_OFFER_PENDING_AT_KEY: datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
         if latest_user_message is not None:
             metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
@@ -176,14 +186,49 @@ async def _offered_issue_ids(
 ) -> set[str]:
     offered_rows = await db.execute(select(
         MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_STATUS_KEY].as_string(),
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_PENDING_AT_KEY].as_string(),
+        MemoirVoiceSession.updated_at,
     ).where(
         MemoirVoiceSession.project_id == project_id,
         MemoirVoiceSession.id != excluded_session_id,
         MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
     ))
-    # Pending is a reservation until its owning turn fails/cancels and clears
-    # the metadata. It must remain excluded from other sessions as well.
-    return {issue_id for (issue_id,) in offered_rows.all()}
+    result = set()
+    for issue_id, status, pending_at, updated_at in offered_rows.all():
+        if status == OPENING_OFFER_PENDING and _pending_offer_expired(
+            {OPENING_OFFER_PENDING_AT_KEY: pending_at},
+            fallback=updated_at,
+        ):
+            continue
+        result.add(issue_id)
+    return result
+
+
+def _pending_offer_started_at(
+    metadata: dict,
+    *,
+    fallback: datetime | None,
+) -> datetime | None:
+    raw = metadata.get(OPENING_OFFER_PENDING_AT_KEY)
+    if isinstance(raw, str):
+        try:
+            value = datetime.fromisoformat(raw)
+        except ValueError:
+            value = None
+        if value is not None:
+            if value.tzinfo is not None:
+                return value.astimezone(UTC).replace(tzinfo=None)
+            return value
+    return fallback
+
+
+def _pending_offer_expired(metadata: dict, *, fallback: datetime | None) -> bool:
+    started_at = _pending_offer_started_at(metadata, fallback=fallback)
+    if started_at is None:
+        return True
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return now - started_at >= OPENING_OFFER_PENDING_TTL
 
 
 async def _latest_user_message(
@@ -218,10 +263,12 @@ async def consume_opening_offer(
         or metadata.get(OPENING_OFFER_STATUS_KEY) != OPENING_OFFER_PENDING
     ):
         return
-    voice_session.metadata_json = {
+    next_metadata = {
         **metadata,
         OPENING_OFFER_STATUS_KEY: OPENING_OFFER_CONSUMED,
     }
+    next_metadata.pop(OPENING_OFFER_PENDING_AT_KEY, None)
+    voice_session.metadata_json = next_metadata
     await db.flush()
 
 
@@ -238,6 +285,7 @@ async def clear_pending_opening_offer(
         OPENING_OFFER_KEY,
         OPENING_OFFER_TRIGGER_MESSAGE_KEY,
         OPENING_OFFER_STATUS_KEY,
+        OPENING_OFFER_PENDING_AT_KEY,
     ):
         next_metadata.pop(key, None)
     voice_session.metadata_json = next_metadata
