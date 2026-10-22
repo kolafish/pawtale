@@ -104,15 +104,6 @@
     </checkbox-group>
   </view>
 
-  <view wx:if="{{showOpeningCompletionOffer}}" class="completion-issue-panel">
-    <text class="completion-issue-label">也可以补充这一点</text>
-    <text class="completion-issue-question">{{openingCompletionOffer.question}}</text>
-    <view class="completion-issue-actions">
-      <button class="completion-issue-defer ui-button" disabled="{{finishingSession}}" bindtap="acceptOpeningCompletionOffer">补充这段</button>
-      <button class="completion-issue-defer ui-button" disabled="{{finishingSession}}" bindtap="dismissOpeningCompletionOffer">先讲别的</button>
-    </view>
-  </view>
-
   <view wx:if="{{showCompletionIssuePanel}}" class="{{completionIssuePanelClass}}">
     <view wx:if="{{!recording}}" class="completion-issue-head">
       <text class="completion-issue-label">本次只补这一点</text>

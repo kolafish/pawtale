@@ -39,12 +39,27 @@ class OpeningCompletionOffer:
 
 
 OPENING_OFFER_KEY = "opening_completion_issue_id"
+OPENING_OFFER_TRIGGER_MESSAGE_KEY = "opening_completion_trigger_message_id"
+OPENING_OFFER_DECLINED_KEY = "opening_completion_offer_declined"
+SUPPLEMENT_DECLINE_PHRASES = (
+    "不想补充",
+    "不补充",
+    "不用补充",
+    "不想回答",
+    "不回答",
+    "不想说这个",
+    "不聊这个",
+    "先讲别的",
+)
 # Assistant lines that leave the narrator still answering the opening.
 OPENING_INTENTS = ("opening", "no_answer_prompt")
 
 
 async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSession) -> OpeningCompletionOffer | None:
     """Recommend once, without starting an issue or binding any narration."""
+    metadata = voice_session.metadata_json or {}
+    if metadata.get(OPENING_OFFER_KEY) or metadata.get(OPENING_OFFER_DECLINED_KEY):
+        return None
     previously_offered = set((await db.scalars(select(
         MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
     ).where(
@@ -67,10 +82,50 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
             if exc.status_code == 409:
                 continue
             raise
-        voice_session.metadata_json = {**(voice_session.metadata_json or {}), OPENING_OFFER_KEY: issue.id}
+        latest_user_message = await db.scalar(
+            select(MemoirChatMessage)
+            .where(
+                MemoirChatMessage.voice_session_id == voice_session.id,
+                MemoirChatMessage.role == "user",
+                MemoirChatMessage.content_text != "",
+            )
+            .order_by(
+                MemoirChatMessage.turn_index.desc(),
+                MemoirChatMessage.created_at.desc(),
+                MemoirChatMessage.id.desc(),
+            )
+            .limit(1)
+        )
+        metadata = {**(voice_session.metadata_json or {}), OPENING_OFFER_KEY: issue.id}
+        if latest_user_message is not None:
+            metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
+        voice_session.metadata_json = metadata
         await db.flush()
         return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
     return None
+
+
+def explicitly_declines_supplement(text: str) -> bool:
+    normalized = "".join(text.split())
+    return any(phrase in normalized for phrase in SUPPLEMENT_DECLINE_PHRASES)
+
+
+async def record_supplement_decline(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+    latest_user_message: MemoirChatMessage | None,
+) -> None:
+    if latest_user_message is None or not explicitly_declines_supplement(latest_user_message.content_text):
+        return
+    metadata = voice_session.metadata_json or {}
+    trigger_message_id = metadata.get(OPENING_OFFER_TRIGGER_MESSAGE_KEY)
+    if not metadata.get(OPENING_OFFER_KEY) or latest_user_message.id == trigger_message_id:
+        return
+    if metadata.get(OPENING_OFFER_DECLINED_KEY):
+        return
+    voice_session.metadata_json = {**metadata, OPENING_OFFER_DECLINED_KEY: True}
+    await db.flush()
 
 
 async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
@@ -95,7 +150,11 @@ async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) 
         .scalar_subquery()
     )
     rows = (await db.execute(
-        select(MemoirChatMessage.id, MemoirCompletionIssue)
+        select(
+            MemoirChatMessage.id,
+            MemoirCompletionIssue,
+            MemoirVoiceSession.metadata_json[OPENING_OFFER_TRIGGER_MESSAGE_KEY].as_string(),
+        )
         .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirChatMessage.voice_session_id)
         .join(MemoirCompletionIssue, MemoirCompletionIssue.id == MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string())
         .where(
@@ -106,7 +165,9 @@ async def offered_chapters(db: AsyncSession, message_ids: Iterable[str | None]) 
         )
     )).all()
     result = {}
-    for message_id, issue in rows:
+    for message_id, issue, trigger_message_id in rows:
+        if trigger_message_id and trigger_message_id == message_id:
+            continue
         chapter_ids = (
             [issue.chapter_id]
             if issue.scope == MemoirCompletionIssueScope.CHAPTER.value

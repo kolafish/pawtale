@@ -32,27 +32,51 @@ async def _issue(client, db):
     return project_id, chapters[0], issue
 
 
-async def test_opening_offer_is_once_only_and_does_not_bind_ordinary_narration(client, test_db, tmp_path, monkeypatch):
+async def test_home_opening_does_not_offer_supplement_until_narrator_has_no_direction(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr('app.services.memoir.audio_files.MEMOIR_AUDIO_DIR', tmp_path / 'audio')
     project_id, _, issue = await _issue(client, test_db)
     session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
     user_id = (await test_db.get(Project, project_id)).user_id
     stream, ai, _, _ = await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
-        chunks=['欢迎回来，愿意补充可以点补充这段，也可以直接讲别的。'])
+        chunks=['欢迎回来，您接着讲就好。'])
     started = next(event for event in stream.sent if event['type'] == 'turn.started')
-    assert started['opening_completion_offer'] == {'issue_id': issue.id, 'question': issue.question}
-    assert issue.question in ai.calls[0]['user_prompt']
+    assert 'opening_completion_offer' not in started
+    assert issue.question not in ai.calls[0]['user_prompt']
     await test_db.refresh(issue)
     await test_db.refresh(session)
     assert issue.status == 'open' and session.current_completion_issue_id is None
-    # Even after an offer, a direct answer/refusal/other story is ordinary narration.
-    source = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw='今天不聊比赛，我想讲工厂里的师傅。')
-    test_db.add(source)
+    assert completion_interviews.OPENING_OFFER_KEY not in session.metadata_json
+
+    no_direction = _line(project_id, session.id, 'user', '我不知道讲什么了。', 1)
+    test_db.add(no_direction)
     await test_db.flush()
-    assert await completion_interviews.bind_answer_segment(test_db, voice_session=session, utterance=source) is None
-    assert source.completion_issue_id is None and issue.status == 'open'
-    later = await _opening(client, test_db, project_id)
-    assert await completion_interviews.offer_for_opening(test_db, voice_session=later) is None
+    await test_db.commit()
+    stream, ai, _, _ = await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['您提到的工作经历，可以补充说说这件事对您后来工作的影响吗？'])
+    started = next(event for event in stream.sent if event['type'] == 'turn.started')
+    assert 'opening_completion_offer' not in started
+    assert issue.question in ai.calls[0]['user_prompt']
+    assert '按钮' not in ai.calls[0]['user_prompt']
+    assert '点击' not in ai.calls[0]['user_prompt']
+
+    await test_db.refresh(session)
+    assert session.metadata_json[completion_interviews.OPENING_OFFER_KEY] == issue.id
+
+    decline = _line(project_id, session.id, 'user', '这个我不想补充，还是讲别的吧。', 3)
+    test_db.add(decline)
+    await test_db.flush()
+    await test_db.commit()
+    await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['好，您想讲什么就讲什么。'])
+    await test_db.refresh(session)
+    assert session.metadata_json[completion_interviews.OPENING_OFFER_DECLINED_KEY] is True
+
+    repeat = _line(project_id, session.id, 'user', '我不知道讲什么了。', 5)
+    test_db.add(repeat)
+    await test_db.commit()
+    _, ai, _, _ = await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
+        chunks=['您接着讲就好。'])
+    assert issue.question not in ai.calls[0]['user_prompt']
 
 
 @pytest.mark.parametrize('entry', ['miniprogram_home', 'miniprogram_home_launch'])
@@ -78,7 +102,7 @@ async def test_new_story_opening_skips_old_questions_and_keeps_ordinary_follow_u
         chunks=['这次想讲什么故事？从您想起的地方开始就好。'],
     )
     started = next(event for event in stream.sent if event['type'] == 'turn.started')
-    assert started['opening_completion_offer'] is None
+    assert 'opening_completion_offer' not in started
     assert issue.question not in ai.calls[0]['user_prompt']
     assert chapter.title not in ai.calls[0]['user_prompt']
     assert completed['primary_intent'] == 'opening'
@@ -142,7 +166,7 @@ async def test_new_story_active_policy_waits_for_explicit_direction_request(
     assert decision is not None and decision.execution_mode == 'active'
     assert decision.selected_action == 'continue_listening'
     assert decision.state_snapshot_json['framework_item_id'] is None
-    assert next(event for event in stream.sent if event['type'] == 'turn.started')['opening_completion_offer'] is None
+    assert 'opening_completion_offer' not in next(event for event in stream.sent if event['type'] == 'turn.started')
     assert issue.question not in reply_ai.calls[0]['user_prompt']
 
     # The entry constraint is only for the opening: an explicit request still authorizes a topic.

@@ -26,6 +26,10 @@ from app.services.memoir.narrative import frameworks, interview_policy
 
 
 MAX_TOPIC_CANDIDATES = 6
+SUPPLEMENT_OFFER_REQUEST_PHRASES = (
+    "不知道讲什么了",
+    "不知道说什么了",
+)
 DIRECTION_REQUEST_PHRASES = (
     "不知道讲什么",
     "不知道说什么",
@@ -51,12 +55,24 @@ class FrameworkTopicCandidate:
     intent: str
 
 
-def is_new_story_entry(session: MemoirVoiceSession) -> bool:
+def explicitly_requests_supplement(text: str) -> bool:
+    normalized = "".join(text.split())
+    return any(phrase in normalized for phrase in SUPPLEMENT_OFFER_REQUEST_PHRASES)
+
+
+def is_home_voice_entry(session: MemoirVoiceSession) -> bool:
     return (
         session.session_goal == MemoirSessionGoal.OPEN_NARRATION.value
         and (session.metadata_json or {}).get("entry")
-        in {"miniprogram_home", "miniprogram_home_launch"}
+        in {"miniprogram_home", "miniprogram_home_launch", "miniprogram_home_resume"}
     )
+
+
+def is_new_story_entry(session: MemoirVoiceSession) -> bool:
+    return is_home_voice_entry(session) and (session.metadata_json or {}).get("entry") in {
+        "miniprogram_home",
+        "miniprogram_home_launch",
+    }
 
 
 def topic_offer_requested(
@@ -71,6 +87,8 @@ def topic_offer_requested(
     if latest_user_message is None:
         return bool(session.anchor_framework_item_id) or not is_new_story_entry(session)
     normalized = "".join(latest_user_message.content_text.split())
+    if explicitly_requests_supplement(latest_user_message.content_text):
+        return False
     return any(phrase in normalized for phrase in DIRECTION_REQUEST_PHRASES)
 
 
