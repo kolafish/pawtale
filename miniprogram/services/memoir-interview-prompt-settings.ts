@@ -30,9 +30,13 @@ export const MEMOIR_INTERVIEW_PROMPT_OPTIONS: MemoirInterviewPromptOption[] = [
 ];
 
 const STORAGE_KEY = "pawtale_memoir_interview_prompt_settings";
+const LEGACY_VARIANT = "standalone";
 const VALUES = new Set(MEMOIR_INTERVIEW_PROMPT_OPTIONS.map((option) => option.value));
 
 export function normalizeMemoirInterviewPromptVariant(value: unknown): MemoirInterviewPromptVariant {
+  if (value === LEGACY_VARIANT) {
+    return "v4";
+  }
   return typeof value === "string" && VALUES.has(value as MemoirInterviewPromptVariant)
     ? value as MemoirInterviewPromptVariant
     : DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT;
@@ -40,8 +44,12 @@ export function normalizeMemoirInterviewPromptVariant(value: unknown): MemoirInt
 
 export function readMemoirInterviewPromptSettings(): MemoirInterviewPromptSettings {
   try {
-    const stored = wx.getStorageSync<Partial<MemoirInterviewPromptSettings>>(STORAGE_KEY);
-    return { variant: normalizeMemoirInterviewPromptVariant(stored?.variant) };
+    const stored = wx.getStorageSync<{ variant?: unknown }>(STORAGE_KEY);
+    const variant = normalizeMemoirInterviewPromptVariant(stored?.variant);
+    if (stored?.variant === LEGACY_VARIANT) {
+      wx.setStorageSync(STORAGE_KEY, { variant });
+    }
+    return { variant };
   } catch (error) {
     console.warn("read memoir interview prompt settings failed", error);
     return { variant: DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT };
