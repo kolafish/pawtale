@@ -25,7 +25,16 @@
       <text class="login-action-arrow" aria-hidden="true">›</text>
     </view>
 
-    <view class="skip-profile-button support-action ui-pressable" aria-role="button" bindtap="openPrivacyContract">《用户隐私保护指引》</view>
+    <checkbox-group class="privacy-consent" bindchange="changePrivacyConsent">
+      <view class="ui-consent-row">
+        <label class="ui-consent-choice">
+          <checkbox value="privacy_contract" checked="{{privacyAgreed}}" disabled="{{wechatLoading}}" color="#b65d49" />
+          <text>我已阅读并同意</text>
+        </label>
+        <view class="ui-consent-link ui-pressable" catchtap="openPrivacyContract"
+          hover-class="ui-subtle-action-hover" aria-role="button" aria-label="阅读用户隐私保护指引">《用户隐私保护指引》</view>
+      </view>
+    </checkbox-group>
   </view>
 
   <view wx:else class="login-panel profile-setup-panel">

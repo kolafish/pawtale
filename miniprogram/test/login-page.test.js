@@ -42,6 +42,47 @@ test("login page offers WeChat as its only sign-in action", () => {
   assert.doesNotMatch(template, /bindtap="submitAccount"|account-login-toggle/);
 });
 
+test("login consent checkbox is bound independently from opening the privacy document", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/login/index.wxml"), "utf8");
+  assert.match(template, /<checkbox-group\b[^>]*bindchange="changePrivacyConsent"/);
+  assert.match(template, /<checkbox\b[^>]*value="privacy_contract"[^>]*checked="\{\{privacyAgreed\}\}"/);
+  assert.match(template, /<\/label>\s*<view\b[^>]*catchtap="openPrivacyContract"/);
+});
+
+test("login starts without consent and never authenticates until the user opts in", async () => {
+  let loginCalls = 0;
+  global.wx = { getStorageSync: () => true };
+  const { page } = loadLoginPage({
+    authExports: { loginWithWeChat: async () => { loginCalls += 1; } },
+  });
+  const context = pageContext(page);
+
+  assert.equal(context.data.privacyAgreed, false);
+  await context.submitWeChat();
+
+  assert.equal(loginCalls, 0);
+  assert.equal(context.data.wechatLoading, false);
+  assert.match(context.data.error, /请先阅读并勾选同意/);
+});
+
+test("unchecking consent blocks login again and a new login page starts unchecked", async () => {
+  let loginCalls = 0;
+  const { page } = loadLoginPage({
+    authExports: { loginWithWeChat: async () => { loginCalls += 1; } },
+  });
+  const context = pageContext(page);
+
+  context.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  assert.equal(context.data.privacyAgreed, true);
+  assert.equal(loginCalls, 0);
+  context.changePrivacyConsent({ detail: { value: [] } });
+  await context.submitWeChat();
+
+  assert.equal(context.data.privacyAgreed, false);
+  assert.equal(loginCalls, 0);
+  assert.equal(pageContext(page).data.privacyAgreed, false);
+});
+
 test("a new wechat user goes straight home without the avatar and nickname step", async () => {
   const relaunches = [];
   global.wx = {
@@ -66,6 +107,7 @@ test("a new wechat user goes straight home without the avatar and nickname step"
   });
   const context = pageContext(page);
 
+  context.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
   await page.submitWeChat.call(context);
 
   assert.deepEqual(relaunches, ["/pages/home/index"]);
@@ -146,8 +188,10 @@ test("privacy entry shows an immediate opening error and permits a successful re
   const context = pageContext(page);
   await context.openPrivacyContract();
   assert.match(toasts[0].title, /隐私保护指引/);
+  assert.equal(context.data.privacyAgreed, false);
   global.wx.openPrivacyContract = (options) => options.success({});
   await context.openPrivacyContract();
   assert.equal(toasts.length, 1);
+  assert.equal(context.data.privacyAgreed, false);
   delete global.wx;
 });

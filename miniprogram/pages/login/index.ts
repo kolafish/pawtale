@@ -26,9 +26,16 @@ interface ChooseAvatarEvent {
   };
 }
 
+interface CheckboxChangeEvent {
+  detail: {
+    value: string[];
+  };
+}
+
 interface LoginData {
   pageClass: string;
   wechatLoading: boolean;
+  privacyAgreed: boolean;
   // Opened right after a family member's first like; finishing returns to what they liked.
   // Logging in to tell a story never stops here: avatar and nickname only matter to likes.
   profileMode: boolean;
@@ -42,6 +49,7 @@ definePage<LoginData>()({
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     wechatLoading: false,
+    privacyAgreed: false,
     profileMode: false,
     profileSaving: false,
     profileDisplayName: "",
@@ -83,8 +91,19 @@ definePage<LoginData>()({
     }
   },
 
+  changePrivacyConsent(event: CheckboxChangeEvent) {
+    this.setData({
+      privacyAgreed: event.detail.value.includes("privacy_contract"),
+      error: "",
+    });
+  },
+
   async submitWeChat() {
     if (this.data.wechatLoading) {
+      return;
+    }
+    if (!this.data.privacyAgreed) {
+      this.setData({ error: "请先阅读并勾选同意《用户隐私保护指引》后再登录" });
       return;
     }
     this.setData({ wechatLoading: true, error: "" });
