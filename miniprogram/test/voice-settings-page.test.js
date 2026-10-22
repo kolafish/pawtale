@@ -119,7 +119,7 @@ function loadVoiceSettingsPage({
   mockModule("../services/memoir-interview-prompt-settings.ts", {
     MEMOIR_INTERVIEW_PROMPT_OPTIONS: [
       { value: "v3_improved", label: "v3 改进版（默认）", description: "当前真机 baseline" },
-      { value: "standalone", label: "全新 Prompt", description: "更强调倾听" },
+      { value: "v4", label: "v4", description: "更强调顺着故事" },
       { value: "v3_plus", label: "v3_plus", description: "更完整检查" },
     ],
     memoirInterviewPromptVariantLabel: (variant) => variant,
@@ -255,14 +255,14 @@ test("voice settings saves the selected interview prompt variant", () => {
   page.selectInterviewPromptVariant.call(context, {
     currentTarget: {
       dataset: {
-        promptVariant: "v3_plus",
+        promptVariant: "v4",
       },
     },
   });
 
-  assert.deepEqual(saved, ["v3_plus"]);
-  assert.equal(context.data.interviewPromptVariant, "v3_plus");
-  assert.equal(context.data.interviewPromptVariantLabel, "label:v3_plus");
+  assert.deepEqual(saved, ["v4"]);
+  assert.equal(context.data.interviewPromptVariant, "v4");
+  assert.equal(context.data.interviewPromptVariantLabel, "label:v4");
 });
 
 test("voice settings saves chat and book TTS settings independently", () => {

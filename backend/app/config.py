@@ -12,7 +12,7 @@ MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
 DEFAULT_AI_TEXT_MODEL = "deepseek-flash"
 DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT = "v3_improved"
-VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"v3_improved", "standalone", "v3_plus"}
+VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"v3_improved", "v4", "v3_plus"}
 VALID_AI_TEXT_MODELS = {
     "deepseek",
     "deepseek-flash",

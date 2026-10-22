@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.interview_policy import InterviewBrief
 from app.domain.memoir.narrative_types import MemoirFrameworkUserResolution
 from app.domain.memoir.types import (
-    MemoirGuidanceMode,
     MemoirInterviewType,
     MemoirSessionGoal,
 )
@@ -96,8 +95,7 @@ async def current_framework_item_id(db: AsyncSession, session: MemoirVoiceSessio
     if session.anchor_framework_item_id:
         return session.anchor_framework_item_id
     if (
-        session.guidance_mode != MemoirGuidanceMode.FREE_NARRATION.value
-        or session.interview_type != MemoirInterviewType.AI_INTERVIEW.value
+        session.interview_type != MemoirInterviewType.AI_INTERVIEW.value
         or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
     ):
         return None

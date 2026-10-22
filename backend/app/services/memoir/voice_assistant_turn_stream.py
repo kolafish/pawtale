@@ -408,8 +408,8 @@ class VoiceAssistantTurnStreamSession:
             None,
         )
         activation_context = ""
-        # The AI interview mostly listens, so only book completion gets earlier material to ask about.
-        if current_user_message is not None and book_completion:
+        # All ordinary AI interview variants share retrieved history; openings have no query.
+        if current_user_message is not None:
             try:
                 activation = await memory_activation.activate_memory_for_turn(
                     self.db,

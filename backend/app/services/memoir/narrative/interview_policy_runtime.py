@@ -24,7 +24,6 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-    MemoirGuidanceMode,
     MemoirInterviewType,
     MemoirSessionGoal,
 )
@@ -147,16 +146,12 @@ class ActivePolicyTurn:
 
 
 def _eligible_session(session: MemoirVoiceSession) -> bool:
-    return session.interview_type == MemoirInterviewType.AI_INTERVIEW.value and (
-        session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
-        or (
-            session.session_goal == MemoirSessionGoal.OPEN_NARRATION.value
-            and session.guidance_mode
-            in {
-                MemoirGuidanceMode.FREE_NARRATION.value,
-                MemoirGuidanceMode.GUIDED_INTERVIEW.value,
-            }
-        )
+    return (
+        session.interview_type == MemoirInterviewType.AI_INTERVIEW.value
+        and session.session_goal in {
+            MemoirSessionGoal.BOOK_COMPLETION.value,
+            MemoirSessionGoal.OPEN_NARRATION.value,
+        }
     )
 
 

@@ -67,6 +67,7 @@ def build_stream_turn_prompt(
         )
     book = book_context or InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
     dialogue = "访谈上下文：\n" + _recent_context(voice_session.messages)
+    retrieved_history = _retrieved_history_block(activation_context)
     first_narration = not has_previous_project_narration and not book.chapters
     if book.completion_offer is not None:
         opening_offer_context = (
@@ -82,8 +83,10 @@ def build_stream_turn_prompt(
             f"讲述者资料：{book.narrator}" if book.narrator else "",
             progress_context.prompt_text if progress_context.progress_update is not None else "",
             _book_block(book, opening=False),
+            _topics_block(book.topics),
             policy_section,
             dialogue,
+            retrieved_history,
         )
     if has_user_message:
         return _join(
@@ -93,6 +96,7 @@ def build_stream_turn_prompt(
             _person_question(book),
             policy_section,
             dialogue,
+            retrieved_history,
             _book_block(book, opening=False),
             _topics_block(book.topics),
         )
@@ -114,7 +118,8 @@ def build_stream_turn_prompt(
         )
         return _join(
             _header(host_name, regenerate, normalized_variant), mode, _profile_question(book, opening=True), progress,
-            _book_block(book, opening=True), policy_section, dialogue,
+            _book_block(book, opening=True), _topics_block(book.topics), policy_section, dialogue,
+            retrieved_history,
         )
 
     if book.starts_new_story:
@@ -126,6 +131,8 @@ def build_stream_turn_prompt(
             progress,
             policy_section,
             dialogue,
+            retrieved_history,
+            _topics_block(book.topics),
         )
 
     if book.anchor_topic is not None:
@@ -150,6 +157,7 @@ def build_stream_turn_prompt(
         topics,
         policy_section,
         dialogue,
+        retrieved_history,
     )
 
 
@@ -165,6 +173,8 @@ _VARIANT_FOLLOW_UP = """讲述者自己决定讲什么，你主要是听众。
 
 
 def _follow_up_for_variant(variant: PromptVariant) -> str:
+    if variant == "v4":
+        return ""
     return _FOLLOW_UP if variant == "v3_improved" else _VARIANT_FOLLOW_UP
 
 
@@ -204,10 +214,8 @@ def _person_question(book: InterviewBookContext) -> str:
 
 
 def _header(host_name: str, regenerate: bool, prompt_variant: PromptVariant) -> str:
-    if prompt_variant in {"standalone", "v3_plus"}:
+    if prompt_variant in {"v4", "v3_plus"}:
         instruction = variant_user_instruction(prompt_variant)
-        if prompt_variant == "standalone":
-            instruction = instruction + "\n\n" + INTERVIEWER_TURN_OUTPUT_RULES
         if regenerate:
             instruction += "\n\n这次是在替换上一句回应，请换一个角度，不要重复上一句。"
         return instruction
@@ -266,6 +274,12 @@ def _topics_block(topics: tuple[LifeTopic, ...]) -> str:
         if titles:
             levels.append(f"{_LEVEL_LABELS[level]}：{titles}")
     return "人生话题（按人生先后，不是必须讲完的清单）：" + "；".join(levels) if levels else ""
+
+
+def _retrieved_history_block(activation_context: str) -> str:
+    return "历史讲述候选（检索结果，仅供参考）：\n" + (
+        activation_context or "本轮没有检索到历史讲述候选。"
+    )
 
 
 def _thin_topics_block(topics: tuple[LifeTopic, ...]) -> str:

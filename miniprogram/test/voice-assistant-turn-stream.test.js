@@ -3,7 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function installWxSocketHarness() {
+function installWxSocketHarness({ promptVariant } = {}) {
   const handlers = {};
   const sent = [];
   let closeCalls = 0;
@@ -23,6 +23,9 @@ function installWxSocketHarness() {
       }
       if (key === "pawtale_ai_model_settings") {
         return { model: "deepseek-v4-pro" };
+      }
+      if (key === "pawtale_memoir_interview_prompt_settings") {
+        return { variant: promptVariant };
       }
       if (key === "pawtale_memoir_tts_settings") {
         return {
@@ -100,7 +103,7 @@ test("audio failure is non-terminal and retains the completed text response", as
 });
 
 test("assistant turn stream sends pcm frame protocol and emits audio frames", async () => {
-  const harness = installWxSocketHarness();
+  const harness = installWxSocketHarness({ promptVariant: "v4" });
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/ai-model-settings.ts")];
   delete require.cache[require.resolve("../services/tts-settings.ts")];
@@ -168,7 +171,7 @@ test("assistant turn stream sends pcm frame protocol and emits audio frames", as
   assert.deepEqual(harness.sent, [{
     type: "turn.start",
     ai_model: "deepseek-v4-pro",
-    prompt_variant: "v3_improved",
+    prompt_variant: "v4",
     regenerate: false,
     voice: "zh_female_vv_uranus_bigtts",
     speed_ratio: 1.5,
