@@ -13,7 +13,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-    MemoirGuidanceMode,
+    MemoirInterviewType,
     MemoirSessionGoal,
     MemoirVoiceSessionStatus,
 )
@@ -120,12 +120,12 @@ async def create_voice_session(
                 detail="这个话题方向当前已被收起，请先修改您的选择",
             )
         if (
-            req.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW
+            req.interview_type != MemoirInterviewType.AI_INTERVIEW
             or req.session_goal != MemoirSessionGoal.OPEN_NARRATION
         ):
             raise HTTPException(
                 status_code=409,
-                detail="话题方向只能用于按照主题来问的自由访谈",
+                detail="话题方向只能用于 AI 访谈",
             )
 
     now = datetime.now(UTC).replace(tzinfo=None)
