@@ -1,4 +1,3 @@
-import type { OpeningCompletionOffer } from "../../services/voice-assistant-turn-stream";
 import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import { isRecorderPermissionDeniedMessage } from "../../services/wechat-privacy";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
@@ -45,8 +44,6 @@ export interface VoiceChatData {
   sessionGoal: MemoirSessionGoal;
   currentCompletionIssueId: string;
   completionIssue: MemoirCompletionIssue | null;
-  openingCompletionOffer: OpeningCompletionOffer | null;
-  showOpeningCompletionOffer: boolean;
   completionIssueLoading: boolean;
   completionIssueAction: string;
   completionIssueError: string;
@@ -187,8 +184,6 @@ export function initialVoiceChatData(): VoiceChatData {
     sessionGoal: "open_narration",
     currentCompletionIssueId: "",
     completionIssue: null,
-    openingCompletionOffer: null,
-    showOpeningCompletionOffer: false,
     completionIssueLoading: false,
     completionIssueAction: "",
     completionIssueError: "",
@@ -354,7 +349,6 @@ export type VoiceChatViewPatch = Pick<
   | "showVoiceAuthorizationPanel"
   | "showAssistantPanel"
   | "showCompletionIssuePanel"
-  | "showOpeningCompletionOffer"
   | "completionIssuePanelClass"
   | "completionIssueStatusText"
   | "completionIssueQuestionText"
@@ -714,9 +708,6 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
     showAssistantPanel,
     showCompletionIssuePanel,
-    showOpeningCompletionOffer: Boolean(state.openingCompletionOffer) && !isHumanInterview && !isBookCompletion
-      && !state.liveCharCount && !state.transcriptLines.some((line) => line.role === "user")
-      && state.status !== "closed" && state.status !== "error",
     completionIssuePanelClass,
     completionIssueStatusText: completionIssueStatusText(state),
     completionIssueQuestionText: state.completionIssue?.question || "本次问题没有准备好",

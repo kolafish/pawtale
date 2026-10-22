@@ -1,4 +1,3 @@
-import { listMemoirCompletionIssues } from "./memoir-completion-issue-api";
 import type {
   MemoirCompletionIssue,
 } from "../domain/memoir-completion-issue";
@@ -79,14 +78,4 @@ export async function openMemoirCompletionInterview(
     { projectId: options.projectId, voiceSessionId: detail.session.id },
   );
   await openVoiceChat(detail.session.id, options.projectTitle, options.replacePage);
-}
-
-
-export async function openOfferedCompletionInterview(options: {
-  projectId: string; projectTitle: string; issueId: string; replacePage?: boolean;
-}): Promise<void> {
-  const response = await listMemoirCompletionIssues(options.projectId);
-  const issue = response.issues.find((item) => item.id === options.issueId && item.channel === "interview" && item.status !== "closed");
-  if (!issue) throw new Error("这项已经处理，可以继续讲别的故事");
-  await openMemoirCompletionInterview({ ...options, issue, entry: "voice_opening" });
 }

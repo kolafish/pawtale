@@ -68,6 +68,23 @@ def build_stream_turn_prompt(
     book = book_context or InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
     dialogue = "访谈上下文：\n" + _recent_context(voice_session.messages)
     first_narration = not has_previous_project_narration and not book.chapters
+    if book.completion_offer is not None:
+        opening_offer_context = (
+            "讲述者明确说现在不知道讲什么了。"
+            if has_user_message
+            else "当前是开场，叙述者可以选择回答一个已有的补充问题。"
+        )
+        return _join(
+            _header(host_name, regenerate, normalized_variant),
+            f"{opening_offer_context}直接自然地问下面这个补充问题。"
+            "只问问题本身；如果他不想回答，接住并允许他继续讲别的。保持 [listen]。",
+            f"补充问题：{book.completion_offer.question}",
+            f"讲述者资料：{book.narrator}" if book.narrator else "",
+            progress_context.prompt_text if progress_context.progress_update is not None else "",
+            _book_block(book, opening=False),
+            policy_section,
+            dialogue,
+        )
     if has_user_message:
         return _join(
             _header(host_name, regenerate, normalized_variant),
@@ -109,16 +126,6 @@ def build_stream_turn_prompt(
             progress,
             policy_section,
             dialogue,
-        )
-
-    if book.completion_offer is not None:
-        return _join(
-            _header(host_name, regenerate, normalized_variant),
-            "当前是开场，可以邀请补充一个旧故事，也允许直接讲别的。先简短欢迎，再说清下面这一个补充方向。"
-            "只作邀请：愿意补充可以点‘补充这段’，也可以直接讲别的。不把讲述者当成已经同意，不催促，不要求口头回答同意，"
-            "不声称问题已经解决，不再提出其他问题。保持 [listen]。",
-            f"可选补充问题：{book.completion_offer.question}",
-            _book_block(book, opening=True),
         )
 
     if book.anchor_topic is not None:

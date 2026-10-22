@@ -84,6 +84,30 @@ async def load_interview_book_context(
     profile_context = await narrator_profile.profile_question_context_for(db, voice_session, project)
     profile_questions = profile_context.questions
     starts_new_story = anchor_topic is None and interview_topics.is_new_story_entry(voice_session)
+    user_messages = [
+        message
+        for message in voice_session.messages
+        if message.role == "user" and message.content_text.strip()
+    ]
+    latest_user_message = max(
+        user_messages,
+        key=lambda message: (message.turn_index, message.created_at, message.id),
+        default=None,
+    )
+    await completion_interviews.record_supplement_decline(
+        db,
+        voice_session=voice_session,
+        latest_user_message=latest_user_message,
+    )
+    opening_completion_offer_allowed = (
+        interview_topics.explicitly_requests_supplement(
+            latest_user_message.content_text if latest_user_message else ""
+        )
+        or (
+            not interview_topics.is_home_voice_entry(voice_session)
+            and latest_user_message is None
+        )
+    )
     return InterviewBookContext(
         chapters=chapters,
         last_chapter_title=await _last_chapter_title(db, voice_session.project_id),
@@ -95,10 +119,10 @@ async def load_interview_book_context(
         people=await narration_people.recent_people_lines(db, voice_session.project_id),
         person_question=None if profile_questions else await narration_people.question_for(db, voice_session),
         completion_offer=(await completion_interviews.offer_for_opening(db, voice_session=voice_session))
-        if chapters and not profile_questions and anchor_topic is None and not starts_new_story
+        if chapters and not profile_questions and anchor_topic is None
         and voice_session.session_goal == "open_narration"
         and voice_session.interview_type == "ai_interview"
-        and not any(message.role == "user" and message.content_text.strip() for message in voice_session.messages)
+        and opening_completion_offer_allowed
         else None,
         starts_new_story=starts_new_story,
     )

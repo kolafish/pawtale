@@ -360,7 +360,7 @@ class VoiceAssistantTurnStreamSession:
                 voice_session=voice_session,
                 snapshot=snapshot,
             )
-        opening_offer = book_context.completion_offer if book_context else None
+        completion_offer = book_context.completion_offer if book_context else None
         completion_prompt_context = await completion_interviews.prompt_context_for_session(
             self.db,
             voice_session=voice_session,
@@ -377,8 +377,6 @@ class VoiceAssistantTurnStreamSession:
         await self.client.send_json(
             {
                 "type": "turn.started",
-                "opening_completion_offer": {"issue_id": opening_offer.issue_id, "question": opening_offer.question}
-                if opening_offer else None,
                 "turn_id": turn_id,
                 "voice_session_id": self.voice_session_id,
                 "state": "streaming",
@@ -397,9 +395,9 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
-        if opening_offer:
-            # Mark the offer only after its card was sent, and release the
-            # session row before model streaming or concurrent audio capture.
+        if completion_offer:
+            # Persist the one-time invitation before model streaming or
+            # concurrent audio capture can start another turn.
             await self.db.commit()
         current_user_message = next(
             (
@@ -441,7 +439,7 @@ class VoiceAssistantTurnStreamSession:
 
         policy_turn: interview_policy_runtime.ActivePolicyTurn | None = None
         completion_answered = bool(completion_prompt_context is not None and completion_prompt_context.answered)
-        if not completion_answered:
+        if not completion_answered and completion_offer is None:
             try:
                 async with self.db.begin_nested():
                     policy_turn = await interview_policy_runtime.prepare_active_policy_turn(
