@@ -9,13 +9,6 @@ import {
 } from "../../services/ai-model-settings";
 import { readMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import {
-  MEMOIR_INTERVIEW_PROMPT_OPTIONS,
-  memoirInterviewPromptVariantLabel,
-  readSelectedMemoirInterviewPromptVariant,
-  saveMemoirInterviewPromptVariant,
-  type MemoirInterviewPromptOption,
-} from "../../services/memoir-interview-prompt-settings";
-import {
   accessibilityPageClass,
   readAccessibilitySettings,
   saveAutoBargeInEnabled,
@@ -44,9 +37,6 @@ interface VoiceSettingsData {
   aiModel: string;
   aiModelLabel: string;
   aiModelOptions: AIModelOption[];
-  interviewPromptVariant: string;
-  interviewPromptVariantLabel: string;
-  interviewPromptOptions: MemoirInterviewPromptOption[];
   chatTTSVoice: string;
   chatTTSSpeedRatio: number;
   bookTTSVoice: string;
@@ -61,7 +51,6 @@ interface VoiceSettingsDataset {
   scope?: string;
   voice?: string;
   speed?: string | number;
-  promptVariant?: string;
 }
 
 type SettingsEvent = PageDatasetEvent<VoiceSettingsDataset>;
@@ -87,7 +76,6 @@ function voiceSettingsData(): VoiceSettingsData {
   const profiles = readTTSSettingsProfiles();
   const isAdmin = currentUserIsAdmin();
   const aiModel = isAdmin ? readSelectedAIModel() : DEFAULT_AI_MODEL;
-  const interviewPromptVariant = readSelectedMemoirInterviewPromptVariant();
   return {
     pageClass: accessibilityPageClass("voice-settings-page", accessibility.largeTextEnabled),
     autoBargeInEnabled: accessibility.autoBargeInEnabled,
@@ -96,9 +84,6 @@ function voiceSettingsData(): VoiceSettingsData {
     aiModelOptions: isAdmin
       ? AI_MODEL_OPTIONS
       : AI_MODEL_OPTIONS.filter((option) => option.value === DEFAULT_AI_MODEL),
-    interviewPromptVariant,
-    interviewPromptVariantLabel: memoirInterviewPromptVariantLabel(interviewPromptVariant),
-    interviewPromptOptions: MEMOIR_INTERVIEW_PROMPT_OPTIONS,
     chatTTSVoice: profiles.chat.voice,
     chatTTSSpeedRatio: profiles.chat.speedRatio,
     bookTTSVoice: profiles.book.voice,
@@ -138,15 +123,6 @@ definePage<VoiceSettingsData>()({
       aiModelLabel: aiModelLabel(model),
     });
     wx.showToast({ title: "已保存", icon: "success" });
-  },
-
-  selectInterviewPromptVariant(event: SettingsEvent) {
-    const variant = saveMemoirInterviewPromptVariant(datasetString(event, "promptVariant"));
-    this.setData({
-      interviewPromptVariant: variant,
-      interviewPromptVariantLabel: memoirInterviewPromptVariantLabel(variant),
-    });
-    wx.showToast({ title: "访谈 Prompt 已保存", icon: "success" });
   },
 
   selectTTSVoice(event: SettingsEvent) {

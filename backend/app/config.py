@@ -11,9 +11,6 @@ DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pa
 MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
 DEFAULT_AI_TEXT_MODEL = "deepseek-flash"
-DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT = "v3_improved"
-VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"v3_improved", "v4", "v3_plus"}
-LEGACY_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"standalone"}
 VALID_AI_TEXT_MODELS = {
     "deepseek",
     "deepseek-flash",
@@ -82,7 +79,6 @@ class Settings(BaseSettings):
 
     # Default AI Model
     default_ai_model: str = DEFAULT_AI_TEXT_MODEL
-    memoir_interview_prompt_variant: str = DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT
     ai_text_max_concurrent_requests: int = 3
     ai_text_realtime_timeout_seconds: float = 15.0
     ai_text_interactive_timeout_seconds: float = 60.0
@@ -191,15 +187,6 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
     if default_ai_model not in VALID_AI_TEXT_MODELS:
         raise RuntimeError(
             f"DEFAULT_AI_MODEL is not supported: {default_ai_model}"
-        )
-
-    prompt_variant = current_settings.memoir_interview_prompt_variant.strip()
-    if prompt_variant not in (
-        VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS | LEGACY_MEMOIR_INTERVIEW_PROMPT_VARIANTS
-    ):
-        valid_variants = ", ".join(sorted(VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS))
-        raise RuntimeError(
-            f"MEMOIR_INTERVIEW_PROMPT_VARIANT must be one of: {valid_variants}"
         )
 
     if app_env != "production":

@@ -14,7 +14,6 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application_errors import ApplicationError
-from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -48,7 +47,6 @@ from app.services.memoir.interview_agent import (
     prepare_interview_turn,
     stream_interview_turn,
 )
-from app.services.memoir.prompt_variants import normalize_prompt_variant
 from app.services.memoir.voice_followup_ai import (
     PROGRESS_PROMPT_VERSION,
     InterviewerTurn,
@@ -100,7 +98,6 @@ class AssistantTurnStartRequest:
     regenerate: bool = False
     temperature: float = STREAM_TEXT_TEMPERATURE
     audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME
-    prompt_variant: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict) -> "AssistantTurnStartRequest":
@@ -126,11 +123,6 @@ class AssistantTurnStartRequest:
             regenerate=bool(payload.get("regenerate", False)),
             temperature=normalized_temperature,
             audio_protocol=normalize_audio_protocol(payload.get("audio_protocol")),
-            prompt_variant=(
-                normalize_prompt_variant(payload.get("prompt_variant"))
-                if isinstance(payload.get("prompt_variant"), str)
-                else None
-            ),
         )
 
 
@@ -502,9 +494,6 @@ class VoiceAssistantTurnStreamSession:
                 requested_model=req.ai_model,
                 temperature=req.temperature,
                 regenerate=req.regenerate,
-                prompt_variant=normalize_prompt_variant(
-                    req.prompt_variant or get_settings().memoir_interview_prompt_variant
-                ),
             ),
         )
 
@@ -862,9 +851,7 @@ class VoiceAssistantTurnStreamSession:
                 metadata_json={
                     "source": "ai.streaming_assistant_turn",
                     "prompt_version": STREAM_PROMPT_VERSION,
-                    "prompt_variant": normalize_prompt_variant(
-                        req.prompt_variant or get_settings().memoir_interview_prompt_variant
-                    ),
+                    "prompt_variant": "v4",
                     "progress_prompt_version": PROGRESS_PROMPT_VERSION,
                     "progress_update": progress_context.progress_update,
                     "progress_update_used": progress_context.progress_update is not None,
