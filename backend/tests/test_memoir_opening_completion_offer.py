@@ -10,7 +10,7 @@ from app.models.projects import Project
 from app.domain.memoir.types import MemoirCompletionIssueOutcome
 from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir.narrative import frameworks, interview_policy_runtime
-from tests.memoir_helpers import post_mobile_memoir_voice_session
+from tests.memoir_helpers import create_test_book_plan_with_chapters, post_mobile_memoir_voice_session
 from tests.test_memoir_book_completion import _book
 from tests.test_memoir_interview_policy_runtime import FakePolicyAI
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
@@ -108,6 +108,72 @@ async def test_pending_opening_offer_can_be_cleared_and_retried(client, test_db)
 
     retried = await completion_interviews.offer_for_opening(test_db, voice_session=session)
     assert retried is not None and retried.issue_id == issue.id
+
+
+async def test_pending_opening_offer_is_cleared_when_issue_is_no_longer_valid(client, test_db):
+    project_id, chapter, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    session.metadata_json = {
+        **(session.metadata_json or {}),
+        completion_interviews.OPENING_OFFER_KEY: issue.id,
+        completion_interviews.OPENING_OFFER_STATUS_KEY: completion_interviews.OPENING_OFFER_PENDING,
+    }
+    chapter.include_in_book = False
+    await test_db.commit()
+
+    assert await completion_interviews.offer_for_opening(test_db, voice_session=session) is None
+    await test_db.refresh(session)
+    assert completion_interviews.OPENING_OFFER_KEY not in session.metadata_json
+
+
+async def test_pending_opening_offer_cannot_reference_another_project(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    owner_id = (await test_db.get(Project, project_id)).user_id
+    foreign_project = Project(user_id=owner_id, type='memoir', title='另一本回忆录')
+    test_db.add(foreign_project)
+    await test_db.flush()
+    foreign_chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=foreign_project.id,
+        chapter_titles=['另一本回忆录的章节'],
+    )
+    foreign_issue = MemoirCompletionIssue(
+        project_id=foreign_project.id,
+        scope='chapter',
+        chapter_id=foreign_chapters[1][0].id,
+        channel='interview',
+        issue_type='context',
+        question='另一个项目的问题？',
+        reason='补充人物背景',
+        priority='medium',
+        fingerprint='b'*64,
+        input_signature='current',
+        related_material_ids_json=[],
+    )
+    test_db.add(foreign_issue)
+    await test_db.flush()
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    session.metadata_json = {
+        **(session.metadata_json or {}),
+        completion_interviews.OPENING_OFFER_KEY: foreign_issue.id,
+        completion_interviews.OPENING_OFFER_STATUS_KEY: completion_interviews.OPENING_OFFER_PENDING,
+    }
+    await test_db.commit()
+
+    offer = await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    assert offer is not None and offer.issue_id == issue.id
+
+
+async def test_pending_opening_offer_is_reserved_across_sessions(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    first = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    second = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+
+    offer = await completion_interviews.offer_for_opening(test_db, voice_session=first)
+    assert offer is not None and offer.issue_id == issue.id
+    await test_db.commit()
+
+    assert await completion_interviews.offer_for_opening(test_db, voice_session=second) is None
 
 
 async def test_failed_opening_offer_is_retryable(client, test_db):

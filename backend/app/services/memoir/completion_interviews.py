@@ -68,9 +68,23 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
     if current_issue_id and current_status != OPENING_OFFER_PENDING:
         # Older sessions have no status field; their existing offer was already shown.
         return None
+    eligible_sections = await _eligible_opening_section_ids(
+        db,
+        project_id=voice_session.project_id,
+    )
     if current_issue_id and current_status == OPENING_OFFER_PENDING:
         pending_issue = await db.get(MemoirCompletionIssue, current_issue_id)
-        if pending_issue is not None and pending_issue.channel == "interview" and pending_issue.status == "open":
+        if (
+            pending_issue is not None
+            and pending_issue.project_id == voice_session.project_id
+            and pending_issue.channel == MemoirCompletionIssueChannel.INTERVIEW.value
+            and pending_issue.status == MemoirCompletionIssueStatus.OPEN.value
+            and await _issue_has_eligible_target(
+                db,
+                issue=pending_issue,
+                eligible_sections=eligible_sections,
+            )
+        ):
             latest_user_message = await _latest_user_message(db, voice_session.id)
             pending_metadata = {
                 **metadata,
@@ -83,46 +97,93 @@ async def offer_for_opening(db: AsyncSession, *, voice_session: MemoirVoiceSessi
             return OpeningCompletionOffer(issue_id=pending_issue.id, question=pending_issue.question)
         await clear_pending_opening_offer(db, voice_session=voice_session)
         metadata = voice_session.metadata_json or {}
-    offered_rows = await db.execute(select(
-        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
-        MemoirVoiceSession.metadata_json[OPENING_OFFER_STATUS_KEY].as_string(),
-    ).where(
-        MemoirVoiceSession.project_id == voice_session.project_id,
-        MemoirVoiceSession.id != voice_session.id,
-        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
-    ))
-    previously_offered = {
-        issue_id
-        for issue_id, status in offered_rows.all()
-        if status != OPENING_OFFER_PENDING
-    }
-    eligible_sections = set((await db.scalars(select(MemoirSection.id).join(MemoirBookPlanChapter).where(
-        MemoirSection.project_id == voice_session.project_id,
-        MemoirSection.status == "active", MemoirSection.include_in_book.is_(True),
-        MemoirBookPlanChapter.include_in_book.is_(True),
-    ))).all())
+    previously_offered = await _offered_issue_ids(
+        db,
+        project_id=voice_session.project_id,
+        excluded_session_id=voice_session.id,
+    )
     for issue in await completion_issues.list_issues(db, project_id=voice_session.project_id):
-        if issue.channel != "interview" or issue.status != "open" or issue.id in previously_offered:
+        if issue.channel != MemoirCompletionIssueChannel.INTERVIEW.value or issue.status != MemoirCompletionIssueStatus.OPEN.value:
             continue
-        try:
-            if await _target_section_id(db, issue=issue) not in eligible_sections:
-                continue
-        except HTTPException as exc:
-            if exc.status_code == 409:
-                continue
-            raise
+        if issue.id in previously_offered:
+            continue
+        # Serialize claims for one issue. The lock is held until the caller
+        # commits the pending metadata, so another opening cannot claim it
+        # between the availability check and the metadata write.
+        locked_issue = await db.scalar(
+            select(MemoirCompletionIssue)
+            .where(MemoirCompletionIssue.id == issue.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked_issue is None or locked_issue.project_id != voice_session.project_id:
+            continue
+        if locked_issue.channel != MemoirCompletionIssueChannel.INTERVIEW.value or locked_issue.status != MemoirCompletionIssueStatus.OPEN.value:
+            continue
+        previously_offered = await _offered_issue_ids(
+            db,
+            project_id=voice_session.project_id,
+            excluded_session_id=voice_session.id,
+        )
+        if locked_issue.id in previously_offered or not await _issue_has_eligible_target(
+            db,
+            issue=locked_issue,
+            eligible_sections=eligible_sections,
+        ):
+            continue
         latest_user_message = await _latest_user_message(db, voice_session.id)
         metadata = {
             **(voice_session.metadata_json or {}),
-            OPENING_OFFER_KEY: issue.id,
+            OPENING_OFFER_KEY: locked_issue.id,
             OPENING_OFFER_STATUS_KEY: OPENING_OFFER_PENDING,
         }
         if latest_user_message is not None:
             metadata[OPENING_OFFER_TRIGGER_MESSAGE_KEY] = latest_user_message.id
         voice_session.metadata_json = metadata
         await db.flush()
-        return OpeningCompletionOffer(issue_id=issue.id, question=issue.question)
+        return OpeningCompletionOffer(issue_id=locked_issue.id, question=locked_issue.question)
     return None
+
+
+async def _eligible_opening_section_ids(db: AsyncSession, *, project_id: str) -> set[str]:
+    return set((await db.scalars(select(MemoirSection.id).join(MemoirBookPlanChapter).where(
+        MemoirSection.project_id == project_id,
+        MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+        MemoirSection.include_in_book.is_(True),
+        MemoirBookPlanChapter.include_in_book.is_(True),
+    ))).all())
+
+
+async def _issue_has_eligible_target(
+    db: AsyncSession,
+    *,
+    issue: MemoirCompletionIssue,
+    eligible_sections: set[str],
+) -> bool:
+    try:
+        return await _target_section_id(db, issue=issue) in eligible_sections
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return False
+        raise
+
+
+async def _offered_issue_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    excluded_session_id: str,
+) -> set[str]:
+    offered_rows = await db.execute(select(
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string(),
+    ).where(
+        MemoirVoiceSession.project_id == project_id,
+        MemoirVoiceSession.id != excluded_session_id,
+        MemoirVoiceSession.metadata_json[OPENING_OFFER_KEY].as_string().is_not(None),
+    ))
+    # Pending is a reservation until its owning turn fails/cancels and clears
+    # the metadata. It must remain excluded from other sessions as well.
+    return {issue_id for (issue_id,) in offered_rows.all()}
 
 
 async def _latest_user_message(
