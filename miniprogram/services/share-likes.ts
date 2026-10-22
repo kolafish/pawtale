@@ -4,8 +4,9 @@ import type {
   MemoirShareLikeSummary,
   MemoirShareLikeTarget,
 } from "../domain/memoir-share-likes";
-import { loginWithWeChat, needsWeChatProfileSetup } from "./auth";
+import { needsWeChatProfileSetup, type BackendAuthUser } from "./auth";
 import { listMemoirShareLikeActivity, readMemoirShareLikes, setMemoirShareLike } from "./memoir-share-like-api";
+import { pageUrl } from "./page-input";
 import { ApiError } from "./request";
 import { resolveBackendAvatarUrl } from "./user-profile";
 
@@ -94,11 +95,6 @@ function shareLikePatch(likes: MemoirShareLikes): Partial<ShareLikeData> {
   };
 }
 
-async function signInForLike(): Promise<boolean> {
-  // wx.login needs no prompt; returns whether the new account still lacks an avatar or name.
-  return needsWeChatProfileSetup((await loginWithWeChat()).user);
-}
-
 function profilePromptShown(): boolean {
   try {
     return Boolean(wx.getStorageSync<boolean>(PROFILE_PROMPT_STORAGE_KEY));
@@ -113,6 +109,19 @@ function rememberProfilePrompt(): void {
   } catch {
     // Asking again next time is harmless.
   }
+}
+
+export async function completeShareLikeLogin(
+  target: MemoirShareLikeTarget,
+  liked: boolean,
+  user: BackendAuthUser,
+): Promise<boolean> {
+  await setMemoirShareLike(target, liked);
+  if (liked && needsWeChatProfileSetup(user) && !profilePromptShown()) {
+    rememberProfilePrompt();
+    return true;
+  }
+  return false;
 }
 
 interface ShareLikeHost {
@@ -149,17 +158,16 @@ export const shareLikeMethods = defineShareLikeMethods({
     const target = this.shareLikeTarget;
     if (!target || this.data.shareLikeBusy || !this.data.shareCanLike) return;
     const liked = !this.data.shareLiked;
-    let needsProfile = false;
     this.setData({ shareLikeBusy: true });
     try {
       let likes: MemoirShareLikes;
       try {
         likes = await setMemoirShareLike(target, liked);
       } catch (error) {
-        // Visitors are signed in by the tap itself; nothing is asked before they choose to like.
+        // Authentication always goes through the login page's explicit consent step.
         if (!(error instanceof ApiError) || error.statusCode !== 401) throw error;
-        needsProfile = await signInForLike();
-        likes = await setMemoirShareLike(target, liked);
+        wx.navigateTo({ url: pageUrl("/pages/login/index", { from: "like", ...target, liked: liked ? "1" : "0" }) });
+        return;
       }
       if (this.shareLikeTarget === target) this.setData(shareLikePatch(likes));
     } catch (error) {
@@ -167,10 +175,6 @@ export const shareLikeMethods = defineShareLikeMethods({
       return;
     } finally {
       this.setData({ shareLikeBusy: false });
-    }
-    if (liked && needsProfile && !profilePromptShown()) {
-      rememberProfilePrompt();
-      wx.navigateTo({ url: "/pages/login/index?from=like" });
     }
   },
 });
