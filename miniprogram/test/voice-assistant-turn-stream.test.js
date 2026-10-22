@@ -168,6 +168,7 @@ test("assistant turn stream sends pcm frame protocol and emits audio frames", as
   assert.deepEqual(harness.sent, [{
     type: "turn.start",
     ai_model: "deepseek-v4-pro",
+    prompt_variant: "v3_improved",
     regenerate: false,
     voice: "zh_female_vv_uranus_bigtts",
     speed_ratio: 1.5,
@@ -228,6 +229,7 @@ test("assistant turn stream connect timeout stops after socket opens", async (co
   assert.deepEqual(harness.sent, [{
     type: "turn.start",
     ai_model: "deepseek-v4-pro",
+    prompt_variant: "v3_improved",
     regenerate: false,
     voice: "zh_female_vv_uranus_bigtts",
     speed_ratio: 1.5,

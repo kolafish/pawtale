@@ -95,3 +95,30 @@ async def test_missing_control_prefix_keeps_existing_safe_pause_behavior():
     ):
         pass
     assert run.completed_turn(prepared.input).conversation_action == MemoirConversationAction.PAUSE
+
+
+def test_prompt_variants_keep_product_context_and_change_only_open_narration_rules():
+    prepared_v3 = prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="v3_improved"))
+    prepared_standalone = prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="standalone"))
+    prepared_plus = prepare_interview_turn(snapshot(), InterviewConfig(prompt_variant="v3_plus"))
+
+    assert "自称“小余”" in prepared_v3.system_prompt
+    assert "本轮落点" in prepared_v3.prompt
+    assert "你在对话中自称“小余”" in prepared_standalone.system_prompt
+    assert "称呼讲述者使用“您”" in prepared_standalone.system_prompt
+    assert "值得记录" in prepared_standalone.prompt
+    assert "你是“小余”" in prepared_plus.system_prompt
+    assert "故事价值" in prepared_plus.prompt
+    assert "访谈上下文" in prepared_standalone.prompt
+    assert "访谈上下文" in prepared_plus.prompt
+
+
+def test_prompt_variants_do_not_replace_book_completion_contract():
+    baseline = prepare_interview_turn(snapshot("book_completion"), InterviewConfig(prompt_variant="v3_improved"))
+    standalone = prepare_interview_turn(snapshot("book_completion"), InterviewConfig(prompt_variant="standalone"))
+    plus = prepare_interview_turn(snapshot("book_completion"), InterviewConfig(prompt_variant="v3_plus"))
+
+    assert standalone.system_prompt == baseline.system_prompt
+    assert plus.system_prompt == baseline.system_prompt
+    assert "当前是成书补访" in standalone.prompt
+    assert "当前是成书补访" in plus.prompt

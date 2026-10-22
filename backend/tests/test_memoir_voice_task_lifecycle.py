@@ -17,6 +17,12 @@ from app.services.memoir.streaming_tts_events import chunk_text_for_tts, stream_
 from tests.test_memoir_voice_tts import FakeBidirectionalConnection, bidi_server_packet, decode_bidi_client_packet
 
 
+def test_assistant_turn_start_request_accepts_prompt_variant():
+    request = AssistantTurnStartRequest.from_payload({"prompt_variant": "v3_plus"})
+
+    assert request.prompt_variant == "v3_plus"
+
+
 @pytest.mark.parametrize("ending", ["cancel", "text_error", "audio_error", "normal"])
 async def test_assistant_stream_finishes_both_tasks(ending, monkeypatch):
     session = VoiceAssistantTurnStreamSession(db=None, client=None, voice_session_id="session", user_id="user")
