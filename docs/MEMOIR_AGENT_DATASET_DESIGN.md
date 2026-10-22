@@ -1,7 +1,7 @@
 # 回忆录 Agent 开发与数据集迭代计划
 
 2026-10-21。本文定义整体开发顺序，首轮聚焦访谈 Agent。访谈文字核心、线上同源离线入口、冻结选择与评分工具已交付；
-首轮候选已对比但未采用，代码保留在实验分支。人工校准、多轮/真机验证与写作 Agent 仍待推进，实际入口及报告见第 11 节。
+首轮及第二轮全量分集候选已对比但未采用，代码保留在实验分支。人工校准、多轮/真机验证与写作 Agent 仍待推进，实际入口及报告见第 11 节。
 数据现状为 v3.1 的 208 条候选；下文阶段表保留实施目标，不代表后续阶段已经完成。
 线上事实与成书规则以[访谈与成书架构](./MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)为准，
 语音生命周期以[实时语音架构](./MEMOIR_VOICE_CHAT_ARCHITECTURE.md)为准，
@@ -299,4 +299,6 @@ PYTHONPATH=. venv/bin/python -m scripts.review_memoir_interview summarize \
 
 首轮候选的实验提交、实际对比与采用决定见[第一轮候选报告](./MEMOIR_INTERVIEW_ITERATION_1_REPORT.md)。
 该候选未达到采用标准，代码留在实验分支，主分支合入报告；线上仍使用原 Prompt。
+第二轮已按 116 条开发 / 92 条评测比较 baseline、grounded_v1 及新增的 v2 / v3 / v4，另跑 8 个产品场景；
+冻结过程、逐轨道分数、裁判局限和未采用结论见[全量分集实验报告](./MEMOIR_INTERVIEW_ITERATION_2_REPORT.md)。
 后续以新的来源分组继续验证，而不是反复调同一批评测输入。
