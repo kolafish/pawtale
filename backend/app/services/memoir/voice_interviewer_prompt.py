@@ -21,6 +21,12 @@ from app.services.memoir.voice_followup_ai import (
     _has_user_message,
     _recent_context,
 )
+from app.services.memoir.prompt_variants import (
+    DEFAULT_PROMPT_VARIANT,
+    PromptVariant,
+    normalize_prompt_variant,
+    variant_user_instruction,
+)
 
 
 OPENING_TOPIC_COUNT = 3
@@ -42,7 +48,9 @@ def build_stream_turn_prompt(
     completion_prompt_context: completion_interviews.CompletionIssuePromptContext | None,
     book_context: InterviewBookContext | None,
     policy_instruction: str = "",
+    prompt_variant: str = DEFAULT_PROMPT_VARIANT,
 ) -> str:
+    normalized_variant = normalize_prompt_variant(prompt_variant)
     host_name = persona.host_name
     has_user_message = _has_user_message(list(voice_session.messages))
     policy_section = f"当前受控访谈策略：\n{policy_instruction}" if policy_instruction else ""
@@ -62,8 +70,8 @@ def build_stream_turn_prompt(
     first_narration = not has_previous_project_narration and not book.chapters
     if has_user_message:
         return _join(
-            _header(host_name, regenerate),
-            _FOLLOW_UP,
+            _header(host_name, regenerate, normalized_variant),
+            _follow_up_for_variant(normalized_variant),
             _profile_question(book),
             _person_question(book),
             policy_section,
@@ -88,13 +96,13 @@ def build_stream_turn_prompt(
             if book.profile_questions else "请他讲一件自己想讲的往事，不再问资料。"
         )
         return _join(
-            _header(host_name, regenerate), mode, _profile_question(book, opening=True), progress,
+            _header(host_name, regenerate, normalized_variant), mode, _profile_question(book, opening=True), progress,
             _book_block(book, opening=True), policy_section, dialogue,
         )
 
     if book.starts_new_story:
         return _join(
-            _header(host_name, regenerate),
+            _header(host_name, regenerate, normalized_variant),
             "当前是开场，讲述者主动选择了‘讲个新故事’。简短欢迎，邀请他从自己想起的一件事开始讲。"
             "不要推荐旧章节的补充问题，不要求接着上次讲，不替他选择话题。保持 [listen]。",
             f"讲述者资料：{book.narrator}" if book.narrator else "",
@@ -105,7 +113,7 @@ def build_stream_turn_prompt(
 
     if book.completion_offer is not None:
         return _join(
-            _header(host_name, regenerate),
+            _header(host_name, regenerate, normalized_variant),
             "当前是开场，可以邀请补充一个旧故事，也允许直接讲别的。先简短欢迎，再说清下面这一个补充方向。"
             "只作邀请：愿意补充可以点‘补充这段’，也可以直接讲别的。不把讲述者当成已经同意，不催促，不要求口头回答同意，"
             "不声称问题已经解决，不再提出其他问题。保持 [listen]。",
@@ -128,7 +136,7 @@ def build_stream_turn_prompt(
 - 只问一个问题：今天想从哪个讲起，也可以讲别的"""
         topics = _thin_topics_block(book.topics)
     return _join(
-        _header(host_name, regenerate),
+        _header(host_name, regenerate, normalized_variant),
         mode,
         progress,
         _book_block(book, opening=True),
@@ -142,6 +150,15 @@ _FOLLOW_UP = """叙述者自己决定讲什么，你主要是听众。
 - 他还在讲（话没说完、故事没讲完），用一句话接住，请他接着说，比如“后来呢？”，不另起问题
 - 一件事讲完了、说记不清了，或者问讲什么好，可以从“人生话题”里提一个可以拒绝的新方向，说成具体的入口
 - 他说想自己讲、不想被问时，这次后面只接住，不再提新方向"""
+
+_VARIANT_FOLLOW_UP = """讲述者自己决定讲什么，你主要是听众。
+- 他还在自然展开、话没有说完时，简短接住，让他继续，不急着提出新问题
+- 一件事讲完了、说记不清了，或者需要入口时，再沿已知的人物、事件或场景提出一个具体、可拒绝的问题
+- 他说想自己讲、不想被问时，后面主要倾听和简短承接，不主动安排新方向"""
+
+
+def _follow_up_for_variant(variant: PromptVariant) -> str:
+    return _FOLLOW_UP if variant == "v3_improved" else _VARIANT_FOLLOW_UP
 
 
 _PROFILE_QUESTIONS = {
@@ -179,7 +196,14 @@ def _person_question(book: InterviewBookContext) -> str:
 - 上下文里已经问过、他已经说清了，或者说过不记得、不想聊这个人，就不问"""
 
 
-def _header(host_name: str, regenerate: bool) -> str:
+def _header(host_name: str, regenerate: bool, prompt_variant: PromptVariant) -> str:
+    if prompt_variant in {"standalone", "v3_plus"}:
+        instruction = variant_user_instruction(prompt_variant)
+        if prompt_variant == "standalone":
+            instruction = instruction + "\n\n" + INTERVIEWER_TURN_OUTPUT_RULES
+        if regenerate:
+            instruction += "\n\n这次是在替换上一句回应，请换一个角度，不要重复上一句。"
+        return instruction
     lines = [
         f"请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。",
         "",
@@ -194,6 +218,7 @@ def _header(host_name: str, regenerate: bool) -> str:
     ]
     if regenerate:
         lines.append("- 这次是在替换上一句回应，请换一个角度，不要重复上一句")
+    lines.extend(["", variant_user_instruction(prompt_variant)])
     return "\n".join(lines)
 
 

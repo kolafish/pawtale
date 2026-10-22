@@ -29,6 +29,13 @@ def test_validate_runtime_settings_rejects_unknown_default_ai_model():
         validate_runtime_settings(settings)
 
 
+def test_validate_runtime_settings_rejects_unknown_interview_prompt_variant():
+    settings = Settings(memoir_interview_prompt_variant="unknown")
+
+    with pytest.raises(RuntimeError, match="MEMOIR_INTERVIEW_PROMPT_VARIANT"):
+        validate_runtime_settings(settings)
+
+
 def test_validate_runtime_settings_rejects_default_production_secret():
     settings = Settings(
         app_env="production",

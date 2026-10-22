@@ -30,9 +30,15 @@ from app.services.memoir.voice_followup_ai import (
     system_prompt_for_persona,
 )
 from app.services.memoir.voice_interviewer_prompt import build_stream_turn_prompt
+from app.services.memoir.prompt_variants import (
+    DEFAULT_PROMPT_VARIANT,
+    PromptVariant,
+    normalize_prompt_variant,
+    variant_system_prompt,
+)
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v10"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v11"
 STREAM_TEXT_TEMPERATURE = 0.72
 
 
@@ -53,6 +59,7 @@ class InterviewConfig:
     requested_model: str | None = None
     temperature: float = STREAM_TEXT_TEMPERATURE
     regenerate: bool = False
+    prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT
 
 
 @dataclass(frozen=True)
@@ -65,10 +72,14 @@ class PreparedInterviewTurn:
 
 
 def prepare_interview_turn(snapshot: InterviewInput, config: InterviewConfig) -> PreparedInterviewTurn:
+    prompt_variant = normalize_prompt_variant(config.prompt_variant)
+    is_open_narration = snapshot.dialogue.session_goal == MemoirSessionGoal.OPEN_NARRATION.value
+    base_system_prompt = system_prompt_for_persona(snapshot.persona)
+    system_prompt = variant_system_prompt(prompt_variant) or base_system_prompt
     return PreparedInterviewTurn(
         input=snapshot,
         config=config,
-        system_prompt=system_prompt_for_persona(snapshot.persona),
+        system_prompt=system_prompt if is_open_narration else base_system_prompt,
         prompt=build_stream_turn_prompt(
             snapshot.dialogue,
             has_previous_project_narration=snapshot.has_previous_project_narration,
@@ -79,6 +90,7 @@ def prepare_interview_turn(snapshot: InterviewInput, config: InterviewConfig) ->
             completion_prompt_context=snapshot.completion_context,
             book_context=snapshot.book_context,
             policy_instruction=snapshot.policy_instruction,
+            prompt_variant=prompt_variant,
         ),
         max_tokens=_llm_max_tokens(
             snapshot.dialogue,
