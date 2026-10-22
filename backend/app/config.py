@@ -13,6 +13,7 @@ VALID_APP_ENVS = {"development", "test", "production"}
 DEFAULT_AI_TEXT_MODEL = "deepseek-flash"
 DEFAULT_MEMOIR_INTERVIEW_PROMPT_VARIANT = "v3_improved"
 VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"v3_improved", "v4", "v3_plus"}
+LEGACY_MEMOIR_INTERVIEW_PROMPT_VARIANTS = {"standalone"}
 VALID_AI_TEXT_MODELS = {
     "deepseek",
     "deepseek-flash",
@@ -193,7 +194,9 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
         )
 
     prompt_variant = current_settings.memoir_interview_prompt_variant.strip()
-    if prompt_variant not in VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS:
+    if prompt_variant not in (
+        VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS | LEGACY_MEMOIR_INTERVIEW_PROMPT_VARIANTS
+    ):
         valid_variants = ", ".join(sorted(VALID_MEMOIR_INTERVIEW_PROMPT_VARIANTS))
         raise RuntimeError(
             f"MEMOIR_INTERVIEW_PROMPT_VARIANT must be one of: {valid_variants}"

@@ -19,8 +19,12 @@ def prompt_variant_text(name: str) -> str:
 
 
 def normalize_prompt_variant(value: object) -> PromptVariant:
-    if isinstance(value, str) and value.strip() in PROMPT_VARIANTS:
-        return value.strip()  # type: ignore[return-value]
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized == "standalone":
+            return "v4"
+        if normalized in PROMPT_VARIANTS:
+            return normalized  # type: ignore[return-value]
     return DEFAULT_PROMPT_VARIANT
 
 

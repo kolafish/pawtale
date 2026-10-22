@@ -10,6 +10,7 @@ from app.services.memoir.interview_book_context import InterviewBookContext, Lif
 from app.services.memoir.interview_agent import (
     InterviewConfig, InterviewInput, InterviewRun, prepare_interview_turn, stream_interview_turn,
 )
+from app.services.memoir.prompt_variants import normalize_prompt_variant
 from app.services.memoir.voice_followup_ai import InterviewDialogue, InterviewMessage
 
 
@@ -115,6 +116,10 @@ def test_prompt_variants_keep_product_context_and_change_only_open_narration_rul
     assert "故事价值" in prepared_plus.prompt
     assert "访谈上下文" in prepared_v4.prompt
     assert "访谈上下文" in prepared_plus.prompt
+
+
+def test_legacy_standalone_prompt_variant_maps_to_v4():
+    assert normalize_prompt_variant("standalone") == "v4"
 
 
 def test_all_open_narration_prompt_variants_include_shared_context():
