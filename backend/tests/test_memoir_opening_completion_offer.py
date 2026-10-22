@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import select
 
@@ -11,7 +13,14 @@ from app.services.memoir.narrative import frameworks, interview_policy_runtime
 from tests.memoir_helpers import post_mobile_memoir_voice_session
 from tests.test_memoir_book_completion import _book
 from tests.test_memoir_interview_policy_runtime import FakePolicyAI
-from tests.test_memoir_voice_assistant_turn_stream import _run_stream_turn
+from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
+from tests.test_memoir_voice_assistant_turn_stream import (
+    FakeStreamingAI,
+    FakeStreamingTTS,
+    FakeTurnClient,
+    _run_stream_turn,
+    _wait_for_event,
+)
 
 
 async def _opening(client, db, project_id, *, entry=None):
@@ -61,6 +70,7 @@ async def test_home_opening_does_not_offer_supplement_until_narrator_has_no_dire
 
     await test_db.refresh(session)
     assert session.metadata_json[completion_interviews.OPENING_OFFER_KEY] == issue.id
+    assert session.metadata_json[completion_interviews.OPENING_OFFER_STATUS_KEY] == completion_interviews.OPENING_OFFER_CONSUMED
 
     decline = _line(project_id, session.id, 'user', '这个我不想补充，还是讲别的吧。', 3)
     test_db.add(decline)
@@ -77,6 +87,61 @@ async def test_home_opening_does_not_offer_supplement_until_narrator_has_no_dire
     _, ai, _, _ = await _run_stream_turn(test_db, voice_session_id=session.id, user_id=user_id,
         chunks=['您接着讲就好。'])
     assert issue.question not in ai.calls[0]['user_prompt']
+
+
+async def test_pending_opening_offer_can_be_cleared_and_retried(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    trigger = _line(project_id, session.id, 'user', '我不知道讲什么了。', 1)
+    test_db.add(trigger)
+    await test_db.commit()
+
+    first = await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    assert first is not None and first.issue_id == issue.id
+    assert session.metadata_json[completion_interviews.OPENING_OFFER_STATUS_KEY] == completion_interviews.OPENING_OFFER_PENDING
+    await test_db.commit()
+
+    assert await completion_interviews.clear_pending_opening_offer(test_db, voice_session=session) is True
+    await test_db.commit()
+    await test_db.refresh(session)
+    assert completion_interviews.OPENING_OFFER_KEY not in session.metadata_json
+
+    retried = await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    assert retried is not None and retried.issue_id == issue.id
+
+
+async def test_failed_opening_offer_is_retryable(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    user_id = (await test_db.get(Project, project_id)).user_id
+    test_db.add(_line(project_id, session.id, 'user', '我不知道讲什么了。', 1))
+    await test_db.commit()
+
+    class FailingAI(FakeStreamingAI):
+        async def stream_llm(self, system_prompt, user_prompt, **kwargs):
+            if False:
+                yield None
+            raise RuntimeError('stream failed')
+
+    stream_client = FakeTurnClient()
+    runner = VoiceAssistantTurnStreamSession(
+        db=test_db,
+        client=stream_client,
+        voice_session_id=session.id,
+        user_id=user_id,
+        ai_client_factory=lambda model=None: FailingAI([]),
+        tts_client_factory=FakeStreamingTTS,
+    )
+    run_task = asyncio.create_task(runner.run())
+    await _wait_for_event(stream_client, 'turn.ready')
+    await stream_client.push({'type': 'turn.start'})
+    await _wait_for_event(stream_client, 'turn.failed')
+    await asyncio.wait_for(run_task, 1)
+
+    await test_db.refresh(session)
+    assert completion_interviews.OPENING_OFFER_KEY not in session.metadata_json
+    retry = await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    assert retry is not None and retry.issue_id == issue.id
 
 
 @pytest.mark.parametrize('entry', ['miniprogram_home', 'miniprogram_home_launch'])

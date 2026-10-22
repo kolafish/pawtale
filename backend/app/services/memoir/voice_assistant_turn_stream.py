@@ -251,6 +251,7 @@ class VoiceAssistantTurnStreamSession:
                 with contextlib.suppress(asyncio.CancelledError):
                     await stream_task
                 await self.db.rollback()
+                await self._clear_pending_opening_offer()
                 if cancel_signal.client_disconnected:
                     return
                 await self.client.send_json(
@@ -272,6 +273,7 @@ class VoiceAssistantTurnStreamSession:
                 await stream_task
             except Exception as exc:
                 await self.db.rollback()
+                await self._clear_pending_opening_offer()
                 logger.exception(
                     "Streaming assistant turn failed voice_session_id=%s turn_id=%s",
                     self.voice_session_id,
@@ -292,6 +294,26 @@ class VoiceAssistantTurnStreamSession:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(cancel_task, stream_task, return_exceptions=True)
+
+    async def _clear_pending_opening_offer(self) -> None:
+        try:
+            voice_session = await load_voice_session(
+                self.db,
+                self.voice_session_id,
+                self.user_id,
+            )
+            cleared = await completion_interviews.clear_pending_opening_offer(
+                self.db,
+                voice_session=voice_session,
+            )
+            if cleared:
+                await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            logger.exception(
+                "Failed to clear pending opening offer voice_session_id=%s",
+                self.voice_session_id,
+            )
 
     async def _wait_for_cancel(self, cancel_event: asyncio.Event) -> AssistantTurnCancelSignal:
         while not cancel_event.is_set():
@@ -396,7 +418,7 @@ class VoiceAssistantTurnStreamSession:
         )
 
         if completion_offer:
-            # Persist the one-time invitation before model streaming or
+            # Persist a retryable pending state before model streaming or
             # concurrent audio capture can start another turn.
             await self.db.commit()
         current_user_message = next(
@@ -496,6 +518,8 @@ class VoiceAssistantTurnStreamSession:
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
+            await self.db.rollback()
+            await self._clear_pending_opening_offer()
             return
         try:
             turn = artifacts.completed_turn(prepared.input)
@@ -515,6 +539,12 @@ class VoiceAssistantTurnStreamSession:
             profile_questions=profile_questions,
             person_question=person_question,
         )
+        if completion_offer is not None:
+            await completion_interviews.consume_opening_offer(
+                self.db,
+                voice_session=voice_session,
+                issue_id=completion_offer.issue_id,
+            )
         if narrator_profile.ask_needs_check(profile_questions, turn.speech_text):
             narrator_profile.check_profile_ask_later(
                 message_id=message.id, fields=profile_questions, text=turn.speech_text, ai_model=req.ai_model,
