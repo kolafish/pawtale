@@ -1,5 +1,4 @@
 import { readSelectedAIModel } from "./ai-model-settings";
-import { readSelectedMemoirInterviewPromptVariant } from "./memoir-interview-prompt-settings";
 import { classifyVoiceGatewayError } from "./memoir-streaming-asr-protocol";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-session-api";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
@@ -11,7 +10,6 @@ const TURN_ACTIVITY_TIMEOUT_MS = 30000;
 export interface VoiceAssistantTurnStreamStartOptions {
   regenerate?: boolean;
   aiModel?: string;
-  promptVariant?: string;
   voice?: string;
   speedRatio?: number;
   extraPayload?: Record<string, unknown>;
@@ -303,7 +301,6 @@ export class VoiceAssistantTurnStreamClient {
       ...(options.extraPayload || {}),
       type: "turn.start",
       ai_model: options.aiModel || readSelectedAIModel(),
-      prompt_variant: options.promptVariant || readSelectedMemoirInterviewPromptVariant(),
       regenerate: options.regenerate || false,
       voice: options.voice || ttsSettings.voice || undefined,
       speed_ratio: speedRatio === 1 ? undefined : speedRatio,

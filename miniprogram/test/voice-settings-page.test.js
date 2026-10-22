@@ -35,7 +35,6 @@ function loadVoiceSettingsPage({
   aiModelExports = {},
   accessibilityExports = {},
   ttsExports = {},
-  promptVariantExports = {},
   memoirCacheExports = {},
 } = {}) {
   mockModule("../stores/memoir-cache.ts", {
@@ -116,18 +115,6 @@ function loadVoiceSettingsPage({
     saveScopedTTSSettings: (_scope, settings) => settings,
     ...ttsExports,
   });
-  mockModule("../services/memoir-interview-prompt-settings.ts", {
-    MEMOIR_INTERVIEW_PROMPT_OPTIONS: [
-      { value: "v3_improved", label: "v3 改进版（默认）", description: "当前真机 baseline" },
-      { value: "v4", label: "v4", description: "更强调顺着故事" },
-      { value: "v3_plus", label: "v3_plus", description: "更完整检查" },
-    ],
-    memoirInterviewPromptVariantLabel: (variant) => variant,
-    readSelectedMemoirInterviewPromptVariant: () => "v3_improved",
-    saveMemoirInterviewPromptVariant: (variant) => variant,
-    ...promptVariantExports,
-  });
-
   return loadPageModule("../pages/voice-settings/index.ts");
 }
 
@@ -143,6 +130,7 @@ test("voice settings page is registered in the miniprogram route list", () => {
     "utf8",
   );
   assert.doesNotMatch(pageTemplate, /润色强度|transcriptPolishOptions/);
+  assert.doesNotMatch(pageTemplate, /访谈 Prompt|promptVariant/);
   const meTemplate = fs.readFileSync(
     path.join(__dirname, "../pages/me/index.wxml"),
     "utf8",
@@ -234,35 +222,6 @@ test("voice settings saves the selected AI model", () => {
   assert.deepEqual(saved, ["doubao-seed-2-0-pro-260215"]);
   assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
   assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
-});
-
-test("voice settings saves the selected interview prompt variant", () => {
-  const saved = [];
-  global.wx = {
-    showToast() {},
-  };
-  const { page } = loadVoiceSettingsPage({
-    promptVariantExports: {
-      saveMemoirInterviewPromptVariant: (variant) => {
-        saved.push(variant);
-        return variant;
-      },
-      memoirInterviewPromptVariantLabel: (variant) => `label:${variant}`,
-    },
-  });
-  const context = pageContext(page);
-
-  page.selectInterviewPromptVariant.call(context, {
-    currentTarget: {
-      dataset: {
-        promptVariant: "v4",
-      },
-    },
-  });
-
-  assert.deepEqual(saved, ["v4"]);
-  assert.equal(context.data.interviewPromptVariant, "v4");
-  assert.equal(context.data.interviewPromptVariantLabel, "label:v4");
 });
 
 test("voice settings saves chat and book TTS settings independently", () => {
