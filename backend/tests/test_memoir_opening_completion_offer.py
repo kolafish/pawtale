@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -99,6 +100,7 @@ async def test_pending_opening_offer_can_be_cleared_and_retried(client, test_db)
     first = await completion_interviews.offer_for_opening(test_db, voice_session=session)
     assert first is not None and first.issue_id == issue.id
     assert session.metadata_json[completion_interviews.OPENING_OFFER_STATUS_KEY] == completion_interviews.OPENING_OFFER_PENDING
+    assert completion_interviews.OPENING_OFFER_PENDING_AT_KEY in session.metadata_json
     await test_db.commit()
 
     assert await completion_interviews.clear_pending_opening_offer(test_db, voice_session=session) is True
@@ -108,6 +110,37 @@ async def test_pending_opening_offer_can_be_cleared_and_retried(client, test_db)
 
     retried = await completion_interviews.offer_for_opening(test_db, voice_session=session)
     assert retried is not None and retried.issue_id == issue.id
+
+
+async def test_stopping_opening_session_releases_pending_offer(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    session = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    offer = await completion_interviews.offer_for_opening(test_db, voice_session=session)
+    assert offer is not None and offer.issue_id == issue.id
+    await test_db.commit()
+
+    stopped = await client.post(f'/api/mobile/memoir/voice-sessions/{session.id}/stop', json={})
+    assert stopped.status_code == 200, stopped.text
+    await test_db.refresh(session)
+    assert completion_interviews.OPENING_OFFER_KEY not in session.metadata_json
+
+
+async def test_expired_pending_opening_offer_can_be_claimed_by_another_session(client, test_db):
+    project_id, _, issue = await _issue(client, test_db)
+    first = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    offer = await completion_interviews.offer_for_opening(test_db, voice_session=first)
+    assert offer is not None and offer.issue_id == issue.id
+    first.metadata_json = {
+        **first.metadata_json,
+        completion_interviews.OPENING_OFFER_PENDING_AT_KEY: (
+            datetime.now(UTC) - timedelta(minutes=16)
+        ).isoformat(),
+    }
+    await test_db.commit()
+
+    second = await _opening(client, test_db, project_id, entry='miniprogram_home_resume')
+    retry = await completion_interviews.offer_for_opening(test_db, voice_session=second)
+    assert retry is not None and retry.issue_id == issue.id
 
 
 async def test_pending_opening_offer_is_cleared_when_issue_is_no_longer_valid(client, test_db):

@@ -351,6 +351,10 @@ async def stop_voice_session(
             db,
             voice_session=voice_session,
         )
+        await completion_interviews.clear_pending_opening_offer(
+            db,
+            voice_session=voice_session,
+        )
         voice_session.status = (
             MemoirVoiceSessionStatus.FAILED.value
             if req.error_message
@@ -382,5 +386,11 @@ async def stop_voice_session(
                 project_id=voice_session.project_id,
                 voice_session_id=voice_session.id,
             )
+    else:
+        # A repeated stop can recover metadata left by an interrupted request.
+        await completion_interviews.clear_pending_opening_offer(
+            db,
+            voice_session=voice_session,
+        )
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)
