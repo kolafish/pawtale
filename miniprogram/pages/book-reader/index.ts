@@ -16,7 +16,8 @@ import {
   readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
-import { navigateToLoginThenNarrate, routeAuthError } from "../../services/navigation";
+import { navigateToLoginThenNarrate, returnToHomeThenNarrate, routeAuthError } from "../../services/navigation";
+import { readSessionCookie } from "../../services/request";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
@@ -337,7 +338,9 @@ definePage<BookReaderData>()({
   ...shareLikeMethods,
 
   startMyStory() {
-    if (this.data.readerDemo) navigateToLoginThenNarrate();
+    if (!this.data.readerDemo) return;
+    if (readSessionCookie()) returnToHomeThenNarrate();
+    else navigateToLoginThenNarrate();
   },
 
   async onLoad(query: PageQuery = {}) {

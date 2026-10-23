@@ -1203,12 +1203,13 @@ test("home does not create voice sessions when consent audit sync fails", async 
   assert.equal(context.data.creatingVoice, false);
 });
 
-test("home creates the first memoir and starts narrating without the setup form", async () => {
+test("a narration request from the sample creates the first memoir through the existing home flow", async () => {
   const navigations = [];
   const createdProjects = [];
   const sessionProjects = [];
   let project = null;
   global.wx = {
+    reLaunch(options) { navigations.push(options.url); },
     navigateTo(options) { navigations.push(options.url); },
     pageScrollTo() {},
   };
@@ -1238,7 +1239,10 @@ test("home creates the first memoir and starts narrating without the setup form"
   });
   context.measureNarration = () => {};
 
-  await context.startPrimaryVoiceChat();
+  require("../services/navigation.ts").returnToHomeThenNarrate();
+  assert.deepEqual(navigations, ["/pages/home/index"]);
+  navigations.length = 0;
+  await context.onShow();
 
   assert.deepEqual(createdProjects, [{ title: "我的回忆录" }]);
   assert.deepEqual(sessionProjects, ["p-first"]);

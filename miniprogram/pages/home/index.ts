@@ -61,7 +61,7 @@ import {
   CHAPTER_WORKSPACE_PAGE_URL,
   consumeHomeStoryTarget,
   consumeHomeVoiceTarget,
-  consumeNarrationAfterLogin,
+  consumeNarrationRequest,
   type HomeVoiceTarget,
   type HomeStoryTarget,
   navigateToBook,
@@ -381,13 +381,13 @@ definePage<HomeData>()({
     this.voiceNavigationTarget = consumeHomeVoiceTarget() ?? this.voiceNavigationTarget;
     this.homeRefreshTimer.cancel();
     enableMiniProgramShareMenu();
-    const narrateAfterLogin = consumeNarrationAfterLogin();
+    const narrationRequested = consumeNarrationRequest();
     this.refreshAccessibilitySettings();
     const agreedEntry = this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
     this.openPendingVoiceSession();
     if (!this.homeVisible || this.data.needsLogin) return;
-    if (narrateAfterLogin) await this.startPrimaryVoiceChat();
+    if (narrationRequested) await this.startPrimaryVoiceChat();
     else if (agreedEntry) await this.startSelectedNarration(agreedEntry);
   },
 

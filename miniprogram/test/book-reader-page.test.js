@@ -119,7 +119,7 @@ test("shared reader opens without owner access and hides owner-only narration", 
 
 test("demo reader uses the public book and disables account-only audio", async () => {
   const destinations = [];
-  global.wx = { navigateTo({url}) { destinations.push(url); } };
+  global.wx = { getStorageSync: () => "", navigateTo({url}) { destinations.push(url); } };
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: unmockedAsync("owner book API"),
     readMemoirDemoBook: async () => sampleFinishedBook("家里的人完整章节"),
@@ -135,8 +135,27 @@ test("demo reader uses the public book and disables account-only audio", async (
   assert.equal(context.data.readerDemo, true);
   context.startMyStory();
   assert.deepEqual(destinations, ["/pages/login/index"]);
-  assert.equal(require("../services/navigation.ts").consumeNarrationAfterLogin(), true);
+  assert.equal(require("../services/navigation.ts").consumeNarrationRequest(), true);
   delete global.wx;
+});
+
+test("a signed-in sample reader returns to the existing home to start narration", () => {
+  const destinations = [];
+  global.wx = {
+    getStorageSync: () => "test-session",
+    navigateTo: ({ url }) => destinations.push(url),
+    navigateBack: ({ delta }) => destinations.push({ delta }),
+  };
+  global.getCurrentPages = () => [{ route: "pages/home/index" }, { route: "pages/book-reader/index" }];
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page, { readerDemo: true });
+
+  context.startMyStory();
+
+  assert.deepEqual(destinations, [{ delta: 1 }]);
+  const { consumeNarrationRequest } = require("../services/navigation.ts");
+  assert.equal(consumeNarrationRequest(), true);
+  assert.equal(consumeNarrationRequest(), false);
 });
 
 test("reader paragraphs only honor line breaks saved by the language model", () => {
