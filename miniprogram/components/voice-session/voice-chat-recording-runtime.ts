@@ -506,8 +506,10 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   focusRecordingTranscript() {
     const runtime = this.runtime();
     if (!this.data.recording || this.data.interviewType !== "ai_interview"
-      || !this.data.liveTranscriptFollowing || runtime.disposed || runtime.pageSuspended) return;
+      || runtime.disposed || runtime.pageSuspended) return;
+    runtime.transcriptLayoutDirty = true;
     const version = ++runtime.transcriptLayoutVersion;
+    if (!this.data.liveTranscriptFollowing) return;
     applyVoiceChatDataPatch(this, { transcriptStageHeight: 0 }, () => {
       let stage: WechatMiniprogram.BoundingClientRectResult | null = null;
       let dock: WechatMiniprogram.BoundingClientRectResult | null = null;
@@ -523,6 +525,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
           recordingDockSpace: layout.bottomSpace,
         }, () => {
           if (!isCurrent()) return;
+          runtime.transcriptLayoutDirty = false;
           if (Math.abs(layout.scrollTop - scrollTop) >= 1) {
             wx.pageScrollTo({ scrollTop: layout.scrollTop, duration: 0 });
           }
@@ -620,7 +623,11 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       return;
     }
     applyVoiceChatDataPatch(this, voiceTranscriptFollowLatestPatch(), () => {
-      this.scheduleLiveTranscriptScroll();
+      if (this.runtime().transcriptLayoutDirty) {
+        this.focusRecordingTranscript();
+      } else {
+        this.scheduleLiveTranscriptScroll();
+      }
     });
   },
 
