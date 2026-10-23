@@ -1061,6 +1061,11 @@ def test_related_context_respects_eight_message_and_four_thousand_char_windows()
     assert len(_recent_context(long_current)) <= 4000
     assert "历史内容" not in related_context_block(long_current, related)
 
+    latest_with_intent = (
+        InterviewMessage("user", "开头" * 2200 + "最后我想暂停一下。", 0, "latest", datetime(2026, 1, 1)),
+    )
+    assert "最后我想暂停一下" in _recent_context(latest_with_intent)
+
 
 @pytest.mark.parametrize("failure_stage", ["before_text", "partial_audio", "after_text", "text_failed"])
 async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(

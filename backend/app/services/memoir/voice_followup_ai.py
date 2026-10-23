@@ -268,6 +268,13 @@ def recent_context_messages(messages: Sequence[Message]) -> list[Message]:
         speaker = "叙述者：" if message.role == MemoirChatMessageRole.USER.value else "AI："
         content_budget = max(0, available - len(speaker))
         if content_budget:
+            if len(content) > content_budget:
+                if content_budget <= 9:
+                    content = content[:content_budget]
+                else:
+                    head_budget = max(1, content_budget // 2)
+                    tail_budget = content_budget - head_budget - 9
+                    content = content[:head_budget] + "……中间省略……" + content[-tail_budget:]
             selected.append(
                 InterviewMessage(
                     role=message.role,
