@@ -36,7 +36,7 @@ from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import (
     VoiceAssistantTurnStreamSession,
 )
-from app.services.memoir.voice_followup_ai import InterviewMessage, related_context_block
+from app.services.memoir.voice_followup_ai import InterviewMessage, _recent_context, related_context_block
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
     create_test_book_plan,
@@ -1058,6 +1058,7 @@ def test_related_context_respects_eight_message_and_four_thousand_char_windows()
         InterviewMessage("user", "当前" * 600, index, str(index), datetime(2026, 1, 1))
         for index in range(7)
     )
+    assert len(_recent_context(long_current)) <= 4000
     assert "历史内容" not in related_context_block(long_current, related)
 
 

@@ -142,7 +142,7 @@ AudioFile
 
 - SectionDigest、ChapterDigest、BookReview；
 - CompletionIssue；
-- InterviewPolicyDecision / Evaluation；
+- 历史 InterviewPolicyDecision / Evaluation（当前不再写入）；
 - EditingJob、AutomationEvent；
 - ImageAsset、BookImagePlacement；
 - 分享视频 job 和 output；

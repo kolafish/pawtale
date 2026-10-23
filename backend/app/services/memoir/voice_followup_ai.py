@@ -248,7 +248,37 @@ def _message_context(messages: Sequence[Message]) -> str:
 
 
 def recent_context_messages(messages: Sequence[Message]) -> list[Message]:
-    return _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
+    """Return the latest messages within both the count and character budgets."""
+    ordered = _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
+    selected: list[Message] = []
+    remaining_chars = MAX_CONTEXT_CHARS
+    for message in reversed(ordered):
+        content = message.content_text.strip()
+        if not content:
+            continue
+        rendered = _message_context((message,))
+        separator = 1 if selected else 0
+        available = remaining_chars - separator
+        if available <= 0:
+            break
+        if len(rendered) <= available:
+            selected.append(message)
+            remaining_chars -= separator + len(rendered)
+            continue
+        speaker = "叙述者：" if message.role == MemoirChatMessageRole.USER.value else "AI："
+        content_budget = max(0, available - len(speaker))
+        if content_budget:
+            selected.append(
+                InterviewMessage(
+                    role=message.role,
+                    content_text=content[:content_budget],
+                    turn_index=message.turn_index,
+                    id=message.id,
+                    created_at=message.created_at,
+                )
+            )
+        break
+    return list(reversed(selected))
 
 
 def _recent_context(messages: Sequence[Message]) -> str:
