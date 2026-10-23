@@ -238,9 +238,9 @@ async def test_failed_opening_offer_is_retryable(client, test_db):
     assert retry is not None and retry.issue_id == issue.id
 
 
-@pytest.mark.parametrize('entry', ['miniprogram_home', 'miniprogram_home_launch'])
+@pytest.mark.parametrize('entry', ['miniprogram_home_resume', 'miniprogram_home', 'miniprogram_home_launch'])
 @pytest.mark.parametrize('previous_offer', [False, True])
-async def test_new_story_opening_skips_old_questions_and_keeps_ordinary_follow_up(
+async def test_all_home_openings_resume_the_book_without_offering_supplement(
     client, test_db, tmp_path, monkeypatch, entry, previous_offer,
 ):
     monkeypatch.setattr('app.services.memoir.audio_files.MEMOIR_AUDIO_DIR', tmp_path / 'audio')
@@ -252,18 +252,20 @@ async def test_new_story_opening_skips_old_questions_and_keeps_ordinary_follow_u
     before = dict(session.metadata_json)
 
     async def unexpected_offer(*args, **kwargs):
-        raise AssertionError('Starting a new story must not select an old completion question')
+        raise AssertionError('A home opening must not select an old completion question')
 
     monkeypatch.setattr(completion_interviews, 'offer_for_opening', unexpected_offer)
     user_id = (await test_db.get(Project, project_id)).user_id
     stream, ai, _, completed = await _run_stream_turn(
         test_db, voice_session_id=session.id, user_id=user_id,
-        chunks=['这次想讲什么故事？从您想起的地方开始就好。'],
+        chunks=['欢迎回来，您接着讲就好。'],
     )
     started = next(event for event in stream.sent if event['type'] == 'turn.started')
     assert 'opening_completion_offer' not in started
     assert issue.question not in ai.calls[0]['user_prompt']
-    assert chapter.title not in ai.calls[0]['user_prompt']
+    assert chapter.title in ai.calls[0]['user_prompt']
+    assert '给两个具体方向让他选' in ai.calls[0]['user_prompt']
+    assert '讲个新故事' not in ai.calls[0]['user_prompt']
     assert completed['primary_intent'] == 'opening'
     await test_db.refresh(session)
     assert session.metadata_json.get(completion_interviews.OPENING_OFFER_KEY) == before.get(completion_interviews.OPENING_OFFER_KEY)

@@ -30,7 +30,7 @@ from app.services.memoir.voice_interviewer_prompt import build_stream_turn_promp
 from app.services.memoir.v4_prompt import system_prompt as v4_system_prompt
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v12"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v13"
 STREAM_TEXT_TEMPERATURE = 0.72
 
 

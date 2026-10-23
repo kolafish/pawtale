@@ -97,7 +97,7 @@ const RESUME_HINT_CHAR_LIMIT = 28;
 // The first story starts without a setup form; the title can be changed later.
 const FIRST_PROJECT_TITLE = "我的回忆录";
 
-type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
+type HomeVoiceEntry = "home_resume";
 
 interface HomeData extends HomeStoryData {
   loading: boolean;
@@ -392,6 +392,7 @@ definePage<HomeData>()({
       if (narrationRequested === "start") navigateToLoginThenNarrate();
       return;
     }
+    if (narrationRequested === "after_login" && this.data.hasProject) return;
     if (narrationRequested) await this.startPrimaryVoiceChat();
     else if (agreedEntry) await this.startSelectedNarration(agreedEntry);
   },
@@ -958,12 +959,7 @@ definePage<HomeData>()({
   },
 
   async startPrimaryVoiceChat() {
-    await this.startSelectedNarration(this.data.launchVariant === "none" ? "home" : "home_launch");
-  },
-
-  async resumeLastStory() {
-    const entry = this.data.launchVariant === "none" ? "home_resume" : "home_launch";
-    await this.startSelectedNarration(entry);
+    await this.startSelectedNarration("home_resume");
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {
@@ -1074,12 +1070,12 @@ definePage<HomeData>()({
       provider: "volc_streaming_asr",
       input_format: "pcm_s16le_16000_mono",
       metadata_json: {
-        entry: entry === "home" ? "miniprogram_home" : `miniprogram_${entry}`,
+        entry: "miniprogram_home_resume",
         interview_type: interviewType,
         session_goal: sessionGoal,
         first_version: true,
         ...(this.data.launchVariant !== "none" ? { launch_variant: this.data.launchVariant } : {}),
-        ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
+        ...(this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
       },
     }, {
       projectId,
@@ -1096,7 +1092,7 @@ definePage<HomeData>()({
       },
       { projectId, voiceSessionId: detail.session.id },
     );
-    if (entry === "home_launch") {
+    if (this.data.launchVariant !== "none") {
       this.dismissLaunchExperience();
     }
     this.voiceNavigationTarget = { userId, projectId, entry: {
