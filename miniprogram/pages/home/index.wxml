@@ -86,7 +86,7 @@
           loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
         <button wx:elif="{{notice.kind === 'progress' && notice.action === 'review'}}" size="mini"
           class="home-inline-action ui-button" bindtap="openReviewIssues">查看待确认 ›</button>
-        <button size="mini" class="home-inline-action is-secondary ui-button" bindtap="dismissNotice"
+        <button size="mini" class="home-inline-action ui-button" bindtap="dismissNotice"
           loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
       </view>
     </view>
