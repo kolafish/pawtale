@@ -454,10 +454,10 @@ test("home story template exposes growth and counts without internal completion 
   assert.doesNotMatch(template, /树上的故事/);
 });
 
-test("home binds the shared notice queue and keeps the tree as the book entry", () => {
+test("home binds the shared notice queue and keeps the memoir card as the book entry", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   assert.match(template, /bindtap="dismissNotice"/);
-  assert.match(template, /bind:openbook="openBook"/);
+  assert.match(template, /bindtap="openBook"/);
   assert.doesNotMatch(template, /growthNoticeTitle|growthNoticeContext|viewStoryGrowth|dismissShareLikeNotice|home-story-progress/);
 });
 

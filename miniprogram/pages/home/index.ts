@@ -1,4 +1,4 @@
-import { narrationModeForSession, NARRATION_MODES, type NarrationMode } from "../../domain/memoir-narration-mode";
+import { narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   VoiceSessionEntry,
   VoiceSessionExitEvent,
@@ -197,26 +197,19 @@ export function homeResumeHint(item?: Pick<
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
-  const choice = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
-    : state.needsLogin || !state.hasProject ? "开始讲述"
     : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
-    : state.selectedMode === "book_completion" ? choice.action
-    : state.hasStories ? "讲个新故事" : "讲第一个故事";
+    : "开始讲述";
+  const greetingName = state.displayName.trim();
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
-    greetingText: `你好，${state.displayName || "作者"}`,
-    headerSubtitleText: state.loading ? "正在看看您的故事树。"
-      : state.needsLogin ? "先读示例，再讲自己的故事。"
-      : !state.hasProject ? "从一段回忆开始。"
-      : state.hasStories ? ""
-      : "想起什么，就讲什么。",
+    greetingText: greetingName && greetingName !== "作者" ? `你好，${greetingName}` : "你好",
+    headerSubtitleText: "",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
-    showNarrationChoiceCard: !state.needsLogin && state.hasProject && state.hasStories
-      && state.hasLastStoryHint && state.selectedMode !== "book_completion",
+    showNarrationChoiceCard: false,
     showVoiceAuthorizationPanel: !state.needsLogin && !state.loading
       && !state.voiceAuthorizationAgreed && state.voiceAuthorizationRequested,
   };
@@ -342,7 +335,7 @@ definePage<HomeData>()({
     voiceAuthorizationAgreed: false,
     voiceAuthorizationRequested: false,
     voiceAuthorizationSaving: false,
-    greetingText: "你好，作者",
+    greetingText: "你好",
     headerSubtitleText: "从一段回忆开始。",
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
@@ -672,9 +665,18 @@ definePage<HomeData>()({
   },
 
   openShareCard() {
+    if (!this.data.projectId) {
+      this.canStartVoiceChat();
+      return;
+    }
     // A suggestion card has its own buttons; otherwise the whole card is the link.
     const candidate = this.data.shareCandidate;
-    if (candidate && (candidate.status === "ready" || candidate.status === "accepted")) return;
+    if (candidate?.status === "accepted") {
+      if (candidate.video_job_id) this.openShareCandidateVideo();
+      else this.openShareVideoLibrary();
+      return;
+    }
+    if (candidate?.status === "ready") return;
     if (this.data.shareVideoTotal || this.data.shareVideoActiveCount || this.data.shareVideoFailedCount) {
       this.openShareVideoLibrary();
     } else {
@@ -742,7 +744,7 @@ definePage<HomeData>()({
   },
 
   openStoryProgress() {
-    wx.pageScrollTo({ selector: "#home-story", duration: 250 });
+    wx.pageScrollTo({ selector: "#home-memoir", duration: 250 });
   },
 
   async refreshStory() {
@@ -826,7 +828,10 @@ definePage<HomeData>()({
   },
 
   openVoiceEdit() {
-    if (!this.data.projectId) return;
+    if (!this.data.projectId) {
+      this.canStartVoiceChat();
+      return;
+    }
     if (this.data.voiceEntry) {
       wx.showToast({ title: "请先结束当前讲述", icon: "none" });
       return;
@@ -948,7 +953,8 @@ definePage<HomeData>()({
   },
 
   async resumeLastStory() {
-    await this.startSelectedNarration("home_resume");
+    const entry = this.data.launchVariant === "none" ? "home_resume" : "home_launch";
+    await this.startSelectedNarration(entry);
   },
 
   async startSelectedNarration(entry: HomeVoiceEntry) {

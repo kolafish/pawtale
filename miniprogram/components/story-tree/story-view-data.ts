@@ -6,6 +6,8 @@ export type StoryTone = "leaf" | "sun" | "clay";
 export interface StoryMemoirSummaryView {
   title: string;
   bookMetaText: string;
+  /** The compact progress line shown on the home memoir entry. */
+  bookProgressText: string;
 }
 
 export interface StoryThemeTagView {
@@ -58,6 +60,7 @@ export function emptyStoryViewData(): StoryViewData {
     memoir: {
       title: "我的故事",
       bookMetaText: "正在整理",
+      bookProgressText: "正在整理",
     },
     overview: {
       title: "我的故事树",
