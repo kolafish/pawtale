@@ -619,7 +619,7 @@ test("me keeps memoir management and voice settings as separate entries", () => 
   ]);
 });
 
-test("me clears the current user's memoir snapshots and old page stack on logout", async () => {
+test("logout clears private snapshots and the old page stack, then returns to the public home", async () => {
   let cacheClearCount = 0;
   const pageStack = ["/pages/home/index", "/pages/me/index"];
   global.wx = {
@@ -646,7 +646,7 @@ test("me clears the current user's memoir snapshots and old page stack on logout
 
   assert.equal(cacheClearCount, 1);
   assert.equal(context.data.loggedIn, false);
-  assert.deepEqual(pageStack, ["/pages/login/index"]);
+  assert.deepEqual(pageStack, ["/pages/home/index"]);
 });
 
 test("me keeps the active session when server logout fails", async () => {

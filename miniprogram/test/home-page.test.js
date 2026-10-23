@@ -652,6 +652,28 @@ test("home start action follows account, project, story and completion states", 
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
 });
 
+test("the memoir card follows the visitor, empty account and own memoir states", () => {
+  const { page, mod } = loadHomePage();
+  const story = { ...page.data.story, memoir: { ...page.data.story.memoir, title: "余老师的往事" } };
+  const states = [
+    {
+      needsLogin: true, hasProject: false,
+      expected: { label: "示例回忆录", title: "余老师的往事", action: "翻开看看", showProgress: true },
+    },
+    {
+      needsLogin: false, hasProject: false,
+      expected: { label: "我的回忆录", title: "还没有回忆录", action: "看看示例", showProgress: false },
+    },
+    {
+      needsLogin: false, hasProject: true,
+      expected: { label: "我的回忆录", title: "余老师的往事", action: "翻开我的书", showProgress: true },
+    },
+  ];
+  for (const { expected, ...state } of states) {
+    assert.deepEqual(mod.homeViewPatch({ ...page.data, story, ...state }).memoirCard, expected);
+  }
+});
+
 test("home reveals voice consent only after a start requests it", () => {
   const loaded = loadHomePage();
   const { homeViewPatch } = loaded.mod;
@@ -888,7 +910,9 @@ test("home paints cached memoir data before the aggregate refresh completes", as
   assert.deepEqual(writes, [3]);
 });
 
-test("home shows explicit project creation state for logged-in users without projects", async () => {
+test("an account without a memoir can open the public sample from its empty card", async () => {
+  const opened = [];
+  global.wx = { navigateTo: ({ url }) => opened.push(url) };
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -917,6 +941,12 @@ test("home shows explicit project creation state for logged-in users without pro
   assert.equal(context.data.projectId, "");
   assert.equal(context.data.projectTitle, "还没有回忆录");
   assert.equal(context.data.hasProject, false);
+  assert.equal(context.data.storyLoaded, true);
+  assert.deepEqual(context.data.memoirCard, {
+    label: "我的回忆录", title: "还没有回忆录", action: "看看示例", showProgress: false,
+  });
+  context.openBook();
+  assert.deepEqual(opened, ["/pages/book-reader/index?demo=1"]);
 });
 
 test("home keeps first-visit context while presenting the seed state", async () => {
@@ -1542,6 +1572,9 @@ test("visitors browse the sample memoir and open only its readable chapters", as
 
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.storyLoaded, true);
+  assert.deepEqual(context.data.memoirCard, {
+    label: "示例回忆录", title: "余仲尤往事", action: "翻开看看", showProgress: true,
+  });
   assert.deepEqual(context.data.story.chapters.map((item) => item.title), ["家里的人", "下乡那几年"]);
 
   context.openChapter({ detail: { chapterId: "family" } });

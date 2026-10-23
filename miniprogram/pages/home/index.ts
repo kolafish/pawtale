@@ -126,6 +126,7 @@ interface HomeData extends HomeStoryData {
   voiceStartButtonClass: string;
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
+  memoirCard: { label: string; title: string; action: string; showProgress: boolean };
   showNarrationChoiceCard: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
@@ -160,6 +161,7 @@ type HomeViewPatch = Pick<
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
+  | "memoirCard"
   | "showNarrationChoiceCard"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
@@ -209,6 +211,12 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
+    memoirCard: {
+      label: state.needsLogin ? "示例回忆录" : "我的回忆录",
+      title: state.needsLogin || state.hasProject ? state.story.memoir.title : "还没有回忆录",
+      action: state.needsLogin ? "翻开看看" : state.hasProject ? "翻开我的书" : "看看示例",
+      showProgress: state.needsLogin || state.hasProject,
+    },
     showNarrationChoiceCard: false,
     showVoiceAuthorizationPanel: !state.needsLogin && !state.loading
       && !state.voiceAuthorizationAgreed && state.voiceAuthorizationRequested,
@@ -340,6 +348,7 @@ definePage<HomeData>()({
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "开始讲述",
+    memoirCard: { label: "我的回忆录", title: "还没有回忆录", action: "看看示例", showProgress: false },
     showNarrationChoiceCard: false,
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
@@ -807,7 +816,7 @@ definePage<HomeData>()({
   },
 
   openBook() {
-    if (this.data.needsLogin && this.data.demoReadableChapterIds.length) {
+    if (this.data.needsLogin || !this.data.hasProject) {
       wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
       return;
     }
