@@ -669,15 +669,9 @@ definePage<HomeData>()({
       this.canStartVoiceChat();
       return;
     }
-    // A suggestion card has its own buttons; otherwise the whole card is the link.
-    const candidate = this.data.shareCandidate;
-    if (candidate?.status === "accepted") {
-      if (candidate.video_job_id) this.openShareCandidateVideo();
-      else this.openShareVideoLibrary();
-      return;
-    }
-    if (candidate?.status === "ready") return;
-    if (this.data.shareVideoTotal || this.data.shareVideoActiveCount || this.data.shareVideoFailedCount) {
+    // Recommendations use their own catchtap buttons; the row always keeps the library/picker reachable.
+    if (this.data.shareCandidate?.status === "accepted" || this.data.shareVideoTotal
+      || this.data.shareVideoActiveCount || this.data.shareVideoFailedCount) {
       this.openShareVideoLibrary();
     } else {
       this.pickShareVideoClip();

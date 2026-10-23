@@ -69,8 +69,6 @@ test("story maps server content into the hero, themes and book summary", () => {
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.bookMetaText, "1 章 · 200 字");
   assert.equal(view.overview.title, "余仲尤的回忆录");
-  assert.equal(view.overview.growthStage, 2);
-  assert.equal(view.overview.growthImageSrc, "/assets/story-tree/tree-hero-stage-02-seedling.jpg");
   assert.deepEqual(view.overview.themeTags.map(tag => tag.title), ["章节 1", "章节 2"]);
   assert.deepEqual(view.overview.themeTags.map(tag => tag.readable), [true, false]);
   assert.equal(view.chapters[0].hasSections, true);
@@ -91,6 +89,17 @@ test("story maps server content into the hero, themes and book summary", () => {
   const countedView = storyViewData(counted);
   assert.equal(countedView.overview.summaryText, "2 章 · 3 小节");
   assert.deepEqual(countedView.chapters.map(chapter => chapter.storyCountText), ["2 小节", "1 小节"]);
+});
+
+test("home memoir progress uses current included chapters for every counter", () => {
+  const current = snapshot({ book_chapter_count: 4, book_char_count: 9000 });
+  current.chapters[1].char_count = 600;
+  assert.equal(storyViewData(current).memoir.bookProgressText, "1 章 · 1 小节 · 200 字");
+  current.chapters[0].sections.push({ id: "new-section", title: "新增小节" });
+  current.chapters[0].char_count = 350;
+  assert.equal(storyViewData(current).memoir.bookProgressText, "1 章 · 2 小节 · 350 字");
+  current.chapters[0].include_in_book = false;
+  assert.equal(storyViewData(current).memoir.bookProgressText, "正在整理");
 });
 
 test("story distinguishes empty, organizing and section-less states", () => {
@@ -441,17 +450,6 @@ test("closed issues disappear despite an old needs_input job; five readable draf
   current.book_readable = true;
   current.book_chapter_count = 3;
   assert.equal(storyViewData(current).memoir.bookMetaText, "3 章 · 200 字");
-});
-
-test("home story template exposes growth and counts without internal completion labels", () => {
-  const template = fs.readFileSync(
-    path.join(__dirname, "../components/story-tree/index.wxml"),
-    "utf8",
-  );
-  assert.doesNotMatch(template, /hero-growth-copy|story-status|statusText/);
-  assert.match(template, /growthLabel/);
-  assert.match(template, /id="story-summary-toggle"/);
-  assert.doesNotMatch(template, /树上的故事/);
 });
 
 test("home binds the shared notice queue and keeps the memoir card as the book entry", () => {

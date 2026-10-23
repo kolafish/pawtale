@@ -19,6 +19,7 @@
 
   <view hidden="{{voiceEntry}}" class="home-content">
     <view class="home-voice-card" id="home-voice">
+      <image class="home-card-background" src="/assets/home/narration-background.png" mode="aspectFill" aria-hidden="true" />
       <view class="voice-card-copy">
         <text class="voice-card-title">聊两句</text>
         <text class="voice-card-subtitle">AI 陪您慢慢聊</text>
@@ -35,12 +36,6 @@
           <text>{{primaryVoiceButtonTitle}}</text>
           <text class="voice-start-arrow" aria-hidden="true">›</text>
         </view>
-      </view>
-      <view class="voice-card-visual" aria-hidden="true">
-        <view class="voice-visual-halo"></view>
-        <image class="voice-microphone" src="/assets/memoir-microphone.png" mode="aspectFit" />
-        <view class="voice-wave voice-wave-one"></view>
-        <view class="voice-wave voice-wave-two"></view>
       </view>
     </view>
 
@@ -60,6 +55,10 @@
 
     <view wx:if="{{storyLoaded}}" id="home-memoir" class="home-memoir-card ui-pressable"
       bindtap="openBook" hover-class="home-memoir-card-hover" aria-role="button" aria-label="翻开我的书">
+      <image class="home-card-background" src="/assets/home/memoir-background.png" mode="aspectFill" aria-hidden="true" />
+      <view class="memoir-cover-caption" aria-hidden="true">
+        <text class="memoir-cover-title">{{story.memoir.title}}</text>
+      </view>
       <view class="memoir-card-copy">
         <text class="memoir-card-kicker">我的回忆录</text>
         <text class="memoir-card-title">{{story.memoir.title}}</text>
@@ -70,21 +69,11 @@
           <text class="memoir-open-arrow" aria-hidden="true">›</text>
         </view>
       </view>
-      <view class="memoir-card-visual" aria-hidden="true">
-        <view class="memoir-book-shadow"></view>
-        <view class="memoir-book">
-          <view class="memoir-book-pages"></view>
-          <view class="memoir-book-cover">
-            <text class="memoir-book-cover-title">{{story.memoir.title}}</text>
-            <view class="memoir-book-cover-mark"></view>
-          </view>
-        </view>
-      </view>
     </view>
     <view wx:elif="{{loading}}" class="memoir-loading-card" aria-live="polite">正在整理您的回忆录…</view>
 
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
-    <button wx:if="{{storyError}}" class="home-story-action ui-button" bindtap="refreshStory"
+    <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取</button>
 
     <view wx:if="{{notice}}" class="home-growth-notice" aria-live="polite">
@@ -107,7 +96,7 @@
         aria-label="分享视频"
         aria-role="button"
         bindtap="openShareCard"
-        hover-class="{{shareCandidate && (shareCandidate.status === 'ready' || shareCandidate.status === 'accepted') ? 'none' : 'ui-subtle-action-hover'}}"
+        hover-class="ui-subtle-action-hover"
       >
         <view class="home-utility-icon home-utility-video" aria-hidden="true">▶</view>
         <view class="home-utility-copy">
