@@ -59,7 +59,6 @@ class InterviewBookContext:
     # One gap about a person 小余 may ask once a story is told; never while profile items are left.
     person_question: narration_people.Question | None = None
     completion_offer: completion_interviews.OpeningCompletionOffer | None = None
-    starts_new_story: bool = False
 
 
 async def load_interview_book_context(
@@ -83,7 +82,6 @@ async def load_interview_book_context(
     profile = profile if isinstance(profile, dict) else {}
     profile_context = await narrator_profile.profile_question_context_for(db, voice_session, project)
     profile_questions = profile_context.questions
-    starts_new_story = anchor_topic is None and interview_topics.is_new_story_entry(voice_session)
     user_messages = [
         message
         for message in voice_session.messages
@@ -124,7 +122,6 @@ async def load_interview_book_context(
         and voice_session.interview_type == "ai_interview"
         and opening_completion_offer_allowed
         else None,
-        starts_new_story=starts_new_story,
     )
 
 

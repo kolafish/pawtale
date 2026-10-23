@@ -500,7 +500,7 @@ test("home ignores a recommendation returned after the project changes", async (
 test("home combines new-story and resume actions into one voice entry", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="resumeLastStory"/);
+  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
   assert.doesNotMatch(pageWxml, /resume-story-action|讲个新故事|接着讲|上次说到/);
   assert.match(pageWxml, /聊两句/);
   assert.match(pageWxml, /AI 陪您慢慢聊/);
@@ -1056,7 +1056,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
   assert.deepEqual(navigations, []);
   assert.deepEqual(context.data.voiceEntry, { voiceSessionId: "voice/1", projectId: "project/1", mode: "guided_interview", interviewType: "ai_interview", sessionGoal: "open_narration", projectTitle: "爷爷的故事" });
@@ -1109,62 +1109,34 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(context.data.voiceEntry.mode, "free_narration");
 });
 
-test("home keeps new-story and resume actions distinct across narration modes", async () => {
-  const createdSessions = [];
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
+test("all home launches keep the resume opening and preserve launch context", async () => {
+  const created = [];
+  const dismissals = [];
+  global.wx = { pageScrollTo() {} };
   const { page } = loadHomePage({
     voiceApiExports: {
-      createMemoirVoiceSession: async (input, options) => {
-        createdSessions.push({ input, options });
-        return {
-          session: {
-            id: `voice/${createdSessions.length}`,
-          },
-        };
+      createMemoirVoiceSession: async input => {
+        created.push(input);
+        return { session: { id: `voice/${created.length}` } };
       },
     },
+    launchStateExports: { dismissHomeLaunch: (...args) => dismissals.push(args) },
   });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      projectTitle: "爷爷的故事",
-      projectDisplayTitle: "爷爷的故事",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-      lastStoryHint: "爷爷退休后还在忙公司的事",
-      hasLastStoryHint: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  await page.startPrimaryVoiceChat.call(context);
-  context.data.voiceEntry = null; // The prior component has completed and unmounted.
-  await context.resumeLastStory();
-  context.data.voiceEntry = null;
-  context.data.selectedMode = "human_interview";
-  await context.startPrimaryVoiceChat();
-
-  assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
-  assert.equal(createdSessions[0].input.metadata_json.resume_hint, undefined);
-  assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
-  assert.equal(createdSessions[1].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
-  assert.equal(createdSessions[2].input.guidance_mode, "free_narration");
-  assert.equal(createdSessions[2].input.interview_type, "human_interview");
-  assert.equal(createdSessions[2].input.metadata_json.entry, "miniprogram_home");
-  assert.equal(createdSessions[2].input.metadata_json.resume_hint, undefined);
-  assert.equal(createdSessions[2].input.metadata_json.interview_type, "human_interview");
-  assert.equal(navigations.length, 0);
-  assert.equal(context.data.voiceEntry.interviewType, "human_interview");
+  for (const launchVariant of ["none", "first_visit", "new_project", "returning_soft"]) {
+    const context = pageContext(page, {
+      userId: "u1", projectId: "p1", hasProject: true, voiceAuthorizationAgreed: true,
+      launchVariant, lastStoryHint: "退休后照顾家里的事", hasLastStoryHint: true,
+    });
+    await context.startPrimaryVoiceChat();
+    const request = created.at(-1);
+    assert.equal(request.guidance_mode, "guided_interview");
+    assert.equal(request.interview_type, "ai_interview");
+    assert.equal(request.metadata_json.entry, "miniprogram_home_resume");
+    assert.equal(request.metadata_json.resume_hint, "退休后照顾家里的事");
+    assert.equal(request.metadata_json.launch_variant, launchVariant === "none" ? undefined : launchVariant);
+    assert.equal(context.data.launchVariant, "none");
+  }
+  assert.deepEqual(dismissals.map((args) => args[1]), ["first_visit", "new_project", "returning_soft"]);
 });
 
 test("home does not create voice sessions when consent audit sync fails", async () => {
@@ -1203,7 +1175,7 @@ test("home does not create voice sessions when consent audit sync fails", async 
   assert.equal(context.data.creatingVoice, false);
 });
 
-test("a narration request from the sample creates the first memoir through the existing home flow", async () => {
+test("logging in without a memoir creates the first book and starts the shared interview", async () => {
   const navigations = [];
   const createdProjects = [];
   const sessionProjects = [];
@@ -1239,8 +1211,8 @@ test("a narration request from the sample creates the first memoir through the e
   });
   context.measureNarration = () => {};
 
-  require("../services/navigation.ts").returnToHomeThenNarrate();
-  assert.deepEqual(navigations, ["/pages/home/index"]);
+  require("../services/navigation.ts").navigateToLoginThenNarrate();
+  assert.deepEqual(navigations, ["/pages/login/index"]);
   navigations.length = 0;
   await context.onShow();
 
@@ -1285,7 +1257,7 @@ test("agreeing to voice consent carries on with the story the user tapped", asyn
   delete global.wx;
 });
 
-test("an expired session sends the sample narration request through login and resumes once", async () => {
+test("an expired session returns an existing memoir to home after login", async () => {
   const { ApiError } = require("../services/request.ts");
   const navigations = [];
   let signedIn = false;
@@ -1322,6 +1294,10 @@ test("an expired session sends the sample narration request through login and re
   const loggedIn = pageContext(page, { needsLogin: true, voiceAuthorizationAgreed: true });
   loggedIn.measureNarration = () => {};
   await loggedIn.onShow();
+  assert.equal(creates, 0);
+  assert.equal(loggedIn.data.projectId, "p1");
+  assert.equal(loggedIn.data.voiceEntry, null);
+  await loggedIn.startPrimaryVoiceChat();
   assert.equal(creates, 1);
   assert.equal(loggedIn.data.voiceEntry.voiceSessionId, "resumed");
   loggedIn.onHide();
@@ -1350,9 +1326,9 @@ test("cancelling narration login allows the visitor to return home without a log
   context.onUnload();
 });
 
-test("logging in from the story button carries on into narration", async () => {
+test("logging in with a memoir returns to its home without starting an interview", async () => {
   const navigations = [];
-  let creates = 0;
+  const created = [];
   global.wx = {
     navigateTo(options) { navigations.push(options.url); },
     pageScrollTo() {},
@@ -1365,8 +1341,8 @@ test("logging in from the story button carries on into narration", async () => {
       }),
     },
     voiceApiExports: {
-      createMemoirVoiceSession: async () => {
-        creates += 1;
+      createMemoirVoiceSession: async input => {
+        created.push(input);
         return { session: { id: "s1" } };
       },
     },
@@ -1378,11 +1354,13 @@ test("logging in from the story button carries on into narration", async () => {
   const relaunched = pageContext(page, { needsLogin: true, voiceAuthorizationAgreed: true });
   relaunched.measureNarration = () => {};
   await relaunched.onShow();
-  assert.equal(creates, 1);
+  assert.equal(created.length, 0);
+  assert.equal(relaunched.data.projectId, "p1");
+  assert.equal(relaunched.data.voiceEntry, null);
 
   await relaunched.onHide();
   await relaunched.onShow();
-  assert.equal(creates, 1);
+  assert.equal(created.length, 0);
   delete global.wx;
 });
 

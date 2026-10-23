@@ -62,13 +62,6 @@ def is_home_voice_entry(session: MemoirVoiceSession) -> bool:
     )
 
 
-def is_new_story_entry(session: MemoirVoiceSession) -> bool:
-    return is_home_voice_entry(session) and (session.metadata_json or {}).get("entry") in {
-        "miniprogram_home",
-        "miniprogram_home_launch",
-    }
-
-
 def topic_offer_requested(
     session: MemoirVoiceSession,
     latest_user_message: MemoirChatMessage | None,
@@ -79,7 +72,7 @@ def topic_offer_requested(
     ):
         return False
     if latest_user_message is None:
-        return bool(session.anchor_framework_item_id) or not is_new_story_entry(session)
+        return True
     normalized = "".join(latest_user_message.content_text.split())
     if explicitly_requests_supplement(latest_user_message.content_text):
         return False

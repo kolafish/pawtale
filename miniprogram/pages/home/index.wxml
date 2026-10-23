@@ -26,7 +26,7 @@
         <view
           id="primary-voice-action"
           class="voice-start-button ui-pressable {{voiceStartButtonClass}}"
-          bindtap="resumeLastStory"
+          bindtap="startPrimaryVoiceChat"
           hover-class="{{voiceStartButtonHoverClass}}"
           aria-role="button"
           aria-label="开始讲述"

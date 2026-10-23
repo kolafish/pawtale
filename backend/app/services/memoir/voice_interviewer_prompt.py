@@ -120,19 +120,6 @@ def build_stream_turn_prompt(
             retrieved_history,
         )
 
-    if book.starts_new_story:
-        return _join(
-            _header(regenerate),
-            "当前是开场，讲述者主动选择了‘讲个新故事’。简短欢迎，邀请他从自己想起的一件事开始讲。"
-            "不要推荐旧章节的补充问题，不要求接着上次讲，不替他选择话题。保持 [listen]。",
-            f"讲述者资料：{book.narrator}" if book.narrator else "",
-            progress,
-            additional_section,
-            dialogue,
-            retrieved_history,
-            _topics_block(book.topics),
-        )
-
     if book.anchor_topic is not None:
         mode = (
             f"当前是开场，叙述者选了“{book.anchor_topic.title}”这个话题，它关心的是：{book.anchor_topic.intent}。\n"
