@@ -21,7 +21,7 @@ function snapshot(patch = {}) {
       material_count: 2, char_count: n === 1 ? 200 : 0, readable: n === 1,
       state: n === 1 ? "settled" : "muted", state_text: n === 1 ? "可阅读" : "暂不入书",
       image_count: 3, video_count: 1, issues: { review_count: 0, supplement_count: 0 },
-      sections: [{ id: `section-${n}`, title: `小节 ${n}`, material_count: 1, image_count: 1, video_count: 2 }],
+      sections: [{ id: `section-${n}`, title: `小节 ${n}`, include_in_book: true, material_count: 1, image_count: 1, video_count: 2 }],
     })),
     automation_events: { items: [], total: 0, limit: 8 },
     unassigned_image_count: 2, unassigned_video_count: 1, growth_events: [], latest_transcript: null, ...patch,
@@ -95,9 +95,11 @@ test("home memoir progress uses current included chapters for every counter", ()
   const current = snapshot({ book_chapter_count: 4, book_char_count: 9000 });
   current.chapters[1].char_count = 600;
   assert.equal(storyViewData(current).memoir.bookProgressText, "1 章 · 1 小节 · 200 字");
-  current.chapters[0].sections.push({ id: "new-section", title: "新增小节" });
+  current.chapters[0].sections.push({ id: "new-section", title: "新增小节", include_in_book: true });
   current.chapters[0].char_count = 350;
   assert.equal(storyViewData(current).memoir.bookProgressText, "1 章 · 2 小节 · 350 字");
+  current.chapters[0].sections[1].include_in_book = false;
+  assert.equal(storyViewData(current).memoir.bookProgressText, "1 章 · 1 小节 · 350 字");
   current.chapters[0].include_in_book = false;
   assert.equal(storyViewData(current).memoir.bookProgressText, "正在整理");
 });

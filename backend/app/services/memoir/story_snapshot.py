@@ -72,7 +72,7 @@ async def attach_sections(
     section_chapters = {}
     for section in (
         await db.execute(
-            select(MemoirSection.id, MemoirSection.chapter_id, MemoirSection.title)
+            select(MemoirSection.id, MemoirSection.chapter_id, MemoirSection.title, MemoirSection.include_in_book)
             .where(
                 MemoirSection.project_id == project_id,
                 MemoirSection.status == "active",
@@ -81,7 +81,9 @@ async def attach_sections(
             .order_by(MemoirSection.sort_order, MemoirSection.id)
         )
     ).all():
-        view = MemoirStorySectionResponse(id=section.id, title=section.title)
+        view = MemoirStorySectionResponse(
+            id=section.id, title=section.title, include_in_book=section.include_in_book,
+        )
         section_views[section.id] = view
         section_chapters[section.id] = section.chapter_id
         chapter_views[section.chapter_id].sections.append(view)

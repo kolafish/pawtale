@@ -305,18 +305,20 @@ test("home editor entry keeps voice and dismiss guards", async () => {
 
 test("home keeps the recommendation and reports a failed consume request", async () => {
   const navigations = [];
+  const toasts = [];
   const candidate = {
     id: "candidate-1", project_id: "p1", utterance_id: "utterance-1", status: "ready",
   };
   const { page } = loadHomePage({ voiceApiExports: {
     dismissMemoirShareVideoCandidate: async () => { throw new Error("请求未送达"); },
   } });
-  global.wx = { navigateTo({ url }) { navigations.push(url); } };
+  global.wx = { navigateTo({ url }) { navigations.push(url); }, showToast(options) { toasts.push(options); } };
   const context = pageContext(page, { projectId: "p1", shareCandidate: candidate });
   await context.openShareCandidateEditor();
   assert.deepEqual(navigations, []);
   assert.equal(context.data.shareCandidate.id, candidate.id);
   assert.equal(context.data.shareCandidateError, "请求未送达");
+  assert.deepEqual(toasts, [{ title: "请求未送达", icon: "none" }]);
   assert.equal(context.data.shareCandidateDismissing, false);
 });
 
@@ -1311,6 +1313,8 @@ test("home sends login-required voice starts to the dedicated login page", async
 });
 
 test("home opens the project switcher from the current memoir", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  assert.match(wxml, /catchtap="openProjects"/);
   const navigations = [];
   global.wx = {
     navigateTo(options) {

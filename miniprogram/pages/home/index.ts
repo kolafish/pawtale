@@ -701,6 +701,7 @@ definePage<HomeData>()({
     } catch (error) {
       if (this.homeVisible && this.data.projectId === projectId) {
         this.setData({ shareCandidateError: error instanceof Error ? error.message : "暂时无法关闭提示" });
+        wx.showToast({ title: this.data.shareCandidateError, icon: "none" });
       }
       return false;
     } finally {
