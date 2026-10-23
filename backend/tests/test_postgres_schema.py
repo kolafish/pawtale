@@ -6,6 +6,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -86,5 +87,8 @@ def test_postgres_baseline_round_trip_matches_models(postgres_schema):
     assert "ix_memoir_retrieval_entries_bm25" in retrieval_indexes
     assert "ix_memoir_retrieval_entries_embedding_hnsw" not in retrieval_indexes
 
-    command.downgrade(config, "base")
-    command.upgrade(config, "head")
+    # The current head permanently removes retired interview-policy data.  A
+    # downgrade cannot restore those rows, so the migration fails explicitly
+    # instead of pretending the schema can be rolled back safely.
+    with pytest.raises(RuntimeError, match="c9f4b7e2a601 is irreversible"):
+        command.downgrade(config, "base")

@@ -293,12 +293,6 @@ class MemoirVoiceUtterance(Base):
         nullable=True,
         index=True,
     )
-    policy_decision_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_interview_policy_decisions.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="utterances")

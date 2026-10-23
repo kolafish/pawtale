@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base, register_models
 
 
-POSTGRES_SCHEMA_REVISION = "a7c2e9f4b601"
+POSTGRES_SCHEMA_REVISION = "c9f4b7e2a601"
 POSTGRES_REQUIRED_EXTENSIONS = {
     "pg_search",
     "pg_trgm",
@@ -39,21 +39,12 @@ DIRECT_PROJECT_TABLES = (
 INDIRECT_PROJECT_TABLES = (
     "memoir_framework_item_materials",
     "memoir_framework_items",
-    "memoir_interview_policy_decisions",
-    "memoir_interview_policy_evaluations",
     "memoir_transcript_alignments",
     "memoir_transcript_versions",
     "memoir_voice_authorization_consents",
     "memoir_voice_utterances",
 )
-MEMOIR_NARRATIVE_TRIGGERS = (
-    "memoir_interview_policy_decisions_immutable_selection",
-    "memoir_interview_policy_decisions_candidate_membership",
-    "memoir_interview_policy_decisions_append_only_evaluation",
-    "memoir_interview_policy_evaluations_failure_codes",
-    "memoir_interview_policy_evaluations_no_update",
-    "memoir_interview_policy_evaluations_no_delete",
-)
+MEMOIR_NARRATIVE_TRIGGERS = ()
 VOICE_INTEGRITY_TRIGGERS = (
     "memoir_voice_sessions_targets_insert",
     "memoir_voice_sessions_targets_update",

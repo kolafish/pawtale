@@ -46,8 +46,8 @@ VoiceSession
 自然语言搜索使用 `narration_mode=ai_interview / human_interview / book_completion`。AI 访谈（包括旧称
 自由讲述、引导访谈、主题访谈）检索两种底层 guidance 值的普通 AI 会话，排除真人与书稿补充；
 原有列表参数 `guidance_mode` 仍按存储值精确筛选。
-访谈策略分类器、shadow 评估和 active rollout 已从实时链路移除。普通 AI 访谈直接使用版本化访谈 Prompt；
-历史话题会话通过 `anchor_framework_item_id` 关联，开场上下文按当前会话窗口补充最近一次同话题会话。
+普通 AI 访谈直接使用版本化访谈 Prompt；历史话题会话通过 `anchor_framework_item_id` 关联，
+开场上下文按当前会话窗口补充最近一次同话题会话。
 
 三种讲述方式都是回忆录级默认设置，在“我的回忆录”的编辑设置页统一修改。
 首页不提供临时切换，开始时读取当前回忆录保存的 `guidance_mode`、`interview_type` 与

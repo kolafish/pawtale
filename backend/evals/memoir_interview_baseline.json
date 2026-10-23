@@ -4,7 +4,6 @@
   "dataset_manifest_sha256": "763b9ba1e8414964115321124eac95135f265cafb51fc255e73a222388e309ca",
   "status": "pending_human_review",
   "mode": "autonomous",
-  "policy_mode": "shadow",
   "model": "deepseek-flash",
   "temperature": 0.72,
   "repeat": 1,
@@ -53,9 +52,7 @@
     "product-unknown-motive"
   ],
   "budget": {
-    "planned_reply_calls": 76,
-    "policy_calls_additional": true,
-    "policy_retries": "shared REALTIME_STRUCTURED workload"
+    "planned_reply_calls": 76
   },
   "selection_reason": "保留原分组；开发集覆盖六类困难行为与四个真实窗口，评测集在候选冻结后才运行；产品样本是合成边界，不代表真实用户。"
 }
