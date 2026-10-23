@@ -174,7 +174,6 @@ class MemoirVoiceUtteranceResponse(BaseModel):
     provider_payload_json: dict[str, object] = Field(default_factory=dict)
     framework_item_id: str | None = None
     completion_issue_id: str | None = None
-    policy_decision_id: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -139,9 +139,6 @@ class MemoirEditingJobType(str, Enum):
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
     GENERATE_MATERIAL_IMAGE = "generate_material_image"
     REGENERATE_CHAPTER_SECTIONS = "regenerate_chapter_sections"
-    # Legacy values are retained only so already persisted jobs can be skipped safely.
-    EVALUATE_INTERVIEW_POLICY_SHADOW = "evaluate_interview_policy_shadow"
-    EVALUATE_INTERVIEW_POLICY_OUTCOME = "evaluate_interview_policy_outcome"
     ORGANIZE_MATERIAL = "organize_material"
     UPDATE_TOPIC_MAP = "update_topic_map"
     GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"

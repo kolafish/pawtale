@@ -249,7 +249,6 @@ flowchart LR
 | `provider_payload_json` | provider 原始或诊断 payload |
 | `framework_item_id` | 与话题地图项的直接访谈锚点 |
 | `completion_issue_id` | 这条回答是否来自成书补讲 |
-| `policy_decision_id` | 历史访谈策略决策关联；当前访谈不再写入 |
 | `created_at` | 讲述产生时间 |
 
 ### 3.2 素材是怎么来的
@@ -1309,12 +1308,6 @@ FrameworkItemMaterial 记录某条 utterance 与某个话题项的关联，以�
 
 它不是章节目录，也不用于判断人生是否“完整”。
 
-### 11.3 访谈策略历史数据
-
-旧版本曾写入 `InterviewPolicyDecision / Evaluation`，对应表仅保留历史数据供删除项目时清理；当前访谈不再运行策略分类器、shadow 评估或 active rollout，也不再新增这些记录。
-
----
-
 ## 十二、任务、事件、快照与缓存
 
 ### 12.1 EditingJob
@@ -1558,15 +1551,13 @@ Digest、Review、Issue、Version、Job 等术语放在系统内部，通过“�
 | `memoir_image_assets` | 图片素材 |
 | `memoir_book_image_placements` | 图片入书位置 |
 
-### 17.4 话题、策略与运行
+### 17.4 话题与运行
 
 | 表 | 说明 |
 | --- | --- |
 | `memoir_project_frameworks` | 项目话题模板快照 |
 | `memoir_framework_items` | 人生话题项与用户决定 |
 | `memoir_framework_item_materials` | 话题与素材的多对多匹配 |
-| `memoir_interview_policy_decisions` | 历史访谈策略决策（当前不再写入） |
-| `memoir_interview_policy_evaluations` | 历史策略评价（当前不再写入） |
 | `memoir_editing_jobs` | 异步编辑/整理任务 |
 | `memoir_automation_events` | 用户可见自动化事件 |
 | `memoir_material_share_videos` | 素材分享视频任务 |
