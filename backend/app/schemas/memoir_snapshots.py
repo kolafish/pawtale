@@ -58,6 +58,7 @@ class MemoirBookSnapshotResponse(BaseModel):
 class MemoirStorySectionResponse(BaseModel):
     id: str
     title: str
+    include_in_book: bool
     material_count: int = 0
     image_count: int = 0
     video_count: int = 0

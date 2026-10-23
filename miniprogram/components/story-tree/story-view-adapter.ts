@@ -50,7 +50,9 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
     || snapshot.chapters.reduce((total, chapter) => total + chapter.material_count, 0);
   // Current included chapters supply all three counters, independently of the last assembled book version.
   const includedChapters = snapshot.chapters.filter(chapter => chapter.include_in_book);
-  const includedSections = includedChapters.reduce((total, chapter) => total + chapter.sections.length, 0);
+  const includedSections = includedChapters.reduce(
+    (total, chapter) => total + chapter.sections.filter(section => section.include_in_book).length, 0,
+  );
   const includedChars = includedChapters.reduce((total, chapter) => total + chapter.char_count, 0);
   return {
     memoir: {

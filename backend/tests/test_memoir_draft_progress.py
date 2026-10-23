@@ -12,6 +12,29 @@ from tests.memoir_helpers import create_test_voice_transcript, run_test_editing_
 from tests.test_memoir_automatic_book_draft import _setup
 
 
+async def test_story_snapshot_preserves_active_section_book_inclusion(client, test_db):
+    from app.models.memoir import MemoirSection
+    from tests.memoir_helpers import create_test_book_plan_with_chapters, ensure_mobile_memoir_project
+
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db, project_id=project_id, chapter_titles=["童年"], draft_contents=["童年往事。"],
+    )
+    included = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapters[0].id))
+    excluded = MemoirSection(
+        project_id=project_id, chapter_id=chapters[0].id, title="暂不入书", sort_order=1,
+        status="active", include_in_book=False,
+    )
+    test_db.add(excluded)
+    await test_db.commit()
+    response = await client.get("/api/mobile/memoir/story-snapshot")
+    assert response.status_code == 200, response.text
+    sections = response.json()["chapters"][0]["sections"]
+    assert {section["id"]: section["include_in_book"] for section in sections} == {
+        included.id: True, excluded.id: False,
+    }
+
+
 async def test_story_snapshot_reads_counts_and_jobs_without_advancing_them(client, test_db, monkeypatch):
     project_id, chapter_id, section_id, fake, parent_id = await _setup(client, test_db, monkeypatch)
     from app.models.memoir import MemoirSectionMaterial

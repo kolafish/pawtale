@@ -81,7 +81,7 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
         view.title = published.title
         view.char_count = len(published.content.strip())
         view.sections = [MemoirStorySectionResponse(
-            id=section.section_id, title=section.title, material_count=section.source_count,
+            id=section.section_id, title=section.title, include_in_book=True, material_count=section.source_count,
         ) for section in published.sections]
         view.material_count = sum(section.material_count for section in view.sections)
     chapters = list(chapter_views.values())

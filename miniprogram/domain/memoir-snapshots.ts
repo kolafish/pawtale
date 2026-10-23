@@ -69,7 +69,7 @@ export interface MemoirStoryChapter {
   candidate_job_id: string | null;
   state: "settled" | "attention" | "draft" | "muted";
   state_text: string;
-  sections: Array<{ id: string; title: string; material_count: number; image_count: number; video_count: number }>;
+  sections: Array<{ id: string; title: string; include_in_book: boolean; material_count: number; image_count: number; video_count: number }>;
 }
 
 export type MemoirStoryChange =

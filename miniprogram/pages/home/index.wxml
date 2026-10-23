@@ -56,6 +56,8 @@
     <view wx:if="{{storyLoaded}}" id="home-memoir" class="home-memoir-card ui-pressable"
       bindtap="openBook" hover-class="home-memoir-card-hover" aria-role="button" aria-label="翻开我的书">
       <image class="home-card-background" src="/assets/home/memoir-background.jpg" mode="aspectFill" aria-hidden="true" />
+      <view wx:if="{{hasProject && !needsLogin}}" class="memoir-switch-action ui-pressable" catchtap="openProjects"
+        hover-class="ui-subtle-action-hover" aria-role="button" aria-label="切换回忆录">切换回忆录 ›</view>
       <view class="memoir-cover-caption" aria-hidden="true">
         <text class="memoir-cover-title">{{story.memoir.title}}</text>
       </view>
