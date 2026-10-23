@@ -90,6 +90,30 @@
   pointer-events: none;
 }
 
+.home-voice-card .home-card-background {
+  transform: translate(-2%, -1%) scale(0.94);
+}
+
+.home-memoir-card .home-card-background {
+  transform: translate(3%, 3%) scale(0.94);
+  transform-origin: right bottom;
+}
+
+.home-voice-card::before,
+.home-memoir-card::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background:
+    linear-gradient(0deg, #fbf5ed, rgba(251, 245, 237, 0) 18%, rgba(251, 245, 237, 0) 82%, #fbf5ed),
+    linear-gradient(90deg, #fbf5ed, rgba(251, 245, 237, 0) 12%, rgba(251, 245, 237, 0) 85%, #fbf5ed);
+  pointer-events: none;
+}
+
 .voice-card-copy {
   position: relative;
   z-index: 2;
@@ -227,13 +251,13 @@
 .memoir-cover-caption {
   position: absolute;
   z-index: 1;
-  top: 35%;
-  left: 65%;
-  width: 23%;
-  color: #684b36;
+  top: 42%;
+  left: 70%;
+  width: 21%;
+  color: #8b7563;
   font-family: var(--ui-font-editorial);
-  font-size: 25rpx;
-  font-weight: 700;
+  font-size: 22rpx;
+  font-weight: 500;
   line-height: 1.25;
   text-align: center;
   transform: rotate(9deg) skewX(-23deg);
@@ -295,9 +319,9 @@
 
 .memoir-card-progress {
   margin-top: 18rpx;
-  color: var(--ui-text-primary);
-  font-size: 31rpx;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: 29rpx;
+  font-weight: 500;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
   text-wrap: pretty;
@@ -398,43 +422,43 @@
   margin-top: 24rpx;
 }
 
-.home-utility-row {
+.home-utility-row,
+.home-share-candidate {
   box-sizing: border-box;
-  min-height: 88rpx;
-  padding: 12rpx 16rpx;
+  min-height: 40px;
+  padding: 10rpx 16rpx;
   border-radius: 20rpx;
   display: flex;
   align-items: center;
   gap: 12rpx;
   color: var(--ui-text-primary);
-  background: rgba(255, 253, 250, 0.76);
-  box-shadow:
-    0 0 0 1rpx rgba(54, 42, 34, 0.035),
-    0 5rpx 14rpx rgba(63, 47, 37, 0.028);
+  background: rgba(255, 253, 250, 0.54);
+  box-shadow: 0 0 0 1rpx rgba(54, 42, 34, 0.025);
 }
 
-.home-utility-row:first-child {
+.home-utility-row:first-child,
+.home-share-candidate {
   grid-column: 1 / -1;
 }
 
 .home-utility-icon {
-  width: 56rpx;
-  height: 56rpx;
-  flex: 0 0 56rpx;
-  border-radius: 17rpx;
+  width: 48rpx;
+  height: 48rpx;
+  flex: 0 0 48rpx;
+  border-radius: 14rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--ui-accent-strong);
-  background: #f8e6dd;
+  background: #fbefe9;
   font-size: 28rpx;
   font-weight: 800;
   line-height: 1;
 }
 
 .home-utility-memories {
-  color: #607257;
-  background: #edf1e8;
+  color: #73816a;
+  background: #f2f4ee;
   font-size: 35rpx;
   font-weight: 500;
 }
@@ -442,7 +466,7 @@
 .home-utility-edit {
   gap: 6rpx;
   align-items: center;
-  background: #fff1d8;
+  background: #fff6e7;
 }
 
 .home-utility-edit-bar-one,
@@ -451,12 +475,12 @@
   display: block;
   width: 7rpx;
   border-radius: 999rpx;
-  background: #d8952f;
+  background: #c89d59;
 }
 
-.home-utility-edit-bar-one { height: 24rpx; }
-.home-utility-edit-bar-two { height: 42rpx; }
-.home-utility-edit-bar-three { height: 31rpx; }
+.home-utility-edit-bar-one { height: 20rpx; }
+.home-utility-edit-bar-two { height: 34rpx; }
+.home-utility-edit-bar-three { height: 26rpx; }
 
 .home-utility-copy {
   min-width: 0;
@@ -465,14 +489,15 @@
 
 .home-utility-title {
   font-size: 29rpx;
-  font-weight: 750;
+  font-weight: 650;
   line-height: 1.35;
 }
 
 .home-utility-arrow {
   flex: 0 0 auto;
   color: var(--ui-text-secondary);
-  font-size: 36rpx;
+  opacity: 0.55;
+  font-size: 32rpx;
   font-weight: 400;
   line-height: 1;
 }
@@ -487,22 +512,6 @@
   font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.3;
-}
-
-.home-share-candidate {
-  grid-column: 1 / -1;
-  box-sizing: border-box;
-  min-height: 88rpx;
-  padding: 12rpx 16rpx;
-  border-radius: 20rpx;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  color: var(--ui-text-primary);
-  background: rgba(255, 253, 250, 0.76);
-  box-shadow:
-    0 0 0 1rpx rgba(54, 42, 34, 0.035),
-    0 5rpx 14rpx rgba(63, 47, 37, 0.028);
 }
 
 .story-refresh-error {
