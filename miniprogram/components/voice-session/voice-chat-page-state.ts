@@ -140,6 +140,8 @@ export interface VoiceChatData {
   liveTextClass: string;
   liveScrollClass: string;
   liveScrollTop: number;
+  transcriptStageHeight: number;
+  recordingDockSpace: number;
   liveTranscriptFollowing: boolean;
   liveReviewStartCharCount: number;
   showReturnToLatest: boolean;
@@ -280,6 +282,8 @@ export function initialVoiceChatData(): VoiceChatData {
     liveTextClass: "live-text",
     liveScrollClass: "live-scroll",
     liveScrollTop: 0,
+    transcriptStageHeight: 0,
+    recordingDockSpace: 0,
     liveTranscriptFollowing: true,
     liveReviewStartCharCount: 0,
     showReturnToLatest: false,

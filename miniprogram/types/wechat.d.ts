@@ -63,14 +63,18 @@ declare function Component<
     pageLifetimes?: {
       show?(): void;
       hide?(): void;
+      resize?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
   },
 ): void;
 
 declare namespace WechatMiniprogram {
   interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
-  interface NodesRef { boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery }
-  interface SelectorQuery { select(selector: string): NodesRef; exec(): void }
+  interface NodesRef {
+    boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery;
+    scrollOffset(callback: (offset: { scrollTop: number; scrollLeft: number }) => void): SelectorQuery;
+  }
+  interface SelectorQuery { select(selector: string): NodesRef; selectViewport(): NodesRef; exec(): void }
 
   type RequestMethod = "OPTIONS" | "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
 

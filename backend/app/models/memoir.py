@@ -629,6 +629,9 @@ class MemoirBookImagePlacement(Base):
         nullable=True,
         index=True,
     )
+    source_utterance_ids_json: Mapped[list[str]] = mapped_column(
+        JSON, default=list, server_default=sql_text("'[]'"), nullable=False,
+    )
     caption_override: Mapped[str] = mapped_column(Text, default="", nullable=False)
     display_size: Mapped[str] = mapped_column(String(40), default="full_width", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

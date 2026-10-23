@@ -6,6 +6,7 @@ const {
   finishSessionSavedPatch,
   finishSessionStartPatch,
   liveTranscriptScrollTop,
+  recordingTranscriptLayout,
   noAnswerPromptFailedPatch,
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
@@ -37,6 +38,7 @@ test("voice recording flow derives recording start and unavailable patches", () 
     error: "",
     liveText: "",
     liveCharCount: 0,
+    transcriptStageHeight: 0,
     liveScrollClass: "live-scroll",
     liveScrollTop: 0,
     liveTranscriptFollowing: true,
@@ -79,6 +81,24 @@ test("live transcript scroll follows rendered line height and handles ASR rewrit
   assert.equal(liveTranscriptScrollTop(300, 390), 0);
   assert.equal(liveTranscriptScrollTop(Number.NaN, 390), 0);
   assert.equal(liveTranscriptScrollTop(500, 0), 0);
+});
+
+test("recording transcript fits above the fixed dock while keeping an already visible card in place", () => {
+  for (const [stage, dockTop, pageScrollTop] of [
+    [{ top: 1200, height: 300 }, 650, 0],
+    [{ top: 900, height: 600 }, 360, 120],
+    [{ top: -80, height: 340 }, 500, 280],
+  ]) {
+    const layout = recordingTranscriptLayout(stage, { top: dockTop, height: 140 }, pageScrollTop);
+    const visibleTop = stage.top - (layout.scrollTop - pageScrollTop);
+    assert.ok(visibleTop >= 16);
+    assert.ok(visibleTop + layout.height <= dockTop - 16);
+    assert.ok(layout.height <= stage.height);
+    assert.ok(layout.bottomSpace >= 140 + 16);
+  }
+  const visible = recordingTranscriptLayout({ top: 120, height: 280 }, { top: 600, height: 140 }, 100);
+  assert.equal(visible.scrollTop, 100);
+  assert.equal(visible.height, 280);
 });
 
 test("voice recording flow pauses review and explicitly returns to the newest caption", () => {

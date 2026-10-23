@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +57,7 @@ from app.services.memoir.book_plan_sources import (
     SourceSegment,
     SOURCES_CHANGED_STATUS_REASON,
     as_dict as _as_dict,
+    chapter_title_owner,
     draft_status_metadata as _draft_status_metadata,
     load_plan_with_chapters as _load_plan,
     merge_metadata as _merge_metadata,
@@ -170,9 +171,9 @@ async def _detach_chapter_operational_references(
         db.add(job)
 
     await db.execute(
-        delete(MemoirBookImagePlacement).where(
+        update(MemoirBookImagePlacement).where(
             MemoirBookImagePlacement.chapter_id.in_(chapter_ids)
-        )
+        ).values(chapter_id=None)
     )
     await db.execute(
         update(MemoirImageAsset)
@@ -522,8 +523,7 @@ async def _set_chapter_book_inclusion(
         db.add(output)
     db.add(chapter)
     db.add(plan)
-    from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await finalize_section_changes(db, project_id=project_id, section_ids=set(), source="structure")
     await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -617,12 +617,12 @@ async def activate_existing_plan_for_automatic_book(db: AsyncSession, *, project
     if await db.scalar(select(MemoirBookPlan.id).where(MemoirBookPlan.project_id == project_id)) is None:
         return False
     plan = await lock_plan_structure(db, project_id=project_id)
-    if plan.created_by == MemoirCreatedBy.USER.value:
-        chapters = (await db.scalars(select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.plan_id == plan.id))).all()
-        for chapter in chapters:
-            if not chapter.metadata_json.get("title_updated_by"):
-                chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": "user"}
-        await db.flush()
+    chapters = (await db.scalars(select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.plan_id == plan.id))).all()
+    for chapter in chapters:
+        owner = chapter_title_owner(chapter, plan_created_by=plan.created_by)
+        if owner is not None and chapter.metadata_json.get("title_updated_by") != owner.value:
+            chapter.metadata_json = {**chapter.metadata_json, "title_updated_by": owner.value}
+    await db.flush()
     if plan.status == MemoirBookPlanStatus.CONFIRMED.value:
         return False
     plan.status = MemoirBookPlanStatus.CONFIRMED.value

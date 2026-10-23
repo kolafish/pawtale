@@ -72,6 +72,8 @@ async def finalize_section_changes(
     settled: bool = False,
 ) -> None:
     """Invalidate changed section inputs and schedule once in the caller's transaction."""
+    from app.services.memoir.image_assets import reconcile_image_placements
+    await reconcile_image_placements(db, project_id=project_id)
     await mark_section_digests_stale(db, project_id=project_id, section_ids=section_ids)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source=source, settled=settled)
@@ -1296,6 +1298,7 @@ async def place_material(
             metadata_json={
                 "created_from_material_assignment_at": datetime.now(UTC).isoformat(),
                 "created_from_material_assignment_by": structure_updated_by.value,
+                "title_updated_by": structure_updated_by.value,
             },
         )
         db.add(chapter)

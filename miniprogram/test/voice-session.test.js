@@ -1323,6 +1323,7 @@ for (const reconnectFirst of [false, true]) {
       voiceAuthorizationAgreed: true,
     });
     context.syncVoiceAuthorizationForSession = async () => true;
+    context.focusRecordingTranscript = () => {};
     await context.connectGateway();
     page.definition.pageLifetimes.show.call(context);
     assert.equal(await context.startRecordingAfterPrivacy(), true);
@@ -1715,6 +1716,117 @@ test("voice chat follows the rendered transcript height with one scroll source",
   assert.equal(context.data.liveTranscriptFollowing, true);
   assert.equal(context.data.liveScrollTarget, undefined);
   assert.equal(context.data.liveTextEndId, undefined);
+});
+
+function recordingViewportContext(page, geometry) {
+  const scrolls = [];
+  global.wx = { ...global.wx, pageScrollTo: options => scrolls.push(options) };
+  let completeMeasurement;
+  const context = {
+    ...page,
+    data: { ...page.data, voiceAuthorizationAgreed: true, status: "ready", assistantPromptText: "长开场。".repeat(50) },
+    voiceStreaming: { hasClient: () => true, startRecording: () => true },
+    async syncVoiceAuthorizationForSession() { return true; },
+    async stopAssistantBargeInMonitor() {},
+    cancelFollowUpTTS() {},
+    setData(patch, callback) { this.data = { ...this.data, ...patch }; callback?.(); },
+    createSelectorQuery() {
+      const { stageTop, stageHeight, dockTop, dockHeight = 150, pageTop = 0, deferred = false } = geometry;
+      const callbacks = [];
+      const query = {
+        select(selector) {
+          return { boundingClientRect(callback) {
+            callbacks.push(() => callback(selector === ".transcript-stage"
+              ? { top: stageTop, height: stageHeight } : selector === ".control-bar" ? { top: dockTop, height: dockHeight } : null));
+            return query;
+          } };
+        },
+        selectViewport() {
+          return { scrollOffset(callback) { callbacks.push(() => callback({ scrollTop: pageTop })); return query; } };
+        },
+        exec() {
+          completeMeasurement = () => callbacks.forEach(callback => callback());
+          if (!deferred) completeMeasurement();
+        },
+      };
+      return query;
+    },
+  };
+  return { context, scrolls, complete: () => completeMeasurement() };
+}
+
+test("manual and automatic recording bring captions above the dock without following page scroll on partials", async () => {
+  for (const autoTriggered of [false, true]) {
+    const page = loadVoiceChatPage();
+    const { context, scrolls } = recordingViewportContext(page, {
+      stageTop: 1200, stageHeight: autoTriggered ? 640 : 300, dockTop: 520, pageTop: 100,
+    });
+    assert.equal(await context.startRecordingAfterPrivacy(autoTriggered), true);
+    assert.equal(scrolls.length, 1);
+    const top = 1200 - (scrolls[0].scrollTop - 100);
+    assert.ok(top >= 16);
+    assert.ok(top + context.data.transcriptStageHeight <= 520 - 16);
+    assert.ok(context.data.recordingDockSpace >= 150 + 16);
+    assert.equal(scrolls[0].duration, 0);
+    assert.equal(context.data.assistantDisplayText, context.data.assistantPromptText);
+
+    context.handlePartial("我家院子有一棵葡萄树。".repeat(10));
+    context.pauseLiveTranscriptFollow();
+    context.handlePartial("我家院子有一棵葡萄树。".repeat(12));
+    assert.equal(scrolls.length, 1);
+    assert.equal(context.data.liveTranscriptFollowing, false);
+  }
+});
+
+test("late recording layout measurements cannot scroll a stopped, hidden or replaced session", () => {
+  for (const invalidate of [
+    context => { context.data.recording = false; },
+    context => { context.pageSuspended = true; },
+    context => { context.disposed = true; },
+    context => { context.data.liveTranscriptFollowing = false; },
+    context => { context.transcriptLayoutVersion += 1; },
+  ]) {
+    const { context, scrolls, complete } = recordingViewportContext(loadVoiceChatPage(), {
+      stageTop: 1200, stageHeight: 300, dockTop: 520, deferred: true,
+    });
+    context.data.recording = true;
+    context.focusRecordingTranscript();
+    invalidate(context);
+    complete();
+    assert.deepEqual(scrolls, []);
+    assert.equal(context.data.transcriptStageHeight, 0);
+  }
+});
+
+test("restoring caption follow refits a window resized during review without moving the review position", async () => {
+  const page = loadVoiceChatPage();
+  const geometry = { stageTop: 1200, stageHeight: 640, dockTop: 720, pageTop: 100 };
+  const { context, scrolls } = recordingViewportContext(page, geometry);
+  assert.equal(await context.startRecordingAfterPrivacy(true), true);
+  const originalHeight = context.data.transcriptStageHeight;
+  const originalSpace = context.data.recordingDockSpace;
+  context.handlePartial("我家院子有一棵葡萄树。".repeat(10));
+  context.pauseLiveTranscriptFollow();
+
+  Object.assign(geometry, { stageTop: 30, dockTop: 300, dockHeight: 200, pageTop: scrolls[0].scrollTop });
+  page.definition.pageLifetimes.resize.call(context);
+  assert.equal(scrolls.length, 1);
+  assert.equal(context.data.transcriptStageHeight, originalHeight);
+  assert.equal(context.data.recordingDockSpace, originalSpace);
+
+  context.resumeLiveTranscriptFollow();
+  const top = geometry.stageTop - (scrolls.at(-1).scrollTop - geometry.pageTop);
+  assert.ok(top >= 16);
+  assert.ok(top + context.data.transcriptStageHeight <= geometry.dockTop - 16);
+  assert.ok(context.data.recordingDockSpace >= geometry.dockHeight + 16);
+  const fittedHeight = context.data.transcriptStageHeight;
+  const scrollCount = scrolls.length;
+
+  context.handlePartial("我家院子有一棵葡萄树。".repeat(12));
+  context.pauseLiveTranscriptFollow();
+  context.resumeLiveTranscriptFollow();
+  assert.equal(scrolls.length, scrollCount, "normal resume only follows text inside the card");
+  assert.equal(context.data.transcriptStageHeight, fittedHeight);
 });
 
 test("voice chat syncs authorization consent before reconnecting", async () => {
