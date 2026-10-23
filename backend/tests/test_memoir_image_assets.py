@@ -371,6 +371,53 @@ async def _register_another_video_image(test_db, tmp_path, *, asset_id: str, sce
     return asset.id
 
 
+async def test_image_anchor_migration_keeps_single_sources_and_snapshots_legacy_chapter_sources(
+    client, test_db, tmp_path, monkeypatch,
+):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import text
+    from app.models.memoir import MemoirSection, MemoirSectionMaterial
+
+    user, pid, chapter_id, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    asset = await test_db.get(MemoirImageAsset, asset_id)
+    extra = await create_test_voice_transcript(client, test_db, '后来葡萄架下还种了花。', project_id=pid)
+    section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == chapter_id))
+    test_db.add(MemoirSectionMaterial(project_id=pid, section_id=section.id,
+        utterance_id=extra['utterance_id'], sort_order=1))
+    uploaded = MemoirImageAsset(project_id=pid, user_id=user['id'], source_type='manual_upload', source_signature='legacy-photo')
+    test_db.add(uploaded)
+    await test_db.flush()
+    placements = [MemoirBookImagePlacement(project_id=pid, image_asset_id=aid,
+        placement_type=kind, chapter_id=chapter_id if kind != 'cover' else None)
+        for aid, kind in [(asset_id, 'chapter_inline'), (uploaded.id, 'chapter_opening'), (uploaded.id, 'cover')]]
+    test_db.add_all(placements)
+    await test_db.flush()
+    expected = {
+        placements[0].id: [asset.source_utterance_id],
+        placements[1].id: sorted([asset.source_utterance_id, extra['utterance_id']]),
+        placements[2].id: [],
+    }
+    savepoint = await test_db.begin_nested()
+    try:
+        await test_db.execute(text('ALTER TABLE memoir_book_image_placements DROP COLUMN source_utterance_ids_json'))
+        spec = importlib.util.spec_from_file_location('image_anchor_migration', Path(__file__).resolve().parents[1]
+            / 'alembic/versions/b2d4f6a8c103_image_placement_material_anchors.py')
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        def upgrade(connection):
+            migration.op = Operations(MigrationContext.configure(connection))
+            migration.upgrade()
+        await (await test_db.connection()).run_sync(upgrade)
+        rows = (await test_db.execute(text('SELECT id, source_utterance_ids_json FROM memoir_book_image_placements WHERE project_id=:pid'),
+            {'pid': pid})).all()
+        assert dict(rows) == expected
+    finally:
+        await savepoint.rollback()
+
+
 async def test_automatic_book_selects_one_video_image_and_updates_unchanged_manuscript(
     client,
     test_db,
@@ -588,6 +635,7 @@ async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscr
     assert placed["include_in_book"] is True
     assert placed["placements"][0]["chapter_id"] == chapter_id
     assert placed["placements"][0]["placement_type"] == "chapter_inline"
+    assert placed["placements"][0]["source_utterance_ids"] == [placed["source_utterance_id"]]
 
     caption_response = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}",

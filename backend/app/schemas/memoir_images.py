@@ -66,6 +66,7 @@ class MemoirBookImagePlacementResponse(BaseModel):
     placement_type: MemoirBookImagePlacementType
     chapter_id: str | None = None
     chapter_title: str = ""
+    source_utterance_ids: list[str] = Field(default_factory=list)
     caption_override: str = ""
     display_size: str = "full_width"
     sort_order: int = 0
@@ -143,8 +144,19 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
 
     placement_type: MemoirBookImagePlacementType = MemoirBookImagePlacementType.CHAPTER_OPENING
     chapter_id: str | None = None
+    source_utterance_ids: list[str] | None = Field(default=None, min_length=1)
     caption_override: str | None = None
     display_size: MemoirImageDisplaySize | MemoirCoverImageLayout = "full_width"
+
+    @field_validator("source_utterance_ids")
+    @classmethod
+    def _valid_source_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        values = [item.strip() for item in value]
+        if any(not item for item in values) or len(values) != len(set(values)):
+            raise ValueError("素材编号不能为空或重复")
+        return values
 
     @field_validator("chapter_id")
     @classmethod
@@ -160,6 +172,12 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
         if value is None:
             return None
         return value.strip()[:500]
+
+    @model_validator(mode="after")
+    def _valid_anchor_placement(self) -> "MemoirBookImagePlacementCreateRequest":
+        if self.source_utterance_ids and self.placement_type.value in {"cover", "back_cover"}:
+            raise ValueError("封面不关联正文素材")
+        return self
 
 
 class MemoirBookImagePlacementUpdateRequest(BaseModel):

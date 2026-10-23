@@ -10,6 +10,36 @@ from tests.test_memoir_book_completion import _book
 from tests.test_memoir_section_organization import _stopped_growth_job
 
 
+@pytest.mark.parametrize("status", ["draft", "confirmed"])
+@pytest.mark.parametrize("blanket_marker", [False, True])
+async def test_automatic_activation_does_not_claim_ai_titles_in_a_manually_adjusted_plan(
+    client, test_db, status, blanket_marker,
+):
+    from app.services.memoir.chapter_structure import structure_context
+    from app.services.memoir.story_tree_growth import _load_tree
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id))
+    plan.status, plan.created_by = status, "user"
+    chapters[0].metadata_json = {
+        "created_from_material_assignment_by": "ai",
+        **({"title_updated_by": "user"} if blanket_marker else {}),
+    }
+    chapters[1].metadata_json = {
+        "created_from_material_assignment_by": "ai", "title_updated_by": "user", "previous_title": "原章名",
+    }
+    await test_db.commit()
+    plan, tree, sections = await _load_tree(test_db, project_id=project_id)
+    context = await structure_context(test_db, plan, tree, sections)
+    assert context.chapter_refs.encode(chapters[0].id) not in context.chapter_titles
+    assert context.chapter_titles[context.chapter_refs.encode(chapters[1].id)] == chapters[1].title
+
+    await book_plan_write_workflow.activate_existing_plan_for_automatic_book(test_db, project_id=project_id)
+    await test_db.commit()
+    assert chapters[0].metadata_json["title_updated_by"] == "ai"
+    assert chapters[1].metadata_json["title_updated_by"] == "user"
+
+
 @pytest.mark.parametrize("created_by", ["user", "ai"])
 async def test_automatic_activation_keeps_existing_outline_and_source_ownership(client, test_db, created_by):
     project_id, chapters, _ = await _book(client, test_db, chapter_count=2)

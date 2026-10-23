@@ -616,6 +616,7 @@ class MemoirBookManuscriptIllustration(BaseModel):
     display_size: str = "full_width"
     source_quote: str = ""
     source_utterance_id: str | None = None
+    source_utterance_ids: list[str] = Field(default_factory=list)
     section_id: str | None = None
     disclosure: str = "AI 根据讲述内容生成的意象插图，不是真实照片。"
 

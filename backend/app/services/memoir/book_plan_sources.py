@@ -88,6 +88,22 @@ def sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
     return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
 
 
+def chapter_title_owner(chapter: MemoirBookPlanChapter, *, plan_created_by: str) -> MemoirCreatedBy | None:
+    metadata = chapter.metadata_json or {}
+    owner = metadata.get("title_updated_by")
+    # Legacy activation stamped every unmarked title in a user-owned plan.
+    # An AI-created chapter without evidence of a later title edit is still AI-owned.
+    if (metadata.get("created_from_material_assignment_by") == "ai"
+            and not metadata.get("title_updated_at") and "previous_title" not in metadata):
+        return MemoirCreatedBy.AI
+    if owner in {"user", "ai"}:
+        return MemoirCreatedBy(owner)
+    creator = metadata.get("created_from_material_assignment_by")
+    if creator in {"user", "ai"}:
+        return MemoirCreatedBy(creator)
+    return MemoirCreatedBy.USER if plan_created_by == "user" else None
+
+
 def included_book_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
     return [chapter for chapter in sorted_chapters(plan) if chapter.include_in_book]
 
