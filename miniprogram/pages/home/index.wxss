@@ -411,6 +411,11 @@
   line-height: 1.4;
 }
 
+/* Keep flex centering above the native button[size="mini"] display rule. */
+.home-inline-action.ui-button {
+  display: flex;
+}
+
 .home-utilities {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
