@@ -14,6 +14,70 @@ from app.services.ai_references import ModelReferenceMap
 from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
 
 
+@pytest.mark.parametrize('split_sources', [False, True])
+@pytest.mark.parametrize('automatic', [False, True])
+async def test_directory_changes_follow_image_source_groups_without_locking_chapters(
+    client, test_db, monkeypatch, split_sources, automatic,
+):
+    from app.models.memoir import MemoirBookImagePlacement, MemoirImageAsset
+    from app.services.memoir import image_assets
+
+    pid, uid = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    source_chapter_id, target_chapter_id = chapters[0].id, chapters[2].id
+    first = next(s for s in sections if s.chapter_id == source_chapter_id)
+    second = next(s for s in sections if s.chapter_id == chapters[1].id)
+    second.chapter_id = source_chapter_id
+    second.sort_order = 1
+    source_ids = [first.materials[0].utterance_id, second.materials[0].utterance_id]
+    asset = MemoirImageAsset(project_id=pid, user_id=uid, source_type='manual_upload',
+        source_signature='source-group-image', storage_path='group.png')
+    test_db.add(asset)
+    await test_db.commit()
+    placed = await client.post(f'/api/mobile/memoir/projects/{pid}/image-assets/{asset.id}/placements', json={
+        'placement_type': 'chapter_inline', 'source_utterance_ids': source_ids,
+    })
+    assert placed.status_code == 201, placed.text
+    placement_id = placed.json()['placements'][0]['id']
+    assert placed.json()['placements'][0]['source_utterance_ids'] == source_ids
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    assert source_chapter_id not in context.locked_chapters
+    proposal = context.outline.model_copy(deep=True)
+    source, target = proposal.chapters[0], proposal.chapters[2]
+    if split_sources:
+        target.sections.append(source.sections.pop())
+    else:
+        target.sections += source.sections
+        proposal.chapters.remove(source)
+    if automatic:
+        _provider(monkeypatch, proposal)
+        assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    else:
+        command = {'type': 'merge_chapters', 'chapter_id': source_chapter_id, 'target_chapter_id': target_chapter_id}
+        if split_sources:
+            command = {'type': 'split_chapter', 'chapter_id': source_chapter_id,
+                'section_ids': [second.id], 'title': '拆开的经历'}
+        changed = await client.post(f'/api/mobile/memoir/projects/{pid}/book-plan/structure-commands', json=command)
+        assert changed.status_code == 200, changed.text
+
+    placement = await test_db.get(MemoirBookImagePlacement, placement_id, populate_existing=True)
+    assert placement is not None and placement.source_utterance_ids_json == source_ids
+    assert placement.enabled is (not split_sources)
+    assert placement.chapter_id == (None if split_sources else target_chapter_id)
+    assert await test_db.get(MemoirImageAsset, asset.id) is not None
+    images, _, _ = await image_assets.manuscript_image_snapshots(test_db, project_id=pid)
+    assert [image['image_asset_id'] for image in images.get(target_chapter_id, [])] == ([] if split_sources else [asset.id])
+    if split_sources:
+        reenable = await client.patch(
+            f'/api/mobile/memoir/projects/{pid}/image-assets/{asset.id}/placements/{placement_id}',
+            json={'enabled': True},
+        )
+        assert reenable.status_code == 400
+    else:
+        assert await test_db.get(type(chapters[0]), source_chapter_id, populate_existing=True) is None
+
+
 async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_new_identity(client, test_db, monkeypatch):
     from app.services.ai_base import AITextServiceBase
 

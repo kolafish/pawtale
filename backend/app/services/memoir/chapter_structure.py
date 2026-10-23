@@ -16,7 +16,7 @@ from app.clock import utcnow_naive
 from app.domain.memoir.limits import MAX_MEMOIR_BOOK_PLAN_CHAPTERS
 from app.domain.memoir.types import MemoirCreatedBy, MemoirSectionMaterialAssignedBy
 from app.models.memoir import (
-    MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookImagePlacement,
+    MemoirBookChapterDraft, MemoirBookChapterDraftVersion,
     MemoirBookPlan, MemoirBookPlanChapter, MemoirCompletionIssue, MemoirSection,
     MemoirSectionMaterial, MemoirBookOutput, MemoirBookOutputVersion, MemoirChapterShare, MemoirBookReview,
     MemoirVoiceSession, MemoirVoiceUtterance,
@@ -29,7 +29,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import fact_decisions
 from app.services.memoir.book_output_versions import automatic_editorial_copy_state
-from app.services.memoir.book_plan_sources import renumber_chapters, set_temporary_chapter_orders
+from app.services.memoir.book_plan_sources import chapter_title_owner, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import _detach_chapter_operational_references
 from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest, get_current_chapter_digest
 from app.services.memoir.completion_issues import open_blocking_book_chapter_ids
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 CHECKED_KEY = "structure_checked_signature"
 FEEDBACK_CHECKED_KEY = "structure_feedback_checked_source_signature"
-STRUCTURE_ENGINE = "content_structure_v2"
+STRUCTURE_ENGINE = "content_structure_v3"
 SYSTEM_PROMPT = "你是一位有整体感的中文回忆录结构编辑。依据讲述内容整理目录，不改写或添加事实。"
 
 
@@ -130,9 +130,6 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
         MemoirBookChapterDraft.project_id == plan.project_id,
         MemoirBookChapterDraft.status == "confirmed",
     ))).all())
-    protected.update((await db.scalars(select(MemoirBookImagePlacement.chapter_id).where(
-        MemoirBookImagePlacement.project_id == plan.project_id,
-    ))).all())
     protected.update(await open_blocking_book_chapter_ids(db, project_id=plan.project_id, all_chapter_ids=[c.id for c in chapters]))
     active_issue_ids = select(MemoirVoiceSession.current_completion_issue_id).where(
         MemoirVoiceSession.project_id == plan.project_id,
@@ -162,11 +159,9 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
     protected.intersection_update(c.id for c in chapters)
     chapter_titles = {}
     for chapter in chapters:
-        meta = chapter.metadata_json or {}
         if not any(s.chapter_id == chapter.id for s in sections) or not chapter.include_in_book:
             protected.add(chapter.id)
-        if (meta.get("title_updated_by") == "user" or (plan.created_by == "user"
-                and meta.get("title_updated_by", meta.get("created_from_material_assignment_by")) != "ai")):
+        if chapter_title_owner(chapter, plan_created_by=plan.created_by) == MemoirCreatedBy.USER:
             chapter_titles[chapter_refs.encode(chapter.id)] = chapter.title
     section_titles = {}
     fixed_sections = set()
