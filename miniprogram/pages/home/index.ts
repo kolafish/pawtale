@@ -386,7 +386,12 @@ definePage<HomeData>()({
     const agreedEntry = this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
     this.openPendingVoiceSession();
-    if (!this.homeVisible || this.data.needsLogin) return;
+    if (!this.homeVisible) return;
+    if (this.data.needsLogin) {
+      // A direct start can discover an expired session; a return from cancelled login stays public.
+      if (narrationRequested === "start") navigateToLoginThenNarrate();
+      return;
+    }
     if (narrationRequested) await this.startPrimaryVoiceChat();
     else if (agreedEntry) await this.startSelectedNarration(agreedEntry);
   },

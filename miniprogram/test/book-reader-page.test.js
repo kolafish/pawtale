@@ -135,7 +135,7 @@ test("demo reader uses the public book and disables account-only audio", async (
   assert.equal(context.data.readerDemo, true);
   context.startMyStory();
   assert.deepEqual(destinations, ["/pages/login/index"]);
-  assert.equal(require("../services/navigation.ts").consumeNarrationRequest(), true);
+  assert.equal(require("../services/navigation.ts").consumeNarrationRequest(), "after_login");
   delete global.wx;
 });
 
@@ -154,8 +154,8 @@ test("a signed-in sample reader returns to the existing home to start narration"
 
   assert.deepEqual(destinations, [{ delta: 1 }]);
   const { consumeNarrationRequest } = require("../services/navigation.ts");
-  assert.equal(consumeNarrationRequest(), true);
-  assert.equal(consumeNarrationRequest(), false);
+  assert.equal(consumeNarrationRequest(), "start");
+  assert.equal(consumeNarrationRequest(), null);
 });
 
 test("reader paragraphs only honor line breaks saved by the language model", () => {

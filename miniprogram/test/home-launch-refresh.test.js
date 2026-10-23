@@ -29,7 +29,7 @@ function fixture(cached, userState) {
   mockModule("../services/memoir-snapshot-api.ts", { getMemoirStorySnapshot: async () => snapshot });
   mockModule("../services/voice-authorization.ts", { readVoiceAuthorizationConsent: () => true });
   mockModule("../services/accessibility-settings.ts", { readLargeTextEnabled: () => false });
-  mockModule("../services/navigation.ts", { consumeHomeStoryTarget: () => null, consumeHomeVoiceTarget: () => null, consumeNarrationRequest: () => false, isAuthError: () => false });
+  mockModule("../services/navigation.ts", { consumeHomeStoryTarget: () => null, consumeHomeVoiceTarget: () => null, consumeNarrationRequest: () => null, isAuthError: () => false });
   const context = pageContext(loadPageModule("../pages/home/index.ts").page);
   context.snapshot = snapshot;
   return context;
