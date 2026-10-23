@@ -1,6 +1,5 @@
 import type { MemoirStorySnapshot } from "../../domain/memoir-snapshots";
 import { memoirHomepageTitle } from "../../services/memoir-display-copy";
-import { resolveStoryTreeGrowthStage, STORY_TREE_STAGE_IMAGES } from "./story-growth-stage";
 import type { StoryTone, StoryViewData } from "./story-view-data";
 
 const STORY_TONES: StoryTone[] = ["clay", "sun", "leaf"];
@@ -13,7 +12,7 @@ function formatBookChars(count: number): string {
   return count ? `${count} 字` : "";
 }
 
-/** The parts of a story snapshot the tree draws; a visitor's sample memoir supplies them too. */
+/** Home presentation data; a visitor's sample memoir supplies the same snapshot fields. */
 export type StoryViewSource = Pick<MemoirStorySnapshot, "chapters" | "book_chapter_count" | "book_char_count"> & {
   identity: { active_project: { title: string } | null };
   progress?: { material_count: number } | null;
@@ -49,12 +48,16 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
   const storyCount = chapters.reduce((total, chapter) => total + chapter.sections.length, 0);
   const materialCount = snapshot.progress?.material_count
     || snapshot.chapters.reduce((total, chapter) => total + chapter.material_count, 0);
-  const growthStage = resolveStoryTreeGrowthStage(snapshot);
+  // Current included chapters supply all three counters, independently of the last assembled book version.
+  const includedChapters = snapshot.chapters.filter(chapter => chapter.include_in_book);
+  const includedSections = includedChapters.reduce((total, chapter) => total + chapter.sections.length, 0);
+  const includedChars = includedChapters.reduce((total, chapter) => total + chapter.char_count, 0);
   return {
     memoir: {
       title: project?.title || "我的故事",
       bookMetaText: [chapterCount ? `${chapterCount} 章` : "", bookCharText].filter(Boolean).join(" · ") || "正在整理",
-      bookProgressText: [chapterCount ? `${chapterCount} 章` : "", storyCount ? `${storyCount} 小节` : "", bookCharText]
+      bookProgressText: [includedChapters.length ? `${includedChapters.length} 章` : "",
+        includedSections ? `${includedSections} 小节` : "", formatBookChars(includedChars)]
         .filter(Boolean)
         .join(" · ") || "正在整理",
     },
@@ -63,8 +66,6 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
       summaryText: chapters.length
         ? `${chapters.length} 章 · ${storyCount} 小节`
         : materialCount ? "回忆正在整理成故事" : "故事树还在等待第一段回忆",
-      growthStage,
-      growthImageSrc: STORY_TREE_STAGE_IMAGES[growthStage],
       themeTags: chapters.slice(0, 3).map((chapter) => ({
         id: chapter.id,
         title: chapter.title,

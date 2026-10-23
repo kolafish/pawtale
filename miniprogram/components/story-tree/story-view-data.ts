@@ -1,5 +1,3 @@
-import { STORY_TREE_STAGE_IMAGES, type StoryTreeGrowthStage } from "./story-growth-stage";
-
 export type StoryChapterState = "settled" | "attention" | "draft" | "muted";
 export type StoryTone = "leaf" | "sun" | "clay";
 
@@ -42,8 +40,6 @@ export interface StoryChapterView {
 export interface StoryOverviewView {
   title: string;
   summaryText: string;
-  growthStage: StoryTreeGrowthStage;
-  growthImageSrc: string;
   themeTags: StoryThemeTagView[];
   hasChapters: boolean;
   growthAnimating: boolean;
@@ -65,8 +61,6 @@ export function emptyStoryViewData(): StoryViewData {
     overview: {
       title: "我的故事树",
       summaryText: "故事树还在等待第一段回忆",
-      growthStage: 1,
-      growthImageSrc: STORY_TREE_STAGE_IMAGES[1],
       themeTags: [],
       hasChapters: false,
       growthAnimating: false,

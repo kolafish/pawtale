@@ -350,10 +350,50 @@ test("home keeps completed videos in the library after handling the latest sugge
   assert.match(pageWxml, /class="home-share-candidate[^\n]*"/);
   assert.match(pageWxml, /bindtap="openShareCard"/);
   assert.doesNotMatch(pageWxml, /挑一段做视频/);
-  // A suggestion keeps its own buttons, so taps that bubble up to the card do nothing more.
-  context.setData({ shareCandidate: { id: "c1", status: "ready" } });
+  // A recommendation must not hide the only library entry.
+  for (const status of ["ready", "accepted"]) {
+    context.setData({ shareCandidate: { id: "c1", status, video_job_id: "video-2" } });
+    context.openShareCard();
+    assert.equal(navigations.at(-1), "/pages/share-videos/index?projectId=p1");
+  }
+  assert.equal(navigations.length, 3);
+});
+
+test("a ready recommendation keeps the manual clip picker reachable before any video exists", () => {
+  const navigations = [];
+  const { page } = loadHomePage();
+  const context = pageContext(page, {
+    projectId: "p1", hasProject: true, shareCandidate: { id: "c1", status: "ready" },
+  });
+  global.wx = { navigateTo({ url }) { navigations.push(url); } };
   context.openShareCard();
-  assert.equal(navigations.length, 1);
+  assert.deepEqual(navigations, ["/pages/transcripts/index?purpose=video"]);
+});
+
+test("a failed first home load exposes retry and recovers without leaving the page", async () => {
+  let online = false;
+  const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => {
+    if (!online) throw new Error("网络暂不可用");
+    return { id: "u1", display_name: "余老师", email: "test@example.com",
+      active_project_id: "p1", active_project: { id: "p1", title: "往事" } };
+  } } });
+  const context = pageContext(page);
+  global.wx = { createSelectorQuery: () => ({ select: () => ({ boundingClientRect: () => ({ exec() {} }) }) }) };
+  try {
+    await context.loadHome();
+    assert.equal(context.data.error, "网络暂不可用");
+    assert.equal(context.data.storyError, "");
+    assert.equal(context.data.storyLoaded, false);
+    const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+    assert.match(wxml, /wx:if="\{\{storyError \|\| \(!storyLoaded && error\)\}\}"[^>]*bindtap="refreshStory"/);
+    online = true;
+    await context.refreshStory();
+    assert.equal(context.data.error, "");
+    assert.equal(context.data.storyLoaded, true);
+    assert.equal(context.data.story.memoir.title, "往事");
+  } finally {
+    context.onHide();
+  }
 });
 
 test("home exposes the video progress library while the first manually selected story is still generating", async () => {
