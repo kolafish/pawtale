@@ -18,7 +18,7 @@ import {
   type AIUsageDay,
   type CreditPack,
 } from "../../services/billing";
-import { isAuthError, navigateToLogin, relaunchLogin } from "../../services/navigation";
+import { isAuthError, navigateToLogin, relaunchHome, relaunchLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {
   aiModelLabel,
@@ -697,7 +697,7 @@ definePage<MeData>()({
       replaceMemoirStore({});
       this.setData({ ...loggedOutData(), error: "" });
       wx.showToast({ title: "已退出", icon: "success" });
-      relaunchLogin();
+      relaunchHome();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "退出失败，请检查网络后重试" });
     } finally {
