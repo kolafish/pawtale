@@ -270,7 +270,7 @@ def recent_context_messages(messages: Sequence[Message]) -> list[Message]:
         if content_budget:
             if len(content) > content_budget:
                 marker = "……中间省略……"
-                if content_budget <= len(marker):
+                if content_budget <= len(marker) + 1:
                     content = content[:content_budget]
                 else:
                     head_budget = max(1, (content_budget - len(marker)) // 2)

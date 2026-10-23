@@ -1072,6 +1072,12 @@ def test_related_context_respects_eight_message_and_four_thousand_char_windows()
     )
     assert len(_recent_context(near_budget)) <= 4000
 
+    nine_char_budget = (
+        InterviewMessage("user", "旧内容" * 100, 0, "nine-budget-old", datetime(2026, 1, 1)),
+        InterviewMessage("user", "当前" * 1991, 1, "nine-budget", datetime(2026, 1, 1)),
+    )
+    assert len(_recent_context(nine_char_budget)) <= 4000
+
 
 @pytest.mark.parametrize("failure_stage", ["before_text", "partial_audio", "after_text", "text_failed"])
 async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(
