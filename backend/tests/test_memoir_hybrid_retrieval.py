@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.models.memoir import MemoirVoiceUtterance
 from app.models.memoir_retrieval import MemoirRetrievalEntry
 from app.services.embeddings import EmbeddingBatchResult
-from app.services.memoir.hybrid_retrieval import retrieve_hybrid_candidates
+from app.services.memoir.hybrid_retrieval import DEFAULT_CANDIDATE_LIMIT, retrieve_hybrid_candidates
 from app.services.memoir.retrieval_source_index import (
     run_source_indexing_job,
     schedule_source_indexing_job,
@@ -18,6 +18,10 @@ def _vector(axis: int) -> tuple[float, ...]:
     values = [0.0] * 512
     values[axis] = 1.0
     return tuple(values)
+
+
+def test_default_hybrid_candidate_limit_is_six():
+    assert DEFAULT_CANDIDATE_LIMIT == 6
 
 
 class FakeEmbeddingClient:

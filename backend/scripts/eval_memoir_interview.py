@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import aclosing
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import datetime
 import hashlib
 import json
@@ -14,15 +14,8 @@ import subprocess
 import time
 from typing import Literal, Mapping  # noqa: F401
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from app.domain.memoir.interview_policy import InterviewBrief, InterviewActionCandidate  # noqa: F401
-from app.domain.memoir.narrative_types import (
-    MemoirConversationMomentum, MemoirInterviewAction, MemoirInterviewActionRisk,  # noqa: F401
-    MemoirInterviewBriefSourceKind, MemoirInterviewStoryState,  # noqa: F401
-    MemoirInterviewPolicyExecutionMode,
-)
-from app.services.ai_calls import AITextCallResult
 from app.services.ai_costs import estimate_ai_cost
 from app.services.ai_factory import get_ai_service
 from app.services.ai_usage_records import current_ai_usage_context
@@ -33,8 +26,6 @@ from app.services.memoir.interview_agent import (
     prepare_interview_turn, stream_interview_turn,
 )
 from app.services.memoir.interview_book_context import InterviewBookContext, LifeTopic  # noqa: F401
-from app.services.memoir.narrative import interview_policy, interview_policy_runtime as policy
-from app.services.memoir.narrative.interview_topics import FrameworkTopicCandidate
 from app.services.memoir.voice_followup_ai import (
     InterviewDialogue, InterviewMessage, InterviewerPersona, ProgressPromptContext,  # noqa: F401
 )
@@ -92,13 +83,6 @@ class SourceMetadata(BaseModel):
     provenance: SourceProvenance
 
 
-class FrozenPolicy(StrictModel):
-    brief: InterviewBrief
-    completion_context: str = ""
-    topic_candidates: tuple[FrameworkTopicCandidate, ...] = ()
-    topic_briefs: dict[str, InterviewBrief] = Field(default_factory=dict)
-    topic_offer_authorized: bool = False
-
 
 class EvalCase(StrictModel):
     schema_version: Literal[1] = 1
@@ -114,7 +98,6 @@ class EvalCase(StrictModel):
     source_url: str = ""
     source_sha256: str = ""
     snapshot: InterviewInput
-    policy_context: FrozenPolicy | None = None
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -157,67 +140,28 @@ def load_dataset(root: Path, *, split: str, track: str, mode: str) -> tuple[list
             source_url=meta.provenance.source_url,
             source_sha256=meta.provenance.content_sha256,
             mode=mode, scenario="narration_follow_up",
-            snapshot=InterviewInput(InterviewDialogue("open_narration", messages), policy_instruction=instruction),
+            snapshot=InterviewInput(InterviewDialogue("open_narration", messages), additional_instruction=instruction),
         ))
     return result, [source, metadata_file, root / "manifest.json"]
 
 
-def policy_context_for(case: EvalCase, *, shadow: bool = False) -> policy.InterviewPolicyContext:
-    messages = sorted(case.snapshot.dialogue.messages, key=lambda item: (item.turn_index, item.created_at, item.id))
-    if case.policy_context is not None:
-        frozen = case.policy_context
-        brief = frozen.brief
-    else:
-        if case.snapshot.dialogue.session_goal != "open_narration":
-            raise ValueError(f"Active completion evaluation requires frozen policy context: {case.id}")
-        latest = next((item for item in reversed(messages) if item.role == "user"), None)
-        constraints = policy._safety_constraints(latest.content_text if latest else "")
-        brief = interview_policy.open_narration_brief(
-            current_story_state=policy._story_state(latest, completion_session=False, safety_constraints=constraints),
-            conversation_momentum=policy._conversation_momentum(latest, safety_constraints=constraints),
-            safety_constraints=constraints,
-            policy_version=policy.SHADOW_POLICY_VERSION if shadow else policy.ACTIVE_POLICY_VERSION,
-        )
-        frozen = FrozenPolicy(brief=brief)
-    return policy.InterviewPolicyContext(
-        project_id="offline", brief=brief, messages=tuple(messages[-policy.MAX_POLICY_CONTEXT_MESSAGES:]),
-        completion_context=frozen.completion_context,
-        trigger_message_id=messages[-1].id if messages else None,
-        topic_candidates=frozen.topic_candidates, topic_offer_authorized=frozen.topic_offer_authorized,
-    )
 
-
-async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, policy_mode: str, client_factory=get_ai_service):
+async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, client_factory=get_ai_service):
     started = time.monotonic()
     run = InterviewRun()
-    calls = []
     snapshot = case.snapshot
-    selected = None
     first_text = None
     prepared = None
-    context = None
-    policy_error = None
     reply_seconds = None
-
-    def record_policy(response: AITextCallResult):
-        calls.append({"operation": "policy", **response.diagnostics()})
 
     def result(status, **extra):
         return {
             "schema_version": 1, "case": case.model_dump(mode="json"),
             "config": asdict(config), "prompt_version": STREAM_PROMPT_VERSION,
-            "policy_mode": policy_mode,
-            "policy_error": policy_error,
-            "policy_context_origin": "frozen" if case.policy_context else "visible_dialogue_only",
-            "policy_input": asdict(context) if context else None,
-            "policy_decision": {
-                "action": selected.selected_action.value, "execution_mode": selected.execution_mode.value,
-                "applies_to_reply": selected.applies_to_reply,
-            } if selected else None,
             "system_prompt": prepared.system_prompt if prepared else None,
             "prompt": prepared.prompt if prepared else None,
             "max_tokens": prepared.max_tokens if prepared else None,
-            "status": status, "run": asdict(run), "policy_calls": calls,
+            "status": status, "run": asdict(run),
             "reply_estimated_cost": estimate_ai_cost(
                 provider=run.ai_provider, model=run.response_ai_model or run.resolved_ai_model, usage=run.usage,
             ).as_dict() if run.usage else None,
@@ -227,42 +171,7 @@ async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, polic
             **extra,
         }
 
-    async def select_turn():
-        nonlocal policy_error
-
-        async def resolve_topic(current, selection):
-            if selection.action != MemoirInterviewAction.OFFER_NEW_TOPIC:
-                return current
-            frozen = case.policy_context
-            if frozen is None or selection.framework_item_id not in frozen.topic_briefs:
-                raise ValueError("Missing frozen selected-topic brief")
-            return replace(current, brief=replace(
-                frozen.topic_briefs[selection.framework_item_id],
-                candidate_actions=current.brief.candidate_actions,
-                candidate_topic_ids=current.brief.candidate_topic_ids,
-            ))
-
-        try:
-            return await policy.select_policy_turn(
-                context=context, ai_client=client_factory(config.requested_model),
-                resolve_context=resolve_topic, on_response=record_policy,
-            )
-        except Exception as exc:
-            policy_error = {"type": type(exc).__name__, "message": str(exc)}
-            return None
-
     try:
-        completion_answered = bool(snapshot.completion_context and snapshot.completion_context.answered)
-        policy_available = (
-            snapshot.dialogue.session_goal == "open_narration" or snapshot.completion_context is not None
-        )
-        if policy_mode != "off" and policy_available and not completion_answered:
-            context = policy_context_for(case, shadow=policy_mode == "shadow")
-            if live and policy_mode == "active":
-                selected = await select_turn()
-                snapshot = replace(snapshot, policy_instruction="\n".join(filter(None, (
-                    snapshot.policy_instruction, policy.active_reply_instruction(selected),
-                ))))
         prepared = prepare_interview_turn(snapshot, config)
         turn = None
         if live:
@@ -274,14 +183,8 @@ async def run_case(case: EvalCase, config: InterviewConfig, *, live: bool, polic
                         first_text = time.monotonic() - started
             turn = run.completed_turn(snapshot)
             reply_seconds = round(time.monotonic() - started, 4)
-            if policy_mode == "shadow" and context is not None:
-                selected = await select_turn()
-                if selected:
-                    selected = replace(selected, execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW)
         return result("completed" if live else "dry_run", turn=asdict(turn) if turn else None)
     except Exception as exc:
-        # Each attempted case is retained; failed provider calls with unavailable
-        # usage remain unknown instead of being reported as zero cost.
         return result("failed", error={"type": type(exc).__name__, "message": str(exc)})
 
 
@@ -316,28 +219,26 @@ async def evaluate(args: argparse.Namespace) -> int:
         "tracked_backend_diff_sha256": hashlib.sha256(tracked_diff.encode()).hexdigest(),
         "tracked_backend_dirty": bool(tracked_diff),
         "source_files": {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-        "config": asdict(config), "policy_mode": args.policy_mode, "live": args.live,
+        "config": asdict(config), "live": args.live,
         "case_ids": [case.id for case in cases], "repeat": args.repeat,
     }
     args.output.mkdir(parents=True, exist_ok=False)
     write_json(args.output / "manifest.json", manifest)
     (args.output / "inputs.jsonl").write_text("".join(case.model_dump_json() + "\n" for case in cases))
     failed = 0
-    policy_failed = 0
     with (args.output / "results.jsonl").open("x") as out:
         for case in cases:
             for repeat in range(args.repeat):
-                row = await run_case(case, config, live=args.live, policy_mode=args.policy_mode)
+                row = await run_case(case, config, live=args.live)
                 row["repeat"] = repeat
                 out.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
                 out.flush()
                 failed += row["status"] == "failed"
-                policy_failed += bool(row["policy_error"])
                 print(json.dumps({"id": case.id, "repeat": repeat, "status": row["status"], "seconds": row["seconds"]}), flush=True)
     write_json(args.output / "summary.json", {
-        "attempts": len(cases) * args.repeat, "failed": failed, "policy_failed": policy_failed,
+        "attempts": len(cases) * args.repeat, "failed": failed,
     })
-    return int(failed > 0 or policy_failed > 0)
+    return int(failed > 0)
 
 
 def main() -> int:
@@ -348,7 +249,6 @@ def main() -> int:
     parser.add_argument("--split", choices=["dev", "eval"], default="dev")
     parser.add_argument("--track", choices=["observed_interview", "narrative_derived", "controlled_stress"], default="observed_interview")
     parser.add_argument("--mode", choices=["autonomous", "guided"], default="autonomous")
-    parser.add_argument("--policy-mode", choices=["off", "active", "shadow"], required=True)
     parser.add_argument("--ai-model", required=True)
     parser.add_argument("--temperature", type=float, default=0.72)
     parser.add_argument("--case", action="append")

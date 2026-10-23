@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,24 +11,19 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.services.ai_base import AITextServiceBase
-from app.config import DEFAULT_AI_TEXT_MODEL, get_settings
+from app.config import DEFAULT_AI_TEXT_MODEL
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
-    MemoirEditingJobStatus,
-    MemoirEditingJobType,
 )
 from app.models.memoir import (
     AudioFile,
     MemoirChatMessage,
     MemoirCompletionIssue,
-    MemoirEditingJob,
     MemoirVoiceSession,
-)
-from app.models.memoir_narrative import (
-    MemoirInterviewPolicyDecision,
+    MemoirVoiceUtterance,
 )
 from app.models.projects import Project
 from app.services.ai_streaming import AITextStreamChunk
@@ -40,6 +36,7 @@ from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import (
     VoiceAssistantTurnStreamSession,
 )
+from app.services.memoir.voice_followup_ai import InterviewMessage, related_context_block
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
     create_test_book_plan,
@@ -416,253 +413,6 @@ async def test_book_completion_acknowledgement_suppresses_global_progress_and_en
     assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert assistant_message is not None
     assert assistant_message.metadata_json["expects_answer"] is False
-    assert (
-        await test_db.scalar(
-            select(func.count(MemoirInterviewPolicyDecision.id)).where(
-                MemoirInterviewPolicyDecision.session_id == session.id
-            )
-        )
-        == 0
-    )
-
-
-async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing_reply(
-    client,
-    test_db,
-    monkeypatch,
-):
-    current_settings = get_settings()
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(update={"memoir_interview_policy_shadow_enabled": True}),
-    )
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我还想接着讲小时候在河边玩的事。",
-        guidance_mode="free_narration",
-    )
-
-    _, _, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["您慢慢讲，我在听。"],
-    )
-
-    shadow_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
-        )
-    )
-    assistant_message = await test_db.get(
-        MemoirChatMessage,
-        completed["message_id"],
-    )
-    assert completed["text"].endswith("您慢慢讲，我在听。")
-    assert assistant_message is not None
-    assert assistant_message.content_text == completed["text"]
-    assert shadow_job is not None
-    assert shadow_job.status == MemoirEditingJobStatus.PENDING.value
-    assert "河边" not in str(shadow_job.payload_json)
-
-
-async def test_voice_assistant_turn_applies_and_records_low_risk_active_policy(
-    client,
-    test_db,
-    monkeypatch,
-):
-    current_settings = get_settings()
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(
-            update={
-                "memoir_interview_policy_shadow_enabled": True,
-                "memoir_interview_policy_active_enabled": True,
-                "memoir_interview_policy_active_rollout_percent": 100,
-            }
-        ),
-    )
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我还想接着讲小时候在河边玩的事。",
-        guidance_mode="free_narration",
-    )
-    policy_ai = FakePolicyAI("follow_current_story")
-
-    _, reply_ai, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["河边那次，后来还发生了什么？"],
-        policy_ai_client=policy_ai,
-    )
-
-    decision = await test_db.scalar(
-        select(MemoirInterviewPolicyDecision).where(
-            MemoirInterviewPolicyDecision.generated_message_id == completed["message_id"]
-        )
-    )
-    shadow_job_count = await test_db.scalar(
-        select(func.count(MemoirEditingJob.id)).where(
-            MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
-        )
-    )
-
-    assert "当前受控访谈策略" in reply_ai.calls[0]["user_prompt"]
-    assert "顺着当前故事追问" in reply_ai.calls[0]["user_prompt"]
-    assert policy_ai.calls
-    assert decision is not None
-    assert decision.execution_mode == "active"
-    assert decision.selected_action == "follow_current_story"
-    assert decision.generated_message_id == completed["message_id"]
-    assert "河边" not in str(decision.state_snapshot_json)
-    assert shadow_job_count == 0
-
-
-async def test_voice_assistant_turn_records_medium_policy_as_suggestion_only(
-    client,
-    test_db,
-    monkeypatch,
-):
-    current_settings = get_settings()
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(
-            update={
-                "memoir_interview_policy_shadow_enabled": True,
-                "memoir_interview_policy_active_enabled": True,
-                "memoir_interview_policy_active_rollout_percent": 100,
-            }
-        ),
-    )
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我还想接着讲小时候在河边玩的事。",
-        guidance_mode="free_narration",
-    )
-
-    _, reply_ai, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["您慢慢讲，我在听。"],
-        policy_ai_client=FakePolicyAI("return_to_prior_story"),
-    )
-
-    decision = await test_db.scalar(
-        select(MemoirInterviewPolicyDecision).where(
-            MemoirInterviewPolicyDecision.generated_message_id == completed["message_id"]
-        )
-    )
-    assert "当前受控访谈策略" not in reply_ai.calls[0]["user_prompt"]
-    assert decision is not None
-    assert decision.execution_mode == "suggest"
-    assert decision.selected_action == "return_to_prior_story"
-
-
-async def test_voice_assistant_turn_policy_failure_falls_back_to_existing_reply_and_shadow(
-    client,
-    test_db,
-    monkeypatch,
-):
-    current_settings = get_settings()
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(
-            update={
-                "memoir_interview_policy_shadow_enabled": True,
-                "memoir_interview_policy_active_enabled": True,
-                "memoir_interview_policy_active_rollout_percent": 100,
-            }
-        ),
-    )
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我还想接着讲小时候在河边玩的事。",
-        guidance_mode="free_narration",
-    )
-
-    _, reply_ai, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["您慢慢讲，我在听。"],
-        policy_ai_client=FailingPolicyAI(),
-    )
-
-    shadow_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
-        )
-    )
-    decision = await test_db.scalar(select(MemoirInterviewPolicyDecision))
-
-    assert completed["text"].endswith("您慢慢讲，我在听。")
-    assert "当前受控访谈策略" not in reply_ai.calls[0]["user_prompt"]
-    assert decision is None
-    assert shadow_job is not None
-
-
-async def test_voice_assistant_turn_policy_persistence_failure_falls_back_to_shadow(
-    client,
-    test_db,
-    monkeypatch,
-):
-    current_settings = get_settings()
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(
-            update={
-                "memoir_interview_policy_shadow_enabled": True,
-                "memoir_interview_policy_active_enabled": True,
-                "memoir_interview_policy_active_rollout_percent": 100,
-            }
-        ),
-    )
-
-    async def fail_policy_persistence(*args, **kwargs):
-        raise RuntimeError("policy persistence unavailable")
-
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime.persist_policy_turn_decision",
-        fail_policy_persistence,
-    )
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我还想接着讲小时候在河边玩的事。",
-        guidance_mode="free_narration",
-    )
-
-    _, _, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["河边那次，后来还发生了什么？"],
-        policy_ai_client=FakePolicyAI("follow_current_story"),
-    )
-
-    shadow_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
-        )
-    )
-    assistant_message = await test_db.get(
-        MemoirChatMessage,
-        completed["message_id"],
-    )
-    assert assistant_message is not None
-    assert assistant_message.content_text == completed["text"]
-    assert shadow_job is not None
-
 
 async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     client,
@@ -819,9 +569,8 @@ async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
     prompt = ai_client.calls[0]["user_prompt"]
     assert completed["primary_intent"] == "opening"
     assert completed["host_name"] == "小余"
-    assert "你在对话中自称“小余”" in ai_client.calls[0]["system_prompt"]
+    assert "始终用“您”称呼讲述者" in ai_client.calls[0]["system_prompt"]
     assert "下一句“小余”要说的话" in prompt
-    assert "你自称“小余”" in prompt
 
 
 async def test_voice_assistant_turn_does_not_turn_project_snapshot_into_notice(
@@ -1258,6 +1007,60 @@ async def test_guided_opening_from_life_topic_starts_with_that_topic(
     assert topic["intent"] in prompt
 
 
+async def test_topic_opening_fills_short_context_from_latest_related_session(
+    client,
+    test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    topic_map = (await client.get(f"/api/mobile/memoir/projects/{project_id}/topic-map")).json()
+    topic_id = topic_map["modules"][0]["items"][1]["id"]
+    previous = await create_test_voice_transcript(
+        client,
+        test_db,
+        project_id=project_id,
+        text="以前讲过，我在县城上学时每天都要走很远的路。",
+    )
+    previous_session = await test_db.get(MemoirVoiceSession, previous["session"]["id"])
+    previous_session.anchor_framework_item_id = topic_id
+    previous_utterance = await test_db.get(MemoirVoiceUtterance, previous["utterance_id"])
+    previous_utterance.framework_item_id = topic_id
+    await test_db.commit()
+
+    response = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={"guidance_mode": "guided_interview", "anchor_framework_item_id": topic_id},
+    )
+    assert response.status_code == 201
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db,
+        voice_session_id=response.json()["session"]["id"],
+        user_id=user_id,
+        chunks=["您接着讲就好。"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "上一轮同一话题的历史会话" in prompt
+    assert "以前讲过，我在县城上学时每天都要走很远的路。" in prompt
+
+
+def test_related_context_respects_eight_message_and_four_thousand_char_windows():
+    current = tuple(
+        InterviewMessage("user", f"当前内容 {index}", index, str(index), datetime(2026, 1, 1))
+        for index in range(7)
+    )
+    related = (InterviewMessage("user", "历史内容", 0, "history", datetime(2026, 1, 1)),)
+    block = related_context_block(current, related)
+    assert block.count("历史内容") == 1
+
+    long_current = tuple(
+        InterviewMessage("user", "当前" * 600, index, str(index), datetime(2026, 1, 1))
+        for index in range(7)
+    )
+    assert "历史内容" not in related_context_block(long_current, related)
+
+
 @pytest.mark.parametrize("failure_stage", ["before_text", "partial_audio", "after_text", "text_failed"])
 async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(
     client, test_db, tmp_path, monkeypatch, failure_stage,
@@ -1399,7 +1202,6 @@ async def _run_stream_turn(
     chunks: list[str],
     regenerate: bool = False,
     voice: str | None = None,
-    policy_ai_client=None,
     control_chunks: tuple[str, ...] = ("[listen]\n",),
 ) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
     stream_client = FakeTurnClient()
@@ -1411,9 +1213,6 @@ async def _run_stream_turn(
         voice_session_id=voice_session_id,
         user_id=user_id,
         ai_client_factory=lambda model=None: ai_client,
-        policy_ai_client_factory=(
-            (lambda model=None: policy_ai_client) if policy_ai_client is not None else (lambda model=None: ai_client)
-        ),
         tts_client_factory=lambda: tts_client,
     )
     run_task = asyncio.create_task(session.run())
@@ -1484,33 +1283,6 @@ class FakeStreamingAI(AITextServiceBase):
             finish_reason="stop",
             usage={"output_tokens": 32, "total_tokens": 42},
         )
-
-
-class FakePolicyAI(AITextServiceBase):
-    provider_name = "fake-policy"
-    model_name = "fake-policy-model"
-
-    def __init__(self, selected_action: str) -> None:
-        self.selected_action = selected_action
-        self.calls: list[dict[str, Any]] = []
-
-    async def _call_llm(self, system_prompt, user_prompt, **kwargs):
-        self.calls.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "kwargs": kwargs,
-            }
-        )
-        return f'{{"selected_action":"{self.selected_action}"}}'
-
-
-class FailingPolicyAI(FakePolicyAI):
-    def __init__(self) -> None:
-        super().__init__("continue_listening")
-
-    async def _call_llm(self, system_prompt, user_prompt, **kwargs):
-        raise RuntimeError("policy unavailable")
 
 
 class SlowStreamingAI(FakeStreamingAI):

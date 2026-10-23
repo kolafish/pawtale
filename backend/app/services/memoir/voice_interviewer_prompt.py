@@ -8,6 +8,8 @@ the life topics. Progress facts are only offered at an opening, never in the mid
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.domain.memoir.types import MemoirSessionGoal
 from app.models.memoir import MemoirVoiceSession
 from app.services.memoir import completion_interviews
@@ -16,10 +18,12 @@ from app.services.memoir.narrative.frameworks import FrameworkTopicLevel
 from app.services.memoir.voice_followup_ai import (
     INTERVIEWER_TURN_OUTPUT_RULES,
     InterviewDialogue,
+    InterviewMessage,
     InterviewerPersona,
     ProgressPromptContext,
     _has_user_message,
     _recent_context,
+    related_context_block,
 )
 from app.services.memoir.v4_prompt import user_instruction as v4_user_instruction
 
@@ -42,11 +46,12 @@ def build_stream_turn_prompt(
     persona: InterviewerPersona,
     completion_prompt_context: completion_interviews.CompletionIssuePromptContext | None,
     book_context: InterviewBookContext | None,
-    policy_instruction: str = "",
+    additional_instruction: str = "",
+    related_context: Sequence[InterviewMessage] = (),
 ) -> str:
     host_name = persona.host_name
     has_user_message = _has_user_message(list(voice_session.messages))
-    policy_section = f"当前受控访谈策略：\n{policy_instruction}" if policy_instruction else ""
+    additional_section = f"本轮额外约束：\n{additional_instruction}" if additional_instruction else ""
     if voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
         return _book_completion_prompt(
             voice_session,
@@ -56,10 +61,11 @@ def build_stream_turn_prompt(
             activation_context=activation_context,
             progress_context=progress_context,
             completion_prompt_context=completion_prompt_context,
-            policy_section=policy_section,
+            additional_section=additional_section,
+            related_context=related_context,
         )
     book = book_context or InterviewBookContext(chapters=(), last_chapter_title="", topics=(), anchor_topic=None)
-    dialogue = "访谈上下文：\n" + _recent_context(voice_session.messages)
+    dialogue = _dialogue_context(voice_session.messages, related_context)
     retrieved_history = _retrieved_history_block(activation_context)
     first_narration = not has_previous_project_narration and not book.chapters
     if book.completion_offer is not None:
@@ -77,7 +83,7 @@ def build_stream_turn_prompt(
             progress_context.prompt_text if progress_context.progress_update is not None else "",
             _book_block(book, opening=False),
             _topics_block(book.topics),
-            policy_section,
+            additional_section,
             dialogue,
             retrieved_history,
         )
@@ -86,7 +92,7 @@ def build_stream_turn_prompt(
             _header(regenerate),
             _profile_question(book),
             _person_question(book),
-            policy_section,
+            additional_section,
             dialogue,
             retrieved_history,
             _book_block(book, opening=False),
@@ -110,7 +116,7 @@ def build_stream_turn_prompt(
         )
         return _join(
             _header(regenerate), mode, _profile_question(book, opening=True), progress,
-            _book_block(book, opening=True), _topics_block(book.topics), policy_section, dialogue,
+            _book_block(book, opening=True), _topics_block(book.topics), additional_section, dialogue,
             retrieved_history,
         )
 
@@ -121,7 +127,7 @@ def build_stream_turn_prompt(
             "不要推荐旧章节的补充问题，不要求接着上次讲，不替他选择话题。保持 [listen]。",
             f"讲述者资料：{book.narrator}" if book.narrator else "",
             progress,
-            policy_section,
+            additional_section,
             dialogue,
             retrieved_history,
             _topics_block(book.topics),
@@ -147,7 +153,7 @@ def build_stream_turn_prompt(
         progress,
         _book_block(book, opening=True),
         topics,
-        policy_section,
+        additional_section,
         dialogue,
         retrieved_history,
     )
@@ -254,6 +260,12 @@ def _join(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part.strip())
 
 
+def _dialogue_context(messages: Sequence, related_context: Sequence[InterviewMessage]) -> str:
+    current = "访谈上下文：\n" + _recent_context(messages)
+    related = related_context_block(messages, related_context)
+    return _join(current, related)
+
+
 def _book_completion_prompt(
     voice_session: MemoirVoiceSession | InterviewDialogue,
     *,
@@ -263,7 +275,8 @@ def _book_completion_prompt(
     activation_context: str,
     progress_context: ProgressPromptContext,
     completion_prompt_context: completion_interviews.CompletionIssuePromptContext | None,
-    policy_section: str,
+    additional_section: str,
+    related_context: Sequence[InterviewMessage],
 ) -> str:
     if has_user_message:
         mode_instruction = """当前是成书补访，只围绕“当前补全问题”推进。
@@ -289,8 +302,8 @@ def _book_completion_prompt(
         _legacy_header(host_name, regenerate),
         "项目进度上下文：\n" + progress_context.prompt_text,
         mode_instruction,
-        policy_section,
+        additional_section,
         "当前补全问题：\n" + completion,
-        "访谈上下文：\n" + _recent_context(voice_session.messages),
+        _dialogue_context(voice_session.messages, related_context),
         "历史讲述候选：\n" + (activation_context or "本轮没有检索到历史讲述候选。"),
     )

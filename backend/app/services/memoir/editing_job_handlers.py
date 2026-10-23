@@ -17,8 +17,6 @@ from app.services.memoir import section_revision_jobs
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir import share_video_candidates
 from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import interview_policy_outcomes
-from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.narrative import framework_matching
 
 
@@ -55,14 +53,6 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS,
         section_regeneration.run_chapter_section_regeneration_job,
-    )
-    register_editing_job_handler(
-        MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW,
-        interview_policy_runtime.run_shadow_policy_evaluation_job,
-    )
-    register_editing_job_handler(
-        MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME,
-        interview_policy_outcomes.run_policy_outcome_evaluation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.ORGANIZE_MATERIAL,

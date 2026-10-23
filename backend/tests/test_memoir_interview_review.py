@@ -21,7 +21,7 @@ def make_run(path, *, group="person-1", text="我在听。", status="completed",
         "case": case.model_dump(mode="json"), "repeat": 0, "status": status,
         "prompt": prompt, "system_prompt": system_prompt,
         "turn": {"speech_text": text, "conversation_action": "listen"} if status == "completed" else None,
-        "first_text_seconds": 0.4, "policy_error": None, "policy_calls": [], "reply_estimated_cost": None,
+        "first_text_seconds": 0.4, "reply_estimated_cost": None,
     }
     (path / "results.jsonl").write_text(json.dumps(row) + "\n")
     return path
@@ -158,12 +158,10 @@ def test_changed_results_cannot_reuse_existing_reviews(tmp_path):
         summarize(output, output / "ratings.jsonl")
 
 
-async def test_product_scene_snapshots_are_valid_and_terminal_completion_skips_policy():
+async def test_product_scene_snapshots_are_valid_and_terminal_completion_is_supported():
     fixture = Path(__file__).parents[1] / "evals/memoir_interview_product_cases.jsonl"
     cases = [EvalCase.model_validate_json(line) for line in fixture.read_text().splitlines()]
     assert len({case.id for case in cases}) == len(cases)
     for case in cases:
-        result = await run_case(case, InterviewConfig(), live=False, policy_mode="shadow")
+        result = await run_case(case, InterviewConfig(), live=False)
         assert result["status"] == "dry_run", result.get("error")
-        if case.id == "product-completion-done":
-            assert result["policy_input"] is None

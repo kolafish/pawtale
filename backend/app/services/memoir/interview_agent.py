@@ -1,8 +1,4 @@
-"""The interviewer's text boundary, shared by live voice turns and offline runs.
-
-Policy context loading and topic validation stay with the database adapter. Policy
-selection itself remains the shared, database-free select_policy_action function.
-"""
+"""The interviewer's text boundary, shared by live voice turns and offline runs."""
 
 from __future__ import annotations
 
@@ -20,6 +16,7 @@ from app.services.memoir.completion_interviews import CompletionIssuePromptConte
 from app.services.memoir.interview_book_context import InterviewBookContext
 from app.services.memoir.voice_followup_ai import (
     InterviewDialogue,
+    InterviewMessage,
     InterviewerPersona,
     InterviewerTurn,
     ProgressPromptContext,
@@ -40,13 +37,14 @@ STREAM_TEXT_TEMPERATURE = 0.72
 @dataclass(frozen=True)
 class InterviewInput:
     dialogue: InterviewDialogue
+    related_context: tuple[InterviewMessage, ...] = ()
     has_previous_project_narration: bool = False
     activation_context: str = ""
     progress_context: ProgressPromptContext = field(default_factory=lambda: ProgressPromptContext(prompt_text=""))
     persona: InterviewerPersona = field(default_factory=lambda: InterviewerPersona("小余", "unknown"))
     completion_context: CompletionIssuePromptContext | None = None
     book_context: InterviewBookContext | None = None
-    policy_instruction: str = ""
+    additional_instruction: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +72,7 @@ def prepare_interview_turn(snapshot: InterviewInput, config: InterviewConfig) ->
         system_prompt=v4_system_prompt() if is_open_narration else base_system_prompt,
         prompt=build_stream_turn_prompt(
             snapshot.dialogue,
+            related_context=snapshot.related_context,
             has_previous_project_narration=snapshot.has_previous_project_narration,
             activation_context=snapshot.activation_context,
             regenerate=config.regenerate,
@@ -81,7 +80,7 @@ def prepare_interview_turn(snapshot: InterviewInput, config: InterviewConfig) ->
             persona=snapshot.persona,
             completion_prompt_context=snapshot.completion_context,
             book_context=snapshot.book_context,
-            policy_instruction=snapshot.policy_instruction,
+            additional_instruction=snapshot.additional_instruction,
         ),
         max_tokens=_llm_max_tokens(
             snapshot.dialogue,

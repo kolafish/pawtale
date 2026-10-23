@@ -142,7 +142,7 @@ app/
 - `book*.py`：章节稿、全书版本、图片、朗读和导出；
 - `editing_jobs.py`：后台整理 job、lease 和 worker；
 - `share_video*.py`：分享视频场景、背景、对齐和渲染；
-- `narrative/`：访谈策略、话题地图和成书领域决策。
+- `narrative/`：话题地图和成书领域决策。
 
 详细边界见仓库根目录 [TECH.md](../TECH.md)。
 
@@ -165,7 +165,7 @@ app/
 - 火山流式 ASR 和 TTS；
 - StepFun 批量 ASR；
 - 回忆录 editing/share-video worker；
-- 访谈策略和话题地图 rollout；
+- 话题地图配置；
 - GitHub App 单向备份。
 
 生产环境要求：

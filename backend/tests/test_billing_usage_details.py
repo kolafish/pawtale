@@ -139,7 +139,6 @@ async def test_usage_categories_distinguish_interview_audio_and_share_candidates
         ("memoir.job.evaluate_share_video_candidate", "deepseek", "deepseek-flash", "0.001984"),
         ("memoir.share_video_generation", "volc_ark", "doubao-seedream-5-0-260128", "0.880000"),
         ("memoir.share_video_title", "deepseek", "deepseek-flash", "0.000410"),
-        ("memoir.job.evaluate_interview_policy_shadow", "deepseek", "deepseek-flash", "0.000492"),
     ]
     for operation, provider, model, amount in samples:
         await record_ai_usage(
@@ -147,7 +146,7 @@ async def test_usage_categories_distinguish_interview_audio_and_share_candidates
             cost=AICostEstimate(float(amount), "estimated", provider, model),
             context=AIUsageContext(operation_id=str(uuid4()), operation=operation, user_id=user_id),
         )
-    expected_cost = Decimal("1.073086")
+    expected_cost = Decimal("1.072594")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert Decimal(day["cost_rmb"]) == expected_cost
     assert {item["purpose"]: (item["count"], Decimal(item["cost_rmb"])) for item in day["purposes"]} == {
@@ -155,18 +154,10 @@ async def test_usage_categories_distinguish_interview_audio_and_share_candidates
         "语音朗读": (1, Decimal("0.150000")),
         "分享片段筛选": (1, Decimal("0.001984")),
         "分享视频生成": (2, Decimal("0.880410")),
-        "访谈策略评测": (1, Decimal("0.000492")),
     }
     summary = (await client.get("/api/billing/ai-credit-summary")).json()
     assert Decimal(summary["used_rmb"]) == expected_cost
-    shadow_debit = await test_db.scalar(select(AICreditTransaction).join(
-        AIUsageRecord, AICreditTransaction.usage_record_id == AIUsageRecord.id,
-    ).where(
-        AIUsageRecord.user_id == user_id,
-        AIUsageRecord.operation == "memoir.job.evaluate_interview_policy_shadow",
-        AICreditTransaction.transaction_type == USAGE_DEBIT,
-    ))
-    assert shadow_debit.amount_rmb == Decimal("-0.000492")
+
 
 
 async def test_usage_details_paginate_whole_beijing_days(client, test_db):
