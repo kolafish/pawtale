@@ -74,6 +74,7 @@ export function voiceRecordingStartedPatch(autoTriggered: boolean): VoiceChatPat
     error: "",
     liveText: "",
     liveCharCount: 0,
+    transcriptStageHeight: 0,
     ...resetLiveTranscriptScrollPatch(),
     primaryActionText: "暂停收音",
     autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
@@ -101,6 +102,21 @@ export function liveTranscriptScrollTop(contentHeight: number, viewportHeight: n
     return 0;
   }
   return Math.max(0, Math.ceil(contentHeight - viewportHeight));
+}
+
+export function recordingTranscriptLayout(
+  stage: { top: number; height: number },
+  dock: { top: number; height: number },
+  pageScrollTop: number,
+): { height: number; scrollTop: number; bottomSpace: number } {
+  const gap = 16;
+  const height = Math.max(1, Math.floor(Math.min(stage.height, dock.top - gap * 2)));
+  const top = Math.max(gap, Math.min(stage.top, dock.top - gap - height));
+  return {
+    height,
+    scrollTop: Math.max(0, Math.round(pageScrollTop + stage.top - top)),
+    bottomSpace: Math.ceil(dock.height + gap),
+  };
 }
 
 export function voiceLiveTranscriptPatch(text: string): VoiceChatPatch {
