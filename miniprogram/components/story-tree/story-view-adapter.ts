@@ -42,8 +42,7 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
       })),
     };
   });
-  const readableCount = chapters.filter(chapter => chapter.readable).length;
-  const chapterCount = snapshot.book_chapter_count || readableCount;
+  const chapterCount = snapshot.book_chapter_count || chapters.length;
   const bookChars = snapshot.book_char_count
     || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);
   const bookCharText = formatBookChars(bookChars);
@@ -55,6 +54,9 @@ export function storyViewData(snapshot: StoryViewSource): StoryViewData {
     memoir: {
       title: project?.title || "我的故事",
       bookMetaText: [chapterCount ? `${chapterCount} 章` : "", bookCharText].filter(Boolean).join(" · ") || "正在整理",
+      bookProgressText: [chapterCount ? `${chapterCount} 章` : "", storyCount ? `${storyCount} 小节` : "", bookCharText]
+        .filter(Boolean)
+        .join(" · ") || "正在整理",
     },
     overview: {
       title: memoirHomepageTitle(project?.title || ""),

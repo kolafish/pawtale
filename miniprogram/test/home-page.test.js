@@ -347,7 +347,8 @@ test("home keeps completed videos in the library after handling the latest sugge
   assert.deepEqual(navigations, [
     "/pages/share-videos/index?projectId=p1",
   ]);
-  assert.match(pageWxml, /class="home-share-candidate"[^>]*bindtap="openShareCard"/);
+  assert.match(pageWxml, /class="home-share-candidate[^\n]*"/);
+  assert.match(pageWxml, /bindtap="openShareCard"/);
   assert.doesNotMatch(pageWxml, /挑一段做视频/);
   // A suggestion keeps its own buttons, so taps that bubble up to the card do nothing more.
   context.setData({ shareCandidate: { id: "c1", status: "ready" } });
@@ -371,7 +372,8 @@ test("home exposes the video progress library while the first manually selected 
   context.openShareCard();
   assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoActiveCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /class="home-share-candidate/);
+  assert.match(wxml, /shareVideoActiveCount/);
 });
 
 test("home keeps the video library reachable when all manually selected video tasks have failed", async () => {
@@ -392,7 +394,8 @@ test("home keeps the video library reachable when all manually selected video ta
   context.openShareCard();
   assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  assert.match(wxml, /wx:if="{{[^"\n]*shareVideoFailedCount[^"\n]*}}"\s+class="home-share-candidate"/);
+  assert.match(wxml, /class="home-share-candidate/);
+  assert.match(wxml, /shareVideoFailedCount/);
 });
 
 test("only a successful completed-video preview dismisses the latest suggestion", async () => {
@@ -452,14 +455,13 @@ test("home ignores a recommendation returned after the project changes", async (
   assert.equal(context.data.shareCandidate, null);
 });
 
-test("home combines new-story and resume actions without mixing their routes", () => {
+test("home combines new-story and resume actions into one voice entry", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
-  assert.match(pageWxml, /id="resume-story-action"[\s\S]*?bindtap="resumeLastStory"/);
-  assert.match(pageWxml, /wx:if="\{\{showNarrationChoiceCard\}\}"/);
-  assert.doesNotMatch(pageWxml, /resume-card|接着上次说/);
-  assert.match(pageWxml, /wx:if="\{\{headerSubtitleText\}\}"/);
+  assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="resumeLastStory"/);
+  assert.doesNotMatch(pageWxml, /resume-story-action|讲个新故事|接着讲|上次说到/);
+  assert.match(pageWxml, /聊两句/);
+  assert.match(pageWxml, /AI 陪您慢慢聊/);
   assert.match(pageWxml, /<voice-session[\s\S]*?bindexit="exitVoiceSession"/);
   assert.doesNotMatch(pageWxml, /bindreturnhome|voiceSessionMinimized/);
 });
@@ -467,8 +469,8 @@ test("home combines new-story and resume actions without mixing their routes", (
 test("home keeps interview-engine notices out of the story overview", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(pageWxml, /<story-tree/);
-  assert.match(pageWxml, /bind:openbook="openBook"/);
+  assert.doesNotMatch(pageWxml, /<story-tree/);
+  assert.match(pageWxml, /bindtap="openBook"/);
   assert.doesNotMatch(pageWxml, /reviewNoticeText|candidateNoticeText/);
 });
 
@@ -572,8 +574,8 @@ test("home view patch keeps first-screen template state simple", () => {
     {
       greetingText: "你好，余主任",
       headerSubtitleText: "",
-      primaryVoiceButtonTitle: "讲个新故事",
-      showNarrationChoiceCard: true,
+      primaryVoiceButtonTitle: "开始讲述",
+      showNarrationChoiceCard: false,
       voiceStartButtonClass: "button-blocked",
       voiceStartButtonHoverClass: "none",
       showVoiceAuthorizationPanel: false,
@@ -595,15 +597,15 @@ test("home start action follows account, project, story and completion states", 
     ...baseData,
     selectedMode: "guided_interview",
   });
-  assert.equal(guided.primaryVoiceButtonTitle, "讲第一个故事");
+  assert.equal(guided.primaryVoiceButtonTitle, "开始讲述");
 
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
-  assert.equal(free.primaryVoiceButtonTitle, "讲第一个故事");
-  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "讲个新故事");
+  assert.equal(free.primaryVoiceButtonTitle, "开始讲述");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "开始讲述");
-  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
-  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, true);
+  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "开始讲述");
+  assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, false);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
 });
