@@ -31,8 +31,8 @@ test("narration returns a session holder to home even when home is absent from t
   };
   returnToHomeThenNarrate();
   assert.deepEqual(destinations, ["/pages/home/index"]);
-  assert.equal(consumeNarrationRequest(), true);
-  assert.equal(consumeNarrationRequest(), false);
+  assert.equal(consumeNarrationRequest(), "start");
+  assert.equal(consumeNarrationRequest(), null);
   delete global.getCurrentPages;
   delete global.wx;
 });

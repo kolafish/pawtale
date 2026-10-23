@@ -1285,6 +1285,71 @@ test("agreeing to voice consent carries on with the story the user tapped", asyn
   delete global.wx;
 });
 
+test("an expired session sends the sample narration request through login and resumes once", async () => {
+  const { ApiError } = require("../services/request.ts");
+  const navigations = [];
+  let signedIn = false;
+  let creates = 0;
+  global.wx = {
+    reLaunch: ({ url }) => navigations.push(url),
+    navigateTo: ({ url }) => navigations.push(url),
+    pageScrollTo() {},
+  };
+  const project = { id: "p1", title: "我的回忆录", metadata_json: {} };
+  const { page } = loadHomePage({
+    authExports: {
+      getMemoirIdentity: async () => {
+        if (!signedIn) throw new ApiError(401, "会话已失效", {});
+        return { id: "u1", display_name: "", email: "", active_project_id: "p1", active_project: project, projects: [project] };
+      },
+    },
+    voiceApiExports: {
+      getMemoirDemoStory: async () => ({ title: "示例", chapters: [] }),
+      createMemoirVoiceSession: async () => { creates += 1; return { session: { id: "resumed" } }; },
+    },
+  });
+  require("../services/navigation.ts").returnToHomeThenNarrate();
+  const expired = pageContext(page, { needsLogin: false, voiceAuthorizationAgreed: true });
+  expired.measureNarration = () => {};
+  await expired.onShow();
+
+  assert.deepEqual(navigations, ["/pages/home/index", "/pages/login/index"]);
+  assert.equal(expired.data.needsLogin, true);
+  assert.equal(creates, 0);
+  expired.onUnload();
+
+  signedIn = true;
+  const loggedIn = pageContext(page, { needsLogin: true, voiceAuthorizationAgreed: true });
+  loggedIn.measureNarration = () => {};
+  await loggedIn.onShow();
+  assert.equal(creates, 1);
+  assert.equal(loggedIn.data.voiceEntry.voiceSessionId, "resumed");
+  loggedIn.onHide();
+  await loggedIn.onShow();
+  assert.equal(creates, 1);
+  loggedIn.onUnload();
+});
+
+test("cancelling narration login allows the visitor to return home without a login loop", async () => {
+  const { ApiError } = require("../services/request.ts");
+  const navigations = [];
+  global.wx = { navigateTo: ({ url }) => navigations.push(url) };
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
+    getMemoirDemoStory: async () => ({ title: "示例", chapters: [] }),
+  } });
+  require("../services/navigation.ts").navigateToLoginThenNarrate();
+  const context = pageContext(page);
+  context.measureNarration = () => {};
+
+  await context.onShow();
+  assert.equal(context.data.needsLogin, true);
+  context.onHide();
+  await context.onShow();
+  assert.deepEqual(navigations, ["/pages/login/index"]);
+  context.onUnload();
+});
+
 test("logging in from the story button carries on into narration", async () => {
   const navigations = [];
   let creates = 0;
