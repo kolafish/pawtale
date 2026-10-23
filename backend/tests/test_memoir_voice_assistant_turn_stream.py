@@ -1066,6 +1066,12 @@ def test_related_context_respects_eight_message_and_four_thousand_char_windows()
     )
     assert "最后我想暂停一下" in _recent_context(latest_with_intent)
 
+    near_budget = (
+        InterviewMessage("user", "当前" * 1985, 0, "near-budget", datetime(2026, 1, 1)),
+        InterviewMessage("user", "旧内容" * 100, 1, "near-budget-old", datetime(2026, 1, 1)),
+    )
+    assert len(_recent_context(near_budget)) <= 4000
+
 
 @pytest.mark.parametrize("failure_stage", ["before_text", "partial_audio", "after_text", "text_failed"])
 async def test_voice_assistant_turn_tts_failure_keeps_only_completed_text(
