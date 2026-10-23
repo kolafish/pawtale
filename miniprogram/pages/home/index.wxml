@@ -19,7 +19,7 @@
 
   <view hidden="{{voiceEntry}}" class="home-content">
     <view class="home-voice-card" id="home-voice">
-      <image class="home-card-background" src="/assets/home/narration-background.png" mode="aspectFill" aria-hidden="true" />
+      <image class="home-card-background" src="/assets/home/narration-background.jpg" mode="aspectFill" aria-hidden="true" />
       <view class="voice-card-copy">
         <text class="voice-card-title">聊两句</text>
         <text class="voice-card-subtitle">AI 陪您慢慢聊</text>
@@ -55,7 +55,7 @@
 
     <view wx:if="{{storyLoaded}}" id="home-memoir" class="home-memoir-card ui-pressable"
       bindtap="openBook" hover-class="home-memoir-card-hover" aria-role="button" aria-label="翻开我的书">
-      <image class="home-card-background" src="/assets/home/memoir-background.png" mode="aspectFill" aria-hidden="true" />
+      <image class="home-card-background" src="/assets/home/memoir-background.jpg" mode="aspectFill" aria-hidden="true" />
       <view class="memoir-cover-caption" aria-hidden="true">
         <text class="memoir-cover-title">{{story.memoir.title}}</text>
       </view>
