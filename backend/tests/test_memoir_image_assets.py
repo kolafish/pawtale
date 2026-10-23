@@ -371,6 +371,120 @@ async def _register_another_video_image(test_db, tmp_path, *, asset_id: str, sce
     return asset.id
 
 
+@pytest.mark.db_independent
+@pytest.mark.parametrize('operation', ['create', 'update'])
+async def test_image_write_does_not_invert_existing_plan_replacement_locks(
+    client, test_db, tmp_path, monkeypatch, operation,
+):
+    import asyncio
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.domain.memoir.types import MemoirBookPlanStatus
+    from app.schemas.memoir_images import MemoirBookImagePlacementCreateRequest, MemoirBookImagePlacementUpdateRequest
+    from app.services.memoir import book_plan_write_workflow as plans
+
+    user, pid, _, aid = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    placement_id = None
+    if operation == 'update':
+        placed = await client.post(f'/api/mobile/memoir/projects/{pid}/image-assets/{aid}/placements',
+            json={'placement_type': 'chapter_inline'})
+        assert placed.status_code == 201
+        placement_id = placed.json()['placements'][0]['id']
+    await test_db.commit()
+    paused, resume = asyncio.Event(), asyncio.Event()
+    real_lock = plans.lock_project_chapters
+    async with AsyncSession(test_db.bind, expire_on_commit=False) as replacement, AsyncSession(test_db.bind, expire_on_commit=False) as image:
+        async def pause_replacement(db, **kwargs):
+            if db is replacement:
+                paused.set()
+                await resume.wait()
+            await real_lock(db, **kwargs)
+        monkeypatch.setattr(plans, 'lock_project_chapters', pause_replacement)
+        task = asyncio.create_task(plans._replace_plan(replacement, project_id=pid, title='保留当前目录', chapters=[],
+            status=MemoirBookPlanStatus.CONFIRMED, created_by=MemoirCreatedBy.AI, model=None,
+            prompt_snapshot='', only_if_missing=True))
+        try:
+            await asyncio.wait_for(paused.wait(), timeout=3)
+            if operation == 'create':
+                call = image_assets.create_image_placement(image, user_id=user['id'], project_id=pid, asset_id=aid,
+                    req=MemoirBookImagePlacementCreateRequest(placement_type='chapter_inline'))
+            else:
+                call = image_assets.update_image_placement(image, user_id=user['id'], project_id=pid, asset_id=aid,
+                    placement_id=placement_id, req=MemoirBookImagePlacementUpdateRequest(display_size='half_width'))
+            result = await asyncio.wait_for(call, timeout=3)
+            assert result.include_in_book
+            resume.set()
+            assert (await asyncio.wait_for(task, timeout=3)).outcome == 'reused'
+        finally:
+            resume.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await image.rollback()
+            await replacement.rollback()
+
+
+@pytest.mark.parametrize('split_sources', [False, True])
+async def test_source_relocation_updates_preview_and_export_images_preserving_manual_body(
+    client, test_db, tmp_path, monkeypatch, split_sources,
+):
+    from app.models.memoir import MemoirBookPlanChapter, MemoirSection, MemoirSectionMaterial
+    from app.schemas.memoir_sections import MemoirSectionMaterialPlacementRequest
+    from app.services.memoir import sections
+    from app.services.memoir.book_output_versions import append_book_output_version, load_latest_book_output_version
+
+    user, pid, cid, aid = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    asset = await test_db.get(MemoirImageAsset, aid)
+    original_section = await test_db.scalar(select(MemoirSection).where(MemoirSection.chapter_id == cid))
+    extra = await create_test_voice_transcript(client, test_db, '后来葡萄架下还种了花。', project_id=pid)
+    test_db.add(MemoirSectionMaterial(project_id=pid, section_id=original_section.id,
+        utterance_id=extra['utterance_id'], sort_order=1))
+    target_chapter = await test_db.get(MemoirBookPlanChapter, cid)
+    if split_sources:
+        target_chapter = MemoirBookPlanChapter(project_id=pid, plan_id=target_chapter.plan_id, title='另一章', sort_order=1)
+        test_db.add(target_chapter)
+        await test_db.flush()
+    target = MemoirSection(project_id=pid, chapter_id=target_chapter.id, title='新的素材位置',
+        sort_order=0 if split_sources else 1)
+    test_db.add(target)
+    await test_db.commit()
+    source_ids = [asset.source_utterance_id, extra['utterance_id']]
+    placed = await client.post(f'/api/mobile/memoir/projects/{pid}/image-assets/{aid}/placements', json={
+        'placement_type': 'chapter_inline', 'source_utterance_ids': source_ids,
+    })
+    assert placed.status_code == 201, placed.text
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == pid))
+    # Keep an older loaded relationship to catch stale snapshot reads after a new manual version.
+    await test_db.refresh(output, attribute_names=['versions'])
+    latest = await load_latest_book_output_version(test_db, output_id=output.id)
+    manuscript = deepcopy(latest.manuscript_json)
+    manuscript['chapters'][0]['content'] = '用户手写的全书正文，必须逐字保留。'
+    manual = await append_book_output_version(test_db, output=output, content='用户手写的全书正文，必须逐字保留。',
+        chapter_snapshot_json=latest.chapter_snapshot_json, manuscript_json=manuscript, created_by=MemoirCreatedBy.USER)
+    await test_db.commit()
+    for source_id in source_ids[:1] if split_sources else source_ids:
+        await sections.place_material(test_db, user_id=user['id'], project_id=pid, utterance_id=source_id,
+            req=MemoirSectionMaterialPlacementRequest(target_section_id=target.id))
+
+    # Match the fresh identity map used by the next HTTP request in production.
+    test_db.expunge_all()
+    preview = (await client.get(f'/api/mobile/memoir/projects/{pid}/book-output')).json()['latest_version']
+    assert preview['content'] == manual.content
+    assert preview['manuscript']['chapters'][0]['content'] == manuscript['chapters'][0]['content']
+    illustrations = preview['manuscript']['chapters'][0]['illustrations']
+    if split_sources:
+        assert illustrations == []
+    else:
+        assert [(item['image_asset_id'], item['section_id']) for item in illustrations] == [(aid, target.id)]
+    prepared = await book_outputs.prepare_book_output_export(test_db, user_id=user['id'], project_id=pid,
+        export_format=book_output_export.MemoirBookOutputExportFormat.PDF)
+    assert prepared.content == manual.content
+    assert [item.image_asset_id for item in prepared.manuscript.chapters[0].illustrations] == ([] if split_sources else [aid])
+    version_count = await test_db.scalar(select(MemoirBookOutputVersion.version)
+        .where(MemoirBookOutputVersion.output_id == output.id).order_by(MemoirBookOutputVersion.version.desc()).limit(1))
+    await image_assets.reconcile_image_placements(test_db, project_id=pid)
+    assert (await load_latest_book_output_version(test_db, output_id=output.id)).version == version_count
+
+
 async def test_image_anchor_migration_keeps_single_sources_and_snapshots_legacy_chapter_sources(
     client, test_db, tmp_path, monkeypatch,
 ):

@@ -28,6 +28,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.models.projects import Project
 from app.schemas.memoir_sections import (
     MemoirChapterSectionMaterialSummary,
     MemoirChapterSectionSummary,
@@ -93,8 +94,9 @@ async def _load_plan(
 
 
 async def lock_project_chapters(db: AsyncSession, *, project_id: str) -> None:
-    # All directory writers take plan -> chapters, matching section moves and
-    # the end-of-narration review. Reversing these locks can deadlock a rename.
+    # The stable parent also serializes first plan creation. Keep the same
+    # project -> plan -> chapters order for replacements, images and structure writes.
+    await db.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
     await db.execute(select(MemoirBookPlan.id).where(
         MemoirBookPlan.project_id == project_id,
     ).with_for_update())
@@ -108,8 +110,9 @@ async def lock_plan_structure(
     *,
     project_id: str,
 ) -> MemoirBookPlan:
-    """Lock the plan before a write that also locks chapters."""
+    """Lock project -> plan before a write that also locks chapters."""
 
+    await db.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
     plan = await db.scalar(
         select(MemoirBookPlan)
         .where(MemoirBookPlan.project_id == project_id)

@@ -33,7 +33,6 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
 )
-from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookChapterTitleGenerateRequest,
@@ -272,9 +271,8 @@ async def _replace_plan(
             status_code=400,
             detail=f"章节数量不能超过 {MAX_MEMOIR_BOOK_PLAN_CHAPTERS} 章",
         )
-    # There is no plan row to lock during first creation. Serialize the short
-    # save phase on its stable parent, without blocking FK reads.
-    await db.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
+    # The shared directory lock includes the stable project parent, including
+    # first creation when there is no plan row yet.
     await lock_project_chapters(db, project_id=project_id)
     plan = await _load_plan(db, project_id)
     if plan is not None and only_if_missing:
