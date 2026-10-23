@@ -44,6 +44,7 @@ import {
   noAnswerPromptQueuedPatch,
   noAnswerPromptStartPatch,
   liveTranscriptScrollTop,
+  recordingTranscriptLayout,
   voiceFinalTranscriptResult,
   voiceAssistantInterruptedPatch,
   voiceClientUnavailableForRecording,
@@ -79,6 +80,7 @@ export interface VoiceChatRecordingRuntimeMethods {
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handleClientEvent(event: MemoirStreamingAsrClientEvent): void;
   handlePartial(text: string): void;
+  focusRecordingTranscript(): void;
   scheduleLiveTranscriptScroll(): void;
   measureLiveTranscriptScroll(): void;
   pauseLiveTranscriptFollow(): void;
@@ -292,7 +294,9 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       this.cancelFollowUpTTS();
     }
     this.runtime().handledNoAnswerFrameCount = -1;
-    applyVoiceChatDataPatch(this, voiceRecordingStartedPatch(autoTriggered));
+    applyVoiceChatDataPatch(this, voiceRecordingStartedPatch(autoTriggered), () => {
+      this.focusRecordingTranscript();
+    });
     trackAuditAction(
       "voice_chat.recording_start",
       { auto_triggered: autoTriggered },
@@ -496,6 +500,40 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
   handlePartial(text: string) {
     applyVoiceChatDataPatch(this, voiceLiveTranscriptPatch(text), () => {
       this.scheduleLiveTranscriptScroll();
+    });
+  },
+
+  focusRecordingTranscript() {
+    const runtime = this.runtime();
+    if (!this.data.recording || this.data.interviewType !== "ai_interview"
+      || !this.data.liveTranscriptFollowing || runtime.disposed || runtime.pageSuspended) return;
+    const version = ++runtime.transcriptLayoutVersion;
+    applyVoiceChatDataPatch(this, { transcriptStageHeight: 0 }, () => {
+      let stage: WechatMiniprogram.BoundingClientRectResult | null = null;
+      let dock: WechatMiniprogram.BoundingClientRectResult | null = null;
+      let scrollTop = 0;
+      let measured = 0;
+      const isCurrent = () => version === runtime.transcriptLayoutVersion
+        && this.data.recording && this.data.liveTranscriptFollowing && !runtime.disposed && !runtime.pageSuspended;
+      const complete = () => {
+        if (++measured !== 3 || !stage || !dock || stage.height <= 0 || dock.top <= 0 || dock.height <= 0 || !isCurrent()) return;
+        const layout = recordingTranscriptLayout(stage, dock, scrollTop);
+        applyVoiceChatDataPatch(this, {
+          transcriptStageHeight: layout.height,
+          recordingDockSpace: layout.bottomSpace,
+        }, () => {
+          if (!isCurrent()) return;
+          if (Math.abs(layout.scrollTop - scrollTop) >= 1) {
+            wx.pageScrollTo({ scrollTop: layout.scrollTop, duration: 0 });
+          }
+          this.scheduleLiveTranscriptScroll();
+        });
+      };
+      const query = this.createSelectorQuery();
+      query.select(".transcript-stage").boundingClientRect(rect => { stage = rect; complete(); });
+      query.select(".control-bar").boundingClientRect(rect => { dock = rect; complete(); });
+      query.selectViewport().scrollOffset(offset => { scrollTop = offset.scrollTop; complete(); });
+      query.exec();
     });
   },
 

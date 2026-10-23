@@ -255,6 +255,15 @@
   justify-content: center;
 }
 
+.transcript-stage.viewport-fitted .live-caption-shell {
+  flex: 1;
+}
+
+.transcript-stage.viewport-fitted .transcript-stage-head,
+.transcript-stage.viewport-fitted .voice-activity {
+  flex-shrink: 0;
+}
+
 .voice-chat-page.human-interview .transcript-stage {
   justify-content: flex-start;
 }

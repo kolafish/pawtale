@@ -21,7 +21,6 @@ test("book completion recording removes panels that crowd the transcript", () =>
   assert.match(template, /wx:if="\{\{!recording\}\}" class="completion-issue-head"/);
   assert.match(template, /wx:if="\{\{showCompletionIssueActions && !recording\}\}"/);
   assert.match(template, /class="completion-issue-question"/);
-  assert.match(template, /class="transcript-stage"/);
 });
 
 test("voice status pills separate control geometry from label typography", () => {

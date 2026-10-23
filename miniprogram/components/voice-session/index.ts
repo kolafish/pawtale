@@ -98,6 +98,7 @@ Component({
   pageLifetimes: {
     show() { this.onShow(); },
     hide() { this.onHide(); },
+    resize() { this.focusRecordingTranscript(); },
   },
   methods: {
   runtime() { return voiceSessionRuntime(this); },
