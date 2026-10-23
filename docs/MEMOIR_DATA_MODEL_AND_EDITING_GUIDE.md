@@ -249,7 +249,7 @@ flowchart LR
 | `provider_payload_json` | provider 原始或诊断 payload |
 | `framework_item_id` | 与话题地图项的直接访谈锚点 |
 | `completion_issue_id` | 这条回答是否来自成书补讲 |
-| `policy_decision_id` | 产生这轮问题的访谈策略决策 |
+| `policy_decision_id` | 历史访谈策略决策关联；当前访谈不再写入 |
 | `created_at` | 讲述产生时间 |
 
 ### 3.2 素材是怎么来的
@@ -357,11 +357,11 @@ sequenceDiagram
 
 历史数据默认只统计、不自动触发有成本的 LLM 调用。`scripts/backfill_memoir_retrieval_semantics.py` 不带参数时只返回符合条件的数量，只有显式传入 `--enqueue` 才会排入回填任务。
 
-实时查询侧不再调用额外 LLM。系统直接把当前讲述原文作为唯一 Query，通过本地 embedding 和 PostgreSQL Vector/BM25/RRF 召回最多 12 个历史素材候选；长讲述先按自然句切块，再由本地 embedding 选出与本轮最相关的原文片段。按融合顺序、总计不超过 4000 字的候选原文直接进入原本就要调用的下一句追问 LLM，由该模型同时判断候选是否相关并生成回应。不相关候选必须忽略，不注入索引文字、LLM 改写摘要或内部检索信息。
+实时查询侧不再调用额外 LLM。系统直接把当前讲述原文作为唯一 Query，通过本地 embedding 和 PostgreSQL Vector/BM25/RRF 召回最多 6 个历史素材候选；长讲述先按自然句切块，再由本地 embedding 选出与本轮最相关的原文片段。按融合顺序、总计不超过 4000 字的候选原文直接进入原本就要调用的下一句追问 LLM，由该模型同时判断候选是否相关并生成回应。不相关候选必须忽略，不注入索引文字、LLM 改写摘要或内部检索信息。
 
 物理表 `memoir_memory_activation_traces` 保存每次激活的完整调试轨迹，包括当前原文 Query、Vector/BM25 命中、RRF 候选、实际送入下一句追问 LLM 的原文以及失败诊断，但不保存向量本身。重复生成同一条用户消息的回应时复用已成功或已跳过的轨迹，避免重复本地检索。调试 API 的列表只返回摘要，单条详情才返回完整 trace。由于不再单独调用选择模型，日志只表达哪些候选被送入最终提示词，不声称最终回答一定使用了某条候选。
 
-旧的“跨会话最近 8 条用户消息”不再直接进入提示词。新会话开场只保留“该项目是否已有同模式讲述”的布尔状态，不读取具体历史内容；有当前讲述时，跨会话事实必须经过上述检索和激活流程才能进入下一问。
+新会话如果从话题地图选择了已有方向，当前会话不足 8 条时，按最多 8 条和总计 4000 字的窗口补入同一项目最近一次同话题会话；当前会话内容优先，历史会话单独标注为承接材料。没有话题锚点时不直接带入跨会话对话，跨会话事实仍通过上述检索和激活流程进入下一问。
 
 ### 3.7 素材当前如何展示
 
@@ -1309,17 +1309,9 @@ FrameworkItemMaterial 记录某条 utterance 与某个话题项的关联，以�
 
 它不是章节目录，也不用于判断人生是否“完整”。
 
-### 11.3 InterviewPolicyDecision / Evaluation
+### 11.3 访谈策略历史数据
 
-访谈策略日志保存：
-
-- 当时的 InterviewBrief；
-- 候选动作；
-- 选中动作和问题；
-- 策略版本；
-- 用户结果和可选人工评价。
-
-它用于评估访谈策略，不是事实来源，也不能修改用户素材或隐私决定。
+旧版本曾写入 `InterviewPolicyDecision / Evaluation`，对应表仅保留历史数据供删除项目时清理；当前访谈不再运行策略分类器、shadow 评估或 active rollout，也不再新增这些记录。
 
 ---
 
@@ -1333,7 +1325,6 @@ FrameworkItemMaterial 记录某条 utterance 与某个话题项的关联，以�
 
 - 校正转写；
 - 离线 ASR 重处理；
-- 访谈策略评估；
 - 自动整理素材；
 - 更新话题地图；
 - 生成全书编辑文案。
@@ -1574,8 +1565,8 @@ Digest、Review、Issue、Version、Job 等术语放在系统内部，通过“�
 | `memoir_project_frameworks` | 项目话题模板快照 |
 | `memoir_framework_items` | 人生话题项与用户决定 |
 | `memoir_framework_item_materials` | 话题与素材的多对多匹配 |
-| `memoir_interview_policy_decisions` | 访谈策略决策 |
-| `memoir_interview_policy_evaluations` | 策略评价 |
+| `memoir_interview_policy_decisions` | 历史访谈策略决策（当前不再写入） |
+| `memoir_interview_policy_evaluations` | 历史策略评价（当前不再写入） |
 | `memoir_editing_jobs` | 异步编辑/整理任务 |
 | `memoir_automation_events` | 用户可见自动化事件 |
 | `memoir_material_share_videos` | 素材分享视频任务 |

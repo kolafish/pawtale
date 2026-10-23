@@ -6,7 +6,6 @@ import hashlib
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.interview_policy import InterviewBrief
 from app.domain.memoir.narrative_types import MemoirFrameworkUserResolution
 from app.domain.memoir.types import (
     MemoirInterviewType,
@@ -17,11 +16,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
-from app.models.memoir_narrative import (
-    MemoirFrameworkItem,
-    MemoirProjectFramework,
-)
-from app.services.memoir.narrative import frameworks, interview_policy
+from app.services.memoir.narrative import frameworks
 
 
 MAX_TOPIC_CANDIDATES = 6
@@ -169,78 +164,4 @@ async def candidate_topics(
         )
         for item in eligible[:MAX_TOPIC_CANDIDATES]
         if item.item_key in definitions
-    )
-
-
-async def brief_for_candidate(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    candidate: FrameworkTopicCandidate,
-    base_brief: InterviewBrief,
-) -> InterviewBrief:
-    item = await db.scalar(
-        select(MemoirFrameworkItem)
-        .join(
-            MemoirProjectFramework,
-            MemoirProjectFramework.id
-            == MemoirFrameworkItem.project_framework_id,
-        )
-        .where(
-            MemoirFrameworkItem.id == candidate.item_id,
-            MemoirProjectFramework.project_id == project_id,
-        )
-    )
-    if (
-        item is None
-        or item.user_resolution != MemoirFrameworkUserResolution.NONE.value
-    ):
-        raise InterviewTopicUnavailableError(
-            "interview_policy_topic_candidate_unavailable"
-        )
-    project_framework = await frameworks.framework_for_project(
-        db,
-        project_id=project_id,
-    )
-    if (
-        project_framework is None
-        or project_framework.id != item.project_framework_id
-    ):
-        raise InterviewTopicUnavailableError(
-            "interview_policy_topic_candidate_unavailable"
-        )
-    template = frameworks.template_for_framework(project_framework)
-    definition = next(
-        definition
-        for definition in template.items
-        if definition.item_key == item.item_key
-    )
-    topic_material_ids = tuple(
-        sorted(
-            set(
-                (
-                    await db.scalars(
-                        select(MemoirVoiceUtterance.id).where(
-                            MemoirVoiceUtterance.framework_item_id == item.id
-                        )
-                    )
-                ).all()
-            )
-        )
-    )
-    return interview_policy.framework_item_brief(
-        item=item,
-        definition=definition,
-        template_version=project_framework.template_version,
-        current_story_state=base_brief.current_story_state,
-        conversation_momentum=base_brief.conversation_momentum,
-        existing_material_refs=tuple(
-            sorted(
-                set(base_brief.existing_material)
-                | set(topic_material_ids)
-            )
-        ),
-        user_preferences=base_brief.user_preferences,
-        safety_constraints=base_brief.safety_constraints,
-        policy_version=base_brief.policy_version,
     )

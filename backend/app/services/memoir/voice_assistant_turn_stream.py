@@ -32,7 +32,6 @@ from app.services.memoir import memory_activation
 from app.services.memoir import narration_people
 from app.services.memoir import narrator_profile
 from app.services.memoir import progress_snapshot
-from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.tts_alignment import alignment_segments_to_json
@@ -69,6 +68,7 @@ from app.services.memoir.streaming_tts_events import (
 )
 from app.services.memoir.voice_chat_context import (
     load_voice_session,
+    load_related_topic_context_messages,
     next_turn_index,
     project_has_previous_narration,
 )
@@ -188,7 +188,6 @@ class VoiceAssistantTurnStreamSession:
         voice_session_id: str,
         user_id: str,
         ai_client_factory=get_ai_service,
-        policy_ai_client_factory=get_ai_service,
         tts_client_factory=get_tts_client,
     ) -> None:
         self.db = db
@@ -196,7 +195,6 @@ class VoiceAssistantTurnStreamSession:
         self.voice_session_id = voice_session_id
         self.user_id = user_id
         self.ai_client_factory = ai_client_factory
-        self.policy_ai_client_factory = policy_ai_client_factory
         self.tts_client_factory = tts_client_factory
 
     async def run(self) -> None:
@@ -421,6 +419,23 @@ class VoiceAssistantTurnStreamSession:
             ),
             None,
         )
+        current_context_messages = recent_context_messages(messages)
+        related_db_messages = await load_related_topic_context_messages(
+            self.db,
+            voice_session=voice_session,
+            current_message_count=len(current_context_messages),
+        )
+        related_context = tuple(
+            InterviewMessage(
+                role=item.role,
+                content_text=item.content_text,
+                turn_index=item.turn_index,
+                id=item.id,
+                created_at=item.created_at,
+            )
+            for item in related_db_messages
+        )
+        related_context_ids = tuple(item.id for item in related_context)
         activation_context = ""
         # All ordinary AI interview variants share retrieved history; openings have no query.
         if current_user_message is not None:
@@ -430,7 +445,7 @@ class VoiceAssistantTurnStreamSession:
                     project_id=voice_session.project_id,
                     voice_session_id=voice_session.id,
                     current_message=current_user_message,
-                    context_message_ids=tuple(item.id for item in recent_context_messages(messages)),
+                    context_message_ids=tuple(item.id for item in current_context_messages) + related_context_ids,
                 )
                 activation_context = activation.context
                 artifacts.memory_activation_trace_id = activation.trace_id
@@ -451,26 +466,6 @@ class VoiceAssistantTurnStreamSession:
                 self.user_id,
             )
 
-        policy_turn: interview_policy_runtime.ActivePolicyTurn | None = None
-        completion_answered = bool(completion_prompt_context is not None and completion_prompt_context.answered)
-        if not completion_answered and completion_offer is None:
-            try:
-                async with self.db.begin_nested():
-                    policy_turn = await interview_policy_runtime.prepare_active_policy_turn(
-                        self.db,
-                        session=voice_session,
-                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
-                        requested_ai_model=req.ai_model,
-                        ai_client_factory=self.policy_ai_client_factory,
-                    )
-            except Exception:
-                logger.exception(
-                    "Active interview policy selection failed; continuing with "
-                    "the existing reply flow voice_session_id=%s turn_id=%s",
-                    voice_session.id,
-                    turn_id,
-                )
-
         prepared = prepare_interview_turn(
             InterviewInput(
                 dialogue=InterviewDialogue(
@@ -482,13 +477,13 @@ class VoiceAssistantTurnStreamSession:
                         ) for item in voice_session.messages
                     ),
                 ),
+                related_context=related_context,
                 has_previous_project_narration=has_previous_project_narration,
                 activation_context=activation_context,
                 progress_context=project_progress_context,
                 persona=persona,
                 completion_context=completion_prompt_context,
                 book_context=book_context,
-                policy_instruction=interview_policy_runtime.active_reply_instruction(policy_turn),
             ),
             InterviewConfig(
                 requested_model=req.ai_model,
@@ -556,60 +551,7 @@ class VoiceAssistantTurnStreamSession:
             voice_session_id=voice_session.id,
             message_id=message.id,
         )
-        persisted_message_id = message.id
-        try:
-            if not completion_answered:
-                if policy_turn is not None:
-                    await interview_policy_runtime.persist_policy_turn_decision(
-                        self.db,
-                        session=voice_session,
-                        generated_message=message,
-                        policy_turn=policy_turn,
-                    )
-                else:
-                    await interview_policy_runtime.schedule_shadow_policy_evaluation(
-                        self.db,
-                        session=voice_session,
-                        generated_message=message,
-                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
-                        requested_ai_model=req.ai_model,
-                    )
-            await self.db.commit()
-        except Exception:
-            await self.db.rollback()
-            logger.exception(
-                "Failed to persist interview policy result voice_session_id=%s message_id=%s",
-                self.voice_session_id,
-                persisted_message_id,
-            )
-            if policy_turn is not None:
-                try:
-                    fallback_session = await load_voice_session(
-                        self.db,
-                        self.voice_session_id,
-                        self.user_id,
-                    )
-                    fallback_message = await self.db.get(
-                        MemoirChatMessage,
-                        persisted_message_id,
-                    )
-                    if fallback_message is None:
-                        raise RuntimeError("Persisted assistant message unavailable for shadow fallback")
-                    await interview_policy_runtime.schedule_shadow_policy_evaluation(
-                        self.db,
-                        session=fallback_session,
-                        generated_message=fallback_message,
-                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
-                        requested_ai_model=req.ai_model,
-                    )
-                    await self.db.commit()
-                except Exception:
-                    await self.db.rollback()
-                    logger.exception(
-                        "Failed to schedule interview policy shadow fallback voice_session_id=%s message_id=%s",
-                        self.voice_session_id,
-                        persisted_message_id,
-                    )
+        await self.db.commit()
         await self.client.send_json(
             {
                 "type": "turn.completed",

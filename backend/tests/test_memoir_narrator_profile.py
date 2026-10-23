@@ -873,7 +873,7 @@ def test_gender_is_asked_last_and_only_while_unknown():
     )
     prompt = _prompt("s1", [narrator], book)
     assert "这次要问的资料：他是男是女，比如“冒昧问一句，我该叫您叔叔还是阿姨呀？”" in prompt
-    assert "除了问性别，不要用“是……还是……”的二选一问法" in prompt
+    assert "避免程式化共情、连续追问和带猜测的二选一问法" in prompt
 
 
 @pytest.mark.asyncio

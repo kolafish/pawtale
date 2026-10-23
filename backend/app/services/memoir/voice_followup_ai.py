@@ -24,7 +24,8 @@ SYSTEM_PROMPT = (
     "你的任务不是审问用户，而是帮助叙述者自然地讲出人生经历、人物、事情、地点、时间和感受。"
     "称呼叙述者用“您”。"
 )
-MAX_CONTEXT_MESSAGES = 12
+MAX_CONTEXT_MESSAGES = 8
+MAX_CONTEXT_CHARS = 4000
 FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 OPENING_MAX_TOKENS = 420
@@ -247,11 +248,77 @@ def _message_context(messages: Sequence[Message]) -> str:
 
 
 def recent_context_messages(messages: Sequence[Message]) -> list[Message]:
-    return _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
+    """Return the latest messages within both the count and character budgets."""
+    ordered = _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
+    selected: list[Message] = []
+    remaining_chars = MAX_CONTEXT_CHARS
+    for message in reversed(ordered):
+        content = message.content_text.strip()
+        if not content:
+            continue
+        rendered = _message_context((message,))
+        separator = 1 if selected else 0
+        available = remaining_chars - separator
+        if available <= 0:
+            break
+        if len(rendered) <= available:
+            selected.append(message)
+            remaining_chars -= separator + len(rendered)
+            continue
+        speaker = "叙述者：" if message.role == MemoirChatMessageRole.USER.value else "AI："
+        content_budget = max(0, available - len(speaker))
+        if content_budget:
+            if len(content) > content_budget:
+                if content_budget <= 9:
+                    content = content[:content_budget]
+                else:
+                    head_budget = max(1, content_budget // 2)
+                    tail_budget = content_budget - head_budget - 9
+                    content = content[:head_budget] + "……中间省略……" + content[-tail_budget:]
+            selected.append(
+                InterviewMessage(
+                    role=message.role,
+                    content_text=content[:content_budget],
+                    turn_index=message.turn_index,
+                    id=message.id,
+                    created_at=message.created_at,
+                )
+            )
+        break
+    return list(reversed(selected))
 
 
 def _recent_context(messages: Sequence[Message]) -> str:
     return _message_context(recent_context_messages(messages)) or "暂无对话。"
+
+
+def related_context_block(
+    current_messages: Sequence[Message],
+    related_messages: Sequence[Message],
+) -> str:
+    """Format topic-linked history that fills an otherwise short current session."""
+    current = recent_context_messages(current_messages)
+    remaining = max(0, MAX_CONTEXT_MESSAGES - len(current))
+    if not remaining:
+        return ""
+    current_chars = len(_message_context(current))
+    if current_chars >= MAX_CONTEXT_CHARS:
+        return ""
+    selected: list[Message] = []
+    chars = current_chars
+    for message in list(related_messages)[-remaining:]:
+        content = message.content_text.strip()
+        if not content:
+            continue
+        rendered = _message_context((message,))
+        extra = len(rendered) + (1 if selected else 0)
+        if chars + extra > MAX_CONTEXT_CHARS:
+            continue
+        selected.append(message)
+        chars += extra
+    if not selected:
+        return ""
+    return "上一轮同一话题的历史会话（仅用于承接，不代表当前会话）：\n" + _message_context(selected)
 
 
 def _has_user_message(messages: Sequence[Message]) -> bool:

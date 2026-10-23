@@ -192,17 +192,13 @@ def summarize(packet_dir: Path, ratings_file: Path):
     for run_path in sorted({item["run"] for item in mapping.values()}):
         rows = list(load_run(Path(run_path)).values())
         first = [row["first_text_seconds"] for row in rows if row["first_text_seconds"] is not None]
-        costs = [cost for row in rows for cost in [row.get("reply_estimated_cost"), *[
-            call.get("estimated_cost") for call in row["policy_calls"]
-        ]]]
+        costs = [row.get("reply_estimated_cost") for row in rows]
         runtime.append({
             "run": run_path, "attempts": len(rows), "failed": sum(row["status"] == "failed" for row in rows),
-            "policy_failed": sum(bool(row["policy_error"]) for row in rows),
             "median_first_text_seconds": median(first) if first else None,
             "known_estimated_rmb": round(sum(cost.get("amount_rmb") or 0 for cost in costs if cost), 6),
             "unknown_cost_items": sum(not cost or cost.get("amount_rmb") is None for cost in costs),
         })
-        runtime[-1]["unknown_cost_items"] += sum(bool(row["policy_error"]) and not row["policy_calls"] for row in rows)
     return {
         "schema_version": 2, "packet_sha256": manifest["packet_sha256"],
         "review_items": len(mapping), "human_checked_items": len(human_checked),

@@ -164,49 +164,6 @@ async def test_claim_due_editing_jobs_can_filter_by_job_type_and_project(test_db
     assert other_ingestion.status == MemoirEditingJobStatus.PENDING.value
 
 
-async def test_claim_due_editing_jobs_deprioritizes_background_analysis(test_db):
-    project = await _create_project(test_db)
-    shadow = await enqueue_editing_job(
-        test_db,
-        project_id=project.id,
-        job_type=MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW,
-        run_after=_utcnow() - timedelta(minutes=1),
-    )
-    outcome = await enqueue_editing_job(
-        test_db,
-        project_id=project.id,
-        job_type=MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME,
-        run_after=_utcnow() - timedelta(minutes=1),
-    )
-    indexing = await enqueue_editing_job(
-        test_db,
-        project_id=project.id,
-        job_type=MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE,
-        run_after=_utcnow() - timedelta(minutes=1),
-    )
-    routing = await enqueue_editing_job(
-        test_db,
-        project_id=project.id,
-        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-        run_after=_utcnow() - timedelta(seconds=1),
-    )
-    await test_db.commit()
-
-    claimed = await claim_due_editing_jobs(
-        test_db,
-        now=_utcnow(),
-        limit=1,
-    )
-
-    assert [lease.job_id for lease in claimed] == [routing.id]
-    await test_db.refresh(shadow)
-    assert shadow.status == MemoirEditingJobStatus.PENDING.value
-    await test_db.refresh(outcome)
-    assert outcome.status == MemoirEditingJobStatus.PENDING.value
-    await test_db.refresh(indexing)
-    assert indexing.status == MemoirEditingJobStatus.PENDING.value
-
-
 async def test_claim_and_run_editing_job_with_registered_handler(test_db):
     project = await _create_project(test_db)
     job = await enqueue_editing_job(

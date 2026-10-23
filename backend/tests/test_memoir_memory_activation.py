@@ -248,6 +248,7 @@ async def test_same_session_early_memory_is_retrieved_but_recent_context_is_excl
         text_source="raw", source_text_hash=source_text_hash(recent.transcript_raw),
         embedding=list(_vector(0)), embedding_model="test-bge-small", index_version=1))
     await test_db.commit()
+    assert len(recent_context_messages(messages)) == 8
     result = await activate_memory_for_turn(test_db, project_id=first.project_id,
         voice_session_id=first.voice_session_id, current_message=messages[-1],
         context_message_ids=tuple(item.id for item in recent_context_messages(messages)),

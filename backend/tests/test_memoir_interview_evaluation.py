@@ -37,7 +37,7 @@ async def test_dataset_adapter_isolates_judge_data_and_preserves_correction(tmp_
     case = dataset(tmp_path)
     restored = EvalCase.model_validate_json(case.model_dump_json())
     assert restored == case
-    result = await run_case(case, InterviewConfig(), live=False, policy_mode="off")
+    result = await run_case(case, InterviewConfig(), live=False)
     assert result["status"] == "dry_run"
     assert "是姐姐陪我去的" in result["prompt"]
     assert "HIDDEN" not in json.dumps(result)
@@ -48,7 +48,7 @@ async def test_dataset_adapter_isolates_judge_data_and_preserves_correction(tmp_
 
 async def test_given_goal_is_separate_from_autonomous_mode(tmp_path):
     case = dataset(tmp_path, mode="guided")
-    result = await run_case(case, InterviewConfig(), live=False, policy_mode="off")
+    result = await run_case(case, InterviewConfig(), live=False)
     assert "本轮给定访谈目标：承接更正" in result["prompt"]
     assert case.mode == "guided"
 
@@ -71,60 +71,3 @@ class EvaluationAI(AITextServiceBase):
     async def stream_llm(self, *args, **kwargs):
         yield AITextStreamChunk(text_delta="[listen]\n是姐姐陪您去的，您接着说。")
         yield AITextStreamChunk(usage={"input_tokens": 21, "output_tokens": 13}, finish_reason="stop")
-
-
-async def test_active_policy_uses_shared_application_rule_and_records_both_calls(tmp_path):
-    result = await run_case(
-        dataset(tmp_path), InterviewConfig(requested_model="evaluation-fake-model"),
-        live=True, policy_mode="active", client_factory=lambda model: EvaluationAI(),
-    )
-    assert result["status"] == "completed"
-    assert result["policy_decision"]["applies_to_reply"] is True
-    assert "继续倾听" in result["prompt"]
-    assert result["policy_calls"][0]["usage"] == {"input_tokens": 11, "output_tokens": 3}
-    assert result["run"]["usage"] == {"input_tokens": 21, "output_tokens": 13}
-    assert result["turn"]["speech_text"] == "是姐姐陪您去的，您接着说。"
-    assert result["first_text_seconds"] is not None
-
-
-async def test_provider_failure_keeps_case_and_unknown_usage(tmp_path):
-    class BrokenAI(EvaluationAI):
-        async def stream_llm(self, *args, **kwargs):
-            raise ConnectionError("provider unavailable")
-            yield
-
-    result = await run_case(
-        dataset(tmp_path), InterviewConfig(), live=True, policy_mode="off", client_factory=lambda model: BrokenAI(),
-    )
-    assert result["status"] == "failed"
-    assert result["error"]["type"] == "ConnectionError"
-    assert result["case"]["id"] == "case-1"
-    assert result["reply_estimated_cost"] is None
-
-
-async def test_shadow_policy_is_measured_without_changing_reply_prompt(tmp_path):
-    case = dataset(tmp_path)
-    result = await run_case(
-        case, InterviewConfig(), live=True, policy_mode="shadow", client_factory=lambda model: EvaluationAI(),
-    )
-    baseline = await run_case(case, InterviewConfig(), live=False, policy_mode="off")
-    assert result["prompt"] == baseline["prompt"]
-    assert result["policy_decision"]["execution_mode"] == "shadow"
-    assert result["policy_decision"]["applies_to_reply"] is False
-    assert len(result["policy_calls"]) == 1
-    assert result["reply_seconds"] <= result["seconds"]
-
-
-async def test_policy_failure_preserves_live_reply_fallback_and_exposes_failure(tmp_path):
-    class FailedPolicy(EvaluationAI):
-        async def _call_llm(self, *args, **kwargs):
-            raise ConnectionError("policy unavailable")
-
-    result = await run_case(
-        dataset(tmp_path), InterviewConfig(), live=True, policy_mode="active",
-        client_factory=lambda model: FailedPolicy(),
-    )
-    assert result["status"] == "completed"
-    assert result["policy_error"]["type"] == "ConnectionError"
-    assert result["policy_decision"] is None
-    assert result["turn"]["speech_text"]

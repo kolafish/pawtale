@@ -67,7 +67,7 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 
 回忆录不使用一个万能 prompt。主要边界包括：
 
-- `voice_followup_ai.py` / `narrative/interview_policy*.py`：访谈回应与受控动作；
+- `voice_followup_ai.py` / `voice_interviewer_prompt.py`：访谈上下文与回应；
 - `material_organization.py`：素材归入 Section；
 - `section_digests.py` / `chapter_digests.py` / `book_reviews.py`：分层派生审阅；
 - `chapter_generation.py` / `book_manuscript_ai.py`：章节和全书候选正文；

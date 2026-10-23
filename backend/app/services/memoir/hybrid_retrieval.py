@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_VECTOR_LIMIT = 8
 DEFAULT_BM25_LIMIT = 8
-DEFAULT_CANDIDATE_LIMIT = 12
+DEFAULT_CANDIDATE_LIMIT = 6
 RRF_RANK_CONSTANT = 60
 
 RetrievalChannel = Literal["vector", "bm25"]

@@ -27,7 +27,7 @@ from app.services.memoir import voice_progress_notices
 from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.asr.streaming import StreamingASREvent
-from app.services.memoir.narrative import interview_policy, interview_policy_outcomes, interview_topics
+from app.services.memoir.narrative import interview_topics
 from app.services.memoir.voice_transcripts import (
     prune_transcript_versions_for_utterance,
 )
@@ -58,34 +58,33 @@ async def _assign_interview_target(
     voice_session: MemoirVoiceSession,
     utterance: MemoirVoiceUtterance,
 ) -> None:
-    policy_decision = await interview_policy.policy_decision_for_utterance(db, utterance=utterance)
-    completion_issue = None
-    framework_item = None
-    # The question's frozen target (including no target) owns this answer.
-    # Session/history targets only apply when no active policy produced the question.
-    if policy_decision is None:
-        completion_issue = (
-            await completion_issues.get_issue(
-                db,
-                project_id=voice_session.project_id,
-                issue_id=voice_session.current_completion_issue_id,
-            )
-            if voice_session.current_completion_issue_id
-            else None
+    completion_issue = (
+        await completion_issues.get_issue(
+            db,
+            project_id=voice_session.project_id,
+            issue_id=voice_session.current_completion_issue_id,
         )
-        anchor_item_id = await interview_topics.current_framework_item_id(db, voice_session)
-        framework_item = (
-            await db.get(MemoirFrameworkItem, anchor_item_id)
-            if anchor_item_id
-            else None
-        )
-    assigned = await interview_policy.assign_utterance(
-        db,
-        utterance=utterance,
-        completion_issue=completion_issue,
-        framework_item=framework_item,
-        policy_decision=policy_decision,
+        if voice_session.current_completion_issue_id
+        else None
     )
+    anchor_item_id = await interview_topics.current_framework_item_id(db, voice_session)
+    framework_item = await db.get(MemoirFrameworkItem, anchor_item_id) if anchor_item_id else None
+    if completion_issue is not None and framework_item is not None:
+        raise ValueError("讲述记录只能归属一个访谈目标")
+    expected_framework_id = framework_item.id if framework_item else None
+    expected_issue_id = completion_issue.id if completion_issue else None
+    if utterance.framework_item_id or utterance.completion_issue_id:
+        if (
+            utterance.framework_item_id != expected_framework_id
+            or utterance.completion_issue_id != expected_issue_id
+        ):
+            raise ValueError("讲述记录已经归属另一访谈目标")
+    else:
+        utterance.framework_item_id = expected_framework_id
+        utterance.completion_issue_id = expected_issue_id
+        db.add(utterance)
+        await db.flush()
+    assigned = utterance
     if not (utterance.transcript_edited or utterance.transcript_raw).strip():
         return  # Capture the original target without claiming an answer or evaluating silence.
     if assigned.completion_issue_id is not None:
@@ -102,11 +101,6 @@ async def _assign_interview_target(
         voice_session.anchor_framework_item_id = assigned.framework_item_id
         db.add(voice_session)
         await db.flush()
-    await interview_policy_outcomes.schedule_policy_outcome_evaluation(
-        db,
-        project_id=voice_session.project_id,
-        utterance=utterance,
-    )
 
 
 class VoiceFinalPersistenceService:
