@@ -50,7 +50,7 @@ from app.services import content_storage
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.branding import branded_image_derivative
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.book_output_versions import append_book_output_version
+from app.services.memoir.book_output_versions import append_book_output_version, load_latest_book_output_version
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 
 
@@ -259,6 +259,8 @@ async def reconcile_image_placements(db: AsyncSession, *, project_id: str) -> No
         MemoirBookImagePlacement.placement_type.notin_(["cover", "back_cover"]),
     ).order_by(MemoirBookImagePlacement.id).with_for_update()
         .execution_options(populate_existing=True))).all())
+    if not placements:
+        return
     locations = await _source_material_locations(db, project_id=project_id, utterance_ids={
         source_id for placement in placements for source_id in placement.source_utterance_ids_json
     })
@@ -274,6 +276,9 @@ async def reconcile_image_placements(db: AsyncSession, *, project_id: str) -> No
             if placement.placement_type == "appendix":
                 placement.placement_type = MemoirBookImagePlacementType.CHAPTER_INLINE.value
     await db.flush()
+    # Source moves can change a section anchor without changing chapter_id.
+    # The snapshot writer compares content and appends only when images changed.
+    await sync_latest_book_output_image_snapshots(db, project_id=project_id)
 
 
 def _placement_response(
@@ -373,7 +378,7 @@ async def _lock_manual_image_selection(
     project = await db.scalar(
         select(Project)
         .where(Project.id == project_id)
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
     if project is None:
@@ -416,7 +421,7 @@ async def auto_place_share_video_backgrounds(
     project = await db.scalar(
         select(Project)
         .where(Project.id == project_id)
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
     if project is None or project.memoir_book_image_selection_manual:
@@ -1078,11 +1083,13 @@ async def sync_latest_book_output_image_snapshots(
     output = await db.scalar(
         select(MemoirBookOutput)
         .where(MemoirBookOutput.project_id == project_id)
-        .options(selectinload(MemoirBookOutput.versions))
+        .with_for_update().execution_options(populate_existing=True)
     )
-    if not output or not output.versions:
+    if output is None:
         return False
-    latest = output.versions[-1]
+    latest = await load_latest_book_output_version(db, output_id=output.id)
+    if latest is None:
+        return False
     manuscript = (
         deepcopy(latest.manuscript_json)
         if isinstance(latest.manuscript_json, dict)
