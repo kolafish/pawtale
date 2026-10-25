@@ -12,6 +12,7 @@ const {
   loadPageModule,
   mockModule,
   pageContext,
+  flushAsyncWork,
   unmockedAsync,
 } = require("./page-harness");
 
@@ -20,6 +21,7 @@ const {
   sampleBookOutput,
 } = require("./book-fixtures");
 const { readingParagraphs } = require("../pages/book/book-view-model.ts");
+const { ApiError } = require("../services/request.ts");
 
 function sampleFinishedBook(content = "全书正文") {
   return sampleBookOutput(1, content, false, [], [], sampleBookManuscript());
@@ -116,6 +118,32 @@ test("shared reader opens without owner access and hides owner-only narration", 
   assert.equal(context.data.error, "");
   await page.playReaderAudio.call(context);
   assert.equal(context.data.ttsBusyTarget, "");
+});
+
+test("returning to a shared reader replaces removed content with the current share result", async () => {
+  let state = "first";
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => {
+      if (state === "removed") throw new ApiError(409, "作者正在更新分享书稿", {});
+      return sampleFinishedBook(state === "first" ? "旧版正文" : "新版正文");
+    },
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "family-token" });
+  context.onShow();
+  assert.equal(context.readerText, "旧版正文");
+  context.onHide();
+  state = "second";
+  context.onShow();
+  await flushAsyncWork();
+  assert.equal(context.readerText, "新版正文");
+  context.onHide();
+  state = "removed";
+  context.onShow();
+  await flushAsyncWork();
+  assert.equal(context.readerText, "");
+  assert.match(context.data.error, /正在更新/);
 });
 
 test("demo reader uses the public book and disables account-only audio", async () => {
@@ -586,6 +614,28 @@ test("friend-view preview uses the private projection, keeps text if an image fa
   assert.equal(context.data.shareImages.length, 0);
   assert.equal(context.data.shareLikeVisible, false);
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+});
+
+test("slow optional preview images do not keep the saved text behind loading", async () => {
+  let finishImage;
+  global.wx = { getStorageSync: () => "", hideShareMenu() {} };
+  mockModule("../services/authenticated-media.ts", {
+    downloadAuthenticatedFile: () => new Promise(resolve => { finishImage = resolve; }),
+  });
+  const output = sampleFinishedBook("先显示这段正文");
+  output.share_scope = "chapter";
+  output.latest_version.manuscript.chapters[0].illustrations = [{
+    image_asset_id: "photo", image_url: "/api/mobile/memoir/projects/p/image-assets/photo/file",
+    section_id: "section-1", caption: "老照片", disclosure: "",
+  }];
+  const { page } = loadBookReaderPage({ previewMemoirBookShare: async () => output });
+  const context = pageContext(page);
+  const pending = context.onLoad({ projectId: "p", chapterId: "c", sharePreview: "1" });
+  await flushAsyncWork();
+  assert.equal(context.data.loading, false);
+  assert.equal(context.readerText, "先显示这段正文");
+  finishImage("file://preview-image");
+  await pending;
 });
 
 test("shared book displays its saved front matter and forwards the same scope", async () => {

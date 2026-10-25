@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.auth import session_token_hash
 from app.clock import utcnow_naive
 from app.main import app
+from app.models.projects import Project
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -55,6 +56,31 @@ async def _shareable_output(test_db, project_id: str, content: str):
     test_db.add(version)
     await test_db.commit()
     return output, version
+
+
+async def test_chapter_share_uses_saved_book_narrator_including_explicit_blank(client, test_db):
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+
+    project_id = await ensure_mobile_memoir_project(client)
+    _, version = await _shareable_output(test_db, project_id, "本章正文")
+    project = await test_db.get(Project, project_id)
+    project.metadata_json = {**project.metadata_json, "memoir_profile": {"narrator_name": "访谈资料姓名"}}
+    manuscript = manuscript_from_snapshot(title="回忆录", content=version.content,
+        snapshot=version.chapter_snapshot_json, metadata={"narrator_name": "作者保存的署名"})
+    version.manuscript_json = manuscript.model_dump(mode="json")
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share/preview"
+    params = {"chapter_id": version.chapter_snapshot_json[0]["chapter_id"]}
+    response = await client.get(path, params=params)
+    assert response.status_code == 200, response.text
+    assert response.json()["latest_version"]["manuscript"]["profile"]["narrator_name"] == "作者保存的署名"
+
+    manuscript.profile.narrator_name = ""
+    version.manuscript_json = manuscript.model_dump(mode="json")
+    await test_db.commit()
+    cleared = await client.get(path, params=params)
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["latest_version"]["manuscript"]["profile"]["narrator_name"] == ""
 
 
 @pytest.mark.asyncio

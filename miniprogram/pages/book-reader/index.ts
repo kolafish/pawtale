@@ -318,6 +318,8 @@ definePage<BookReaderData>()({
   readingToken: "",
   readingProgressKey: "",
   sharedReadingObjectId: "",
+  sharedReadingShown: false,
+  sharedReadGeneration: 0,
   readingScrollTop: 0,
   readingProgress: null as SharedReadingProgress | null,
 
@@ -374,6 +376,7 @@ definePage<BookReaderData>()({
     const shareToken = queryParam(query, "shareToken");
     const sharePreview = queryParam(query, "sharePreview") === "1";
     this.readingToken = shareToken;
+    this.sharedReadingShown = false;
     this.setData({ responseToken: shareToken });
     // Visitors open the sample memoir's open chapters before logging in.
     const demo = queryParam(query, "demo") === "1";
@@ -402,14 +405,17 @@ definePage<BookReaderData>()({
   },
 
   onShow() {
+    const returningToShare = Boolean(this.readingToken && this.sharedReadingShown);
+    if (this.readingToken) this.sharedReadingShown = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     if (this.readingToken && !this.data.error) enableMiniProgramShareMenu(); else hideMiniProgramShareMenu();
     if (this.sharedReadingObjectId && this.readingProgressKey !== sharedReadingKey(this.sharedReadingObjectId, this.data.shareScope)) {
       this.stopPlayback();
       this.restoreSharedReadingPosition();
     }
-    // Back from choosing an avatar after a like.
-    this.refreshShareLikes();
+    // Recheck the same link before showing a snapshot that may have been removed.
+    if (returningToShare) void this.retrySharedReading();
+    else this.refreshShareLikes();
   },
 
   onShareAppMessage() {
@@ -432,6 +438,7 @@ definePage<BookReaderData>()({
   },
 
   onShareUnavailable(error: Error) {
+    this.sharedReadGeneration += 1;
     this.stopPlayback();
     this.readerText = "";
     this.readerAudioVersionId = "";
@@ -441,7 +448,7 @@ definePage<BookReaderData>()({
     hideMiniProgramShareMenu();
     this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0,
       shareImages: [], shareCoverUrl: "", shareByline: "", sharePreface: "", shareAfterword: "",
-      shareRetryable: !(error instanceof ApiError && [404, 410].includes(error.statusCode)), error: error.message });
+      loading: false, shareRetryable: !(error instanceof ApiError && [404, 410].includes(error.statusCode)), error: error.message });
   },
 
   onHide() {
@@ -741,22 +748,26 @@ definePage<BookReaderData>()({
   },
 
   async loadSharedBookReader(read: () => Promise<MemoirBookOutput>) {
+    const generation = ++this.sharedReadGeneration;
     this.stopPlayback();
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const output = await read();
+      if (generation !== this.sharedReadGeneration) return;
       this.applyBookReaderOutput(output);
-      await this.applySharePresentation(output);
+      const presentation = this.applySharePresentation(output, generation);
       if (this.readingToken) this.restoreReadingProgress(output);
       if (this.readingToken) enableMiniProgramShareMenu();
-    } catch (error) {
-      this.onShareUnavailable(error instanceof Error ? error : new Error("分享链接已失效"));
-    } finally {
       this.setData({ loading: false });
+      await presentation;
+    } catch (error) {
+      if (generation === this.sharedReadGeneration) this.onShareUnavailable(error instanceof Error ? error : new Error("分享链接已失效"));
+    } finally {
+      if (generation === this.sharedReadGeneration) this.setData({ loading: false });
     }
   },
 
-  async applySharePresentation(output: MemoirBookOutput) {
+  async applySharePresentation(output: MemoirBookOutput, generation: number) {
     const manuscript = output.latest_version?.manuscript;
     const scope = output.share_scope || "book";
     const imageUrl = async (url = ""): Promise<string> => {
@@ -769,17 +780,21 @@ definePage<BookReaderData>()({
         return ""; // A missing illustration must not hide the saved text.
       }
     };
+    this.setData({
+      shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: [], shareCoverUrl: "",
+      shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
+      sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
+      shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
+    });
     const images = await Promise.all((manuscript?.chapters || []).flatMap(chapter => chapter.illustrations.map(async item => ({
       id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId: item.section_id || "",
       url: await imageUrl(item.image_url), caption: item.caption, disclosure: item.disclosure,
     }))));
     const cover = manuscript?.render_settings.cover_image;
+    const coverUrl = cover ? await imageUrl(cover.image_url) : "";
+    if (generation !== this.sharedReadGeneration) return;
     this.setData({
-      shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: images.filter(item => Boolean(item.url)),
-      shareCoverUrl: cover ? await imageUrl(cover.image_url) : "",
-      shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
-      sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
-      shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
+      shareImages: images.filter(item => Boolean(item.url)), shareCoverUrl: coverUrl,
     });
   },
 

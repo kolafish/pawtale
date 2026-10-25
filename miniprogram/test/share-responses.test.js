@@ -51,6 +51,26 @@ test('private inbox discards a request after author/project changes', async () =
   assert.deepEqual(ctx.data.items, []); assert.equal(ctx.data.selected, null);
 });
 
+test('opening one response twice before either read returns decrements unread only once', async () => {
+  const pending = [];
+  mockModule('../services/share-responses.ts', {
+    readShareResponse: () => new Promise(resolve => pending.push(resolve)),
+  });
+  const { component } = loadComponentModule('../components/share-response-inbox/index.ts');
+  const ctx = componentContext(component, { projectId: 'p', userId: 'owner' }, {
+    items: [{ id: 'a', read_at: null }, { id: 'b', read_at: null }], unread: 2,
+  });
+  const first = ctx.select({ currentTarget: { dataset: { id: 'a' } } });
+  ctx.back();
+  const second = ctx.select({ currentTarget: { dataset: { id: 'a' } } });
+  pending[0]({ id: 'a', read_at: '2026-10-25T08:00:00Z' });
+  await first;
+  pending[1]({ id: 'a', read_at: '2026-10-25T08:00:00Z' });
+  await second;
+  assert.equal(ctx.data.unread, 1);
+  assert.equal(ctx.data.items.find(item => item.id === 'b').read_at, null);
+});
+
 test('voice response keeps confirmed text and binds only its finalized source', async () => {
   const submits = [];
   mockModule('../services/share-responses.ts', {

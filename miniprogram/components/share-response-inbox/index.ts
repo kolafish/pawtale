@@ -43,7 +43,9 @@ Component({
       try {
         const row = await readShareResponse(selected.id);
         if (generation !== runtime(this).generation) return;
-        this.setData({ items: this.data.items.map((item: ShareResponseItem) => item.id === row.id ? row : item), unread: Math.max(0, this.data.unread - (selected.read_at ? 0 : 1)) });
+        const current = this.data.items.find((item: ShareResponseItem) => item.id === row.id);
+        const newlyRead = Boolean(current && !current.read_at && row.read_at);
+        this.setData({ items: this.data.items.map((item: ShareResponseItem) => item.id === row.id ? row : item), unread: Math.max(0, this.data.unread - (newlyRead ? 1 : 0)) });
       } catch (error) { if (generation === runtime(this).generation) this.setData({ error: error instanceof Error ? error.message : "暂时未能标记已读" }); }
     },
     back() { runtime(this).playback.stop(); this.setData({ selected: null, error: "", audioPlaying: false }); },

@@ -95,6 +95,30 @@ async def test_missing_audio_never_enqueues_from_public_read(client, test_db, tt
         assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 200
 
 
+async def test_author_repreparing_share_retries_failed_audio_without_public_retry(client, test_db, tts):
+    pid, _, _, _, section, _, _ = await saved_stories(client, test_db)
+    path = f"/api/mobile/memoir/projects/{pid}/book-output/share"
+    params = {"section_id": section.id}
+    first = await client.put(path, params=params)
+    assert first.status_code == 200, first.text
+    job = await test_db.scalar(select(MemoirEditingJob).where(
+        MemoirEditingJob.job_type == "generate_book_audio_chunk"))
+    assert job is not None
+    job.status = "failed"
+    await test_db.commit()
+
+    await book_shares.queue_active_share_audio(test_db, project_id=pid, chapter_id=section.chapter_id)
+    await test_db.commit()
+    await test_db.refresh(job)
+    assert job.status == "failed"
+
+    repeated = await client.put(path, params=params)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["token"] == first.json()["token"]
+    await test_db.refresh(job)
+    assert job.status == "pending"
+
+
 async def test_saved_book_version_prepares_audio_without_committing_the_author_transaction(client, test_db, tts):
     from app.domain.memoir.types import MemoirCreatedBy
     from app.models.memoir import MemoirBookOutput
