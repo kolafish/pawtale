@@ -33,15 +33,17 @@
         </text>
         <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
         <view
-          wx:if="{{!readerShared}}"
+          wx:if="{{!readerShared || (!sharePreview && !readerDemo)}}"
           class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookViewingHistoricalVersion}}"
           bindtap="playReaderAudio"
         >
           <image class="reader-audio-icon" src="/assets/book-reader/audio.png" mode="aspectFit" />
-          <text>{{ttsBusyTarget === readerMode ? (readerMode === "chapter" ? "正在准备整章朗读…" : "正在准备全书朗读…") : (playingTarget === readerMode ? "停止朗读" : (bookViewingHistoricalVersion ? "历史版本暂不朗读" : (readerMode === "chapter" ? "朗读整章" : "朗读全书")))}}</text>
+          <text wx:if="{{readerShared}}">{{ttsBusyTarget ? '正在准备 AI 朗读…' : (playingTarget ? '停止朗读' : (shareScope === 'story' ? '听故事 · AI 朗读' : '听本章 · AI 朗读'))}}</text>
+          <text wx:else>{{ttsBusyTarget === readerMode ? (readerMode === "chapter" ? "正在准备整章朗读…" : "正在准备全书朗读…") : (playingTarget === readerMode ? "停止朗读" : (bookViewingHistoricalVersion ? "历史版本暂不朗读" : (readerMode === "chapter" ? "朗读整章" : "朗读全书")))}}</text>
         </view>
+        <button wx:if="{{readerShared && shareScope === 'book'}}" class="ui-share-more" bindtap="continueSharedReading">继续阅读</button>
         <text wx:if="{{playbackError}}" class="reader-playback-error">{{playbackError}}</text>
       </view>
     </view>
@@ -51,7 +53,7 @@
       class="reader-tts-shell"
     >
       <book-tts-player
-        title="{{readerMode === 'chapter' ? '整章朗读' : '全书朗读'}}"
+        title="{{readerShared ? 'AI 朗读' : (readerMode === 'chapter' ? '整章朗读' : '全书朗读')}}"
         phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
         preparing-text="{{bookTTSPreparingText || ''}}"
         progress="{{bookTTSProgressPercent}}"

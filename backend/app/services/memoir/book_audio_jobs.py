@@ -60,6 +60,7 @@ class AudioChunkPayload(BaseModel):
     user_id: str
     text: str
     profile: AudioProfile
+    background: bool = False
 
 
 class AudioChunkResult(BaseModel):
@@ -203,6 +204,7 @@ async def prepare_book_audio(
 async def prepare_audio_plan(
     db: AsyncSession, *, user_id: str, project_id: str, source: AudioSource,
     req: MemoirAudioPlanRequest, allow_admin: bool = False,
+    generate: bool = True, prepare_all: bool = False, commit: bool = True,
 ) -> MemoirBookAudioPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     owner_id = project.user_id
@@ -242,13 +244,14 @@ async def prepare_audio_plan(
     for index, (chunk, key) in enumerate(zip(chunks, keys)):
         job = jobs.get(key)
         cached = None if force else cached_by_key.get(key)
-        if cached is None and (force or req.start_index <= index < window_end):
+        needs_schedule = not prepare_all or job is None or job.status not in {"pending", "running"}
+        if generate and needs_schedule and cached is None and (prepare_all or force or req.start_index <= index < window_end):
             job = await enqueue_editing_job(
                 db, project_id=project_id,
                 job_type=MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK,
                 dedupe_key=key,
                 payload_json=AudioChunkPayload(
-                    version_id=source.version_id, user_id=owner_id, text=chunk.text, profile=profile,
+                    version_id=source.version_id, user_id=owner_id, text=chunk.text, profile=profile, background=prepare_all,
                 ).model_dump(mode="json"),
                 retry_failed=req.retry_failed,
                 replace_completed=bool(job and job.status == MemoirEditingJobStatus.SUCCEEDED.value),
@@ -267,7 +270,8 @@ async def prepare_audio_plan(
             alignment=cached.alignment if cached else [],
             error_message=job.error_message if job and status == "failed" else "",
         ))
-    await db.commit()
+    if commit:
+        await db.commit()
     return MemoirBookAudioPlanResponse(
         version_id=source.version_id, source_text_hash=book_audio.source_text_hash(text),
         profile_key=signature, voice=profile.voice, speed_ratio=profile.speed_ratio,

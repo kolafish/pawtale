@@ -26,6 +26,7 @@ function sampleFinishedBook(content = "全书正文") {
 }
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
+  global.wx ||= { getStorageSync: () => "", setStorageSync() {} };
   mockMemoirApiModules({
     memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
@@ -626,4 +627,85 @@ test("the sample book retry reloads its public source", async () => {
   await context.retrySharedReading();
   assert.equal(context.data.error, "");
   assert.equal(context.readerText, "全书正文");
+});
+
+test("shared reading restores its chapter and scroll position, then resets obsolete audio after a new version", async () => {
+  const storage = {};
+  const scrolls = [];
+  global.wx = { getStorageSync: key => storage[key], setStorageSync: (key, value) => { storage[key] = value; }, pageScrollTo: options => scrolls.push(options) };
+  let output = sampleFinishedBook();
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => output,
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+  });
+  const first = pageContext(page);
+  await first.onLoad({ shareToken: "family" });
+  first.showReaderChapter(1);
+  first.onPageScroll({ scrollTop: 456 });
+  first.readingProgress = { versionId: output.latest_version.id, audioChapterId: "chapter-2", audioHash: "old-hash", audioIndex: 3, audioSeconds: 12 };
+  first.onHide();
+  const reopened = pageContext(page);
+  await reopened.onLoad({ shareToken: "family" });
+  assert.equal(reopened.data.readerChapterIndex, 1);
+  assert.equal(reopened.readingScrollTop, 456);
+  assert.equal(reopened.readingProgress.audioIndex, 3);
+  output = JSON.parse(JSON.stringify(output));
+  output.latest_version.id = "updated-version";
+  const updated = pageContext(page);
+  await updated.onLoad({ shareToken: "family" });
+  assert.equal(updated.data.readerChapterIndex, 1);
+  assert.equal(updated.readingScrollTop, 0);
+  assert.equal(updated.readingProgress.audioHash, "");
+  assert.equal(scrolls.at(-1).scrollTop, 0);
+  delete global.wx;
+});
+
+test("shared chapter playback uses only the public plan and stops a late response after leaving", async () => {
+  const { flushAsyncWork } = require("./page-harness");
+  let resolvePlan;
+  const calls = [];
+  const output = sampleFinishedBook();
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => output,
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+    prepareMemoirAudio: unmockedAsync("private author generation"),
+    readMemoirSharedAudioPlan: (...args) => { calls.push(args); return new Promise(resolve => { resolvePlan = resolve; }); },
+    downloadMemoirSharedAudio: unmockedAsync("download after hiding"),
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "public-link" });
+  context.showReaderChapter(1);
+  const playing = context.playReaderAudio();
+  await flushAsyncWork();
+  assert.deepEqual(calls, [["public-link", output.latest_version.id, context.bookChapters[1].chapterId]]);
+  context.onHide();
+  resolvePlan({ ...sampleAudioPlan(), content: "本章的声音" });
+  await playing;
+  assert.equal(context.data.playingTarget, "");
+  assert.equal(context.data.ttsBusyTarget, "");
+});
+
+test("returning from login switches reading progress to that visitor without overwriting guest progress", async () => {
+  const storage = {};
+  global.wx = { getStorageSync: key => storage[key], setStorageSync: (key, value) => { storage[key] = value; }, pageScrollTo() {} };
+  const { page } = loadBookReaderPage({ readMemoirBookShare: async () => sampleFinishedBook(),
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }) });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "family" });
+  const guestKey = context.readingProgressKey;
+  context.showReaderChapter(1);
+  context.onPageScroll({ scrollTop: 80 });
+  context.onHide();
+  storage.pawtale_backend_cookie = "member-session";
+  storage.pawtale_memoir_session = { cache_identity: { user_id: "member" } };
+  context.onShow();
+  assert.notEqual(context.readingProgressKey, guestKey);
+  assert.equal(context.data.readerChapterIndex, 0);
+  assert.equal(context.readingScrollTop, 0);
+  context.onPageScroll({ scrollTop: 220 });
+  context.onHide();
+  const { readSharedReadingProgress } = require("../stores/reading-progress.ts");
+  assert.equal(readSharedReadingProgress(guestKey).scrollTop, 80);
+  assert.equal(readSharedReadingProgress(context.readingProgressKey).scrollTop, 220);
+  delete global.wx;
 });

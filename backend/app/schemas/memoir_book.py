@@ -730,6 +730,17 @@ class MemoirBookShareReadRequest(BaseModel):
     token: str
 
 
+class MemoirSharedAudioPlanRequest(MemoirBookShareReadRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str = Field(min_length=1, max_length=36)
+    chapter_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class MemoirSharedAudioPlanResponse(MemoirBookAudioPlanResponse):
+    content: str
+
+
 class MemoirBookOutputExportInfo(BaseModel):
     version_id: str
     cache_key: str

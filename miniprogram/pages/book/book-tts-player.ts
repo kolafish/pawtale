@@ -34,6 +34,7 @@ export interface BookTTSHost {
   bookTTSChunk?: MemoirBookAudioSegment | null;
   bookTTSPollTimer?: PollingTimer;
   bookTTSWake?: () => void;
+  onBookAudioPosition?(index: number, seconds: number): void;
   onBookTTSProgressPatch?(patch: VoiceAssistantTTSProgressPatch): void;
 }
 
@@ -72,6 +73,7 @@ export async function playAudioPlanSegments(
   prepare: (index: number, plan: MemoirBookAudioPlan, retryFailed: boolean) => Promise<MemoirBookAudioPlan>,
   onPreparing: (index: number, count: number) => void,
   playSegment: (segment: MemoirBookAudioSegment) => Promise<unknown>,
+  startIndex = 0,
 ): Promise<void> {
   let plan = initialPlan;
   const isCurrent = () => token === host.playToken;
@@ -85,7 +87,7 @@ export async function playAudioPlanSegments(
     return next;
   };
   if (!isCurrent()) return;
-  for (let index = 0; index < plan.segments.length && isCurrent(); index += 1) {
+  for (let index = Math.max(0, startIndex); index < plan.segments.length && isCurrent(); index += 1) {
     while (isCurrent() && plan.segments[index].status !== "succeeded") {
       const segment = plan.segments[index];
       if (segment.status === "failed") {
@@ -138,6 +140,7 @@ export async function playBookAudioPlan(
   activeText: string,
   prepare: (index: number, plan: MemoirBookAudioPlan, retryFailed: boolean) => Promise<MemoirBookAudioPlan>,
   target = "book",
+  resume: { index: number; seconds: number } = { index: 0, seconds: 0 },
 ): Promise<void> {
   if (token !== host.playToken) return;
   host.setData({
@@ -151,8 +154,8 @@ export async function playBookAudioPlan(
     }, async (segment) => {
       host.bookTTSChunk = segment;
       host.setData({ ttsBusyTarget: "", playingTarget: target, bookTTSPreparingText: "" });
-      await playBookAudioFile(host, segment.audio_file_id!, token, 0, positiveFiniteSeconds(segment.duration_seconds));
-    });
+      await playBookAudioFile(host, segment.audio_file_id!, token, 0, positiveFiniteSeconds(segment.duration_seconds), segment.index === resume.index ? resume.seconds : 0);
+    }, resume.index);
     if (token === host.playToken) host.setData({
       bookTTSSpokenText: activeText, bookTTSCurrentText: "", bookTTSRemainingText: "", bookTTSProgressPercent: 100,
     });
@@ -174,6 +177,7 @@ export async function playBookAudioFile(
   token: number,
   elapsedBeforeSeconds: number,
   fallbackDurationSeconds: number,
+  startTime = 0,
 ): Promise<number> {
   if (token !== host.playToken) {
     return 0;
@@ -186,6 +190,7 @@ export async function playBookAudioFile(
     return positiveFiniteSeconds(duration);
   };
   await host.audioPlayback.playFile(audioFileId, token, {
+    startTime,
     onPlay: (audio) => {
       if (token !== host.playToken || host.audioPlayback.currentAudio() !== audio) return;
       host.ttsProgress.markPlaybackStarted();
@@ -193,6 +198,7 @@ export async function playBookAudioFile(
     },
     onTimeUpdate: (audio) => {
       if (token === host.playToken && host.audioPlayback.currentAudio() === audio) {
+        if (host.bookTTSChunk) host.onBookAudioPosition?.(host.bookTTSChunk.index, playbackTimeForProgress(host, audio));
         updateBookTTSProgress(
           host,
           elapsedBeforeSeconds + playbackTimeForProgress(host, audio),

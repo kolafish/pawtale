@@ -165,3 +165,18 @@ test("late events from stopped audio cannot change a new playback session", asyn
   stopBookPlayback(h.context);
   await second;
 });
+
+test("audio resumes at the saved segment and native start time without replaying earlier chunks", async () => {
+  const h = host();
+  const positions = [];
+  h.context.onBookAudioPosition = (index, seconds) => positions.push([index, seconds]);
+  const playback = playBookAudioPlan(h.context, plan("succeeded"), 1, text, async () => plan("succeeded"), "book", { index: 1, seconds: 0.4 });
+  await flushAsyncWork();
+  assert.deepEqual(h.played, ["audio-2"]);
+  assert.equal(h.events[0].options.startTime, 0.4);
+  h.events[0].audio.currentTime = 0.6;
+  h.events[0].options.onTimeUpdate(h.events[0].audio);
+  assert.deepEqual(positions, [[1, 0.6]]);
+  h.finish();
+  await playback;
+});

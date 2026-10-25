@@ -34,7 +34,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
     MemoirBookShareCreateResponse,
-    MemoirBookShareReadRequest,
+    MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse,
     MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
@@ -120,6 +120,18 @@ async def read_mobile_memoir_book_share(
 ):
     response.headers["Cache-Control"] = "no-store"
     return await memoir_book_shares.read_share(db, req.token)
+
+
+@router.post("/book-shares/audio/plan", response_model=MemoirSharedAudioPlanResponse)
+async def read_mobile_memoir_shared_audio(req: MemoirSharedAudioPlanRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.shared_audio_plan(db, req.token, req.version_id, req.chapter_id)
+
+
+@router.get("/book-shares/{token}/audio/{audio_id}")
+async def download_mobile_memoir_shared_audio(token: str, audio_id: str, version_id: str, chapter_id: str | None = None, db: AsyncSession = Depends(get_db)):
+    audio, path = await memoir_book_shares.shared_audio_file(db, token, version_id, audio_id, chapter_id)
+    return FileResponse(path, media_type=audio.mime_type, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/projects/{project_id}/book-output/share/preview", response_model=MemoirBookOutputResponse)
