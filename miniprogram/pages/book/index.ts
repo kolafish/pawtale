@@ -167,7 +167,7 @@ definePage<BookPageData>()({
     this.setData({ pageClass: accessibilityPageClass("book-page") });
     hideMiniProgramShareMenu();
     await this.loadBookHome();
-    if (this.data.bookSharePanelOpen) await this.refreshBookShareStatus();
+    if (this.readingShareTarget().available) await this.refreshBookShareStatus();
   },
 
   ...readingShareMethods,
@@ -181,9 +181,6 @@ definePage<BookPageData>()({
     };
   },
 
-  openReadingSharePreview() {
-    this.openBookReader();
-  },
 
   async loadBookHome() {
     const loadSequence = ++this.bookLoadSequence;
@@ -223,10 +220,10 @@ definePage<BookPageData>()({
         this.setData(guestBookData());
         this.setData({
           showingCachedBook: false,
-          bookSharePanelOpen: false,
           bookShareActive: false,
+          bookShareBusy: false,
+          bookShareImageUrl: "",
           bookShareReady: false,
-          bookShareNeedsUpdate: false,
           bookShareStale: false,
           bookShareStatusKnown: false,
           bookShareDescription: INITIAL_READING_SHARE_DATA.bookShareDescription,
@@ -253,10 +250,10 @@ definePage<BookPageData>()({
     if (projectId !== this.data.projectId) {
       this.bookShareToken = "";
       this.setData({
-        bookSharePanelOpen: false,
         bookShareActive: false,
+        bookShareBusy: false,
+        bookShareImageUrl: "",
         bookShareReady: false,
-        bookShareNeedsUpdate: false,
         bookShareStale: false,
         bookShareStatusKnown: false,
         bookShareDescription: INITIAL_READING_SHARE_DATA.bookShareDescription,
@@ -352,12 +349,11 @@ definePage<BookPageData>()({
       chapters: bookChapterInclusionData(this.data.chapters, output, progress),
       ...(shareStateChanged ? {
         bookShareReady: false,
-        bookShareNeedsUpdate: false,
         bookShareStale: false,
         bookShareStatusKnown: false,
       } : {}),
     });
-    if (shareStateChanged && this.data.bookSharePanelOpen && this.data.projectId) {
+    if (shareStateChanged && this.data.projectId) {
       void this.refreshBookShareStatus();
     }
   },

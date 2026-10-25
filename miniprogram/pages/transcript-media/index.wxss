@@ -360,11 +360,6 @@
   margin-top: 10rpx;
 }
 
-.text-action-button.share-video-more {
-  display: block;
-  margin: 18rpx auto 0;
-}
-
 .share-video-result-actions {
   margin-top: 22rpx;
 }

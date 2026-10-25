@@ -19,7 +19,7 @@ const CODE = "0123456789abcdef0123";
 test("book and chapter share panels receive the full liker list", () => {
   for (const page of ["book", "chapter-workspace"]) {
     const template = fs.readFileSync(path.join(__dirname, `../pages/${page}/index.wxml`), "utf8");
-    const binding = template.match(/<template\s+is="readingSharePanel"\s+data="([^"]+)"/);
+    const binding = template.match(/<template[^>]*\bis="readingShareActions"\s+data="([^"]+)"/);
     assert.ok(binding, `${page} must render the reading share panel`);
     assert.match(binding[1], /\bbookShareLikeCount\b/, `${page} must pass the like count`);
     assert.match(binding[1], /\bbookShareLikers\b/, `${page} must pass the full liker list`);

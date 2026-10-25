@@ -1,3 +1,4 @@
+import { pageUrl } from "../../services/page-input";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage, pageRuntime } from "../../services/page-definition";
@@ -254,18 +255,22 @@ definePage<TranscriptMediaData & { shareCardPreparing: boolean }>()({
 
   // Remaking and deleting are rarer than sending, so they live behind one menu.
   openShareVideoMoreActions() {
+    const job = this.data.shareVideoJob;
+    if (!job) return;
     if (this.data.shareVideoSharing || this.data.shareVideoDeleting || this.data.shareCardPreparing) {
       return;
     }
     wx.showActionSheet({
-      itemList: ["重新制作", "删除这版视频", ...(this.data.shareVideoJob?.output?.share_enabled ? ["停止分享"] : [])],
+      itemList: ["重新制作", "删除这版视频", ...(job.output?.share_enabled ? ["停止分享"] : []), "预览分享内容"],
       success: ({ tapIndex }) => {
         if (tapIndex === 0) {
           void this.remakeShareVideo();
         } else if (tapIndex === 1) {
           void this.deleteShareVideo();
-        } else if (tapIndex === 2) {
+        } else if (tapIndex === 2 && job.output?.share_enabled) {
           void this.stopVideoShare();
+        } else {
+          wx.navigateTo({ url: pageUrl("/pages/share-video-player/index", { previewJobId: job.id }) });
         }
       },
     });

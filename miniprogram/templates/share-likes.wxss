@@ -1,5 +1,6 @@
 .share-like-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 20rpx;
   margin: 24rpx 0;
@@ -13,11 +14,11 @@
   flex: none;
   align-items: center;
   gap: 8rpx;
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 0;
   padding: 0 26rpx;
   border: 1rpx solid var(--ui-accent-border);
-  border-radius: 999rpx;
+  border-radius: var(--ui-radius-control);
   background: var(--ui-surface);
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
@@ -112,3 +113,5 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.share-like-people-shell { flex-basis: 100%; min-width: 0; }

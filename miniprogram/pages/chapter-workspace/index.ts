@@ -197,9 +197,6 @@ definePage<ChapterWorkspacePageData>()({
     };
   },
 
-  openReadingSharePreview() {
-    this.openChapterPreview();
-  },
 
   onHide() {
     this.pageVisible = false;
@@ -445,7 +442,6 @@ definePage<ChapterWorkspacePageData>()({
       workspace: viewWorkspace,
       ...(shareStateChanged ? {
         bookShareReady: false,
-        bookShareNeedsUpdate: false,
         bookShareStale: false,
         bookShareStatusKnown: false,
       } : {}),
@@ -467,7 +463,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
-    if (this.data.bookSharePanelOpen) void this.refreshBookShareStatus();
+    if (this.readingShareTarget().available) void this.refreshBookShareStatus();
     this.syncDraftSectionUnloadAlert();
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
@@ -591,7 +587,8 @@ definePage<ChapterWorkspacePageData>()({
         });
       }
       if (this.data.chapterHasReadableDraft) {
-        actions.push({ label: "分享本章", run: () => this.openBookSharePanel() });
+        actions.push({ label: "预览分享内容", run: async () => this.openReadingSharePreview() });
+        if (this.data.bookShareActive) actions.push({ label: "停止分享", run: () => this.revokeBookShare() });
       }
       const includeInBook = chapter.include_in_book === false;
       actions.push({

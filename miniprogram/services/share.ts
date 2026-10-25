@@ -103,3 +103,12 @@ export function sharedVideoShareMessage(
     ...(imageUrl ? { imageUrl } : {}),
   };
 }
+
+
+export function readingShareMessage(title: string, token: string, imageUrl = ""): WechatMiniprogram.ShareAppMessagePayload {
+  return token ? {
+    title: title.trim() || "一段家里的故事",
+    path: `/pages/book-reader/index?shareToken=${encodeURIComponent(token)}`,
+    imageUrl: imageUrl || "/assets/memoir-book-header.png",
+  } : homeShareAppMessage();
+}

@@ -436,3 +436,8 @@ export async function downloadMemoirBookOutputExport(
     cache: { key: info.cache_key, filename: info.filename, ready: info.ready, sessionCookie, onPhase },
   });
 }
+
+
+export function previewMemoirBookShare(projectId: string, chapterId?: string): Promise<MemoirBookOutput> {
+  return memoirRequest(memoirProjectPath(projectId, `/book-output/share/preview${chapterId ? `?chapter_id=${encodeURIComponent(chapterId)}` : ""}`));
+}

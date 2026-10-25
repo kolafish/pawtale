@@ -423,3 +423,8 @@ export function parseMemoirVoiceSearchQuery(
     { invalidatesSnapshots: false },
   );
 }
+
+
+export function previewMemoirSharedVideo(jobId: string): Promise<MemoirSharedVideo> {
+  return memoirRequest(`/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}/preview`);
+}

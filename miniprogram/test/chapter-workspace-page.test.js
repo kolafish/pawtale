@@ -1774,7 +1774,7 @@ test("chapter workspace offers the migrated chapter actions and preserves narrat
   const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
   context.pageVisible = true;
   await page.openChapterMoreActions.call(context);
-  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "分享本章", "不收入本书"]);
+  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "预览分享内容", "不收入本书"]);
   assert.equal(context.data.operationKind, "");
   await page.playChapterAudio.call(context);
   assert.deepEqual(calls, [{ projectId: "project-1", source: { kind: "chapter", chapterId: "chapter-1", versionId: "version-1" }, payload: { voice: "linjiajiejie", speed_ratio: 1.5, start_index: 0, retry_failed: true } }]);
@@ -1885,17 +1885,18 @@ test("chapter sharing creates a chapter-only reader link and revokes the same ch
   const calls = [];
   const { page } = loadWorkspacePage({ voiceApiExports: {
     getMemoirBookShareStatus: async (...args) => { calls.push(["status", ...args]); return { active: false, current: false, stale: false }; },
-    createMemoirBookShare: async (...args) => { calls.push(["create", ...args]); return { token: "c1.chapter-token", expires_at: "2026-10-16T00:00:00" }; },
+    updateMemoirBookShare: async (...args) => { calls.push(["ensure", ...args]); return { token: "c1.chapter-token" }; },
+    readMemoirBookShare: async () => ({ latest_version: null }),
     revokeMemoirBookShare: async (...args) => { calls.push(["revoke", ...args]); },
   } });
   const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
-  await context.openBookSharePanel();
-  assert.equal(context.onShareAppMessage().path, "/pages/home/index");
-  await context.createBookShare();
-  assert.deepEqual(context.onShareAppMessage(), { title: "阅读《第一次离家》", path: "/pages/book-reader/index?shareToken=c1.chapter-token" });
+  await context.refreshBookShareStatus();
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+  await context.prepareReadingShare();
+  assert.deepEqual(context.onShareAppMessage(), { title: "第一次离家", path: "/pages/book-reader/index?shareToken=c1.chapter-token", imageUrl: "/assets/memoir-book-header.png" });
   await context.revokeBookShare();
-  assert.equal(context.onShareAppMessage().path, "/pages/home/index");
-  assert.deepEqual(calls, [["status", "project-1", "chapter-1"], ["create", "project-1", "chapter-1"], ["revoke", "project-1", "chapter-1"]]);
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+  assert.deepEqual(calls, [["status", "project-1", "chapter-1"], ["ensure", "project-1", "chapter-1"], ["revoke", "project-1", "chapter-1"]]);
 });
 
 test("chapter share ignores a status response from a different chapter in the same project", async () => {
@@ -1905,10 +1906,10 @@ test("chapter share ignores a status response from a different chapter in the sa
     getMemoirBookShareStatus: () => new Promise((resolve) => { resolveStatus = resolve; }),
   } });
   const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
-  const pending = context.openBookSharePanel();
+  const pending = context.refreshBookShareStatus();
   context.setData({ chapterId: "chapter-2" });
   resolveStatus({ active: true, current: true, stale: false, token: "old-chapter-token" });
   await pending;
-  assert.equal(context.onShareAppMessage().path, "/pages/home/index");
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
   assert.equal(context.bookShareToken, "");
 });

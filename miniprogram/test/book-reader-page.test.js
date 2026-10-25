@@ -264,7 +264,7 @@ test("book reader hides private content from system sharing", async () => {
     page.onShow.call(context);
 
     assert.deepEqual(shareMenuCalls, ["hidden"]);
-    assert.equal(page.onShareAppMessage, undefined);
+    assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
     assert.equal(page.onShareTimeline, undefined);
   } finally {
     delete global.wx;
@@ -564,4 +564,66 @@ test("book reader keeps the full text visible when narration fails", async () =>
   assert.equal(context.data.error, "");
   assert.equal(context.data.bookContent, "仍然可以阅读的全书正文");
   assert.equal(context.data.playbackError, "朗读服务暂时不可用");
+});
+
+
+test("friend-view preview uses the private projection, keeps text if an image fails, and never forwards it", async () => {
+  global.wx = { getStorageSync: () => "", hideShareMenu() {} };
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async () => { throw new Error("image unavailable"); } });
+  const calls = [];
+  const output = sampleFinishedBook("分享正文");
+  output.share_scope = "chapter";
+  output.latest_version.manuscript.chapters[0].illustrations = [{ image_asset_id: "photo", image_url: "/api/mobile/memoir/projects/p/image-assets/photo/file", section_id: "section-1", caption: "老照片", disclosure: "" }];
+  const { page } = loadBookReaderPage({ previewMemoirBookShare: async (...args) => { calls.push(args); return output; } });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: "p", chapterId: "c", sharePreview: "1" });
+  assert.deepEqual(calls, [["p", "c"]]);
+  assert.equal(context.data.error, "");
+  assert.equal(context.readerText, "分享正文");
+  assert.equal(context.data.readerMode, "chapter");
+  assert.equal(context.data.shareByline, "家人整理");
+  assert.equal(context.data.shareImages.length, 0);
+  assert.equal(context.data.shareLikeVisible, false);
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+});
+
+test("shared book displays its saved front matter and forwards the same scope", async () => {
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => sampleFinishedBook(),
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "same-token" });
+  assert.equal(context.data.sharePreface, "这些故事来自家里的讲述。");
+  assert.equal(context.data.shareAfterword, "这些故事还可以继续补充。");
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?shareToken=same-token");
+});
+
+
+test("retrying a failed share restores both text and the like target", async () => {
+  let fail = true;
+  const targets = [];
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => { if (fail) throw new Error("network"); return sampleFinishedBook(); },
+    readMemoirShareLikes: async target => { targets.push(target); return { count: 0, likers: [], liked: false, can_like: true }; },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "retry-token" });
+  assert.equal(context.data.shareRetryable, true);
+  fail = false;
+  await context.retrySharedReading();
+  assert.equal(context.data.error, "");
+  assert.deepEqual(targets, [{ reading_token: "retry-token" }]);
+  assert.equal(context.data.shareLikeVisible, true);
+});
+
+test("the sample book retry reloads its public source", async () => {
+  let fail = true;
+  const { page } = loadBookReaderPage({ readMemoirDemoBook: async () => { if (fail) throw new Error("network"); return sampleFinishedBook(); } });
+  const context = pageContext(page);
+  await context.onLoad({ demo: "1" });
+  fail = false;
+  await context.retrySharedReading();
+  assert.equal(context.data.error, "");
+  assert.equal(context.readerText, "全书正文");
 });

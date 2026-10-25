@@ -13,6 +13,7 @@
       </view>
       <image class="chapter-growth-image" src="/assets/chapter-workspace/chapter-growth.png" mode="aspectFit" />
       <button class="chapter-more-action" aria-label="本章更多操作" disabled="{{operationKind !== '' || editingSectionId !== ''}}" bindtap="openChapterMoreActions">本章操作 ···</button>
+      <template wx:if="{{chapterHasReadableDraft}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers, shareScopeLabel: '本章'}}" />
       <view wx:if="{{audioTarget === 'chapter' && audioPhase !== 'idle'}}" class="chapter-audio-notice">
         <text>{{audioPhase === 'preparing' ? '正在准备整章朗读…' : '正在朗读本章'}}</text>
         <button class="chapter-audio-stop" bindtap="stopDraftSectionPlayback">停止朗读</button>
@@ -72,7 +73,6 @@
       ><text>阅读当前版本</text><text>›</text></view>
     </view>
 
-    <view wx:if="{{bookSharePanelOpen}}" class="ui-card"><template is="readingSharePanel" data="{{chapterShare: true, bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers}}" /></view>
 
     <view wx:if="{{!focusedSectionId && chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
       <text class="section-kicker">这次更新需要您判断</text>

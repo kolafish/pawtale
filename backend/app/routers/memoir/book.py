@@ -122,6 +122,22 @@ async def read_mobile_memoir_book_share(
     return await memoir_book_shares.read_share(db, req.token)
 
 
+@router.get("/projects/{project_id}/book-output/share/preview", response_model=MemoirBookOutputResponse)
+async def preview_mobile_memoir_book_share(
+    project_id: str, response: Response, chapter_id: str | None = None,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.preview_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+
+
+@router.get("/book-shares/{token}/images/{asset_id}")
+async def get_mobile_memoir_shared_image(token: str, asset_id: str, db: AsyncSession = Depends(get_db)):
+    asset, path = await memoir_book_shares.shared_image_file(db, token, asset_id)
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or asset.mime_type,
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.get("/projects/{project_id}/book-plan", response_model=MemoirBookPlanResponse)
 async def get_mobile_memoir_book_plan(
     project_id: str,

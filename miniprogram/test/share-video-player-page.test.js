@@ -2,7 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockMemoirApiModules, pageContext } = require("./page-harness");
+const { loadPageModule, mockMemoirApiModules, mockModule, pageContext } = require("./page-harness");
 
 function loadPlayer(readMemoirSharedVideo) {
   mockMemoirApiModules({
@@ -83,4 +83,30 @@ test("a deleted clip explains itself instead of playing", async () => {
   assert.equal(context.data.video, null);
   assert.equal(context.data.error, "这段视频已被作者删除");
   assert.equal(page.onShareAppMessage.call(context).path.startsWith("/pages/home/index"), true);
+});
+
+
+test("private video preview never enables forwarding and survives a missing poster", async () => {
+  const downloads = [];
+  const menus = [];
+  global.wx = { hideShareMenu: () => menus.push("hide"), showShareMenu: () => menus.push("show") };
+  mockMemoirApiModules({
+    previewMemoirSharedVideo: async () => ({ ...sharedVideo, video_url: "/private-video", poster_url: "/private-poster", end_frame_url: "" }),
+    memoirShareVideoDownloadUrl: url => url,
+  });
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => {
+    downloads.push(url);
+    if (url === "/private-poster") throw new Error("missing");
+    return "/tmp/video.mp4";
+  } });
+  const { page } = loadPageModule("../pages/share-video-player/index.ts");
+  const context = pageContext(page);
+  await context.onLoad({ previewJobId: "job" });
+  assert.deepEqual(downloads, ["/private-video", "/private-poster"]);
+  assert.equal(context.data.videoUrl, "/tmp/video.mp4");
+  assert.equal(context.data.posterUrl, "");
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.shareLikeVisible, false);
+  assert.equal(menus.includes("show"), false);
+  assert.match(context.onShareAppMessage().path, /^\/pages\/home\/index/);
 });

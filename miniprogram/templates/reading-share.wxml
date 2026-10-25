@@ -1,23 +1,11 @@
 <import src="./share-likes.wxml" />
-<template name="readingSharePanel">
-    <view wx:if="{{bookSharePanelOpen}}" class="book-share-panel">
-      <text class="book-share-description">{{chapterShare ? '对方可阅读本章全部正文，不含其他章节。' : '对方可阅读您确认分享的书稿。'}}</text>
-      <button class="book-share-manage-button" bindtap="openReadingSharePreview" disabled="{{bookShareStale}}">预览阅读页</button>
-      <text class="book-share-description">{{bookShareStatusKnown ? bookShareDescription : (bookShareBusy ? '正在读取阅读链接…' : '暂时无法读取阅读链接，请重试。')}}</text>
-      <view class="book-share-primary-action">
-        <button wx:if="{{!bookShareStatusKnown}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
-        <button wx:elif="{{bookShareReady}}" class="reading-share-primary-button" open-type="share" disabled="{{bookShareBusy}}">发送阅读页</button>
-        <button wx:elif="{{bookShareStale}}" class="reading-share-primary-button" disabled="{{true}}">书稿更新中</button>
-        <button wx:elif="{{bookShareNeedsUpdate}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="updateBookShare">更新分享版本</button>
-        <button wx:elif="{{!bookShareActive}}" class="reading-share-primary-button" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}" bindtap="createBookShare">生成阅读链接</button>
-        <button wx:else class="reading-share-primary-button" disabled="{{bookShareBusy}}" bindtap="refreshBookShareStatus">重试读取</button>
-      </view>
-      <view wx:if="{{bookShareLikeCount}}" class="book-share-likes">
-        <template is="shareLikeList" data="{{count: bookShareLikeCount, likers: bookShareLikers}}" />
-      </view>
-      <view wx:if="{{bookShareStatusKnown && bookShareActive}}" class="book-share-management">
-        <button class="book-share-manage-button" disabled="{{bookShareBusy || bookShareStale}}" bindtap="regenerateBookShare">重新生成</button>
-        <button class="book-share-manage-button is-danger" disabled="{{bookShareBusy}}" bindtap="revokeBookShare">撤销链接</button>
-      </view>
+<template name="readingShareActions">
+  <view class="reading-share-actions">
+    <view class="ui-share-actions">
+      <button class="ui-share-primary" open-type="{{bookShareReady ? 'share' : ''}}" bindtap="prepareReadingShare" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}">分享给好友</button>
+      <button class="ui-share-more" bindtap="openReadingShareMore" disabled="{{bookShareBusy}}" aria-label="分享更多操作">···</button>
     </view>
+    <text class="reading-share-scope">{{shareScopeLabel || '整本书'}} · {{bookShareDescription}}</text>
+    <template wx:if="{{bookShareLikeCount}}" is="shareLikeList" data="{{count: bookShareLikeCount, likers: bookShareLikers}}" />
+  </view>
 </template>

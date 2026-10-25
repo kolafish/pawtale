@@ -1,25 +1,30 @@
 <import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">
+  <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>正在打开成书...</text>
   </view>
 
   <view wx:elif="{{error}}" class="reader-state error ui-card">
     <text>{{error}}</text>
+    <button wx:if="{{readerShared && shareRetryable}}" class="ui-share-primary" bindtap="retrySharedReading">重试</button>
+    <button wx:if="{{readerShared}}" class="ui-share-more" bindtap="openShareHome">返回首页</button>
   </view>
 
   <block wx:else>
     <view class="reader-cover ui-card">
+      <image wx:if="{{shareCoverUrl}}" class="share-cover-image" src="{{shareCoverUrl}}" mode="widthFix" />
       <image
-        wx:if="{{readerMode === 'book'}}"
+        wx:if="{{readerMode === 'book' && !shareCoverUrl}}"
         class="reader-cover-art"
         src="/assets/book-reader/hero-branch.png"
         mode="aspectFit"
         aria-hidden="true"
       />
       <view class="reader-cover-copy">
-        <text wx:if="{{readerMode === 'chapter'}}" class="reader-eyebrow">整章预览</text>
+        <text wx:if="{{readerMode === 'chapter'}}" class="reader-eyebrow">{{readerShared ? (shareScope === 'story' ? '一则故事' : '本章') : '整章预览'}}</text>
         <text class="reader-title">{{readerTitle}}</text>
+        <text wx:if="{{shareByline}}" class="reader-subtitle">{{shareByline}}</text>
         <text wx:if="{{readerSubtitle}}" class="reader-subtitle">{{readerSubtitle}}</text>
         <text wx:if="{{readerMetaText}}" class="reader-meta">{{readerMetaText}}</text>
         <text wx:if="{{readerUpdateNotice}}" class="reader-notice">
@@ -57,7 +62,7 @@
       />
     </view>
 
-    <view wx:if="{{readerMode === 'book' && bookPreviewTocItems.length}}" class="reader-section ui-card">
+    <view wx:if="{{shareScope !== 'story' && bookPreviewTocItems.length}}" class="reader-section ui-card">
       <text class="section-label">目录</text>
       <view class="toc-list">
         <view wx:for="{{bookPreviewTocItems}}" wx:key="id" wx:for-item="chapter" wx:for-index="chapterIndex" class="toc-group">
@@ -100,6 +105,7 @@
       </view>
     </view>
 
+    <view wx:if="{{sharePreface && readerChapterIndex === 0}}" class="reader-section ui-card"><text class="section-label">前言</text><text class="book-content" selectable>{{sharePreface}}</text></view>
     <view wx:if="{{bookPreviewChapters.length}}" id="reader-body" class="chapter-list">
       <view
         wx:for="{{bookPreviewChapters}}"
@@ -112,6 +118,13 @@
           <text class="chapter-index">{{chapter.indexText}}</text>
           <text class="chapter-title">{{chapter.title}}</text>
         </block>
+<view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
+          <block wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId}}">
+            <image src="{{illustration.url}}" mode="widthFix" />
+            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
+            <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+          </block>
+        </view>
         <view wx:if="{{chapter.sections.length}}" class="reader-small-section-list">
           <view
             wx:for="{{chapter.sections}}"
@@ -122,6 +135,13 @@
             class="reader-small-section"
           >
             <text wx:if="{{section.title !== chapter.title}}" class="small-section-title">{{section.title}}</text>
+<view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
+          <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id}}">
+            <image src="{{illustration.url}}" mode="widthFix" />
+            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
+            <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+          </block>
+        </view>
             <view class="small-section-paragraph-list">
               <view
                 wx:for="{{section.paragraphs}}"
@@ -155,8 +175,10 @@
       <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === readerChapterTotal - 1}}" bindtap="nextReaderChapter">下一{{bookPreviewChapters.length ? '章' : '页'}}</view>
     </view>
 
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
+    <view wx:if="{{shareAfterword && readerChapterIndex === readerChapterTotal - 1}}" class="reader-section ui-card"><text class="section-label">后记</text><text class="book-content" selectable>{{shareAfterword}}</text></view>
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview && !readerDemo}}" />
 
+    <button wx:if="{{readerShared && !sharePreview}}" class="ui-share-more" bindtap="openShareHome">我也想讲故事</button>
     <view class="reader-top-action-shell">
       <view wx:if="{{readerDemo}}" class="reader-top-action ui-pressable" aria-role="button" bindtap="startMyStory">种下我的故事</view>
       <view

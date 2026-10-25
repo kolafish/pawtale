@@ -1,3 +1,4 @@
+import { downloadAuthenticatedFile } from "../../services/authenticated-media";
 import type {
   MemoirBookOutput,
   MemoirBookOutputVersion,
@@ -13,11 +14,12 @@ import {
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
   readMemoirBookShare,
+  previewMemoirBookShare,
   readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
 import { navigateToLoginThenNarrate, returnToHomeThenNarrate, routeAuthError } from "../../services/navigation";
-import { readSessionCookie } from "../../services/request";
+import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "../../services/request";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
@@ -31,7 +33,7 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import { hideMiniProgramShareMenu } from "../../services/share";
+import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage } from "../../services/share";
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import {
@@ -66,6 +68,14 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
   readerMode: "book" | "chapter";
   readerShared: boolean;
   readerDemo: boolean;
+  sharePreview: boolean;
+  shareScope: "book" | "chapter" | "story";
+  shareImages: { id: string; chapterId: string; sectionId: string; url: string; caption: string; disclosure: string }[];
+  shareCoverUrl: string;
+  shareByline: string;
+  sharePreface: string;
+  shareAfterword: string;
+  shareRetryable: boolean;
   readerChapterIndex: number;
   readerChapterTotal: number;
   readerTitle: string;
@@ -302,6 +312,7 @@ definePage<BookReaderData>()({
   bookChapters: [] as BookOutputChapterPreviewView[],
   flatPages: [] as string[],
   shareLikeTarget: null as MemoirShareLikeTarget | null,
+  readingToken: "",
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -314,6 +325,8 @@ definePage<BookReaderData>()({
     readerMode: "book",
     readerShared: false,
     readerDemo: false,
+    sharePreview: false, shareScope: "book", shareImages: [], shareCoverUrl: "", shareByline: "",
+    sharePreface: "", shareAfterword: "", shareRetryable: false,
     readerChapterIndex: 0,
     readerChapterTotal: 0,
     readerHighlightSectionId: "",
@@ -348,10 +361,16 @@ definePage<BookReaderData>()({
     const chapterId = queryParam(query, "chapterId");
     const versionId = queryParam(query, "versionId");
     const shareToken = queryParam(query, "shareToken");
+    const sharePreview = queryParam(query, "sharePreview") === "1";
+    this.readingToken = shareToken;
     // Visitors open the sample memoir's open chapters before logging in.
     const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, versionId, readerMode, readerDemo: demo, readerShared: Boolean(shareToken) || demo });
+    this.setData({ projectId, chapterId, versionId, readerMode, readerDemo: demo, sharePreview, readerShared: Boolean(shareToken) || demo || sharePreview });
+    if (sharePreview) {
+      await this.loadSharedBookReader(() => previewMemoirBookShare(projectId, chapterId || undefined));
+      return;
+    }
     if (shareToken || demo) {
       await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook() : readMemoirBookShare(shareToken)));
       // Family who open a forwarded link can like what they read.
@@ -372,9 +391,24 @@ definePage<BookReaderData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
-    hideMiniProgramShareMenu();
+    if (this.readingToken && !this.data.error) enableMiniProgramShareMenu(); else hideMiniProgramShareMenu();
     // Back from choosing an avatar after a like.
     this.refreshShareLikes();
+  },
+
+  onShareAppMessage() {
+    return readingShareMessage(this.data.readerTitle, this.data.error ? "" : this.readingToken, this.data.shareCoverUrl || this.data.shareImages[0]?.url);
+  },
+
+  openShareHome() { wx.reLaunch({ url: "/pages/home/index" }); },
+
+  async retrySharedReading() {
+    if (this.data.sharePreview) await this.loadSharedBookReader(() => previewMemoirBookShare(this.data.projectId, this.data.chapterId || undefined));
+    else if (this.data.readerDemo) await this.loadSharedBookReader(() => readMemoirDemoBook());
+    else if (this.readingToken) {
+      await this.loadSharedBookReader(() => readMemoirBookShare(this.readingToken));
+      if (!this.data.error) await this.loadShareLikes({ reading_token: this.readingToken });
+    }
   },
 
   onShareUnavailable(error: Error) {
@@ -384,7 +418,10 @@ definePage<BookReaderData>()({
     this.bookChapters = [];
     this.flatPages = [];
     this.chapterParagraphRanges = [];
-    this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0, error: error.message });
+    hideMiniProgramShareMenu();
+    this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0,
+      shareImages: [], shareCoverUrl: "", shareByline: "", sharePreface: "", shareAfterword: "",
+      shareRetryable: !(error instanceof ApiError && [404, 410].includes(error.statusCode)), error: error.message });
   },
 
   onHide() {
@@ -422,7 +459,7 @@ definePage<BookReaderData>()({
   },
 
   showReaderChapter(index: number, sectionIndex?: number) {
-    if (this.data.readerMode !== "book" || index < 0 || index >= this.data.readerChapterTotal) return;
+    if (index < 0 || index >= this.data.readerChapterTotal) return;
     const chapter = this.bookChapters[index];
     this.setData({
       readerChapterIndex: index,
@@ -590,12 +627,42 @@ definePage<BookReaderData>()({
     this.stopPlayback();
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
-      this.applyBookReaderOutput(await read());
+      const output = await read();
+      this.applyBookReaderOutput(output);
+      await this.applySharePresentation(output);
+      if (this.readingToken) enableMiniProgramShareMenu();
     } catch (error) {
       this.onShareUnavailable(error instanceof Error ? error : new Error("分享链接已失效"));
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  async applySharePresentation(output: MemoirBookOutput) {
+    const manuscript = output.latest_version?.manuscript;
+    const scope = output.share_scope || "book";
+    const imageUrl = async (url = ""): Promise<string> => {
+      if (!url.startsWith("/api/mobile/memoir/")) return "";
+      const base = cleanBaseUrl(readBackendConfig().httpBaseUrl);
+      if (!this.data.sharePreview) return `${base}${url}`;
+      try {
+        return await downloadAuthenticatedFile(`${base}${url}`, { failureMessage: "配图暂时打不开", domainLabel: "分享配图" });
+      } catch {
+        return ""; // A missing illustration must not hide the saved text.
+      }
+    };
+    const images = await Promise.all((manuscript?.chapters || []).flatMap(chapter => chapter.illustrations.map(async item => ({
+      id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId: item.section_id || "",
+      url: await imageUrl(item.image_url), caption: item.caption, disclosure: item.disclosure,
+    }))));
+    const cover = manuscript?.render_settings.cover_image;
+    this.setData({
+      shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: images.filter(item => Boolean(item.url)),
+      shareCoverUrl: cover ? await imageUrl(cover.image_url) : "",
+      shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
+      sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
+      shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
+    });
   },
 
   async loadChapterReader(projectId: string, chapterId: string) {

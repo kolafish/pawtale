@@ -466,6 +466,7 @@ export interface MemoirBookManuscriptSourceRef {
 }
 
 export interface MemoirBookManuscriptIllustration {
+  image_url?: string;
   image_asset_id: string;
   storage_path: string;
   mime_type: string;
@@ -542,6 +543,7 @@ export interface MemoirBookOutputVersion extends MemoirBookOutputVersionSummary 
 }
 
 export interface MemoirBookOutput {
+  share_scope?: "book" | "chapter" | "story" | null;
   id: string;
   project_id: string;
   plan_id: string;

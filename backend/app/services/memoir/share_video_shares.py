@@ -37,9 +37,17 @@ async def _shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
 
 async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoResponse:
     job = await _shared_job(db, code)
+    return await _video_response(db, job, public=True)
+
+
+async def preview_video(db: AsyncSession, job_id: str, user_id: str) -> MemoirSharedVideoResponse:
+    return await _video_response(db, await _load_owned_job(db, job_id, user_id), public=False)
+
+
+async def _video_response(db: AsyncSession, job: MemoirMaterialShareVideo, *, public: bool) -> MemoirSharedVideoResponse:
     title = completed_share_video_file(job).title
     book_title, narrator_name = await share_video_end_card_source(db, job.project_id)
-    base_url = f"/api/mobile/memoir/share-video/shares/{code}/video"
+    base_url = f"/api/mobile/memoir/share-video/shares/{job.share_code}/video" if public else f"/api/mobile/memoir/share-video/jobs/{job.id}/download"
     return MemoirSharedVideoResponse(
         title=title,
         book_title=book_title,
