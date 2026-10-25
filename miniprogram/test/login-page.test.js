@@ -49,13 +49,25 @@ test("login consent checkbox is bound independently from opening the privacy doc
   assert.match(template, /<\/label>\s*<view\b[^>]*catchtap="openPrivacyContract"/);
 });
 
-test("login starts without consent and never authenticates until the user opts in", async () => {
+function installPrivacyStorage() {
+  const storage = new Map();
+  global.wx = {
+    getStorageSync: (key) => storage.get(key),
+    setStorageSync: (key, value) => storage.set(key, value),
+    removeStorageSync: (key) => storage.delete(key),
+    reLaunch() {},
+  };
+  return storage;
+}
+
+test("first login requires consent and later login pages remember the explicit choice", async () => {
   let loginCalls = 0;
-  global.wx = { getStorageSync: () => true };
+  installPrivacyStorage();
   const { page } = loadLoginPage({
-    authExports: { loginWithWeChat: async () => { loginCalls += 1; } },
+    authExports: { loginWithWeChat: async () => { loginCalls += 1; return { user: {} }; } },
   });
   const context = pageContext(page);
+  context.onLoad();
 
   assert.equal(context.data.privacyAgreed, false);
   await context.submitWeChat();
@@ -63,10 +75,22 @@ test("login starts without consent and never authenticates until the user opts i
   assert.equal(loginCalls, 0);
   assert.equal(context.data.wechatLoading, false);
   assert.match(context.data.error, /请先阅读并勾选同意/);
+
+  context.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  assert.equal(loginCalls, 0);
+  await context.submitWeChat();
+  assert.equal(loginCalls, 1);
+
+  const next = pageContext(page);
+  next.onLoad();
+  assert.equal(next.data.privacyAgreed, true);
+  await next.submitWeChat();
+  assert.equal(loginCalls, 2);
 });
 
-test("unchecking consent blocks login again and a new login page starts unchecked", async () => {
+test("unchecking consent blocks login again including on a new login page", async () => {
   let loginCalls = 0;
+  installPrivacyStorage();
   const { page } = loadLoginPage({
     authExports: { loginWithWeChat: async () => { loginCalls += 1; } },
   });
@@ -80,7 +104,46 @@ test("unchecking consent blocks login again and a new login page starts unchecke
 
   assert.equal(context.data.privacyAgreed, false);
   assert.equal(loginCalls, 0);
-  assert.equal(pageContext(page).data.privacyAgreed, false);
+  const next = pageContext(page);
+  next.onLoad();
+  assert.equal(next.data.privacyAgreed, false);
+  await next.submitWeChat();
+  assert.equal(loginCalls, 0);
+});
+
+test("a changed contract, cleared storage or an unknown old value requires consent again", async () => {
+  const storage = installPrivacyStorage();
+  let loginCalls = 0;
+  const { page } = loadLoginPage({
+    authExports: { loginWithWeChat: async () => { loginCalls += 1; } },
+  });
+  const context = pageContext(page);
+  context.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  const [key] = storage.keys();
+  for (const oldValue of ["previous-contract", true, { agreed: true }, undefined]) {
+    storage.set(key, oldValue);
+    const next = pageContext(page);
+    next.onLoad();
+    assert.equal(next.data.privacyAgreed, false);
+    await next.submitWeChat();
+  }
+  assert.equal(loginCalls, 0);
+});
+
+test("failed consent storage stays visible and does not grant consent on the next page", () => {
+  installPrivacyStorage();
+  global.wx.setStorageSync = () => { throw new Error("storage unavailable"); };
+  const { page } = loadLoginPage();
+  const context = pageContext(page);
+  context.changePrivacyConsent({ detail: { value: ["privacy_contract"] } });
+  assert.equal(context.data.privacyAgreed, true);
+  assert.match(context.data.error, /无法保存/);
+  const next = pageContext(page);
+  next.onLoad();
+  assert.equal(next.data.privacyAgreed, false);
+  global.wx.getStorageSync = () => { throw new Error("storage unavailable"); };
+  next.onLoad();
+  assert.equal(next.data.privacyAgreed, false);
 });
 
 test("a new wechat user goes straight home without the avatar and nickname step", async () => {

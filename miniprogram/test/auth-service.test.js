@@ -73,6 +73,22 @@ test("logout keeps the cookie if server revocation cannot be confirmed", async (
   delete global.wx;
 });
 
+test("logout clears the session and preserves the accepted login privacy contract", async () => {
+  installWxMock((options) => {
+    options.success({ statusCode: 204, data: "", cookies: [], header: {} });
+  });
+  const { saveLoginPrivacyConsent, readLoginPrivacyConsent } = require("../services/wechat-privacy.ts");
+  saveLoginPrivacyConsent(true);
+  global.wx.setStorageSync("pawtale_backend_cookie", "pawtale_session=active");
+  const { logoutBackendSession } = authModule();
+
+  await logoutBackendSession();
+
+  assert.equal(global.wx.getStorageSync("pawtale_backend_cookie"), "");
+  assert.equal(readLoginPrivacyConsent(), true);
+  delete global.wx;
+});
+
 test("account deletion requires a fresh WeChat code and clears the cookie only after success", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/me");
