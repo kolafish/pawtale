@@ -16,7 +16,7 @@ from app.models.projects import Project
 from app.models.users import User
 from app.services.asr.streaming import StreamingASREvent
 from app.services import account_deletion
-from app.services.memoir import audio_files, narrator_profile, project_deletion, share_response_voice, share_responses
+from app.services.memoir import audio_files, book_shares, narrator_profile, project_deletion, share_response_voice, share_responses
 from tests.test_memoir_share_likes import _family_member
 from tests.test_memoir_story_shares import saved_stories
 
@@ -119,6 +119,13 @@ async def test_voice_capture_rejects_revoked_share_and_discards_unsent_audio(cli
         ticket = (await aunt.post(f'{BASE}/voice', json={'reading_token': token})).json()['capture_id']
         cap = await test_db.get(MemoirShareResponseVoice, ticket)
         persistence = share_response_voice.ResponseCapturePersistence(capture_id=ticket, user_id=cap.user_id)
+        full_book_read = AsyncMock(side_effect=AssertionError('frame authorization read the whole book'))
+        original_read = book_shares.readable_share
+        monkeypatch.setattr(book_shares, 'readable_share', full_book_read)
+        for _ in range(3):
+            assert await persistence.authorized()
+        full_book_read.assert_not_awaited()
+        monkeypatch.setattr(book_shares, 'readable_share', original_read)
         await persistence.record_audio_frame(b'\x00\x00' * 800)
         await client.delete(path, params=params)
         assert not await persistence.authorized()

@@ -19,6 +19,8 @@ interface VoiceRuntime {
   baseText: string;
   transcript: string;
   automaticStartState: AutomaticStartState;
+  commandReady: boolean;
+  lastVoiceStartRequest: number;
 }
 
 const voiceRuntimes = new WeakMap<object, VoiceRuntime>();
@@ -33,6 +35,8 @@ function voiceRuntime(owner: object): VoiceRuntime {
       baseText: "",
       transcript: "",
       automaticStartState: "detached",
+      commandReady: false,
+      lastVoiceStartRequest: 0,
     };
     voiceRuntimes.set(owner, runtime);
   }
@@ -70,7 +74,11 @@ Component({
       this.syncText(value);
     },
     voiceStartRequest(value: unknown) {
-      if (typeof value === "number" && value > 0 && this.properties.prepareVoice) void this.startVoice(false);
+      const runtime = voiceRuntime(this);
+      const request = typeof value === "number" ? value : 0;
+      const newRequest = runtime.commandReady && request > runtime.lastVoiceStartRequest;
+      runtime.lastVoiceStartRequest = request;
+      if (newRequest && this.properties.prepareVoice) void this.startVoice(false);
     },
     "automaticVoiceCommand,gatewayUrl,disabled,busy"() {
       this.tryAutoStart();
@@ -79,7 +87,10 @@ Component({
 
   lifetimes: {
     attached() {
-      voiceRuntime(this).automaticStartState = "available";
+      const runtime = voiceRuntime(this);
+      runtime.automaticStartState = "available";
+      runtime.lastVoiceStartRequest = this.properties.voiceStartRequest;
+      runtime.commandReady = true;
       this.syncText(this.properties.value);
       this.tryAutoStart();
     },

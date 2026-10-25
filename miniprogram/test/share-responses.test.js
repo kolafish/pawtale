@@ -79,6 +79,7 @@ test('voice response keeps confirmed text and binds only its finalized source', 
   });
   const { component } = loadComponentModule('../components/share-response-form/index.ts');
   const ctx = componentContext(component, { readingToken: 'story-token' });
+  ctx.openForm();
   ctx.changeText({ detail: { value: '我还记得那棵树。' } });
   await ctx.requestVoice();
   await flushAsyncWork();
@@ -97,6 +98,7 @@ test('voice start waits for gateway URL to reach the child component', async () 
   });
   const { component } = loadComponentModule('../components/share-response-form/index.ts');
   const ctx = componentContext(component, { videoCode: 'video' });
+  ctx.openForm();
   const immediateSetData = ctx.setData;
   let gatewayBound;
   ctx.setData = function (patch, callback) {
@@ -109,6 +111,33 @@ test('voice start waits for gateway URL to reach the child component', async () 
   assert.equal(ctx.data.voiceStartRequest, 0);
   gatewayBound();
   assert.equal(ctx.data.voiceStartRequest, 1);
+});
+
+test('closing and reopening a response form does not replay an old voice ticket', async () => {
+  mockModule('../services/share-responses.ts', {
+    startShareResponseVoice: async () => ({ gatewayUrl: 'wss://example.test/voice' }),
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { videoCode: 'video' });
+  ctx.openForm();
+  await ctx.requestVoice();
+  assert.equal(ctx.data.voiceStartRequest, 1);
+  ctx.closeForm();
+  ctx.openForm();
+  assert.equal(ctx.data.voiceStartRequest, 0);
+  assert.equal(ctx.data.gatewayUrl, '');
+
+  const immediateSetData = ctx.setData;
+  let bindGateway;
+  ctx.setData = function (patch, callback) {
+    immediateSetData.call(this, patch);
+    if (patch.gatewayUrl) bindGateway = callback;
+    else callback?.();
+  };
+  await ctx.requestVoice();
+  ctx.closeForm();
+  bindGateway();
+  assert.equal(ctx.data.voiceStartRequest, 0);
 });
 
 test('expired original audio can be replaced without losing response text', async () => {
