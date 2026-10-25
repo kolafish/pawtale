@@ -401,8 +401,12 @@ async def _current_chapter_digests(
     chapters: list[MemoirBookPlanChapter],
 ) -> dict[str, MemoirChapterDigest]:
     decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
+    question_lines = await section_digests.interviewer_lines(db, (
+        material.utterance.chat_message_id
+        for chapter in chapters for section in chapter.sections for material in section.materials
+    ))
     section_contexts = {
-        section.id: section_digests.section_digest_context(section, decisions=decisions)
+        section.id: section_digests.section_digest_context(section, decisions=decisions, question_lines=question_lines)
         for chapter in chapters
         for section in chapter.sections
         if (

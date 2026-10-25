@@ -757,7 +757,7 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     assert digest.status == MemoirSemanticCacheStatus.READY.value
     assert reused.id == digest.id
     assert len(fake.prompts) == 2
-    assert "原始讲述" in fake.prompts[0]
+    assert "朋友发来一张山桃花照片，后来邀请我一起爬山" in fake.prompts[0]
     assert "摘要:" in fake.prompts[1]
     assert "删掉重复的爬山经过" in fake.prompts[1]
     assert "这次重新联系为什么重要" in fake.prompts[1]

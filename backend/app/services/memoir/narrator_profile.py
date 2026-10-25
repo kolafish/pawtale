@@ -47,6 +47,7 @@ from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_secon
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import book_outputs, editing_jobs, narration_people
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
+from app.services.memoir.material_roles import interviewer_messages
 from app.services.memoir.projects import (
     FIRST_PROJECT_TITLE,
     INFERRED_PROFILE_FIELDS_KEY,
@@ -426,17 +427,9 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
 
 
 async def _previous_line_id(db: AsyncSession, message: MemoirChatMessage) -> str | None:
-    return await db.scalar(
-        select(MemoirChatMessage.id)
-        .where(
-            MemoirChatMessage.voice_session_id == message.voice_session_id,
-            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
-            MemoirChatMessage.guidance_intent.is_distinct_from("no_answer_prompt"),
-            MemoirChatMessage.turn_index < message.turn_index,
-        )
-        .order_by(MemoirChatMessage.turn_index.desc())
-        .limit(1)
-    )
+    questions = await interviewer_messages(db, [message.id])
+    question = questions.get(message.id)
+    return question.id if question else None
 
 
 async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> editing_jobs.EditingJobResult:

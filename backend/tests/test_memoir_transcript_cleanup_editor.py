@@ -325,3 +325,48 @@ async def test_recleanup_uses_stable_source_and_preserves_latest_manual_edit(cli
             test_db, utterance_id=utterance.id, version_type="dialect_corrected",
         )
         assert await cleanup_source_text(test_db, utterance) == "我小时候住在奶奶家。"
+
+
+@pytest.mark.parametrize("role", ["assistant", "interviewer"])
+@pytest.mark.parametrize("parent", ["none", "older", "future", "other_session", "answer", "detached"])
+async def test_answer_context_follows_valid_parent_or_preceding_question(client, test_db, role, parent):
+    from app.services.memoir.material_roles import interviewer_lines
+
+    source = await create_test_voice_transcript(client, test_db, text="五岁。", question_text="发大水那年您多大？")
+    other = await create_test_voice_transcript(
+        client, test_db, project_id=source["session"]["project_id"], question_text="另一场访谈的问题？",
+    )
+    old_question = await test_db.scalar(select(MemoirChatMessage).where(
+        MemoirChatMessage.voice_session_id == source["session"]["id"], MemoirChatMessage.turn_index == 0,
+    ))
+    old_question.role = role
+    def message(text, turn, speaker, **kwargs):
+        return MemoirChatMessage(
+            project_id=source["session"]["project_id"], voice_session_id=source["session"]["id"],
+            content_text=text, turn_index=turn, role=speaker, content_status="final", **kwargs,
+        )
+    question = message("谁带您去邮局领工资？", 2, role)
+    answer = message("刘师傅。", 3, "user")
+    continuation = message("他还让我数了一遍。", 4, "user")
+    reminder = message("您可以接着慢慢说。", 5, "assistant", guidance_intent="no_answer_prompt")
+    resumed = message("那钱我收在衣兜里。", 6, "user")
+    future = message("退休以后呢？", 7, role)
+    test_db.add_all([question, answer, continuation, reminder, resumed, future])
+    await test_db.flush()
+    other_question = await test_db.scalar(select(MemoirChatMessage).where(
+        MemoirChatMessage.voice_session_id == other["session"]["id"], MemoirChatMessage.turn_index == 0,
+    ))
+    answer.parent_message_id = {
+        "none": None, "detached": None, "older": old_question.id, "future": future.id,
+        "other_session": other_question.id, "answer": source["message_id"],
+    }[parent]
+    if parent == "detached":
+        answer.metadata_json = {"relation_updated_at": "2026-10-25T00:00:00"}
+    await test_db.flush()
+    lines = await interviewer_lines(test_db, [source["message_id"], answer.id, continuation.id, resumed.id])
+    assert lines[source["message_id"]] == old_question.content_text
+    if parent == "detached":
+        assert answer.id not in lines
+    else:
+        assert lines[answer.id] == {"older": old_question.content_text, "future": future.content_text}.get(parent, question.content_text)
+    assert lines[continuation.id] == lines[resumed.id] == question.content_text

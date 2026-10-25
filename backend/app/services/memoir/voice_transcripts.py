@@ -52,6 +52,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import narration_people
+from app.services.memoir.material_roles import interviewer_lines
 from app.services.memoir.dialect_glossary import glossary_context_lines, glossary_entries
 from app.services.memoir.memory_activation import delete_source_memory_traces
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
@@ -116,6 +117,7 @@ class MemoirTranscriptCleanupContext:
     dialect_glossary: tuple[str, ...] = ()
     recent_user_utterances: tuple[str, ...] = ()
     recent_assistant_messages: tuple[str, ...] = ()
+    interviewer_line: str = ""
 
 
 def _has_transcript_text_clause(utterance_model=MemoirVoiceUtterance):
@@ -186,7 +188,11 @@ def _cleanup_context_block(context: MemoirTranscriptCleanupContext | None) -> st
     if user_utterances:
         lines.append("- 最近用户原话：")
         lines.extend(f"  {index}. {text}" for index, text in enumerate(user_utterances, start=1))
-    assistant_messages = _compact_context_texts(context.recent_assistant_messages, limit=3)
+    if context.interviewer_line:
+        lines.append(f"- 本条对应提问（只帮助理解本条回答）：{context.interviewer_line}")
+    assistant_messages = _compact_context_texts(tuple(
+        text for text in context.recent_assistant_messages if text.strip() != context.interviewer_line.strip()
+    ), limit=3)
     if assistant_messages:
         lines.append("- 最近 AI 问题/回复：")
         lines.extend(f"  {index}. {text}" for index, text in enumerate(assistant_messages, start=1))
@@ -363,6 +369,7 @@ async def load_voice_transcript_cleanup_context(
     project = await db.get(Project, voice_session.project_id)
     corrections = glossary_entries(project) if project is not None else []
     corrected_sources = {entry.source for entry in corrections}
+    paired_lines = await interviewer_lines(db, [exclude_message_id]) if exclude_message_id else {}
     return MemoirTranscriptCleanupContext(
         scene="voice_chat",
         guidance_mode=voice_session.guidance_mode,
@@ -377,6 +384,7 @@ async def load_voice_transcript_cleanup_context(
         ))),
         recent_user_utterances=tuple(recent_user[-5:]),
         recent_assistant_messages=tuple(recent_assistant[-3:]),
+        interviewer_line=paired_lines.get(exclude_message_id, ""),
     )
 
 

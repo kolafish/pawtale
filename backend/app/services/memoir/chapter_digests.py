@@ -397,7 +397,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
         )
         for item in context.sections
     )
-    prompt = f"""请通读回忆录章节“{context.chapter_title}”。
+    prompt = f"""请通读回忆录章节“{context.chapter_title}”的小节摘要，并据此评估结构。你未收到原始讲述或完整正文。
 
 有序小章节：
 {sections}
@@ -428,7 +428,9 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 已有素材足够、只需编辑处理的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
-- manual_review 只用于必须由用户决定的事实冲突或取舍，未处理时会阻止章节确认。
+- manual_review 只用于输入明确支持、必须由用户决定的取舍，未处理时会阻止章节确认。仅由摘要差异推测的事实矛盾不能升级为阻塞事项，应在 structure_guidance 中说明需要核对的原素材。
+- 先区分不同人物、事件、时间和当时/现在的看法；这些差异不自动构成矛盾。摘要保留原有不确定性、否定、转述归属与程度，不声称完成原始事实核验。
+- 已答、明确不记得或不愿说明的不重复追问；不凭摘要未提及就断定素材缺失。无必要问题时 candidate_issues 为空。
 - question 和 reason 会直接展示给用户；引用小章节时使用标题。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。

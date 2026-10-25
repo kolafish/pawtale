@@ -43,8 +43,11 @@ from app.services.memoir.material_organization import (
     MaterialOrganizationSectionCandidate,
     normalize_material_organization_decision,
 )
-from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.material_roles import (
+    ANSWER_CONTEXT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_narrator_material,
+)
 from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.prompt_budget import representative_excerpt
 from app.services.memoir.section_roles import (
     PENDING_ASSIGNMENT_SECTION_ROLE,
     PENDING_ASSIGNMENT_SECTION_TITLE,
@@ -75,6 +78,7 @@ class _MaterialSnapshot:
     source_section_id: str = ""
     source_section_title: str = ""
     source_section_order: int = 0
+    interviewer_line: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,11 +237,15 @@ def _ordered_materials(
     )
 
 
-def _material_snapshots(
-    chapter: MemoirBookPlanChapter,
+async def _material_snapshots(
+    db: AsyncSession, chapter: MemoirBookPlanChapter,
 ) -> list[_MaterialSnapshot]:
     snapshots: list[_MaterialSnapshot] = []
-    for section, material in _ordered_materials(chapter):
+    ordered = _ordered_materials(chapter)
+    lines = await interviewer_lines(db, (
+        material.utterance.chat_message_id for _, material in ordered if material.utterance is not None
+    ))
+    for section, material in ordered:
         utterance = material.utterance
         text = current_utterance_text(utterance) if utterance else ""
         if (
@@ -265,6 +273,7 @@ def _material_snapshots(
                 ),
                 source_section_title=section.title,
                 source_section_order=section.sort_order,
+                interviewer_line=lines.get(utterance.chat_message_id, ""),
             )
         )
     return snapshots
@@ -278,15 +287,6 @@ def _validate_material_snapshots(
         raise SectionRegenerationConflict(status_code=409, detail="本章讲述已经变化，请刷新后重试")
 
 
-def _compact_excerpt(value: str, *, limit: int) -> str:
-    text = re.sub(r"\s+", " ", value).strip()
-    if len(text) <= limit:
-        return text
-    head_length = max(1, int(limit * 0.7))
-    tail_length = max(1, limit - head_length - 1)
-    return f"{text[:head_length]}…{text[-tail_length:]}"
-
-
 def _build_section_structure_prompt(
     *,
     chapter_title: str,
@@ -295,15 +295,13 @@ def _build_section_structure_prompt(
 ) -> str:
     excerpt_limit = max(
         120,
-        min(
-            600,
-            SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // max(1, len(materials)),
-        ),
+        SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // max(1, len(materials)),
     )
     material_outlines = [
         {
             "source_index": index,
-            "excerpt": _compact_excerpt(material.text, limit=excerpt_limit),
+            "excerpt": representative_excerpt(material.text, limit=excerpt_limit),
+            **({"interviewer_line": material.interviewer_line} if material.interviewer_line else {}),
             **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
                if max_sections is not None else {}),
         }
@@ -326,7 +324,8 @@ def _build_section_structure_prompt(
             "按事件、人物、阶段或反思主题自然分组，不强制小节数量；"
         )
     return (
-        task + "这里只设计候选小节，不做逐条归类。\n\n"
+        task + "这里只设计候选小节，不做逐条归类。"
+        + STORY_THEME_GUIDANCE + ANSWER_CONTEXT_GUIDANCE + "摘录可能省略内容，不能把省略理解为不存在。\n\n"
         f"章节：\n{chapter_json}\n\n"
         f"讲述概览：\n{outlines_json}\n\n"
         "只返回 JSON："
@@ -427,15 +426,17 @@ async def _plan_existing_section_merges(
     texts_by_section: dict[str, list[str]] = {section.id: [] for section in ordered}
     for material in materials:
         if material.source_section_id in texts_by_section:
-            texts_by_section[material.source_section_id].append(material.text)
-    excerpt_limit = max(80, min(500, SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // len(ordered)))
+            texts_by_section[material.source_section_id].append(
+                (f"提问：{material.interviewer_line}\n回答：" if material.interviewer_line else "") + material.text
+            )
+    excerpt_limit = max(80, SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // len(ordered))
     outlines = [
         {
             "section_id": refs.encode(section.id),
             "order": index,
             "title": section.title,
             "material_count": len(texts_by_section[section.id]),
-            "excerpt": _compact_excerpt(
+            "excerpt": representative_excerpt(
                 "；".join(texts_by_section[section.id]), limit=excerpt_limit,
             ),
         }
@@ -445,6 +446,7 @@ async def _plan_existing_section_merges(
         f"章节：{chapter_title}\n当前收录 {len(ordered)} 个小节：\n"
         f"{json.dumps(outlines, ensure_ascii=False)}\n\n"
         "用户希望合并现有小节，让收录小节数变少。仅选择内容有关联、适合合并的整个旧小节；"
+        + STORY_THEME_GUIDANCE + ANSWER_CONTEXT_GUIDANCE +
         "每组把顺序最早的小节作为保留的 target_section_id，其他小节放进 source_section_ids。"
         "一个旧小节最多出现在一组中；不在组内的小节保持原样。"
         "尽量保留叙事顺序，不要拆散小节内的讲述，不要新建小节。"
@@ -549,6 +551,7 @@ def _build_material_assignment_prompt(
             {
                 "utterance_id": material_refs.encode(material.utterance_id),
                 "text": material.text,
+                **({"interviewer_line": material.interviewer_line} if material.interviewer_line else {}),
                 **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
                    if max_sections is not None else {}),
             }
@@ -561,7 +564,7 @@ def _build_material_assignment_prompt(
         task += "同一原小节的讲述必须归入同一个候选小节，不得拆散。"
     return (
         task + "确实无法可靠归类时才标记为 leave_unassigned；"
-        "不得遗漏、重复或改写 utterance_id。\n\n"
+        "不得遗漏、重复或改写 utterance_id。" + STORY_THEME_GUIDANCE + ANSWER_CONTEXT_GUIDANCE + "\n\n"
         f"当前章节：\n{chapter}\n\n"
         f"候选小节：\n{candidates}\n\n"
         f"待归类讲述：\n{material_items}\n\n"
@@ -800,7 +803,7 @@ async def regenerate_chapter_sections(
     )
     if current_section_count is not None and current_section_count < 2:
         raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
-    materials = _material_snapshots(chapter)
+    materials = await _material_snapshots(db, chapter)
     chapter_title = chapter.title
     included_sections = [
         section for section in chapter.sections
@@ -841,7 +844,7 @@ async def regenerate_chapter_sections(
             db, project_id=project_id, chapter_id=chapter_id,
         )
         _validate_expected_sections(chapter, req)
-        _validate_material_snapshots(_material_snapshots(chapter), materials)
+        _validate_material_snapshots(await _material_snapshots(db, chapter), materials)
         current_ids = {
             section.id for section in chapter.sections
             if section.status == "active" and section.include_in_book
@@ -922,7 +925,7 @@ async def regenerate_chapter_sections(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
-    _validate_material_snapshots(_material_snapshots(chapter), materials)
+    _validate_material_snapshots(await _material_snapshots(db, chapter), materials)
     if preserve_initial_structure:
         # Initial placement is already complete. An uncertain finer partition
         # must not remove included sources from the book. Keep the whole valid
@@ -1081,7 +1084,7 @@ async def enqueue_chapter_section_regeneration(
         and _current_included_section_count(chapter) < 2
     ):
         raise HTTPException(422, "本章至少需要两个当前收录的小节才能合并")
-    materials = _material_snapshots(chapter)
+    materials = await _material_snapshots(db, chapter)
     requested_ai_model = select_project_ai_model(project, req.ai_model)
     job = await editing_jobs.enqueue_editing_job(
         db,

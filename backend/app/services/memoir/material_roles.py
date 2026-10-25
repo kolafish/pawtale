@@ -2,29 +2,38 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole, MemoirSpeakerRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
+ANSWER_CONTEXT_GUIDANCE = (
+    "对应提问只用于理解回答，不能把问题中的猜测当成事实。"
+    "可结合明确回答补出其省略的主体、对象或事件，使内容独立可懂；保留否定、不确定性、转述者和人物视角。"
+    "短回答的主题跟随其对应提问，不按相邻素材或书名猜测。"
+    "确定与不确定只作用于各自事实，不把记不清年份扩散成年龄也不确定。"
+    "对复合问题含糊地回答‘是’，不等于逐项确认；编辑建议获同意也不等于新增事实获确认。"
+    "无法消解的指代不猜人物身份，没有对应提问就只按讲述本身判断。"
+)
+STORY_THEME_GUIDANCE = (
+    "章是大主题，小节是章内的小主题；主题可围绕人物、生活领域、地点、阶段或相关经历，"
+    "不强制按人生阶段编排，也不要求一件事单独一节。主题连贯的多件事可以合节；"
+    "整条素材不可拆分或重复收录，包含多个主题时按整体主要内容安放，标题覆盖其范围。"
+    "保留合理的既有结构和标题，只为明确的主题问题调整，不为凑数量或追求整齐重排。"
+)
 STORY_CONTENT_GUIDANCE = (
-    "按以下顺序判断整条回答是否有可入书的内容："
-    "（1）先区分回答本身是在讲往事，还是只在同意访谈员的编辑建议。"
-    "仅同意解释、补充说明、调整写法或安排下一步，且没有新增事实或真实感受，是对话回应，不入书；"
-    "例如问‘妈妈大名和昵称的区别，要不要在书里再说明一下’，答‘可以说明一下，就这么解释一下就好了’，应排除。"
-    "不能因为问题提到了某段往事，就把编辑确认当成对其中事实的确认。"
-    "（2）若回答本身补充或明确确认了往事中的事实，即使只有年龄、姓名或地点也必须保留；"
-    "例如问‘发大水那年多大’，答‘我那年五岁’，"
-    "问‘那位师傅叫什么’，答‘他叫李明’，都不是当前个人资料，不能按第（4）步排除。"
-    "这类事实补充即使暂时找不到归属，也只是待归类，不是非故事。"
-    "（3）若回答讲了亲历事件、生活经历、具体回忆或自己的真实感受，整条保留，不因同时报资料、同意编辑建议或问题是资料采集而丢弃、切断。"
-    "真实感受不要求同时有完整事件；表达思念、留恋、遗憾等也超出了个人资料，必须保留。"
-    "（4）整条只含上述编辑确认，或停留在讲述者本人的当前姓名/称呼、当前年龄、性别、籍贯/老家等个人资料（包括一次回答多项），"
-    "以及纯寒暄、停顿、暂停请求，才排除；不要为这些内容建立自我介绍或个人资料章节。"
-    "没有 interviewer_line 时按回答本身判断。访谈员的问题帮助确定回答的指代，不可把问题中的猜测写成讲述者确认的事实。"
+    "逐条先判定内容角色，再给故事归类。只回答当前姓名、称呼、年龄等本人资料的整条来源属于非故事，"
+    "即使同批有故事也不能附带塞入章节。"
+    "回答提供或明确确认了往事事实、个人经历或真实感受时保留，"
+    "即使很短或同时包含资料、寒暄及编辑确认，也不截断。往事中的年龄、姓名、地点补充同样可入书，"
+    "暂时找不到位置只是待归类，不是非故事。"
+    "整条只有对编辑建议/下一步安排的同意、当前本人资料、寒暄、停顿或暂停请求时才排除，"
+    "不建立自我介绍或资料章节。纯编辑确认不能因问题含往事而变成事实确认。"
+    + ANSWER_CONTEXT_GUIDANCE
 )
 
 
@@ -80,30 +89,43 @@ def is_ready_story_material(utterance: MemoirVoiceUtterance) -> bool:
     )
 
 
-async def interviewer_lines(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
-    """For each narrator message, the AI interviewer's line right before it, if it was answering one."""
+async def interviewer_messages(
+    db: AsyncSession, message_ids: Iterable[str | None],
+) -> dict[str, MemoirChatMessage]:
+    """Honor edited question bindings, else find the preceding interviewer across answer segments."""
     ids = {message_id for message_id in message_ids if message_id}
     if not ids:
         return {}
-    window = {
-        "partition_by": MemoirChatMessage.voice_session_id,
-        "order_by": (MemoirChatMessage.turn_index, MemoirChatMessage.created_at),
+    answer = aliased(MemoirChatMessage)
+    candidate = aliased(MemoirChatMessage)
+    eligible = (
+        candidate.voice_session_id == answer.voice_session_id,
+        candidate.project_id == answer.project_id,
+        candidate.role.in_([MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value]),
+        candidate.guidance_intent.is_distinct_from("no_answer_prompt"),
+        func.trim(candidate.content_text) != "",
+    )
+    parent = select(candidate.id).where(
+        *eligible, candidate.id == answer.parent_message_id,
+    ).correlate(answer).scalar_subquery()
+    previous = select(candidate.id).where(
+        *eligible,
+        tuple_(candidate.turn_index, candidate.created_at, candidate.id)
+        < tuple_(answer.turn_index, answer.created_at, answer.id),
+        # A user may explicitly detach an answer in the interview editor.
+        or_(answer.parent_message_id.is_not(None), answer.metadata_json["relation_updated_at"].as_string().is_(None)),
+    ).order_by(
+        candidate.turn_index.desc(), candidate.created_at.desc(), candidate.id.desc(),
+    ).limit(1).correlate(answer).scalar_subquery()
+    rows = await db.execute(select(answer.id, MemoirChatMessage).join(
+        MemoirChatMessage, MemoirChatMessage.id == func.coalesce(parent, previous),
+    ).where(answer.id.in_(ids), answer.role == MemoirChatMessageRole.USER.value)
+      .execution_options(populate_existing=True))
+    return dict(rows.all())
+
+
+async def interviewer_lines(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+    return {
+        message_id: message.content_text.strip()
+        for message_id, message in (await interviewer_messages(db, message_ids)).items()
     }
-    ordered = (
-        select(
-            MemoirChatMessage.id,
-            func.lag(MemoirChatMessage.role).over(**window).label("previous_role"),
-            func.lag(MemoirChatMessage.content_text).over(**window).label("previous_text"),
-        )
-        .where(MemoirChatMessage.voice_session_id.in_(
-            select(MemoirChatMessage.voice_session_id).where(MemoirChatMessage.id.in_(ids))
-        ))
-        .subquery()
-    )
-    rows = await db.execute(
-        select(ordered.c.id, ordered.c.previous_text).where(
-            ordered.c.id.in_(ids),
-            ordered.c.previous_role == MemoirChatMessageRole.ASSISTANT.value,
-        )
-    )
-    return {message_id: text.strip() for message_id, text in rows if (text or "").strip()}

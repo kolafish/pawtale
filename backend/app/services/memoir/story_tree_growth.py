@@ -56,7 +56,7 @@ from app.services.memoir.chapter_structure import load_structure_summaries, revi
 from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_lines, is_ready_story_material
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -75,7 +75,7 @@ from app.services.memoir.transcript_projection import (
 
 SYSTEM_PROMPT = (
     "你是一位克制而有整体感的中文回忆录结构编辑。"
-    "请把本次新讲述作为一个整体理解。章承载人生阶段或持续主题，小节承载具体经历。只有现有章节无法容纳的新人生阶段或持续主题才新建章；新事件、新地点或新细节本身不是新建章的理由。"
+    "整体理解本次新讲述，按大主题和小主题安排章节与小节，不把每件新事都立为新章。"
     "已有标题不限定内容归属；归类后由整体结构检查统一调整标题和拆合。"
 )
 OFFERED_CHAPTER_GUIDANCE = "offered_chapter_id 表示访谈员问的是这一章里的事：回答在补充这一章的内容就放进这一章（已有小节或新小节），讲了别的事就照常安排。"
@@ -242,8 +242,7 @@ def build_story_growth_prompt(
     prompt = (
         '请将本次全部讲述安排到故事目录中。先判断哪些是故事，再安排故事的章节和小节。\n'
         f'1. {STORY_CONTENT_GUIDANCE} 非故事标为 not_story。\n'
-        '2. source_index 是不可拆分的一整条原始讲述，不是事件编号；不能复制、分割或自编 source_index。优先保证每条讲述完整且只收录一次。在能按整条讲述分组的前提下，同一事件的断续讲述合组，不同事件分组。如果同一条讲述包含多个事件，必须整体放在一个小节，使用能覆盖这些事件的共同主题标题，不能拆成多个小节重复引用该条，也不能只保留第一个事件。章节对应人生阶段或持续主题；不同原始讲述能分开的事件仍分小节，不因同属一个阶段就全部合并。\n'
-        '以摘要和素材判断整章覆盖的人生阶段或持续主题；已有小节只是当前收录的例子，不限制该章容纳新的事件。例如家人主题可以容纳童年家人故事，不因现有小节讲成年生活就另建一章。\n'
+        f'2. {STORY_THEME_GUIDANCE} source_index 是不可拆分的一整条讲述，不能复制、分割或自编。以摘要和素材理解章节主题，已有小节只是当前例子，不限制该章容纳同主题的新经历。\n'
         '3. 已有小节适合时填 section_id；已有章节适合而需新小节时填 chapter_ref 和 new_section_title。没有合适章节时先在 new_chapters 中定义 N1、N2 等新章节，再让相应讲述用 chapter_ref 引用它，不需要重复定义章节。\n'
         '4. 只要有明确的亲历事件或感受，就安排已有位置或建立适当的新位置；篇幅短、没有年份或与现有章节不同，均不是暂不归类的理由。不为迁就现有目录强行添加时间或人生阶段。不编造人物关系、时间或事件。\n'
         '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才标为 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'

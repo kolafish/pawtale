@@ -40,6 +40,7 @@ from app.services.ai_workloads import (
     ai_text_workload_policy,
 )
 from app.services.memoir.prompt_budget import checked_review_prompt
+from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE, interviewer_lines
 from app.services.memoir import fact_decisions
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -53,7 +54,7 @@ from app.services.memoir.transcript_projection import (
 SECTION_DIGEST_ENGINE = "llm_section_digest_v3"
 SECTION_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制、敏锐的中文回忆录编辑。"
-    "你只根据给定小章节、原始讲述及用户明确确认的事实更正判断读者是否容易理解，不补写事实。"
+    "你只根据给定小节、素材版本及用户明确确认的事实更正判断读者是否容易理解，不补写事实。"
 )
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class SectionDigestMaterial:
     text: str
     include_in_book: bool
     edits: tuple[TranscriptEdit, ...] = ()
+    interviewer_line: str = ""
 
 
 @dataclass(frozen=True)
@@ -138,6 +140,7 @@ def _string_list(
 def section_digest_context(
     section: MemoirSection, *, decisions: tuple[fact_decisions.FactDecision, ...] = (),
     transcript_edits: dict[str, tuple[TranscriptEdit, ...]] | None = None,
+    question_lines: dict[str, str] | None = None,
 ) -> SectionDigestContext:
     ordered = sorted(
         section.materials,
@@ -152,6 +155,7 @@ def section_digest_context(
             text=_compact_text(current_material_text(material)),
             include_in_book=material.include_in_book,
             edits=(transcript_edits or {}).get(material.transcript_version_id, ()),
+            interviewer_line=(question_lines or {}).get(material.utterance.chat_message_id, ""),
         )
         for material in ordered
     )
@@ -175,6 +179,8 @@ def section_digest_context(
                 "transcript_version_id": material.transcript_version_id,
                 "sort_order": material.sort_order,
                 "include_in_book": material.include_in_book,
+                **({"interviewer_line": material.interviewer_line}
+                   if material.include_in_book and material.interviewer_line else {}),
                 "text_hash": (
                     semantic_text_hash(material.text)
                     if material.include_in_book
@@ -226,6 +232,7 @@ async def load_section_digest_context(
     return section_digest_context(
         section, decisions=decisions,
         transcript_edits=await load_transcript_edits(db, list(section.materials)) if decisions else {},
+        question_lines=await interviewer_lines(db, (item.utterance.chat_message_id for item in section.materials)),
     )
 
 
@@ -256,7 +263,8 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
     materials = "\n\n".join(
         (
             f"material_id: {references.encode(material.material_id)}\n"
-            f"原始讲述: {material.text}\n"
+            + (f"对应提问: {material.interviewer_line}\n" if material.interviewer_line else "")
+            + f"素材版本中的讲述: {material.text}\n"
         )
         for material in context.materials
         if material.include_in_book
@@ -294,11 +302,13 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 }}
 
 要求：
+- {ANSWER_CONTEXT_GUIDANCE}
+- 摘要、重点和要点逐项保留原述的否定、确定程度、听说及转述归属；不把不确定扩散到其他事实，也不把派生摘要升级为确定事实。
 - 这是私人回忆录，普通经历、婚姻家庭、个人感受、人物称呼和爱好默认保留，不提出隐私追问或匿名化建议。
 - 不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求。
 - 先理解这一段真正想表达什么，不要逐条检查时间、地点、人物、起因和结果。
 - 能通过编辑现有素材解决的问题写入 editorial_guidance，不要向用户提问。
-- 只提出会明显改善读者理解的问题；内容已经自然成立时 candidate_issues 可以为空。
+- 只问缺失且妨碍理解的必要信息，不补想象中的动机、场景或感慨；已答、明确不记得或不想说的不重复追问。没有必要问题时 candidate_issues 为空。
 - candidate_issues 最多三个，并按价值排序。
 - 不要要求讲述者证明事实，不要创造素材中没有的信息。
 - material_ids 只能使用输入中出现的本次请求短编号 material_id。

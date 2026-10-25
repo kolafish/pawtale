@@ -1858,3 +1858,15 @@ async def test_waiting_for_correction_preserves_story_checkpoint(client, test_db
 
 
 pytestmark = pytest.mark.usefixtures("unchanged_story_structure")
+
+
+def test_long_material_preview_covers_middle_and_keeps_short_material_complete():
+    from app.services.memoir.prompt_budget import representative_excerpt
+
+    short = "师傅教我修自行车。"
+    assert representative_excerpt(short, limit=120) == short
+    long = "开头去上海。" + "甲" * 200 + "中间到南昌学修车。" + "乙" * 200 + "结尾退休回成都。"
+    preview = representative_excerpt(long, limit=120)
+    assert len(preview) <= 120
+    assert "开头去上海" in preview and "中间到南昌学修车" in preview and "退休回成都" in preview
+    assert "…" in preview

@@ -39,6 +39,7 @@ from app.services.memoir.offline_asr import (
     run_offline_asr,
 )
 from app.services.memoir.material_roles import (
+    interviewer_lines,
     is_narrator_material,
     narrator_material_clause,
 )
@@ -195,26 +196,8 @@ def _candidate_payload(utterance: MemoirVoiceUtterance) -> dict[str, object]:
 
 
 async def _latest_question_context(db: AsyncSession, utterance: MemoirVoiceUtterance) -> str:
-    message = utterance.chat_message
-    if message is not None and message.turn_index is not None:
-        text = await db.scalar(
-            select(MemoirChatMessage.content_text)
-            .where(
-                MemoirChatMessage.voice_session_id == utterance.voice_session_id,
-                MemoirChatMessage.turn_index < message.turn_index,
-                MemoirChatMessage.role.in_([
-                    MemoirChatMessageRole.ASSISTANT.value,
-                    MemoirChatMessageRole.INTERVIEWER.value,
-                ]),
-                func.trim(MemoirChatMessage.content_text) != "",
-            )
-            .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
-            .limit(1)
-        )
-        if text:
-            return text.strip()
-
-    return ""
+    lines = await interviewer_lines(db, [utterance.chat_message_id])
+    return lines.get(utterance.chat_message_id, "")
 
 
 def _primary_asr_result(results: Sequence[OfflineASRResult]) -> OfflineASRResult:
@@ -503,7 +486,7 @@ async def _reprocess_offline_asr_utterance(
             dialect_glossary=tuple(
                 f"{entry.source} => {entry.target}" for entry in dialect_glossary
             ),
-            recent_assistant_messages=(question_context,) if question_context else (),
+            interviewer_line=question_context,
         ),
         transcript_polish_level=polish_level,
     )
