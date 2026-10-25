@@ -71,10 +71,10 @@ async def get_mobile_memoir_book_share_status(
     response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    chapter_id: str | None = None,
+    chapter_id: str | None = None, section_id: str | None = None,
 ):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.share_status(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+    return await memoir_book_shares.share_status(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
 
 
 @router.post("/projects/{project_id}/book-output/share", response_model=MemoirBookShareCreateResponse)
@@ -83,10 +83,10 @@ async def create_mobile_memoir_book_share(
     response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    chapter_id: str | None = None,
+    chapter_id: str | None = None, section_id: str | None = None,
 ):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.create_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+    return await memoir_book_shares.create_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
 
 
 @router.put("/projects/{project_id}/book-output/share", response_model=MemoirBookShareCreateResponse)
@@ -95,10 +95,10 @@ async def update_mobile_memoir_book_share(
     response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    chapter_id: str | None = None,
+    chapter_id: str | None = None, section_id: str | None = None,
 ):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.update_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+    return await memoir_book_shares.update_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
 
 
 @router.delete("/projects/{project_id}/book-output/share", status_code=204)
@@ -106,9 +106,9 @@ async def revoke_mobile_memoir_book_share(
     project_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    chapter_id: str | None = None,
+    chapter_id: str | None = None, section_id: str | None = None,
 ):
-    await memoir_book_shares.revoke_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+    await memoir_book_shares.revoke_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     return Response(status_code=204)
 
 
@@ -124,11 +124,11 @@ async def read_mobile_memoir_book_share(
 
 @router.get("/projects/{project_id}/book-output/share/preview", response_model=MemoirBookOutputResponse)
 async def preview_mobile_memoir_book_share(
-    project_id: str, response: Response, chapter_id: str | None = None,
+    project_id: str, response: Response, chapter_id: str | None = None, section_id: str | None = None,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.preview_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id)
+    return await memoir_book_shares.preview_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
 
 
 @router.get("/book-shares/{token}/images/{asset_id}")

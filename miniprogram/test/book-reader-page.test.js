@@ -577,7 +577,7 @@ test("friend-view preview uses the private projection, keeps text if an image fa
   const { page } = loadBookReaderPage({ previewMemoirBookShare: async (...args) => { calls.push(args); return output; } });
   const context = pageContext(page);
   await context.onLoad({ projectId: "p", chapterId: "c", sharePreview: "1" });
-  assert.deepEqual(calls, [["p", "c"]]);
+  assert.deepEqual(calls, [["p", "c", undefined]]);
   assert.equal(context.data.error, "");
   assert.equal(context.readerText, "分享正文");
   assert.equal(context.data.readerMode, "chapter");

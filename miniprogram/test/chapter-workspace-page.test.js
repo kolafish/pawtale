@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  flushAsyncWork,
   mockMemoirApiModules,
   clearModule,
   loadPageModule,
@@ -1896,7 +1897,7 @@ test("chapter sharing creates a chapter-only reader link and revokes the same ch
   assert.deepEqual(context.onShareAppMessage(), { title: "第一次离家", path: "/pages/book-reader/index?shareToken=c1.chapter-token", imageUrl: "/assets/memoir-book-header.png" });
   await context.revokeBookShare();
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
-  assert.deepEqual(calls, [["status", "project-1", "chapter-1"], ["ensure", "project-1", "chapter-1"], ["revoke", "project-1", "chapter-1"]]);
+  assert.deepEqual(calls, [["status", "project-1", "chapter-1", undefined], ["ensure", "project-1", "chapter-1", undefined], ["revoke", "project-1", "chapter-1", undefined]]);
 });
 
 test("chapter share ignores a status response from a different chapter in the same project", async () => {
@@ -1911,5 +1912,60 @@ test("chapter share ignores a status response from a different chapter in the sa
   resolveStatus({ active: true, current: true, stale: false, token: "old-chapter-token" });
   await pending;
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+  assert.equal(context.bookShareToken, "");
+});
+
+
+test("focused story shares and previews only its stable section", async () => {
+  installWx();
+  const calls = [];
+  const urls = [];
+  global.wx.navigateTo = ({ url }) => urls.push(url);
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async (...args) => { calls.push(["status", ...args]); return { active: false, current: false, stale: false }; },
+    updateMemoirBookShare: async (...args) => { calls.push(["ensure", ...args]); return { token: "s1.story-token" }; },
+    readMemoirBookShare: async () => ({ latest_version: null }),
+    revokeMemoirBookShare: async (...args) => { calls.push(["stop", ...args]); },
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", focusedSectionId: "s", focusedSectionTitle: "院子里的故事", focusedSection: { hasDraft: true } });
+  await context.refreshBookShareStatus();
+  context.openReadingSharePreview();
+  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=p&chapterId=c&sectionId=s&sharePreview=1"]);
+  await context.prepareReadingShare();
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?shareToken=s1.story-token");
+  assert.equal(context.onShareAppMessage().title, "院子里的故事");
+  await context.revokeBookShare();
+  assert.deepEqual(calls, [["status", "p", "c", "s"], ["ensure", "p", "c", "s"], ["stop", "p", "c", "s"]]);
+});
+
+test("a response for another story in the same chapter never readies the current share", async () => {
+  installWx();
+  let finish;
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: () => new Promise(resolve => { finish = resolve; }),
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", focusedSectionId: "first", focusedSection: { hasDraft: true } });
+  const pending = context.refreshBookShareStatus();
+  context.setData({ focusedSectionId: "second" });
+  finish({ active: true, current: true, stale: false, token: "first-token" });
+  await pending;
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(context.bookShareToken, "");
+});
+
+
+test("removing the focused story clears its in-flight sharing state before returning to the chapter", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: false, current: false, stale: false }),
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", focusedSectionId: "removed", bookShareBusy: true, bookShareReady: true, bookShareActive: true });
+  context.sectionFocusId = "removed";
+  context.bookShareToken = "old-story";
+  context.applyWorkspace(workspace());
+  await flushAsyncWork();
+  assert.equal(context.data.focusedSectionId, "");
+  assert.equal(context.data.bookShareBusy, false);
+  assert.equal(context.data.bookShareReady, false);
   assert.equal(context.bookShareToken, "");
 });

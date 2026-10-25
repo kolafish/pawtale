@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.auth import WECHAT_PLACEHOLDER_DISPLAY_NAME
-from app.models.memoir import MemoirBookOutput, MemoirBookPlanChapter, MemoirMaterialShareVideo, MemoirShareLike
+from app.models.memoir import MemoirBookOutput, MemoirBookPlanChapter, MemoirMaterialShareVideo, MemoirShareLike, MemoirSection
 from app.models.projects import Project
 from app.models.users import User
 from app.schemas.memoir_share_likes import (
@@ -43,6 +43,10 @@ def book_target(output: MemoirBookOutput) -> ShareLikeTarget:
 
 def chapter_target(chapter: MemoirBookPlanChapter) -> ShareLikeTarget:
     return ShareLikeTarget(chapter.project_id, MemoirShareLike.chapter_id, chapter.id)
+
+
+def section_target(section: MemoirSection) -> ShareLikeTarget:
+    return ShareLikeTarget(section.project_id, MemoirShareLike.section_id, section.id)
 
 
 def video_target(job: MemoirMaterialShareVideo) -> ShareLikeTarget:
@@ -112,10 +116,11 @@ async def list_like_activity(
 ) -> MemoirShareLikeActivityResponse:
     await load_memoir_project(db, project_id, user_id)
     rows = (await db.execute(
-        select(MemoirShareLike, User, MemoirBookOutput, MemoirBookPlanChapter, MemoirMaterialShareVideo)
+        select(MemoirShareLike, User, MemoirBookOutput, MemoirBookPlanChapter, MemoirMaterialShareVideo, MemoirSection)
         .join(User, User.id == MemoirShareLike.user_id)
         .outerjoin(MemoirBookOutput, MemoirBookOutput.id == MemoirShareLike.book_output_id)
         .outerjoin(MemoirBookPlanChapter, MemoirBookPlanChapter.id == MemoirShareLike.chapter_id)
+        .outerjoin(MemoirSection, MemoirSection.id == MemoirShareLike.section_id)
         .outerjoin(MemoirMaterialShareVideo, MemoirMaterialShareVideo.id == MemoirShareLike.share_video_id)
         .where(
             MemoirShareLike.project_id == project_id,
@@ -125,11 +130,13 @@ async def list_like_activity(
         .limit(ACTIVITY_LIMIT)
     )).unique().all()
     items = []
-    for like, user, output, chapter, video in rows:
+    for like, user, output, chapter, video, section in rows:
         if output is not None:
             kind, title = "book", output.title
         elif chapter is not None:
             kind, title = "chapter", chapter.title
+        elif section is not None:
+            kind, title = "story", section.title
         else:
             kind = "video"
             title = share_video_title(ShareVideoJobMetadata.from_json(video.metadata_json), video.selected_text)

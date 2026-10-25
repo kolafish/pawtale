@@ -1364,17 +1364,27 @@ class MemoirChapterShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
+class MemoirSectionShare(Base):
+    __tablename__ = "memoir_section_shares"
+
+    section_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_sections.id", ondelete="CASCADE"), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+
+
 class MemoirShareLike(Base):
     """One family member's like on a shared book, chapter or story video."""
 
     __tablename__ = "memoir_share_likes"
     __table_args__ = (
         CheckConstraint(
-            "num_nonnulls(book_output_id, chapter_id, share_video_id) = 1",
+            "num_nonnulls(book_output_id, chapter_id, section_id, share_video_id) = 1",
             name="ck_memoir_share_likes_one_target",
         ),
         UniqueConstraint("user_id", "book_output_id", name="uq_memoir_share_likes_user_book"),
         UniqueConstraint("user_id", "chapter_id", name="uq_memoir_share_likes_user_chapter"),
+        UniqueConstraint("user_id", "section_id", name="uq_memoir_share_likes_user_section"),
         UniqueConstraint("user_id", "share_video_id", name="uq_memoir_share_likes_user_video"),
         Index("ix_memoir_share_likes_project_created", "project_id", "created_at"),
     )
@@ -1388,6 +1398,9 @@ class MemoirShareLike(Base):
     )
     chapter_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    section_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_sections.id", ondelete="CASCADE"), nullable=True, index=True,
     )
     share_video_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_material_share_videos.id", ondelete="CASCADE"), nullable=True, index=True,

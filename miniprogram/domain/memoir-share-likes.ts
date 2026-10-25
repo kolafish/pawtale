@@ -23,7 +23,7 @@ export interface MemoirShareLikes extends MemoirShareLikeSummary {
 
 export interface MemoirShareLikeActivityItem {
   id: string;
-  target_kind: "book" | "chapter" | "video";
+  target_kind: "book" | "chapter" | "story" | "video";
   target_title: string;
   liker: MemoirShareLiker;
   created_at: string;

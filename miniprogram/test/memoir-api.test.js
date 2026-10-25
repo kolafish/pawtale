@@ -818,3 +818,24 @@ test("book output export download encodes route and session cookie", async () =>
   );
   delete global.wx;
 });
+
+
+test("story share requests retain their section selector for status, preparation, preview and stop", async () => {
+  const requests = [];
+  installBookApiWxMock({ requests });
+  resetMemoirApiModules();
+  const api = require("../services/memoir-book-api.ts");
+  await api.getMemoirBookShareStatus("p/1", "c/1", "s/1");
+  await api.updateMemoirBookShare("p/1", "c/1", "s/1");
+  await api.previewMemoirBookShare("p/1", "c/1", "s/1");
+  await api.revokeMemoirBookShare("p/1", "c/1", "s/1");
+  const shares = requests.filter(item => item.url.includes("/book-output/share"));
+  assert.equal(shares.length, 4);
+  for (const item of shares) {
+    const url = new URL(item.url);
+    assert.equal(url.searchParams.get("section_id"), "s/1");
+    assert.equal(url.searchParams.get("chapter_id"), "c/1");
+    assert.match(url.pathname, /projects\/p%2F1\/book-output\/share/);
+  }
+  assert.equal(shares[2].url.includes("/share/preview?"), true);
+});

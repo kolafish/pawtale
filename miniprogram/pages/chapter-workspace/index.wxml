@@ -258,6 +258,7 @@
               <text>请小余改</text>
             </view>
           </view>
+          <template is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers, shareScopeLabel: '本故事'}}" />
         </block>
 
         <view wx:else class="focused-story-empty">
