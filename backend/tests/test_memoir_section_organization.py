@@ -66,6 +66,41 @@ def test_section_structure_prompt_does_not_require_specific_titles():
     assert "避免用空泛" not in prompt
 
 
+@pytest.mark.parametrize("same_question", [False, True])
+def test_section_regeneration_budgets_questions_and_answers(same_question):
+    from app.services.ai_references import ModelReferenceMap
+    from app.services.memoir.material_organization import MaterialOrganizationSectionCandidate
+    materials = [section_regeneration._MaterialSnapshot(utterance_id=f"u{i}", text="三岁。",
+        text_hash="test", transcript_version_id=None, include_in_book=True,
+        interviewer_line=("您那时" * 50) + ("？" if same_question else f"第{i}次？")) for i in range(80)]
+    prompt = section_regeneration._build_section_structure_prompt(chapter_title="童年", materials=materials)
+    outlines = json.loads(prompt.split("讲述概览：\n")[1].split("\n\n只返回 JSON")[0])
+    assert len(json.dumps(outlines, ensure_ascii=False)) <= section_regeneration.SECTION_STRUCTURE_SOURCE_CHAR_BUDGET
+    assert [row["source_index"] for row in outlines] == list(range(1, 81))
+    assert len(prompt) < section_regeneration.LLM_PROMPT_CHAR_LIMIT
+    sections = [MaterialOrganizationSectionCandidate(id="s", chapter_id="c", title="童年生活",
+        section_type="life_stage_summary", existing_material_examples=[])]
+    batches = section_regeneration._material_batches(materials)
+    assert len(batches) > 1
+    assert [item.utterance_id for batch in batches for item in batch] == [item.utterance_id for item in materials]
+    for batch in batches:
+        prompt = section_regeneration._build_material_assignment_prompt(chapter_title="童年", sections=sections,
+            materials=batch, section_refs=ModelReferenceMap("S", ["s"]),
+            material_refs=ModelReferenceMap("M", [item.utterance_id for item in batch]))
+        assert len(prompt) < section_regeneration.LLM_PROMPT_CHAR_LIMIT
+        assert all(item.interviewer_line in prompt for item in batch)
+
+
+def test_section_structure_refuses_a_budget_that_would_erase_source_evidence():
+    from fastapi import HTTPException
+    materials = [section_regeneration._MaterialSnapshot(utterance_id=f"u{i}", text="小时候住在河边。" * 20,
+        text_hash="test", transcript_version_id=None, include_in_book=True, interviewer_line="家乡的河流是什么样的？" * 20)
+        for i in range(140)]
+    with pytest.raises(HTTPException) as exc:
+        section_regeneration._build_section_structure_prompt(chapter_title="童年", materials=materials)
+    assert exc.value.status_code == 422
+
+
 class ReplayMaterialOrganizationAI(AITextServiceBase):
     provider_name = "fake"
     model_name = "fake-section-organizer"
@@ -1343,6 +1378,71 @@ async def _stopped_growth_job(client, test_db, project_id, text):
     return source, job
 
 
+@pytest.mark.db_independent
+async def test_growth_question_guard_locks_chapters_before_utterances(client, test_db):
+    import asyncio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+    pid, chapters, sources, _ = await _bootstrap_two_chapters(client, test_db)
+    source = sources[0]
+    batch = story_tree_growth.GrowthBatch(sources={source["utterance_id"]: ("unused", None)},
+        section_versions={}, section_chapters={}, chapter_updated_at={})
+    async with AsyncSession(test_db.bind) as automatic, AsyncSession(test_db.bind) as editor:
+        await editor.execute(select(MemoirBookPlanChapter.id).where(MemoirBookPlanChapter.id == chapters[0].id).with_for_update())
+        automatic_pid = await automatic.scalar(text("SELECT pg_backend_pid()"))
+        task = asyncio.create_task(story_tree_growth._lock_growth_questions(automatic, project_id=pid, batch=batch))
+        try:
+            async def blocked():
+                while not await test_db.scalar(text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"), {"pid": automatic_pid}):
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(blocked(), 3)
+            await editor.execute(text("SET LOCAL lock_timeout = '500ms'"))
+            await editor.execute(select(MemoirVoiceUtterance.id).where(
+                MemoirVoiceUtterance.id == source["utterance_id"]).with_for_update())
+            await editor.commit()
+            assert await asyncio.wait_for(task, 3)
+        finally:
+            await editor.rollback()
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await automatic.rollback()
+
+
+async def test_person_answer_detached_during_growth_is_not_placed_in_old_source(client, test_db, monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.memoir import narration_people
+    from app.services.memoir.transcript_projection import source_text_hash
+    pid, _, originals, _ = await _bootstrap_two_chapters(client, test_db)
+    source, job = await _stopped_growth_job(client, test_db, pid, "是，二舅也去了。")
+    answer = await test_db.get(MemoirChatMessage, source["message_id"])
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id, role="assistant",
+        content_text="二舅那次也去了吗？", turn_index=answer.turn_index - 1,
+        metadata_json={narration_people.ASKED_KEY: f"{originals[0]['message_id']}:version:1"})
+    test_db.add(question)
+    await test_db.flush()
+    answer.parent_message_id = question.id
+    answer.metadata_json = {narration_people.READING_KEY: {"schema_version": 3,
+        "question_message_id": question.id, "source_text_hash": source_text_hash(answer.content_text),
+        "question_context": narration_people.interviewer_context_signature(answer, question), "story_content": True}}
+    await test_db.commit()
+    other, _ = await _stopped_growth_job(client, test_db, pid, "我后来去过杭州。")
+
+    async def decide(**kwargs):
+        assert [item.id for item in kwargs["utterances"]] == [other["utterance_id"]]
+        async with AsyncSession(test_db.bind) as editor:
+            changed = await editor.get(MemoirChatMessage, answer.id)
+            changed.parent_message_id = None
+            changed.metadata_json = {**changed.metadata_json, "relation_updated_at": "2026-10-25T00:00:00"}
+            await editor.commit()
+        return [story_tree_growth.GrowthGroup(action="leave_unassigned", utterance_ids=[other["utterance_id"]])]
+
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert await test_db.scalar(select(MemoirSectionMaterial.id).where(
+        MemoirSectionMaterial.utterance_id == source["utterance_id"])) is None
+
+
 async def test_story_growth_repairs_section_order_gap_before_creating_section(
     client, test_db, monkeypatch,
 ):
@@ -1641,6 +1741,76 @@ async def test_initial_story_waits_when_narration_only_answers_the_interviewer(c
         test_db, project_id=project_id, voice_session_id=job.payload_json["voice_session_id"], source="narration",
     )
     assert again.id == job.id and again.status == "pending"
+
+
+@pytest.mark.parametrize("initial", [False, True])
+@pytest.mark.parametrize("change", ["question_text", "detach"])
+async def test_not_story_checkpoint_reconsiders_changed_question(client, test_db, monkeypatch, initial, change):
+    from app.models.memoir import MemoirChatMessage
+    if initial:
+        pid = await ensure_mobile_memoir_project(client)
+    else:
+        pid, _, _, _ = await _bootstrap_two_chapters(client, test_db)
+    source, job = await _stopped_growth_job(client, test_db, pid, "三岁。")
+    answer = await test_db.get(MemoirChatMessage, source["message_id"])
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="你现在几岁？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    ai = FakeStoryGrowthAI({"title": "", "chapters": [], "not_story_source_indices": [1]})
+    monkeypatch.setattr("app.services.memoir.book_plan_ai.get_ai_service", lambda _model=None: ai)
+    calls = []
+
+    async def decide(**kwargs):
+        calls.append(kwargs["interviewer_lines"])
+        return [story_tree_growth.GrowthGroup(action="not_story", utterance_ids=[source["utterance_id"]], reason="当前资料")]
+
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    job.result_json = result.result_json
+    job.status = result.status.value
+    await test_db.commit()
+    assert source["utterance_id"] in await story_tree_growth._deferred_sources(test_db, pid)
+    if change == "question_text":
+        question.content_text = "几岁上幼儿园？"
+    else:
+        answer.metadata_json = {"relation_updated_at": "2026-10-25T00:00:00"}
+    await test_db.commit()
+    assert source["utterance_id"] not in await story_tree_growth._deferred_sources(test_db, pid)
+    job.status = "running"
+    await test_db.commit()
+    await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert (ai.calls if initial else len(calls)) == 2
+
+
+async def test_initial_plan_discards_not_story_if_question_changes_during_model(client, test_db, monkeypatch):
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.models.memoir import MemoirChatMessage
+    pid = await ensure_mobile_memoir_project(client)
+    source, job = await _stopped_growth_job(client, test_db, pid, "三岁。")
+    answer = await test_db.get(MemoirChatMessage, source["message_id"])
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="你现在几岁？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    ai = FakeStoryGrowthAI({"title": "", "chapters": [], "not_story_source_indices": [1]})
+    call = ai._call_llm
+
+    async def changed(*args, **kwargs):
+        async with AsyncSession(test_db.bind) as writer:
+            current = await writer.get(MemoirChatMessage, question.id)
+            current.content_text = "几岁上幼儿园？"
+            await writer.commit()
+        return await call(*args, **kwargs)
+
+    monkeypatch.setattr(ai, "_call_llm", changed)
+    monkeypatch.setattr("app.services.memoir.book_plan_ai.get_ai_service", lambda _model=None: ai)
+    with pytest.raises(HTTPException) as exc:
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert exc.value.status_code == 409
+    await test_db.rollback()
+    assert not await story_tree_growth._deferred_sources(test_db, pid)
 
 
 async def test_retry_initial_story_with_empty_chapters_preserves_existing_user_draft(client, test_db):

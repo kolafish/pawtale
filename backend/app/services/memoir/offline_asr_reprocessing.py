@@ -145,10 +145,12 @@ async def candidate_utterances(
     return candidates
 
 
-async def load_reprocess_utterance(db: AsyncSession, utterance_id: str) -> MemoirVoiceUtterance | None:
+async def load_reprocess_utterance(db: AsyncSession, utterance_id: str, *, lock: bool = False) -> MemoirVoiceUtterance | None:
+    query = select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == utterance_id)
+    if lock:
+        query = query.with_for_update()
     return await db.scalar(
-        select(MemoirVoiceUtterance)
-        .where(MemoirVoiceUtterance.id == utterance_id)
+        query
         .options(
             selectinload(MemoirVoiceUtterance.audio_file),
             selectinload(MemoirVoiceUtterance.chat_message),
@@ -494,13 +496,17 @@ async def _reprocess_offline_asr_utterance(
     corrected_provider = polished.provider or verified.provider
     polish_provider = polished.provider
     db.expunge_all()
-    utterance = await load_reprocess_utterance(db, utterance_id)
+    utterance = await load_reprocess_utterance(db, utterance_id, lock=True)
     if utterance is None:
         raise ValueError("material utterance no longer exists")
     if await _has_user_edited_version(db, utterance.id):
         raise ValueError("user-edited transcript cannot be overwritten")
     if (utterance.transcript_raw or "") != baseline_raw or (utterance.transcript_edited or "") != baseline_edited:
         raise ValueError("material transcript changed while offline ASR was running")
+
+    current_questions = await interviewer_lines(db, [utterance.chat_message_id], lock=True)
+    if current_questions.get(utterance.chat_message_id, "") != question_context:
+        raise ValueError("material question changed while offline ASR was running")
 
     applied_at = datetime.now(UTC).isoformat()
     recognition_metadata: dict[str, object] = {

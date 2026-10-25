@@ -63,7 +63,7 @@ from app.services.memoir.section_regeneration import (
     SectionRegenerationNeedsMaterial,
     regenerate_chapter_sections,
 )
-from app.services.memoir.sections import finalize_section_changes, lock_chapter_structure, lock_plan_structure, place_material
+from app.services.memoir.sections import finalize_section_changes, lock_chapter_structure, lock_plan_structure, lock_project_chapters, place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -470,11 +470,12 @@ async def _live_batch_sources(
     ))).all())
     deferred = await _deferred_sources(db, project_id)
     deferred.update(progress.deferred)
+    lines = await interviewer_lines(db, (item.chat_message_id for item in sources))
     candidates = [item for item in sources if is_ready_story_material(item)
         and has_story_content(current_utterance_text(item)) and f"correct_transcript:{item.id}" not in correcting
         and not (item.id in deferred and deferred[item.id].status in {"not_story", "needs_user"}
             and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
-            and _question_context_matches(deferred[item.id].question_context, item.chat_message))]
+            and _question_context_matches(deferred[item.id].question_context, item.chat_message, lines))]
     person_answers = await narration_people.answer_sources(
         db, project_id=project_id, message_ids=(item.chat_message_id for item in candidates),
     )
@@ -495,21 +496,24 @@ async def _deferred_sources(db: AsyncSession, project_id: str) -> dict[str, Defe
         messages = (await db.execute(select(MemoirVoiceUtterance.id, MemoirChatMessage)
             .join(MemoirChatMessage, MemoirChatMessage.id == MemoirVoiceUtterance.chat_message_id)
             .where(MemoirVoiceUtterance.id.in_(result)).execution_options(populate_existing=True))).all()
+        lines = await interviewer_lines(db, (message.id for _, message in messages))
         for source_id, message in messages:
-            if not _question_context_matches(result[source_id].question_context, message):
+            if not _question_context_matches(result[source_id].question_context, message, lines):
                 result.pop(source_id)
     return result
 
 
-def _question_context(message: MemoirChatMessage | None) -> str:
-    return semantic_json_signature(message.parent_message_id if message else None)
+def _question_context(message: MemoirChatMessage | None, lines: dict[str, str] | None = None) -> str:
+    return semantic_json_signature({"resolver": "interviewer_context_v2",
+        "parent": message.parent_message_id if message else None,
+        "question": (lines or {}).get(message.id, "") if message else ""})
 
 
-def _question_context_matches(context: str, message: MemoirChatMessage | None) -> bool:
+def _question_context_matches(context: str, message: MemoirChatMessage | None, lines: dict[str, str] | None = None) -> bool:
     if not context:
         # Old checkpoints have no question binding. Keep them only if the relation was never edited.
-        return message is None or "relation_updated_at" not in (message.metadata_json or {})
-    return context == _question_context(message)
+        return message is None or (not (lines or {}).get(message.id) and "relation_updated_at" not in (message.metadata_json or {}))
+    return context == _question_context(message, lines)
 
 
 async def _person_answer_target(db: AsyncSession, project_id: str, source_id: str | None) -> tuple[str, int] | None:
@@ -531,7 +535,7 @@ async def _person_answer_target(db: AsyncSession, project_id: str, source_id: st
 async def _person_answer_can_progress(
     db: AsyncSession, *, project_id: str, answer: MemoirVoiceUtterance, source_id: str | None,
 ) -> bool:
-    content = narration_people.answer_story_content(answer.chat_message)
+    content = await narration_people.answer_story_content(db, answer.chat_message)
     if content is False or await _person_answer_target(db, project_id, source_id) is None:
         return False
     if content is None:
@@ -620,7 +624,8 @@ async def _create_initial_tree(
             progress.deferred[source.utterance_id] = DeferredSource(
                 text_hash=source_text_hash(source.text), status="not_story", reason="资料或对话回应，不含故事",
                 attempts=MAX_UNASSIGNED_ATTEMPTS,
-                question_context=semantic_json_signature(source.parent_message_id),
+                question_context=semantic_json_signature({"resolver": "interviewer_context_v2",
+                    "parent": source.parent_message_id, "question": source.interviewer_line}),
             )
         await _save_progress(db, job, progress)
 
@@ -698,6 +703,18 @@ async def _finish_initial_sections(
         await _save_progress(db, job, progress)
 
 
+async def _lock_growth_questions(db: AsyncSession, *, project_id: str, batch: GrowthBatch) -> bool:
+    await lock_project_chapters(db, project_id=project_id)
+    sources = (await db.scalars(select(MemoirVoiceUtterance).where(
+        MemoirVoiceUtterance.id.in_(batch.sources),
+    ).order_by(MemoirVoiceUtterance.id).with_for_update()
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+        .execution_options(populate_existing=True))).all()
+    lines = await interviewer_lines(db, (item.chat_message_id for item in sources), lock=True)
+    return all(_question_context_matches(batch.question_contexts.get(item.id, ""), item.chat_message, lines)
+               for item in sources)
+
+
 async def _place_groups(
     db: AsyncSession,
     *,
@@ -734,6 +751,8 @@ async def _place_groups(
                 )
             else:
                 raise RuntimeError("故事树生长结果缺少目标小节")
+            if not await _lock_growth_questions(db, project_id=project_id, batch=batch):
+                raise HTTPException(409, "提问已变化，请重新整理素材")
             try:
                 placement = await place_material(
                     db,
@@ -976,10 +995,11 @@ async def grow_story_tree(
     ).all()
     if source_ids is not None:
         project_sources = [item for item in project_sources if item.id in source_ids]
+    lines = await interviewer_lines(db, (item.chat_message_id for item in project_sources))
     deferred.update(progress.deferred)
     for item in project_sources:
         previous = deferred.get(item.id)
-        if previous and not _question_context_matches(previous.question_context, item.chat_message):
+        if previous and not _question_context_matches(previous.question_context, item.chat_message, lines):
             deferred.pop(item.id)
             progress.deferred.pop(item.id, None)
     person_answers = await narration_people.answer_sources(
@@ -987,7 +1007,7 @@ async def grow_story_tree(
     )
     # Retry budgets belong to one set of evidence, not to the source forever.
     context_signature = semantic_json_signature({
-        "sources": [(item.id, source_text_hash(current_utterance_text(item))) for item in project_sources],
+        "sources": [(item.id, source_text_hash(current_utterance_text(item)), _question_context(item.chat_message, lines)) for item in project_sources],
         "chapters": [(item.id, item.title) for item in before_chapters],
         "sections": [(item.id, item.chapter_id, item.title, item.version) for item in before_sections],
     })
@@ -1001,20 +1021,20 @@ async def grow_story_tree(
         if previous and previous.text_hash == text_hash and previous.status == "not_story":
             progress.deferred[answer.id] = previous
             continue
-        story_content = narration_people.answer_story_content(answer.chat_message)
+        story_content = await narration_people.answer_story_content(db, answer.chat_message)
         if story_content is None:
             from app.services.memoir.narrator_profile import schedule_narrator_profile
             await schedule_narrator_profile(db, utterance=answer, require_answer_reading=True)
             progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="pending",
                 reason="等待人物补答的内容核对", context_signature=context_signature,
-                question_context=_question_context(answer.chat_message))
+                question_context=_question_context(answer.chat_message, lines))
         elif story_content:
             linked_answers.append(answer)
         else:
             progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="not_story",
                 reason="人物问题后的回复不含故事事实或感受", attempts=MAX_UNASSIGNED_ATTEMPTS,
                 context_signature=context_signature,
-                question_context=_question_context(answer.chat_message))
+                question_context=_question_context(answer.chat_message, lines))
     utterances = [
         item
         for item in project_sources
@@ -1035,9 +1055,10 @@ async def grow_story_tree(
             )
         )
     ]
+    linked_question_contexts = {answer.id: _question_context(answer.chat_message, lines) for answer in linked_answers}
     if progress.batch is not None and any(
         item.id in progress.batch.sources
-        and not _question_context_matches(progress.batch.question_contexts.get(item.id, ""), item.chat_message)
+        and not _question_context_matches(progress.batch.question_contexts.get(item.id, ""), item.chat_message, lines)
         for item in project_sources
     ):
         progress.batch = None
@@ -1050,14 +1071,13 @@ async def grow_story_tree(
                 item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
                 for item in utterances
             },
-            question_contexts={item.id: _question_context(item.chat_message) for item in utterances},
+            question_contexts={item.id: _question_context(item.chat_message, lines) for item in utterances},
             section_versions={item.id: item.version for item in sections},
             section_chapters={item.id: item.chapter_id for item in sections},
             chapter_updated_at={item.id: item.updated_at for item in chapters},
             recovery_materials={item.id: recovery_materials[item.id] for item in utterances if item.id in recovery_materials},
         )
         ai_model = await load_project_ai_model(db, job.project_id, None)
-        lines = await interviewer_lines(db, (item.chat_message_id for item in utterances))
         offered = await completion_interviews.offered_chapters(db, (item.chat_message_id for item in utterances))
         chapter_summaries, section_summaries = await load_structure_summaries(
             db, project_id=job.project_id, chapters=chapters, sections=sections,
@@ -1077,6 +1097,11 @@ async def grow_story_tree(
         await _save_progress(db, job, progress)
     if progress.batch is not None:
         batch = progress.batch
+        if not await _lock_growth_questions(db, project_id=job.project_id, batch=batch):
+            progress.batch = None
+            await _save_progress(db, job, progress)
+            return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
+                result_json={**(job.result_json or {}), "stage": "question_context_changed"}), False
         answer_ids = {item.id for item in project_sources if item.chat_message_id in person_answers}
         batch.groups = [replace(group, utterance_ids=[value for value in group.utterance_ids if value not in answer_ids])
                         for group in batch.groups]
@@ -1084,6 +1109,8 @@ async def grow_story_tree(
             if group.action == "not_story":
                 for source_id in group.utterance_ids:
                     if source_id in batch.recovery_materials:
+                        if not await _lock_growth_questions(db, project_id=job.project_id, batch=batch):
+                            raise HTTPException(409, "提问已变化，请重新整理素材")
                         if await _remove_recovered_nonstory(db, project_id=job.project_id, batch=batch, source_id=source_id):
                             progress.deferred[source_id] = DeferredSource(
                                 text_hash=batch.sources[source_id][0], status="not_story", reason=group.reason,
@@ -1107,6 +1134,8 @@ async def grow_story_tree(
                 )
             ).all()
         )
+        if not await _lock_growth_questions(db, project_id=job.project_id, batch=batch):
+            raise HTTPException(409, "提问已变化，请重新整理素材")
         for group in batch.groups:
             for source_id in group.utterance_ids:
                 if source_id in assigned_ids:
@@ -1137,9 +1166,26 @@ async def grow_story_tree(
                     question_context=batch.question_contexts.get(source_id, ""),
                 )
         progress.batch = None
+        await _save_progress(db, job, progress)
     # A saved person question already identifies its source. Only the original narration goes
     # through classification; its answer follows the source's current placement afterwards.
     for answer in linked_answers:
+        await lock_project_chapters(db, project_id=job.project_id)
+        fresh = await db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == answer.id)
+            .with_for_update().options(selectinload(MemoirVoiceUtterance.chat_message))
+            .execution_options(populate_existing=True))
+        fresh_lines = await interviewer_lines(db, [fresh.chat_message_id] if fresh else [], lock=True)
+        fresh_sources = await narration_people.answer_sources(db, project_id=job.project_id,
+            message_ids=[fresh.chat_message_id] if fresh else [])
+        if (fresh is None or not _question_context_matches(linked_question_contexts[answer.id], fresh.chat_message, fresh_lines)
+            or fresh_sources.get(fresh.chat_message_id) != person_answers[answer.chat_message_id]
+            or await narration_people.answer_story_content(db, fresh.chat_message) is not True):
+            if fresh is not None:
+                from app.services.memoir.narrator_profile import schedule_narrator_profile
+                await schedule_narrator_profile(db, utterance=fresh, require_answer_reading=True)
+            await _save_progress(db, job, progress)
+            continue
+        answer = fresh
         source_id = person_answers[answer.chat_message_id]
         target = await _person_answer_target(db, job.project_id, source_id)
         if target is not None:
@@ -1163,8 +1209,9 @@ async def grow_story_tree(
         progress.deferred[answer.id] = DeferredSource(
             text_hash=source_text_hash(current_utterance_text(answer)), status="pending",
             reason="补充回答等待原讲述可收录后加入", context_signature=context_signature,
-            question_context=_question_context(answer.chat_message),
+            question_context=_question_context(answer.chat_message, lines),
         )
+        await _save_progress(db, job, progress)
     # Preserve placement checkpoints before reviewing; report only the final
     # directory, not a transient chapter that the same review absorbed.
     await _save_progress(db, job, progress)

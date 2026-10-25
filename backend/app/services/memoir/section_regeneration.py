@@ -238,13 +238,19 @@ def _ordered_materials(
 
 
 async def _material_snapshots(
-    db: AsyncSession, chapter: MemoirBookPlanChapter,
+    db: AsyncSession, chapter: MemoirBookPlanChapter, *, lock: bool = False,
 ) -> list[_MaterialSnapshot]:
     snapshots: list[_MaterialSnapshot] = []
     ordered = _ordered_materials(chapter)
+    if lock:
+        await db.execute(select(MemoirVoiceUtterance).where(
+            MemoirVoiceUtterance.id.in_([material.utterance_id for _, material in ordered]),
+        ).order_by(MemoirVoiceUtterance.id).with_for_update()
+            .options(selectinload(MemoirVoiceUtterance.chat_message))
+            .execution_options(populate_existing=True))
     lines = await interviewer_lines(db, (
         material.utterance.chat_message_id for _, material in ordered if material.utterance is not None
-    ))
+    ), lock=lock)
     for section, material in ordered:
         utterance = material.utterance
         text = current_utterance_text(utterance) if utterance else ""
@@ -293,20 +299,31 @@ def _build_section_structure_prompt(
     materials: list[_MaterialSnapshot],
     max_sections: int | None = None,
 ) -> str:
-    excerpt_limit = max(
-        120,
-        SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // max(1, len(materials)),
-    )
-    material_outlines = [
-        {
-            "source_index": index,
-            "excerpt": representative_excerpt(material.text, limit=excerpt_limit),
-            **({"interviewer_line": material.interviewer_line} if material.interviewer_line else {}),
-            **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
-               if max_sections is not None else {}),
-        }
-        for index, material in enumerate(materials, start=1)
-    ]
+    def outlines(limit: int) -> list[dict[str, object]]:
+        result = []
+        for index, material in enumerate(materials, start=1):
+            question_limit = min(len(material.interviewer_line), max(limit // 2, limit - len(material.text)))
+            result.append({
+                "source_index": index,
+                "excerpt": representative_excerpt(material.text, limit=max(0, limit - question_limit)),
+                **({"interviewer_line": representative_excerpt(material.interviewer_line, limit=question_limit)}
+                   if material.interviewer_line else {}),
+                **({"current_section": f"{material.source_section_order + 1}. {material.source_section_title}"}
+                   if max_sections is not None else {}),
+            })
+        return result
+
+    # Budget the actual serialized questions, answers and identity fields together.
+    low, high = 24, SECTION_STRUCTURE_SOURCE_CHAR_BUDGET
+    if len(json.dumps(outlines(low), ensure_ascii=False)) > SECTION_STRUCTURE_SOURCE_CHAR_BUDGET:
+        raise HTTPException(status_code=422, detail="本章素材数量过多，无法安全规划小节结构")
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(json.dumps(outlines(middle), ensure_ascii=False)) <= SECTION_STRUCTURE_SOURCE_CHAR_BUDGET:
+            low = middle
+        else:
+            high = middle - 1
+    material_outlines = outlines(low)
     chapter_json = json.dumps(
         {"title": chapter_title},
         ensure_ascii=False,
@@ -505,18 +522,23 @@ def _material_batches(
 ) -> list[list[_MaterialSnapshot]]:
     batches: list[list[_MaterialSnapshot]] = []
     current: list[_MaterialSnapshot] = []
-    current_text_chars = 0
+    current_text_chars = 2
     for material in materials:
+        material_chars = len(json.dumps({
+            "utterance_id": material.utterance_id, "text": material.text,
+            **({"interviewer_line": material.interviewer_line} if material.interviewer_line else {}),
+            "current_section": f"{material.source_section_order + 1}. {material.source_section_title}",
+        }, ensure_ascii=False)) + 2
         if (
             current
-            and current_text_chars + len(material.text)
+            and current_text_chars + material_chars
             > MATERIAL_BATCH_CHAR_BUDGET
         ):
             batches.append(current)
             current = []
-            current_text_chars = 0
+            current_text_chars = 2
         current.append(material)
-        current_text_chars += len(material.text)
+        current_text_chars += material_chars
     if current:
         batches.append(current)
     return batches
@@ -844,7 +866,7 @@ async def regenerate_chapter_sections(
             db, project_id=project_id, chapter_id=chapter_id,
         )
         _validate_expected_sections(chapter, req)
-        _validate_material_snapshots(await _material_snapshots(db, chapter), materials)
+        _validate_material_snapshots(await _material_snapshots(db, chapter, lock=True), materials)
         current_ids = {
             section.id for section in chapter.sections
             if section.status == "active" and section.include_in_book
@@ -925,7 +947,7 @@ async def regenerate_chapter_sections(
         chapter_id=chapter_id,
     )
     _validate_expected_sections(chapter, req)
-    _validate_material_snapshots(await _material_snapshots(db, chapter), materials)
+    _validate_material_snapshots(await _material_snapshots(db, chapter, lock=True), materials)
     if preserve_initial_structure:
         # Initial placement is already complete. An uncertain finer partition
         # must not remove included sources from the book. Keep the whole valid

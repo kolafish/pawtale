@@ -90,12 +90,22 @@ def is_ready_story_material(utterance: MemoirVoiceUtterance) -> bool:
 
 
 async def interviewer_messages(
-    db: AsyncSession, message_ids: Iterable[str | None],
+    db: AsyncSession, message_ids: Iterable[str | None], *, lock: bool = False,
 ) -> dict[str, MemoirChatMessage]:
     """Honor edited question bindings, else find the preceding interviewer across answer segments."""
     ids = {message_id for message_id in message_ids if message_id}
     if not ids:
         return {}
+    if lock:
+        # Lock answers and possible questions together in a stable order. A
+        # question edit/rebinding must not race final validation and writing.
+        sessions = select(MemoirChatMessage.voice_session_id).where(MemoirChatMessage.id.in_(ids))
+        await db.execute(select(MemoirChatMessage).where(or_(
+            MemoirChatMessage.id.in_(ids),
+            and_(MemoirChatMessage.voice_session_id.in_(sessions), MemoirChatMessage.role.in_([
+                MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value,
+            ])),
+        )).order_by(MemoirChatMessage.id).with_for_update().execution_options(populate_existing=True))
     answer = aliased(MemoirChatMessage)
     candidate = aliased(MemoirChatMessage)
     eligible = (
@@ -124,8 +134,22 @@ async def interviewer_messages(
     return dict(rows.all())
 
 
-async def interviewer_lines(db: AsyncSession, message_ids: Iterable[str | None]) -> dict[str, str]:
+async def interviewer_lines(
+    db: AsyncSession, message_ids: Iterable[str | None], *, lock: bool = False,
+) -> dict[str, str]:
     return {
         message_id: message.content_text.strip()
-        for message_id, message in (await interviewer_messages(db, message_ids)).items()
+        for message_id, message in (await interviewer_messages(db, message_ids, lock=lock)).items()
     }
+
+
+def interviewer_context_signature(message: MemoirChatMessage, question: MemoirChatMessage | None) -> str:
+    from app.services.memoir.semantic_state import semantic_json_signature
+    if question is None and message.parent_message_id is None and not (message.metadata_json or {}).get("relation_updated_at"):
+        return ""
+    return semantic_json_signature({
+        "parent": message.parent_message_id,
+        "question_id": question.id if question else None,
+        "question": question.content_text.strip() if question else "",
+        "person_asked": (question.metadata_json or {}).get("person_asked") if question else None,
+    })

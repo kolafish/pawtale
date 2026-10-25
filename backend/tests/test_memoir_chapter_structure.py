@@ -162,6 +162,39 @@ async def test_question_edit_invalidates_directory_and_section_regeneration_inpu
         regeneration._validate_material_snapshots(await regeneration._material_snapshots(test_db, chapter), snapshots)
 
 
+@pytest.mark.db_independent
+async def test_final_directory_write_holds_question_lock(client, test_db, monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from app.models.memoir import MemoirChatMessage
+    pid, uid = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    answer = sections[0].materials[0].utterance.chat_message
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="妈妈叫什么名字？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    _provider(monkeypatch, _merge(context))
+    apply = structure.apply_structure
+    checked = []
+
+    async def apply_with_editor(*args, **kwargs):
+        async with AsyncSession(test_db.bind) as editor:
+            await editor.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            with pytest.raises(DBAPIError) as exc:
+                await editor.execute(text("UPDATE memoir_chat_messages SET content_text = :content WHERE id = :id"),
+                    {"content": "妈妈在学校教什么？", "id": question.id})
+            assert exc.value.orig.sqlstate == "55P03"
+            checked.append(True)
+            await editor.rollback()
+        return await apply(*args, **kwargs)
+
+    monkeypatch.setattr(structure, "apply_structure", apply_with_editor)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert checked == [True]
+
+
 def _merge(context, *, merge_sections=False):
     output = context.outline.model_copy(deep=True)
     first, second, third, fourth = output.chapters

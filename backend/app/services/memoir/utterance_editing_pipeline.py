@@ -11,6 +11,8 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import narrator_profile, sections, story_tree_growth
+from app.services.memoir.material_roles import interviewer_lines
+from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.narrative.framework_matching import (
     schedule_framework_matching_job,
@@ -18,7 +20,6 @@ from app.services.memoir.narrative.framework_matching import (
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
     current_utterance_text,
-    source_text_hash,
 )
 
 
@@ -29,12 +30,18 @@ class TranscriptMutationGuard:
 
 
 def transcript_mutation_guard(
-    utterance: MemoirVoiceUtterance,
+    utterance: MemoirVoiceUtterance, *, interviewer_line: str = "",
 ) -> TranscriptMutationGuard:
     return TranscriptMutationGuard(
-        source_text_hash=source_text_hash(current_utterance_text(utterance)),
+        source_text_hash=_cleanup_input_hash(current_utterance_text(utterance), interviewer_line),
         transcript_version_id=current_transcript_version_id(utterance),
     )
+
+
+def _cleanup_input_hash(text: str, question: str) -> str:
+    # The existing API field is an opaque preview token echoed by clients.
+    # Include interpretation context so older/context-stale previews conflict.
+    return semantic_json_signature({"text": text.strip(), "question": question.strip(), "engine": "cleanup_input_v2"})
 
 
 async def claim_transcript_mutation_guard(
@@ -59,9 +66,11 @@ async def claim_transcript_mutation_guard(
     locked_text = (locked_utterance.transcript_edited or "").strip() or (
         locked_utterance.transcript_raw or ""
     ).strip()
-    if source_text_hash(locked_text) != expected.source_text_hash:
-        return False
     if locked_utterance.chat_message_id is None:
+        return False
+    lines = await interviewer_lines(db, [locked_utterance.chat_message_id], lock=True)
+    question = lines.get(locked_utterance.chat_message_id, "")
+    if _cleanup_input_hash(locked_text, question) != expected.source_text_hash:
         return False
 
     locked_message = (
@@ -79,7 +88,7 @@ async def claim_transcript_mutation_guard(
     if locked_message is None:
         return False
     matches = (
-        source_text_hash(locked_message.content_text) == expected.source_text_hash
+        _cleanup_input_hash(locked_message.content_text, question) == expected.source_text_hash
         and locked_message.transcript_version_id == expected.transcript_version_id
     )
     if not matches:

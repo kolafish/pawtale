@@ -1280,10 +1280,10 @@ async def cleanup_voice_transcript(
         if req.transcript_polish_level is not None
         else project_transcript_polish_level(utterance.voice_session.project)
     )
-    expected = transcript_mutation_guard(utterance)
     cleanup_context = await load_voice_transcript_cleanup_context(
         db, utterance.voice_session, exclude_message_id=utterance.chat_message_id,
     )
+    expected = transcript_mutation_guard(utterance, interviewer_line=cleanup_context.interviewer_line)
     # Persist a changed model preference, then release the request transaction
     # before waiting on the provider. Re-lock and revalidate the exact source
     # rows before applying the result.

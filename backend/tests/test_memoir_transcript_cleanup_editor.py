@@ -200,6 +200,32 @@ async def test_memoir_transcript_cleanup_confirm_rejects_stale_preview(client, t
     assert utterance.transcript_edited == "用户在预览后补充了新的内容。"
 
 
+@pytest.mark.parametrize("change", ["question_text", "detach"])
+async def test_cleanup_confirm_rejects_changed_question(client, test_db, monkeypatch, change):
+    created = await create_test_voice_transcript(client, test_db, text="三岁。")
+    pid = created["session"]["project_id"]
+    answer = await test_db.get(MemoirChatMessage, created["message_id"])
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="几岁上幼儿园？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    preview = await _preview_item(client, monkeypatch, project_id=pid, utterance_id=created["utterance_id"])
+    if change == "question_text":
+        question.content_text = "几岁搬到外婆家？"
+    else:
+        answer.metadata_json = {"relation_updated_at": "2026-10-25T00:00:00"}
+    await test_db.commit()
+    response = await client.post(f"/api/memoir/projects/{pid}/transcript-cleanup/confirm", json={"items": [{
+        "utterance_id": created["utterance_id"], "source_text_hash": preview["source_text_hash"],
+        "source_transcript_version_id": preview["source_transcript_version_id"],
+        "cleaned_text": "我三岁上幼儿园。", "provider": "fake", "created_by": "ai",
+    }]})
+    assert response.status_code == 409
+    await test_db.refresh(answer)
+    assert answer.content_text == "三岁。"
+    assert answer.transcript_version_id == created["transcript_version_id"]
+
+
 async def test_memoir_transcript_cleanup_rejects_entire_batch_when_one_preview_is_stale(
     client,
     test_db,

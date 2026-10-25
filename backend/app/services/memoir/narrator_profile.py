@@ -47,7 +47,7 @@ from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_secon
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import book_outputs, editing_jobs, narration_people
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
-from app.services.memoir.material_roles import interviewer_messages
+from app.services.memoir.material_roles import interviewer_messages, interviewer_context_signature
 from app.services.memoir.projects import (
     FIRST_PROJECT_TITLE,
     INFERRED_PROFILE_FIELDS_KEY,
@@ -104,15 +104,18 @@ class _ProfileReading(BaseModel):
     transcript_version_id: str
     output: _ProfileOutput
     source_text_hash: str | None = None
+    question_context: str = ""
 
 
-def _reading(message: MemoirChatMessage) -> _ProfileReading | None:
+def _reading(message: MemoirChatMessage, question_context: str = "") -> _ProfileReading | None:
     stored = (message.metadata_json or {}).get(READING_KEY)
     if not isinstance(stored, dict):
         return None
     try:
         reading = _ProfileReading.model_validate(stored)
     except ValidationError:
+        return None
+    if reading.question_context != question_context:
         return None
     version_id = message.transcript_version_id or ""
     if reading.transcript_version_id == version_id:
@@ -398,18 +401,20 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
     ):
         return
     version_id = message.transcript_version_id or ""
+    question = (await interviewer_messages(db, [message.id])).get(message.id)
+    question_context = interviewer_context_signature(message, question)
     dedupe_key = f"narrator_profile:{utterance.id}"
     existing = await db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == dedupe_key))
     if (
         existing is not None
         and (existing.payload_json or {}).get("transcript_version_id") == version_id
+        and (existing.payload_json or {}).get("question_context", "") == question_context
         and existing.status != MemoirEditingJobStatus.FAILED.value
         and (not require_answer_reading or (existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
              and (existing.payload_json or {}).get("require_answer_reading") is True)
-             or narration_people.answer_story_content(message) is not None)
+             or await narration_people.answer_story_content(db, message) is not None)
     ):
         return
-    previous_line = await _previous_line_id(db, message)
     await editing_jobs.enqueue_editing_job(
         db,
         project_id=project.id,
@@ -417,19 +422,13 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         payload_json={
             "utterance_id": utterance.id,
             "transcript_version_id": version_id,
-            "previous_message_id": previous_line,
+            "question_context": question_context,
             **({"require_answer_reading": True} if require_answer_reading else {}),
         },
         dedupe_key=dedupe_key,
         replace_completed=True,
         reschedule_running=True,
     )
-
-
-async def _previous_line_id(db: AsyncSession, message: MemoirChatMessage) -> str | None:
-    questions = await interviewer_messages(db, [message.id])
-    question = questions.get(message.id)
-    return question.id if question else None
 
 
 async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> editing_jobs.EditingJobResult:
@@ -457,7 +456,6 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             project=project,
             utterance=utterance,
             transcript_version_id=version_id,
-            previous_message_id=payload.get("previous_message_id"),
         )
         if current is None:
             # A dependency changed without necessarily queuing its own profile job (e.g. a writing
@@ -470,17 +468,14 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             return editing_jobs.EditingJobResult(result_json={"awaiting_profile_sources": True})
         if current and (narration_people.ready(utterance, utterance.chat_message)
                         or payload.get("require_answer_reading") is True):
-            previous = payload.get("previous_message_id")
-            previous_message = await db.get(MemoirChatMessage, previous) if isinstance(previous, str) else None
             current = await narration_people.read_people(
                 db,
                 project=project,
                 narrator=str(_profile(project).get("narrator_name") or ""),
                 message=utterance.chat_message,
-                previous_line=previous_message.content_text.strip() if previous_message else "",
                 transcript_version_id=version_id,
             )
-            if current and narration_people.answer_story_content(utterance.chat_message) is not None:
+            if current and await narration_people.answer_story_content(db, utterance.chat_message) is not None:
                 from app.services.memoir.story_tree_growth import schedule_story_tree_growth
                 await schedule_story_tree_growth(db, project_id=project.id,
                     voice_session_id=utterance.voice_session_id, source="person_answer_read")
@@ -504,7 +499,12 @@ async def run_narrator_profile_job(db: AsyncSession, job: MemoirEditingJob) -> e
             .values(rerun_requested=True, run_after=utcnow_naive() + RETRY_DELAYS[failures])
         )
         return editing_jobs.EditingJobResult(result_json={"failures": failures + 1, "last_error": str(exc)[:200]})
-    # When the transcript changed meanwhile, its new version is queued as a rerun, which only follows a success.
+    if not current:
+        latest = await _load_utterance(db, utterance.id)
+        if latest is not None:
+            await schedule_narrator_profile(db, utterance=latest,
+                require_answer_reading=payload.get("require_answer_reading") is True)
+    # A changed transcript or question is queued as a rerun, which follows a success.
     return editing_jobs.EditingJobResult(
         result_json={"utterance_id": utterance.id, **({} if current else {"superseded": True})}
     )
@@ -566,12 +566,12 @@ async def _extract_profile(
     *,
     project: Project,
     utterance: MemoirVoiceUtterance,
-    previous_message_id: str | None,
 ) -> _ProfileReading:
     message = utterance.chat_message
     version_id = message.transcript_version_id or ""
     segment = message.content_text.strip()
-    previous = await db.get(MemoirChatMessage, previous_message_id) if isinstance(previous_message_id, str) else None
+    previous = (await interviewer_messages(db, [message.id])).get(message.id)
+    question_context = interviewer_context_signature(message, previous)
     ai_model = resolve_project_ai_model(project, None)
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     prompt = build_profile_prompt(
@@ -595,7 +595,7 @@ async def _extract_profile(
         max_attempts=policy.max_attempts,
     )
     return _ProfileReading(transcript_version_id=version_id, output=generated.value,
-        source_text_hash=source_text_hash(normalized_material_text(segment)))
+        source_text_hash=source_text_hash(normalized_material_text(segment)), question_context=question_context)
 
 
 def _other_segments(project_id: str, utterance_id: str) -> Select[tuple[MemoirVoiceUtterance]]:
@@ -639,7 +639,8 @@ async def _profile_recovery(
     for segment in await db.scalars(_other_segments(project_id, excluding).with_for_update(
         of=(MemoirVoiceUtterance, MemoirChatMessage),
     )):
-        reading = _reading(segment.chat_message)
+        question = (await interviewer_messages(db, [segment.chat_message.id])).get(segment.chat_message.id)
+        reading = _reading(segment.chat_message, interviewer_context_signature(segment.chat_message, question))
         if reading is None:
             result.pending = segment
             return result
@@ -668,13 +669,13 @@ async def fill_narrator_profile(
     project: Project,
     utterance: MemoirVoiceUtterance,
     transcript_version_id: str,
-    previous_message_id: str | None,
 ) -> bool | None:
     """True: applied; False: own transcript superseded; None: recovery needs a continuation."""
     if (utterance.chat_message.transcript_version_id or "") != transcript_version_id:
         return False
-    reading = _reading(utterance.chat_message) or await _extract_profile(
-        db, project=project, utterance=utterance, previous_message_id=previous_message_id,
+    question = (await interviewer_messages(db, [utterance.chat_message.id])).get(utterance.chat_message.id)
+    reading = _reading(utterance.chat_message, interviewer_context_signature(utterance.chat_message, question)) or await _extract_profile(
+        db, project=project, utterance=utterance,
     )
     output = reading.output
     found = _profile_values(output)
@@ -683,13 +684,27 @@ async def fill_narrator_profile(
         # Recompute ownership and recovery after every provider call. The final selection and profile
         # write share the same locks, so a previously valid reading cannot silently turn into a gap.
         await db.refresh(project, with_for_update=True)
+        # Recovery can consume any earlier narration. Lock all of its possible
+        # utterances before shared questions, matching transcript mutation order.
+        message_ids = (await db.scalars(select(MemoirVoiceUtterance.chat_message_id)
+            .join(MemoirChatMessage, MemoirChatMessage.id == MemoirVoiceUtterance.chat_message_id)
+            .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirVoiceUtterance.voice_session_id)
+            .where(MemoirChatMessage.project_id == project.id,
+                MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+                MemoirVoiceSession.interview_type == MemoirInterviewType.AI_INTERVIEW.value,
+                MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
+                func.trim(MemoirChatMessage.content_text) != "")
+            .order_by(MemoirVoiceUtterance.id).with_for_update(of=MemoirVoiceUtterance))).all()
+        questions = await interviewer_messages(db, message_ids, lock=True)
         current = await _load_utterance(db, utterance.id)
         if current is None or current.chat_message is None:
             await db.commit()
             return False
         message = current.chat_message
-        await db.refresh(message, with_for_update=True)
-        if (message.transcript_version_id or "") != transcript_version_id:
+        question = questions.get(message.id)
+        await db.refresh(message)
+        if ((message.transcript_version_id or "") != transcript_version_id
+            or interviewer_context_signature(message, question) != reading.question_context):
             await db.commit()
             return False
         message.metadata_json = {**(message.metadata_json or {}), READING_KEY: reading.model_dump()}
@@ -716,14 +731,16 @@ async def fill_narrator_profile(
         attempted.add(pending.id)
         recovered = await _extract_profile(
             db, project=project, utterance=pending,
-            previous_message_id=await _previous_line_id(db, pending.chat_message),
         )
         pending = await _load_utterance(db, pending.id)
         if pending is not None and pending.chat_message is not None:
             pending_message = pending.chat_message
-            await db.refresh(pending_message, with_for_update=True)
-            if _reading(pending_message) is None:
-                if (pending_message.transcript_version_id or "") != recovered.transcript_version_id:
+            question = (await interviewer_messages(db, [pending_message.id], lock=True)).get(pending_message.id)
+            await db.refresh(pending_message)
+            context = interviewer_context_signature(pending_message, question)
+            if _reading(pending_message, context) is None:
+                if ((pending_message.transcript_version_id or "") != recovered.transcript_version_id
+                    or context != recovered.question_context):
                     await db.commit()
                     return None
                 pending_message.metadata_json = {

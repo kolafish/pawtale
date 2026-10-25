@@ -117,7 +117,7 @@ async def load_structure_summaries(
     return chapter_summaries, section_summaries
 
 
-async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection]) -> StructureContext:
+async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection], *, lock_questions: bool = False) -> StructureContext:
     chapter_refs = ModelReferenceMap("C", (c.id for c in chapters))
     section_refs = ModelReferenceMap("S", (s.id for s in sections))
     material_refs = ModelReferenceMap("M", (m.id for s in sections for m in sorted(s.materials, key=lambda m: (m.sort_order, m.id))))
@@ -185,7 +185,7 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
     decisions = await fact_decisions.load_fact_decisions(db, project_id=plan.project_id)
     question_lines = await interviewer_lines(db, (
         material.utterance.chat_message_id for section in sections for material in section.materials
-    ))
+    ), lock=lock_questions)
     manual_order = tuple((plan.metadata_json or {}).get("manual_chapter_order", []))
     if not manual_order and (plan.metadata_json or {}).get("structure_operation") == "move_chapter":
         manual_order = tuple(c.id for c in chapters)
@@ -610,7 +610,7 @@ async def review_story_structure(
         await db.execute(select(MemoirCompletionIssue.id).where(MemoirCompletionIssue.project_id == project_id)
             .order_by(MemoirCompletionIssue.id).with_for_update())
         plan, chapters, sections = await _load_tree(db, project_id=project_id)
-        fresh = await structure_context(db, plan, chapters, sections)
+        fresh = await structure_context(db, plan, chapters, sections, lock_questions=True)
         if context.signature != fresh.signature:
             raise HTTPException(status_code=409, detail="目录或素材已变化，本次结构检查未保存")
         if review_identity is not None:
@@ -631,6 +631,8 @@ async def review_story_structure(
                 if s.status == "active" and s.include_in_book and any(m.include_in_book for m in s.materials)}:
             raise HTTPException(status_code=409, detail="目录调整不能将保留的章节移空，本次结果未保存")
         after = await structure_context(db, plan, chapters, sections)
+        if after.question_lines != context.question_lines:
+            raise HTTPException(status_code=409, detail="提问已变化，本次结构检查未保存")
         plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: after.signature,
             **({FEEDBACK_CHECKED_KEY: after.source_signature} if review_identity is not None else {})}
         await db.flush()

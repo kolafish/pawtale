@@ -54,6 +54,7 @@ class SourceSegment:
     text: str
     created_at: datetime
     parent_message_id: str | None = None
+    interviewer_line: str = ""
 
     def ref(self, quote: str = "") -> MemoirBookChapterSourceRef:
         return MemoirBookChapterSourceRef(

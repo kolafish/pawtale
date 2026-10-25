@@ -115,6 +115,39 @@ async def _add_audio(test_db, *, user_id: str = "user-1", size_bytes: int = 3200
     return audio_file
 
 
+async def test_offline_asr_discards_result_when_question_changes(test_db):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.memoir.offline_asr_reprocessing import reprocess_offline_asr_utterance
+    project, session = await _create_project(test_db)
+    audio = await _add_audio(test_db)
+    question = MemoirChatMessage(project_id=project.id, voice_session_id=session.id,
+        role="assistant", content_text="几岁上幼儿园？", content_status="final", turn_index=0)
+    answer = MemoirChatMessage(project_id=project.id, voice_session_id=session.id,
+        role="user", content_text="三岁。", content_status="final", turn_index=1)
+    test_db.add_all([question, answer])
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(voice_session_id=session.id, audio_file_id=audio.id,
+        chat_message_id=answer.id, transcript_raw="三岁。", transcript_edited="三岁。")
+    test_db.add(utterance)
+    await test_db.commit()
+    uid, mid, qid = utterance.id, answer.id, question.id
+
+    async def runner(request):
+        async with AsyncSession(test_db.bind) as writer:
+            changed = await writer.get(MemoirChatMessage, qid)
+            changed.content_text = "几岁搬到外婆家？"
+            await writer.commit()
+        return [OfflineASRResult(VOLC_OFFLINE_ASR_PROVIDER, "三岁。")]
+
+    with pytest.raises(ValueError, match="question changed"):
+        await reprocess_offline_asr_utterance(test_db, utterance_id=uid, asr_runner=runner,
+            ai_client=FakeCleanupAI("我三岁上幼儿园。"))
+    await test_db.rollback()
+    assert (await test_db.get(MemoirChatMessage, mid)).content_text == "三岁。"
+    assert not (await test_db.scalars(select(MemoirTranscriptVersion).where(
+        MemoirTranscriptVersion.source_artifact_id == uid))).all()
+
+
 @pytest.mark.parametrize("manual_type", ["user_edited", "dialect_corrected"])
 async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db, manual_type):
     project, voice_session = await _create_project(test_db)

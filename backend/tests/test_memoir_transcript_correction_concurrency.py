@@ -20,6 +20,36 @@ from tests.memoir_helpers import create_test_voice_transcript
 
 
 @pytest.mark.db_independent
+async def test_question_edit_during_correction_discards_old_interpretation(client, test_db, monkeypatch):
+    created = await create_test_voice_transcript(client, test_db, text="三岁。")
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    utterance.transcript_edited = ""
+    answer = await test_db.get(MemoirChatMessage, created["message_id"])
+    question = MemoirChatMessage(project_id=answer.project_id, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="几岁上幼儿园？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
+    async def generate(text, **kwargs):
+        async with sessions() as writer:
+            changed = await writer.get(MemoirChatMessage, question.id)
+            changed.content_text = "几岁搬到外婆家？"
+            await writer.commit()
+        return CleanedTranscriptText(content="我三岁上幼儿园。", provider="fake", created_by=MemoirCreatedBy.AI)
+
+    monkeypatch.setattr("app.services.memoir.voice_transcript_correction.generate_cleaned_transcript_text", generate)
+    async with sessions() as worker:
+        result = await run_transcript_correction_job(worker, SimpleNamespace(project_id=answer.project_id,
+            payload_json={"utterance_id": utterance.id, "raw_transcript_version_id": created["transcript_version_id"]}))
+        await worker.commit()
+    assert result.status == MemoirEditingJobStatus.SKIPPED
+    await test_db.refresh(answer)
+    assert answer.content_text == "三岁。"
+    assert answer.transcript_version_id == created["transcript_version_id"]
+
+
+@pytest.mark.db_independent
 @pytest.mark.parametrize("manual_text", ["小时候我住在奶奶家。", "我小时候住在外婆家。"])
 async def test_manual_edit_during_ai_correction_keeps_user_version(
     client, test_db, monkeypatch, manual_text,
