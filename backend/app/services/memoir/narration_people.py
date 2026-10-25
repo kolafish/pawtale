@@ -65,19 +65,31 @@ class _AnswerReadingOutput(_ReadingOutput):
     story_content: bool
 
 
-async def answer_story_content(db: AsyncSession, message: MemoirChatMessage) -> bool | None:
-    """Only a reading of this exact answer and parent question can decide content eligibility."""
-    question = (await interviewer_messages(db, [message.id])).get(message.id)
-    reading = (message.metadata_json or {}).get(READING_KEY, {})
+def _answer_reading(message: MemoirChatMessage) -> dict | None:
+    reading = (message.metadata_json or {}).get(READING_KEY)
     if (isinstance(reading, dict) and reading.get("schema_version") == 3
-        and question is not None and question.id == message.parent_message_id
-        and (question.metadata_json or {}).get(ASKED_KEY)
-        and reading.get("question_context", "") == interviewer_context_signature(message, question)
         and reading.get("question_message_id") == message.parent_message_id
         and reading.get("source_text_hash") == source_text_hash(normalized_material_text(message.content_text))
         and isinstance(reading.get("story_content"), bool)):
+        return reading
+    return None
+
+
+def cached_answer_story_content(message: MemoirChatMessage, question: MemoirChatMessage | None) -> bool | None:
+    """Only a reading of this exact answer and parent question can decide content eligibility."""
+    reading = _answer_reading(message)
+    if (reading is not None and question is not None and question.id == message.parent_message_id
+        and (question.metadata_json or {}).get(ASKED_KEY)
+        and reading.get("question_context", "") == interviewer_context_signature(message, question)):
         return reading["story_content"]
     return None
+
+
+async def answer_story_content(db: AsyncSession, message: MemoirChatMessage) -> bool | None:
+    if _answer_reading(message) is None:
+        return None
+    question = (await interviewer_messages(db, [message.id])).get(message.id)
+    return cached_answer_story_content(message, question)
 
 
 @dataclass
@@ -401,7 +413,7 @@ async def read_people(
     stored_reading = (message.metadata_json or {}).get(READING_KEY)
     if (isinstance(stored_reading, dict) and stored_reading.get("schema_version", 1) in {1, 2, 3}
         and stored_reading.get("question_context", "") == question_context
-        and (not classify_answer or await answer_story_content(db, message) is not None)
+        and (not classify_answer or cached_answer_story_content(message, question) is not None)
         and isinstance(stored_reading.get("people"), list) and (
         stored_reading.get("transcript_version_id") == transcript_version_id
         or (stored_reading.get("schema_version") in {2, 3} and stored_reading.get("source_text_hash") == text_hash)
@@ -410,7 +422,7 @@ async def read_people(
         await db.refresh(message)
         if ((message.transcript_version_id or "") != transcript_version_id
             or interviewer_context_signature(message, fresh_question) != question_context
-            or (classify_answer and await answer_story_content(db, message) is None)):
+            or (classify_answer and cached_answer_story_content(message, fresh_question) is None)):
             return False
         message.metadata_json = {**(message.metadata_json or {}), READING_KEY: {
             **stored_reading, "transcript_version_id": transcript_version_id,

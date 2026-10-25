@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import delete, false, func, or_, select
+from sqlalchemy import delete, false, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -336,6 +337,36 @@ async def generate_cleaned_transcript_text(
     )
 
 
+def _cleanup_context(
+    voice_session: MemoirVoiceSession, recent: Iterable[tuple[str, str]], *,
+    dialect_glossary: tuple[str, ...], interviewer_line: str,
+) -> MemoirTranscriptCleanupContext:
+    recent_user: list[str] = []
+    recent_assistant: list[str] = []
+    for role, content_text in recent:
+        if role == MemoirChatMessageRole.USER.value:
+            recent_user.append(content_text)
+        elif role in {MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value}:
+            recent_assistant.append(content_text)
+    return MemoirTranscriptCleanupContext(
+        scene="voice_chat", guidance_mode=voice_session.guidance_mode,
+        current_guidance_module=voice_session.current_guidance_module,
+        dialect_glossary=dialect_glossary,
+        recent_user_utterances=tuple(recent_user[-5:]),
+        recent_assistant_messages=tuple(recent_assistant[-3:]),
+        interviewer_line=interviewer_line,
+    )
+
+
+async def _cleanup_glossary(db: AsyncSession, project: Project | None, extra: tuple[str, ...]) -> tuple[str, ...]:
+    corrections = glossary_entries(project) if project is not None else []
+    corrected_sources = {entry.source for entry in corrections}
+    names = await narration_people.names(db, project.id) if project is not None else []
+    # Confirmed corrections supersede older spellings and go last in the prompt.
+    return tuple(dict.fromkeys((*(name for name in names if name not in corrected_sources),
+        *extra, *glossary_context_lines(corrections))))
+
+
 async def load_voice_transcript_cleanup_context(
     db: AsyncSession,
     voice_session: MemoirVoiceSession,
@@ -359,33 +390,40 @@ async def load_voice_transcript_cleanup_context(
         .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
         .limit(8)
     )
-    recent_user: list[str] = []
-    recent_assistant: list[str] = []
-    for role, content_text in reversed(result.all()):
-        if role == MemoirChatMessageRole.USER.value:
-            recent_user.append(content_text)
-        elif role in {MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value}:
-            recent_assistant.append(content_text)
     project = await db.get(Project, voice_session.project_id)
-    corrections = glossary_entries(project) if project is not None else []
-    corrected_sources = {entry.source for entry in corrections}
     paired_lines = await interviewer_lines(db, [exclude_message_id]) if exclude_message_id else {}
-    return MemoirTranscriptCleanupContext(
-        scene="voice_chat",
-        guidance_mode=voice_session.guidance_mode,
-        current_guidance_module=voice_session.current_guidance_module,
-        # Names the narrator has said help pick the right characters for 同音字,
-        # unless a correction retired that writing. The prompt keeps the last
-        # entries, so the project's confirmed corrections go last.
-        dialect_glossary=tuple(dict.fromkeys((
-            *(name for name in await narration_people.names(db, voice_session.project_id) if name not in corrected_sources),
-            *dialect_glossary,
-            *glossary_context_lines(corrections),
-        ))),
-        recent_user_utterances=tuple(recent_user[-5:]),
-        recent_assistant_messages=tuple(recent_assistant[-3:]),
-        interviewer_line=paired_lines.get(exclude_message_id, ""),
-    )
+    return _cleanup_context(voice_session, reversed(result.all()),
+        dialect_glossary=await _cleanup_glossary(db, project, dialect_glossary),
+        interviewer_line=paired_lines.get(exclude_message_id, ""))
+
+
+async def load_voice_transcript_cleanup_contexts(
+    db: AsyncSession, utterances: list[MemoirVoiceUtterance], *, project: Project,
+    dialect_glossary: tuple[str, ...] = (),
+) -> dict[str, MemoirTranscriptCleanupContext]:
+    """Load at most eight prior messages per answer and project vocabulary once."""
+    if not utterances:
+        return {}
+    message_ids = [item.chat_message_id for item in utterances]
+    target = aliased(MemoirChatMessage)
+    # Keep the same bounded history lookup as the single-item path. Ranking a
+    # full session for every answer would scan all earlier messages first.
+    history = select(MemoirChatMessage.role, MemoirChatMessage.content_text,
+        MemoirChatMessage.turn_index, MemoirChatMessage.created_at).where(
+        MemoirChatMessage.voice_session_id == target.voice_session_id,
+        MemoirChatMessage.turn_index < target.turn_index,
+        func.trim(MemoirChatMessage.content_text) != "",
+    ).order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
+    history = history.limit(8).correlate(target).lateral()
+    recent: dict[str, list[tuple[str, str]]] = {}
+    for row in await db.execute(select(target.id.label("target_id"), history.c.role, history.c.content_text)
+        .select_from(target).join(history, true()).where(target.id.in_(message_ids))
+        .order_by(target.id, history.c.turn_index, history.c.created_at)):
+        recent.setdefault(row.target_id, []).append((row.role, row.content_text))
+    lines = await interviewer_lines(db, message_ids)
+    glossary = await _cleanup_glossary(db, project, dialect_glossary)
+    return {item.id: _cleanup_context(item.voice_session, recent.get(item.chat_message_id, []),
+        dialect_glossary=glossary, interviewer_line=lines.get(item.chat_message_id, "")) for item in utterances}
 
 
 def _transcript_filter(

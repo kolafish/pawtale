@@ -401,10 +401,10 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
     ):
         return
     version_id = message.transcript_version_id or ""
-    question = (await interviewer_messages(db, [message.id])).get(message.id)
-    question_context = interviewer_context_signature(message, question)
     dedupe_key = f"narrator_profile:{utterance.id}"
     existing = await db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == dedupe_key))
+    question = (await interviewer_messages(db, [message.id])).get(message.id)
+    question_context = interviewer_context_signature(message, question)
     if (
         existing is not None
         and (existing.payload_json or {}).get("transcript_version_id") == version_id
@@ -412,7 +412,7 @@ async def schedule_narrator_profile(db: AsyncSession, *, utterance: MemoirVoiceU
         and existing.status != MemoirEditingJobStatus.FAILED.value
         and (not require_answer_reading or (existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
              and (existing.payload_json or {}).get("require_answer_reading") is True)
-             or await narration_people.answer_story_content(db, message) is not None)
+             or narration_people.cached_answer_story_content(message, question) is not None)
     ):
         return
     await editing_jobs.enqueue_editing_job(
