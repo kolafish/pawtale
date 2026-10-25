@@ -97,8 +97,6 @@ const RESUME_HINT_CHAR_LIMIT = 28;
 // The first story starts without a setup form; the title can be changed later.
 const FIRST_PROJECT_TITLE = "我的回忆录";
 
-type HomeVoiceEntry = "home_resume";
-
 interface HomeData extends HomeStoryData {
   loading: boolean;
   creatingVoice: boolean;
@@ -315,7 +313,7 @@ definePage<HomeData>()({
   storyNavigationTarget: null as HomeStoryTarget | null,
   voiceNavigationTarget: null as HomeVoiceTarget | null,
   // The narration the user tapped before the voice consent box appeared; agreeing carries on with it.
-  pendingNarrationEntry: null as HomeVoiceEntry | null,
+  pendingNarration: false,
   growthTracker: pageRuntime(() => new HomeGrowthTracker()),
   growthAnimationTimer: pageRuntime(() => new PollingTimer(800)),
   homeScrollTop: 0,
@@ -383,7 +381,7 @@ definePage<HomeData>()({
     enableMiniProgramShareMenu();
     const narrationRequested = consumeNarrationRequest();
     this.refreshAccessibilitySettings();
-    const agreedEntry = this.refreshVoiceAuthorizationConsent();
+    const resumeNarration = this.refreshVoiceAuthorizationConsent();
     await this.loadHome();
     this.openPendingVoiceSession();
     if (!this.homeVisible) return;
@@ -394,7 +392,7 @@ definePage<HomeData>()({
     }
     if (narrationRequested === "after_login" && this.data.hasProject) return;
     if (narrationRequested) await this.startPrimaryVoiceChat();
-    else if (agreedEntry) await this.startSelectedNarration(agreedEntry);
+    else if (resumeNarration) await this.startPrimaryVoiceChat();
   },
 
   onHide() {
@@ -424,21 +422,21 @@ definePage<HomeData>()({
     setHomeData(this, { largeTextEnabled: readLargeTextEnabled() });
   },
 
-  /** Returns the narration to carry on with when consent was just given on the authorization page. */
-  refreshVoiceAuthorizationConsent(): HomeVoiceEntry | null {
+  /** Whether to resume narration after consent was given on the authorization page. */
+  refreshVoiceAuthorizationConsent(): boolean {
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    const agreedEntry = voiceAuthorizationAgreed ? this.takePendingNarration() : null;
+    const resumeNarration = voiceAuthorizationAgreed && this.takePendingNarration();
     setHomeData(this, {
       voiceAuthorizationAgreed,
       voiceAuthorizationRequested: voiceAuthorizationAgreed ? false : this.data.voiceAuthorizationRequested,
     });
-    return agreedEntry;
+    return resumeNarration;
   },
 
-  takePendingNarration(): HomeVoiceEntry | null {
-    const entry = this.data.voiceAuthorizationRequested ? this.pendingNarrationEntry : null;
-    this.pendingNarrationEntry = null;
-    return entry;
+  takePendingNarration(): boolean {
+    const resumeNarration = this.data.voiceAuthorizationRequested && this.pendingNarration;
+    this.pendingNarration = false;
+    return resumeNarration;
   },
 
   async loadHome(background = false) {
@@ -906,11 +904,11 @@ definePage<HomeData>()({
       voiceAuthorizationSaving: true,
       error: "",
     }, () => this.measureNarration());
-    let agreedEntry: HomeVoiceEntry | null = null;
+    let resumeNarration = false;
     try {
       await syncVoiceAuthorizationConsent({ consent });
       if (userId !== this.data.userId || projectId !== this.data.projectId) return;
-      agreedEntry = agreed ? this.takePendingNarration() : null;
+      resumeNarration = agreed && this.takePendingNarration();
       setHomeData(this, {
         voiceAuthorizationRequested: agreed ? false : this.data.voiceAuthorizationRequested,
       });
@@ -926,7 +924,7 @@ definePage<HomeData>()({
         setHomeData(this, { voiceAuthorizationSaving: false });
       }
     }
-    if (agreedEntry) await this.startSelectedNarration(agreedEntry);
+    if (resumeNarration) await this.startPrimaryVoiceChat();
   },
 
   openVoiceAuthorization() {
@@ -959,10 +957,6 @@ definePage<HomeData>()({
   },
 
   async startPrimaryVoiceChat() {
-    await this.startSelectedNarration("home_resume");
-  },
-
-  async startSelectedNarration(entry: HomeVoiceEntry) {
     const mode = this.data.selectedMode;
     if (mode === "book_completion") {
       this.openBookSupplementInterview();
@@ -970,7 +964,7 @@ definePage<HomeData>()({
     }
     const human = mode === "human_interview";
     await this.startVoiceChatWithMode(mode === "human_interview" ? "free_narration" : mode,
-      entry, human ? "human_interview" : "ai_interview");
+      human ? "human_interview" : "ai_interview");
   },
 
   openBookSupplementInterview() {
@@ -978,11 +972,11 @@ definePage<HomeData>()({
     this.openReviewIssues();
   },
 
-  ensureVoiceAuthorization(entry: HomeVoiceEntry) {
+  ensureVoiceAuthorization() {
     if (this.data.voiceAuthorizationAgreed) {
       return true;
     }
-    this.pendingNarrationEntry = entry;
+    this.pendingNarration = true;
     setHomeData(this, { voiceAuthorizationRequested: true, error: "" }, () => {
       wx.pageScrollTo({ selector: "#home-voice-authorization", duration: 250 });
     });
@@ -1017,7 +1011,6 @@ definePage<HomeData>()({
 
   async startVoiceChatWithMode(
     mode: MemoirGuidanceMode,
-    entry: HomeVoiceEntry,
     interviewType: MemoirInterviewType = "ai_interview",
     sessionGoal: MemoirSessionGoal = "open_narration",
   ) {
@@ -1028,7 +1021,7 @@ definePage<HomeData>()({
       navigateToLoginThenNarrate();
       return;
     }
-    if (!this.ensureVoiceAuthorization(entry)) {
+    if (!this.ensureVoiceAuthorization()) {
       return;
     }
     const { userId, projectId } = this.data;
@@ -1038,7 +1031,7 @@ definePage<HomeData>()({
       if (!this.homeVisible || userId !== this.data.userId || projectId !== this.data.projectId) return;
       if (!projectId) await this.createFirstProject();
       if (!this.homeVisible || userId !== this.data.userId) return;
-      await this.createAndOpenVoiceChat(mode, entry, interviewType, sessionGoal);
+      await this.createAndOpenVoiceChat(mode, interviewType, sessionGoal);
     } catch (error) {
       if (isAuthError(error)) {
         navigateToLogin();
@@ -1054,7 +1047,6 @@ definePage<HomeData>()({
 
   async createAndOpenVoiceChat(
     mode: MemoirGuidanceMode,
-    entry: HomeVoiceEntry,
     interviewType: MemoirInterviewType,
     sessionGoal: MemoirSessionGoal,
     currentCompletionIssueId = "",
@@ -1087,7 +1079,7 @@ definePage<HomeData>()({
         guidance_mode: mode,
         interview_type: interviewType,
         session_goal: sessionGoal,
-        entry,
+        entry: "home_resume",
         launch_variant: this.data.launchVariant,
       },
       { projectId, voiceSessionId: detail.session.id },
