@@ -2310,3 +2310,10 @@ def test_title_and_copy_context_include_middle_and_end_of_long_chapter():
         assert "中段学会了修自行车。" in prompt
         assert "末尾退休后教孙子修车。" in prompt
         assert len(prompt) < 30000
+
+
+def test_fallback_titles_do_not_expand_a_topic_to_a_whole_life():
+    from app.services.memoir.book_output_manuscript import fallback_title_suggestions
+    titles = fallback_title_suggestions("车间日子", 6)
+    assert len(titles) == 6
+    assert not any("一生" in title for title in titles)

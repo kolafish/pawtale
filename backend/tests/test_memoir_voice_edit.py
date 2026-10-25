@@ -1,4 +1,5 @@
 import json
+from itertools import product
 
 import pytest
 import pytest_asyncio
@@ -210,7 +211,6 @@ async def test_reduce_sections_voice_edit_queues_natural_consolidation(
     item = response.json()["operations"][0]
     assert "目前 2 个，整理后更少" in item["label"]
     assert "不预设合并后的数量" in item["detail"]
-    assert "必须使用 consolidate_chapter_sections" in fake.system
 
     result = await apply(client, story, response.json())
     assert result.status_code == 200, result.text
@@ -602,7 +602,6 @@ async def test_multiple_splits_require_a_client_that_can_confirm_each_group(clie
     assert response.json()["operations"] == []
     assert response.json()["questions"] == []
     assert "更新小程序" in response.json()["reply"]
-    assert "不能分别确认同一章拆出的多个新章" in fake.system
 
 
 async def test_multiple_splits_roll_back_the_whole_batch_after_a_later_failure(
@@ -734,7 +733,7 @@ async def test_old_client_cannot_receive_unexecutable_chapter_split(client, monk
     assert response.status_code == 200
     assert response.json()["operations"] == []
     assert "当前小程序版本" in response.json()["reply"]
-    assert "不能执行 split_chapter" in fake.system
+    assert "split_chapter" not in fake.system
 
 
 async def test_selected_deletion_combines_material_and_structure_atomically(client, test_db, monkeypatch, story):
@@ -809,7 +808,6 @@ async def test_voice_merge_moves_section_into_existing_chapter_and_preserves_oth
         instruction="把这个章节里的小节挪到早晨日常章节，和那里的小节合并。",
     )
     assert response.status_code == 200, response.text
-    assert "必须使用 merge_sections" in fake.system
     item = response.json()["operations"][0]
     assert "合并到「早晨日常」中的「早晨日常」" in item["label"]
     assert ("将移除" in item["detail"]) == singleton
@@ -1678,3 +1676,30 @@ async def test_chapter_merge_batch_rolls_back_if_later_merge_fails(client, test_
     assert (await apply(client, story, response.json(), echoed(response.json()))).status_code == 409
     assert calls == 2
     assert await _story(test_db, story["pid"]) == before
+
+
+@pytest.mark.parametrize("flags", product([False, True], repeat=5))
+def test_voice_edit_contract_matches_all_client_capabilities(flags):
+    from app.schemas.memoir_voice_edit import VoiceEditPreviewRequest, BASE_VOICE_EDIT_ACTIONS, EXTENDED_VOICE_EDIT_ACTIONS
+    from app.services.memoir.voice_edit import _voice_edit_contract
+    keys = ["supports_extended_edits", "supports_chapter_split", "supports_section_merge",
+            "supports_composed_chapter_edits", "supports_multiple_chapter_splits"]
+    req = VoiceEditPreviewRequest(instruction="整理目录", **dict(zip(keys, flags)))
+    system, model = _voice_edit_contract(req, compact=False)
+    expected = set(BASE_VOICE_EDIT_ACTIONS)
+    if flags[0]:
+        expected |= EXTENDED_VOICE_EDIT_ACTIONS
+    if not flags[1]:
+        expected.remove("split_chapter")
+    if not flags[2]:
+        expected.remove("merge_sections")
+    action_schema = model.model_json_schema()["$defs"]["AvailableVoiceEditOperation"]["properties"]["action"]
+    assert set(action_schema["enum"]) == expected
+    for action in set(BASE_VOICE_EDIT_ACTIONS) | EXTENDED_VOICE_EDIT_ACTIONS:
+        assert (action in system) is (action in expected)
+    # The narrower schema still inherits real operation validation.
+    with pytest.raises(ValidationError):
+        model.model_validate({"reply": "预览", "operations": [{"action": "rename_chapter", "target_ref": "c"}]})
+    for unsupported in (set(BASE_VOICE_EDIT_ACTIONS) | EXTENDED_VOICE_EDIT_ACTIONS) - expected:
+        with pytest.raises(ValidationError):
+            model.model_validate({"reply": "预览", "operations": [{"action": unsupported, "target_ref": "c"}]})
