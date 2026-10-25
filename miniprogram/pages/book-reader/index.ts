@@ -13,13 +13,14 @@ import {
   memoirAudioPlanLoader,
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
-  readMemoirBookShare,
+  readMemoirBookShare, readMemoirSharedAudioPlan, downloadMemoirSharedAudio,
   previewMemoirBookShare,
   readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
 import { navigateToLoginThenNarrate, returnToHomeThenNarrate, routeAuthError } from "../../services/navigation";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "../../services/request";
+import { sharedReadingKey, readSharedReadingProgress, saveSharedReadingProgress, type SharedReadingProgress } from "../../stores/reading-progress";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
@@ -314,6 +315,11 @@ definePage<BookReaderData>()({
   flatPages: [] as string[],
   shareLikeTarget: null as MemoirShareLikeTarget | null,
   readingToken: "",
+  readingProgressKey: "",
+  sharedReadingObjectId: "",
+  readingScrollTop: 0,
+  readingProgress: null as SharedReadingProgress | null,
+
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -395,6 +401,10 @@ definePage<BookReaderData>()({
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     if (this.readingToken && !this.data.error) enableMiniProgramShareMenu(); else hideMiniProgramShareMenu();
+    if (this.sharedReadingObjectId && this.readingProgressKey !== sharedReadingKey(this.sharedReadingObjectId, this.data.shareScope)) {
+      this.stopPlayback();
+      this.restoreSharedReadingPosition();
+    }
     // Back from choosing an avatar after a like.
     this.refreshShareLikes();
   },
@@ -428,10 +438,12 @@ definePage<BookReaderData>()({
   },
 
   onHide() {
+    this.saveReadingProgress();
     this.stopPlayback();
   },
 
   onUnload() {
+    this.saveReadingProgress();
     this.stopPlayback();
   },
 
@@ -463,6 +475,8 @@ definePage<BookReaderData>()({
 
   showReaderChapter(index: number, sectionIndex?: number) {
     if (index < 0 || index >= this.data.readerChapterTotal) return;
+    this.stopPlayback();
+    this.readingScrollTop = 0;
     const chapter = this.bookChapters[index];
     this.setData({
       readerChapterIndex: index,
@@ -492,13 +506,13 @@ definePage<BookReaderData>()({
   },
 
   async playReaderAudio() {
-    if (this.data.readerShared) return;
+    if (this.data.readerShared && !this.readingToken) return;
     const target = this.data.readerMode;
     if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
       this.stopPlayback();
       return;
     }
-    if (!this.data.projectId || !this.readerText) {
+    if ((!this.data.projectId && !this.readingToken) || !this.readerText) {
       return;
     }
     if (this.data.bookViewingHistoricalVersion) {
@@ -506,6 +520,11 @@ definePage<BookReaderData>()({
       return;
     }
     this.stopPlayback();
+    if (this.readingToken) {
+      const chapterId = this.data.shareScope === "book" ? this.bookChapters[this.data.readerChapterIndex]?.chapterId : undefined;
+      const readingToken = this.readingToken, versionId = this.readerAudioVersionId;
+      this.audioPlayback.setDownloadAudioFile(id => downloadMemoirSharedAudio(readingToken, versionId, id, chapterId));
+    }
     const token = this.audioPlayback.nextToken();
     this.playToken = token;
     this.setData({
@@ -513,6 +532,30 @@ definePage<BookReaderData>()({
       playbackError: "",
     });
     try {
+      if (this.readingToken) {
+        const chapterId = this.data.shareScope === "book" ? this.bookChapters[this.data.readerChapterIndex]?.chapterId : undefined;
+        const versionId = this.readerAudioVersionId;
+        const readingToken = this.readingToken;
+        const prepare = () => readMemoirSharedAudioPlan(readingToken, versionId, chapterId);
+        const plan = await prepare();
+        if (token !== this.playToken) return;
+        const playbackToken = token;
+        const saved = this.readingProgress;
+        const resume = saved?.versionId === versionId && saved.audioHash === plan.source_text_hash
+          && saved.audioChapterId === (chapterId || "") && saved.audioIndex < plan.segments.length
+          ? { index: saved.audioIndex, seconds: Math.min(saved.audioSeconds, Math.max(0, (plan.segments[saved.audioIndex].duration_seconds || 0) - 0.1)) }
+          : { index: 0, seconds: 0 };
+        this.readingProgress = { versionId, chapterId: this.bookChapters[this.data.readerChapterIndex]?.chapterId || "",
+          chapterIndex: this.data.readerChapterIndex, scrollTop: this.readingScrollTop,
+          audioChapterId: chapterId || "", audioHash: plan.source_text_hash, audioIndex: resume.index, audioSeconds: resume.seconds };
+        try {
+          await playBookAudioPlan(this, plan, playbackToken, plan.content, prepare, target, resume);
+          if (playbackToken === this.playToken) this.onBookAudioPosition(0, 0);
+        } catch (error) {
+          if (playbackToken === this.playToken) await this.handleSharedAudioError(error);
+        }
+        return;
+      }
       const source = this.data.readerMode === "book"
         ? { kind: "book" as const, versionId: this.readerAudioVersionId }
         : { kind: "chapter" as const, chapterId: this.data.chapterId, versionId: this.readerAudioVersionId || undefined };
@@ -520,6 +563,10 @@ definePage<BookReaderData>()({
       const plan = await prepare();
       if (token === this.playToken) await playBookAudioPlan(this, plan, token, this.readerText, prepare, target);
     } catch (error) {
+      if (this.readingToken) {
+        if (token === this.playToken) await this.handleSharedAudioError(error);
+        return;
+      }
       if (routeAuthError(error, "login")) {
         return;
       }
@@ -535,6 +582,65 @@ definePage<BookReaderData>()({
         this.setData({ ttsBusyTarget: "" });
       }
     }
+  },
+
+  async handleSharedAudioError(error: unknown) {
+    if (error instanceof ApiError && [404, 409, 410].includes(error.statusCode)) {
+      await this.retrySharedReading();
+      if (this.data.error) return;
+    }
+    this.setData({ playbackError: error instanceof Error ? error.message : "朗读暂时不可用，可以先阅读正文" });
+  },
+
+  continueSharedReading() {
+    if (this.readingScrollTop > 0) scrollReader({ scrollTop: this.readingScrollTop });
+    else scrollReader({ selector: "#reader-body" });
+  },
+
+  onPageScroll(event: { scrollTop: number }) { this.readingScrollTop = event.scrollTop; },
+
+  saveReadingProgress() {
+    if (!this.readingProgressKey || this.data.error) return;
+    const prior = this.readingProgress;
+    const value: SharedReadingProgress = {
+      versionId: this.readerAudioVersionId, chapterId: this.bookChapters[this.data.readerChapterIndex]?.chapterId || "",
+      chapterIndex: this.data.readerChapterIndex, scrollTop: this.readingScrollTop,
+      audioChapterId: prior?.audioChapterId || "", audioHash: prior?.audioHash || "",
+      audioIndex: prior?.audioIndex || 0, audioSeconds: prior?.audioSeconds || 0,
+    };
+    this.readingProgress = value;
+    saveSharedReadingProgress(this.readingProgressKey, value);
+  },
+
+  restoreReadingProgress(output: MemoirBookOutput) {
+    this.sharedReadingObjectId = output.id;
+    this.restoreSharedReadingPosition();
+  },
+
+  restoreSharedReadingPosition() {
+    this.readingProgressKey = sharedReadingKey(this.sharedReadingObjectId, this.data.shareScope);
+    const saved = readSharedReadingProgress(this.readingProgressKey);
+    this.readingProgress = saved;
+    this.readingScrollTop = 0;
+    if (!saved) {
+      if (this.data.readerChapterIndex !== 0) this.showReaderChapter(0);
+      scrollReader({ scrollTop: 0 });
+      return;
+    }
+    const sameVersion = saved.versionId === this.readerAudioVersionId;
+    const index = saved.chapterId ? this.bookChapters.findIndex(chapter => chapter.chapterId === saved.chapterId)
+      : (sameVersion ? Math.min(saved.chapterIndex, this.data.readerChapterTotal - 1) : 0);
+    if (index >= 0) this.showReaderChapter(index);
+    const scrollTop = sameVersion && index >= 0 ? saved.scrollTop : 0;
+    this.readingScrollTop = scrollTop;
+    if (!sameVersion) this.readingProgress = { ...saved, audioHash: "", audioIndex: 0, audioSeconds: 0 };
+    this.setData({}, () => scrollReader({ scrollTop }));
+  },
+
+  onBookAudioPosition(index: number, seconds: number) {
+    if (!this.readingProgress) return;
+    this.readingProgress.audioIndex = index;
+    this.readingProgress.audioSeconds = seconds;
   },
 
   onBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
@@ -585,6 +691,7 @@ definePage<BookReaderData>()({
   },
 
   stopPlayback() {
+    if (this.readingProgress && this.data.playingTarget) this.saveReadingProgress();
     stopBookPlayback(this);
     this.clearReaderHighlight();
   },
@@ -633,6 +740,7 @@ definePage<BookReaderData>()({
       const output = await read();
       this.applyBookReaderOutput(output);
       await this.applySharePresentation(output);
+      if (this.readingToken) this.restoreReadingProgress(output);
       if (this.readingToken) enableMiniProgramShareMenu();
     } catch (error) {
       this.onShareUnavailable(error instanceof Error ? error : new Error("分享链接已失效"));

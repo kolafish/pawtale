@@ -374,6 +374,8 @@ async def _rebase_chapters(
             draft.updated_at = utcnow_naive()
             db.add(draft)
         created[chapter_id] = rebased
+        from app.services.memoir.book_shares import queue_active_share_audio
+        await queue_active_share_audio(db, project_id=project_id, chapter_id=chapter_id)
     return created
 
 

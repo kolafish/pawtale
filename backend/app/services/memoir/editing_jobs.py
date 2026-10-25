@@ -369,6 +369,10 @@ async def claim_due_editing_jobs(
         statement = statement.where(MemoirEditingJob.project_id == project_id)
     statement = statement.order_by(
         case(
+            # Share preparation can contain an entire book. Keep it behind
+            # editing/indexing work; explicit playback retains its small priority window.
+            (and_(MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK.value,
+                  MemoirEditingJob.payload_json["background"].as_boolean().is_(True)), 2),
             (MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK.value, -1),
             (
                 MemoirEditingJob.job_type.in_(

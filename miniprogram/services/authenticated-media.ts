@@ -153,7 +153,7 @@ export async function downloadAuthenticatedFile(
   return downloadFile(url, options);
 }
 
-function downloadFile(url: string, options: AuthenticatedDownloadOptions): Promise<string> {
+export function downloadFile(url: string, options: AuthenticatedDownloadOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     wx.downloadFile({
       url,

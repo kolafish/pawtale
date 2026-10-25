@@ -13,6 +13,7 @@ export interface AudioPlaybackError {
 }
 
 export interface AudioPlaybackPlayOptions {
+  startTime?: number;
   onPlay?: (audio: WechatMiniprogram.InnerAudioContext) => void;
   onPlayRequested?: (audio: WechatMiniprogram.InnerAudioContext) => void;
   onTimeUpdate?: (audio: WechatMiniprogram.InnerAudioContext) => void;
@@ -45,6 +46,11 @@ export class AudioPlaybackController {
   private playToken = 0;
 
   constructor(private readonly options: AudioPlaybackControllerOptions = {}) {}
+
+  setDownloadAudioFile(download: DownloadAudioFile): void {
+    this.stop();
+    this.options.downloadAudioFile = download;
+  }
 
   nextToken(): number {
     this.playToken += 1;
@@ -107,6 +113,7 @@ export class AudioPlaybackController {
       };
       this.activePlayback = playback;
       this.configureAudio(audio);
+      audio.startTime = Math.max(0, options.startTime || 0);
       audio.src = tempFilePath;
       audio.onPlay(() => {
         options.onPlay?.(audio);

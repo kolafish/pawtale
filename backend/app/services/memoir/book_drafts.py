@@ -318,6 +318,8 @@ async def revise_chapter_draft(
         db.add(output)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="manual_draft", settled=True)
+    from app.services.memoir.book_shares import queue_active_share_audio
+    await queue_active_share_audio(db, project_id=project_id, chapter_id=chapter_id)
     await db.commit()
     refreshed = await _load_draft(
         db,

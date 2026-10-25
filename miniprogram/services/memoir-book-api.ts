@@ -36,7 +36,7 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
-import { downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
+import { downloadFile, downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
 
 function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "", preview = false): string {
@@ -75,6 +75,20 @@ export function readMemoirBookShare(token: string): Promise<MemoirBookOutput> {
     method: "POST",
     data: { token },
   });
+}
+
+export type MemoirSharedAudioPlan = MemoirBookAudioPlan & { content: string };
+
+export function readMemoirSharedAudioPlan(token: string, versionId: string, chapterId?: string): Promise<MemoirSharedAudioPlan> {
+  return request<MemoirSharedAudioPlan>("/api/mobile/memoir/book-shares/audio/plan", {
+    method: "POST", data: { token, version_id: versionId, ...(chapterId ? { chapter_id: chapterId } : {}) },
+  });
+}
+
+export function downloadMemoirSharedAudio(token: string, versionId: string, audioId: string, chapterId?: string): Promise<string> {
+  const query = `version_id=${encodeURIComponent(versionId)}${chapterId ? `&chapter_id=${encodeURIComponent(chapterId)}` : ""}`;
+  return downloadFile(`${cleanBaseUrl(readBackendConfig().httpBaseUrl)}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/audio/${encodeURIComponent(audioId)}?${query}`,
+    { failureMessage: "朗读暂时无法播放，请重新打开故事后重试", domainLabel: "分享朗读" });
 }
 
 export function readMemoirDemoBook(): Promise<MemoirBookOutput> {
