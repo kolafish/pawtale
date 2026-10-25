@@ -91,6 +91,8 @@
       </view>
     </view>
 
+    <share-response-inbox wx:if="{{storyLoaded && !needsLogin}}" project-id="{{projectId}}" user-id="{{userId}}" />
+
     <view wx:if="{{storyLoaded && !needsLogin}}" class="home-utilities" aria-label="更多功能">
       <view
         wx:if="{{shareCandidate || shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount}}"

@@ -50,6 +50,7 @@ interface LoginData {
 definePage<LoginData>()({
   shareLikeTarget: null as MemoirShareLikeTarget | null,
   shareLikeValue: false,
+  returnToResponse: false,
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -63,6 +64,7 @@ definePage<LoginData>()({
   },
 
   onLoad(query: PageQuery = {}) {
+    this.returnToResponse = queryParam(query, "from") === "response";
     if (queryParam(query, "from") === "like") {
       const videoCode = queryParam(query, "video_code");
       const readingToken = queryParam(query, "reading_token");
@@ -129,6 +131,7 @@ definePage<LoginData>()({
         }
         return;
       }
+      if (this.returnToResponse) { this.finishProfile(); return; }
       relaunchHome();
     } catch (error) {
       this.setData({

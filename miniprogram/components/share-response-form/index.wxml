@@ -1,0 +1,10 @@
+<view class="share-response-form">
+  <button wx:if="{{!open}}" class="ui-button ui-share-more" bindtap="openForm">我也记得这件事</button>
+  <text wx:if="{{sent}}" class="response-hint" aria-live="polite">已送达，仅您和作者可见</text>
+  <view wx:if="{{open}}" class="response-card">
+    <text class="response-title">我也记得这件事</text>
+    <text class="response-hint">回应仅您和作者可见。提交时需要登录，作者确认后才会收为素材。</text>
+    <voice-text-editor value="{{content}}" voice-enabled="{{false}}" maxlength="2000" placeholder="写下您记得的细节…" submit-text="送给作者" cancel-text="稍后再写" busy="{{busy}}" bindchange="changeText" bindsubmit="submit" bindcancel="closeForm" />
+    <text wx:if="{{error}}" class="ui-error-banner" aria-live="polite">{{error}}</text>
+  </view>
+</view>

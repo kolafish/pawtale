@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "家里人的讲述"
+  "navigationBarTitleText": "家里人的讲述",
+  "usingComponents": {
+    "share-response-form": "/components/share-response-form/index"
+  }
 }

@@ -1,0 +1,5 @@
+.response-inbox { margin: 24rpx 0; padding: 24rpx; border-radius: 28rpx; background: var(--ui-surface); }
+.response-person { display: block; font-size: var(--ui-font-caption); color: var(--ui-text-secondary); }
+.response-content { display: block; white-space: pre-wrap; line-height: 1.8; font-size: var(--ui-font-body); margin: 20rpx 0; }
+.response-hint { display: block; font-size: 26rpx; line-height: 1.7; color: var(--ui-text-secondary); margin-bottom: 20rpx; }
+.response-row { white-space: normal; text-align: left; font-size: var(--ui-font-caption); padding: 20rpx 0; }

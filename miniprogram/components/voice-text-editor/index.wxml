@@ -26,6 +26,7 @@
   </view>
   <view class="voice-text-actions">
     <view
+      wx:if="{{voiceEnabled}}"
       class="voice-action ui-block-action ui-pressable {{voicePhase === 'listening' ? 'recording' : ''}} {{disabled || busy || voicePhase === 'connecting' || voicePhase === 'stopping' ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{disabled || busy || voicePhase === 'connecting' || voicePhase === 'stopping'}}"

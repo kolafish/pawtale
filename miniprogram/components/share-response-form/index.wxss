@@ -1,0 +1,4 @@
+.share-response-form { margin-top: 24rpx; }
+.response-card { padding: 28rpx; background: var(--ui-surface); border-radius: 28rpx; }
+.response-title { display: block; font-size: var(--ui-font-body); font-weight: 600; }
+.response-hint { display: block; font-size: 26rpx; color: var(--ui-text-secondary); line-height: 1.7; margin: 16rpx 0; }

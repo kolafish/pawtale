@@ -12,6 +12,7 @@ import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import { initialVideoPlaybackData, videoPlaybackMethods, type VideoPlaybackData } from "../../services/video-playback";
 
 interface SharedVideoPlayerData extends ShareLikeData, VideoPlaybackData {
+  responseCode: string;
   pageClass: string;
   sharePreview: boolean;
   retryable: boolean;
@@ -32,6 +33,7 @@ definePage<SharedVideoPlayerData>()({
   shareLikeTarget: null as MemoirShareLikeTarget | null,
 
   data: {
+    responseCode: "",
     pageClass: "detail-page",
     sharePreview: false, retryable: false,
     loading: true,
@@ -53,6 +55,7 @@ definePage<SharedVideoPlayerData>()({
     // Cards pass code; the printed mini program code passes it as scene.
     this.shareCode = queryParam(options, "code") || queryParam(options, "scene");
     this.previewJobId = queryParam(options, "previewJobId");
+    this.setData({ responseCode: this.shareCode });
     this.setData({ sharePreview: Boolean(this.previewJobId) });
     await this.loadVideo();
   },
@@ -62,6 +65,10 @@ definePage<SharedVideoPlayerData>()({
     if (this.previewJobId || !this.data.video || this.data.error) hideMiniProgramShareMenu();
     // Back from choosing an avatar after a like.
     this.refreshShareLikes();
+  },
+
+  onResponseUnavailable() {
+    void this.loadVideo();
   },
 
   onShareUnavailable(error: Error) {
