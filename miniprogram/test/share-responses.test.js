@@ -55,25 +55,62 @@ test('hiding a response cancels a pending voice ticket without losing its draft'
 
 test('hiding a response preserves the idempotency key for a retry', async () => {
   const calls = [];
+  let failSubmit;
   mockModule('../services/share-responses.ts', {
-    submitShareResponse: async (...args) => {
+    submitShareResponse: (...args) => {
       calls.push(args);
-      if (calls.length === 1) throw new Error('网络中断');
-      return { id: 'response' };
+      if (calls.length === 1) return new Promise((_, reject) => { failSubmit = reject; });
+      return Promise.resolve({ id: 'response' });
     },
   });
   const { component } = loadComponentModule('../components/share-response-form/index.ts');
   const ctx = componentContext(component, { videoCode: 'video-code' });
   ctx.openForm();
   ctx.changeText({ detail: { value: '我记得这段往事。' } });
-  await ctx.submit();
+  const pending = ctx.submit();
+  component.observers['readingToken,videoCode'].call(ctx);
   ctx.properties.active = false;
   component.observers.active.call(ctx, false);
+  assert.equal(ctx.data.busy, true);
+  failSubmit(new Error('网络中断'));
+  await pending;
+  assert.equal(ctx.data.busy, false);
+  assert.equal(ctx.data.content, '我记得这段往事。');
   ctx.properties.active = true;
   component.observers.active.call(ctx, true);
   await ctx.submit();
   assert.equal(calls[0][2], calls[1][2]);
   assert.equal(ctx.data.sent, true);
+});
+
+test('hiding a response keeps an in-flight submission until its success is shown', async () => {
+  const calls = [];
+  let finishSubmit;
+  mockModule('../services/share-responses.ts', {
+    submitShareResponse: (...args) => {
+      calls.push(args);
+      return new Promise(resolve => { finishSubmit = resolve; });
+    },
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { videoCode: 'video-code' });
+  ctx.openForm();
+  ctx.changeText({ detail: { value: '我记得这段往事。' } });
+  const pending = ctx.submit();
+  component.observers['readingToken,videoCode'].call(ctx);
+  ctx.properties.active = false;
+  component.observers.active.call(ctx, false);
+  assert.equal(ctx.data.busy, true);
+  assert.equal(ctx.data.content, '我记得这段往事。');
+  finishSubmit({ id: 'saved' });
+  await pending;
+  assert.equal(ctx.data.busy, false);
+  assert.equal(ctx.data.sent, true);
+  assert.equal(ctx.data.content, '');
+  ctx.properties.active = true;
+  component.observers.active.call(ctx, true);
+  await ctx.submit();
+  assert.equal(calls.length, 1);
 });
 
 test('response preserves text through login and network retry with the same submission id', async () => {
@@ -105,6 +142,7 @@ test('response late submit cannot replace another share form', async () => {
   const ctx = componentContext(component, {videoCode:'video-a'});
   ctx.changeText({detail:{value:'旧视频的回应'}});
   const pending = ctx.submit();
+  ctx.properties.videoCode = 'video-b';
   component.observers['readingToken,videoCode'].call(ctx);
   ctx.changeText({detail:{value:'新故事的回应'}});
   finish({id:'old'}); await pending;

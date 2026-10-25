@@ -1,10 +1,12 @@
 import { submitShareResponse, startShareResponseVoice } from "../../services/share-responses";
 import { ApiError } from "../../services/request";
 
-const runtimes = new WeakMap<object, { generation: number; requestId: string; requestContent: string }>();
+const runtimes = new WeakMap<object, { generation: number; voiceGeneration: number; submitting: boolean;
+  targetReadingToken: string | null; targetVideoCode: string | null; requestId: string; requestContent: string }>();
 function runtime(owner: object) {
   let value = runtimes.get(owner);
-  if (!value) { value = { generation: 0, requestId: "", requestContent: "" }; runtimes.set(owner, value); }
+  if (!value) { value = { generation: 0, voiceGeneration: 0, submitting: false,
+    targetReadingToken: null, targetVideoCode: null, requestId: "", requestContent: "" }; runtimes.set(owner, value); }
   return value;
 }
 
@@ -16,13 +18,19 @@ Component({
   observers: {
     active(active: unknown) {
       if (active) return;
-      runtime(this).generation += 1;
-      this.setData({ busy: false, gatewayUrl: "", voiceStartRequest: 0 });
+      const current = runtime(this);
+      current.voiceGeneration += 1;
+      this.setData({ busy: current.submitting, gatewayUrl: "", voiceStartRequest: 0 });
     },
     "readingToken,videoCode"() {
-      runtime(this).generation += 1;
-      runtime(this).requestId = "";
-      runtime(this).requestContent = "";
+      const current = runtime(this);
+      if (current.targetReadingToken === this.properties.readingToken && current.targetVideoCode === this.properties.videoCode) return;
+      current.targetReadingToken = this.properties.readingToken;
+      current.targetVideoCode = this.properties.videoCode;
+      current.generation += 1;
+      current.submitting = false;
+      current.requestId = "";
+      current.requestContent = "";
       this.setData({ open: false, content: "", busy: false, error: "", sent: false,
         voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 });
     },
@@ -34,17 +42,21 @@ Component({
     changeText(event: { detail: { value?: string } }) { this.setData({ content: event.detail.value || "", error: "" }); },
     async requestVoice() {
       if (!this.properties.active || this.data.busy || this.data.voiceCaptureId) return;
+      runtime(this).targetReadingToken = this.properties.readingToken;
+      runtime(this).targetVideoCode = this.properties.videoCode;
       const generation = runtime(this).generation;
+      const voiceGeneration = runtime(this).voiceGeneration;
+      const isCurrent = () => generation === runtime(this).generation && voiceGeneration === runtime(this).voiceGeneration && this.properties.active;
       this.setData({ busy: true, error: "" });
       try {
         const target = this.properties.readingToken ? { reading_token: this.properties.readingToken } : { video_code: this.properties.videoCode };
         const ticket = await startShareResponseVoice(target);
-        if (generation !== runtime(this).generation) return;
+        if (!isCurrent()) return;
         this.setData({ gatewayUrl: ticket.gatewayUrl, busy: false }, () => {
-          if (generation === runtime(this).generation && this.data.open) this.setData({ voiceStartRequest: this.data.voiceStartRequest + 1 });
+          if (isCurrent() && this.data.open) this.setData({ voiceStartRequest: this.data.voiceStartRequest + 1 });
         });
       } catch (error) {
-        if (generation !== runtime(this).generation) return;
+        if (!isCurrent()) return;
         if (error instanceof ApiError && error.statusCode === 401) {
           this.setData({ error: "请先登录，再录下这段记忆。已写文字会保留。" });
           wx.navigateTo({ url: "/pages/login/index?from=response" });
@@ -52,7 +64,7 @@ Component({
           this.setData({ error: error instanceof Error ? error.message : "语音暂时不可用，请重试" });
           if (error instanceof ApiError && [404, 409, 410].includes(error.statusCode)) this.triggerEvent("unavailable", { error });
         }
-      } finally { if (generation === runtime(this).generation) this.setData({ busy: false }); }
+      } finally { if (isCurrent()) this.setData({ busy: false }); }
     },
     voiceSource(event: { detail: { captureId?: string } }) {
       const id = String(event.detail.captureId || "");
@@ -66,12 +78,15 @@ Component({
     async submit() {
       const content = this.data.content.trim();
       if (!this.properties.active || this.data.busy || !content) return;
+      runtime(this).targetReadingToken = this.properties.readingToken;
+      runtime(this).targetVideoCode = this.properties.videoCode;
       const generation = runtime(this).generation;
       const fingerprint = `${content}\0${this.data.voiceCaptureId}`;
       if (!runtime(this).requestId || runtime(this).requestContent !== fingerprint) {
         runtime(this).requestId = `response-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         runtime(this).requestContent = fingerprint;
       }
+      runtime(this).submitting = true;
       this.setData({ busy: true, error: "" });
       try {
         const target = this.properties.readingToken ? { reading_token: this.properties.readingToken } : { video_code: this.properties.videoCode };
@@ -91,7 +106,12 @@ Component({
           this.setData({ error: error instanceof Error ? error.message : "暂时没能提交，请重试" });
           if (error instanceof ApiError && [404, 409, 410].includes(error.statusCode)) this.triggerEvent("unavailable", { error });
         }
-      } finally { if (generation === runtime(this).generation) this.setData({ busy: false }); }
+      } finally {
+        if (generation === runtime(this).generation) {
+          runtime(this).submitting = false;
+          this.setData({ busy: false });
+        }
+      }
     },
   },
 });
