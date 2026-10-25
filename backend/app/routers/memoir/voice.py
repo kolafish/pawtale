@@ -2,7 +2,6 @@ import base64
 import binascii
 from pathlib import Path
 import re
-import struct
 from typing import Literal
 import uuid
 
@@ -85,39 +84,13 @@ from app.services.memoir import memory_activation as memoir_memory_activation
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
-from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.audio_files import audio_file_response
 from app.services.asr.factory import create_volc_streaming_asr_client
 
 
 router = APIRouter()
 VoiceTranscriptIncludedFilter = Literal["all", "included", "not_included"]
 VoiceTranscriptGuidanceModeFilter = Literal["free_narration", "guided_interview"]
-
-_PCM_SAMPLE_RATE = 16000
-_PCM_CHANNELS = 1
-_PCM_BITS_PER_SAMPLE = 16
-
-
-def _wav_bytes(pcm: bytes) -> bytes:
-    byte_rate = _PCM_SAMPLE_RATE * _PCM_CHANNELS * _PCM_BITS_PER_SAMPLE // 8
-    block_align = _PCM_CHANNELS * _PCM_BITS_PER_SAMPLE // 8
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",
-        36 + len(pcm),
-        b"WAVE",
-        b"fmt ",
-        16,
-        1,
-        _PCM_CHANNELS,
-        _PCM_SAMPLE_RATE,
-        byte_rate,
-        block_align,
-        _PCM_BITS_PER_SAMPLE,
-        b"data",
-        len(pcm),
-    )
-    return header + pcm
 
 
 async def _memoir_project_id(
@@ -397,22 +370,7 @@ async def play_mobile_memoir_audio_file(
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
-    path = audio_file_path(audio_file)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="音频文件不存在")
-    if audio_file.mime_type == "audio/pcm":
-        async with aiofiles.open(path, "rb") as file:
-            pcm = await file.read()
-        return Response(
-            content=_wav_bytes(pcm),
-            media_type="audio/wav",
-            headers={"Content-Disposition": f'inline; filename="{audio_file.id}.wav"'},
-        )
-    return FileResponse(
-        path,
-        media_type=audio_file.mime_type,
-        filename=f"{audio_file.id}{Path(audio_file.storage_path).suffix}",
-    )
+    return await audio_file_response(audio_file, include_filename=True)
 
 
 @router.post("/search-query/transcribe", response_model=MemoirVoiceSearchTranscriptionResponse)

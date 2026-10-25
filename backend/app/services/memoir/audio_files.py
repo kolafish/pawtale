@@ -1,12 +1,14 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+import struct
 import uuid
 import wave
 
 import aiofiles
 import aiofiles.os
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DATA_DIR
@@ -38,6 +40,46 @@ def audio_file_path(audio_file: AudioFile) -> Path:
     except ValueError:
         return DATA_DIR / storage_path
     return MEMOIR_AUDIO_DIR / relative_path
+
+
+def pcm_wav_bytes(pcm: bytes) -> bytes:
+    byte_rate = _PCM_SAMPLE_RATE * _PCM_BYTES_PER_SAMPLE
+    block_align = _PCM_BYTES_PER_SAMPLE
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + len(pcm),
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        _PCM_SAMPLE_RATE,
+        byte_rate,
+        block_align,
+        (_PCM_BYTES_PER_SAMPLE * 8),
+        b"data",
+        len(pcm),
+    )
+    return header + pcm
+
+
+async def audio_file_response(
+    audio_file: AudioFile, *, include_filename: bool = False,
+    headers: dict[str, str] | None = None, missing_detail: str = "音频文件不存在",
+) -> Response:
+    path = audio_file_path(audio_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=missing_detail)
+    if audio_file.mime_type == "audio/pcm":
+        async with aiofiles.open(path, "rb") as file:
+            pcm = await file.read()
+        response_headers = dict(headers or {})
+        if include_filename:
+            response_headers["Content-Disposition"] = f'inline; filename="{audio_file.id}.wav"'
+        return Response(content=pcm_wav_bytes(pcm), media_type="audio/wav", headers=response_headers)
+    return FileResponse(path, media_type=audio_file.mime_type, headers=headers,
+        filename=f"{audio_file.id}{Path(audio_file.storage_path).suffix}" if include_filename else None)
 
 
 def audio_file_duration_seconds(audio_file: AudioFile, path: Path) -> float | None:

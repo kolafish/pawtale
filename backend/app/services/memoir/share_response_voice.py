@@ -7,12 +7,10 @@ from fastapi import HTTPException
 from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import session_token_hash
 from app.clock import utcnow_naive
 from app.database import async_session_maker
-from app.models.memoir import MemoirShareResponse, MemoirShareResponseVoice, MemoirMaterialShareVideo
+from app.models.memoir import MemoirShareResponse, MemoirShareResponseVoice
 from app.models.memoir_common import AudioFile
-from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.projects import Project
 from app.models.users import User
 from app.schemas.memoir_share_likes import MemoirShareLikeTarget
@@ -24,15 +22,8 @@ from app.services.asr.streaming import StreamingASREvent
 
 async def new_capture(db: AsyncSession, user_id: str, target: MemoirShareLikeTarget) -> MemoirShareResponseVoice:
     resolved = await share_responses.response_target(db, target)
-    if target.reading_token is not None:
-        model, _ = book_shares._share_table(resolved.kind)
-        share = await db.get(model, resolved.id)
-        key = share.token_hash
-    else:
-        video = await db.get(MemoirMaterialShareVideo, resolved.id)
-        key = session_token_hash(video.share_code)
     capture = MemoirShareResponseVoice(project_id=resolved.project_id, user_id=user_id,
-        target_kind=resolved.kind, target_id=resolved.id, share_key=key,
+        target_kind=resolved.kind, target_id=resolved.id, share_key=resolved.share_key,
         expires_at=utcnow_naive() + timedelta(minutes=10))
     db.add(capture)
     await db.commit()
@@ -46,19 +37,9 @@ async def valid_capture(db: AsyncSession, capture_id: str, user_id: str) -> Memo
     if capture.audio_file_id:
         raise HTTPException(status_code=409, detail="这段录音已完成")
     if capture.target_kind == "video":
-        job = await db.get(MemoirMaterialShareVideo, capture.target_id, populate_existing=True)
-        if job is None or session_token_hash(job.share_code) != capture.share_key:
-            raise HTTPException(status_code=404, detail="视频分享已停止")
-        await share_video_shares._shared_job(db, job.share_code)
+        await share_video_shares.validate_share_key(db, capture.target_id, capture.share_key)
     else:
-        model, _ = book_shares._share_table(capture.target_kind)
-        share = await db.get(model, capture.target_id, populate_existing=True)
-        if share is None or share.token_hash != capture.share_key:
-            raise HTTPException(status_code=404, detail="阅读分享已停止")
-        token = book_shares._stable_token(capture.target_id, share.token_hash, scope=capture.target_kind)
-        resource, _ = await book_shares.readable_share(db, token)
-        if resource.id != capture.target_id:
-            raise HTTPException(status_code=404, detail="阅读分享已停止")
+        await book_shares.validate_share_key(db, capture.target_kind, capture.target_id, capture.share_key)
     return capture
 
 
@@ -69,15 +50,10 @@ async def active_capture_ticket(db: AsyncSession, capture_id: str, user_id: str)
             or capture.expires_at <= utcnow_naive()):
         return False
     if capture.target_kind == "video":
-        code = await db.scalar(select(MemoirMaterialShareVideo.share_code).where(
-            MemoirMaterialShareVideo.id == capture.target_id,
-            MemoirMaterialShareVideo.share_enabled.is_(True),
-            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
-        ))
-        return code is not None and session_token_hash(code) == capture.share_key
-    model, _ = book_shares._share_table(capture.target_kind)
-    share = await db.get(model, capture.target_id)
-    return bool(share and book_shares._active(share) and share.token_hash == capture.share_key)
+        key = await share_video_shares.active_share_key(db, capture.target_id)
+    else:
+        key = await book_shares.active_share_key(db, capture.target_kind, capture.target_id)
+    return key is not None and key == capture.share_key
 
 
 class ResponseCapturePersistence:
@@ -146,13 +122,13 @@ class ResponseCapturePersistence:
         await self.pending.discard()
 
 
-async def capture_audio(db: AsyncSession, response_id: str, user_id: str) -> tuple[AudioFile, str]:
+async def capture_audio(db: AsyncSession, response_id: str, user_id: str) -> AudioFile:
     response = await share_responses.private_response(db, response_id, user_id)
     capture = await db.get(MemoirShareResponseVoice, response.voice_capture_id) if response.voice_capture_id else None
     audio = await db.get(AudioFile, capture.audio_file_id) if capture and capture.audio_file_id else None
     if audio is None:
         raise HTTPException(status_code=404, detail="这条回应没有原音")
-    return audio, capture.id
+    return audio
 
 
 async def cleanup_expired_unsubmitted_captures(db: AsyncSession) -> int:

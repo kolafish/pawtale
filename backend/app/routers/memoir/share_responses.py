@@ -13,10 +13,7 @@ from app.routers.websocket_auth import authenticate_websocket, reject_websocket
 from app.routers.dictation_gateway import run_dictation_gateway
 from app.services.memoir.voice_authorization import audio_authorizer, has_current_voice_authorization_consent
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.audio_files import audio_file_path
-from fastapi.responses import FileResponse
-import aiofiles
-from app.routers.memoir.voice import _wav_bytes
+from app.services.memoir.audio_files import audio_file_response
 
 
 def no_store(response: Response) -> None:
@@ -85,16 +82,8 @@ async def response_voice(websocket: WebSocket, capture_id: str, db: AsyncSession
 
 
 @router.get("/share-responses/{response_id}/audio")
-async def response_audio(response_id: str, response: Response,
+async def response_audio(response_id: str,
                          db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    audio, _ = await voice_service.capture_audio(db, response_id, user.id)
-    response.headers["Cache-Control"] = "no-store"
-    path = audio_file_path(audio)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="原音文件不存在")
-    if audio.mime_type == "audio/pcm":
-        async with aiofiles.open(path, "rb") as file:
-            return Response(content=_wav_bytes(await file.read()), media_type="audio/wav",
-                headers={"Cache-Control": "no-store"})
-    return FileResponse(path, media_type=audio.mime_type,
-        headers={"Cache-Control": "no-store"})
+    audio = await voice_service.capture_audio(db, response_id, user.id)
+    return await audio_file_response(audio, headers={"Cache-Control": "no-store"},
+        missing_detail="原音文件不存在")

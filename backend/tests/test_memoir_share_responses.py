@@ -125,7 +125,7 @@ async def test_response_submission_reports_deleted_object_after_lock_wait(monkey
     async def video_read(_db, _code):
         return MemoirMaterialShareVideo(id='gone')
     monkeypatch.setattr(book_shares, 'readable_share', text_read)
-    monkeypatch.setattr(share_video_shares, '_shared_job', video_read)
+    monkeypatch.setattr(share_video_shares, 'shared_job', video_read)
     for target in ({'reading_token': 'old'}, {'video_code': '0' * 20}):
         with pytest.raises(HTTPException) as exc:
             from app.schemas.memoir_share_likes import MemoirShareLikeTarget
