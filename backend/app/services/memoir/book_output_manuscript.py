@@ -200,11 +200,11 @@ def fallback_title_suggestions(base_title: str, count: int) -> list[str]:
     subject = formal_title.removesuffix("的回忆录").removesuffix("回忆录").strip("的") or "家人"
     candidates = [
         formal_title,
-        f"{subject}的一生",
+        f"{subject}的往事",
         f"{subject}慢慢说",
         f"{subject}口述回忆录",
         "我走过的这些年",
-        "一生的来路",
+        "记忆中的来路",
         "从前的日子",
         "那些年我记得",
         "家里的回忆录",

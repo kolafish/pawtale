@@ -45,6 +45,7 @@ from app.services.memoir import automation_events
 from app.services.memoir import narration_people
 from app.services.memoir import fact_decisions
 from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE, interviewer_lines
+from app.services.memoir.prompt_budget import representative_excerpt
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
@@ -582,14 +583,13 @@ async def select_related_sections(
     candidate_blocks = "\n\n".join(
         f"section_id: {references.encode(section.section_id)}\n"
         f"标题：{section.title}\n"
-        f"现有正文节选：{section.content[:280]}"
-        f"{' …… ' + section.content[-280:] if len(section.content) > 560 else ''}"
+        f"现有正文或首中尾摘录：{representative_excerpt(section.content, limit=560)}"
         for section in candidates
     )
     prompt = f"""新讲述已经归入《{context.chapter_title}》的相关小节。请判断其他现有小节是否确实需要局部调整，以避免具体事实重复或修正明确的前后衔接。普通主题相似、风格统一、整体润色都不足以选择旧小节；可以返回空数组。
 
-新讲述原文：
-{changed_text[:4800]}
+新讲述问答或首中尾摘录（省略部分不代表不存在）：
+{representative_excerpt(changed_text, limit=4800)}
 
 其他小节：
 {candidate_blocks}
@@ -617,22 +617,23 @@ async def select_related_sections(
         )
         return {}
     selected: dict[str, str] = {}
+    normalized_changed_text = normalized_material_text(changed_text)
     for item in response.value.sections:
         try:
             section_id = references.decode(item.section_id)
         except ValueError:
             continue
         previous = candidates_by_id.get(section_id)
-        new_evidence = item.new_evidence.strip()
-        existing_evidence = item.existing_evidence.strip()
+        new_evidence = normalized_material_text(item.new_evidence)
+        existing_evidence = normalized_material_text(item.existing_evidence)
         reason = " ".join(item.reason.split())[:240]
         if (
             previous is None
             or len(new_evidence) < 4
             or len(existing_evidence) < 4
             or len(reason) < 12
-            or new_evidence not in changed_text
-            or existing_evidence not in previous.content
+            or new_evidence not in normalized_changed_text
+            or existing_evidence not in normalized_material_text(previous.content)
         ):
             continue
         selected[section_id] = reason
@@ -1534,7 +1535,7 @@ async def generate_chapter_section(
             if last_error is not None:
                 attempt_prompt += (
                     "\n上次输出未通过校验："
-                    f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
+                    f"{getattr(last_error, 'validation_feedback', '') or str(last_error)}。请补齐所有 JSON 字段并严格遵守输出格式。"
                 )
             generated_result = await generate_structured_with_client(
                 client,

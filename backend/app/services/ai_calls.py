@@ -126,9 +126,11 @@ class AIStructuredOutputError(ValueError):
         message: str,
         *,
         response: AITextCallResult | None = None,
+        validation_feedback: str = "",
     ) -> None:
         super().__init__(message)
         self.response = response
+        self.validation_feedback = validation_feedback
 
     @property
     def diagnostics(self) -> dict[str, object]:
@@ -388,6 +390,37 @@ async def stream_text_with_client(
             record_ai_usage_in_background(**record)
 
 
+def structured_validation_feedback(error: ValidationError, output_model: type[BaseModel]) -> str:
+    """Return bounded field/type diagnostics, without input values or validator context."""
+    fields: set[str] = set()
+    def collect(value: object) -> None:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            if isinstance(properties, dict):
+                fields.update(properties)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+    collect(output_model.model_json_schema())
+    reasons = {
+        "missing": "缺少必填字段", "extra_forbidden": "含未声明字段",
+        "literal_error": "值不在 schema 允许的枚举中", "enum": "值不在允许的枚举中",
+        "string_type": "必须是字符串", "list_type": "必须是数组", "dict_type": "必须是对象",
+        "int_type": "必须是整数", "int_parsing": "无法解析为整数", "bool_type": "必须是布尔值",
+        "value_error": "未通过字段业务约束，请按输入及 schema 修正",
+    }
+    lines = []
+    for item in error.errors(include_input=False, include_context=False, include_url=False)[:5]:
+        location = ".".join(str(part) if isinstance(part, int) or part in fields else "<未声明字段>"
+            for part in item["loc"])[:120] or "<根对象>"
+        kind = item["type"]
+        reason = reasons.get(kind, "不符合 schema 的类型或取值约束")
+        lines.append(f"{location}: {reason} ({kind})")
+    return "; ".join(lines)[:600]
+
+
 def validate_structured_response(
     response: AITextCallResult,
     *,
@@ -398,6 +431,7 @@ def validate_structured_response(
         raise AIOutputTruncatedError(
             "模型结构化输出达到长度上限，请重试",
             response=response,
+            validation_feedback="输出被长度限制截断；请精简表达并返回完整 JSON，保留全部必填字段和必要条目。",
         )
     candidate = payload
     if candidate is None:
@@ -406,13 +440,15 @@ def validate_structured_response(
         raise AIInvalidStructuredOutputError(
             "模型没有返回可识别的结构化结果，请重试",
             response=response,
+            validation_feedback="无法解析为 JSON 对象；请检查括号、字符串引号和转义，顶层必须是对象。",
         )
     try:
         value = output_model.model_validate(candidate)
     except ValidationError as exc:
         raise AIInvalidStructuredOutputError(
-            "模型返回的结构化结果缺少必要字段，请重试",
+            "模型返回的结构化结果不符合字段约束，请重试",
             response=response,
+            validation_feedback=structured_validation_feedback(exc, output_model),
         ) from exc
     return AIStructuredCallResult(value=value, response=response)
 

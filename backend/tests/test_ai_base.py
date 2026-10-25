@@ -333,7 +333,7 @@ class TestCallLlmContract:
             "total_tokens": 30,
         }
         assert call.await_count == 2
-        assert "上次输出未通过结构校验" in call.await_args_list[1].args[1]
+        assert "输出被长度限制截断" in call.await_args_list[1].args[1]
 
     @pytest.mark.asyncio
     async def test_structured_generation_retries_unescaped_quote_json(self):
@@ -625,3 +625,22 @@ async def test_public_text_call_preserves_provider_diagnostics():
     assert result.resolved_model == result.response_model == service.model_name
     assert result.usage == {"total_tokens": 12}
     assert result.attempt_count == 1
+
+
+@pytest.mark.parametrize("first,reason", [
+    ('{}', 'missing'),
+    ('{"ok": "private-source-value"}', 'bool_parsing'),
+    ('{"ok": true, "private-source-value": "secret"}', 'extra_forbidden'),
+])
+async def test_structured_retry_reports_field_failures_without_input_values(first, reason):
+    service = DeepSeekTextService()
+    call = AsyncMock(side_effect=[first, '{"ok": true}'])
+    with patch.object(service, "_call_llm", call):
+        result = await service.generate_structured("system", "user", output_model=_StructuredProbe, max_attempts=2)
+    assert result.value.ok is True
+    second_prompt = call.await_args_list[1].args[1]
+    assert reason in second_prompt
+    assert "private-source-value" not in second_prompt and "secret" not in second_prompt
+    assert len(second_prompt) < 800
+    if reason != "extra_forbidden":
+        assert "ok:" in second_prompt

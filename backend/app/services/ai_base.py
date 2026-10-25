@@ -199,7 +199,8 @@ class AITextServiceBase(ABC):
             attempt_prompt = user_prompt
             if last_error is not None:
                 attempt_prompt += (
-                    "\n上次输出未通过结构校验。"
+                    "\n上次输出未通过结构校验："
+                    + (last_error.validation_feedback or str(last_error)) + "。"
                     "请重新生成完整结果，确保所有字符串和字段都符合约定结构。"
                 )
             response, payload = await self._generate_structured_once(
@@ -228,10 +229,7 @@ class AITextServiceBase(ABC):
                 )
                 return validated
             except AIStructuredOutputError as exc:
-                last_error = type(exc)(
-                    str(exc),
-                    response=exc.response,
-                )
+                last_error = exc
         if last_error is not None:
             raise last_error
         raise RuntimeError("structured generation did not run")

@@ -567,8 +567,19 @@ def test_retired_signatures_require_generation_and_preserve_manual_review(engine
     assert not chapter_generation.chapter_draft_render_policy_current(context, latest)
 
 
-async def test_new_material_selects_only_evidence_backed_related_section(monkeypatch):
+@pytest.mark.parametrize("input_kind", ["short", "long", "multiline"])
+async def test_new_material_selects_only_evidence_backed_related_section(monkeypatch, input_kind):
     context = _two_section_context()
+    if input_kind == "long":
+        material = replace(context.materials[1], text="开头。" * 1500 + "终于抵达" * 100 + "后来。" * 1500)
+        context = replace(context, materials=(context.materials[0], material), sections=(
+            context.sections[0], replace(context.sections[1], materials=(material,))))
+    evidence = "终于抵达"
+    if input_kind == "multiline":
+        material = replace(context.materials[1], text="到城里后\n\n我进了厂。")
+        context = replace(context, materials=(context.materials[0], material), sections=(
+            context.sections[0], replace(context.sections[1], materials=(material,))))
+        evidence = "到城里后 我进了厂"
     latest = SimpleNamespace(
         material_snapshot_json=chapter_generation._snapshot(context, used_material_ids={"material-1"}),
     )
@@ -577,9 +588,11 @@ async def test_new_material_selects_only_evidence_backed_related_section(monkeyp
     previous = chapter_generation.GeneratedChapterSection(
         section_id="section-1",
         title="出发",
-        content="那天我从家里出发，傍晚终于抵达了目的地。",
+        content=("出发。" * 200 + "终于抵达" * 50 + "结尾。" * 200) if input_kind == "long" else "那天我从家里出发，傍晚终于抵达了目的地。",
         used_material_ids=("material-1",),
     )
+    if input_kind == "multiline":
+        previous = replace(previous, content="到城里后  \n\n我进了厂。")
     plan = chapter_generation.ChapterDraftGenerationPlan(
         target_context=chapter_generation._single_section_context(context, context.sections[1]),
         preserved_sections=(previous,),
@@ -591,13 +604,14 @@ async def test_new_material_selects_only_evidence_backed_related_section(monkeyp
     result = chapter_generation._RelatedSectionSelection(sections=[
         chapter_generation._RelatedSectionTarget(
             section_id="S1",
-            new_evidence="终于抵达",
-            existing_evidence="终于抵达",
+            new_evidence=evidence,
+            existing_evidence=evidence,
             reason="旧小节提前说了抵达结果，应把结果留给新增的抵达小节。",
         ),
     ])
 
     async def fake_selection(*args, **kwargs):
+        assert evidence in args[2]
         return SimpleNamespace(value=result)
 
     monkeypatch.setattr(chapter_generation, "generate_structured_with_client", fake_selection)
@@ -1607,3 +1621,21 @@ async def test_manual_review_acknowledges_only_the_edited_sections_question(clie
                 replace(section, materials=tuple(by_id[item.material_id] for item in section.materials))
                 for section in context.sections))
             assert chapter_generation.chapter_draft_question_changes(altered, latest) == set()
+
+
+async def test_chapter_retry_receives_specific_structured_field_failure():
+    class MissingContentAI(AITextServiceBase):
+        provider_name = "test"
+        model_name = "test"
+        def __init__(self):
+            self.prompts = []
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            self.prompts.append(user_prompt)
+            return json.dumps({"used_material_ids": ["M1"], **({"content": "那天我从家里出发。"} if len(self.prompts) > 1 else {})})
+    context = _two_section_context()
+    ai = MissingContentAI()
+    generated = await chapter_generation.generate_chapter_section(context, section=context.sections[0],
+        editorial_guidance=[], chapter_sections=context.sections, ai_client=ai)
+    assert generated.sections[0].content == "那天我从家里出发。"
+    assert len(ai.prompts) == 2
+    assert "content: 缺少必填字段 (missing)" in ai.prompts[1]
