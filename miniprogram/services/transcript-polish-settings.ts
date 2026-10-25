@@ -13,18 +13,18 @@ export interface TranscriptPolishOption {
 export const TRANSCRIPT_POLISH_OPTIONS: TranscriptPolishOption[] = [
   {
     value: "low",
-    label: "低 · 保留原话",
-    description: "去口头赘词和重复，尽量保留原话。",
+    label: "低 · 轻度整理",
+    description: "理顺口语和句子，保留个人语气与事实。",
   },
   {
     value: "medium",
     label: "中 · 适度润色",
-    description: "适度调整口语，让文字自然连贯。",
+    description: "整理句群和段落，表达自然连贯，保留细节。",
   },
   {
     value: "high",
     label: "高 · 深度提炼",
-    description: "重组和润色表达，不改动或补写事实。",
+    description: "重组叙述与节奏，保留细节，不补写事实。",
   },
 ];
 

@@ -52,7 +52,6 @@ from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
     _build_cleanup_prompt,
-    _remove_obvious_oral_fillers,
     _summary_fields,
     generate_cleaned_transcript_text,
 )
@@ -111,14 +110,6 @@ class FakeAIClient(AITextServiceBase):
 
     async def _call_llm(self, *args, **kwargs):
         return "我小时候住在外婆家。"
-
-
-class EchoFillerAIClient(AITextServiceBase):
-    provider_name = "fake-ai"
-    model_name = "fake-cleaner"
-
-    async def _call_llm(self, *args, **kwargs):
-        return "那个就是今天下雨了，那个那个那个雨下的很大。"
 
 
 class FailingAIClient(AITextServiceBase):
@@ -3190,35 +3181,10 @@ async def test_mobile_memoir_transcript_edits_keep_only_latest_three_versions(cl
     assert message.transcript_version_id == versions[-1].id
 
 
-async def test_mobile_memoir_ai_cleanup_removes_repeated_fillers_when_model_is_too_conservative(
-    client,
-    test_db,
-    monkeypatch,
-):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="那个就是今天下雨了，那个那个那个雨下的很大。",
-    )
-    monkeypatch.setattr(
-        "app.services.memoir.voice_transcripts.get_ai_service",
-        lambda model=None: EchoFillerAIClient(),
-    )
-
-    response = await client.post(
-        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup",
-        json={},
-    )
-
-    assert response.status_code == 200
-    item = response.json()
-    assert item["transcript_raw"] == "那个就是今天下雨了，那个那个那个雨下的很大。"
-    assert item["transcript_edited"] == "今天下雨了，雨下的很大。"
-
-
-def test_remove_obvious_oral_fillers_preserves_meaningful_deictic_phrase():
-    assert _remove_obvious_oral_fillers("那个年代生活很不一样。") == "那个年代生活很不一样。"
-    assert _remove_obvious_oral_fillers("那个那个那个雨下得很大。") == "雨下得很大。"
+async def test_cleanup_preserves_model_paragraphs_and_meaningful_emphasis():
+    content = "就是我，没有别人。\n\n他只说了一声：‘啊！’我记得很清楚。"
+    result = await generate_cleaned_transcript_text(content, ai_client=CapturingAIClient(content))
+    assert result.content == content
 
 
 def test_normalize_memoir_asr_text_corrects_chapter_homophones_in_book_context():
@@ -3250,7 +3216,7 @@ async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
         strict=False,
     )
 
-    assert result.content == "今天下雨了，雨下的很大。"
+    assert result.content == "那个就是今天下雨了，那个那个那个雨下的很大。"
     assert result.provider is None
     assert result.created_by == MemoirCreatedBy.SYSTEM
 
@@ -3404,3 +3370,9 @@ async def test_empty_audio_recovery_retains_framework_without_moving_current_int
         provider="offline-replay", transcript_polish_level="medium")
     assert utterance.framework_item_id == original_id
     assert session.anchor_framework_item_id == current_id
+
+
+async def test_cleanup_failure_preserves_emphasis_and_paragraphs():
+    source = "就是我，没有别人。\n\n那个是我的，不是他的。"
+    result = await generate_cleaned_transcript_text(source, ai_client=FailingAIClient(), strict=False)
+    assert result.content == source

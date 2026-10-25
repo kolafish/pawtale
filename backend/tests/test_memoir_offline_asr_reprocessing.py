@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from sqlalchemy import select
 
 from app.services.ai_base import AITextServiceBase
@@ -32,6 +34,8 @@ from app.services.memoir.offline_asr import (
     memoir_offline_asr_hotwords,
 )
 from app.services.memoir.offline_asr_reprocessing import reprocess_offline_asr
+from app.services.memoir.transcript_projection import cleanup_source_text
+from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
 
 
 class FakeCleanupAI(AITextServiceBase):
@@ -111,7 +115,8 @@ async def _add_audio(test_db, *, user_id: str = "user-1", size_bytes: int = 3200
     return audio_file
 
 
-async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db):
+@pytest.mark.parametrize("manual_type", ["user_edited", "dialect_corrected"])
+async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db, manual_type):
     project, voice_session = await _create_project(test_db)
     audio_file = await _add_audio(test_db)
     candidate = MemoirVoiceUtterance(
@@ -143,7 +148,7 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
         MemoirTranscriptVersion(
             voice_session_id=voice_session.id,
             source_artifact_id=edited.id,
-            version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+            version_type=manual_type,
             content="人工已经校过",
             created_by=MemoirCreatedBy.USER.value,
         )
@@ -176,11 +181,12 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
     ) is None
 
 
-async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db):
+@pytest.mark.parametrize("level", ["low", "medium", "high"])
+async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db, level):
     project, voice_session = await _create_project(test_db)
     project.metadata_json = {
         **(project.metadata_json or {}),
-        "transcript_polish_level": "high",
+        "transcript_polish_level": level,
     }
     project_id = project.id
     audio_file = await _add_audio(test_db)
@@ -255,7 +261,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert recognition_metadata["dialect_label"] == "四川话"
     assert recognition_metadata["dialect_enhancement_enabled"] is True
     assert recognition_metadata["providers"] == ["volc", "stepfun"]
-    assert recognition_metadata["transcript_polish_level"] == "high"
+    assert recognition_metadata["transcript_polish_level"] == level
     assert recognition_metadata["polish_provider"] == "fake-ai"
     assert refreshed_message.content_text == "爷爷退休以后仍在为公司奔波。"
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
@@ -263,7 +269,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert "四川及重庆方言常见词" in fake_ai.calls[0]["user_prompt"]
     assert "新凡 => 新繁" in fake_ai.calls[0]["user_prompt"]
     assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
-    assert "重组句式与表达层次" in fake_ai.calls[1]["user_prompt"]
+    assert f"“{level}”" in fake_ai.calls[1]["user_prompt"]
     assert "新凡 => 新繁" in fake_ai.calls[1]["user_prompt"]
 
     versions = (
@@ -275,6 +281,20 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert by_provider[VOLC_OFFLINE_ASR_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
     assert by_provider[STEPFUN_OFFLINE_ASR_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
     assert by_provider["fake-ai"].version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value
+    for index in range(5):
+        assert await cleanup_source_text(test_db, refreshed) == "爷爷退休以后还在帮公司跑事情。"
+        next_version = MemoirTranscriptVersion(
+            voice_session_id=refreshed.voice_session_id, source_artifact_id=refreshed.id,
+            version_type="dialect_corrected", created_by="ai", content=f"后续第 {index} 次润色。",
+        )
+        test_db.add(next_version)
+        await test_db.flush()
+        refreshed_message.transcript_version_id = next_version.id
+        await test_db.flush()
+        await prune_transcript_versions_for_utterance(
+            test_db, utterance_id=refreshed.id, version_type="dialect_corrected",
+        )
+    assert await cleanup_source_text(test_db, refreshed) == "爷爷退休以后还在帮公司跑事情。"
 
     repeat_dry_run = await reprocess_offline_asr(
         test_db,
@@ -294,7 +314,8 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert forced_dry_run["candidate_count"] == 1
 
 
-async def test_offline_asr_reprocess_does_not_overwrite_an_edit_saved_while_asr_is_running(test_db):
+@pytest.mark.parametrize("manual_type", ["user_edited", "dialect_corrected"])
+async def test_offline_asr_reprocess_does_not_overwrite_an_edit_saved_while_asr_is_running(test_db, manual_type):
     project, voice_session = await _create_project(test_db)
     audio_file = await _add_audio(test_db)
     utterance = MemoirVoiceUtterance(
@@ -313,7 +334,7 @@ async def test_offline_asr_reprocess_does_not_overwrite_an_edit_saved_while_asr_
             MemoirTranscriptVersion(
                 voice_session_id=voice_session.id,
                 source_artifact_id=request.utterance.id,
-                version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+                version_type=manual_type,
                 content="用户刚刚确认的文字",
                 created_by=MemoirCreatedBy.USER.value,
             )

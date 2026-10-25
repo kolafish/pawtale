@@ -74,16 +74,9 @@ _SKIP_FIELDS = {
 }
 _ASK_TOPICS = {
     "narrator_name": "他本人怎么称呼、叫什么名字",
-    "narrator_age": "他本人现在的年纪，或者哪年出生",
+    "narrator_age": "他本人的当前年龄、出生年份或属相；不含某件往事发生时的年龄。这里只判断是否问过资料，不要求能算出周岁",
     "narrator_origin": "他本人的老家、籍贯或是哪里人",
     "narrator_gender": "他本人是男是女，比如该叫他叔叔还是阿姨",
-}
-# Only when the check call fails: wording that plainly asks for each item.
-_ASK_PATTERNS = {
-    "narrator_name": re.compile(r"怎么称呼|贵姓|叫什么名字|您的名字"),
-    "narrator_age": re.compile(r"多少岁|几岁|多大岁数|多大年纪|年纪多大|高寿|贵庚|哪一?年(出)?生|出生年|属什么|属相"),
-    "narrator_origin": re.compile(r"老家|哪里人|哪儿人|家乡|籍贯|祖籍"),
-    "narrator_gender": re.compile(r"性别|(男的|女的|男士|女士|叔叔|阿姨|大哥|大姐|爷爷|奶奶)还是"),
 }
 
 
@@ -365,25 +358,25 @@ async def asked_profile_field(fields: tuple[str, ...], text: str, *, ai_model: s
     prompt = (
         f"访谈主持人对讲述者说了这句话：\n{text}\n\n"
         f"这句话问的是下面哪一项？\n{topics}\n"
-        "只选实际问到的一项。问过去某个时候的事、问家人的情况、问别的事，都不算。"
-        '只返回 JSON：{"field":"narrator_age"}（用选中的字段名）或 {"field":null}'
+        "先判断提问对象和时间：问他人或某段经历当时的情况，返回 null。"
+        "年龄若限定在上学、参加工作等事件发生时，或那年、当时，都返回 null，不能因出现年龄词而选年龄资料。"
+        "仅询问本人当前基本资料或出生信息时选择上面实际问到的一项。"
+        "只返回含 field 字段的 JSON，值为选中的字段名或 null。"
     )
-    try:
-        generated = await generate_structured_with_client(
-            get_ai_service(ai_model),
-            "你判断访谈主持人的一句话问的是什么。",
-            prompt,
-            output_model=_AskOutput,
-            requested_model=ai_model,
-            temperature=0,
-            max_tokens=20,
-            timeout=min(ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE), 15),
-            max_attempts=1,
-        )
-        asked = generated.value.field
-    except Exception:
-        logger.warning("Profile ask check failed; falling back to wording", exc_info=True)
-        asked = next((field for field in fields if _ASK_PATTERNS[field].search(text)), None)
+    # On failure, _record_profile_ask preserves the pending ask. Keyword
+    # guesses can erase the cap or mistake a relative/past event for a profile ask.
+    generated = await generate_structured_with_client(
+        get_ai_service(ai_model),
+        "你判断访谈主持人的一句话问的是什么。",
+        prompt,
+        output_model=_AskOutput,
+        requested_model=ai_model,
+        temperature=0,
+        max_tokens=20,
+        timeout=min(ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE), 15),
+        max_attempts=1,
+    )
+    asked = generated.value.field
     return asked if asked in fields else None
 
 
@@ -551,14 +544,14 @@ def _known_profile(profile: dict, *, excluding_utterance_id: str) -> str:
 def build_profile_prompt(*, previous_line: str, segment: str, known: str, today: date) -> str:
     previous = f"AI：{previous_line}\n" if previous_line else ""
     return (
-        f"今年是 {today.year} 年。下面是回忆录访谈里的一段：“AI”是访谈主持人，“叙述者”是讲述者本人。\n"
+        f"今天是 {today.isoformat()}。下面是回忆录访谈里的一段：“AI”是访谈主持人，“叙述者”是讲述者本人。\n"
         f"已经记下的资料：{known or '还没有'}\n\n"
         f"{previous}叙述者：{segment}\n\n"
         "只看叙述者这一段，记下这一段支持的本人资料，包括再次确认的资料，或者明确纠正已经记下的资料：\n"
         "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”。"
         "回答“该叫叔叔还是阿姨”这类问题，只是在说性别，name 填 null\n"
         "- gender：male 或 female；从用户讲述中提取性别，不要猜。\n"
-        "- age：周岁；他说的是出生年份就按今年算\n"
+        "- age：只填明确说出的当前周岁；只有出生年份、虚岁或大约年龄时填 null，不推算确定年龄，也不把往事中的年龄当成现在年龄\n"
         "- origin：本产品记录的是家乡，不要求他明确说出“老家”或“籍贯”二字。"
         "老家、籍贯、本人小时候住的地方或长大的地方都算。还不知道家乡时，"
         "他说“我小时候住在X”或“我在X长大”，origin 必须填写地名 X，不能因为没说籍贯而填 null，"

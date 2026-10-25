@@ -3,14 +3,14 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance, MemoirTranscriptVersion
-from app.domain.memoir.types import MemoirCreatedBy
+from app.domain.memoir.types import MemoirCreatedBy, MemoirTranscriptVersionType
 
 
 _NON_STORY_RE = re.compile(r"[\W_]|嗯|啊|呃|额|哦|那个|这个|就是")
@@ -33,6 +33,49 @@ def current_utterance_text_and_source(
     if edited:
         return edited, "edited"
     return (utterance.transcript_raw or "").strip(), "raw"
+
+
+def user_edited_version_clause():
+    return or_(
+        MemoirTranscriptVersion.created_by == MemoirCreatedBy.USER.value,
+        MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+    )
+
+
+async def cleanup_source_version(
+    db: AsyncSession, utterance: MemoirVoiceUtterance,
+) -> MemoirTranscriptVersion | None:
+    edited = await db.scalar(select(MemoirTranscriptVersion).where(
+        MemoirTranscriptVersion.source_artifact_id == utterance.id,
+        user_edited_version_clause(),
+    ).order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc()).limit(1))
+    if edited is not None:
+        return edited
+    # The first corrected version of an offline recognition run is its verified
+    # text; later versions only change expression. Older runs did not save the
+    # verification separately: keep their earliest surviving corrected version.
+    from app.services.memoir.material_offline_asr_state import material_offline_asr_metadata
+
+    applied_at = material_offline_asr_metadata(utterance).get("applied_at")
+    if not isinstance(applied_at, str):
+        return None
+    try:
+        applied = datetime.fromisoformat(applied_at)
+    except ValueError:
+        return None
+    if applied.tzinfo is not None:
+        applied = applied.astimezone(UTC).replace(tzinfo=None)
+    return await db.scalar(select(MemoirTranscriptVersion).where(
+        MemoirTranscriptVersion.source_artifact_id == utterance.id,
+        MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
+        MemoirTranscriptVersion.created_at >= applied,
+    ).order_by(MemoirTranscriptVersion.created_at, MemoirTranscriptVersion.id).limit(1))
+
+
+async def cleanup_source_text(db: AsyncSession, utterance: MemoirVoiceUtterance) -> str:
+    """Re-polish a stable source, never a succession of automatic rewrites."""
+    version = await cleanup_source_version(db, utterance)
+    return (version.content if version else utterance.transcript_raw or current_utterance_text(utterance)).strip()
 
 
 def current_transcript_version_id(
