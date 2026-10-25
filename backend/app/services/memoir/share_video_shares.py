@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import session_token_hash
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import MemoirMaterialShareVideo
 from app.schemas.memoir_voice import MemoirSharedVideoResponse, MemoirShareVideoJobResponse
@@ -23,7 +24,7 @@ from app.services.memoir.share_video_jobs import (
 SHARE_CODE_PATTERN = re.compile(r"[0-9a-f]{20}\Z")
 
 
-async def _shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
+async def shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
     # Every public entry, including images and byte ranges, checks publication.
     job = await db.scalar(select(MemoirMaterialShareVideo).where(
         MemoirMaterialShareVideo.share_code == code,
@@ -35,8 +36,24 @@ async def _shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
     return job
 
 
+async def active_share_key(db: AsyncSession, job_id: str) -> str | None:
+    code = await db.scalar(select(MemoirMaterialShareVideo.share_code).where(
+        MemoirMaterialShareVideo.id == job_id,
+        MemoirMaterialShareVideo.share_enabled.is_(True),
+        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+    ))
+    return session_token_hash(code) if code is not None else None
+
+
+async def validate_share_key(db: AsyncSession, job_id: str, key: str) -> None:
+    job = await db.get(MemoirMaterialShareVideo, job_id, populate_existing=True)
+    if job is None or session_token_hash(job.share_code) != key:
+        raise HTTPException(status_code=404, detail="视频分享已停止")
+    await shared_job(db, job.share_code)
+
+
 async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoResponse:
-    job = await _shared_job(db, code)
+    job = await shared_job(db, code)
     return await _video_response(db, job, public=True)
 
 
@@ -60,11 +77,11 @@ async def _video_response(db: AsyncSession, job: MemoirMaterialShareVideo, *, pu
 
 
 async def video_like_target(db: AsyncSession, code: str) -> ShareLikeTarget:
-    return video_target(await _shared_job(db, code))
+    return video_target(await shared_job(db, code))
 
 
 async def load_shared_video_file(db: AsyncSession, code: str) -> CompletedShareVideo:
-    return completed_share_video_file(await _shared_job(db, code))
+    return completed_share_video_file(await shared_job(db, code))
 
 
 async def set_video_share(

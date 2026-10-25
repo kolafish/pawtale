@@ -30,8 +30,8 @@ from app.schemas.memoir_book import (
     MemoirBookShareStatusResponse, MemoirAudioPlanRequest, MemoirSharedAudioPlanResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_output_versions import book_output_version_title
-from app.services.memoir.book_outputs import _output_version_response, get_book_output
+from app.services.memoir.book_output_versions import book_output_version_title, load_latest_book_output_version
+from app.services.memoir.book_outputs import _output_version_response
 from app.services.memoir.book_output_snapshots import chapter_snapshot, normalized_section_snapshots
 from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
 from app.services.memoir.image_assets import manuscript_image_snapshots, image_asset_file_path
@@ -57,7 +57,7 @@ def _stable_token(output_id: str, token_hash: str, *, scope: ShareScope = "book"
     return f"{dict(book='v1', chapter='c1', story='s1')[scope]}.{output_id}.{signature}"
 
 
-def _scope(resource: ShareResource) -> ShareScope:
+def share_scope(resource: ShareResource) -> ShareScope:
     if isinstance(resource, MemoirSection):
         return "story"
     return "chapter" if isinstance(resource, MemoirBookPlanChapter) else "book"
@@ -119,8 +119,8 @@ async def _current_version(
             MemoirBookChapterDraftVersion.chapter_id == chapter_id,
         ).order_by(MemoirBookChapterDraftVersion.version.desc()).limit(1))
     else:
-        output = await get_book_output(db, user_id=user_id, project_id=project_id)
-        version = await db.get(MemoirBookOutputVersion, output.latest_version.id) if output.latest_version else None
+        output = await _owned_resource(db, user_id, project_id, None)
+        version = await load_latest_book_output_version(db, output_id=output.id)
     if version is None:
         return None, False
     if isinstance(version, MemoirBookChapterDraftVersion):
@@ -163,18 +163,43 @@ def _active(share: MemoirBookShare | MemoirChapterShare | MemoirSectionShare | N
     return share is not None and (share.expires_at is None or share.expires_at > utcnow_naive())
 
 
+async def active_share_key(db: AsyncSession, scope: ShareScope, resource_id: str) -> str | None:
+    """Publication identity only; callers needing readable content must validate it separately."""
+    model, _ = _share_table(scope)
+    share = await db.get(model, resource_id, populate_existing=True)
+    return share.token_hash if _active(share) else None
+
+
+async def validate_share_key(db: AsyncSession, scope: ShareScope, resource_id: str, key: str) -> None:
+    if await active_share_key(db, scope, resource_id) != key:
+        raise HTTPException(status_code=404, detail="阅读分享已停止")
+    await readable_share(db, _stable_token(resource_id, key, scope=scope))
+
+
+def reading_share_title(resource: ShareResource, version: ShareVersion) -> str:
+    if isinstance(resource, MemoirSection):
+        section = next((item for item in normalized_section_snapshots(version.section_snapshot_json)
+                        if item["section_id"] == resource.id), None)
+        if section is None:
+            raise HTTPException(404, "这个故事还没有已保存正文")
+        return section["title"]
+    if isinstance(version, MemoirBookOutputVersion):
+        return book_output_version_title(version, fallback=resource.title)
+    return resource.title
+
+
 async def share_status(
     db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> MemoirBookShareStatusResponse:
     output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
-    share_model, share_key = _share_table(_scope(output))
+    share_model, share_key = _share_table(share_scope(output))
     share = await db.get(share_model, output.id, populate_existing=True)
     active = _active(share)
     version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     return MemoirBookShareStatusResponse(
         active=active,
         expires_at=share.expires_at if active else None,
-        token=_stable_token(output.id, share.token_hash, scope=_scope(output)) if active else None,
+        token=_stable_token(output.id, share.token_hash, scope=share_scope(output)) if active else None,
         stale=stale,
         current=bool(active and not stale and version),
         likes=await like_summary(db, _like_target(output), limit=None),
@@ -193,7 +218,7 @@ async def create_share(
     await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
     output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
     await db.refresh(output)
-    share_model, share_key = _share_table(_scope(output))
+    share_model, share_key = _share_table(share_scope(output))
     version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     if stale:
         raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
@@ -202,7 +227,7 @@ async def create_share(
     existing = await db.get(share_model, output.id, populate_existing=True)
     if not rotate and _active(existing):
         result = MemoirBookShareCreateResponse(
-            token=_stable_token(output.id, existing.token_hash, scope=_scope(output)),
+            token=_stable_token(output.id, existing.token_hash, scope=share_scope(output)),
             expires_at=existing.expires_at,
         )
         await _queue_resource_audio(db, output, version, retry_failed=True)
@@ -221,7 +246,7 @@ async def create_share(
     await db.execute(statement.on_conflict_do_update(index_elements=[share_key], set_=values))
     await _queue_resource_audio(db, output, version, retry_failed=True)
     await db.commit()
-    return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, scope=_scope(output)), expires_at=expires_at)
+    return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, scope=share_scope(output)), expires_at=expires_at)
 
 
 async def update_share(
@@ -235,7 +260,7 @@ async def revoke_share(
     db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> None:
     output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
-    share_model, share_key = _share_table(_scope(output))
+    share_model, share_key = _share_table(share_scope(output))
     await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
     await db.execute(delete(share_model).where(share_key == output.id))
     await db.commit()
@@ -306,7 +331,7 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
 async def _resource_reading_response(
     db: AsyncSession, resource: ShareResource, version: ShareVersion, *, token: str = "", presentation: bool = True,
 ) -> MemoirBookOutputResponse:
-    scope = _scope(resource)
+    scope = share_scope(resource)
     if isinstance(version, MemoirBookChapterDraftVersion):
         chapter = await db.get(MemoirBookPlanChapter, resource.chapter_id) if isinstance(resource, MemoirSection) else resource
         snapshot = chapter_snapshot(chapter, version, chapter_index=1)
@@ -472,20 +497,28 @@ async def _resource_audio_plan(
     db: AsyncSession, resource: ShareResource, version: ShareVersion, *, generate: bool,
     chapter_id: str | None = None, retry_failed: bool = False,
 ) -> MemoirSharedAudioPlanResponse:
-    from app.services.memoir.book_audio_jobs import AudioSource, prepare_audio_plan
-
     owner_id = await db.scalar(select(Project.user_id).where(Project.id == resource.project_id))
     response = await _resource_reading_response(db, resource, version, presentation=False)
     text = response.latest_version.content
     if chapter_id:
         chapters = response.latest_version.manuscript.chapters if response.latest_version.manuscript else []
         chapter = next((item for item in chapters if item.chapter_id == chapter_id), None)
-        if _scope(resource) != "book" or chapter is None:
+        if share_scope(resource) != "book" or chapter is None:
             raise HTTPException(404, "分享中没有这个章节")
         text = chapter.content
+    return await _prepare_shared_audio(db, owner_id=owner_id, project_id=resource.project_id,
+        version_id=version.id, text=text, generate=generate, retry_failed=retry_failed)
+
+
+async def _prepare_shared_audio(
+    db: AsyncSession, *, owner_id: str, project_id: str, version_id: str, text: str,
+    generate: bool, retry_failed: bool,
+) -> MemoirSharedAudioPlanResponse:
+    from app.services.memoir.book_audio_jobs import AudioSource, prepare_audio_plan
+
     plan = await prepare_audio_plan(
-        db, user_id=owner_id, project_id=resource.project_id,
-        source=AudioSource(version.id, text), req=MemoirAudioPlanRequest(retry_failed=retry_failed),
+        db, user_id=owner_id, project_id=project_id,
+        source=AudioSource(version_id, text), req=MemoirAudioPlanRequest(retry_failed=retry_failed),
         generate=generate, prepare_all=generate, commit=False,
     )
     return MemoirSharedAudioPlanResponse(**plan.model_dump(), content=text)
@@ -498,11 +531,12 @@ async def _queue_resource_audio(
         if isinstance(resource, MemoirBookOutput):
             response = await _resource_reading_response(db, resource, version, presentation=False)
             chapters = response.latest_version.manuscript.chapters if response.latest_version.manuscript else []
-            for chapter in chapters:
-                await _resource_audio_plan(db, resource, version, generate=True,
-                    chapter_id=chapter.chapter_id, retry_failed=retry_failed)
-            if chapters:
-                return
+            owner_id = await db.scalar(select(Project.user_id).where(Project.id == resource.project_id))
+            texts = [chapter.content for chapter in chapters] or [response.latest_version.content]
+            for text in texts:
+                await _prepare_shared_audio(db, owner_id=owner_id, project_id=resource.project_id,
+                    version_id=version.id, text=text, generate=True, retry_failed=retry_failed)
+            return
         await _resource_audio_plan(db, resource, version, generate=True, retry_failed=retry_failed)
     except HTTPException as exc:
         # A missing TTS configuration/content cannot prevent saving or sharing text.
@@ -528,7 +562,7 @@ async def queue_active_share_audio(db: AsyncSession, *, project_id: str, chapter
     if not owner_id:
         return
     for resource in resources:
-        share_model, _ = _share_table(_scope(resource))
+        share_model, _ = _share_table(share_scope(resource))
         if not _active(await db.get(share_model, resource.id)):
             continue
         version, stale = await _current_version(db, user_id=owner_id, project_id=project_id,

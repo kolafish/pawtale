@@ -1,12 +1,13 @@
 """Private responses reuse share authorization and the existing material pipeline."""
 from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import WECHAT_PLACEHOLDER_DISPLAY_NAME, session_token_hash
+from app.auth import WECHAT_PLACEHOLDER_DISPLAY_NAME
 from app.clock import utcnow_naive
 from app.models.memoir import (
     MemoirShareResponse, MemoirShareResponseVoice, MemoirVoiceSession, MemoirVoiceUtterance,
@@ -26,9 +27,10 @@ from app.services.memoir.utterance_editing_pipeline import schedule_ready_uttera
 @dataclass(frozen=True)
 class ResponseTarget:
     project_id: str
-    kind: str
+    kind: Literal["book", "chapter", "story", "video"]
     id: str
     title: str
+    share_key: str
 
 
 async def response_target(db: AsyncSession, req: MemoirShareLikeTarget) -> ResponseTarget:
@@ -40,14 +42,21 @@ async def response_target(db: AsyncSession, req: MemoirShareLikeTarget) -> Respo
         if locked is None:
             raise HTTPException(status_code=404, detail="分享内容已删除")
         resource, version = await book_shares.readable_share(db, req.reading_token)
-        projection = await book_shares._resource_reading_response(db, resource, version, presentation=False)
-        return ResponseTarget(resource.project_id, book_shares._scope(resource), resource.id, projection.title)
-    job = await share_video_shares._shared_job(db, req.video_code or "")
+        scope = book_shares.share_scope(resource)
+        key = await book_shares.active_share_key(db, scope, resource.id)
+        if key is None:
+            raise HTTPException(status_code=404, detail="阅读分享已停止")
+        return ResponseTarget(resource.project_id, scope, resource.id,
+            book_shares.reading_share_title(resource, version), key)
+    job = await share_video_shares.shared_job(db, req.video_code or "")
     locked = await db.scalar(select(type(job).id).where(type(job).id == job.id).with_for_update())
     if locked is None:
         raise HTTPException(status_code=404, detail="分享视频已删除")
-    job = await share_video_shares._shared_job(db, req.video_code or "")
-    return ResponseTarget(job.project_id, "video", job.id, completed_share_video_file(job).title)
+    job = await share_video_shares.shared_job(db, req.video_code or "")
+    key = await share_video_shares.active_share_key(db, job.id)
+    if key is None:
+        raise HTTPException(status_code=404, detail="视频分享已停止")
+    return ResponseTarget(job.project_id, "video", job.id, completed_share_video_file(job).title, key)
 
 
 async def create_response(db: AsyncSession, user: User, req: ShareResponseCreate) -> ShareResponseItem:
@@ -62,14 +71,7 @@ async def create_response(db: AsyncSession, user: User, req: ShareResponseCreate
         if (capture is None or capture.user_id != user.id or capture.project_id != target.project_id
                 or capture.target_kind != target.kind or capture.target_id != target.id or not capture.audio_file_id):
             raise HTTPException(status_code=410, detail="原音已过期或未完成，请重新录制")
-        if req.reading_token is not None:
-            model, _ = book_shares._share_table(target.kind)
-            current = await db.get(model, target.id, populate_existing=True)
-            valid_key = current.token_hash if current else ""
-        else:
-            video = await db.get(share_video_shares.MemoirMaterialShareVideo, target.id, populate_existing=True)
-            valid_key = session_token_hash(video.share_code) if video else ""
-        if capture.share_key != valid_key:
+        if capture.share_key != target.share_key:
             raise HTTPException(status_code=410, detail="原音对应的分享已更新，请重新录制")
         used = await db.scalar(select(MemoirShareResponse).where(
             MemoirShareResponse.voice_capture_id == capture.id,
