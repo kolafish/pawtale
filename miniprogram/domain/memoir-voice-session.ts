@@ -262,6 +262,7 @@ export interface VoiceGatewayServerEvent {
   utterance_id?: string;
   audio_file_id?: string | null;
   transcript_version_id?: string | null;
+  voice_capture_id?: string | null;
   start_ms?: number | null;
   end_ms?: number | null;
   error?: string;

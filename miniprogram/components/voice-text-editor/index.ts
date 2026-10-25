@@ -43,6 +43,8 @@ Component({
   properties: {
     value: { type: String, value: "" },
     voiceEnabled: { type: Boolean, value: true },
+    prepareVoice: { type: Boolean, value: false },
+    voiceStartRequest: { type: Number, value: 0 },
     gatewayUrl: { type: String, value: "" },
     voiceSessionId: { type: String, value: "" },
     placeholder: { type: String, value: "请输入或说出您的意见" },
@@ -66,6 +68,9 @@ Component({
   observers: {
     value(value: unknown) {
       this.syncText(value);
+    },
+    voiceStartRequest(value: unknown) {
+      if (typeof value === "number" && value > 0 && this.properties.prepareVoice) void this.startVoice(false);
     },
     "automaticVoiceCommand,gatewayUrl,disabled,busy"() {
       this.tryAutoStart();
@@ -156,6 +161,11 @@ Component({
         runtime.streaming.stopRecording();
         return;
       }
+      if (!this.canEdit()) return;
+      if (this.properties.prepareVoice) {
+        this.triggerEvent("requestvoice");
+        return;
+      }
       await this.startVoice(false);
     },
 
@@ -208,7 +218,12 @@ Component({
               }
             },
             onPartial: (text) => this.updateVoiceTranscript(token, text),
-            onFinal: (event) => this.updateVoiceTranscript(token, event.text || ""),
+            onFinal: (event) => {
+              this.updateVoiceTranscript(token, event.text || "");
+              if (token === runtime.token && event.voice_capture_id) {
+                this.triggerEvent("voicesource", { captureId: event.voice_capture_id });
+              }
+            },
             onError: (message) => {
               if (token === runtime.token) {
                 if (autoTriggered) {

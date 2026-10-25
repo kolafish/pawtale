@@ -1,4 +1,7 @@
 from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
 
 from app.models.users import User
 from app.routers import dictation_gateway
@@ -128,6 +131,40 @@ async def test_article_dictation_rejects_non_article_project(client, test_db, mo
         }
     ]
     assert websocket.closed_with == 1008
+
+
+async def test_shared_gateway_releases_voice_capture_when_billing_fails(monkeypatch):
+    lease = type("Lease", (), {"release": AsyncMock()})()
+    capacity = type("Capacity", (), {"acquire": AsyncMock(return_value=lease)})()
+    stop = AsyncMock()
+
+    class GatewaySession:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def run(self):
+            pass
+
+    monkeypatch.setattr(dictation_gateway, "assert_ai_credit_available", AsyncMock())
+    monkeypatch.setattr(dictation_gateway, "voice_gateway_capacity_manager", capacity)
+    monkeypatch.setattr(dictation_gateway, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(
+        dictation_gateway,
+        "record_volc_streaming_asr_usage",
+        AsyncMock(side_effect=RuntimeError("billing failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="billing failure"):
+        await dictation_gateway.run_dictation_gateway(
+            FakeWebSocket(),
+            user_id="user-1",
+            capacity_prefix="test",
+            diagnostics_context={},
+            on_session_stop=stop,
+        )
+
+    stop.assert_awaited_once_with(None, "transport_closed")
+    lease.release.assert_awaited_once()
 
 
 class FakeWebSocket:

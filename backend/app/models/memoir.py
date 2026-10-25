@@ -1426,12 +1426,38 @@ class MemoirShareResponse(Base):
     target_title: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    voice_capture_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_share_response_voices.id", ondelete="SET NULL"), unique=True, nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     adopted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     adopted_utterance_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"), nullable=True,
     )
+
+
+class MemoirShareResponseVoice(Base):
+    """A visitor-owned original recording with immutable ASR text and source timing."""
+    __tablename__ = "memoir_share_response_voices"
+    __table_args__ = (
+        CheckConstraint("target_kind IN ('book','chapter','story','video')", name="ck_memoir_share_response_voices_target"),
+        Index("ix_memoir_share_response_voices_project_created", "project_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    share_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    audio_file_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=True)
+    asr_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    provider_payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class MemoirBookRevisionProposal(Base):

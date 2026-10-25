@@ -13,7 +13,10 @@ from app.services.asr.capacity import (
     voice_gateway_capacity_manager,
 )
 from app.services.asr.factory import create_realtime_volc_streaming_asr_client
-from app.services.asr.gateway import AudioAuthorizationHandler, VoiceGatewaySession
+from app.services.asr.gateway import (
+    AudioAuthorizationHandler, AudioFrameHandler, AudioEndHandler, ASRFinalHandler,
+    SessionStopHandler, VoiceGatewaySession,
+)
 from app.services.asr.billing import record_volc_streaming_asr_usage
 from app.services.ai_credits import assert_ai_credit_available
 
@@ -30,8 +33,13 @@ async def run_dictation_gateway(
     diagnostics_context: dict[str, Any],
     text_normalizer: Callable[[str], str] = _identity_text,
     authorize_audio: AudioAuthorizationHandler | None = None,
+    on_audio_frame: AudioFrameHandler | None = None,
+    on_audio_end: AudioEndHandler | None = None,
+    on_asr_final: ASRFinalHandler | None = None,
+    on_session_stop: SessionStopHandler | None = None,
 ) -> None:
     session: VoiceGatewaySession | None = None
+    stopped = False
     try:
         await assert_ai_credit_available(user_id)
     except InsufficientAICreditError:
@@ -55,7 +63,18 @@ async def run_dictation_gateway(
             _stop_reason: str,
         ) -> None:
             await capacity_lease.release()
+            nonlocal stopped
+            stopped = True
+            if on_session_stop:
+                await on_session_stop(_error_message, _stop_reason)
 
+        extra_handlers = {}
+        if on_audio_frame:
+            extra_handlers["on_audio_frame"] = on_audio_frame
+        if on_audio_end:
+            extra_handlers["on_audio_end"] = on_audio_end
+        if on_asr_final:
+            extra_handlers["on_asr_final"] = on_asr_final
         session = VoiceGatewaySession(
             client=websocket,
             asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
@@ -66,17 +85,24 @@ async def run_dictation_gateway(
             authorize_audio=authorize_audio,
             connection_id=connection_id,
             diagnostics_context=diagnostics_context,
+            **extra_handlers,
         )
         await session.run()
     finally:
-        if session is not None:
-            audio_duration_seconds = float(getattr(session, "total_audio_duration_seconds", 0) or 0)
-            terminal_error = getattr(session, "terminal_error", None)
-            await record_volc_streaming_asr_usage(
-                audio_duration_seconds=audio_duration_seconds,
-                status="failed" if terminal_error else "succeeded",
-                error_type=terminal_error,
-                # The audio was streamed to the provider either way.
-                billable=True,
-            )
-        await capacity_lease.release()
+        try:
+            if session is not None:
+                audio_duration_seconds = float(getattr(session, "total_audio_duration_seconds", 0) or 0)
+                terminal_error = getattr(session, "terminal_error", None)
+                await record_volc_streaming_asr_usage(
+                    audio_duration_seconds=audio_duration_seconds,
+                    status="failed" if terminal_error else "succeeded",
+                    error_type=terminal_error,
+                    # The audio was streamed to the provider either way.
+                    billable=True,
+                )
+        finally:
+            try:
+                if on_session_stop and not stopped:
+                    await on_session_stop(getattr(session, "terminal_error", None), "transport_closed")
+            finally:
+                await capacity_lease.release()

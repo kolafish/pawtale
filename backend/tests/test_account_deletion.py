@@ -136,6 +136,7 @@ async def test_memoir_project_deletion_defers_audio_files_until_commit(monkeypat
     project_file.write_text("memoir")
     monkeypatch.setattr(content_storage, "PROJECTS_DIR", tmp_path / "projects")
     db = _AccountDeletionSession([], [project_file])
+    db.scalar = AsyncMock(return_value=project_id)
     project = SimpleNamespace(id=project_id, metadata_json={})
     audio_file = SimpleNamespace(id="audio-1")
     delete_audio = AsyncMock()

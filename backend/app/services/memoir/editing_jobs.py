@@ -849,6 +849,7 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     settings = get_settings()
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
     book_policy_reconciled = False
+    next_capture_cleanup_at = 0.0
     while not stop_event.is_set():
         try:
             from app.services.memoir.book_completion_jobs import advance_book_completion_jobs
@@ -862,6 +863,11 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
             async with async_session_maker() as db:
                 await resume_credit_blocked_editing_jobs(db)
                 await advance_book_completion_jobs(db)
+            if asyncio.get_running_loop().time() >= next_capture_cleanup_at:
+                next_capture_cleanup_at = asyncio.get_running_loop().time() + 60
+                from app.services.memoir.share_response_voice import cleanup_expired_unsubmitted_captures
+                async with async_session_maker() as db:
+                    await cleanup_expired_unsubmitted_captures(db)
             await run_available_editing_jobs(should_stop=stop_event.is_set)
         except Exception:
             logger.exception("memoir editing worker tick failed")

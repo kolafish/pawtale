@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirVoiceAuthorizationConsent,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
+    MemoirShareResponseVoice,
 )
 from app.models.memoir_common import AudioFile
 from app.models.projects import Project
@@ -100,6 +101,10 @@ async def _project_audio_files(
         ),
         select(MemoirMaterialShareVideo.audio_file_id).where(
             MemoirMaterialShareVideo.project_id == project_id,
+        ),
+        select(MemoirShareResponseVoice.audio_file_id).where(
+            MemoirShareResponseVoice.project_id == project_id,
+            MemoirShareResponseVoice.audio_file_id.is_not(None),
         ),
     ):
         audio_ids.update(value for value in (await db.scalars(statement)).all() if value)
@@ -229,6 +234,13 @@ async def delete_project(
     post_commit_cleanups: list[project_documents.PostCommitCleanup] | None = None,
 ) -> None:
     project_id = project.id
+    # Finalizing a visitor recording uses the same row lock before adding audio.
+    # Collecting candidates under it prevents an untracked late audio file.
+    locked_project_id = await db.scalar(
+        select(Project.id).where(Project.id == project_id).with_for_update(key_share=True)
+    )
+    if locked_project_id is None:
+        raise RuntimeError("Project disappeared before memoir cleanup")
     audio_candidates = await _project_audio_files(db, project_id=project_id)
     image_candidates = list(
         (

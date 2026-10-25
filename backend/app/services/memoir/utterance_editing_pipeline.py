@@ -150,4 +150,5 @@ async def schedule_ready_utterance_background_work(
     await story_tree_growth.schedule_story_tree_growth(
         db, project_id=project_id, voice_session_id=utterance.voice_session_id, source=source,
     )
-    await narrator_profile.schedule_narrator_profile(db, utterance=utterance)
+    if source != "share_response":
+        await narrator_profile.schedule_narrator_profile(db, utterance=utterance)

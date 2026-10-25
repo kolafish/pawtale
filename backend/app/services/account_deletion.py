@@ -12,7 +12,10 @@ from app.config import DATA_DIR
 from app.models.ai_credits import AICreditOrder
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
 from app.models.git_sync import GitHubInstallation, GitHubSetupState, ProjectGitSync
-from app.models.memoir import MemoirImageAsset, MemoirMaterialShareVideo, MemoirVoiceAuthorizationConsent
+from app.models.memoir import (
+    MemoirImageAsset, MemoirMaterialShareVideo, MemoirVoiceAuthorizationConsent,
+    MemoirShareResponse, MemoirShareResponseVoice,
+)
 from app.models.memoir_common import AudioFile
 from app.models.projects import Project
 from app.models.users import AuthIdentity, AuthSession, User
@@ -62,6 +65,9 @@ async def delete_account(db: AsyncSession, user: User) -> None:
             await db.execute(delete(ProjectGitSync).where(ProjectGitSync.user_id == user_id))
             await db.execute(delete(GitHubSetupState).where(GitHubSetupState.user_id == user_id))
             await db.execute(delete(GitHubInstallation).where(GitHubInstallation.user_id == user_id))
+            # A visitor can have private responses and original audio in someone else's project.
+            await db.execute(delete(MemoirShareResponse).where(MemoirShareResponse.user_id == user_id))
+            await db.execute(delete(MemoirShareResponseVoice).where(MemoirShareResponseVoice.user_id == user_id))
             await db.execute(delete(AudioFile).where(AudioFile.user_id == user_id))
             await db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
             await retain_ai_credit_account(db, user_id)
