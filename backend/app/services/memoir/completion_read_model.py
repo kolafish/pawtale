@@ -691,6 +691,7 @@ async def chapter_workspace(
         chapter=chapter,
     )
     signature_changed = False
+    input_signature = ""
     if version is not None:
         try:
             context = await chapter_generation.load_chapter_generation_context(
@@ -698,6 +699,7 @@ async def chapter_workspace(
                 project_id=project_id,
                 chapter_id=chapter_id,
             )
+            input_signature = context.input_signature
             signature_changed = not chapter_generation.chapter_draft_is_current(
                 context,
                 version,
@@ -746,6 +748,7 @@ async def chapter_workspace(
         sections=chapter_sections,
         draft_id=draft.id if draft else None,
         draft_version_id=version.id if version else None,
+        input_signature=input_signature,
         draft_version=version.version if version else None,
         draft_status=draft.status if draft else None,
         draft_content=version.content if version else "",

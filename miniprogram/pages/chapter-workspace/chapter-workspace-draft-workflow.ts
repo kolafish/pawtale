@@ -71,6 +71,8 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       editingMode: "manual",
       editingSectionId: section.section_id,
       editingSectionContent: section.content,
+      editingVersionId: workspace.draft_version_id,
+      editingInputSignature: workspace.input_signature || "",
       error: "",
     });
     this.syncDraftSectionUnloadAlert();
@@ -155,7 +157,8 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         this.data.projectId,
         this.data.chapterId,
         {
-          expected_version_id: workspace.draft_version_id,
+          expected_version_id: this.data.editingVersionId || workspace.draft_version_id,
+          ...(this.data.editingInputSignature ? { expected_input_signature: this.data.editingInputSignature } : {}),
           sections: workspace.draft_sections.map((section) => ({
             section_id: section.section_id,
             content: section.section_id === sectionId

@@ -2,6 +2,7 @@ import type { MemoirChapterCompletionSummary } from "./chapter-completion";
 import type { MemoirChapterDraftSection, MemoirChapterSectionSummary } from "./memoir-book";
 
 export interface MemoirChapterWorkspace {
+  input_signature?: string;
   server_revision: number;
   project_id: string;
   chapter_id: string;

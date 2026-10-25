@@ -223,6 +223,7 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     sections: list[MemoirChapterSectionSummary] = Field(default_factory=list)
     draft_id: str | None = None
     draft_version_id: str | None = None
+    input_signature: str = ""
     draft_version: int | None = None
     draft_status: str | None = None
     draft_content: str = ""

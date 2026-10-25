@@ -248,6 +248,7 @@ export interface MemoirBookChapterDraft {
 
 export interface MemoirBookChapterDraftRevisionRequest {
   expected_version_id: string;
+  expected_input_signature?: string;
   sections: Array<{
     section_id: string;
     content: string;

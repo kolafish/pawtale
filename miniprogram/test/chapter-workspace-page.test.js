@@ -1226,6 +1226,7 @@ test("chapter workspace edits one small section with optimistic version control"
   const { toasts } = installWx();
   const calls = [];
   const currentWorkspace = workspace();
+  currentWorkspace.input_signature = "source-before-edit";
   currentWorkspace.draft_sections.push({
     section_id: "section-2",
     title: "抵达后的第一晚",
@@ -1255,6 +1256,7 @@ test("chapter workspace edits one small section with optimistic version control"
   });
   assert.equal(context.data.editingSectionId, "section-1");
   assert.equal(context.data.editingSectionContent, "修改后的第一小节正文");
+  context.data.workspace = { ...context.data.workspace, input_signature: "source-after-refresh", draft_version_id: "version-after-refresh" };
   await page.saveDraftSectionEdit.call(context);
 
   assert.deepEqual(calls, [[
@@ -1262,6 +1264,7 @@ test("chapter workspace edits one small section with optimistic version control"
     "chapter-1",
     {
       expected_version_id: "version-1",
+      expected_input_signature: "source-before-edit",
       sections: [
         {
           section_id: "section-1",
