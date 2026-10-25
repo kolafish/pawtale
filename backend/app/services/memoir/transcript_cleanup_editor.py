@@ -29,7 +29,7 @@ from app.services.memoir.project_ai_preferences import (
     select_project_ai_model,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.material_roles import is_countable_material
+from app.services.memoir.material_roles import interviewer_lines, is_countable_material
 from app.services.memoir.transcript_projection import cleanup_source_text, current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     TranscriptMutationGuard,
@@ -141,7 +141,7 @@ async def preview_batch_cleanup(
             dialect_glossary=glossary_lines,
         )
         baseline = await cleanup_source_text(db, utterance)
-        prepared.append((utterance, source_text, baseline, context, transcript_mutation_guard(utterance)))
+        prepared.append((utterance, source_text, baseline, context, transcript_mutation_guard(utterance, interviewer_line=context.interviewer_line)))
 
     # Preview is read-only. Release its database transaction before making one
     # or more provider calls; the returned guards protect the later confirm.
@@ -196,6 +196,12 @@ async def confirm_batch_cleanup(
         allow_admin=allow_admin,
     )
     try:
+        # Acquire all source locks before shared question locks; two disjoint
+        # answer batches can still share a question.
+        await db.execute(select(MemoirVoiceUtterance.id).where(
+            MemoirVoiceUtterance.id.in_([item.id for item in utterances]),
+        ).order_by(MemoirVoiceUtterance.id).with_for_update())
+        await interviewer_lines(db, (item.chat_message_id for item in utterances), lock=True)
         # Acquire multi-row guards in a stable order so overlapping batch edits
         # cannot deadlock by presenting the same materials in a different order.
         for utterance in sorted(utterances, key=lambda item: item.id):

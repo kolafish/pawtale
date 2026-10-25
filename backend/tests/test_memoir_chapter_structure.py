@@ -132,6 +132,69 @@ async def _book(client, db):
     return pid, user_id
 
 
+async def test_question_edit_invalidates_directory_and_section_regeneration_inputs(client, test_db):
+    from app.models.memoir import MemoirChatMessage
+    from app.services.memoir import section_regeneration as regeneration
+
+    pid, _ = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    material = sections[0].materials[0]
+    answer = material.utterance.chat_message
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role='assistant', content_text='妈妈叫什么名字？', content_status='final', turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    before = await structure.structure_context(test_db, plan, chapters, sections)
+    chapter = SimpleNamespace(sections=[sections[0]])
+    snapshots = await regeneration._material_snapshots(test_db, chapter)
+    assert snapshots[0].interviewer_line == question.content_text
+    prompt = structure.build_structure_prompt(before, chapters=chapters, sections=sections,
+        chapter_summaries={}, section_summaries={})
+    assert question.content_text in prompt
+    async with AsyncSession(test_db.bind) as writer:
+        changed = await writer.get(MemoirChatMessage, question.id)
+        changed.content_text = '妈妈在学校教什么？'
+        await writer.commit()
+    after = await structure.structure_context(test_db, plan, chapters, sections)
+    assert after.content_signature != before.content_signature
+    assert after.source_signature != before.source_signature
+    with pytest.raises(regeneration.SectionRegenerationConflict):
+        regeneration._validate_material_snapshots(await regeneration._material_snapshots(test_db, chapter), snapshots)
+
+
+@pytest.mark.db_independent
+async def test_final_directory_write_holds_question_lock(client, test_db, monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from app.models.memoir import MemoirChatMessage
+    pid, uid = await _book(client, test_db)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    answer = sections[0].materials[0].utterance.chat_message
+    question = MemoirChatMessage(project_id=pid, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="妈妈叫什么名字？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    context = await structure.structure_context(test_db, plan, chapters, sections)
+    _provider(monkeypatch, _merge(context))
+    apply = structure.apply_structure
+    checked = []
+
+    async def apply_with_editor(*args, **kwargs):
+        async with AsyncSession(test_db.bind) as editor:
+            await editor.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            with pytest.raises(DBAPIError) as exc:
+                await editor.execute(text("UPDATE memoir_chat_messages SET content_text = :content WHERE id = :id"),
+                    {"content": "妈妈在学校教什么？", "id": question.id})
+            assert exc.value.orig.sqlstate == "55P03"
+            checked.append(True)
+            await editor.rollback()
+        return await apply(*args, **kwargs)
+
+    monkeypatch.setattr(structure, "apply_structure", apply_with_editor)
+    assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    assert checked == [True]
+
+
 def _merge(context, *, merge_sections=False):
     output = context.outline.model_copy(deep=True)
     first, second, third, fourth = output.chapters
@@ -1199,19 +1262,22 @@ async def test_unreadable_chapter_does_not_block_other_chapter_review(client, te
 
 @pytest.mark.parametrize('count,text', [(4, '妈妈的课堂。'), (600, '童年往事。' * 1000), (2000, '\x01"\\' * 1000)],
                          ids=['short', '600-long-materials', '2000-json-escaped-materials'])
-def test_structure_material_overviews_obey_serialized_budget(count, text):
+@pytest.mark.parametrize('has_questions', [False, True])
+def test_structure_material_overviews_obey_serialized_budget(count, text, has_questions):
     sections = [SimpleNamespace(id=f's{i}', chapter_id='c', include_in_book=True, status='active', materials=[])
                 for i in range(4)]
     for i in range(count):
         sections[i % len(sections)].materials.append(SimpleNamespace(id=f'm{i}', sort_order=i,
-            include_in_book=True, transcript_version=SimpleNamespace(content=text)))
+            include_in_book=True, transcript_version=SimpleNamespace(content=text),
+            utterance=SimpleNamespace(chat_message_id=f'q{i}')))
     refs = ModelReferenceMap('M', (m.id for s in sections for m in s.materials))
     context = structure.StructureContext(
         outline=structure.StructureOutput(chapters=[structure.ChapterGroup(chapter_ref='C1', title='童年',
             sections=[structure.SectionGroup(section_refs=[f'S{i+1}'], title='往事') for i in range(4)])]),
         chapter_refs=ModelReferenceMap('C', ['c']), section_refs=ModelReferenceMap('S', [s.id for s in sections]),
         locked_chapters=frozenset(), signature='', material_refs=refs,
-        fixed_materials={refs.encode('m0'): ('S1', 'C1')})
+        fixed_materials={refs.encode('m0'): ('S1', 'C1')},
+        question_lines={f'q{i}': '您愿意再讲讲妈妈的课堂吗？' * 25 for i in range(count)} if has_questions else {})
     prompt = structure.build_structure_prompt(context, chapters=[SimpleNamespace(id='c', include_in_book=True)],
         sections=sections, chapter_summaries={}, section_summaries={})
     payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
@@ -1224,5 +1290,6 @@ def test_structure_material_overviews_obey_serialized_budget(count, text):
     assert len({row['material_ref'] for row in overviews}) == len(overviews)
     assert all(any(row['material_ref'] in g['material_refs'] for row in overviews) for g in groups)
     assert all(row['text_truncated'] == (row['text'] != text) for row in overviews)
+    assert all(bool(row.get('interviewer_line')) == has_questions for row in overviews)
     if count == 4:
         assert len(overviews) == count and all(row['text'] == text for row in overviews)

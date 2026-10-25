@@ -29,7 +29,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_messages, interviewer_context_signature
 from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
 
 logger = logging.getLogger(__name__)
@@ -65,10 +65,14 @@ class _AnswerReadingOutput(_ReadingOutput):
     story_content: bool
 
 
-def answer_story_content(message: MemoirChatMessage) -> bool | None:
+async def answer_story_content(db: AsyncSession, message: MemoirChatMessage) -> bool | None:
     """Only a reading of this exact answer and parent question can decide content eligibility."""
+    question = (await interviewer_messages(db, [message.id])).get(message.id)
     reading = (message.metadata_json or {}).get(READING_KEY, {})
     if (isinstance(reading, dict) and reading.get("schema_version") == 3
+        and question is not None and question.id == message.parent_message_id
+        and (question.metadata_json or {}).get(ASKED_KEY)
+        and reading.get("question_context", "") == interviewer_context_signature(message, question)
         and reading.get("question_message_id") == message.parent_message_id
         and reading.get("source_text_hash") == source_text_hash(normalized_material_text(message.content_text))
         and isinstance(reading.get("story_content"), bool)):
@@ -232,8 +236,8 @@ async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = N
 
     Its merges are left out: the re-read may be correcting one, and both people must stay offered.
     """
-    rows = await db.execute(
-        select(MemoirChatMessage.id, MemoirChatMessage.metadata_json, MemoirChatMessage.transcript_version_id)
+    messages = list((await db.scalars(
+        select(MemoirChatMessage)
         .join(MemoirVoiceSession, MemoirChatMessage.voice_session_id == MemoirVoiceSession.id)
         .where(
             MemoirChatMessage.project_id == project_id,
@@ -242,18 +246,21 @@ async def load_people(db: AsyncSession, project_id: str, *, keep: str | None = N
             func.trim(MemoirChatMessage.content_text) != "",
         )
         .order_by(MemoirVoiceSession.created_at, MemoirChatMessage.turn_index, MemoirChatMessage.created_at)
-    )
+    )).all())
+    questions = await interviewer_messages(db, [message.id for message in messages])
     # A reading of an older transcript version is dropped: what it said may have been corrected.
     return fold(
         (
-            message_id,
-            {"people": [{**item, "same_as": None} for item in metadata[READING_KEY].get("people") or []]}
-            if message_id == keep
-            else metadata[READING_KEY],
+            message.id,
+            {"people": [{**item, "same_as": None} for item in message.metadata_json[READING_KEY].get("people") or []]}
+            if message.id == keep
+            else message.metadata_json[READING_KEY],
         )
-        for message_id, metadata, version in rows
-        if isinstance((metadata or {}).get(READING_KEY), dict)
-        and (message_id == keep or metadata[READING_KEY].get("transcript_version_id") == (version or ""))
+        for message in messages
+        if isinstance((message.metadata_json or {}).get(READING_KEY), dict)
+        and (message.id == keep or message.metadata_json[READING_KEY].get("question_context", "")
+             == interviewer_context_signature(message, questions.get(message.id)))
+        and (message.id == keep or message.metadata_json[READING_KEY].get("transcript_version_id") == (message.transcript_version_id or ""))
     )
 
 
@@ -369,7 +376,6 @@ async def read_people(
     project: Project,
     narrator: str,
     message: MemoirChatMessage,
-    previous_line: str,
     transcript_version_id: str,
 ) -> bool:
     """Read one segment and store what it says about people. Returns False when its transcript changed since.
@@ -381,8 +387,10 @@ async def read_people(
     """
     if (message.transcript_version_id or "") != transcript_version_id:
         return False
-    question = await db.get(MemoirChatMessage, message.parent_message_id) if message.parent_message_id else None
-    classify_answer = bool(question and question.role == MemoirChatMessageRole.ASSISTANT.value
+    question = (await interviewer_messages(db, [message.id])).get(message.id)
+    question_context = interviewer_context_signature(message, question)
+    previous_line = question.content_text.strip() if question else ""
+    classify_answer = bool(question and question.id == message.parent_message_id and question.role == MemoirChatMessageRole.ASSISTANT.value
                            and question.project_id == message.project_id
                            and question.voice_session_id == message.voice_session_id
                            and (question.metadata_json or {}).get(ASKED_KEY))
@@ -392,14 +400,17 @@ async def read_people(
     text_hash = source_text_hash(normalized_material_text(message.content_text))
     stored_reading = (message.metadata_json or {}).get(READING_KEY)
     if (isinstance(stored_reading, dict) and stored_reading.get("schema_version", 1) in {1, 2, 3}
-        and (not classify_answer or answer_story_content(message) is not None)
+        and stored_reading.get("question_context", "") == question_context
+        and (not classify_answer or await answer_story_content(db, message) is not None)
         and isinstance(stored_reading.get("people"), list) and (
         stored_reading.get("transcript_version_id") == transcript_version_id
         or (stored_reading.get("schema_version") in {2, 3} and stored_reading.get("source_text_hash") == text_hash)
     )):
-        await db.refresh(message, with_for_update=True)
+        fresh_question = (await interviewer_messages(db, [message.id], lock=True)).get(message.id)
+        await db.refresh(message)
         if ((message.transcript_version_id or "") != transcript_version_id
-            or (classify_answer and answer_story_content(message) is None)):
+            or interviewer_context_signature(message, fresh_question) != question_context
+            or (classify_answer and await answer_story_content(db, message) is None)):
             return False
         message.metadata_json = {**(message.metadata_json or {}), READING_KEY: {
             **stored_reading, "transcript_version_id": transcript_version_id,
@@ -432,6 +443,7 @@ async def read_people(
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
+    fresh_question = (await interviewer_messages(db, [message_id], lock=True)).get(message_id)
     current = await db.scalar(
         select(MemoirChatMessage)
         .where(MemoirChatMessage.id == message_id)
@@ -439,7 +451,7 @@ async def read_people(
         .execution_options(populate_existing=True)
     )
     if (current is None or (current.transcript_version_id or "") != transcript_version_id
-        or (classify_answer and current.parent_message_id != question_message_id)):
+        or interviewer_context_signature(current, fresh_question) != question_context):
         return False
 
     def text(value: str | None) -> str | None:
@@ -457,7 +469,7 @@ async def read_people(
     current.metadata_json = {
         **(current.metadata_json or {}),
         READING_KEY: {"schema_version": 3 if classify_answer else 2, "transcript_version_id": transcript_version_id,
-            "source_text_hash": text_hash, "people": stored,
+            "source_text_hash": text_hash, "question_context": question_context, "people": stored,
             **({"question_message_id": question_message_id, "story_content": generated.value.story_content}
                if classify_answer else {})},
     }

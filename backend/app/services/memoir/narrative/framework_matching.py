@@ -22,6 +22,7 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import frameworks
 from app.services.memoir.project_ai_preferences import load_project_ai_model
+from app.services.memoir.prompt_budget import representative_excerpt
 from app.services.memoir.transcript_projection import current_utterance_text
 
 
@@ -74,7 +75,7 @@ def _matching_prompt(
     )
     material_lines = "\n".join(
         f"- {material_refs.encode(material.id)} | "
-        f"{current_utterance_text(material)[:800]}"
+        f"{representative_excerpt(current_utterance_text(material), limit=max(800, 20_000 // max(1, len(materials))))}"
         for material in materials
     )
     return f"""把每段回忆录讲述整体匹配到话题地图。
@@ -82,7 +83,8 @@ def _matching_prompt(
 规则：
 - 一段讲述是一个完整素材，不要拆成 Claim 或逐句匹配。
 - 只匹配讲述的主要语义；顺带提到的人、地点或事情不算一个独立话题。
-- 话题按人生先后排；每段素材通常只对应一个话题，明显跨两段人生时才给两个；无法判断时返回空。
+- 按话题本身的语义匹配，不把话题地图当固定人生阶段表。确有多个充分展开的主题时可多选，最多 {MAX_MATCHES_PER_MATERIAL} 项；无法判断时返回空。
+- 素材可能是含省略号的首中尾摘录，不能把未展示内容视为不存在，不从片段推断身份、关系或时间。
 - 不判断事实真假、内容能否入书、隐私范围或用户决定。
 - confidence 是 0 到 1 的数值。
 - 只输出 JSON：

@@ -121,6 +121,104 @@ async def _settle_correction(test_db, utterance_id: str) -> None:
         await test_db.commit()
 
 
+async def test_profile_question_edit_reextracts_same_answer(client, test_db, fake_ai):
+    pid = await ensure_mobile_memoir_project(client)
+    sid = await _session(client, pid)
+    question = await _ask(test_db, sid, "您现在几岁？")
+    answer = await _narrate(client, test_db, sid, "七十岁。")
+    fake_ai.payload = {"age": 70}
+    await _run(test_db, answer.utterance_id)
+    assert (await _profile(test_db, pid))[1]["narrator_age"] == 70
+    job = await _profile_job(test_db, answer.utterance_id)
+    job.status = "succeeded"
+    question.content_text = "您退休那年几岁？"
+    await test_db.commit()
+    utterance = await test_db.get(MemoirVoiceUtterance, answer.utterance_id)
+    await narrator_profile.schedule_narrator_profile(test_db, utterance=utterance)
+    assert job.status == "pending"
+    fake_ai.payload = {}
+    count = len(fake_ai.prompts)
+    await _run(test_db, answer.utterance_id)
+    assert len(fake_ai.prompts) > count
+    assert "您退休那年几岁？" in fake_ai.prompts[-1]
+    assert (await _profile(test_db, pid))[1]["narrator_age"] is None
+
+
+async def test_person_answer_reading_depends_on_question_and_person_anchor(client, test_db, fake_ai):
+    pid = await ensure_mobile_memoir_project(client)
+    sid = await _session(client, pid)
+    question = await _ask(test_db, sid, "名字要不要解释一下？")
+    question.metadata_json = {narration_people.ASKED_KEY: "original:version:1"}
+    await test_db.commit()
+    answer = await _narrate(client, test_db, sid, "是。")
+    message = await test_db.get(MemoirChatMessage, answer.message_id)
+    message.parent_message_id = question.id
+    await test_db.commit()
+    project = await test_db.get(Project, pid)
+    fake_ai.payload = {"people": [], "story_content": False}
+    assert await narration_people.read_people(test_db, project=project, narrator="", message=message,
+        transcript_version_id=answer.transcript_version_id)
+    assert await narration_people.answer_story_content(test_db, message) is False
+    question.content_text = "那次您也参加了？"
+    await test_db.commit()
+    assert await narration_people.answer_story_content(test_db, message) is None
+
+    fake_ai.payload = {"people": [], "story_content": True}
+    assert await narration_people.read_people(test_db, project=project, narrator="", message=message,
+        transcript_version_id=answer.transcript_version_id)
+    assert "那次您也参加了？" in fake_ai.prompts[-1]
+    assert await narration_people.answer_story_content(test_db, message) is True
+    question.metadata_json = {narration_people.ASKED_KEY: "another:version:1"}
+    await test_db.commit()
+    assert await narration_people.answer_story_content(test_db, message) is None
+
+async def test_roster_excludes_a_reading_whose_question_changed(client, test_db, fake_ai):
+    pid = await ensure_mobile_memoir_project(client)
+    sid = await _session(client, pid)
+    question = await _ask(test_db, sid, "父亲叫什么？")
+    answer = await _narrate(client, test_db, sid, "建国。")
+    message = await test_db.get(MemoirChatMessage, answer.message_id)
+    fake_ai.payload = {"people": [{"ref": "new", "call": "父亲", "name": "建国", "relation": "父亲"}]}
+    assert await narration_people.read_people(test_db, project=await test_db.get(Project, pid), narrator="",
+        message=message, transcript_version_id=answer.transcript_version_id)
+    assert "建国" in await narration_people.names(test_db, pid)
+    question.content_text = "舅舅叫什么？"
+    await test_db.commit()
+    assert await narration_people.names(test_db, pid) == ()
+    assert await narration_people.load_people(test_db, pid, keep=message.id)
+
+
+@pytest.mark.parametrize("people", [False, True])
+async def test_question_edit_during_reading_does_not_persist_old_interpretation(client, test_db, fake_ai, monkeypatch, people):
+    pid = await ensure_mobile_memoir_project(client)
+    sid = await _session(client, pid)
+    question = await _ask(test_db, sid, "父亲叫什么？" if people else "您现在几岁？")
+    answer = await _narrate(client, test_db, sid, "建国。" if people else "七十岁。")
+    utterance = await narrator_profile._load_utterance(test_db, answer.utterance_id)
+    project = await test_db.get(Project, pid)
+
+    async def changed(*args, **kwargs):
+        async with AsyncSession(test_db.bind) as editor:
+            current = await editor.get(MemoirChatMessage, question.id)
+            current.content_text = "舅舅叫什么？" if people else "您退休那年几岁？"
+            await editor.commit()
+        return json.dumps({"people": [{"ref": "new", "call": "父亲", "name": "建国"}]} if people else {"age": 70}, ensure_ascii=False)
+
+    monkeypatch.setattr(fake_ai, "_call_llm", changed)
+    if people:
+        current = await narration_people.read_people(test_db, project=project, narrator="",
+            message=utterance.chat_message, transcript_version_id=answer.transcript_version_id)
+    else:
+        current = await narrator_profile.fill_narrator_profile(test_db, project=project,
+            utterance=utterance, transcript_version_id=answer.transcript_version_id)
+    assert current is False
+    await test_db.commit()
+    message = await test_db.get(MemoirChatMessage, answer.message_id)
+    key = narration_people.READING_KEY if people else narrator_profile.READING_KEY
+    assert key not in (message.metadata_json or {})
+
+
+
 async def run_test_editing_job(test_db, job_id):
     job = await test_db.get(MemoirEditingJob, job_id)
     if job and job.job_type == 'fill_narrator_profile':
@@ -147,7 +245,8 @@ async def test_each_segment_of_the_first_narration_is_read_with_the_line_before_
     assert job.payload_json == {
         "utterance_id": first.utterance_id,
         "transcript_version_id": first.transcript_version_id,
-        "previous_message_id": opening.id,
+        "question_context": narrator_profile.interviewer_context_signature(
+            await test_db.get(MemoirChatMessage, first.message_id), opening),
     }
     fake_ai.payload = {"name": "王秀音"}
     await _run(test_db, first.utterance_id)
@@ -158,7 +257,8 @@ async def test_each_segment_of_the_first_narration_is_read_with_the_line_before_
     # 小余 says the name aloud; a spoken correction in the next segment replaces it.
     asked = await _ask(test_db, session_id, "王秀音阿姨，您是哪年生的？", offered="narrator_age")
     second = await _narrate(client, test_db, session_id, "是秀英，英雄的英。我五二年生的，老家四川成都。")
-    assert (await _profile_job(test_db, second.utterance_id)).payload_json["previous_message_id"] == asked.id
+    assert (await _profile_job(test_db, second.utterance_id)).payload_json["question_context"] == narrator_profile.interviewer_context_signature(
+        await test_db.get(MemoirChatMessage, second.message_id), asked)
     fake_ai.payload = {"name": "王秀英", "gender": "female", "age": None, "origin": "四川成都"}
     await _run(test_db, second.utterance_id)
     assert "已经记下的资料：称呼：王秀音" in fake_ai.prompts[-1]
@@ -242,7 +342,6 @@ async def test_a_corrected_transcript_is_read_again_and_a_stale_version_writes_n
         project=await test_db.get(Project, project_id),
         utterance=await narrator_profile._load_utterance(test_db, first.utterance_id),
         transcript_version_id=first.transcript_version_id,
-        previous_message_id=None,
     )
     _project, profile = await _profile(test_db, project_id)
     assert not profile.get("narrator_name")
@@ -534,7 +633,7 @@ async def test_failed_legacy_recovery_does_not_clear_the_profile(client, test_db
         await narrator_profile.fill_narrator_profile(
             test_db, project=await test_db.get(Project, project_id),
             utterance=await narrator_profile._load_utterance(test_db, later.utterance_id),
-            transcript_version_id=version, previous_message_id=None,
+            transcript_version_id=version,
         )
     await test_db.rollback()
     _, profile = await _profile(test_db, project_id)
@@ -1205,7 +1304,8 @@ async def test_no_answer_prompts_preserve_the_question_until_a_real_topic_change
     segment = await _narrate(client, test_db, first, answer)
     job = await _profile_job(test_db, segment.utterance_id)
     assert job.status == "pending"
-    assert job.payload_json["previous_message_id"] == previous.id
+    assert job.payload_json["question_context"] == narrator_profile.interviewer_context_signature(
+        await test_db.get(MemoirChatMessage, segment.message_id), previous)
 
     session = await test_db.get(MemoirVoiceSession, first)
     await test_db.refresh(session, ["messages"])

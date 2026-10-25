@@ -39,6 +39,7 @@ from app.services.memoir.offline_asr import (
     run_offline_asr,
 )
 from app.services.memoir.material_roles import (
+    interviewer_lines,
     is_narrator_material,
     narrator_material_clause,
 )
@@ -144,10 +145,12 @@ async def candidate_utterances(
     return candidates
 
 
-async def load_reprocess_utterance(db: AsyncSession, utterance_id: str) -> MemoirVoiceUtterance | None:
+async def load_reprocess_utterance(db: AsyncSession, utterance_id: str, *, lock: bool = False) -> MemoirVoiceUtterance | None:
+    query = select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == utterance_id)
+    if lock:
+        query = query.with_for_update()
     return await db.scalar(
-        select(MemoirVoiceUtterance)
-        .where(MemoirVoiceUtterance.id == utterance_id)
+        query
         .options(
             selectinload(MemoirVoiceUtterance.audio_file),
             selectinload(MemoirVoiceUtterance.chat_message),
@@ -195,26 +198,8 @@ def _candidate_payload(utterance: MemoirVoiceUtterance) -> dict[str, object]:
 
 
 async def _latest_question_context(db: AsyncSession, utterance: MemoirVoiceUtterance) -> str:
-    message = utterance.chat_message
-    if message is not None and message.turn_index is not None:
-        text = await db.scalar(
-            select(MemoirChatMessage.content_text)
-            .where(
-                MemoirChatMessage.voice_session_id == utterance.voice_session_id,
-                MemoirChatMessage.turn_index < message.turn_index,
-                MemoirChatMessage.role.in_([
-                    MemoirChatMessageRole.ASSISTANT.value,
-                    MemoirChatMessageRole.INTERVIEWER.value,
-                ]),
-                func.trim(MemoirChatMessage.content_text) != "",
-            )
-            .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
-            .limit(1)
-        )
-        if text:
-            return text.strip()
-
-    return ""
+    lines = await interviewer_lines(db, [utterance.chat_message_id])
+    return lines.get(utterance.chat_message_id, "")
 
 
 def _primary_asr_result(results: Sequence[OfflineASRResult]) -> OfflineASRResult:
@@ -503,7 +488,7 @@ async def _reprocess_offline_asr_utterance(
             dialect_glossary=tuple(
                 f"{entry.source} => {entry.target}" for entry in dialect_glossary
             ),
-            recent_assistant_messages=(question_context,) if question_context else (),
+            interviewer_line=question_context,
         ),
         transcript_polish_level=polish_level,
     )
@@ -511,13 +496,17 @@ async def _reprocess_offline_asr_utterance(
     corrected_provider = polished.provider or verified.provider
     polish_provider = polished.provider
     db.expunge_all()
-    utterance = await load_reprocess_utterance(db, utterance_id)
+    utterance = await load_reprocess_utterance(db, utterance_id, lock=True)
     if utterance is None:
         raise ValueError("material utterance no longer exists")
     if await _has_user_edited_version(db, utterance.id):
         raise ValueError("user-edited transcript cannot be overwritten")
     if (utterance.transcript_raw or "") != baseline_raw or (utterance.transcript_edited or "") != baseline_edited:
         raise ValueError("material transcript changed while offline ASR was running")
+
+    current_questions = await interviewer_lines(db, [utterance.chat_message_id], lock=True)
+    if current_questions.get(utterance.chat_message_id, "") != question_context:
+        raise ValueError("material question changed while offline ASR was running")
 
     applied_at = datetime.now(UTC).isoformat()
     recognition_metadata: dict[str, object] = {

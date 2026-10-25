@@ -469,10 +469,11 @@ async def test_waiting_person_answers_do_not_starve_later_live_stories(client, t
                 dedupe_key=f'narrator_profile:{answer.id}', run_after=automatic_book_draft.utcnow_naive()))
         else:
             message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
-                'question_message_id': question.id, 'source_text_hash': source_text_hash(message.content_text),
+                'question_message_id': question.id,
+                'question_context': narration_people.interviewer_context_signature(message, question), 'source_text_hash': source_text_hash(message.content_text),
                 'story_content': True}}
         deferred[answer.id] = story_tree_growth.DeferredSource(text_hash=source_text_hash(message.content_text),
-            status='pending', reason='等待原讲述或内容核对', question_context=story_tree_growth._question_context(message))
+            status='pending', reason='等待原讲述或内容核对', question_context=story_tree_growth._question_context(message, {message.id: question.content_text}))
     job.result_json = {'growth': story_tree_growth.StoryGrowthProgress(deferred=deferred).model_dump(mode='json')}
     ready = {(await _add_narration(test_db, session, f'后来我去杭州的第{index + 1}段故事。')).id for index in range(5)}
     await test_db.commit()
@@ -502,7 +503,8 @@ async def test_waiting_person_answers_do_not_starve_later_live_stories(client, t
         for answer in answers:
             message = await test_db.get(MemoirChatMessage, answer.chat_message_id)
             message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
-                'question_message_id': question.id, 'source_text_hash': source_text_hash(message.content_text),
+                'question_message_id': question.id,
+                'question_context': narration_people.interviewer_context_signature(message, question), 'source_text_hash': source_text_hash(message.content_text),
                 'story_content': True}}
         await test_db.commit()
         assert {item.id for item in await story_tree_growth._live_batch_sources(test_db, project_id=pid,

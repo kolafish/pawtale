@@ -269,3 +269,37 @@ async def test_excluded_material_is_not_sent_to_digest_model(client, test_db):
     assert "朋友发来一张山桃花照片" in fake.prompts[0]
     assert created[1]["utterance_id"] not in fake.prompts[0]
     assert "那天六个人一起爬了西山" not in fake.prompts[0]
+
+
+async def test_question_changes_invalidate_digest_and_reach_both_context_readers(client, test_db):
+    from app.models.memoir import MemoirChatMessage, MemoirSection
+    from sqlalchemy.orm import selectinload
+    from app.services.memoir.material_roles import interviewer_lines
+
+    project_id, section, sources = await _bootstrapped_section(client, test_db)
+    source = sources[0]
+    question = MemoirChatMessage(
+        project_id=project_id, voice_session_id=source["session"]["id"], role="assistant",
+        content_text="朋友怎样邀请您爬山？", content_status="final", turn_index=-1,
+    )
+    test_db.add(question)
+    await test_db.commit()
+    before = await section_digests.load_section_digest_context(test_db, project_id=project_id, section_id=section["id"])
+    fake = FakeDigestAI(_valid_digest_payload("M1"))
+    await section_digests.generate_or_reuse_section_digest(
+        test_db, project_id=project_id, section_id=section["id"], ai_client=fake,
+    )
+    assert question.content_text in fake.prompts[0]
+    loaded = await test_db.scalar(select(MemoirSection).where(MemoirSection.id == section["id"]).options(
+        selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.utterance),
+        selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.transcript_version),
+    ))
+    lines = await interviewer_lines(test_db, (item.utterance.chat_message_id for item in loaded.materials))
+    assert section_digests.section_digest_context(loaded, question_lines=lines).input_signature == before.input_signature
+    question.content_text = "朋友什么时候邀请您爬山？"
+    await test_db.commit()
+    after = await section_digests.load_section_digest_context(test_db, project_id=project_id, section_id=section["id"])
+    assert after.input_signature != before.input_signature
+    assert await section_digests.get_current_section_digest(
+        test_db, project_id=project_id, section_id=section["id"],
+    ) is None

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -32,6 +32,7 @@ from app.models.memoir import (
     MemoirImageAsset,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
@@ -368,6 +369,7 @@ async def generate_book_plan(
     project_title = project.title
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     lines = await interviewer_lines(db, (source.message_id for source in sources))
+    sources = [replace(source, interviewer_line=lines.get(source.message_id, "")) for source in sources]
     await db.commit()
     generated = await _generate_book_plan_from_sources(
         project_title=project_title,
@@ -376,11 +378,19 @@ async def generate_book_plan(
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )
-    if on_not_story and generated.not_story_sources:
-        await on_not_story(generated.not_story_sources)
+    # Revalidate the interpretation input under the same write locks used by
+    # plan replacement; stale not-story decisions must not be checkpointed.
+    await lock_project_chapters(db, project_id=project_id)
+    await db.execute(select(MemoirVoiceUtterance.id).where(
+        MemoirVoiceUtterance.id.in_([source.utterance_id for source in sources]),
+    ).order_by(MemoirVoiceUtterance.id).with_for_update())
+    if await interviewer_lines(db, (source.message_id for source in sources), lock=True) != lines:
+        raise HTTPException(status_code=409, detail="提问已变化，请重新规划章节")
     if not generated.chapters:
+        if on_not_story and generated.not_story_sources:
+            await on_not_story(generated.not_story_sources)
         raise HTTPException(status_code=422, detail=NO_STORY_YET)
-    return await _replace_plan(
+    result = await _replace_plan(
         db,
         project_id=project_id,
         title=generated.title,
@@ -401,6 +411,9 @@ async def generate_book_plan(
             ),
         },
     )
+    if on_not_story and generated.not_story_sources:
+        await on_not_story(generated.not_story_sources)
+    return result
 
 
 def _validated_chapters(

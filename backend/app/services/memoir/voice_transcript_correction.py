@@ -182,12 +182,12 @@ async def run_transcript_correction_job(
             error_message="transcript version changed",
         )
 
-    expected = transcript_mutation_guard(utterance)
     cleanup_context = await load_voice_transcript_cleanup_context(
         db,
         utterance.voice_session,
         exclude_message_id=utterance.chat_message_id,
     )
+    expected = transcript_mutation_guard(utterance, interviewer_line=cleanup_context.interviewer_line)
     # The provider call may take seconds. End the read phase before crossing the
     # network; the mutation guard below re-locks and revalidates the source.
     await db.commit()

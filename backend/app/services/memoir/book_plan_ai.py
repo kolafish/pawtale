@@ -16,7 +16,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_plan_sources import SourceSegment
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述内容整理章节。"
@@ -117,6 +117,7 @@ def build_plan_prompt(
 
 要求：
 - 只根据 source text 已经讲过的事实划分章节，不新增人物、时间、地点、事件或情绪。
+- {STORY_THEME_GUIDANCE}
 - 章节标题要短，像书稿目录，不要像 AI 总结标题。
 - 根据素材量和主题密度自主决定章节数量，不要为了凑数拆分，也不要为了减少章节强行合并。
 - source_indices 必须来自给定 source_index，且每章至少包含一个来源。

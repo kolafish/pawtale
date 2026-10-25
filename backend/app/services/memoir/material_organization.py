@@ -7,6 +7,7 @@ from app.domain.memoir.types import MemoirSectionStatus, MemoirSectionType
 from app.models.memoir import MemoirBookPlanChapter, MemoirSection
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.transcript_projection import current_utterance_text
+from app.services.memoir.prompt_budget import representative_excerpt
 
 
 ALLOWED_ACTIONS = {"assign_existing", "leave_unassigned"}
@@ -49,7 +50,7 @@ def _confidence(value: object) -> float | None:
 
 
 def material_organization_excerpt(material_text: str) -> str:
-    return _compact(material_text, limit=120)
+    return representative_excerpt(material_text, limit=120)
 
 
 def material_organization_candidates(
