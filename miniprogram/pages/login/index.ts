@@ -9,7 +9,11 @@ import {
 import { relaunchHome } from "../../services/navigation";
 import { queryParam, type PageQuery } from "../../services/page-input";
 import { definePage } from "../../services/page-definition";
-import { openWechatPrivacyContract } from "../../services/wechat-privacy";
+import {
+  openWechatPrivacyContract,
+  readLoginPrivacyConsent,
+  saveLoginPrivacyConsent,
+} from "../../services/wechat-privacy";
 import { completeShareLikeLogin } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import { uploadBackendAvatar } from "../../services/user-profile";
@@ -64,6 +68,7 @@ definePage<LoginData>()({
   },
 
   onLoad(query: PageQuery = {}) {
+    this.setData({ privacyAgreed: readLoginPrivacyConsent() });
     this.returnToResponse = queryParam(query, "from") === "response";
     if (queryParam(query, "from") === "like") {
       const videoCode = queryParam(query, "video_code");
@@ -104,10 +109,16 @@ definePage<LoginData>()({
   },
 
   changePrivacyConsent(event: CheckboxChangeEvent) {
+    const privacyAgreed = event.detail.value.includes("privacy_contract");
     this.setData({
-      privacyAgreed: event.detail.value.includes("privacy_contract"),
+      privacyAgreed,
       error: "",
     });
+    try {
+      saveLoginPrivacyConsent(privacyAgreed);
+    } catch {
+      this.setData({ error: "本次隐私同意选择无法保存，请稍后重试" });
+    }
   },
 
   async submitWeChat() {

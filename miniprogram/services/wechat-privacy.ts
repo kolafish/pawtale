@@ -6,6 +6,26 @@ const RECORDER_PERMISSION_DENIED_MESSAGE = "没有麦克风权限，请在小程
 const RECORDER_PERMISSION_DENIED_CODE = "recorder_permission_denied";
 const RECORDER_SCOPE = "scope.record";
 
+const LOGIN_PRIVACY_CONSENT_KEY = "pawtale_login_privacy_consent";
+// Bump when the login privacy contract changes and needs renewed consent.
+const LOGIN_PRIVACY_CONTRACT_VERSION = "2026-10-25";
+
+export function readLoginPrivacyConsent(): boolean {
+  try {
+    return wx.getStorageSync<unknown>(LOGIN_PRIVACY_CONSENT_KEY) === LOGIN_PRIVACY_CONTRACT_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+export function saveLoginPrivacyConsent(agreed: boolean): void {
+  if (agreed) {
+    wx.setStorageSync(LOGIN_PRIVACY_CONSENT_KEY, LOGIN_PRIVACY_CONTRACT_VERSION);
+  } else {
+    wx.removeStorageSync(LOGIN_PRIVACY_CONSENT_KEY);
+  }
+}
+
 interface RecorderPermissionError extends Error {
   code: typeof RECORDER_PERMISSION_DENIED_CODE;
 }
