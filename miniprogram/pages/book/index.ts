@@ -353,16 +353,8 @@ definePage<BookPageData>()({
       ...(shareStateChanged ? {
         bookShareReady: false,
         bookShareNeedsUpdate: false,
-        bookShareStale: Boolean(bookData.bookStaleNotice),
+        bookShareStale: false,
         bookShareStatusKnown: false,
-      } : {}),
-      ...(bookData.bookStaleNotice ? {
-        bookShareReady: false,
-        bookShareNeedsUpdate: false,
-        bookShareStale: true,
-        bookShareDescription: this.data.bookShareActive
-          ? "书稿正在更新，阅读链接已暂停。更新完成后，你可以决定是否将新版发给家人。"
-          : "书稿正在更新，完成后即可生成阅读链接。",
       } : {}),
     });
     if (shareStateChanged && this.data.bookSharePanelOpen && this.data.projectId) {

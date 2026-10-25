@@ -223,6 +223,7 @@ async def client(anonymous_client, test_db, test_user_password_hash):
     )
     await test_db.commit()
     anonymous_client.cookies.set(SESSION_COOKIE_NAME, token)
+    anonymous_client.headers["X-Memoir-Share-Lifecycle"] = "1"
     yield anonymous_client
 
 

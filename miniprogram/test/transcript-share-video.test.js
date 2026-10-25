@@ -195,7 +195,9 @@ test("share video controller streams the finished clip and downloads it only to 
   const pollCalls = [];
   const downloads = [];
   const saved = [];
+  const publications = [];
   const { controller, state } = controllerFixture({
+    enableShare: async (job) => { publications.push(job.id); return job; },
     getJob: async (jobId) => {
       pollCalls.push(jobId);
       if (pollCalls.length === 1) {
@@ -229,7 +231,10 @@ test("share video controller streams the finished clip and downloads it only to 
   assert.equal(await controller.saveToAlbum(), true);
   assert.deepEqual(downloads, ["job-1"]);
   assert.deepEqual(saved, ["/tmp/share-video.mp4"]);
-  assert.equal(state().shareVideoStatusText, "已保存到相册");
+  assert.deepEqual(publications, []);
+  assert.equal(await controller.share("video.mp4"), true);
+  assert.deepEqual(publications, ["job-1"]);
+  assert.equal(state().shareVideoStatusText, "已打开微信分享");
   controller.dispose();
 });
 

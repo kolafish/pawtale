@@ -288,6 +288,12 @@ export function readMemoirSharedVideo(code: string): Promise<MemoirSharedVideo> 
   });
 }
 
+export function setMemoirVideoShare(jobId: string, enabled: boolean): Promise<MemoirShareVideoJob> {
+  return memoirRequest<MemoirShareVideoJob>(`/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}/share`, {
+    method: enabled ? "PUT" : "DELETE", timeoutProfile: "generation",
+  });
+}
+
 export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<string> {
   const downloadUrl = job.output?.download_url.trim();
   if (!downloadUrl) {

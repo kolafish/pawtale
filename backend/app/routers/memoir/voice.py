@@ -591,6 +591,11 @@ async def get_mobile_memoir_material_image_generation_job(
     )
 
 
+def _require_video_share_lifecycle(request: Request) -> None:
+    if request.headers.get("X-Memoir-Share-Lifecycle") != "1":
+        raise HTTPException(status_code=426, detail="请更新小程序后制作或分享视频，已有分享不受影响")
+
+
 @router.post(
     "/voice-transcripts/{utterance_id}/share-video/jobs",
     response_model=MemoirShareVideoJobResponse,
@@ -599,9 +604,11 @@ async def get_mobile_memoir_material_image_generation_job(
 async def create_mobile_memoir_voice_transcript_share_video_job(
     utterance_id: str,
     req: MemoirShareVideoJobCreateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_video_share_lifecycle(request)
     job = await memoir_share_video_jobs.create_share_video_job(
         db,
         utterance_id,
@@ -651,9 +658,11 @@ async def create_mobile_memoir_share_video_candidate_job(
     project_id: str,
     candidate_id: str,
     req: MemoirShareVideoCandidateCreateVideoRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_video_share_lifecycle(request)
     return await memoir_share_video_candidates.create_candidate_share_video(
         db, user_id=current_user.id, project_id=project_id, candidate_id=candidate_id, req=req,
     )
@@ -662,15 +671,19 @@ async def create_mobile_memoir_share_video_candidate_job(
 @router.get("/share-video/jobs/{job_id}", response_model=MemoirShareVideoJobResponse)
 async def get_mobile_memoir_share_video_job(
     job_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_share_video_jobs.get_share_video_job(
+    job = await memoir_share_video_jobs.get_share_video_job(
         db,
         job_id,
         current_user.id,
         allow_admin=is_admin_user(current_user),
     )
+    if job.output is None or not job.output.share_enabled:
+        _require_video_share_lifecycle(request)
+    return job
 
 
 @router.delete("/share-video/jobs/{job_id}", status_code=204)
@@ -806,6 +819,20 @@ async def download_mobile_memoir_share_video_job(
     return await _share_video_file_response(request, video, variant)
 
 
+@router.put("/share-video/jobs/{job_id}/share", response_model=MemoirShareVideoJobResponse)
+async def enable_mobile_memoir_video_share(
+    job_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_shares.set_video_share(db, job_id, current_user.id, enabled=True)
+
+
+@router.delete("/share-video/jobs/{job_id}/share", response_model=MemoirShareVideoJobResponse)
+async def stop_mobile_memoir_video_share(
+    job_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_shares.set_video_share(db, job_id, current_user.id, enabled=False)
+
+
 @router.post("/share-video/shares/read", response_model=MemoirSharedVideoResponse)
 async def read_mobile_memoir_shared_video(
     req: MemoirSharedVideoReadRequest,
@@ -824,7 +851,9 @@ async def download_mobile_memoir_shared_video(
     db: AsyncSession = Depends(get_db),
 ):
     video = await memoir_share_video_shares.load_shared_video_file(db, code)
-    return await _share_video_file_response(request, video, variant)
+    response = await _share_video_file_response(request, video, variant)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)

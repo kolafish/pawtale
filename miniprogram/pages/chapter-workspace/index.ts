@@ -446,7 +446,7 @@ definePage<ChapterWorkspacePageData>()({
       ...(shareStateChanged ? {
         bookShareReady: false,
         bookShareNeedsUpdate: false,
-        bookShareStale: workspace.draft_needs_rewrite,
+        bookShareStale: false,
         bookShareStatusKnown: false,
       } : {}),
       ...viewPatch,

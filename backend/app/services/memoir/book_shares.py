@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import re
 import secrets
-from datetime import timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
@@ -18,7 +17,7 @@ from app.config import get_settings
 from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import (
     MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare,
-    MemoirBookPlanChapter, MemoirBookChapterDraftVersion, MemoirChapterShare,
+    MemoirBookPlan, MemoirBookPlanChapter, MemoirBookChapterDraftVersion, MemoirChapterShare, MemoirSection,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import (
@@ -32,11 +31,10 @@ from app.services.memoir.book_output_versions import book_output_version_title
 from app.services.memoir.book_outputs import _output_version_response, get_book_output
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
-from app.services.memoir.completion_read_model import chapter_workspace
+from app.services.memoir.book_source_links import chapter_source_change_states_by_chapter
 from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, like_summary
 
 
-SHARE_LIFETIME = timedelta(days=7)
 STABLE_TOKEN_PATTERN = re.compile(r"(v1|c1)\.([0-9a-f-]{36})\.([0-9a-f]{64})\Z")
 ShareResource = MemoirBookOutput | MemoirBookPlanChapter
 ShareVersion = MemoirBookOutputVersion | MemoirBookChapterDraftVersion
@@ -76,20 +74,57 @@ async def _owned_resource(
 
 
 async def _current_version(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
 ) -> tuple[ShareVersion | None, bool]:
+    """Return the last complete saved text; additions may be assembling separately."""
     if chapter_id is not None:
-        workspace = await chapter_workspace(db, project_id=project_id, chapter_id=chapter_id)
-        version = await db.get(MemoirBookChapterDraftVersion, workspace.draft_version_id) if workspace.draft_version_id else None
-        return version, workspace.draft_needs_rewrite
-    output = await get_book_output(db, user_id=user_id, project_id=project_id)
-    version_id = output.latest_version.id if output.latest_version else None
-    version = await db.get(MemoirBookOutputVersion, version_id) if version_id else None
-    return version, output.is_stale
+        version = await db.scalar(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.project_id == project_id,
+            MemoirBookChapterDraftVersion.chapter_id == chapter_id,
+        ).order_by(MemoirBookChapterDraftVersion.version.desc()).limit(1))
+    else:
+        output = await get_book_output(db, user_id=user_id, project_id=project_id)
+        version = await db.get(MemoirBookOutputVersion, output.latest_version.id) if output.latest_version else None
+    if version is None:
+        return None, False
+    if isinstance(version, MemoirBookChapterDraftVersion):
+        versions = {version.chapter_id: version}
+    else:
+        snapshots = version.chapter_snapshot_json or []
+        version_ids = [item.get("draft_version_id") for item in snapshots if isinstance(item, dict)]
+        drafts = list(await db.scalars(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.id.in_(version_ids),
+            MemoirBookChapterDraftVersion.project_id == project_id,
+        )))
+        versions = {draft.chapter_id: draft for draft in drafts}
+        expected_chapters = {item.get("chapter_id") for item in snapshots if isinstance(item, dict)}
+        included = set(await db.scalars(select(MemoirBookPlanChapter.id).where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.include_in_book.is_(True),
+        )))
+        if expected_chapters - included or len(drafts) != len(version_ids):
+            return version, True
+    # Removal is different from an addition: never keep showing withdrawn material
+    # while a replacement is being generated. Compare the actual saved versions.
+    plan_id = version.plan_id if isinstance(version, MemoirBookOutputVersion) else await db.scalar(
+        select(MemoirBookPlanChapter.plan_id).where(MemoirBookPlanChapter.id == version.chapter_id)
+    )
+    plan = await db.get(MemoirBookPlan, plan_id) if plan_id else None
+    changes = await chapter_source_change_states_by_chapter(db, plan, latest_versions=versions)
+    current_sections = {section.id: section.chapter_id for section in await db.scalars(select(MemoirSection).where(
+        MemoirSection.project_id == project_id, MemoirSection.status == "active", MemoirSection.include_in_book.is_(True),
+    ))}
+    for saved in versions.values():
+        if changes.get(saved.chapter_id) and changes[saved.chapter_id].removed_source_count:
+            return version, True
+        if any(current_sections.get(item.get("section_id")) != saved.chapter_id
+               for item in saved.section_snapshot_json or [] if isinstance(item, dict)):
+            return version, True
+    return version, False
+
+
+def _active(share: MemoirBookShare | MemoirChapterShare | None) -> bool:
+    return share is not None and (share.expires_at is None or share.expires_at > utcnow_naive())
 
 
 async def share_status(
@@ -98,20 +133,20 @@ async def share_status(
     output = await _owned_resource(db, user_id, project_id, chapter_id)
     share_model, share_key = _share_table(chapter_id is not None)
     share = await db.get(share_model, output.id, populate_existing=True)
-    active = share is not None and share.expires_at > utcnow_naive()
+    active = _active(share)
     version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
     return MemoirBookShareStatusResponse(
         active=active,
         expires_at=share.expires_at if active else None,
         token=_stable_token(output.id, share.token_hash, chapter=chapter_id is not None) if active else None,
         stale=stale,
-        current=bool(active and not stale and version and share.version_id == version.id),
+        current=bool(active and not stale and version),
         likes=await like_summary(db, _like_target(output), limit=None),
     )
 
 
 async def create_share(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, rotate: bool = True,
 ) -> MemoirBookShareCreateResponse:
     output = await _owned_resource(db, user_id, project_id, chapter_id)
     share_model, share_key = _share_table(chapter_id is not None)
@@ -120,10 +155,20 @@ async def create_share(
         raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
     if version is None or not version.content.strip():
         raise HTTPException(status_code=409, detail="请先生成可阅读的书稿")
+    # Serialize ensure/rotate/revoke on the resource even before a share row exists.
+    await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
+    existing = await db.get(share_model, output.id, populate_existing=True)
+    if not rotate and _active(existing):
+        result = MemoirBookShareCreateResponse(
+            token=_stable_token(output.id, existing.token_hash, chapter=chapter_id is not None),
+            expires_at=existing.expires_at,
+        )
+        await db.commit()
+        return result
     token = secrets.token_urlsafe(32)
     token_hash = session_token_hash(token)
     now = utcnow_naive()
-    expires_at = now + SHARE_LIFETIME
+    expires_at = None
     statement = insert(share_model).values(
         **{share_key.key: output.id},
         version_id=version.id,
@@ -147,22 +192,8 @@ async def create_share(
 async def update_share(
     db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
 ) -> MemoirBookShareCreateResponse:
-    output = await _owned_resource(db, user_id, project_id, chapter_id)
-    share_model, share_key = _share_table(chapter_id is not None)
-    share = await db.get(share_model, output.id, populate_existing=True)
-    if share is None or share.expires_at <= utcnow_naive():
-        raise HTTPException(status_code=409, detail="阅读链接已失效，请重新生成")
-    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
-    if stale:
-        raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
-    if version is None or not version.content.strip():
-        raise HTTPException(status_code=409, detail="请先生成可阅读的书稿")
-    share.version_id = version.id
-    await db.commit()
-    return MemoirBookShareCreateResponse(
-        token=_stable_token(output.id, share.token_hash, chapter=chapter_id is not None),
-        expires_at=share.expires_at,
-    )
+    # Keep the old PUT contract while making repeated share actions idempotent.
+    return await create_share(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, rotate=False)
 
 
 async def revoke_share(
@@ -170,23 +201,9 @@ async def revoke_share(
 ) -> None:
     output = await _owned_resource(db, user_id, project_id, chapter_id)
     share_model, share_key = _share_table(chapter_id is not None)
+    await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
     await db.execute(delete(share_model).where(share_key == output.id))
     await db.commit()
-
-
-async def readable_share_token(db: AsyncSession, project_id: str) -> str | None:
-    """The author's live book link, if a reader could open it right now."""
-    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-    share = await db.get(MemoirBookShare, output.id, populate_existing=True) if output else None
-    if share is None or share.expires_at <= utcnow_naive():
-        return None
-    owner_id = await db.scalar(select(Project.user_id).where(Project.id == project_id))
-    if owner_id is None:
-        return None
-    version, stale = await _current_version(db, user_id=owner_id, project_id=project_id)
-    if stale or version is None or share.version_id != version.id:
-        return None
-    return _stable_token(share.output_id, share.token_hash)
 
 
 async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, ShareVersion]:
@@ -206,7 +223,7 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
         ))
     else:
         raise invalid
-    if share is None or share.expires_at <= utcnow_naive():
+    if not _active(share):
         raise invalid
     if isinstance(share, MemoirChapterShare):
         resource = await db.get(MemoirBookPlanChapter, share.chapter_id)
@@ -225,9 +242,9 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
         db, user_id=owner_id, project_id=resource.project_id,
         chapter_id=resource.id if chapter_link else None,
     )
-    if stale or current_version is None or share.version_id != current_version.id:
-        raise HTTPException(status_code=409, detail="书稿正在更新，暂时无法阅读分享内容")
-    return resource, version
+    if stale or current_version is None:
+        raise HTTPException(status_code=409, detail="作者已移除部分内容，正在更新分享书稿")
+    return resource, current_version
 
 
 def _like_target(resource: ShareResource) -> ShareLikeTarget:

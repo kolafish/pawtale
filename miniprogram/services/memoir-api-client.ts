@@ -37,6 +37,7 @@ export async function memoirRequest<T>(
   const method = requestOptions.method || "GET";
   const response = await requestWithBackendSession<T>(path, {
     ...requestOptions,
+    header: { ...requestOptions.header, "X-Memoir-Share-Lifecycle": "1" },
     timeoutProfile: requestOptions.timeoutProfile ?? (method === "GET" ? "interactive" : "mutation"),
   });
   if (method !== "GET" && invalidatesSnapshots) {

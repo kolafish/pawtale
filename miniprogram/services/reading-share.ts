@@ -4,12 +4,12 @@ import { pageUrl } from "./page-input";
 import { shareLikerViews, type ShareLikerView } from "./share-likes";
 import { formatBeijingDateTimeShort } from "./time";
 
-const BOOK_SHARE_INACTIVE_DESCRIPTION = "生成后 7 天有效；你可以决定何时更新家人看到的书稿。";
+const BOOK_SHARE_INACTIVE_DESCRIPTION = "链接长期有效，书稿更新后自动同步；可随时停止分享。";
 
 function bookShareDescription(active: boolean, expiresAt: string | null): string {
   if (!active) return BOOK_SHARE_INACTIVE_DESCRIPTION;
   const expiresText = expiresAt ? formatBeijingDateTimeShort(expiresAt) : "";
-  return `${expiresText ? `链接有效至 ${expiresText}` : "链接有效"}；家人可阅读你确认分享的书稿。`;
+  return `${expiresText ? `链接有效至 ${expiresText}` : "链接长期有效"}；家人可阅读最新完成的书稿。`;
 }
 
 export interface ReadingShareData {
@@ -66,7 +66,7 @@ export const readingShareMethods = defineReadingShareMethods({
   },
 
   onShareAppMessage() {
-    const canShare = this.data.bookShareReady && !this.readingShareTarget().stale && Boolean(this.bookShareToken);
+    const canShare = this.data.bookShareReady && Boolean(this.bookShareToken);
     return {
       title: canShare ? `阅读《${this.readingShareTarget().title || "家庭回忆录"}》` : "老余口述",
       path: canShare
@@ -94,7 +94,7 @@ export const readingShareMethods = defineReadingShareMethods({
       const status = await getMemoirBookShareStatus(projectId, chapterId);
       if (!this.isReadingShareTarget(projectId, chapterId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = status.active ? status.token || "" : "";
-      const stale = status.stale || Boolean(this.readingShareTarget().stale);
+      const stale = status.stale;
       const needsUpdate = status.active && !stale && !status.current;
       this.setData({
         bookShareLikeCount: status.likes?.count ?? 0,
@@ -106,10 +106,10 @@ export const readingShareMethods = defineReadingShareMethods({
         bookShareStatusKnown: true,
         bookShareDescription: stale
           ? status.active
-            ? "书稿正在更新，阅读链接已暂停。更新完成后，你可以决定是否将新版发给家人。"
-            : "书稿正在更新，完成后即可生成阅读链接。"
+            ? "已移除部分内容，分享暂时暂停；书稿完成更新后自动恢复。"
+            : "已移除部分内容，请完成书稿更新后再分享。"
           : needsUpdate
-            ? "新版书稿已完成。确认更新后，之前收到链接的家人也能读到新版。"
+            ? "书稿已更新，阅读链接将自动显示新版。"
             : bookShareDescription(status.active, status.expires_at),
       });
     } catch (error) {
@@ -123,7 +123,7 @@ export const readingShareMethods = defineReadingShareMethods({
 
   async createBookShare() {
     const { projectId, chapterId } = this.readingShareTarget();
-    if (!projectId || !this.data.bookShareStatusKnown || this.data.bookShareBusy || this.data.bookShareStale || this.readingShareTarget().stale) return;
+    if (!projectId || !this.data.bookShareStatusKnown || this.data.bookShareBusy || this.data.bookShareStale) return;
     this.setData({ bookShareBusy: true, error: "" });
     try {
       const share = await createMemoirBookShare(projectId, chapterId);
@@ -148,7 +148,7 @@ export const readingShareMethods = defineReadingShareMethods({
 
   async updateBookShare() {
     const { projectId, chapterId } = this.readingShareTarget();
-    if (!projectId || !this.data.bookShareStatusKnown || !this.data.bookShareActive || !this.data.bookShareNeedsUpdate || this.data.bookShareBusy || this.readingShareTarget().stale) return;
+    if (!projectId || !this.data.bookShareStatusKnown || !this.data.bookShareActive || !this.data.bookShareNeedsUpdate || this.data.bookShareBusy) return;
     const confirmed = await new Promise<boolean>((resolve) => {
       wx.showModal({
         title: "更新家人阅读的书稿",
@@ -179,7 +179,7 @@ export const readingShareMethods = defineReadingShareMethods({
   },
 
   async regenerateBookShare() {
-    if (!this.data.bookShareStatusKnown || !this.data.bookShareActive || this.data.bookShareBusy || this.data.bookShareStale || this.readingShareTarget().stale) return;
+    if (!this.data.bookShareStatusKnown || !this.data.bookShareActive || this.data.bookShareBusy || this.data.bookShareStale) return;
     const { projectId, chapterId } = this.readingShareTarget();
     const confirmed = await new Promise<boolean>((resolve) => {
       wx.showModal({
@@ -217,7 +217,7 @@ export const readingShareMethods = defineReadingShareMethods({
         bookShareNeedsUpdate: false,
         bookShareStatusKnown: true,
         bookShareDescription: this.data.bookShareStale
-          ? "书稿正在更新，完成后即可生成阅读链接。"
+          ? "已移除部分内容，请完成书稿更新后再分享。"
           : BOOK_SHARE_INACTIVE_DESCRIPTION,
       });
     } catch (error) {

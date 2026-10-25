@@ -12,6 +12,7 @@ import {
   getMemoirShareVideoJob,
   getMemoirVoiceTranscript,
   memoirSharedVideoUrl,
+  setMemoirVideoShare,
 } from "../../services/memoir-transcript-api";
 import {
   isAuthError,
@@ -23,6 +24,8 @@ import {
 } from "../../services/page-input";
 import {
   homeShareAppMessage,
+  enableMiniProgramShareMenu,
+  hideMiniProgramShareMenu,
   saveVideoToAlbum,
   shareLocalFileMessage,
   sharedVideoShareMessage,
@@ -49,13 +52,14 @@ import {
   type TranscriptMediaData,
 } from "../transcript-detail/transcript-detail-share-video-workflow";
 
-definePage<TranscriptMediaData>()({
+definePage<TranscriptMediaData & { shareCardPreparing: boolean }>()({
   shareVideoController: pageRuntime(() => new TranscriptShareVideoController({
     createJob: createMemoirTranscriptShareVideoJob,
     createCandidateJob: createMemoirShareVideoCandidateJob,
     getJob: getMemoirShareVideoJob,
     downloadJob: downloadMemoirShareVideoJob,
-    streamUrl: (job) => memoirSharedVideoUrl(job.output?.share_code || ""),
+    streamUrl: (job) => job.output?.share_enabled ? memoirSharedVideoUrl(job.output.share_code) : "",
+    enableShare: (job) => setMemoirVideoShare(job.id, true),
     shareFile: shareLocalFileMessage,
     saveVideo: saveVideoToAlbum,
   })),
@@ -74,6 +78,7 @@ definePage<TranscriptMediaData>()({
     error: "",
     viewMode: "create",
     shareVideoDeleting: false,
+    shareCardPreparing: false,
     shareVideoPreviewPortrait: true,
     utteranceId: "",
     item: null,
@@ -95,7 +100,8 @@ definePage<TranscriptMediaData>()({
         ...(job !== undefined && job?.id !== previousJob?.id
           ? { shareVideoLikeCount: 0, shareVideoLikers: [] } : {}),
       });
-      if (job?.status === "succeeded" && job.output?.share_code
+      this.syncVideoShareMenu();
+      if (job?.status === "succeeded" && job.output?.share_enabled && job.output?.share_code
         && job.output.share_code !== previousJob?.output?.share_code) {
         void this.loadShareVideoLikers(job.output.share_code, this.loadToken);
       }
@@ -112,14 +118,39 @@ definePage<TranscriptMediaData>()({
     await this.loadTranscript();
   },
 
+  syncVideoShareMenu() {
+    if (this.data.shareVideoJob?.output?.share_enabled && !this.data.shareCardPreparing) enableMiniProgramShareMenu();
+    else hideMiniProgramShareMenu();
+  },
+
   onShareAppMessage() {
     const job = this.data.shareVideoJob;
-    const shareCode = job?.output?.share_code;
-    if (!job || !shareCode) {
-      return homeShareAppMessage();
+    if (!job?.output?.share_enabled) return homeShareAppMessage();
+    return sharedVideoShareMessage(job.title, job.output.share_code, memoirSharedVideoUrl(job.output.share_code, "card"));
+  },
+
+  async prepareVideoShare() {
+    const job = this.data.shareVideoJob;
+    if (!job?.output || job.output.share_enabled || this.data.shareCardPreparing) return;
+    const requestToken = this.loadToken;
+    this.setData({ shareCardPreparing: true, shareVideoError: "" });
+    this.syncVideoShareMenu();
+    try {
+      const sharedJob = await setMemoirVideoShare(job.id, true);
+      if (requestToken !== this.loadToken || this.data.shareVideoJob?.id !== job.id) return;
+      await this.shareVideoController.showJob(sharedJob);
+      trackAuditAction("transcript.detail_share_video_card", { job_id: job.id }, { projectId: job.project_id });
+      wx.showToast({ title: "已准备好，请再点分享给好友", icon: "none" });
+    } catch (error) {
+      if (requestToken === this.loadToken && this.data.shareVideoJob?.id === job.id) {
+        this.setData({ shareVideoError: error instanceof Error ? error.message : "分享准备失败，请重试" });
+      }
+    } finally {
+      if (requestToken === this.loadToken) {
+        this.setData({ shareCardPreparing: false });
+        this.syncVideoShareMenu();
+      }
     }
-    trackAuditAction("transcript.detail_share_video_card", { job_id: job.id }, { projectId: job.project_id });
-    return sharedVideoShareMessage(job.title, shareCode, memoirSharedVideoUrl(shareCode, "card"));
   },
 
   markShareVideoPreviewShape(event: { detail: { width: number; height: number } }) {
@@ -223,19 +254,44 @@ definePage<TranscriptMediaData>()({
 
   // Remaking and deleting are rarer than sending, so they live behind one menu.
   openShareVideoMoreActions() {
-    if (this.data.shareVideoSharing || this.data.shareVideoDeleting) {
+    if (this.data.shareVideoSharing || this.data.shareVideoDeleting || this.data.shareCardPreparing) {
       return;
     }
     wx.showActionSheet({
-      itemList: ["重新制作", "删除这版视频"],
+      itemList: ["重新制作", "删除这版视频", ...(this.data.shareVideoJob?.output?.share_enabled ? ["停止分享"] : [])],
       success: ({ tapIndex }) => {
         if (tapIndex === 0) {
           void this.remakeShareVideo();
         } else if (tapIndex === 1) {
           void this.deleteShareVideo();
+        } else if (tapIndex === 2) {
+          void this.stopVideoShare();
         }
       },
     });
+  },
+
+  async stopVideoShare() {
+    const job = this.data.shareVideoJob;
+    if (!job || this.data.shareCardPreparing || this.data.shareVideoSharing) return;
+    const requestToken = this.loadToken;
+    this.setData({ shareCardPreparing: true, shareVideoError: "" });
+    this.syncVideoShareMenu();
+    try {
+      const updated = await setMemoirVideoShare(job.id, false);
+      if (requestToken !== this.loadToken || this.data.shareVideoJob?.id !== job.id) return;
+      await this.shareVideoController.showJob(updated);
+      wx.showToast({ title: "已停止分享", icon: "success" });
+    } catch (error) {
+      if (requestToken === this.loadToken && this.data.shareVideoJob?.id === job.id) {
+        this.setData({ shareVideoError: error instanceof Error ? error.message : "停止分享失败" });
+      }
+    } finally {
+      if (requestToken === this.loadToken) {
+        this.setData({ shareCardPreparing: false });
+        this.syncVideoShareMenu();
+      }
+    }
   },
 
   markShareVideoStreamError() {
@@ -296,6 +352,7 @@ definePage<TranscriptMediaData>()({
 
   onShow() {
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
+    this.syncVideoShareMenu();
   },
 
   onUnload() {

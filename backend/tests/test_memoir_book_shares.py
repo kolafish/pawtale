@@ -18,7 +18,6 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
-from app.services.memoir.book_shares import readable_share_token
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -59,7 +58,7 @@ async def _shareable_output(test_db, project_id: str, content: str):
 
 
 @pytest.mark.asyncio
-async def test_book_share_is_public_read_only_version_pinned_and_revocable(client, test_db):
+async def test_book_share_is_public_read_only_auto_updated_and_revocable(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     output, first = await _shareable_output(test_db, project_id, "第一版，只给家人阅读。")
 
@@ -73,7 +72,9 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
     created = await client.post(share_path)
     assert created.status_code == 200
     assert created.headers["cache-control"] == "no-store"
+    assert created.json()["expires_at"] is None
     first_token = created.json()["token"]
+    assert (await client.put(share_path)).json()["token"] == first_token
     assert first_token.startswith(f"v1.{output.id}.")
     recovered = await client.get(share_path)
     assert recovered.headers["cache-control"] == "no-store"
@@ -108,15 +109,12 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
         )
         test_db.add(second)
         await test_db.commit()
-        assert (await read(first_token)).status_code == 409
-        assert (await client.get(share_path)).json()["current"] is False
-        # Share videos only point at a book link a reader can open now.
-        assert await readable_share_token(test_db, project_id) is None
+        assert (await read(first_token)).json()["latest_version"]["content"] == second.content
+        assert (await client.get(share_path)).json()["current"] is True
 
         updated = await client.put(share_path)
         assert updated.status_code == 200
         assert updated.json()["token"] == first_token
-        assert await readable_share_token(test_db, project_id) == first_token
         assert (await read(first_token)).json()["latest_version"]["content"] == second.content
 
         rotated = await client.post(share_path)
@@ -131,7 +129,6 @@ async def test_book_share_is_public_read_only_version_pinned_and_revocable(clien
         share.expires_at = utcnow_naive() - timedelta(seconds=1)
         await test_db.commit()
         assert (await read(second_token)).status_code == 404
-        assert await readable_share_token(test_db, project_id) is None
         assert (await client.get(share_path)).json() == {
             "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
             "likes": {"count": 0, "likers": []},
@@ -176,7 +173,7 @@ async def test_book_share_keeps_existing_random_tokens_readable(client, test_db)
 
 
 @pytest.mark.asyncio
-async def test_book_share_pauses_during_unassembled_chapter_update(client, test_db):
+async def test_book_share_keeps_saved_text_during_unassembled_chapter_update(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     output, first = await _shareable_output(test_db, project_id, "旧稿")
     share_path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
@@ -196,12 +193,12 @@ async def test_book_share_pauses_during_unassembled_chapter_update(client, test_
 
     status = (await client.get(share_path)).json()
     assert status["active"] is True
-    assert status["stale"] is True
-    assert status["current"] is False
-    assert (await client.post(share_path)).status_code == 409
-    assert (await client.put(share_path)).status_code == 409
+    assert status["stale"] is False
+    assert status["current"] is True
+    assert (await client.put(share_path)).json()["token"] == token
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
-        assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 409
+        response = await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})
+        assert response.json()["latest_version"]["content"] == "旧稿"
     assert (await test_db.get(MemoirBookShare, output.id)).version_id == first.id
 
 
@@ -255,8 +252,8 @@ async def test_chapter_share_without_book_is_scoped_versioned_and_independently_
         )
         test_db.add(second)
         await test_db.commit()
-        assert (await read(token)).status_code == 409
-        assert (await client.get(share_path)).json()["current"] is False
+        assert (await read(token)).json()["latest_version"]["content"] == "本章第二版"
+        assert (await client.get(share_path)).json()["current"] is True
         updated = await client.put(share_path)
         assert updated.status_code == 200, updated.text
         assert updated.json() == created.json()
@@ -314,3 +311,55 @@ async def test_chapter_share_pauses_when_a_saved_source_is_excluded(client, test
     assert (await client.put(path)).status_code == 409
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_book_share_withdraws_a_removed_chapter_before_reassembly(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, version = await _shareable_output(test_db, project_id, "后来决定不分享的章节")
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    token = (await client.put(path)).json()["token"]
+    assert (await client.put(path)).json()["token"] == token
+    chapter = await test_db.get(MemoirBookPlanChapter, version.chapter_snapshot_json[0]["chapter_id"])
+    chapter.include_in_book = False
+    await test_db.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 409
+    assert (await client.get(path)).json()["stale"] is True
+
+
+async def test_share_migration_preserves_live_tokens_without_reviving_expired(client, test_db):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    project_id = await ensure_mobile_memoir_project(client)
+    output, version = await _shareable_output(test_db, project_id, "旧版家书")
+    draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.project_id == project_id))
+    live = MemoirBookShare(output_id=output.id, version_id=version.id,
+        token_hash=session_token_hash("old-live"), expires_at=utcnow_naive() + timedelta(days=1))
+    expired = MemoirChapterShare(chapter_id=draft.chapter_id, version_id=draft.id,
+        token_hash=session_token_hash("old-expired"), expires_at=utcnow_naive() - timedelta(days=1))
+    test_db.add_all([live, expired])
+    await test_db.commit()
+    token = (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share")).json()["token"]
+    spec = importlib.util.spec_from_file_location("scoped_shares", Path(__file__).parents[1] / "alembic/versions/f8a3c5e7b209_persistent_scoped_shares.py")
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    def migrate(session):
+        with Operations.context(MigrationContext.configure(session.connection())):
+            migration.downgrade()
+            migration.upgrade()
+
+    await test_db.run_sync(migrate)
+    await test_db.commit()
+    await test_db.refresh(live)
+    await test_db.refresh(expired)
+    assert live.expires_at is None
+    assert expired.expires_at < utcnow_naive()
+    assert (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share")).json()["token"] == token
+    assert (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share",
+                            params={"chapter_id": draft.chapter_id})).json()["active"] is False

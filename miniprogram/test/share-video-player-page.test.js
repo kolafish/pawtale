@@ -21,7 +21,6 @@ const sharedVideo = {
   video_url: "/api/mobile/memoir/share-video/shares/abc/video",
   poster_url: "/api/mobile/memoir/share-video/shares/abc/video?variant=poster",
   end_frame_url: "/api/mobile/memoir/share-video/shares/abc/video?variant=end",
-  book_share_token: "book-token",
 };
 
 test("a scanned mini program code opens the clip and forwards the same card", async () => {
@@ -67,8 +66,7 @@ test("a scanned mini program code opens the clip and forwards the same card", as
     context.applyVideoPlaybackRate();
     assert.deepEqual(playbackRates, [1.5, 1.5]);
 
-    page.openBook.call(context);
-    assert.deepEqual(navigations, ["/pages/book-reader/index?shareToken=book-token"]);
+    assert.deepEqual(navigations, []);
   } finally {
     delete global.wx;
   }

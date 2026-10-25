@@ -41,6 +41,20 @@ async def test_opening_hook_plays_before_the_narration(tmp_path: Path):
     assert loudest(hook_seconds + 0.2, hook_seconds + 0.8) > 2000
     assert loudest(hook_seconds + 1.3, hook_seconds + 2.5) < 200
 
+    # Reopening a stopped share replaces its embedded code without changing audio.
+    code = BytesIO()
+    Image.new("RGB", (430, 430), "black").save(code, format="PNG")
+    await rendering.replace_share_video_end_card(
+        request.target_path, book_title="相约出发", narrator_name="余老师",
+        mini_program_code=code.getvalue(), body_seconds=1, hook_text=text,
+    )
+    new_pcm = subprocess.check_output([ffmpeg, "-v", "error", "-i", str(request.target_path), "-map", "0:a:0",
+                                       "-ac", "1", "-ar", "8000", "-f", "s16le", "-acodec", "pcm_s16le", "-"])
+    assert new_pcm == pcm
+    frame = subprocess.check_output([ffmpeg, "-v", "error", "-ss", str(hook_seconds + 2),
+                                     "-i", str(request.target_path), "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+    assert Image.open(BytesIO(frame)).crop((300, 600, 420, 720)).convert("L").getextrema()[1] < 60
+
 
 async def test_cancelled_frame_encoding_stops_the_child_process(monkeypatch):
     started = asyncio.Event()

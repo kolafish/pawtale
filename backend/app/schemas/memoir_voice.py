@@ -569,8 +569,9 @@ class MemoirShareVideoOutputResponse(BaseModel):
     mime_type: str
     size_bytes: int
     download_url: str
-    # Opens the public playback page from a forwarded card.
+    # Public only after the author explicitly enables sharing.
     share_code: str
+    share_enabled: bool = False
 
 
 class MemoirSharedVideoReadRequest(BaseModel):
@@ -586,8 +587,6 @@ class MemoirSharedVideoResponse(BaseModel):
     poster_url: str
     # The closing frame with the mini program code, shown once playback ends.
     end_frame_url: str
-    # Present only while the author keeps the whole book shared.
-    book_share_token: str | None = None
 
 
 class MemoirShareVideoCountResponse(BaseModel):
