@@ -819,6 +819,13 @@ async def download_mobile_memoir_share_video_job(
     return await _share_video_file_response(request, video, variant)
 
 
+@router.get("/share-video/jobs/{job_id}/preview", response_model=MemoirSharedVideoResponse)
+async def preview_mobile_memoir_video_share(job_id: str, response: Response,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_share_video_shares.preview_video(db, job_id, current_user.id)
+
+
 @router.put("/share-video/jobs/{job_id}/share", response_model=MemoirShareVideoJobResponse)
 async def enable_mobile_memoir_video_share(
     job_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),

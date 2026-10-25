@@ -24,7 +24,7 @@
 </template>
 
 <template name="shareLikeBar">
-  <view wx:if="{{shareLikeVisible}}" class="share-like-bar">
+  <view wx:if="{{shareLikeVisible || shareForward}}" class="share-like-bar">
     <button
       wx:if="{{shareCanLike}}"
       class="share-like-button ui-button {{shareLiked ? 'is-liked' : ''}}"
@@ -36,6 +36,7 @@
       <text class="share-like-heart" aria-hidden="true">{{shareLiked ? '♥' : '♡'}}</text>
       <text>{{shareLiked ? '已赞' : '点赞'}}</text>
     </button>
+    <button wx:if="{{shareForward}}" class="ui-share-primary" open-type="share">分享给好友</button>
     <view class="share-like-people-shell">
       <text wx:if="{{shareCanLike && !shareLiked}}" class="share-like-text">首次使用会通过微信建立账号，记录您的点赞；头像和昵称可选填。</text>
       <template is="shareLikePeople" data="{{avatars: shareLikeAvatars, text: shareLikeText}}" />

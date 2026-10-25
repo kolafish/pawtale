@@ -579,3 +579,22 @@ async def test_video_share_is_explicit_idempotent_and_revocable_without_deleting
         path.unlink()
         assert (await client.delete(endpoint)).status_code == 200
         assert (await read(new["share_code"])).status_code == 404
+
+
+async def test_private_video_preview_does_not_enable_public_sharing(client, test_db, monkeypatch):
+    created = await create_test_voice_transcript(client, test_db)
+    job = await _add_video_job(test_db, created, job_id="preview-only", status=MemoirShareVideoJobStatus.SUCCEEDED,
+        created_at=utcnow_naive(), completed_at=utcnow_naive())
+    job.share_enabled = False
+    await test_db.commit()
+    monkeypatch.setattr(share_video_shares, "completed_share_video_file", lambda job: SimpleNamespace(title="童年故事"))
+    path = f"/api/mobile/memoir/share-video/jobs/{job.id}/preview"
+    response = await client.get(path)
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["video_url"] == f"/api/mobile/memoir/share-video/jobs/{job.id}/download"
+    await test_db.refresh(job)
+    assert job.share_enabled is False
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.get(path)).status_code == 401
+        assert (await guest.get(f"/api/mobile/memoir/share-video/shares/{job.share_code}")).status_code == 404

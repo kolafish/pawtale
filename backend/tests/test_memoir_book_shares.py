@@ -363,3 +363,75 @@ async def test_share_migration_preserves_live_tokens_without_reviving_expired(cl
     assert (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share")).json()["token"] == token
     assert (await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share",
                             params={"chapter_id": draft.chapter_id})).json()["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_friend_preview_and_public_media_have_identical_scope_without_publishing(client, test_db, tmp_path, monkeypatch):
+    from PIL import Image
+    from app.models.memoir import MemoirImageAsset, MemoirBookImagePlacement
+    from app.services.memoir import image_assets
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+
+    project_id = await ensure_mobile_memoir_project(client)
+    output, version = await _shareable_output(test_db, project_id, "我们家的故事")
+    manuscript = manuscript_from_snapshot(title=output.title, content=version.content, snapshot=version.chapter_snapshot_json,
+        metadata={"narrator_name": "外婆", "prepared_by": "家人整理"})
+    manuscript.front_matter = [item.model_copy(update={"content": "书中的前言", "enabled": True}) for item in manuscript.front_matter if item.kind == "preface"]
+    manuscript.back_matter.afterword.content = "书中的后记"
+    manuscript.back_matter.afterword.enabled = True
+    version.manuscript_json = manuscript.model_dump(mode="json")
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    asset = MemoirImageAsset(project_id=project_id, user_id=user_id, source_type="manual_upload", source_signature="shared-cover",
+        storage_path="cover.png", mime_type="image/png", status="ready", source_quote="秘密原话", caption="外婆家的院子")
+    test_db.add(asset)
+    await test_db.flush()
+    placement = MemoirBookImagePlacement(project_id=project_id, image_asset_id=asset.id, placement_type="cover")
+    test_db.add(placement)
+    await test_db.commit()
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    Image.new("RGB", (16, 16), "white").save(tmp_path / "cover.png")
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    preview = await client.get(f"{path}/preview")
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["cache-control"] == "no-store"
+    assert (await client.get(path)).json()["active"] is False
+    assert await test_db.get(MemoirBookShare, output.id) is None
+    book = preview.json()["latest_version"]["manuscript"]
+    assert book["profile"]["narrator_name"] == "外婆"
+    assert book["profile"]["prepared_by"] == "家人整理"
+    assert book["front_matter"][0]["content"] == "书中的前言"
+    assert book["back_matter"]["afterword"]["content"] == "书中的后记"
+    cover = book["render_settings"]["cover_image"]
+    assert cover["storage_path"] == cover["source_quote"] == ""
+    assert cover["image_url"].endswith(f"/{asset.id}/file")
+    assert "秘密原话" not in preview.text
+    token = (await client.put(path)).json()["token"]
+    chapter_id = version.chapter_snapshot_json[0]["chapter_id"]
+    chapter_preview = (await client.get(f"{path}/preview", params={"chapter_id": chapter_id})).json()
+    assert chapter_preview["share_scope"] == "chapter"
+    assert chapter_preview["latest_version"]["manuscript"]["render_settings"]["cover_image"] is None
+    assert chapter_preview["latest_version"]["manuscript"]["front_matter"] == []
+    chapter_token = (await client.put(path, params={"chapter_id": chapter_id})).json()["token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.get(f"{path}/preview")).status_code == 401
+        public = (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).json()
+        public_book = public["latest_version"]["manuscript"]
+        assert public_book["chapters"] == book["chapters"]
+        assert public_book["profile"] == book["profile"]
+        manuscript.back_matter.afterword.enabled = False
+        version.manuscript_json = manuscript.model_dump(mode="json")
+        await test_db.commit()
+        disabled = await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})
+        assert "书中的后记" not in disabled.text
+        media_url = public_book["render_settings"]["cover_image"]["image_url"]
+        image = await guest.get(media_url)
+        assert image.status_code == 200, image.text
+        assert image.headers["cache-control"] == "no-store"
+        assert (await guest.get(media_url.replace(token, chapter_token))).status_code == 404
+        placement.enabled = False
+        await test_db.commit()
+        assert (await guest.get(media_url)).status_code == 404
+        placement.enabled = True
+        await test_db.commit()
+        await client.delete(path)
+        assert (await guest.get(media_url)).status_code == 404

@@ -1,14 +1,15 @@
 <import src="../../templates/share-likes.wxml" />
 <import src="../../templates/video-playback.wxml" />
 <view class="ui-page-shell {{pageClass}}">
+  <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading && !video}}" class="empty-panel">
     <text class="empty-copy">正在打开视频</text>
   </view>
 
   <view wx:elif="{{error && !video}}" class="empty-panel">
     <text class="empty-title">{{error}}</text>
-    <button class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
-    <button class="primary-button shared-video-action" bindtap="openHome">看看老余口述</button>
+    <button wx:if="{{retryable}}" class="ui-share-primary" bindtap="loadVideo">重试</button>
+    <button class="primary-button shared-video-action" bindtap="openHome">返回首页</button>
   </view>
 
   <block wx:elif="{{video}}">
@@ -44,18 +45,8 @@
     </video>
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
-    <button class="ui-button shared-video-invitation" bindtap="openHome" hover-class="ui-accent-action-hover" aria-label="也为家里的长辈留一本回忆录，去讲讲故事">
-      <view class="shared-video-invitation-title">
-        <text>为家人</text>
-        <text>留一本回忆录</text>
-      </view>
-      <view class="shared-video-invitation-art" aria-hidden="true">
-        <image src="/assets/memoir-book-header.png" mode="widthFix" aria-hidden="true" />
-      </view>
-      <view class="shared-video-invitation-action">
-        <text>去讲讲故事</text><text aria-hidden="true">→</text>
-      </view>
-    </button>
+    <view class="shared-video-heading"><text class="shared-video-title">{{video.title}}</text><text wx:if="{{video.narrator_name}}">{{video.narrator_name}} 口述</text></view>
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: !sharePreview}}" />
+    <button wx:if="{{!sharePreview}}" class="ui-share-more" bindtap="openHome">我也想讲故事</button>
   </block>
 </view>

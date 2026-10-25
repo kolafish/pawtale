@@ -153,6 +153,7 @@ function loadBookPage({
     getMemoirBookShareStatus: unmockedAsync("getMemoirBookShareStatus"),
     createMemoirBookShare: unmockedAsync("createMemoirBookShare"),
     updateMemoirBookShare: unmockedAsync("updateMemoirBookShare"),
+    readMemoirBookShare: async () => ({ latest_version: null }),
     revokeMemoirBookShare: unmockedAsync("revokeMemoirBookShare"),
     getMemoirBookSnapshot: async () => {
       const identity = await getMemoirIdentity();
@@ -215,208 +216,98 @@ test("book page binds separate settings and file entries", () => {
   assert.match(pageWxml, /data-action="settings" bindtap="openBookExportPage"/);
   assert.match(pageWxml, /data-action="files" bindtap="openBookExportPage"/);
   assert.deepEqual(page.onShareAppMessage.call(pageContext(page)), {
-    title: "老余口述",
-    path: "/pages/home/index",
+    title: "老余口述，把家里的故事慢慢讲下来",
+    path: "/pages/home/index?from=share_home",
   });
   assert.equal(page.onShareTimeline, undefined);
 });
 
-test("book page shares only an explicitly created family link and revokes it", async () => {
-  const revoked = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: async () => ({ active: false, expires_at: null, stale: false, current: false }),
-      createMemoirBookShare: async () => ({ token: "family-secret", expires_at: "2026-09-28T00:00:00" }),
-      revokeMemoirBookShare: async (projectId) => { revoked.push(projectId); },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookContentAvailable: true,
-    bookPreviewTitle: "外婆回忆录",
-  });
-
-  await page.openBookSharePanel.call(context);
-  assert.equal(context.data.bookShareActive, false);
-  assert.equal(context.data.bookShareReady, false);
-  await page.createBookShare.call(context);
-  assert.equal(context.data.bookShareReady, true);
-  assert.deepEqual(page.onShareAppMessage.call(context), {
-    title: "阅读《外婆回忆录》",
-    path: "/pages/book-reader/index?shareToken=family-secret",
-  });
+test("one share action prepares the default book, reuses its link, and can stop it", async () => {
+  const calls = [];
   global.wx = { showModal: ({ success }) => success({ confirm: true }) };
-  await page.revokeBookShare.call(context);
-  assert.deepEqual(revoked, ["project/1"]);
+  const { page } = loadBookPage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: false, current: false, stale: false }),
+    updateMemoirBookShare: async (...args) => { calls.push(["ensure", ...args]); return { token: "family-secret" }; },
+    revokeMemoirBookShare: async (...args) => { calls.push(["stop", ...args]); },
+  } });
+  const context = pageContext(page, { projectId: "project/1", bookContentAvailable: true, bookPreviewTitle: "外婆回忆录" });
+  await context.refreshBookShareStatus();
+  assert.equal(calls.length, 0);
+  await context.prepareReadingShare();
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareReady, true);
+  assert.deepEqual(context.onShareAppMessage(), {
+    title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "/assets/memoir-book-header.png",
+  });
+  await context.revokeBookShare();
+  assert.deepEqual(calls, [["ensure", "project/1", undefined], ["stop", "project/1", undefined]]);
   assert.equal(context.data.bookShareReady, false);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
 });
 
-test("book page restores an existing family link for sharing without regenerating it", async () => {
-  let createCount = 0;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: async () => ({
-        active: true,
-        token: "v1.existing-share",
-        expires_at: "2026-09-28T00:00:00",
-        stale: false,
-        current: true,
-      }),
-      createMemoirBookShare: async () => { createCount += 1; throw new Error("unexpected regeneration"); },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookContentAvailable: true,
-    bookPreviewTitle: "外婆回忆录",
-  });
+test("existing current shares need no update or configuration", async () => {
+  const { page } = loadBookPage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: true, token: "existing", current: true, stale: false }),
+  } });
+  const context = pageContext(page, { projectId: "p", bookContentAvailable: true });
+  await context.refreshBookShareStatus();
+  assert.equal(context.data.bookShareReady, true);
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?shareToken=existing");
+});
 
-  await page.openBookSharePanel.call(context);
+test("a failed preparation stays on the same action and can be retried", async () => {
+  let fail = true;
+  const { page } = loadBookPage({ voiceApiExports: {
+    updateMemoirBookShare: async () => { if (fail) throw new Error("网络暂时不可用"); return { token: "retry" }; },
+  } });
+  const context = pageContext(page, { projectId: "p", bookContentAvailable: true });
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(context.data.bookShareBusy, false);
+  fail = false;
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareReady, true);
+});
+
+test("a withdrawn source disables sharing until the server returns a safe version", async () => {
+  const { page } = loadBookPage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: true, token: "existing", stale: true, current: false }),
+  } });
+  const context = pageContext(page, { projectId: "p", bookContentAvailable: true });
+  await context.refreshBookShareStatus();
   assert.equal(context.data.bookShareActive, true);
-  assert.equal(context.data.bookShareReady, true);
-  assert.deepEqual(page.onShareAppMessage.call(context), {
-    title: "阅读《外婆回忆录》",
-    path: "/pages/book-reader/index?shareToken=v1.existing-share",
-  });
-  assert.equal(createCount, 0);
-});
-
-test("book page pauses an outdated link until the owner confirms the new manuscript", async () => {
-  let updateCount = 0;
-  let confirm = false;
-  global.wx = { showModal: ({ success }) => success({ confirm }) };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: async () => ({
-        active: true,
-        token: "v1.existing-share",
-        expires_at: "2026-09-28T00:00:00",
-        stale: false,
-        current: false,
-      }),
-      updateMemoirBookShare: async () => {
-        updateCount += 1;
-        return { token: "v1.existing-share", expires_at: "2026-09-28T00:00:00" };
-      },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookContentAvailable: true,
-    bookPreviewTitle: "外婆回忆录",
-  });
-
-  await page.openBookSharePanel.call(context);
-  assert.equal(context.data.bookShareNeedsUpdate, true);
   assert.equal(context.data.bookShareReady, false);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
-  await page.updateBookShare.call(context);
-  assert.equal(updateCount, 0);
-  confirm = true;
-  await page.updateBookShare.call(context);
-  assert.equal(updateCount, 1);
-  assert.equal(context.data.bookShareReady, true);
-  assert.equal(context.data.bookShareNeedsUpdate, false);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/book-reader/index?shareToken=v1.existing-share");
+  assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
 });
 
-test("book page keeps sharing paused while the manuscript is stale", async () => {
-  let createCount = 0;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: async () => ({
-        active: true,
-        token: "v1.existing-share",
-        expires_at: "2026-09-28T00:00:00",
-        stale: true,
-        current: false,
-      }),
-      createMemoirBookShare: async () => { createCount += 1; },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookContentAvailable: true,
-    bookStaleNotice: "书稿更新中",
-  });
-
-  await page.openBookSharePanel.call(context);
-  assert.equal(context.data.bookShareStale, true);
-  assert.equal(context.data.bookShareReady, false);
-  await page.createBookShare.call(context);
-  assert.equal(createCount, 0);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
-});
-
-test("book page clears share readiness as soon as a new book version arrives", async () => {
+test("a new book version rechecks the same link and ignores a previous project's response", async () => {
   let resolveStatus;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: () => new Promise((resolve) => { resolveStatus = resolve; }),
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookSharePanelOpen: true,
-    bookShareReady: true,
-    bookShareStatusKnown: true,
-    bookContentAvailable: true,
-  });
+  const { page } = loadBookPage({ voiceApiExports: {
+    getMemoirBookShareStatus: () => new Promise(resolve => { resolveStatus = resolve; }),
+  } });
+  const context = pageContext(page, { projectId: "p", bookShareReady: true, bookContentAvailable: true });
   context.bookOutput = sampleBookOutput(1);
-  context.bookShareToken = "old-link";
-
-  page.applyBookOutput.call(context, sampleBookOutput(2));
+  context.bookShareToken = "existing";
+  context.applyBookOutput(sampleBookOutput(2));
   assert.equal(context.data.bookShareReady, false);
-  assert.equal(context.data.bookShareStatusKnown, false);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
-  resolveStatus({ active: true, token: "old-link", expires_at: "2026-09-28T00:00:00", stale: false, current: false });
+  resolveStatus({ active: true, token: "existing", current: true, stale: false });
   await flushAsyncWork();
-  assert.equal(context.data.bookShareNeedsUpdate, true);
-});
-
-test("book page never shares a previous project's link after the active project changes", async () => {
-  let resolveStatus;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      getMemoirBookShareStatus: () => new Promise((resolve) => { resolveStatus = resolve; }),
-    },
-  });
-  const context = pageContext(page, { projectId: "first-project", bookContentAvailable: true });
-
-  const opening = page.openBookSharePanel.call(context);
-  context.setData({ projectId: "second-project" });
-  resolveStatus({ active: true, token: "first-project-link", expires_at: "2026-09-28T00:00:00", stale: false, current: true });
-  await opening;
-
+  assert.equal(context.data.bookShareReady, true);
+  const pending = context.refreshBookShareStatus();
+  context.setData({ projectId: "other" });
+  resolveStatus({ active: true, token: "previous-project", current: true, stale: false });
+  await pending;
   assert.equal(context.data.bookShareReady, false);
-  assert.equal(page.onShareAppMessage.call(context).path, "/pages/home/index");
 });
 
-test("book page asks before replacing an existing family link", async () => {
-  let createCount = 0;
-  let confirm = false;
-  global.wx = { showModal: ({ success }) => success({ confirm }) };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookShare: async () => {
-        createCount += 1;
-        return { token: "next-link", expires_at: "2026-09-29T00:00:00" };
-      },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    bookShareActive: true,
-    bookShareStatusKnown: true,
-  });
-
-  await page.regenerateBookShare.call(context);
-  assert.equal(createCount, 0);
-  confirm = true;
-  await page.regenerateBookShare.call(context);
-  assert.equal(createCount, 1);
-  assert.equal(context.bookShareToken, "next-link");
+test("friend-view preview navigates without activating a share", () => {
+  const urls = [];
+  global.wx = { navigateTo: ({url}) => urls.push(url) };
+  const { page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project/1", bookContentAvailable: true });
+  context.openReadingSharePreview();
+  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project%2F1&sharePreview=1"]);
+  assert.equal(context.data.bookShareActive, false);
 });
 
 test("book page routes chapter card actions to the chapter workspace", () => {
@@ -1111,4 +1002,21 @@ test("continue automatic writing reports failure and permits retry", async () =>
   await page.continueBookDraft.call(context);
   assert.equal(context.data.error, "网络暂时不可用");
   assert.equal(context.data.retryingDraft, false);
+});
+
+
+test("an activated link remains stoppable when its card read fails", async () => {
+  global.wx = { showModal: ({success}) => success({confirm: true}) };
+  let stopped = false;
+  const { page } = loadBookPage({ voiceApiExports: {
+    updateMemoirBookShare: async () => ({ token: "active" }),
+    readMemoirBookShare: async () => { throw new Error("network"); },
+    revokeMemoirBookShare: async () => { stopped = true; },
+  } });
+  const context = pageContext(page, { projectId: "p", bookContentAvailable: true });
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(context.data.bookShareActive, true);
+  await context.revokeBookShare();
+  assert.equal(stopped, true);
 });

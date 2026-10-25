@@ -45,12 +45,11 @@
       <button wx:if="{{bookContentAvailable}}" class="hero-reading-action" bindtap="openBookReader">
         <text>{{bookStaleNotice ? '阅读已保存书稿' : '阅读全书'}}</text><text aria-hidden="true">→</text>
       </button>
-      <button wx:if="{{bookContentAvailable}}" class="hero-share-action" bindtap="openBookSharePanel">分享阅读页</button>
+      <template wx:if="{{bookContentAvailable}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers}}" />
     </view>
     <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookCompletion" aria-role="button">
       <text>{{bookStaleNotice || bookActivityNotice}}</text><text aria-hidden="true">›</text>
     </view>
-    <template is="readingSharePanel" data="{{bookSharePanelOpen, bookShareActive, bookShareReady, bookShareNeedsUpdate, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers}}" />
   </view>
 
   <view

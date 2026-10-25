@@ -607,6 +607,7 @@ class MemoirBookManuscriptSourceRef(BaseModel):
 
 
 class MemoirBookManuscriptIllustration(BaseModel):
+    image_url: str = ""
     image_asset_id: str
     storage_path: str
     mime_type: str = ""
@@ -696,6 +697,7 @@ class MemoirBookOutputVersionSummaryResponse(BaseModel):
 
 
 class MemoirBookOutputResponse(BaseModel):
+    share_scope: Literal["book", "chapter", "story"] | None = None
     id: str
     project_id: str
     plan_id: str
