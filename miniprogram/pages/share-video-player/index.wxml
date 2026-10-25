@@ -47,6 +47,7 @@
     <button wx:if="{{error}}" class="ghost-button shared-video-action" bindtap="loadVideo">重新加载</button>
     <view class="shared-video-heading"><text class="shared-video-title">{{video.title}}</text><text wx:if="{{video.narrator_name}}">{{video.narrator_name}} 口述</text></view>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: !sharePreview}}" />
+    <share-response-form wx:if="{{!sharePreview && !error}}" video-code="{{responseCode}}" bindunavailable="onResponseUnavailable" />
     <button wx:if="{{!sharePreview}}" class="ui-share-more" bindtap="openHome">我也想讲故事</button>
   </block>
 </view>

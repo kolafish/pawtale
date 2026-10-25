@@ -1,0 +1,17 @@
+<view wx:if="{{items.length || error}}" class="response-inbox">
+  <button class="ui-button ui-share-more" bindtap="toggle">家人回应{{unread ? ' · ' + unread + ' 条未读' : ''}} ›</button>
+  <view wx:if="{{open}}">
+    <view wx:if="{{selected}}" class="response-detail">
+      <text class="response-person">{{selected.display_name}} · {{selected.target_title}}</text>
+      <text class="response-content" user-select>{{selected.content}}</text>
+      <text class="response-hint">仅您与回应人可见，收录不会直接改写书稿。</text>
+      <button class="ui-button ui-share-primary" bindtap="adopt" disabled="{{busy || selected.adopted_at}}" loading="{{busy}}">{{selected.adopted_at ? '已收为补充素材' : '收为补充素材'}}</button>
+      <button class="ui-button ui-share-more" bindtap="back">返回回应列表</button>
+    </view>
+    <block wx:else>
+      <button wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" class="response-row ui-button" bindtap="select">{{item.display_name}} · {{item.target_title}}{{item.adopted_at ? ' · 已收录' : ''}}</button>
+      <button wx:if="{{next}}" class="ui-button ui-share-more" bindtap="loadMore" disabled="{{busy}}">查看更多回应</button>
+    </block>
+  </view>
+  <view wx:if="{{error}}" class="ui-error-banner">{{error}}<button class="ui-button ui-share-more" bindtap="retry">重新读取</button></view>
+</view>

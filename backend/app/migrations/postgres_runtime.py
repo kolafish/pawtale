@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base, register_models
 
 
-POSTGRES_SCHEMA_REVISION = "e6c8d0a2f413"
+POSTGRES_SCHEMA_REVISION = "a7d9e1b3c520"
 POSTGRES_REQUIRED_EXTENSIONS = {
     "pg_search",
     "pg_trgm",

@@ -60,6 +60,7 @@ type ReaderData = Omit<BookReadingData, "bookPreviewTocItems"> & {
 };
 
 type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
+  responseToken: string;
   pageClass: string;
   loading: boolean;
   playbackError: string;
@@ -322,6 +323,7 @@ definePage<BookReaderData>()({
 
 
   data: {
+    responseToken: "",
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     error: "",
@@ -372,6 +374,7 @@ definePage<BookReaderData>()({
     const shareToken = queryParam(query, "shareToken");
     const sharePreview = queryParam(query, "sharePreview") === "1";
     this.readingToken = shareToken;
+    this.setData({ responseToken: shareToken });
     // Visitors open the sample memoir's open chapters before logging in.
     const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
@@ -422,6 +425,10 @@ definePage<BookReaderData>()({
       await this.loadSharedBookReader(() => readMemoirBookShare(this.readingToken));
       if (!this.data.error) await this.loadShareLikes({ reading_token: this.readingToken });
     }
+  },
+
+  onResponseUnavailable() {
+    void this.retrySharedReading();
   },
 
   onShareUnavailable(error: Error) {

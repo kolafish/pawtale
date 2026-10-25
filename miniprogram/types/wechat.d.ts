@@ -50,6 +50,7 @@ declare function Component<
   options: {
     options?: {
       multipleSlots?: boolean;
+      addGlobalClass?: boolean;
     };
     properties: TProperties;
     data?: TData;

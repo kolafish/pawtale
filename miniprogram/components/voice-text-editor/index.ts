@@ -42,6 +42,7 @@ function voiceRuntime(owner: object): VoiceRuntime {
 Component({
   properties: {
     value: { type: String, value: "" },
+    voiceEnabled: { type: Boolean, value: true },
     gatewayUrl: { type: String, value: "" },
     voiceSessionId: { type: String, value: "" },
     placeholder: { type: String, value: "请输入或说出您的意见" },
@@ -160,7 +161,7 @@ Component({
 
     async startVoice(autoTriggered: boolean = false) {
       const runtime = voiceRuntime(this);
-      if (!this.canEdit()) {
+      if (!this.canEdit() || !this.properties.voiceEnabled) {
         return;
       }
       if (!this.properties.gatewayUrl) {
