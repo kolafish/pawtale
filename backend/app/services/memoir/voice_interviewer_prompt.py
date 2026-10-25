@@ -148,7 +148,7 @@ def build_stream_turn_prompt(
 
 _PROFILE_QUESTIONS = {
     "narrator_name": "怎么称呼他，比如“您怎么称呼？”",
-    "narrator_age": "他的年纪，比如“您是哪年生的？”",
+    "narrator_age": "他的年纪，直接问当前周岁，比如“您今年满多少周岁了？”",
     "narrator_origin": "他的老家，比如“您老家是哪里的？”",
     "narrator_gender": "他是男是女，比如“冒昧问一句，我该叫您叔叔还是阿姨呀？”",
 }
@@ -167,7 +167,7 @@ def _profile_question(book: InterviewBookContext, *, opening: bool = False) -> s
     ) if book.profile_answers else ""
     return f"""这次要问的资料：{_PROFILE_QUESTIONS[first]}
 {timing}- 同时检查以前的资料问答和本次对话；一句回答可能包含多个资料项，以最新说法为准
-- 岁数和出生年份属于同一项年龄资料：已说“今年七十岁”就不能再问“哪年生的”，也不换个问法确认
+- 岁数和出生年份在去重时属于同一项年龄资料；已回答其中任一项，就不再换问法补问。只有出生年份时，不自行推算或确认周岁
 - 上下文里他本人已经说了这一项，或明确不想说，{instead}
 - 他刚说了怎么称呼，接话时就用这个称呼叫他一声（叫错了他会纠正）{history}"""
 

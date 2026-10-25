@@ -1,5 +1,4 @@
 import asyncio
-from datetime import date
 import json
 from types import SimpleNamespace
 
@@ -32,7 +31,6 @@ from tests.memoir_helpers import (
 )
 
 REAL_SCHEDULE = narrator_profile.schedule_narrator_profile
-TODAY = date.today()
 
 
 @pytest.fixture(autouse=True)
@@ -161,13 +159,13 @@ async def test_each_segment_of_the_first_narration_is_read_with_the_line_before_
     asked = await _ask(test_db, session_id, "王秀音阿姨，您是哪年生的？", offered="narrator_age")
     second = await _narrate(client, test_db, session_id, "是秀英，英雄的英。我五二年生的，老家四川成都。")
     assert (await _profile_job(test_db, second.utterance_id)).payload_json["previous_message_id"] == asked.id
-    fake_ai.payload = {"name": "王秀英", "gender": "female", "age": TODAY.year - 1952, "origin": "四川成都"}
+    fake_ai.payload = {"name": "王秀英", "gender": "female", "age": None, "origin": "四川成都"}
     await _run(test_db, second.utterance_id)
     assert "已经记下的资料：称呼：王秀音" in fake_ai.prompts[-1]
     project, profile = await _profile(test_db, project_id)
     assert project.title == "王秀英的回忆录"
     assert (profile["narrator_name"], profile["narrator_age"], profile["narrator_origin"]) == (
-        "王秀英", TODAY.year - 1952, "四川成都",
+        "王秀英", None, "四川成都",
     )
     source = profile[projects.INFERRED_PROFILE_FIELDS_KEY]["narrator_name"]
     assert source["utterance_id"] == second.utterance_id
@@ -769,11 +767,11 @@ async def test_asking_stops_after_two_asks_or_a_refusal_but_late_answers_are_kep
     )
 
     # After the second ask the answer still comes, much later.
-    late = await _narrate(client, test_db, session_id, "我是五二年生的，属龙。")
-    fake_ai.payload = {"age": TODAY.year - 1952}
+    late = await _narrate(client, test_db, session_id, "我今年满七十周岁了。")
+    fake_ai.payload = {"age": 70}
     await _run(test_db, late.utterance_id)
     _project, saved = await _profile(test_db, project_id)
-    assert saved["narrator_age"] == TODAY.year - 1952
+    assert saved["narrator_age"] == 70
 
     refusal = await _narrate(client, test_db, session_id, "老家就不说了吧。")
     fake_ai.payload = {"skip": ["origin"]}
@@ -803,21 +801,52 @@ async def test_a_reply_counts_as_an_ask_only_when_the_check_says_it_asks_for_the
     assert len(fake_ai.prompts) == calls
 
 
+async def test_birth_year_answer_keeps_age_ask_count_and_context_without_inventing_age(client, test_db, fake_ai):
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    question = await _ask(test_db, session_id, "您是哪年生的？", offered="narrator_age")
+    fake_ai.payload = {"field": "narrator_age"}
+    await narrator_profile._record_profile_ask(
+        message_id=question.id, fields=("narrator_age",), text=question.content_text, ai_model=None,
+    )
+    await test_db.refresh(question)
+    answer = await _narrate(client, test_db, session_id, "我是1952年出生的。")
+    fake_ai.payload = {"age": None}
+    await _run(test_db, answer.utterance_id)
+    _, profile = await _profile(test_db, project_id)
+    session = await test_db.get(MemoirVoiceSession, session_id)
+    await test_db.refresh(session, ["messages"])
+    assert profile.get("narrator_age") is None
+    assert narrator_profile.profile_asks(list(session.messages))["narrator_age"] == 1
+    assert narrator_profile._previous_profile_answers(list(session.messages)) == (
+        narrator_profile.ProfileAnswer("您是哪年生的？", "我是1952年出生的。"),
+    )
+    assert "narrator_age" not in narrator_profile.profile_questions_to_ask(profile, list(session.messages))
+
+
 @pytest.mark.asyncio
-async def test_when_the_check_fails_plain_wording_decides(monkeypatch):
+async def test_failed_ask_classification_preserves_pending_count_and_answer(client, test_db, monkeypatch):
     async def fail(*_args, **_kwargs):
         raise RuntimeError("provider down")
 
+    project_id = await ensure_mobile_memoir_project(client, title="我的回忆录")
+    session_id = await _session(client, project_id)
+    question = await _ask(test_db, session_id, "您是哪年生的？", offered="narrator_age")
+    question.metadata_json = {"profile_questions": ["narrator_age"]}
+    await test_db.commit()
     monkeypatch.setattr(narrator_profile, "generate_structured_with_client", fail)
-    fields = ("narrator_name", "narrator_age", "narrator_origin")
-    assert await narrator_profile.asked_profile_field(fields, "您今年多少岁了？", ai_model=None) == "narrator_age"
-    assert await narrator_profile.asked_profile_field(fields, "您是哪年生的呀？", ai_model=None) == "narrator_age"
-    assert await narrator_profile.asked_profile_field(fields, "您是哪年参加工作的？", ai_model=None) is None
-    assert await narrator_profile.asked_profile_field(fields, "那年您多大，还记得吗？", ai_model=None) is None
-    assert await narrator_profile.asked_profile_field(fields, "您怎么称呼？", ai_model=None) == "narrator_name"
-    gender = ("narrator_gender",)
-    assert await narrator_profile.asked_profile_field(gender, "我该叫您叔叔还是阿姨呀？", ai_model=None) == "narrator_gender"
-    assert await narrator_profile.asked_profile_field(gender, "那时候女的也要下地干活吗？", ai_model=None) is None
+    await narrator_profile._record_profile_ask(
+        message_id=question.id, fields=("narrator_age",), text=question.content_text, ai_model=None,
+    )
+    await test_db.refresh(question)
+    assert "profile_asked" not in question.metadata_json
+    assert narrator_profile.profile_asks([question]) == {"narrator_age": 1}
+    await _narrate(client, test_db, session_id, "我是1952年出生的。")
+    session = await test_db.get(MemoirVoiceSession, session_id)
+    await test_db.refresh(session, ["messages"])
+    assert narrator_profile._previous_profile_answers(list(session.messages)) == (
+        narrator_profile.ProfileAnswer(question.content_text, "我是1952年出生的。"),
+    )
 
 
 def test_pending_ask_checks_cannot_exceed_two_asks_for_any_candidate():
@@ -1084,7 +1113,7 @@ def test_the_interviewer_asks_the_next_item_while_the_last_answer_is_still_being
         chapters=(("童年", 2),), last_chapter_title="童年", topics=(), anchor_topic=None, profile_questions=questions,
     )
     prompt = _prompt("s1", [asked, narrator], book)
-    assert "这次要问的资料：他的年纪，比如“您是哪年生的？”" in prompt
+    assert "当前周岁" in prompt
     assert "就改问：他的老家，比如“您老家是哪里的？”（这一项也说了就不问）" in prompt
     assert "你叫我于大姐吧。" in prompt
     last = InterviewBookContext(
@@ -1213,7 +1242,7 @@ def test_the_second_session_opens_by_asking_what_the_first_left():
         completion_prompt_context=None,
         book_context=book,
     )
-    assert "这次要问的资料：他的年纪，比如“您是哪年生的？”" in prompt
+    assert "当前周岁" in prompt
     assert "或明确不想说，就改问：他是男是女" in prompt
     assert "接着上次" not in prompt
 

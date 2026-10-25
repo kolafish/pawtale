@@ -506,11 +506,9 @@ async def test_first_narration_offers_one_profile_item_and_records_the_ask(clien
 
     # The ask check runs after the reply is saved; a slow check must not hold up or cancel the turn.
     release = asyncio.Event()
-    original_check = narrator_profile.asked_profile_field
-
     async def slow_check(*args, **kwargs):
         await release.wait()
-        return await original_check(*args, **kwargs)
+        return "narrator_origin"
 
     monkeypatch.setattr(narrator_profile, "asked_profile_field", slow_check)
     _, ai_client, _, _ = await _run_stream_turn(

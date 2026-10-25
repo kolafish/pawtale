@@ -28,6 +28,9 @@ async def evaluate(args: argparse.Namespace) -> int:
             recent_user_utterances=tuple(
                 case.get("context", {}).get("recent_user_utterances", [])
             ),
+            recent_assistant_messages=tuple(
+                case.get("context", {}).get("recent_assistant_messages", [])
+            ),
         )
         result = await generate_cleaned_transcript_text(
             case["source"], ai_model=args.ai_model, context=context, strict=True,

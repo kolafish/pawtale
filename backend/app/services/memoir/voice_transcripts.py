@@ -73,7 +73,10 @@ from app.services.memoir.section_roles import (
 )
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.sections import finalize_section_changes, refresh_material_transcript_version
-from app.services.memoir.transcript_projection import cleanup_source_text, current_utterance_text, has_story_content
+from app.services.memoir.transcript_projection import (
+    cleanup_source_text, cleanup_source_version, current_utterance_text, has_story_content,
+    user_edited_version_clause,
+)
 from app.services.memoir.utterance_editing_pipeline import (
     claim_transcript_mutation_guard,
     schedule_ready_utterance_background_work,
@@ -228,7 +231,7 @@ def _build_cleanup_prompt(
 {polish_requirements}
 
 {context_block}
-本条整理基线（原始识别或最近一次人工编辑；以下是本次唯一可整理的正文）：
+本条整理基线（原始识别、多路校对基线或最近一次人工编辑；以下是本次唯一可整理的正文）：
 {source_text}
 """
 
@@ -408,7 +411,7 @@ def _manual_correction_exists():
         select(MemoirTranscriptVersion.id)
         .where(
             MemoirTranscriptVersion.source_artifact_id == MemoirVoiceUtterance.id,
-            MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            user_edited_version_clause(),
         )
         .exists()
     )
@@ -536,6 +539,10 @@ async def prune_transcript_versions_for_utterance(
             .offset(max(1, keep))
         )
     ).scalars().all()
+    utterance = await db.get(MemoirVoiceUtterance, utterance_id)
+    baseline = await cleanup_source_version(db, utterance) if utterance else None
+    if baseline is not None:
+        stale_ids = [version_id for version_id in stale_ids if version_id != baseline.id]
     if not stale_ids:
         return 0
     result = await db.execute(delete(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id.in_(stale_ids)))
@@ -801,7 +808,7 @@ async def manual_corrections_by_utterance_ids(
             )
             .where(
                 MemoirTranscriptVersion.source_artifact_id.in_(clean_ids),
-                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+                user_edited_version_clause(),
             )
             .group_by(MemoirTranscriptVersion.source_artifact_id)
         )

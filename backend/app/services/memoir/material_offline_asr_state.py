@@ -10,12 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-    MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.schemas.memoir_voice import MemoirMaterialOfflineASRStateResponse
 from app.services.memoir.dialect_profile import MemoirDialectProfile, resolve_memoir_dialect_profile
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.transcript_projection import user_edited_version_clause
 
 
 MATERIAL_OFFLINE_ASR_METADATA_KEY = "material_offline_asr"
@@ -57,7 +57,7 @@ async def user_edited_utterance_ids(
         await db.scalars(
             select(MemoirTranscriptVersion.source_artifact_id).where(
                 MemoirTranscriptVersion.source_artifact_id.in_(clean_ids),
-                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+                user_edited_version_clause(),
             )
         )
     ).all()

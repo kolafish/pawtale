@@ -300,8 +300,10 @@ async def test_cleanup_entries_use_project_level_and_only_preceding_context(
     assert "后来您退休了吗？" not in ai.prompts[0]
 
 
-async def test_recleanup_uses_stable_source_and_preserves_latest_manual_edit(client, test_db):
+@pytest.mark.parametrize("manual_type", ["user_edited", "dialect_corrected"])
+async def test_recleanup_uses_stable_source_and_preserves_latest_manual_edit(client, test_db, manual_type):
     from app.services.memoir.transcript_projection import cleanup_source_text
+    from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
 
     created = await create_test_voice_transcript(client, test_db, text="我小时候住在外婆家。")
     utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
@@ -309,13 +311,17 @@ async def test_recleanup_uses_stable_source_and_preserves_latest_manual_edit(cli
     assert await cleanup_source_text(test_db, utterance) == "我小时候住在外婆家。"
     test_db.add(MemoirTranscriptVersion(
         voice_session_id=utterance.voice_session_id, source_artifact_id=utterance.id,
-        version_type="user_edited", created_by="user", content="我小时候住在奶奶家。",
+        version_type=manual_type, created_by="user", content="我小时候住在奶奶家。",
     ))
     await test_db.flush()
     utterance.transcript_edited = "奶奶家承载着我美好的童年。"
-    test_db.add(MemoirTranscriptVersion(
-        voice_session_id=utterance.voice_session_id, source_artifact_id=utterance.id,
-        version_type="dialect_corrected", created_by="ai", content=utterance.transcript_edited,
-    ))
-    await test_db.flush()
-    assert await cleanup_source_text(test_db, utterance) == "我小时候住在奶奶家。"
+    for _ in range(5):
+        test_db.add(MemoirTranscriptVersion(
+            voice_session_id=utterance.voice_session_id, source_artifact_id=utterance.id,
+            version_type="dialect_corrected", created_by="ai", content=utterance.transcript_edited,
+        ))
+        await test_db.flush()
+        await prune_transcript_versions_for_utterance(
+            test_db, utterance_id=utterance.id, version_type="dialect_corrected",
+        )
+        assert await cleanup_source_text(test_db, utterance) == "我小时候住在奶奶家。"
