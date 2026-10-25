@@ -64,6 +64,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
   playbackError: string;
   projectId: string;
   chapterId: string;
+  sectionId: string;
   versionId: string;
   readerMode: "book" | "chapter";
   readerShared: boolean;
@@ -321,6 +322,7 @@ definePage<BookReaderData>()({
     playbackError: "",
     projectId: "",
     chapterId: "",
+    sectionId: "",
     versionId: "",
     readerMode: "book",
     readerShared: false,
@@ -359,6 +361,7 @@ definePage<BookReaderData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
+    const sectionId = queryParam(query, "sectionId");
     const versionId = queryParam(query, "versionId");
     const shareToken = queryParam(query, "shareToken");
     const sharePreview = queryParam(query, "sharePreview") === "1";
@@ -366,9 +369,9 @@ definePage<BookReaderData>()({
     // Visitors open the sample memoir's open chapters before logging in.
     const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, versionId, readerMode, readerDemo: demo, sharePreview, readerShared: Boolean(shareToken) || demo || sharePreview });
+    this.setData({ projectId, chapterId, sectionId, versionId, readerMode, readerDemo: demo, sharePreview, readerShared: Boolean(shareToken) || demo || sharePreview });
     if (sharePreview) {
-      await this.loadSharedBookReader(() => previewMemoirBookShare(projectId, chapterId || undefined));
+      await this.loadSharedBookReader(() => previewMemoirBookShare(projectId, chapterId || undefined, sectionId || undefined));
       return;
     }
     if (shareToken || demo) {
@@ -403,7 +406,7 @@ definePage<BookReaderData>()({
   openShareHome() { wx.reLaunch({ url: "/pages/home/index" }); },
 
   async retrySharedReading() {
-    if (this.data.sharePreview) await this.loadSharedBookReader(() => previewMemoirBookShare(this.data.projectId, this.data.chapterId || undefined));
+    if (this.data.sharePreview) await this.loadSharedBookReader(() => previewMemoirBookShare(this.data.projectId, this.data.chapterId || undefined, this.data.sectionId || undefined));
     else if (this.data.readerDemo) await this.loadSharedBookReader(() => readMemoirDemoBook());
     else if (this.readingToken) {
       await this.loadSharedBookReader(() => readMemoirBookShare(this.readingToken));

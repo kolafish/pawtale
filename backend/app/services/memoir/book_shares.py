@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import re
 import secrets
+from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
@@ -18,7 +19,7 @@ from app.config import get_settings
 from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import (
     MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare,
-    MemoirBookPlan, MemoirBookPlanChapter, MemoirBookChapterDraftVersion, MemoirChapterShare, MemoirSection, MemoirImageAsset,
+    MemoirBookPlan, MemoirBookPlanChapter, MemoirBookChapterDraftVersion, MemoirChapterShare, MemoirSection, MemoirSectionMaterial, MemoirSectionShare, MemoirImageAsset,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import (
@@ -30,41 +31,55 @@ from app.schemas.memoir_book import (
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_output_versions import book_output_version_title
 from app.services.memoir.book_outputs import _output_version_response, get_book_output
-from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_output_snapshots import chapter_snapshot, normalized_section_snapshots
 from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, project_narrator_name
 from app.services.memoir.image_assets import manuscript_image_snapshots, image_asset_file_path
 from app.services.memoir.book_source_links import chapter_source_change_states_by_chapter
-from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, like_summary
+from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, section_target, like_summary
 
 
-STABLE_TOKEN_PATTERN = re.compile(r"(v1|c1)\.([0-9a-f-]{36})\.([0-9a-f]{64})\Z")
-ShareResource = MemoirBookOutput | MemoirBookPlanChapter
+STABLE_TOKEN_PATTERN = re.compile(r"(v1|c1|s1)\.([0-9a-f-]{36})\.([0-9a-f]{64})\Z")
+ShareScope = Literal["book", "chapter", "story"]
+ShareResource = MemoirBookOutput | MemoirBookPlanChapter | MemoirSection
 ShareVersion = MemoirBookOutputVersion | MemoirBookChapterDraftVersion
 
 
-def _stable_token(output_id: str, token_hash: str, *, chapter: bool = False) -> str:
+def _stable_token(output_id: str, token_hash: str, *, scope: ShareScope = "book") -> str:
     # Legacy shares retain only a hash; bind a recoverable token to that hash
     # without making the stored hash usable as a public link.
-    namespace = "memoir-chapter-share:v1" if chapter else "memoir-book-share:v1"
+    namespace = f"memoir-{scope}-share:v1"
     signature = hmac.new(
         get_settings().app_secret_key.encode("utf-8"),
         f"{namespace}\0{output_id}\0{token_hash}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return f"{'c1' if chapter else 'v1'}.{output_id}.{signature}"
+    return f"{dict(book='v1', chapter='c1', story='s1')[scope]}.{output_id}.{signature}"
 
 
-def _share_table(chapter: bool) -> tuple[
-    type[MemoirBookShare] | type[MemoirChapterShare], InstrumentedAttribute[str],
+def _scope(resource: ShareResource) -> ShareScope:
+    if isinstance(resource, MemoirSection):
+        return "story"
+    return "chapter" if isinstance(resource, MemoirBookPlanChapter) else "book"
+
+
+def _share_table(scope: ShareScope) -> tuple[
+    type[MemoirBookShare] | type[MemoirChapterShare] | type[MemoirSectionShare], InstrumentedAttribute[str],
 ]:
-    return (MemoirChapterShare, MemoirChapterShare.chapter_id) if chapter else (MemoirBookShare, MemoirBookShare.output_id)
+    if scope == "story":
+        return MemoirSectionShare, MemoirSectionShare.section_id
+    return (MemoirChapterShare, MemoirChapterShare.chapter_id) if scope == "chapter" else (MemoirBookShare, MemoirBookShare.output_id)
 
 
 async def _owned_resource(
-    db: AsyncSession, user_id: str, project_id: str, chapter_id: str | None,
+    db: AsyncSession, user_id: str, project_id: str, chapter_id: str | None, section_id: str | None = None,
 ) -> ShareResource:
     await load_memoir_project(db, project_id, user_id)
-    if chapter_id is not None:
+    if section_id is not None:
+        resource = await db.scalar(select(MemoirSection).where(
+            MemoirSection.project_id == project_id, MemoirSection.id == section_id, MemoirSection.status == "active",
+            *(() if chapter_id is None else (MemoirSection.chapter_id == chapter_id,)),
+        ))
+    elif chapter_id is not None:
         resource = await db.scalar(select(MemoirBookPlanChapter).where(
             MemoirBookPlanChapter.project_id == project_id, MemoirBookPlanChapter.id == chapter_id,
         ))
@@ -76,9 +91,27 @@ async def _owned_resource(
 
 
 async def _current_version(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> tuple[ShareVersion | None, bool]:
     """Return the last complete saved text; additions may be assembling separately."""
+    if section_id is not None:
+        section = await db.get(MemoirSection, section_id)
+        if section is None or section.project_id != project_id or section.status != "active":
+            return None, True
+        version = await db.scalar(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.project_id == project_id,
+            MemoirBookChapterDraftVersion.chapter_id == section.chapter_id,
+        ).order_by(MemoirBookChapterDraftVersion.version.desc()).limit(1))
+        saved = next((item for item in normalized_section_snapshots(version.section_snapshot_json if version else [])
+                      if item["section_id"] == section_id), None)
+        if saved is None:
+            return None, False
+        included_sources = set(await db.scalars(select(MemoirSectionMaterial.utterance_id).where(
+            MemoirSectionMaterial.section_id == section_id, MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.include_in_book.is_(True),
+        )))
+        unsafe = not section.include_in_book or bool(set(saved["used_material_ids"]) - included_sources)
+        return version, unsafe
     if chapter_id is not None:
         version = await db.scalar(select(MemoirBookChapterDraftVersion).where(
             MemoirBookChapterDraftVersion.project_id == project_id,
@@ -125,22 +158,22 @@ async def _current_version(
     return version, False
 
 
-def _active(share: MemoirBookShare | MemoirChapterShare | None) -> bool:
+def _active(share: MemoirBookShare | MemoirChapterShare | MemoirSectionShare | None) -> bool:
     return share is not None and (share.expires_at is None or share.expires_at > utcnow_naive())
 
 
 async def share_status(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> MemoirBookShareStatusResponse:
-    output = await _owned_resource(db, user_id, project_id, chapter_id)
-    share_model, share_key = _share_table(chapter_id is not None)
+    output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    share_model, share_key = _share_table(_scope(output))
     share = await db.get(share_model, output.id, populate_existing=True)
     active = _active(share)
-    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     return MemoirBookShareStatusResponse(
         active=active,
         expires_at=share.expires_at if active else None,
-        token=_stable_token(output.id, share.token_hash, chapter=chapter_id is not None) if active else None,
+        token=_stable_token(output.id, share.token_hash, scope=_scope(output)) if active else None,
         stale=stale,
         current=bool(active and not stale and version),
         likes=await like_summary(db, _like_target(output), limit=None),
@@ -148,11 +181,11 @@ async def share_status(
 
 
 async def create_share(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, rotate: bool = True,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None, rotate: bool = True,
 ) -> MemoirBookShareCreateResponse:
-    output = await _owned_resource(db, user_id, project_id, chapter_id)
-    share_model, share_key = _share_table(chapter_id is not None)
-    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    share_model, share_key = _share_table(_scope(output))
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     if stale:
         raise HTTPException(status_code=409, detail="书稿正在更新，请完成更新后再分享")
     if version is None or not version.content.strip():
@@ -162,7 +195,7 @@ async def create_share(
     existing = await db.get(share_model, output.id, populate_existing=True)
     if not rotate and _active(existing):
         result = MemoirBookShareCreateResponse(
-            token=_stable_token(output.id, existing.token_hash, chapter=chapter_id is not None),
+            token=_stable_token(output.id, existing.token_hash, scope=_scope(output)),
             expires_at=existing.expires_at,
         )
         await db.commit()
@@ -171,38 +204,29 @@ async def create_share(
     token_hash = session_token_hash(token)
     now = utcnow_naive()
     expires_at = None
-    statement = insert(share_model).values(
-        **{share_key.key: output.id},
-        version_id=version.id,
-        token_hash=token_hash,
-        expires_at=expires_at,
-        created_at=now,
-    )
-    await db.execute(statement.on_conflict_do_update(
-        index_elements=[share_key],
-        set_={
-            "version_id": version.id,
-            "token_hash": token_hash,
-            "expires_at": expires_at,
-            "created_at": now,
-        },
-    ))
+    values = {"token_hash": token_hash, "expires_at": expires_at, "created_at": now}
+    # A section can move to a different chapter whose saved versions have a
+    # separate lifetime. Its authorization belongs to the section alone.
+    if not isinstance(output, MemoirSection):
+        values["version_id"] = version.id
+    statement = insert(share_model).values(**{share_key.key: output.id}, **values)
+    await db.execute(statement.on_conflict_do_update(index_elements=[share_key], set_=values))
     await db.commit()
-    return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, chapter=chapter_id is not None), expires_at=expires_at)
+    return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, scope=_scope(output)), expires_at=expires_at)
 
 
 async def update_share(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> MemoirBookShareCreateResponse:
     # Keep the old PUT contract while making repeated share actions idempotent.
-    return await create_share(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, rotate=False)
+    return await create_share(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id, rotate=False)
 
 
 async def revoke_share(
-    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None,
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None,
 ) -> None:
-    output = await _owned_resource(db, user_id, project_id, chapter_id)
-    share_model, share_key = _share_table(chapter_id is not None)
+    output = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    share_model, share_key = _share_table(_scope(output))
     await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
     await db.execute(delete(share_model).where(share_key == output.id))
     await db.commit()
@@ -212,12 +236,12 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
     """The book or chapter behind a reading link, while a reader can open it."""
     invalid = HTTPException(status_code=404, detail="分享链接已失效")
     stable_match = STABLE_TOKEN_PATTERN.fullmatch(token)
-    chapter_link = bool(stable_match and stable_match.group(1) == "c1")
+    scope: ShareScope = {"v1": "book", "c1": "chapter", "s1": "story"}[stable_match.group(1)] if stable_match else "book"
     if stable_match:
         resource_id = stable_match.group(2)
-        share_model, _ = _share_table(chapter_link)
+        share_model, _ = _share_table(scope)
         share = await db.get(share_model, resource_id, populate_existing=True)
-        if share is None or not hmac.compare_digest(token, _stable_token(resource_id, share.token_hash, chapter=chapter_link)):
+        if share is None or not hmac.compare_digest(token, _stable_token(resource_id, share.token_hash, scope=scope)):
             raise invalid
     elif len(token) == 43:
         share = await db.scalar(select(MemoirBookShare).where(
@@ -227,7 +251,11 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
         raise invalid
     if not _active(share):
         raise invalid
-    if isinstance(share, MemoirChapterShare):
+    if isinstance(share, MemoirSectionShare):
+        resource = await db.get(MemoirSection, share.section_id)
+        if resource is None or resource.status != "active":
+            raise invalid
+    elif isinstance(share, MemoirChapterShare):
         resource = await db.get(MemoirBookPlanChapter, share.chapter_id)
         version = await db.get(MemoirBookChapterDraftVersion, share.version_id)
         if resource is None or version is None or version.chapter_id != resource.id:
@@ -242,7 +270,7 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
         raise invalid
     current_version, stale = await _current_version(
         db, user_id=owner_id, project_id=resource.project_id,
-        chapter_id=resource.id if chapter_link else None,
+        chapter_id=resource.id if scope == "chapter" else None, section_id=resource.id if scope == "story" else None,
     )
     if stale or current_version is None:
         raise HTTPException(status_code=409, detail="作者已移除部分内容，正在更新分享书稿")
@@ -250,6 +278,8 @@ async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, S
 
 
 def _like_target(resource: ShareResource) -> ShareLikeTarget:
+    if isinstance(resource, MemoirSection):
+        return section_target(resource)
     return chapter_target(resource) if isinstance(resource, MemoirBookPlanChapter) else book_target(resource)
 
 
@@ -267,26 +297,36 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
 async def _resource_reading_response(
     db: AsyncSession, resource: ShareResource, version: ShareVersion, *, token: str = "",
 ) -> MemoirBookOutputResponse:
-    if isinstance(resource, MemoirBookPlanChapter) and isinstance(version, MemoirBookChapterDraftVersion):
-        # Adapt the saved chapter to the existing public reader without creating a book.
+    scope = _scope(resource)
+    if isinstance(version, MemoirBookChapterDraftVersion):
+        chapter = await db.get(MemoirBookPlanChapter, resource.chapter_id) if isinstance(resource, MemoirSection) else resource
+        snapshot = chapter_snapshot(chapter, version, chapter_index=1)
+        content = version.content
+        title = resource.title
+        if isinstance(resource, MemoirSection):
+            sections = [item for item in snapshot["sections"] if item["section_id"] == resource.id]
+            if not sections:
+                raise HTTPException(404, "这个故事还没有已保存正文")
+            title, content = sections[0]["title"], sections[0]["content"]
+            snapshot.update(chapter_title=title, content=content, sections=sections, section_count=1,
+                            source_refs=[], source_count=0, metadata_json={})
         output = MemoirBookOutput(
-            id=resource.id, project_id=resource.project_id, plan_id=resource.plan_id,
-            title=resource.title, status=MemoirOutputStatus.DRAFT.value,
+            id=resource.id, project_id=resource.project_id, plan_id=chapter.plan_id,
+            title=title, status=MemoirOutputStatus.DRAFT.value,
             created_at=resource.created_at, updated_at=version.created_at,
         )
-        snapshot = [chapter_snapshot(resource, version, chapter_index=1)]
-        manuscript = manuscript_from_snapshot(title=resource.title, content=version.content, snapshot=snapshot)
+        manuscript = manuscript_from_snapshot(title=title, content=content, snapshot=[snapshot])
         reading_version = MemoirBookOutputVersion(
-            id=version.id, output_id=resource.id, project_id=resource.project_id, plan_id=resource.plan_id,
-            version=version.version, content=version.content, created_by=version.created_by,
+            id=version.id, output_id=resource.id, project_id=resource.project_id, plan_id=chapter.plan_id,
+            version=version.version, content=content, created_by=version.created_by,
             created_at=version.created_at,
-            chapter_snapshot_json=snapshot,
+            chapter_snapshot_json=[snapshot],
             manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
         )
         result = public_reading_response(output, reading_version)
     else:
         result = public_reading_response(resource, version, include_book_details=True)
-    return await _share_presentation(db, result, token=token, chapter=isinstance(resource, MemoirBookPlanChapter))
+    return await _share_presentation(db, result, token=token, scope=scope)
 
 
 def public_reading_response(
@@ -362,16 +402,16 @@ def public_reading_response(
     )
 
 
-async def preview_share(db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None) -> MemoirBookOutputResponse:
-    resource = await _owned_resource(db, user_id, project_id, chapter_id)
-    version, unsafe = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+async def preview_share(db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str | None = None, section_id: str | None = None) -> MemoirBookOutputResponse:
+    resource = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    version, unsafe = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     if version is None or unsafe:
         raise HTTPException(status_code=409, detail="请完成书稿更新后预览分享内容")
     return await _resource_reading_response(db, resource, version)
 
 
-async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse, *, token: str, chapter: bool) -> MemoirBookOutputResponse:
-    result.share_scope = "chapter" if chapter else "book"
+async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse, *, token: str, scope: ShareScope) -> MemoirBookOutputResponse:
+    result.share_scope = scope
     manuscript = result.latest_version.manuscript if result.latest_version else None
     if manuscript is None:
         return result
@@ -388,10 +428,10 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
     for item in manuscript.chapters:
         section_ids = {section.section_id for section in item.sections}
         item.illustrations = [public_image(raw) for raw in chapter_images.get(item.chapter_id, [])
-                             if not raw.get("section_id") or raw["section_id"] in section_ids]
-    if cover and not chapter:
+                             if (raw.get("section_id") in section_ids if scope == "story" else not raw.get("section_id") or raw["section_id"] in section_ids)]
+    if cover and scope == "book":
         manuscript.render_settings.cover_image = public_image(cover)
-    if chapter:
+    if scope != "book":
         project = await db.get(Project, result.project_id)
         manuscript.profile.narrator_name = project_narrator_name(project)
     return result

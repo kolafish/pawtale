@@ -39,31 +39,32 @@ import {
 import { downloadAuthenticatedFile, uploadAuthenticatedFile, type FileDownloadPhase } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie, request } from "./request";
 
-function memoirBookSharePath(projectId: string, chapterId: string): string {
-  const path = memoirProjectPath(projectId, "/book-output/share");
-  return chapterId ? `${path}?chapter_id=${encodeURIComponent(chapterId)}` : path;
+function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "", preview = false): string {
+  const path = memoirProjectPath(projectId, `/book-output/share${preview ? "/preview" : ""}`);
+  const query = [chapterId ? `chapter_id=${encodeURIComponent(chapterId)}` : "", sectionId ? `section_id=${encodeURIComponent(sectionId)}` : ""].filter(Boolean).join("&");
+  return query ? `${path}?${query}` : path;
 }
 
-export function getMemoirBookShareStatus(projectId: string, chapterId = ""): Promise<MemoirBookShareStatus> {
-  return memoirRequest<MemoirBookShareStatus>(memoirBookSharePath(projectId, chapterId));
+export function getMemoirBookShareStatus(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareStatus> {
+  return memoirRequest<MemoirBookShareStatus>(memoirBookSharePath(projectId, chapterId, sectionId));
 }
 
-export function createMemoirBookShare(projectId: string, chapterId = ""): Promise<MemoirBookShareCreated> {
-  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId), {
+export function createMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId, sectionId), {
     method: "POST",
     invalidatesSnapshots: false,
   });
 }
 
-export function updateMemoirBookShare(projectId: string, chapterId = ""): Promise<MemoirBookShareCreated> {
-  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId), {
+export function updateMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareCreated> {
+  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId, sectionId), {
     method: "PUT",
     invalidatesSnapshots: false,
   });
 }
 
-export async function revokeMemoirBookShare(projectId: string, chapterId = ""): Promise<void> {
-  await memoirRequest<unknown>(memoirBookSharePath(projectId, chapterId), {
+export async function revokeMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<void> {
+  await memoirRequest<unknown>(memoirBookSharePath(projectId, chapterId, sectionId), {
     method: "DELETE",
     invalidatesSnapshots: false,
   });
@@ -438,6 +439,6 @@ export async function downloadMemoirBookOutputExport(
 }
 
 
-export function previewMemoirBookShare(projectId: string, chapterId?: string): Promise<MemoirBookOutput> {
-  return memoirRequest(memoirProjectPath(projectId, `/book-output/share/preview${chapterId ? `?chapter_id=${encodeURIComponent(chapterId)}` : ""}`));
+export function previewMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookOutput> {
+  return memoirRequest(memoirBookSharePath(projectId, chapterId, sectionId, true));
 }

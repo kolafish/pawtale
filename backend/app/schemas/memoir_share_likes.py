@@ -45,7 +45,7 @@ class MemoirShareLikesResponse(MemoirShareLikeSummary):
 
 class MemoirShareLikeActivityItem(BaseModel):
     id: str
-    target_kind: Literal["book", "chapter", "video"]
+    target_kind: Literal["book", "chapter", "story", "video"]
     target_title: str
     liker: MemoirShareLiker
     created_at: datetime

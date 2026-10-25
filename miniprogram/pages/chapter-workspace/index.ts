@@ -191,8 +191,9 @@ definePage<ChapterWorkspacePageData>()({
     return {
       projectId: this.data.projectId,
       chapterId: this.data.chapterId,
-      title: this.data.workspace?.chapter_title || "本章",
-      available: this.data.chapterHasReadableDraft,
+      sectionId: this.data.focusedSectionId || undefined,
+      title: this.data.focusedSectionId ? this.data.focusedSectionTitle : this.data.workspace?.chapter_title || "本章",
+      available: this.data.focusedSectionId ? Boolean(this.data.focusedSection?.hasDraft) : this.data.chapterHasReadableDraft,
       stale: Boolean(this.data.workspace?.draft_needs_rewrite),
     };
   },
@@ -435,11 +436,18 @@ definePage<ChapterWorkspacePageData>()({
     const focusedSection = hasFocusedSection
       ? viewPatch.sectionViews.find((section) => section.id === focusedSectionId)
       : undefined;
+    const shareTargetChanged = this.data.focusedSectionId !== (focusedSection?.id || "");
+    if (shareTargetChanged) {
+      this.bookShareStatusSequence += 1;
+      this.bookShareToken = "";
+      hideMiniProgramShareMenu();
+    }
     setPageNavigationTitle(
       focusedSection?.title || viewWorkspace.chapter_title || "本章正文",
     );
     this.setData({
       workspace: viewWorkspace,
+      ...(shareTargetChanged ? INITIAL_READING_SHARE_DATA : {}),
       ...(shareStateChanged ? {
         bookShareReady: false,
         bookShareStale: false,

@@ -240,7 +240,7 @@ test("one share action prepares the default book, reuses its link, and can stop 
     title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "/assets/memoir-book-header.png",
   });
   await context.revokeBookShare();
-  assert.deepEqual(calls, [["ensure", "project/1", undefined], ["stop", "project/1", undefined]]);
+  assert.deepEqual(calls, [["ensure", "project/1", undefined, undefined], ["stop", "project/1", undefined, undefined]]);
   assert.equal(context.data.bookShareReady, false);
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
 });
