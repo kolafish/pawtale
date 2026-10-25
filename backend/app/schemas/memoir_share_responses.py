@@ -9,6 +9,11 @@ class ShareResponseCreate(MemoirShareLikeTarget):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     request_id: str = Field(min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=2000)
+    voice_capture_id: str | None = Field(default=None, max_length=36)
+
+
+class ShareResponseVoiceTicket(BaseModel):
+    capture_id: str
 
 
 class ShareResponseItem(BaseModel):
@@ -18,6 +23,7 @@ class ShareResponseItem(BaseModel):
     target_title: str
     display_name: str
     content: str
+    voice_capture_id: str | None = None
     created_at: datetime
     read_at: datetime | None
     adopted_at: datetime | None

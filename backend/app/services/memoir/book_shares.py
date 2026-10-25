@@ -33,7 +33,7 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_output_versions import book_output_version_title
 from app.services.memoir.book_outputs import _output_version_response, get_book_output
 from app.services.memoir.book_output_snapshots import chapter_snapshot, normalized_section_snapshots
-from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, project_narrator_name
+from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
 from app.services.memoir.image_assets import manuscript_image_snapshots, image_asset_file_path
 from app.services.memoir.book_source_links import chapter_source_change_states_by_chapter
 from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, section_target, like_summary
@@ -205,7 +205,7 @@ async def create_share(
             token=_stable_token(output.id, existing.token_hash, scope=_scope(output)),
             expires_at=existing.expires_at,
         )
-        await _queue_resource_audio(db, output, version)
+        await _queue_resource_audio(db, output, version, retry_failed=True)
         await db.commit()
         return result
     token = secrets.token_urlsafe(32)
@@ -219,7 +219,7 @@ async def create_share(
         values["version_id"] = version.id
     statement = insert(share_model).values(**{share_key.key: output.id}, **values)
     await db.execute(statement.on_conflict_do_update(index_elements=[share_key], set_=values))
-    await _queue_resource_audio(db, output, version)
+    await _queue_resource_audio(db, output, version, retry_failed=True)
     await db.commit()
     return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, scope=_scope(output)), expires_at=expires_at)
 
@@ -441,8 +441,16 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
     if cover and scope == "book":
         manuscript.render_settings.cover_image = public_image(cover)
     if scope != "book":
-        project = await db.get(Project, result.project_id)
-        manuscript.profile.narrator_name = project_narrator_name(project)
+        saved_manuscript = await db.scalar(
+            select(MemoirBookOutputVersion.manuscript_json)
+            .join(MemoirBookOutput, MemoirBookOutput.id == MemoirBookOutputVersion.output_id)
+            .where(MemoirBookOutput.project_id == result.project_id)
+            .order_by(MemoirBookOutputVersion.version.desc())
+            .limit(1)
+        )
+        saved_profile = saved_manuscript.get("profile") if isinstance(saved_manuscript, dict) else None
+        saved_name = saved_profile.get("narrator_name") if isinstance(saved_profile, dict) else ""
+        manuscript.profile.narrator_name = saved_name if isinstance(saved_name, str) else ""
     return result
 
 
@@ -461,7 +469,8 @@ async def shared_image_file(db: AsyncSession, token: str, asset_id: str):
 
 
 async def _resource_audio_plan(
-    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, generate: bool, chapter_id: str | None = None,
+    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, generate: bool,
+    chapter_id: str | None = None, retry_failed: bool = False,
 ) -> MemoirSharedAudioPlanResponse:
     from app.services.memoir.book_audio_jobs import AudioSource, prepare_audio_plan
 
@@ -476,22 +485,25 @@ async def _resource_audio_plan(
         text = chapter.content
     plan = await prepare_audio_plan(
         db, user_id=owner_id, project_id=resource.project_id,
-        source=AudioSource(version.id, text), req=MemoirAudioPlanRequest(),
+        source=AudioSource(version.id, text), req=MemoirAudioPlanRequest(retry_failed=retry_failed),
         generate=generate, prepare_all=generate, commit=False,
     )
     return MemoirSharedAudioPlanResponse(**plan.model_dump(), content=text)
 
 
-async def _queue_resource_audio(db: AsyncSession, resource: ShareResource, version: ShareVersion) -> None:
+async def _queue_resource_audio(
+    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, retry_failed: bool = False,
+) -> None:
     try:
         if isinstance(resource, MemoirBookOutput):
             response = await _resource_reading_response(db, resource, version, presentation=False)
             chapters = response.latest_version.manuscript.chapters if response.latest_version.manuscript else []
             for chapter in chapters:
-                await _resource_audio_plan(db, resource, version, generate=True, chapter_id=chapter.chapter_id)
+                await _resource_audio_plan(db, resource, version, generate=True,
+                    chapter_id=chapter.chapter_id, retry_failed=retry_failed)
             if chapters:
                 return
-        await _resource_audio_plan(db, resource, version, generate=True)
+        await _resource_audio_plan(db, resource, version, generate=True, retry_failed=retry_failed)
     except HTTPException as exc:
         # A missing TTS configuration/content cannot prevent saving or sharing text.
         if exc.status_code not in {400, 409, 503}:

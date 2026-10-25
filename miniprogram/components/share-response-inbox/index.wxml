@@ -4,6 +4,7 @@
     <view wx:if="{{selected}}" class="response-detail">
       <text class="response-person">{{selected.display_name}} · {{selected.target_title}}</text>
       <text class="response-content" user-select>{{selected.content}}</text>
+      <button wx:if="{{selected.voice_capture_id}}" class="ui-button ui-share-more" bindtap="playOriginal">{{audioPlaying ? '停止原音' : '听家人原音'}}</button>
       <text class="response-hint">仅您与回应人可见，收录不会直接改写书稿。</text>
       <button class="ui-button ui-share-primary" bindtap="adopt" disabled="{{busy || selected.adopted_at}}" loading="{{busy}}">{{selected.adopted_at ? '已收为补充素材' : '收为补充素材'}}</button>
       <button class="ui-button ui-share-more" bindtap="back">返回回应列表</button>

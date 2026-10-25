@@ -1,7 +1,7 @@
 require('./register-ts');
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { componentContext, loadComponentModule, mockModule } = require('./page-harness');
+const { componentContext, flushAsyncWork, loadComponentModule, mockModule } = require('./page-harness');
 const { ApiError } = require('../services/request');
 
 test('response preserves text through login and network retry with the same submission id', async () => {
@@ -49,4 +49,132 @@ test('private inbox discards a request after author/project changes', async () =
   component.observers['projectId,userId'].call(ctx);
   finish({items:[{id:'private',content:'private'}],unread_count:1,next_before_id:null}); await pending;
   assert.deepEqual(ctx.data.items, []); assert.equal(ctx.data.selected, null);
+});
+
+test('opening one response twice before either read returns decrements unread only once', async () => {
+  const pending = [];
+  mockModule('../services/share-responses.ts', {
+    readShareResponse: () => new Promise(resolve => pending.push(resolve)),
+  });
+  const { component } = loadComponentModule('../components/share-response-inbox/index.ts');
+  const ctx = componentContext(component, { projectId: 'p', userId: 'owner' }, {
+    items: [{ id: 'a', read_at: null }, { id: 'b', read_at: null }], unread: 2,
+  });
+  const first = ctx.select({ currentTarget: { dataset: { id: 'a' } } });
+  ctx.back();
+  const second = ctx.select({ currentTarget: { dataset: { id: 'a' } } });
+  pending[0]({ id: 'a', read_at: '2026-10-25T08:00:00Z' });
+  await first;
+  pending[1]({ id: 'a', read_at: '2026-10-25T08:00:00Z' });
+  await second;
+  assert.equal(ctx.data.unread, 1);
+  assert.equal(ctx.data.items.find(item => item.id === 'b').read_at, null);
+});
+
+test('voice response keeps confirmed text and binds only its finalized source', async () => {
+  const submits = [];
+  mockModule('../services/share-responses.ts', {
+    startShareResponseVoice: async () => ({ gatewayUrl: 'wss://example.test/voice' }),
+    submitShareResponse: async (...args) => { submits.push(args); return { id: 'saved' }; },
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { readingToken: 'story-token' });
+  ctx.changeText({ detail: { value: '我还记得那棵树。' } });
+  await ctx.requestVoice();
+  await flushAsyncWork();
+  assert.equal(ctx.data.gatewayUrl, 'wss://example.test/voice');
+  assert.equal(ctx.data.voiceStartRequest, 1);
+  assert.equal(ctx.data.voiceCaptureId, '');
+  ctx.voiceSource({ detail: { captureId: '11111111-1111-4111-8111-111111111111' } });
+  await ctx.submit();
+  assert.equal(submits[0][1], '我还记得那棵树。');
+  assert.equal(submits[0][3], '11111111-1111-4111-8111-111111111111');
+});
+
+test('voice start waits for gateway URL to reach the child component', async () => {
+  mockModule('../services/share-responses.ts', {
+    startShareResponseVoice: async () => ({ gatewayUrl: 'wss://example.test/voice' }),
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { videoCode: 'video' });
+  const immediateSetData = ctx.setData;
+  let gatewayBound;
+  ctx.setData = function (patch, callback) {
+    immediateSetData.call(this, patch);
+    if (patch.gatewayUrl) gatewayBound = callback;
+    else callback?.();
+  };
+  await ctx.requestVoice();
+  assert.equal(ctx.data.gatewayUrl, 'wss://example.test/voice');
+  assert.equal(ctx.data.voiceStartRequest, 0);
+  gatewayBound();
+  assert.equal(ctx.data.voiceStartRequest, 1);
+});
+
+test('expired original audio can be replaced without losing response text', async () => {
+  const submits = [];
+  mockModule('../services/share-responses.ts', {
+    submitShareResponse: async (...args) => {
+      submits.push(args);
+      if (args[3]) throw new ApiError(410, '原音已过期', {});
+      return { id: 'text-only' };
+    },
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { readingToken: 'story-token' });
+  ctx.changeText({ detail: { value: '我仍记得这段往事。' } });
+  ctx.voiceSource({ detail: { captureId: '11111111-1111-4111-8111-111111111111' } });
+  await ctx.submit();
+  assert.equal(ctx.data.content, '我仍记得这段往事。');
+  assert.equal(ctx.data.voiceCaptureId, '');
+  assert.match(ctx.data.error, /重新录音/);
+  await ctx.submit();
+  assert.equal(submits[1][3], '');
+  assert.equal(ctx.data.sent, true);
+  ctx.changeText({ detail: { value: '下一条' } });
+  ctx.voiceSource({ detail: { captureId: '22222222-2222-4222-8222-222222222222' } });
+  ctx.replaceVoice();
+  assert.equal(ctx.data.voiceCaptureId, '');
+  assert.equal(ctx.data.content, '下一条');
+});
+
+test('old private audio download cannot change newly selected response playback state', async () => {
+  let finishA; let finishB;
+  class Playback {
+    constructor() { this.token = 0; }
+    stop() { this.token += 1; }
+    destroy() { this.stop(); }
+    setDownloadAudioFile(download) { this.stop(); this.download = download; }
+    nextToken() { return ++this.token; }
+    isCurrentToken(token) { return this.token === token; }
+    async playFile(id, token, options) {
+      if (id === 'a') await new Promise(resolve => { finishA = resolve; });
+      if (!this.isCurrentToken(token)) return;
+      options.onPlay();
+      if (id === 'b') await new Promise(resolve => { finishB = resolve; });
+    }
+  }
+  mockModule('../services/audio-playback.ts', { AudioPlaybackController: Playback });
+  mockModule('../services/share-responses.ts', {
+    readShareResponse: async id => ({ id, voice_capture_id: 'voice' }),
+    downloadShareResponseAudio: async id => id,
+  });
+  const { component } = loadComponentModule('../components/share-response-inbox/index.ts');
+  const ctx = componentContext(component, { projectId: 'p', userId: 'owner' }, {
+    items: [{ id: 'a', voice_capture_id: 'voice' }, { id: 'b', voice_capture_id: 'voice' }],
+  });
+  await ctx.select({ currentTarget: { dataset: { id: 'a' } } });
+  const old = ctx.playOriginal();
+  await ctx.select({ currentTarget: { dataset: { id: 'b' } } });
+  const latest = ctx.playOriginal();
+  await flushAsyncWork();
+  assert.equal(ctx.data.selected.id, 'b');
+  assert.equal(ctx.data.audioPlaying, true);
+  finishA();
+  await old;
+  assert.equal(ctx.data.selected.id, 'b');
+  assert.equal(ctx.data.audioPlaying, true);
+  finishB();
+  await latest;
+  assert.equal(ctx.data.audioPlaying, false);
 });
