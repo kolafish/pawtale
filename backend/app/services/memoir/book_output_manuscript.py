@@ -391,6 +391,8 @@ def manuscript_from_snapshot(
         for item in (editorial_copy.chapter_intros if editorial_copy else [])
         if item.chapter_id and item.intro
     }
+    empty_quote_chapters = {item.chapter_id for item in (editorial_copy.chapter_intros if editorial_copy else [])
+        if item.valid_empty_quote}
     for fallback_index, item in enumerate(snapshot, start=1):
         chapter_id = safe_str(item.get("chapter_id"))
         chapter_title = safe_str(item.get("chapter_title")) or safe_str(item.get("title"))
@@ -417,7 +419,7 @@ def manuscript_from_snapshot(
                 index=chapter_index,
                 title=chapter_title,
                 intro=intro_by_chapter_id.get(chapter_id) or fallback_chapter_intro(chapter_title, chapter_content),
-                pull_quotes=[generated_pull_quote] if generated_pull_quote else fallback_chapter_quotes(chapter_content, item, polish_level=polish_level),
+                pull_quotes=[generated_pull_quote] if generated_pull_quote else [] if chapter_id in empty_quote_chapters else fallback_chapter_quotes(chapter_content, item, polish_level=polish_level),
                 content=chapter_content,
                 sections=sections,
                 source_refs=source_refs,
@@ -444,7 +446,7 @@ def manuscript_from_snapshot(
         afterword = editorial_copy.afterword if editorial_copy and editorial_copy.afterword else expanded_afterword()
     back_cover_quote = metadata.get("back_cover_quote")
     if back_cover_quote is None:
-        back_cover_quote = editorial_copy.back_cover_quote if editorial_copy and editorial_copy.back_cover_quote else fallback_back_cover_quote(
+        back_cover_quote = editorial_copy.back_cover_quote if editorial_copy and (editorial_copy.back_cover_quote or editorial_copy.valid_empty_back_cover_quote) else fallback_back_cover_quote(
             [chapter.model_dump(mode="json") for chapter in chapters]
         )
     source_count = sum(item.source_count for item in toc)
@@ -626,7 +628,7 @@ def apply_editorial_copy(
         _set_preface(manuscript, editorial_copy.preface)
     if "afterword" in targets and editorial_copy.afterword:
         manuscript.back_matter.afterword.content = editorial_copy.afterword
-    if "back_cover_quote" in targets and editorial_copy.back_cover_quote:
+    if "back_cover_quote" in targets and (editorial_copy.back_cover_quote or editorial_copy.valid_empty_back_cover_quote):
         manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote
     if editorial_copy.model:
         manuscript.render_settings.editorial_copy_model = editorial_copy.model
@@ -647,6 +649,8 @@ def apply_editorial_copy(
                     source="original_quote" if generated.pull_quote_source_ref_id else "editorial_generated",
                 )
             ]
+        elif "pull_quotes" in targets and generated.valid_empty_quote:
+            chapter.pull_quotes = []
 
 
 def find_manuscript_chapter(manuscript: MemoirBookManuscript, chapter_id: str) -> MemoirBookManuscriptChapter:

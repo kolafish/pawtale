@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from app.config import get_settings
 from app.domain.memoir.types import MemoirTranscriptPolishLevel
@@ -21,6 +22,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.prompt_budget import representative_excerpt
 from app.services.memoir.book_manuscript_cleanup import original_quote_candidates, body_excerpt_candidates, matched_quote
 
 
@@ -31,50 +33,13 @@ logger = logging.getLogger(__name__)
 class _ChapterIntroOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    chapter_id: str = ""
-    intro: str = ""
-    pull_quote: str = ""
-
     @model_validator(mode="before")
     @classmethod
     def discard_obsolete_source_ref(cls, value: Any) -> Any:
-        # Polished copy uses excerpts. Ignore only this obsolete model habit;
-        # LOW still declares and validates the source reference normally.
+        # Polished copy uses body excerpts; old model habits must not label them as raw quotes.
         if isinstance(value, dict) and "pull_quote_source_ref_id" not in cls.model_fields:
             return {key: item for key, item in value.items() if key != "pull_quote_source_ref_id"}
         return value
-
-
-class _OriginalChapterIntroOutput(_ChapterIntroOutput):
-    pull_quote_source_ref_id: str = ""
-
-
-class _ManuscriptCopyOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    book_title: str = ""
-    cover_subtitle: str = ""
-    preface: str = ""
-    afterword: str = ""
-    chapter_intros: list[_ChapterIntroOutput] = Field(default_factory=list)
-    back_cover_quote: str = ""
-
-    @model_validator(mode="after")
-    def require_copy(self) -> "_ManuscriptCopyOutput":
-        if not (
-            self.book_title
-            or self.cover_subtitle
-            or self.preface
-            or self.afterword
-            or self.chapter_intros
-            or self.back_cover_quote
-        ):
-            raise ValueError("manuscript copy is empty")
-        return self
-
-
-class _OriginalManuscriptCopyOutput(_ManuscriptCopyOutput):
-    chapter_intros: list[_OriginalChapterIntroOutput] = Field(default_factory=list)
 
 
 class _TitleSuggestionsOutput(BaseModel):
@@ -102,6 +67,7 @@ class GeneratedManuscriptCopy:
     back_cover_quote: str
     model: str | None
     prompt: str
+    valid_empty_back_cover_quote: bool = False
 
 
 @dataclass(frozen=True)
@@ -177,6 +143,7 @@ def _chapter_context(
     candidates: _QuoteCandidates,
 ) -> str:
     parts: list[str] = []
+    content_budget = 24000 // max(1, sum(bool(_string(item.get("content"))) for item in snapshot))
     for fallback_index, item in enumerate(snapshot, start=1):
         chapter_id = _string(item.get("chapter_id"))
         title = _string(item.get("chapter_title")) or _string(item.get("title")) or f"第{fallback_index}章"
@@ -184,7 +151,8 @@ def _chapter_context(
         if not chapter_id or not content:
             continue
         source_quote_lines = [f"- source_ref_id: {source_refs.encode(source_id)}; quote: {quote}"
-            for source_id, quotes in candidates.originals.get(chapter_id, {}).items() for quote in quotes][:6]
+            for source_id, quotes in candidates.originals.get(chapter_id, {}).items() for quote in quotes]
+        source_quote_lines = _distributed_candidates(source_quote_lines)
         parts.append(
             "\n".join(
                 [
@@ -194,117 +162,88 @@ def _chapter_context(
                     f"source_count: {_int(item.get('source_count'))}",
                     *(["original_quote_candidates:", *(source_quote_lines or ["- 无"])] if candidates.originals else []),
                     "body_excerpt_candidates（当前正文摘句，不是原话）:",
-                    *(f"- {quote}" for quote in candidates.excerpts.get(chapter_id, ())[:6]),
-                    f"content_excerpt: {_compact_text(content, 420)}",
+                    *(f"- {quote}" for quote in _distributed_candidates(list(candidates.excerpts.get(chapter_id, ())))),
+                    f"正文或首中尾摘录（省略部分不能当作不存在）: {representative_excerpt(content, limit=content_budget)}",
                 ]
             )
         )
     return "\n\n".join(parts)
 
 
+COPY_FACT_RULES = "以当前书稿为事实依据，标题只定位主题。保留否定、转述来源、视角和局部不确定程度；不从旧素材恢复已修改的说法，记不清不改成未记录或已经丢失。以客观编辑者口吻概括，不冒充讲述者或家属，不推测性别、生死、写书动机、整理过程或未说出的情绪，不补场景细节。性别未明确时不用他或她等带性别的第三人称。尊重实际收录范围，专题或部分人生不扩大为一生；材料不足就简短，不作真实性或完整性保证，不评论材料多少或列出待补清单。篇幅和完整性只作内部生成限制，不写入文案；前言导语直接介绍经历，后记简短收束已讲内容。"
+
+
+def _distributed_candidates(values: list[str], limit: int = 6) -> list[str]:
+    if len(values) <= limit:
+        return values
+    return [values[round(index * (len(values) - 1) / (limit - 1))] for index in range(limit)]
+
+
+def _copy_output_model(targets: list[str] | None, polish_level: MemoirTranscriptPolishLevel) -> type[BaseModel]:
+    fields = {key: (str, "") for key in ("book_title", "cover_subtitle", "preface", "afterword", "back_cover_quote")}
+    selected = set(targets or [*fields, "chapter_intros", "pull_quotes"])
+    if "chapter_intros" in selected or "pull_quotes" in selected:
+        intro_fields = {"chapter_id": (str, ...)}
+        if "chapter_intros" in selected:
+            intro_fields["intro"] = (str, ...)
+        if "pull_quotes" in selected:
+            intro_fields["pull_quote"] = (str, ...)
+            if polish_level == MemoirTranscriptPolishLevel.LOW:
+                intro_fields["pull_quote_source_ref_id"] = (str, "")
+        intro_model = create_model("RequestedChapterIntro", __base__=_ChapterIntroOutput, **intro_fields)
+        fields["chapter_intros"] = (list[intro_model], Field(default_factory=list))
+        selected.add("chapter_intros")
+    return create_model("RequestedManuscriptCopy", __config__=ConfigDict(extra="forbid"),
+        **{key: field for key, field in fields.items() if key in selected})
+
+
 def build_manuscript_copy_prompt(
-    *,
-    title: str,
-    snapshot: list[dict[str, object]],
-    targets: list[str] | None = None,
-    chapter_ids: list[str] | None = None,
-    feedback: str | None = None,
+    *, title: str, snapshot: list[dict[str, object]], targets: list[str] | None = None,
+    chapter_ids: list[str] | None = None, feedback: str | None = None,
     candidates: _QuoteCandidates | None = None,
     polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
 ) -> str:
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
-    chapters = _chapter_context(
-        snapshot,
-        chapter_refs=chapter_refs,
-        source_refs=source_refs,
-        candidates=candidates or _quote_candidates(snapshot, polish_level=polish_level),
-    )
-    target_text = "、".join(targets or []) or "全部成书文案"
-    chapter_text = (
-        "、".join(chapter_refs.encode(identifier) for identifier in chapter_ids)
-        if chapter_ids
-        else "全部章节"
-    )
-    feedback_text = f"\n用户本次反馈：{feedback.strip()}" if feedback and feedback.strip() else ""
-    original = polish_level == MemoirTranscriptPolishLevel.LOW
-    quote_source_field = ',\n      "pull_quote_source_ref_id": "对应 source_ref_id"' if original else ''
-    quote_rule = (
-        "每个 pull_quote 必须逐字选择 original_quote_candidates 中的一条完整候选，来源编号填写对应 source_ref_id；"
-        "没有原话候选时从 body_excerpt_candidates 选择正文摘句，来源编号留空。"
-        if original else "每个 pull_quote 必须逐字选择 body_excerpt_candidates 中的一条正文摘句；正文摘句不标为原话，不提供来源编号。"
-    )
-    cover_rule = "original_quote_candidates 或 body_excerpt_candidates" if original else "body_excerpt_candidates"
-    return f"""请根据下面已经确认的回忆录章节，生成适合 PDF 成书的前置文案。
-
+    chapters = _chapter_context(snapshot, chapter_refs=chapter_refs, source_refs=source_refs,
+        candidates=candidates or _quote_candidates(snapshot, polish_level=polish_level))
+    rules = {
+        "book_title": "book_title：概括实际主题范围，朴素自然；现有书名合适即可保留。",
+        "cover_subtitle": "cover_subtitle：12 到 28 字概括收录范围，不补充未提供的事实。",
+        "preface": "preface：最多 220 字，直接介绍已收录的经历，不套书名，不描述未经证实的访谈或整理过程。",
+        "afterword": "afterword：最多 160 字，可邀请以后补充，不代家人表态，不写空泛祝福。",
+        "chapter_intros": "chapter_intros：仅为指定章节填写 intro，最多 90 字，用正文已有事实引入，不新造画面或解释章节功能。",
+        "pull_quotes": ("pull_quote：逐字选本章 original_quote_candidates 的完整候选并填来源编号；无合适原话可用 body_excerpt_candidates，来源编号留空。" if polish_level == MemoirTranscriptPolishLevel.LOW else
+            "pull_quote：逐字选本章 body_excerpt_candidates 的完整候选，不标为原话，不填来源编号。"),
+        "back_cover_quote": "back_cover_quote：从全书候选逐字选 15 到 45 字的完整句子，无合适候选留空。",
+    }
+    selected = targets or list(rules)
+    instructions = "\n".join("- " + rules[key] for key in selected)
+    chapters_requested = "、".join(chapter_refs.encode(identifier) for identifier in chapter_ids) if chapter_ids else "全部章节"
+    return f"""根据当前书稿生成指定成书文案。
 当前书名：{title}
-本次生成目标：{target_text}
-本次重点章节：{chapter_text}{feedback_text}
-
-请输出严格 JSON，不要 Markdown，不要解释。格式：
-{{
-  "book_title": "正式书名",
-  "cover_subtitle": "封面短副标题",
-  "preface": "前言正文",
-  "afterword": "后记正文",
-  "chapter_intros": [
-    {{
-      "chapter_id": "对应 chapter_id",
-      "intro": "章节导语",
-      "pull_quote": "从本章候选中逐字选择的完整句子"{quote_source_field}
-    }}
-  ],
-  "back_cover_quote": "封底短句"
-}}
-
-要求：
-- 只输出本次生成目标中的文案；chapter_intros 只包含本次重点章节，未要求章节导语或引语时返回空数组。
-- 只以当前书稿正文摘录为事实依据；正文已包含用户确认的修改，不从旧素材或旧摘要恢复被改掉的说法。章节标题只定位章节，不据此推断事实。不新增人物、地点、事件或评价。
-- book_title 要像家人会保存的一本书名，避免“主题回忆录”“章节规划”等内部词；如果原书名已经自然，可以保留。
-- cover_subtitle 控制在 12 到 28 个汉字，可概括内容；素材不足时用“根据口述访谈整理而成”。
-- preface 最多 220 个汉字，不设最低字数，素材短就简短，语气安静、可信、像书，不要直接套书名或项目名，不要出现“主题回忆录”“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
-- afterword 最多 160 个汉字，不设最低字数，偏家人保存、后续补充和记忆延续，不要写空泛祝福语，不要像模板。
-- 每个 chapter_intro 最多 90 个汉字，不设最低字数，像书籍章节导语，用具体画面把读者带进正文；不要解释章节功能，不要写“这一章主要记录”“从口述内容看”“相关的回忆”“本章讲述”等系统摘要句。
-- {quote_rule} 没有合适候选时留空。不改写、不截断、不增删标点，不编金句。
-- back_cover_quote 控制在 15 到 45 个汉字，从全书 {cover_rule} 中逐字选择完整候选；没有合适候选时留空，不使用公共格言或励志句。
-
+本次目标：{'、'.join(selected)}
+重点章节：{chapters_requested}
+用户反馈：{feedback or '无'}
+{COPY_FACT_RULES}
+{instructions}
+引语须能独立理解，不能遗漏转述归属或疑义，不选脱离上下文会变意的句子。来源候选只是当前素材版本与正文共有的句子，不保证是录音逐字原话。没有适合独立引用的候选就留空，即使候选列表不为空；不截断、改写、拼接或增删标点。
+只输出本次目标对应的字段；章节输出只包含重点章节。严格 JSON，遵守 schema：
+{json.dumps(_copy_output_model(targets, polish_level).model_json_schema(), ensure_ascii=False)}
 章节材料：
 {chapters}
-
-文案以客观编辑者的身份书写，不冒充讲述者或家属表达感想。不得声称整理过程、讲述顺序、写书动机、亲属态度、讲述者性别或生死状态、未讲过的心情。不能写‘心里踏实了’‘没有打算写书’‘每一句都是真的’等无依据的判断。不能添加风、天气、水声、表情、动作细节或时间先后。只概括提供的事实；前言可说明收录范围，后记可邀请以后补充，导语只提供进入故事的事实线索。素材不足时缩短，不能为达到篇幅而补写。前言直接概括已给出的经历，不描述访谈或整理过程，不对文字是否逐字、完整、真实作保证。
 """
 
 
 def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object]], count: int) -> str:
     chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
-    chapters = _chapter_context(
-        snapshot,
-        chapter_refs=chapter_refs,
-        source_refs=source_refs,
-        candidates=_quote_candidates(snapshot),
-    )
-    return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选主书名。
-
-当前暂定书名：{title}
-
-请输出严格 JSON，不要 Markdown，不要解释。格式：
-{{
-  "suggestions": ["书名一", "书名二"]
-}}
-
-要求：
-- 只能基于给定章节标题、代表性口述和正文摘录，不新增未出现的人物、地点或事件。
-- 这是整本书的主标题，要有“一个人一生回忆”的全局感，像家人会保存、下载、转发和打印的一本书。
-- 不要只抓某个场景、物件、单章细节或一句话作为主书名；除非这个细节能明显象征整个人生，否则不要用。
-- 避免类似“坐在院子里看月亮”“从葡萄籽到葡萄熟”“外婆摸着进厨房”“升职加薪那些年”“我家那个院子”这类过窄标题。
-- 可以包含朴素正式型、温和口语型、略有书感型，但都要克制，例如“外婆的一生”“外婆慢慢说”“走过的这些年”“一生的来路”“某某口述回忆录”。
-- 不要出现“主题回忆录”“章节规划”“AI”“生成”等内部词。
-- 每个候选 4 到 14 个汉字，最多一个书名号内容，不要副标题。
-- 至少给出 {count} 个不同候选。
-
+    chapters = _chapter_context(snapshot, chapter_refs=chapter_refs, source_refs=source_refs, candidates=_quote_candidates(snapshot))
+    return f"""根据当前书稿拟 {count} 个不同主书名，当前书名：{title}。
+{COPY_FACT_RULES}
+覆盖实际共同主题；只讲某阶段或专题时可以围绕它拟题，不要求概括一生。不因亲属称呼推定讲述者身份。
+每个标题 4 到 14 字，朴素克制，不含副标题或内部流程术语；不靠夸张评价营造文学感。
+只返回 JSON：{{"suggestions":["候选书名"]}}。
 章节材料：
 {chapters}
-
-文案以客观编辑者的身份书写，不冒充讲述者或家属表达感想。不得声称整理过程、讲述顺序、写书动机、亲属态度、讲述者性别或生死状态、未讲过的心情。不能写‘心里踏实了’‘没有打算写书’‘每一句都是真的’等无依据的判断。不能添加风、天气、水声、表情、动作细节或时间先后。只概括提供的事实；前言可说明收录范围，后记可邀请以后补充，导语只提供进入故事的事实线索。素材不足时缩短，不能为达到篇幅而补写。前言直接概括已给出的经历，不描述访谈或整理过程，不对文字是否逐字、完整、真实作保证。
 """
 
 
@@ -396,8 +335,7 @@ def _copy_from_payload(
             )
             if not pull_quote and not source_ref:
                 pull_quote = matched_quote(_string(raw_intro.get("pull_quote")), excerpts.get(chapter_id, ()), max_chars=90)
-            valid_empty_quote = (raw_intro.get("pull_quote") == ""
-                and not any(quote_candidates.get(chapter_id, {}).values()) and not excerpts.get(chapter_id))
+            valid_empty_quote = raw_intro.get("pull_quote") == ""
             if chapter_id and (intro or pull_quote or valid_empty_quote):
                 chapter_intros.append(
                     GeneratedChapterIntro(
@@ -419,6 +357,7 @@ def _copy_from_payload(
         ] + [quote for candidates in excerpts.values() for quote in candidates]),
         model=model,
         prompt=prompt,
+        valid_empty_back_cover_quote=payload.get("back_cover_quote") == "",
     )
     if (
         copy.book_title
@@ -427,6 +366,7 @@ def _copy_from_payload(
         or copy.afterword
         or copy.chapter_intros
         or copy.back_cover_quote
+        or payload.get("back_cover_quote") == ""
     ):
         return copy
     return None
@@ -464,7 +404,7 @@ async def generate_manuscript_editorial_copy(
             client,
             SYSTEM_PROMPT,
             prompt,
-            output_model=_OriginalManuscriptCopyOutput if polish_level == MemoirTranscriptPolishLevel.LOW else _ManuscriptCopyOutput,
+            output_model=_copy_output_model(targets, polish_level),
             requested_model=ai_model,
             temperature=0.35,
             max_tokens=policy.max_tokens,

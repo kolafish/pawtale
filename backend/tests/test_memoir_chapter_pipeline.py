@@ -1434,3 +1434,27 @@ async def test_missing_history_is_visible_even_when_model_omits_warning():
     assert chapter_generation._previous_draft_section(context.sections[0], snapshot[0]) == result.sections[0]
     checkpoint = chapter_generation._generated_chapter_checkpoint(context, result, current_section=None)
     assert chapter_generation._generated_chapter_from_checkpoint(context, checkpoint).sections == result.sections
+
+
+async def test_changed_interview_question_invalidates_generated_body(client, test_db):
+    from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    source = await test_db.get(MemoirVoiceUtterance, materials[0]["utterance_id"])
+    answer = await test_db.get(MemoirChatMessage, source.chat_message_id)
+    question = MemoirChatMessage(project_id=project_id, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="是谁教您修车？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    fake = FakeChapterAI(section_material_id=source.id, chapter_section_id=section["id"],
+        chapter_material_id=source.id, draft_material_ids=[source.id])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
+        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+    before = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    assert question.content_text in fake.prompts[-1]
+    assert not chapter_generation.chapter_draft_generation_plan(before, version).target_context.sections
+    question.content_text = "是谁教您修摩托车？"
+    await test_db.commit()
+    after = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    assert before.input_signature != after.input_signature
+    assert chapter_generation.chapter_draft_generation_plan(after, version).target_context.sections
+    assert source.id in chapter_generation._changed_material_ids(after, version)

@@ -48,12 +48,13 @@ from app.services.memoir.share_video_backgrounds import (
 )
 from app.services.memoir.share_video_alignment import build_share_video_alignment
 from app.services.memoir.voice_transcripts import _load_owned_utterance
+from app.services.memoir.prompt_budget import representative_excerpt
 
 
 logger = logging.getLogger(__name__)
 
-MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v4"
-MATERIAL_IMAGE_CONTENT_MAX_CHARS = 500
+MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v5"
+MATERIAL_IMAGE_CONTENT_MAX_CHARS = 3000
 MATERIAL_IMAGE_DIR = Path("memoir") / "material-images"
 
 
@@ -63,10 +64,7 @@ def _normalized_text(value: str) -> str:
 
 def _prompt_content(selected_text: str) -> str:
     normalized = _normalized_text(selected_text)
-    characters = list(normalized)
-    if len(characters) <= MATERIAL_IMAGE_CONTENT_MAX_CHARS:
-        return normalized
-    return "".join(characters[:MATERIAL_IMAGE_CONTENT_MAX_CHARS]).rstrip() + "..."
+    return representative_excerpt(normalized, limit=MATERIAL_IMAGE_CONTENT_MAX_CHARS)
 
 
 def build_material_image_prompt(selected_text: str, style_id: str | None) -> tuple[str, str, str]:
@@ -79,7 +77,7 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
 
 {content}
 
-请理解原文所表达的场景、人物关系和整体氛围，并让画面的光线、色彩与情绪自然贴合原文。
+若内容含省略号，表示分散摘录，不能拼成同一个事件。仅选择有依据的单一场景；转述不能画成讲述者亲历，不确定事实不能具体化。
 
 绘画风格：
 {style.drawing_instruction}
@@ -92,7 +90,8 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
 
 生成边界：
 - 这是基于记忆的意象创作，不冒充真实历史照片。
-- 不要添加口述中没有依据的重大人物、事件或时代符号。
+- 风格只决定笔触、材质和色彩，不能据此推断人物性别、年龄、服装年代、身份或历史背景。
+- 不添加没有依据的人物关系、关键动作、事件或时代符号；未说明的外貌、环境用简约、不具辨识性的画法，不能伪装成事实还原。
 - 不要出现任何文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和、夸张电影光效和泛泛的 AI 插画感。""".strip()
     prompt_hash = sha256(

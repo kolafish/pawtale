@@ -165,7 +165,7 @@ class _BookReviewOutput(BaseModel):
     editorial_actions: list[_BookReviewEditorialActionOutput] = Field(
         default_factory=list
     )
-    candidate_issues: list[_BookReviewIssueOutput] = Field(default_factory=list)
+    candidate_issues: list[_BookReviewIssueOutput] = Field(default_factory=list, description="无回答就无法理解关键关系的问题；已明确记不清、拒答、已回答的内容禁止追问；可成文则为空")
 
 
 def _compact(value: object, *, limit: int) -> str:
@@ -471,7 +471,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|impact|meaning|clarity|structure|conflict",
-      "question": "确实需要用户处理时的一句自然问题",
+      "question": "缺少回答就无法理解关键人物或事件关系、且现有文字无法解决的问题；已明确记不清的不问",
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
       "chapter_ids": ["相关 chapter_id"],
@@ -482,9 +482,14 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 }}
 
 要求：
+- 输入是当前书稿及明确列出的用户决定，未提供原始录音或完整转写，不能声称核验过这些来源。
+- 章是大主题，小节是其下的小主题；不同人物、事件时间、当时与现在的观点不同，不能直接判为事实冲突。保留否定、转述来源和局部疑义。
+- candidate_issues 仅放缺少回答就无法理解关键人物或事件关系的问题。能保留疑义成文就不补问；不能为丰富背景、补年份或补细节制造问题。明确记不清、已回答或拒答的内容禁止换问法追问，包括改问大概年份、年龄或意愿；无必要问题必须为空。
+- 可通过段落安排、衔接或保留联想解决的跳转，只提编辑建议，不要求用户解释人生经历的意义或关系。
+- 成书资料为空不等于错误，不要求补齐可选文案；口述人、整理人等身份只有与明确已知资料矛盾时才建议更正，不能要求编辑凭空补出姓名。
 - 这是供讲述者自己和亲友阅读的私人回忆录，不按正规出版或公开传播标准审查。
 - 普通经历、婚姻家庭、个人感受、亲友姓名或称呼、爱好默认保留，不提出隐私追问或匿名化建议。
-- 私人书稿不进行隐私确认；即使发现敏感内容，也不要产生 privacy 事项，不阻止成书。公开传播的隐私提醒应留到用户主动选择公开时。
+- 私人书稿不产生 privacy 事项或以隐私确认阻止成书。
 - 用户已决定保留的内容不得反复追问；用户明确要求不收录的内容必须尊重，不能自行恢复或改变收录范围。
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 从整体阅读感受出发，没有明显影响时可以不提修改。
@@ -499,7 +504,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有事实冲突、内容是否收录等确实需要用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
-- 不能创建正文和来源中没有的人生事实。
+- 不新增正文和明确用户决定以外的人生事实，不把审阅猜测写成确定结论。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 - 事实冲突事项的 evidence_quote 必须逐字摘自相关章节当前正文，选能指认这件事的最短完整片段；找不到可核对原文时留空，不要编造。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。

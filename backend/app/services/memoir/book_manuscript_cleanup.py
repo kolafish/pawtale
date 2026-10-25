@@ -315,8 +315,7 @@ def sanitize_manuscript_payload(*, title: str, manuscript: dict[str, Any]) -> di
 
     settings = _dict(cleaned.get("render_settings"))
     if settings is not None:
-        quote = _safe_str(settings.get("back_cover_quote"))
-        if not quote:
+        if not isinstance(settings.get("back_cover_quote"), str):
             settings["back_cover_quote"] = fallback_back_cover_quote(chapters)
         cleaned["render_settings"] = settings
     return cleaned

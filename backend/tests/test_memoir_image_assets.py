@@ -940,3 +940,12 @@ async def test_uploaded_cover_is_independent_of_auto_body_images_and_templates(c
     assert project.memoir_book_image_selection_manual is False
     invalid = await client.post(f"/api/mobile/memoir/projects/{project_id}/image-assets", files={"file": ("photo.png", b"invalid image", "image/png")})
     assert invalid.status_code == 400
+
+
+@pytest.mark.parametrize("style", ["watercolor", "ink_paper", "old_album", "pencil", "gouache", "storybook"])
+def test_material_illustration_samples_the_whole_selection_for_every_style(style):
+    source = "开头在家里。" + "日常生活。" * 1500 + "中间在车间。" + "日常生活。" * 1500 + "最后在学校。"
+    selected, prompt, _ = material_image_generation.build_material_image_prompt(source, style)
+    assert selected == style
+    assert "开头在家里。" in prompt and "中间在车间。" in prompt and "最后在学校。" in prompt
+    assert len(prompt) < 4500

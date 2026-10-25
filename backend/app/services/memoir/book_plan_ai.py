@@ -225,7 +225,8 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
 {source_text or "无"}
 
 要求：
-- 只根据 record_summary 和 representative_quote，不新增事实、人物、地点或情绪。
+- 只根据 record_summary 和 representative_quote；它们是摘要和摘录，不代表完整转写。created_at 是记录时间，不是事件发生时间。
+- 章名概括本章大主题，小节承载小主题，不把记录日期或某一个细节扩大为整章事实。
 - 必须综合全部来源记录；来源很多时，不要只看前几条，优先概括反复出现或最能代表本章的主题。
 - 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
 - 不要使用“转写”、“讲述”、“新收录”、“记录”、“素材”、“章节”等占位词。

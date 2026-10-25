@@ -23,7 +23,6 @@ from app.services.memoir import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.project_ai_preferences import select_project_ai_model
-from app.services.memoir.semantic_state import semantic_json_signature
 
 
 BookRevisionJobSource = Literal[
@@ -279,9 +278,7 @@ async def enqueue_book_revision_job(
             source="proposal_feedback",
             proposal_id=proposal.id,
             feedback=feedback_text,
-            plan_signature=semantic_json_signature(
-                proposal.revision_plan_json
-            ),
+            plan_signature=book_revision_proposals.revision_plan_signature(proposal),
         )
         result.update(
             proposal_id=proposal.id,
@@ -307,7 +304,7 @@ async def enqueue_book_revision_job(
         payload.update(
             source="proposal_draft",
             proposal_id=proposal.id,
-            plan_signature=semantic_json_signature(proposal.revision_plan_json),
+            plan_signature=book_revision_proposals.revision_plan_signature(proposal),
         )
         result.update(
             proposal_id=proposal.id,

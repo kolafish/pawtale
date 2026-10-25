@@ -26,6 +26,7 @@ from app.schemas.memoir_book_review import (
     MemoirBookRevisionPreviewVersion,
     MemoirBookRevisionProposalResponse,
 )
+from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE
 from app.services.memoir import (
     book_revision_generation,
     book_revision_proposals,
@@ -159,17 +160,17 @@ def _job_response(
 
 def _source_text(target: _Target) -> str:
     materials = "\n".join(
-        f"- {material.text}"
+        (f"对应提问：{material.interviewer_line}\n" if material.interviewer_line else "") + f"素材版本：{material.text}"
         for material in target.section.materials
         if material.text.strip()
-    ) or "（没有可用的原始讲述）"
+    ) or "（没有可用的素材版本）"
     return (
         f"章节：{target.context.chapter_title}\n"
         "本章小节顺序："
         + "、".join(section.title for section in target.context.sections)
         + f"\n目标小节：{target.section.title}\n"
         f"当前正文：\n{str(target.snapshot.get('content') or '').strip()}\n\n"
-        f"本节原始讲述：\n{materials}"
+        f"本节素材版本：\n{materials}"
     )
 
 
@@ -186,7 +187,7 @@ _PLAN_FORMAT = """请输出严格 JSON：
 }
 
 只给修改思路，不输出修改后的正文；只修改目标小节；用户明确要求时可以修改标题，
-但不改变小节数量、顺序或素材归属；只采用当前正文、原始讲述和用户明确给出的事实，不推测或补造；
+但不改变小节数量、顺序或素材归属；事实只来自当前正文、素材版本及单列的用户原话。旧计划仅描述编辑范围，确认计划不代表确认其中新增的事实；
 没有事实依据时明确说明不能添加；book_metadata_patch 必须为空对象。
 """
 
@@ -196,6 +197,7 @@ async def _generate_plan(
     feedback: str,
     ai_model: str | None,
     current: MemoirBookRevisionPlan | None = None,
+    prior_instructions: list[str] | None = None,
 ) -> book_revision_generation.GeneratedRevisionPlan:
     if current is None:
         prompt = (
@@ -212,6 +214,7 @@ async def _generate_plan(
             f"请返回完整的新思路，不要只返回增量说明。\n{_PLAN_FORMAT}"
         )
         engine = "llm_chapter_section_revision_plan_feedback_v1"
+    prompt += "\n" + ANSWER_CONTEXT_GUIDANCE + "\n此前用户原话（按时间排列；新反馈明确纠正时以新反馈为准）：\n" + "\n".join(prior_instructions or [])
     generated = await book_revision_generation.generate_revision_plan(
         project_id=target.context.project_id,
         prompt=prompt,
@@ -470,6 +473,7 @@ async def run_section_revision_job(
                 "chapter_title": current.context.chapter_title,
                 "section_title": current.section.title,
                 "revision_plan": generated.plan.model_dump(mode="json"),
+                "revision_instructions": [str(payload.get("feedback") or "")],
                 "candidate_title": "",
                 "candidate_content": "",
                 "summary": generated.plan.summary.strip(),
@@ -491,6 +495,7 @@ async def run_section_revision_job(
                 version_id=str(previous.get("base_version_id") or ""),
                 input_signature=str(previous.get("input_signature") or ""),
             )
+            prior_instructions = TypeAdapter(list[str]).validate_python(previous.get("revision_instructions", []))
             plan = MemoirBookRevisionPlan.model_validate(previous["revision_plan"])
             await update({"stage": "revising"})
             await db.commit()
@@ -500,10 +505,12 @@ async def run_section_revision_job(
                     str(payload.get("feedback") or ""),
                     ai_model,
                     current=plan,
+                    prior_instructions=prior_instructions,
                 )
                 patch = {
                     "proposal_phase": "plan_ready",
                     "revision_plan": generated.plan.model_dump(mode="json"),
+                    "revision_instructions": [*prior_instructions, str(payload.get("feedback") or "")],
                     "candidate_title": "",
                     "candidate_content": "",
                     "summary": generated.plan.summary.strip(),
@@ -514,7 +521,9 @@ async def run_section_revision_job(
                 generated = await _generate_candidate(
                     db, target,
                     "请严格按以下已确认的修改思路调整当前小节：\n"
-                    + json.dumps(plan.model_dump(mode="json"), ensure_ascii=False),
+                    + json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
+                    + "\n用户原话（事实来源，按时间排列）：\n" + "\n".join(prior_instructions)
+                    + "\n计划仅确定编辑范围；新增事实必须由素材或这些用户原话明确支持。",
                     ai_model,
                 )
                 candidate = generated.sections[0]

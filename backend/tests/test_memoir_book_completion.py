@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookReview,
+    MemoirBookRevisionProposal,
     MemoirChapterDigest,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -1902,7 +1903,6 @@ async def test_explicit_rewrite_refreshes_all_sections_once(
     assert len(body["draft_sections"]) == 4
     assert [item["section_id"] for item in body["draft_sections"]] == [item["id"] for item in body["sections"]]
     assert len(fake.prompts) == 4
-    assert all("请把下面的原始讲述整理为回忆录章节" in prompt for prompt in fake.prompts)
     assert all(prompt.count("material_id: ") == 1 for prompt in fake.prompts)
     assert body["draft_sections"][0]["content"] != "这是已经存在的完整章节正文。"
     assert requested_models == [DEFAULT_AI_TEXT_MODEL]
@@ -2048,6 +2048,8 @@ async def test_section_revision_waits_for_apply_and_preserves_other_content(
         assert await run_test_editing_job(test_db, draft.json()["job_id"])
     finally:
         clear_editing_job_handlers()
+    assert "把标题中的错字改正，并把标题缩短为“赛后回想”。" in fake.prompts[-1]
+    assert "标题就用“赛后回想”。" in fake.prompts[-1]
     preview = await client.get(f"{base_path}/proposals/{proposal_id}")
     assert preview.status_code == 200, preview.text
     body = preview.json()
@@ -2998,6 +3000,13 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert drafted.status_code == 200, drafted.text
     assert drafted.json()["status"] == "succeeded"
     assert drafted.json()["proposal_phase"] == "draft_ready"
+    draft_prompt = next(prompt for prompt in reversed(fake.prompts) if "请按照已确认的修改思路生成书稿修改稿" in prompt)
+    assert "用户原话：保留两段经历，但请统一相关人物的称谓。" in draft_prompt
+    proposal_row = await test_db.get(MemoirBookRevisionProposal, completed_body["proposal_id"])
+    assert len(proposal_row.generation_json["user_inputs"]) == 2
+    assert proposal_row.generation_json["user_inputs"][0]["question"]
+    assert proposal_row.generation_json["user_inputs"][0]["text"] in draft_prompt
+
     proposal = await client.get(
         f"/api/memoir/projects/{project_id}/book-review/"
         f"revision-proposals/{completed_body['proposal_id']}?preview=after"
@@ -3535,3 +3544,12 @@ async def test_confirmed_fact_invalidates_chapter_and_blocks_old_book_assembly(c
     assert updated.materials[0].edits[-1].before == context.materials[0].text
     assert updated.materials[0].edits[-1].after == edited_text
     assert updated.sections[0].decisions == context.sections[0].decisions
+
+
+def test_revision_plan_job_signature_includes_user_evidence_even_if_plan_is_unchanged():
+    from types import SimpleNamespace
+    plan = {"summary": "补充师傅姓名", "items": [], "book_metadata_patch": {}}
+    proposal = SimpleNamespace(revision_plan_json=plan, generation_json={"user_inputs": [{"text": "叫刘明"}]})
+    before = book_revision_proposals.revision_plan_signature(proposal)
+    proposal.generation_json = {"user_inputs": [{"text": "叫李明"}]}
+    assert book_revision_proposals.revision_plan_signature(proposal) != before

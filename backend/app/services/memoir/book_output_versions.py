@@ -304,7 +304,8 @@ async def repair_automatic_chapter_quotes(
     snapshots = {item["chapter_id"]: item for item in version.chapter_snapshot_json}
     for chapter in manuscript.get("chapters", []):
         chapter_id = chapter.get("chapter_id")
-        if "pull_quotes" in state.manual_chapter_fields.get(chapter_id, []) or chapter_id not in snapshots:
+        if ("pull_quotes" in state.manual_chapter_fields.get(chapter_id, [])
+                or chapter_id not in snapshots or chapter.get("pull_quotes") == []):
             continue
         snapshot = snapshots[chapter_id]
         quotes = retained_chapter_quotes(chapter, snapshot, polish_level=polish_level)

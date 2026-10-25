@@ -29,6 +29,7 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
     MemoirTranscriptVersion,
+    MemoirVoiceUtterance,
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
@@ -43,7 +44,7 @@ from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import automation_events
 from app.services.memoir import narration_people
 from app.services.memoir import fact_decisions
-from app.services.memoir.material_roles import interviewer_lines
+from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE, interviewer_lines
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
@@ -64,13 +65,13 @@ from app.services.memoir.transcript_projection import (
 CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v3"
 CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
-    "只使用允许的原始讲述及用户明确确认的事实更正整理成第一人称完整章节，不创造事实。"
+    "只使用允许的素材版本及用户明确确认的事实更正整理成第一人称完整章节，不创造事实。"
 )
 CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
     "你是一位谨慎的中文回忆录编辑。"
     "以当前小节正文为编辑基线，严格按用户已确认的修改思路局部修改，"
     "未涉及的现有内容必须逐字保留。"
-    "新增或变更的事实只能依据允许的原始讲述和用户明确给出的事实更正，不自行创造事实。"
+    "新增或变更的事实只能依据允许的素材版本和用户明确给出的事实更正，不自行创造事实。"
 )
 CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
 CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS = 40
@@ -162,7 +163,7 @@ class _GeneratedChapterSectionOutput(BaseModel):
 
     content: str
     used_material_ids: list[str]
-    missing_source_candidates: list[str] = Field(default_factory=list)
+    missing_source_candidates: list[str] = Field(default_factory=list, description="仅列无法继续成文且必须新求证的事实；已回答、拒答、明确记不清的不列；可保留疑义成文则为空")
     editor_notes: list[str] = Field(default_factory=list)
 
 
@@ -501,6 +502,7 @@ def _changed_material_ids(
             or prior.get("section_id") != material.section_id
             or prior.get("transcript_version_id") != material.transcript_version_id
             or prior.get("text_hash") != semantic_text_hash(material.text)
+            or prior.get("interviewer_line", "") != material.interviewer_line
         ):
             changed.add(material.material_id)
     return changed
@@ -573,7 +575,7 @@ async def select_related_sections(
     if not candidates or not new_materials:
         return {}
     references = ModelReferenceMap("S", (section.section_id for section in candidates))
-    changed_text = "\n".join(material.text for material in new_materials)
+    changed_text = "\n".join((f"对应提问：{material.interviewer_line}\n" if material.interviewer_line else "") + material.text for material in new_materials)
     candidates_by_id = {section.section_id: section for section in candidates}
     candidate_blocks = "\n\n".join(
         f"section_id: {references.encode(section.section_id)}\n"
@@ -882,6 +884,7 @@ def chapter_generation_context(
                     "material_order": item.material_order,
                     "transcript_version_id": item.transcript_version_id,
                     "text_hash": semantic_text_hash(item.text),
+                    **({"interviewer_line": item.interviewer_line} if item.interviewer_line else {}),
                 }
                 for item in materials
             ],
@@ -970,7 +973,7 @@ def build_chapter_generation_prompt(
     )
     required_materials = (
         f"本次必须融入的讲述：{required_refs}。这些讲述已归属当前小节，尚未写入正文或已更正。"
-        "请逐条将其中的真实经历、事实和感受融入正文，并在 used_material_ids 中列出实际采用的编号；"
+        "请逐条将其中的真实经历、事实和感受融入正文，used_material_ids 是归属核对清单，并非事实核验结论；"
         "不能只列编号而省略内容。重复内容可以合并，访谈过渡语无需写入。\n\n"
         if required_refs else ""
     )
@@ -1001,12 +1004,12 @@ def build_chapter_generation_prompt(
             *[
                 (
                     f"material_id: {material_refs.encode(material.material_id)}\n"
-                    + (f"小余刚才说: {material.interviewer_line}\n" if material.interviewer_line else "")
+                    + (f"对应提问: {material.interviewer_line}\n" if material.interviewer_line else "")
                     + (
                         _confirmed_material_update(material, material.material_id in (changed_material_ids or set()))
                         if current_section_user_edited and current_section_content
                         and previous_material_ids is not None and material.material_id in previous_material_ids
-                        else f"原始讲述{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
+                        else f"素材版本{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
                     )
                 )
                 for material in section.materials
@@ -1034,12 +1037,11 @@ def build_chapter_generation_prompt(
         "- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。\n"
         "- 只能使用输入中的事实和感受，可以调整顺序、合并重复。\n"
         "- 正文根据内容自然分段，段落之间用换行分隔。\n"
-        "- used_material_ids 必须完整记录本小节全部已归属讲述，包括现有正文保留的来源和本次新增或更正来源，不能只返回本次变化的编号。\n"
     )
     task = (
         f"请按已确认修改思路局部修改回忆录章节“{context.chapter_title}”中的当前小节。"
         if revision_instruction
-        else f"请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”中的当前小节。"
+        else f"请把下面的素材版本整理为回忆录章节“{context.chapter_title}”中的当前小节。"
     )
     revision = ""
     if revision_instruction:
@@ -1060,13 +1062,13 @@ def build_chapter_generation_prompt(
 - 同一个错字或名称同时出现在标题和正文时，两处必须同步修正。
 - 未涉及的文字、用户已写内容、段落及换行必须逐字保留，不删除、不改写。
 - 只有已确认思路明确要求时，才能在指定范围内调整措辞、语气、详略、顺序或段落结构；通用整理、编辑建议和润色要求不得扩大修改范围。
-- 下方原始讲述仅用于校对本次新增或变更事实的依据，不能因其中没有对应内容而删除当前正文中本次未涉及的说明。
-- 用户在指令中明确给出的事实更正可以采用；其他新增或变更事实必须有下方原始讲述支持。
-- 用户只要求“补充更多细节”却没有说出具体事实、且原始讲述也不支持时，不得自行虚构，应放入 missing_source_candidates。
+- 下方素材版本仅用于校对本次新增或变更事实的依据，不能因其中没有对应内容而删除当前正文中本次未涉及的说明。
+- 用户在指令中明确给出的事实更正可以采用；其他新增或变更事实必须有下方素材版本支持。
+- 用户只要求“补充更多细节”却没有说出具体事实、且素材版本也不支持时，不得自行虚构，应放入 missing_source_candidates。
 - 不要把本次修改指令或修改过程的解释新增到正文。
 """
     elif current_section_content:
-        reason = source_update_reason or "本小节的原始讲述发生了变化。"
+        reason = source_update_reason or "本小节的素材版本发生了变化。"
         ownership = (
             "现有正文已经由用户修改或确认。其与未变化的旧素材不同之处属于已采纳的表达，"
             "不能仅因旧素材不支持就撤销。只按本次新增素材或明确更正更新实际涉及的事实，保留其余内容。"
@@ -1103,19 +1105,22 @@ def build_chapter_generation_prompt(
 {required_materials}输出严格 JSON：
 {{
 {title_output}  "content": "当前小节完整、连贯、第一人称的正文",
-  "used_material_ids": ["当前小节正文实际使用的 material_id"],
-  "missing_source_candidates": ["想表达但现有素材没有支持的内容，只列出，不写入正文"],
+  "used_material_ids": ["本小节全部已归属素材的 material_id，含保留来源"],
+  "missing_source_candidates": ["无法继续成文且必须新求证的事实，或用户明确要求但尚未提供的事实；可保留疑义成文则为空数组"],
   "editor_notes": ["可选的简短编辑说明"]
 }}
 
 要求：
 - 本次只生成标记为“本次生成”的一个小节，不得复述其他小节的内容。
-- material_id 是本次请求内的短编号，必须原样返回。
+- material_id 是本次请求内的短编号，必须原样返回；used_material_ids 完整列出本小节全部已归属素材，包括当前正文保留的来源，不能只列变化项。
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
 - 只能使用当前小节的允许素材，不能把素材移动到其他小节。
 - 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
 {writing_rules}- 不要为了完整而虚构时间、地点、人物、因果或心理活动。
-- “小余刚才说”是访谈员的话，只用来理解原始讲述在回答什么，事实以讲述者说的为准；小余的话，以及只是在回应小余、没有经历或感受的话（比如怎么称呼、寒暄、不想聊），都不写进正文。
+- {ANSWER_CONTEXT_GUIDANCE}
+- 用回答明确支持的主语和对象补足省略，使正文脱离问答也能读懂；不能把提问原样当作讲述者经历。保留否定、转述来源、过去与现在的观点差异及局部不确定程度。
+- 编辑建议和修改计划仅决定编辑范围，不提供人生事实；确认计划不等于确认计划中新增的事实。只有素材与单独列出的用户原话中的明确事实可用于新增或更正。
+- missing_source_candidates 只列必要疑义，已回答、拒答或明确记不清的内容不得列入。能保留不确定程度写清楚时必须为空，不为丰富情节制造缺失项。
 - 不在正文中{"新增" if revision_instruction else "出现"} material_id、编辑指令、“叙述者”等后台术语。
 """
 
@@ -1600,6 +1605,7 @@ def _snapshot(
             "section_id": item.section_id,
             "transcript_version_id": item.transcript_version_id,
             "text_hash": semantic_text_hash(item.text),
+            **({"interviewer_line": item.interviewer_line} if item.interviewer_line else {}),
             "section_order": item.section_order,
             "material_order": item.material_order,
         }
@@ -1627,6 +1633,7 @@ def _section_input_signature(
                     "material_id": material.material_id,
                     "transcript_version_id": material.transcript_version_id,
                     "text_hash": semantic_text_hash(material.text),
+                    **({"interviewer_line": material.interviewer_line} if material.interviewer_line else {}),
                     "material_order": material.material_order,
                 }
                 for material in section.materials
@@ -1689,6 +1696,7 @@ def rebased_chapter_draft_version(
             prior is not None and current is not None
             and item.get("transcript_version_id") == prior.transcript_version_id
             and item.get("text_hash") == semantic_text_hash(prior.text)
+            and item.get("interviewer_line", "") == prior.interviewer_line == current.interviewer_line
         ):
             item["transcript_version_id"] = current.transcript_version_id
             item["text_hash"] = semantic_text_hash(current.text)
@@ -1877,6 +1885,12 @@ async def lock_chapter_draft_write(db: AsyncSession, *, project_id: str, chapter
     await db.execute(select(MemoirBookPlanChapter.id).where(
         MemoirBookPlanChapter.project_id == project_id, MemoirBookPlanChapter.id == chapter_id,
     ).with_for_update())
+    message_ids = (await db.scalars(select(MemoirVoiceUtterance.chat_message_id)
+        .join(MemoirSectionMaterial, MemoirSectionMaterial.utterance_id == MemoirVoiceUtterance.id)
+        .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+        .where(MemoirSection.chapter_id == chapter_id, MemoirSection.project_id == project_id)
+        .order_by(MemoirVoiceUtterance.id).with_for_update(of=MemoirVoiceUtterance))).all()
+    await interviewer_lines(db, message_ids, lock=True)
 
 
 async def _save_generated_draft(

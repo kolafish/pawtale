@@ -7,7 +7,7 @@ import json
 import logging
 import time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookReview,
+    MemoirBookRevisionProposal,
     MemoirCompletionIssue,
 )
 from app.schemas.memoir_book_review import MemoirBookRevisionPlan
@@ -50,7 +51,8 @@ from app.services.memoir.book_output_manuscript import (
     stored_manuscript_metadata,
 )
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
-from app.services.memoir.semantic_state import semantic_json_signature
+from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE
+from app.services.memoir.prompt_budget import checked_review_prompt
 
 
 PLAN_ENGINE = "llm_book_revision_plan_v1"
@@ -120,6 +122,38 @@ class GeneratedRevisionPlan:
     plan: _RevisionPlan
     resolved_ai_model: str | None
     generation: dict[str, object]
+
+
+class RevisionUserInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str
+    question: str = ""
+    chapter_ids: list[str] = Field(default_factory=list)
+
+
+def _user_input_text(inputs: list[RevisionUserInput], snapshots: list[dict[str, object]]) -> str:
+    titles = {_text(item.get("chapter_id")): _text(item.get("chapter_title")) for item in snapshots}
+    return "\n\n".join(
+        (f"对应提问（只作上下文）：{item.question}\n" if item.question else "")
+        + f"用户原话：{item.text}"
+        + ("\n涉及章节：" + "、".join(titles.get(key, "相关章节") for key in item.chapter_ids) if item.chapter_ids else "")
+        for item in inputs
+    ) or "（没有另行提供的用户事实或反馈）"
+
+
+async def _proposal_user_inputs(db: AsyncSession, proposal: MemoirBookRevisionProposal) -> list[RevisionUserInput]:
+    stored = proposal.generation_json or {}
+    if "user_inputs" in stored:
+        return TypeAdapter(list[RevisionUserInput]).validate_python(stored["user_inputs"])
+    # Older plans may still have their explicitly selected answers. Never reconstruct
+    # user facts from AI-written plan text when their original feedback is unavailable.
+    ids = (proposal.selected_actions_json or {}).get("issue_ids", [])
+    issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == proposal.project_id, MemoirCompletionIssue.id.in_(ids),
+    ))).all() if ids else []
+    return [RevisionUserInput(text=item.outcome_note, question=item.question,
+        chapter_ids=[item.chapter_id] if item.chapter_id else list(item.related_chapter_ids_json or []))
+        for item in issues if item.outcome_note and book_review_answer_state.has_explicit_answer(item.outcome_note)]
 
 
 class BookRevisionError(ValueError):
@@ -519,19 +553,11 @@ def _plan_output_instruction() -> str:
 - targets 使用章节名或小节名。
 - 书名或成书信息需要调整时，在 book_metadata_patch 给出供用户确认的完整新值，并在 items 说明理由和做法。
 - book_metadata_patch 只包含需要修改的字段；没有成书信息调整时返回空对象。
-- 只根据输入原文、检查结论和用户明确表达的决定制定计划。
+- 事实只来自当前书稿及单独列出的用户原话。检查结论和旧修改思路是编辑建议，不能作为事实证据；确认计划不等于确认新增事实。
+- 用户后续原话明确纠正前述事实时，只替换涉及部分，保留否定、疑义、视角和转述来源。
 - 不新增、推测或改变人生事实。
 - 不需要修改时，items 返回空数组，并在 summary 里说明原因。
 """
-
-
-def _book_outline(snapshots: list[dict[str, object]]) -> str:
-    return "\n".join(
-        f"- {_text(chapter.get('chapter_title'))}："
-        + "、".join(_text(section.get("title")) for section in _sections(chapter) if _text(section.get("title")))
-        for chapter in snapshots
-        if _text(chapter.get("chapter_title"))
-    )
 
 
 def _plan_feedback_prompt(
@@ -540,8 +566,12 @@ def _plan_feedback_prompt(
     feedback: str,
     snapshots: list[dict[str, object]],
     book_information: dict[str, str],
+    user_inputs: list[RevisionUserInput] | None = None,
 ) -> str:
-    return f"""请根据用户反馈更新完整修改思路。
+    ids = {_text(item.get("chapter_id")) for item in snapshots}
+    chapter_refs, section_refs = _reference_maps(snapshots, ids, stale_message="书稿章节已变化")
+    body = _chapter_source_text(snapshots=snapshots, chapter_refs=chapter_refs, section_refs=section_refs)
+    return checked_review_prompt(f"""请根据用户反馈更新完整修改思路。
 
 当前修改思路：
 {json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2)}
@@ -552,11 +582,14 @@ def _plan_feedback_prompt(
 当前成书信息：
 {book_information_text(book_information)}
 
-当前书稿目录：
-{_book_outline(snapshots)}
+此前用户原话（按时间排列，最新明确更正优先）：
+{_user_input_text(user_inputs or [], snapshots)}
+
+当前完整书稿：
+{body}
 
 请吸收用户意见后返回一份完整的新思路，不要只返回增量说明。
-{_plan_output_instruction()}"""
+{_plan_output_instruction()}""", subject="修改思路")
 
 
 def _plan_draft_prompt(
@@ -565,16 +598,21 @@ def _plan_draft_prompt(
     snapshots: list[dict[str, object]],
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
+    user_inputs: list[RevisionUserInput] | None = None,
 ) -> str:
     chapters = _chapter_source_text(
         snapshots=snapshots,
         chapter_refs=chapter_refs,
         section_refs=section_refs,
     )
-    return f"""请按照已确认的修改思路生成书稿修改稿。
+    return checked_review_prompt(f"""请按照已确认的修改思路生成书稿修改稿。
 
 已确认的完整修改思路：
 {json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2)}
+
+用户原话（按时间排列，只有明确事实可以补入正文）：
+{_user_input_text(user_inputs or [], snapshots)}
+{ANSWER_CONTEXT_GUIDANCE}
 
 当前书稿：
 {chapters}
@@ -594,9 +632,9 @@ def _plan_draft_prompt(
 - section_id 只能使用输入中的短编号。
 - 修改小节时返回修改后的完整正文；不需要修改的小节不要返回。
 - 不改变章节和小节的标题、数量、收录状态及归属关系。
-- 只使用当前书稿和修改思路中已有的事实，不得推测或补造。
-- 保留原文叙述视角和语气，计划未涉及的内容保持原样。
-"""
+- 事实只采用当前书稿及用户原话中明确提供的内容。修改思路仅确定编辑范围，不是事实证据；其中没有原文支持的新事实不得写入。
+- 保留视角、否定、疑义和转述归属；计划未涉及的段落及文字逐字保留，不为统一文风扩大修改范围。
+""", subject="修改稿")
 
 
 async def _refine_book_revision_plan(
@@ -620,10 +658,11 @@ async def _refine_book_revision_plan(
         proposal=proposal,
         preview="none",
     )
+    user_inputs = await _proposal_user_inputs(db, proposal)
     plan = _RevisionPlan.model_validate(proposal.revision_plan_json)
     if (
         response.status != MemoirBookRevisionProposalStatus.READY
-        or semantic_json_signature(proposal.revision_plan_json) != expected_plan_signature
+        or book_revision_proposals.revision_plan_signature(proposal) != expected_plan_signature
     ):
         raise BookRevisionError("修改思路已经变化，请重新查看后再提交反馈")
     baseline = await db.get(
@@ -645,6 +684,7 @@ async def _refine_book_revision_plan(
             feedback=feedback,
             snapshots=snapshots,
             book_information=_book_information(output, baseline),
+            user_inputs=user_inputs,
         ),
         engine=PLAN_FEEDBACK_ENGINE,
         error_message="按反馈更新修改思路时遇到问题，请稍后重试",
@@ -664,6 +704,9 @@ async def _refine_book_revision_plan(
     if progress_callback is not None:
         await progress_callback({"stage": "saving"})
     db.expire_all()
+    await db.execute(select(MemoirBookRevisionProposal.id).where(
+        MemoirBookRevisionProposal.project_id == project_id, MemoirBookRevisionProposal.id == proposal_id,
+    ).with_for_update())
     current = await book_revision_proposals.load_proposal(
         db,
         project_id=project_id,
@@ -676,13 +719,14 @@ async def _refine_book_revision_plan(
     )
     if (
         current_response.status != MemoirBookRevisionProposalStatus.READY
-        or semantic_json_signature(current.revision_plan_json) != expected_plan_signature
+        or book_revision_proposals.revision_plan_signature(current) != expected_plan_signature
     ):
         raise BookRevisionError("调整期间修改思路已经变化，请重新提交反馈")
+    user_inputs = [*user_inputs, RevisionUserInput(text=feedback)]
     current.phase = MemoirBookRevisionProposalPhase.PLAN_READY.value
     current.revision_plan_json = generated.plan.model_dump(mode="json")
     current.candidate_chapter_snapshot_json = []
-    current.generation_json = generated.generation
+    current.generation_json = {**generated.generation, "user_inputs": [item.model_dump(mode="json") for item in user_inputs]}
     current.summary = generated.plan.summary.strip()
     current.updated_at = utcnow_naive()
     db.add(current)
@@ -719,11 +763,12 @@ async def generate_book_revision_draft(
         proposal=proposal,
         preview="none",
     )
+    user_inputs = await _proposal_user_inputs(db, proposal)
     plan = _RevisionPlan.model_validate(proposal.revision_plan_json)
     if (
         response.status != MemoirBookRevisionProposalStatus.READY
         or proposal.phase != MemoirBookRevisionProposalPhase.PLAN_READY.value
-        or semantic_json_signature(proposal.revision_plan_json) != expected_plan_signature
+        or book_revision_proposals.revision_plan_signature(proposal) != expected_plan_signature
     ):
         raise BookRevisionError("修改思路已经变化，请重新查看后再生成修改稿")
     baseline = await db.get(
@@ -763,6 +808,7 @@ async def generate_book_revision_draft(
             snapshots=snapshots,
             chapter_refs=chapter_refs,
             section_refs=section_refs,
+            user_inputs=user_inputs,
         ),
         engine=PLAN_DRAFT_ENGINE,
         error_message="按修改思路生成修改稿时遇到问题，请稍后重试",
@@ -782,6 +828,9 @@ async def generate_book_revision_draft(
     if progress_callback is not None:
         await progress_callback({"stage": "saving"})
     db.expire_all()
+    await db.execute(select(MemoirBookRevisionProposal.id).where(
+        MemoirBookRevisionProposal.project_id == project_id, MemoirBookRevisionProposal.id == proposal_id,
+    ).with_for_update())
     current = await book_revision_proposals.load_proposal(
         db,
         project_id=project_id,
@@ -795,12 +844,12 @@ async def generate_book_revision_draft(
     if (
         current_response.status != MemoirBookRevisionProposalStatus.READY
         or current.phase != MemoirBookRevisionProposalPhase.PLAN_READY.value
-        or semantic_json_signature(current.revision_plan_json) != expected_plan_signature
+        or book_revision_proposals.revision_plan_signature(current) != expected_plan_signature
     ):
         raise BookRevisionError("生成期间修改思路已经变化，请重新生成修改稿")
     current.phase = MemoirBookRevisionProposalPhase.DRAFT_READY.value
     current.candidate_chapter_snapshot_json = generated.snapshots
-    current.generation_json = generated.generation
+    current.generation_json = {**generated.generation, "user_inputs": [item.model_dump(mode="json") for item in user_inputs]}
     current.summary = summary
     current.updated_at = utcnow_naive()
     db.add(current)
@@ -920,7 +969,7 @@ def _revision_plan_prompt(
         if required_metadata_fields
         else "本次没有成书信息修改。"
     )
-    return f"""请根据用户选中的问题回答和编辑建议，制定一份统一的书稿修改思路。
+    return checked_review_prompt(f"""请根据用户选中的问题回答和编辑建议，制定一份统一的书稿修改思路。
 
 用户选择采用的问题回答：
 {answers}
@@ -939,7 +988,8 @@ def _revision_plan_prompt(
 
 {metadata_requirement}
 
-{_plan_output_instruction()}"""
+{ANSWER_CONTEXT_GUIDANCE}
+{_plan_output_instruction()}""", subject="修改思路")
 
 
 def _validate_metadata_plan(
@@ -1127,7 +1177,9 @@ async def generate_book_revision_proposal(
             "action_ids": action_ids,
             "actions_signature": expected_actions_signature,
         },
-        generation=generated_plan.generation,
+        generation={**generated_plan.generation, "user_inputs": [RevisionUserInput(text=answer.answer,
+            question=answer.question, chapter_ids=list(answer.chapter_ids)).model_dump(mode="json")
+            for answer in current_answers.answers] if include_answers else []},
         summary=generated_plan.plan.summary.strip(),
         phase=(MemoirBookRevisionProposalPhase.DRAFT_READY if direct_metadata_preview
                else MemoirBookRevisionProposalPhase.PLAN_READY),

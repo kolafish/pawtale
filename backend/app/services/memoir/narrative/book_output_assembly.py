@@ -285,7 +285,8 @@ async def assemble_book_output(
             chapter.pull_quotes = book_output_versions.retained_chapter_quotes(
                 old, next_snapshot, preserve_manual=preserve_quotes, polish_level=project_transcript_polish_level(project),
             )
-            if not chapter.pull_quotes and not preserve_quotes:
+            preserve_empty_quotes = "pull_quotes" in fields and old.get("pull_quotes") == []
+            if not chapter.pull_quotes and not preserve_quotes and not preserve_empty_quotes:
                 chapter.pull_quotes = fallback_chapter_quotes(chapter.content, next_snapshot, polish_level=project_transcript_polish_level(project))
     version = await book_output_versions.append_book_output_version(
         db,

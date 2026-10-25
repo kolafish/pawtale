@@ -76,6 +76,13 @@ _BOOK_METADATA_FIELDS = (
 )
 
 
+def revision_plan_signature(proposal: MemoirBookRevisionProposal) -> str:
+    from app.services.memoir.semantic_state import semantic_json_signature
+    inputs = (proposal.generation_json or {}).get("user_inputs")
+    return semantic_json_signature({"plan": proposal.revision_plan_json, "user_inputs": inputs}
+        if inputs is not None else proposal.revision_plan_json)
+
+
 def _revision_metadata_patch(proposal: MemoirBookRevisionProposal) -> dict[str, str]:
     plan = proposal.revision_plan_json
     value = plan.get("book_metadata_patch") if isinstance(plan, dict) else None

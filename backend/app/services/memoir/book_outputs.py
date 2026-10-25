@@ -646,7 +646,8 @@ async def regenerate_book_output_editorial_copy(
         generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
         eligible_chapters = {chapter.chapter_id for chapter in manuscript.chapters
             if not chapter_ids or chapter.chapter_id in chapter_ids}
-        has_book_copy = any(target in targets and getattr(editorial_copy, target)
+        has_book_copy = any(target in targets and (getattr(editorial_copy, target)
+                or (target == "back_cover_quote" and editorial_copy.valid_empty_back_cover_quote))
             for target in ("preface", "afterword", "back_cover_quote"))
         has_chapter_copy = any(
             item.chapter_id in eligible_chapters and any(
@@ -727,7 +728,7 @@ async def regenerate_book_output_editorial_copy(
     if not automatic and editorial_copy:
         claim_editorial_copy_fields(output,
             targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in targets
-                and getattr(editorial_copy, key)],
+                and (getattr(editorial_copy, key) or (key == "back_cover_quote" and editorial_copy.valid_empty_back_cover_quote))],
             chapter_fields={chapter.chapter_id: [field for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes"))
                 if target in targets and (field == "pull_quotes" or generated[chapter.chapter_id].intro)]
                 for chapter in manuscript.chapters if chapter.chapter_id in generated
