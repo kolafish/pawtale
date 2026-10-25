@@ -26,6 +26,48 @@ test("a rebuilt editor consumes only voice requests made after attachment", () =
   component.lifetimes.detached.call(context);
 });
 
+test("disabling a mounted editor stops recording and prevents a pending start", async () => {
+  const controller = {
+    callbacks: null,
+    connectCount: 0,
+    closeCount: 0,
+    async connect(options) { this.connectCount += 1; this.callbacks = options.callbacks; },
+    startRecording() { return true; },
+    close() { this.closeCount += 1; },
+  };
+  mockModule("../services/streaming-voice-controller.ts", {
+    StreamingVoiceController: class { constructor() { return controller; } },
+  });
+  let authorize;
+  mockModule("../services/voice-authorization.ts", {
+    ensureVoiceRecordingAuthorization: () => new Promise(resolve => { authorize = resolve; }),
+  });
+  const component = loadComponentModule("../components/voice-text-editor/index.ts").component;
+  const context = componentContext(component, { gatewayUrl: "wss://example.test/voice" });
+  component.lifetimes.attached.call(context);
+
+  const pending = context.startVoice();
+  context.properties.disabled = true;
+  component.observers["automaticVoiceCommand,gatewayUrl,disabled,busy"].call(context);
+  authorize(true);
+  await pending;
+  assert.equal(controller.connectCount, 0);
+  assert.equal(context.data.voicePhase, "idle");
+
+  context.properties.disabled = false;
+  component.observers["automaticVoiceCommand,gatewayUrl,disabled,busy"].call(context);
+  const recording = context.startVoice();
+  authorize(true);
+  await recording;
+  controller.callbacks.onStatus("listening");
+  const closesBeforeHide = controller.closeCount;
+  context.properties.disabled = true;
+  component.observers["automaticVoiceCommand,gatewayUrl,disabled,busy"].call(context);
+  assert.equal(controller.closeCount, closesBeforeHide + 1);
+  assert.equal(context.data.voicePhase, "idle");
+  component.lifetimes.detached.call(context);
+});
+
 test("shared voice text editor shows live transcription without replacing existing text", async () => {
   const controller = {
     callbacks: null,

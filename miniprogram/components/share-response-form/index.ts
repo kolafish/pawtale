@@ -10,10 +10,15 @@ function runtime(owner: object) {
 
 Component({
   options: { addGlobalClass: true },
-  properties: { readingToken: { type: String, value: "" }, videoCode: { type: String, value: "" } },
+  properties: { readingToken: { type: String, value: "" }, videoCode: { type: String, value: "" }, active: { type: Boolean, value: true } },
   data: { open: false, content: "", busy: false, error: "", sent: false,
     voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 },
   observers: {
+    active(active: unknown) {
+      if (active) return;
+      runtime(this).generation += 1;
+      this.setData({ busy: false, gatewayUrl: "", voiceStartRequest: 0 });
+    },
     "readingToken,videoCode"() {
       runtime(this).generation += 1;
       runtime(this).requestId = "";
@@ -24,11 +29,11 @@ Component({
   },
   lifetimes: { detached() { runtime(this).generation += 1; } },
   methods: {
-    openForm() { this.setData({ open: true, sent: false }); },
+    openForm() { if (this.properties.active) this.setData({ open: true, sent: false }); },
     closeForm() { if (!this.data.busy) this.setData({ open: false, gatewayUrl: "", voiceStartRequest: 0 }); },
     changeText(event: { detail: { value?: string } }) { this.setData({ content: event.detail.value || "", error: "" }); },
     async requestVoice() {
-      if (this.data.busy || this.data.voiceCaptureId) return;
+      if (!this.properties.active || this.data.busy || this.data.voiceCaptureId) return;
       const generation = runtime(this).generation;
       this.setData({ busy: true, error: "" });
       try {
@@ -51,7 +56,7 @@ Component({
     },
     voiceSource(event: { detail: { captureId?: string } }) {
       const id = String(event.detail.captureId || "");
-      if (/^[0-9a-f-]{36}$/.test(id)) this.setData({ voiceCaptureId: id, gatewayUrl: "", voiceStartRequest: 0 });
+      if (this.properties.active && /^[0-9a-f-]{36}$/.test(id)) this.setData({ voiceCaptureId: id, gatewayUrl: "", voiceStartRequest: 0 });
     },
     replaceVoice() {
       if (this.data.busy) return;
@@ -60,7 +65,7 @@ Component({
     },
     async submit() {
       const content = this.data.content.trim();
-      if (this.data.busy || !content) return;
+      if (!this.properties.active || this.data.busy || !content) return;
       const generation = runtime(this).generation;
       const fingerprint = `${content}\0${this.data.voiceCaptureId}`;
       if (!runtime(this).requestId || runtime(this).requestContent !== fingerprint) {

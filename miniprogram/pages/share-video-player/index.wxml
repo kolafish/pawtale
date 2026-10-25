@@ -49,7 +49,7 @@
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: !sharePreview}}" />
   </block>
   <view wx:if="{{responseCode && !sharePreview}}" hidden="{{loading || error || !video}}">
-    <share-response-form id="shared-response" video-code="{{responseCode}}" bindunavailable="onResponseUnavailable" />
+    <share-response-form id="shared-response" video-code="{{responseCode}}" active="{{!loading && !error && video !== null}}" bindunavailable="onResponseUnavailable" />
   </view>
   <button wx:if="{{video && !sharePreview}}" class="ui-share-more" bindtap="openHome">我也想讲故事</button>
 </view>
