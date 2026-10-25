@@ -12,6 +12,7 @@ from app.clock import utcnow_naive
 from app.database import async_session_maker
 from app.models.memoir import MemoirShareResponse, MemoirShareResponseVoice, MemoirMaterialShareVideo
 from app.models.memoir_common import AudioFile
+from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.projects import Project
 from app.models.users import User
 from app.schemas.memoir_share_likes import MemoirShareLikeTarget
@@ -61,6 +62,24 @@ async def valid_capture(db: AsyncSession, capture_id: str, user_id: str) -> Memo
     return capture
 
 
+async def active_capture_ticket(db: AsyncSession, capture_id: str, user_id: str) -> bool:
+    """Check only ticket and publication state before forwarding each audio frame."""
+    capture = await db.get(MemoirShareResponseVoice, capture_id)
+    if (capture is None or capture.user_id != user_id or capture.audio_file_id
+            or capture.expires_at <= utcnow_naive()):
+        return False
+    if capture.target_kind == "video":
+        code = await db.scalar(select(MemoirMaterialShareVideo.share_code).where(
+            MemoirMaterialShareVideo.id == capture.target_id,
+            MemoirMaterialShareVideo.share_enabled.is_(True),
+            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+        ))
+        return code is not None and session_token_hash(code) == capture.share_key
+    model, _ = book_shares._share_table(capture.target_kind)
+    share = await db.get(model, capture.target_id)
+    return bool(share and book_shares._active(share) and share.token_hash == capture.share_key)
+
+
 class ResponseCapturePersistence:
     def __init__(self, *, capture_id: str, user_id: str):
         self.capture_id = capture_id
@@ -69,11 +88,7 @@ class ResponseCapturePersistence:
 
     async def authorized(self) -> bool:
         async with async_session_maker() as db:
-            try:
-                await valid_capture(db, self.capture_id, self.user_id)
-            except HTTPException:
-                return False
-            return True
+            return await active_capture_ticket(db, self.capture_id, self.user_id)
 
     async def record_audio_frame(self, audio: bytes) -> None:
         # VoiceGatewaySession authorizes each audio.frame before invoking this callback.

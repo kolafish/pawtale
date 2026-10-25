@@ -9,6 +9,23 @@ const {
   mockModule,
 } = require("./page-harness");
 
+test("a rebuilt editor consumes only voice requests made after attachment", () => {
+  const component = loadComponentModule("../components/voice-text-editor/index.ts").component;
+  const context = componentContext(component, {
+    prepareVoice: true, gatewayUrl: "wss://example.test/voice", voiceStartRequest: 1,
+  });
+  let starts = 0;
+  context.startVoice = () => { starts += 1; };
+  component.observers.voiceStartRequest.call(context, 1);
+  component.lifetimes.attached.call(context);
+  component.observers.voiceStartRequest.call(context, 1);
+  assert.equal(starts, 0);
+  context.properties.voiceStartRequest = 2;
+  component.observers.voiceStartRequest.call(context, 2);
+  assert.equal(starts, 1);
+  component.lifetimes.detached.call(context);
+});
+
 test("shared voice text editor shows live transcription without replacing existing text", async () => {
   const controller = {
     callbacks: null,

@@ -18,13 +18,14 @@ Component({
       runtime(this).generation += 1;
       runtime(this).requestId = "";
       runtime(this).requestContent = "";
-      this.setData({ open: false, content: "", busy: false, error: "", sent: false, voiceCaptureId: "", gatewayUrl: "" });
+      this.setData({ open: false, content: "", busy: false, error: "", sent: false,
+        voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 });
     },
   },
   lifetimes: { detached() { runtime(this).generation += 1; } },
   methods: {
     openForm() { this.setData({ open: true, sent: false }); },
-    closeForm() { if (!this.data.busy) this.setData({ open: false }); },
+    closeForm() { if (!this.data.busy) this.setData({ open: false, gatewayUrl: "", voiceStartRequest: 0 }); },
     changeText(event: { detail: { value?: string } }) { this.setData({ content: event.detail.value || "", error: "" }); },
     async requestVoice() {
       if (this.data.busy || this.data.voiceCaptureId) return;
@@ -35,7 +36,7 @@ Component({
         const ticket = await startShareResponseVoice(target);
         if (generation !== runtime(this).generation) return;
         this.setData({ gatewayUrl: ticket.gatewayUrl, busy: false }, () => {
-          if (generation === runtime(this).generation) this.setData({ voiceStartRequest: this.data.voiceStartRequest + 1 });
+          if (generation === runtime(this).generation && this.data.open) this.setData({ voiceStartRequest: this.data.voiceStartRequest + 1 });
         });
       } catch (error) {
         if (generation !== runtime(this).generation) return;
@@ -50,11 +51,12 @@ Component({
     },
     voiceSource(event: { detail: { captureId?: string } }) {
       const id = String(event.detail.captureId || "");
-      if (/^[0-9a-f-]{36}$/.test(id)) this.setData({ voiceCaptureId: id });
+      if (/^[0-9a-f-]{36}$/.test(id)) this.setData({ voiceCaptureId: id, gatewayUrl: "", voiceStartRequest: 0 });
     },
     replaceVoice() {
       if (this.data.busy) return;
-      this.setData({ voiceCaptureId: "", gatewayUrl: "", error: "原音已移除，文字保留。可以重新录音。" });
+      this.setData({ voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0,
+        error: "原音已移除，文字保留。可以重新录音。" });
     },
     async submit() {
       const content = this.data.content.trim();
@@ -71,14 +73,14 @@ Component({
         await submitShareResponse(target, content, runtime(this).requestId, this.data.voiceCaptureId);
         if (generation !== runtime(this).generation) return;
         runtime(this).requestId = ""; runtime(this).requestContent = "";
-        this.setData({ sent: true, open: false, content: "", voiceCaptureId: "", gatewayUrl: "" });
+        this.setData({ sent: true, open: false, content: "", voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 });
       } catch (error) {
         if (generation !== runtime(this).generation) return;
         if (error instanceof ApiError && error.statusCode === 401) {
           this.setData({ error: "请先登录，再提交这段回应。文字已保留。" });
           wx.navigateTo({ url: "/pages/login/index?from=response" });
         } else if (error instanceof ApiError && error.statusCode === 410 && this.data.voiceCaptureId) {
-          this.setData({ voiceCaptureId: "", gatewayUrl: "",
+          this.setData({ voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0,
             error: "原音已过期，请重新录音；文字已保留，也可以直接发送文字。" });
         } else {
           this.setData({ error: error instanceof Error ? error.message : "暂时没能提交，请重试" });
