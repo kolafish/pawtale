@@ -740,7 +740,7 @@ async def test_copy_success_requires_an_applicable_requested_field(client, test_
 
 @pytest.mark.parametrize("automatic", [False, True])
 @pytest.mark.parametrize("reply", ["empty", "missing", "has_candidate"])
-async def test_quote_only_job_accepts_explicit_empty_without_candidates(client, test_db, monkeypatch, automatic, reply):
+async def test_quote_only_job_accepts_explicit_empty_even_with_candidates(client, test_db, monkeypatch, automatic, reply):
     from app.services.memoir import book_generation_jobs
     from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
     from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -776,7 +776,7 @@ async def test_quote_only_job_accepts_explicit_empty_without_candidates(client, 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     try:
-        succeeds = reply == "empty"
+        succeeds = reply != "missing"
         assert await run_test_editing_job(test_db, job.id) is succeeds
         await test_db.refresh(job)
         assert job.status == ("succeeded" if succeeds else "failed")
@@ -788,7 +788,7 @@ async def test_quote_only_job_accepts_explicit_empty_without_candidates(client, 
             reused = await book_outputs.regenerate_book_output_editorial_copy(test_db,
                 user_id=project.user_id, project_id=project_id, req=req, automatic=True, retry=True)
             assert reused.latest_version.id == latest.id
-        assert len(calls) == 1
+        assert len(calls) == (2 if reply == "missing" else 1)
     finally:
         clear_editing_job_handlers()
 
@@ -1097,3 +1097,54 @@ async def test_old_original_quote_reconciles_with_current_body_and_policy(client
     if not body_changed:
         await _automatic(test_db, project)
         assert len(calls) == 1  # The evidence-v2 checkpoint is still reusable.
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+async def test_explicit_empty_back_cover_is_saved_and_manual_choice_is_retained(client, test_db, monkeypatch, automatic):
+    from app.services.memoir.book_manuscript_ai import _copy_from_payload
+    project, chapters, before = await _output(client, test_db)
+    stored = copy.deepcopy(before.manuscript_json)
+    stored["render_settings"]["back_cover_quote"] = "脱离上下文的旧摘句"
+    before.manuscript_json = stored
+    await test_db.commit()
+    async def generate(**kwargs):
+        return _copy_from_payload({"back_cover_quote": ""}, snapshot=kwargs["snapshot"], prompt="", model="test")
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    result = await book_outputs.regenerate_book_output_editorial_copy(test_db,
+        user_id=project.user_id, project_id=project.id,
+        req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=["back_cover_quote"]), automatic=automatic)
+    assert result.latest_version.manuscript.render_settings.back_cover_quote == ""
+    if not automatic:
+        output = await book_outputs._load_output(test_db, project_id=project.id)
+        assert "back_cover_quote" in output.metadata_json["automatic_editorial_copy"]["manual_targets"]
+    updated = await book_outputs.update_book_output_chapter_editorial_copy(test_db,
+        user_id=project.user_id, project_id=project.id, chapter_id=chapters[0].id,
+        req=MemoirBookOutputChapterEditorialCopyUpdateRequest(intro="后来补写的导语"))
+    assert updated.latest_version.manuscript.render_settings.back_cover_quote == ""
+
+
+
+async def test_automatic_empty_chapter_quote_survives_another_chapter_reassembly(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from app.services.memoir.book_output_versions import load_latest_book_output_version
+    project, chapters, _ = await _output(client, test_db)
+    async def generate(**kwargs):
+        return replace(_copy(kwargs["snapshot"]), chapter_intros=[GeneratedChapterIntro(
+            chapter_id=item["chapter_id"], intro="车间往事", pull_quote="", valid_empty_quote=True)
+            for item in kwargs["snapshot"]])
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    await _automatic(test_db, project)
+    draft = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.chapter_id == chapters[1].id))
+    draft.content += "后来我在学校交了新朋友。"
+    sections = copy.deepcopy(draft.section_snapshot_json)
+    sections[0]["content"] = draft.content
+    draft.section_snapshot_json = sections
+    await test_db.commit()
+    result = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    latest = await load_latest_book_output_version(test_db, output_id=result.output_id)
+    assert latest.manuscript_json["chapters"][0]["pull_quotes"] == []
+    repeated = await assemble_book_output(test_db, project_id=project.id, automatic=True)
+    latest = await load_latest_book_output_version(test_db, output_id=repeated.output_id)
+    assert latest.manuscript_json["chapters"][0]["pull_quotes"] == []

@@ -145,8 +145,12 @@ class FakeEditorialAI(AITextServiceBase):
 
 
         payload = json.loads(response)
-        if '"pull_quote_source_ref_id"' not in user_prompt:
-            payload['chapter_intros'][0].pop('pull_quote_source_ref_id')
+        schema = json.JSONDecoder().raw_decode(user_prompt.split("遵守 schema：\n", 1)[1])[0]
+        payload = {key: value for key, value in payload.items() if key in schema["properties"]}
+        if "chapter_intros" in payload:
+            fields = schema["$defs"]["RequestedChapterIntro"]["properties"]
+            payload["chapter_intros"] = [{key: value for key, value in item.items() if key in fields}
+                for item in payload["chapter_intros"]]
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -262,8 +266,7 @@ async def test_memoir_book_title_suggestions_keep_nonempty_names():
 
     assert suggestions is not None
     assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]
-    assert "一个人一生回忆" in fake_ai.calls[0]["user_prompt"]
-    assert "不要只抓某个场景、物件、单章细节" in fake_ai.calls[0]["user_prompt"]
+    assert "我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_memoir_book_editorial_copy_keeps_text_and_validates_quotes():
@@ -403,6 +406,8 @@ def test_release_quotes_keep_complete_source_sentences(release_quote_snapshot):
 
     payload = manuscript.model_dump(mode="json")
     payload["render_settings"]["back_cover_quote"] = ""
+    assert sanitize_manuscript_payload(title="发布手测", manuscript=payload)["render_settings"]["back_cover_quote"] == ""
+    payload["render_settings"].pop("back_cover_quote")
     regenerated = sanitize_manuscript_payload(title="发布手测", manuscript=payload)
     assert regenerated["render_settings"]["back_cover_quote"] == "我小时候住在四川成都，7岁那年，奶奶每天早晨带我去河边散步。"
 
@@ -1321,8 +1326,8 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     first_chapter = manuscript["chapters"][0]
     assert first_chapter["intro"] == "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"
     assert first_chapter["pull_quotes"] == []
-    assert "本次生成目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
-    assert "用户本次反馈：更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
+    assert "本次目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
+    assert "更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
     assert "这一章写外婆家的院子和童年生活。" not in fake_ai.calls[0]["user_prompt"]
 
 
@@ -1420,8 +1425,8 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     assert len(quotes) == 1
     assert quotes[0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
     assert quotes[0]["source"] == "editorial_generated"
-    assert "本次生成目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]
-    assert "用户本次反馈：只换章首引语" in fake_ai.calls[0]["user_prompt"]
+    assert "本次目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]
+    assert "只换章首引语" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, test_db):
@@ -2224,7 +2229,7 @@ def test_quote_selection_requires_exact_candidate(value, expected):
 
 @pytest.mark.parametrize("level", list(MemoirTranscriptPolishLevel))
 async def test_quote_policy_is_shared_by_prompt_schema_validation_and_fallback(level):
-    from app.services.memoir.book_manuscript_ai import _ManuscriptCopyOutput, _OriginalManuscriptCopyOutput, _copy_from_payload, build_manuscript_copy_prompt
+    from app.services.memoir.book_manuscript_ai import _copy_output_model, _copy_from_payload, build_manuscript_copy_prompt
     excerpt = '后来我们一起走过那条很长的小路。'
     snapshot = [{'chapter_id': 'c', 'chapter_title': '往事', 'content': '那年我回了家。' + excerpt,
         'source_refs': [{'utterance_id': 'u', 'quote': excerpt}]}]
@@ -2234,7 +2239,7 @@ async def test_quote_policy_is_shared_by_prompt_schema_validation_and_fallback(l
     assert ('pull_quote_source_ref_id' in prompt) is original
     payload = {'chapter_intros': [{'chapter_id': 'C1', 'pull_quote': excerpt,
         'pull_quote_source_ref_id': 'M1'}]}
-    schema = _OriginalManuscriptCopyOutput if original else _ManuscriptCopyOutput
+    schema = _copy_output_model(["pull_quotes"], level)
     result = _copy_from_payload(schema.model_validate(payload).model_dump(), snapshot=snapshot,
         prompt=prompt, model='offline', polish_level=level)
     assert result.chapter_intros[0].pull_quote == excerpt
@@ -2260,7 +2265,7 @@ def test_low_original_quote_cannot_be_retained_from_a_different_section():
 
 async def test_polished_copy_ignores_only_obsolete_source_field_without_provider_retry():
     from pydantic import ValidationError
-    from app.services.memoir.book_manuscript_ai import _ManuscriptCopyOutput
+    from app.services.memoir.book_manuscript_ai import _copy_output_model
     excerpt = '后来我们一起走过那条很长的小路。'
     class OldShapeAI(FakeEditorialAI):
         async def _call_llm(self, *args, **kwargs):
@@ -2276,4 +2281,32 @@ async def test_polished_copy_ignores_only_obsolete_source_field_without_provider
     assert result.chapter_intros[0].pull_quote == excerpt
     assert result.chapter_intros[0].pull_quote_source_ref_id == ''
     with pytest.raises(ValidationError):
-        _ManuscriptCopyOutput.model_validate({'chapter_intros': [{'pull_quote': excerpt, 'unknown_field': 'value'}]})
+        _copy_output_model(['pull_quotes'], MemoirTranscriptPolishLevel.HIGH).model_validate({'chapter_intros': [{'pull_quote': excerpt, 'unknown_field': 'value'}]})
+
+
+@pytest.mark.parametrize("level", list(MemoirTranscriptPolishLevel))
+@pytest.mark.parametrize("target", ["preface", "afterword", "back_cover_quote", "chapter_intros", "pull_quotes"])
+def test_copy_schema_only_requests_selected_fields(level, target):
+    from pydantic import ValidationError
+    from app.services.memoir.book_manuscript_ai import _copy_output_model
+    schema = _copy_output_model([target], level)
+    expected = "chapter_intros" if target == "pull_quotes" else target
+    assert set(schema.model_fields) == {expected}
+    with pytest.raises(ValidationError):
+        schema.model_validate({"book_title": "本次不应改书名"})
+    if target in {"chapter_intros", "pull_quotes"}:
+        fields = schema.model_json_schema()["$defs"]["RequestedChapterIntro"]["properties"]
+        assert set(fields) == ({"chapter_id", "intro"} if target == "chapter_intros" else
+            {"chapter_id", "pull_quote"} | ({"pull_quote_source_ref_id"} if level == MemoirTranscriptPolishLevel.LOW else set()))
+
+
+def test_title_and_copy_context_include_middle_and_end_of_long_chapter():
+    from app.services.memoir.book_manuscript_ai import build_title_suggestion_prompt, build_manuscript_copy_prompt
+    content = "开头是学徒。" + "日常工作。" * 5000 + "中段学会了修自行车。" + "日常工作。" * 5000 + "末尾退休后教孙子修车。"
+    snapshot = [{"chapter_id": "c", "content": content, "chapter_title": "修车"}]
+    for prompt in [build_title_suggestion_prompt(title="往事", snapshot=snapshot, count=3),
+                   build_manuscript_copy_prompt(title="往事", snapshot=snapshot, targets=["preface"])]:
+        assert "开头是学徒。" in prompt
+        assert "中段学会了修自行车。" in prompt
+        assert "末尾退休后教孙子修车。" in prompt
+        assert len(prompt) < 30000
