@@ -396,3 +396,44 @@ async def test_answer_context_follows_valid_parent_or_preceding_question(client,
     else:
         assert lines[answer.id] == {"older": old_question.content_text, "future": future.content_text}.get(parent, question.content_text)
     assert lines[continuation.id] == lines[resumed.id] == question.content_text
+
+
+async def test_batch_cleanup_keeps_session_context_and_each_stable_source(client, test_db, monkeypatch):
+    from datetime import datetime
+
+    first = await create_test_voice_transcript(client, test_db, text="我小时候住在外婆家。", question_text="您小时候住在哪里？")
+    project_id = first["session"]["project_id"]
+    second = await create_test_voice_transcript(client, test_db, project_id=project_id,
+        text="误识别的码头经历。", question_text="您最早在哪里工作？")
+    first_utterance = await test_db.get(MemoirVoiceUtterance, first["utterance_id"])
+    second_utterance = await test_db.get(MemoirVoiceUtterance, second["utterance_id"])
+    first_utterance.transcript_edited = "奶奶家承载着美好的童年。"
+    second_utterance.transcript_edited = "码头让我不断成长。"
+    second_utterance.provider_payload_json = {"material_offline_asr": {"applied_at": "2020-01-01T08:00:00+08:00"}}
+    test_db.add_all([
+        MemoirTranscriptVersion(voice_session_id=first["session"]["id"], source_artifact_id=first_utterance.id,
+            version_type="user_edited", created_by="user", content="我小时候住在奶奶家。"),
+        MemoirTranscriptVersion(voice_session_id=second["session"]["id"], source_artifact_id=second_utterance.id,
+            version_type="dialect_corrected", created_by="ai", content="我最早在码头工作。", created_at=datetime(2020, 1, 1)),
+        MemoirTranscriptVersion(voice_session_id=second["session"]["id"], source_artifact_id=second_utterance.id,
+            version_type="dialect_corrected", created_by="ai", content="码头让我不断成长。", created_at=datetime(2020, 1, 2)),
+    ])
+    for source in (first, second):
+        test_db.add(MemoirChatMessage(project_id=project_id, voice_session_id=source["session"]["id"],
+            role="assistant", content_text="未来才问的问题", turn_index=99))
+    await test_db.commit()
+    ai = CapturingCleanupAIClient()
+    monkeypatch.setattr("app.services.memoir.voice_transcripts.get_ai_service", lambda model=None: ai)
+    response = await client.post(f"/api/memoir/projects/{project_id}/transcript-cleanup/preview",
+        json={"utterance_ids": [first["utterance_id"], second["utterance_id"]]})
+    assert response.status_code == 200
+    assert [item["source_text"] for item in response.json()["items"]] == [
+        "奶奶家承载着美好的童年。", "码头让我不断成长。",
+    ]
+    assert "我小时候住在奶奶家。" in ai.prompts[0]
+    assert "您小时候住在哪里？" in ai.prompts[0]
+    assert "您最早在哪里工作？" not in ai.prompts[0]
+    assert "我最早在码头工作。" in ai.prompts[1]
+    assert "您最早在哪里工作？" in ai.prompts[1]
+    assert "您小时候住在哪里？" not in ai.prompts[1]
+    assert all("未来才问的问题" not in prompt for prompt in ai.prompts)

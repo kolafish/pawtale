@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSectionMaterial, MemoirVoiceUtterance, MemoirTranscriptVersion
@@ -42,40 +44,79 @@ def user_edited_version_clause():
     )
 
 
-async def cleanup_source_version(
-    db: AsyncSession, utterance: MemoirVoiceUtterance,
-) -> MemoirTranscriptVersion | None:
-    edited = await db.scalar(select(MemoirTranscriptVersion).where(
-        MemoirTranscriptVersion.source_artifact_id == utterance.id,
+async def _cleanup_versions(
+    db: AsyncSession, condition: ColumnElement[bool], *, latest: bool, single_source: bool,
+) -> dict[str, MemoirTranscriptVersion]:
+    order = (MemoirTranscriptVersion.created_at, MemoirTranscriptVersion.id)
+    order = tuple(column.desc() for column in order) if latest else order
+    query = select(MemoirTranscriptVersion).where(condition)
+    if single_source:
+        query = query.order_by(*order).limit(1)
+    else:
+        query = query.distinct(MemoirTranscriptVersion.source_artifact_id).order_by(
+            MemoirTranscriptVersion.source_artifact_id, *order)
+    versions = await db.scalars(query)
+    return {version.source_artifact_id: version for version in versions}
+
+
+async def cleanup_source_versions(
+    db: AsyncSession, utterances: Iterable[MemoirVoiceUtterance],
+) -> dict[str, MemoirTranscriptVersion]:
+    utterances = list(utterances)
+    if not utterances:
+        return {}
+    source_ids = [item.id for item in utterances]
+    versions = await _cleanup_versions(db, and_(
+        MemoirTranscriptVersion.source_artifact_id == source_ids[0] if len(source_ids) == 1
+        else MemoirTranscriptVersion.source_artifact_id.in_(source_ids),
         user_edited_version_clause(),
-    ).order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc()).limit(1))
-    if edited is not None:
-        return edited
+    ), latest=True, single_source=len(utterances) == 1)
     # The first corrected version of an offline recognition run is its verified
     # text; later versions only change expression. Older runs did not save the
     # verification separately: keep their earliest surviving corrected version.
     from app.services.memoir.material_offline_asr_state import material_offline_asr_metadata
 
-    applied_at = material_offline_asr_metadata(utterance).get("applied_at")
-    if not isinstance(applied_at, str):
-        return None
-    try:
-        applied = datetime.fromisoformat(applied_at)
-    except ValueError:
-        return None
-    if applied.tzinfo is not None:
-        applied = applied.astimezone(UTC).replace(tzinfo=None)
-    return await db.scalar(select(MemoirTranscriptVersion).where(
-        MemoirTranscriptVersion.source_artifact_id == utterance.id,
-        MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
-        MemoirTranscriptVersion.created_at >= applied,
-    ).order_by(MemoirTranscriptVersion.created_at, MemoirTranscriptVersion.id).limit(1))
+    offline_sources = []
+    for utterance in utterances:
+        if utterance.id in versions:
+            continue
+        applied_at = material_offline_asr_metadata(utterance).get("applied_at")
+        if not isinstance(applied_at, str):
+            continue
+        try:
+            applied = datetime.fromisoformat(applied_at)
+        except ValueError:
+            continue
+        if applied.tzinfo is not None:
+            applied = applied.astimezone(UTC).replace(tzinfo=None)
+        offline_sources.append(and_(
+            MemoirTranscriptVersion.source_artifact_id == utterance.id,
+            MemoirTranscriptVersion.created_at >= applied,
+        ))
+    if offline_sources:
+        versions.update(await _cleanup_versions(db, and_(
+            MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
+            or_(*offline_sources),
+        ), latest=False, single_source=len(offline_sources) == 1))
+    return versions
+
+
+async def cleanup_source_version(
+    db: AsyncSession, utterance: MemoirVoiceUtterance,
+) -> MemoirTranscriptVersion | None:
+    return (await cleanup_source_versions(db, [utterance])).get(utterance.id)
+
+
+async def cleanup_source_texts(db: AsyncSession, utterances: Iterable[MemoirVoiceUtterance]) -> dict[str, str]:
+    """Re-polish stable sources, never a succession of automatic rewrites."""
+    utterances = list(utterances)
+    versions = await cleanup_source_versions(db, utterances)
+    return {item.id: (versions[item.id].content if item.id in versions else
+        item.transcript_raw or current_utterance_text(item)).strip() for item in utterances}
 
 
 async def cleanup_source_text(db: AsyncSession, utterance: MemoirVoiceUtterance) -> str:
-    """Re-polish a stable source, never a succession of automatic rewrites."""
-    version = await cleanup_source_version(db, utterance)
-    return (version.content if version else utterance.transcript_raw or current_utterance_text(utterance)).strip()
+    return (await cleanup_source_texts(db, [utterance]))[utterance.id]
 
 
 def current_transcript_version_id(

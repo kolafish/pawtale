@@ -56,7 +56,7 @@ from app.services.memoir.chapter_structure import load_structure_summaries, revi
 from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material
+from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material, interviewer_messages
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -995,7 +995,8 @@ async def grow_story_tree(
     ).all()
     if source_ids is not None:
         project_sources = [item for item in project_sources if item.id in source_ids]
-    lines = await interviewer_lines(db, (item.chat_message_id for item in project_sources))
+    questions = await interviewer_messages(db, (item.chat_message_id for item in project_sources))
+    lines = {key: question.content_text.strip() for key, question in questions.items()}
     deferred.update(progress.deferred)
     for item in project_sources:
         previous = deferred.get(item.id)
@@ -1021,7 +1022,7 @@ async def grow_story_tree(
         if previous and previous.text_hash == text_hash and previous.status == "not_story":
             progress.deferred[answer.id] = previous
             continue
-        story_content = await narration_people.answer_story_content(db, answer.chat_message)
+        story_content = narration_people.cached_answer_story_content(answer.chat_message, questions.get(answer.chat_message_id))
         if story_content is None:
             from app.services.memoir.narrator_profile import schedule_narrator_profile
             await schedule_narrator_profile(db, utterance=answer, require_answer_reading=True)
@@ -1174,12 +1175,13 @@ async def grow_story_tree(
         fresh = await db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == answer.id)
             .with_for_update().options(selectinload(MemoirVoiceUtterance.chat_message))
             .execution_options(populate_existing=True))
-        fresh_lines = await interviewer_lines(db, [fresh.chat_message_id] if fresh else [], lock=True)
+        fresh_questions = await interviewer_messages(db, [fresh.chat_message_id] if fresh else [], lock=True)
+        fresh_lines = {key: question.content_text.strip() for key, question in fresh_questions.items()}
         fresh_sources = await narration_people.answer_sources(db, project_id=job.project_id,
             message_ids=[fresh.chat_message_id] if fresh else [])
         if (fresh is None or not _question_context_matches(linked_question_contexts[answer.id], fresh.chat_message, fresh_lines)
             or fresh_sources.get(fresh.chat_message_id) != person_answers[answer.chat_message_id]
-            or await narration_people.answer_story_content(db, fresh.chat_message) is not True):
+            or narration_people.cached_answer_story_content(fresh.chat_message, fresh_questions.get(fresh.chat_message_id)) is not True):
             if fresh is not None:
                 from app.services.memoir.narrator_profile import schedule_narrator_profile
                 await schedule_narrator_profile(db, utterance=fresh, require_answer_reading=True)

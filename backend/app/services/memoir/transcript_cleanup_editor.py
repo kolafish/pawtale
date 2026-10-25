@@ -29,18 +29,19 @@ from app.services.memoir.project_ai_preferences import (
     select_project_ai_model,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.material_roles import interviewer_lines, is_countable_material
-from app.services.memoir.transcript_projection import cleanup_source_text, current_utterance_text
+from app.services.memoir.material_roles import is_countable_material
+from app.services.memoir.transcript_projection import cleanup_source_texts, current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     TranscriptMutationGuard,
-    claim_transcript_mutation_guard,
+    claim_transcript_mutation_guards,
     transcript_mutation_guard,
 )
 
 
-def _detail_options():
+def _detail_options(*, include_session_history: bool):
     return (
-        selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages),
+        selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages)
+        if include_session_history else selectinload(MemoirVoiceUtterance.voice_session),
         selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.project),
         selectinload(MemoirVoiceUtterance.chat_message).selectinload(MemoirChatMessage.parent_message),
         selectinload(MemoirVoiceUtterance.audio_file),
@@ -54,6 +55,7 @@ async def _load_project_utterances(
     user_id: str,
     utterance_ids: list[str],
     allow_admin: bool = False,
+    include_session_history: bool = False,
 ) -> list[MemoirVoiceUtterance]:
     filters = [
         MemoirVoiceUtterance.id.in_(utterance_ids),
@@ -66,7 +68,7 @@ async def _load_project_utterances(
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(*filters)
-        .options(*_detail_options())
+        .options(*_detail_options(include_session_history=include_session_history))
     )
     utterances_by_id = {utterance.id: utterance for utterance in result.scalars().all()}
     missing_ids = [utterance_id for utterance_id in utterance_ids if utterance_id not in utterances_by_id]
@@ -131,17 +133,15 @@ async def preview_batch_cleanup(
         utterance_ids=req.utterance_ids,
         allow_admin=allow_admin,
     )
-    prepared = []
     for utterance in utterances:
-        source_text = _ensure_cleanup_source(utterance)
-        context = await voice_transcripts.load_voice_transcript_cleanup_context(
-            db,
-            utterance.voice_session,
-            exclude_message_id=utterance.chat_message_id,
-            dialect_glossary=glossary_lines,
-        )
-        baseline = await cleanup_source_text(db, utterance)
-        prepared.append((utterance, source_text, baseline, context, transcript_mutation_guard(utterance, interviewer_line=context.interviewer_line)))
+        _ensure_cleanup_source(utterance)
+    contexts = await voice_transcripts.load_voice_transcript_cleanup_contexts(
+        db, utterances, project=project, dialect_glossary=glossary_lines,
+    )
+    baselines = await cleanup_source_texts(db, utterances)
+    prepared = [(utterance, current_utterance_text(utterance), baselines[utterance.id], contexts[utterance.id],
+                 transcript_mutation_guard(utterance, interviewer_line=contexts[utterance.id].interviewer_line))
+                for utterance in utterances]
 
     # Preview is read-only. Release its database transaction before making one
     # or more provider calls; the returned guards protect the later confirm.
@@ -194,29 +194,19 @@ async def confirm_batch_cleanup(
         user_id=user_id,
         utterance_ids=list(item_by_utterance_id),
         allow_admin=allow_admin,
+        include_session_history=True,
     )
     try:
-        # Acquire all source locks before shared question locks; two disjoint
-        # answer batches can still share a question.
-        await db.execute(select(MemoirVoiceUtterance.id).where(
-            MemoirVoiceUtterance.id.in_([item.id for item in utterances]),
-        ).order_by(MemoirVoiceUtterance.id).with_for_update())
-        await interviewer_lines(db, (item.chat_message_id for item in utterances), lock=True)
-        # Acquire multi-row guards in a stable order so overlapping batch edits
-        # cannot deadlock by presenting the same materials in a different order.
-        for utterance in sorted(utterances, key=lambda item: item.id):
+        for utterance in utterances:
             _ensure_cleanup_source(utterance)
-            item = item_by_utterance_id[utterance.id]
-            claimed = await claim_transcript_mutation_guard(
-                db,
-                utterance=utterance,
-                expected=TranscriptMutationGuard(
-                    source_text_hash=item.source_text_hash,
-                    transcript_version_id=item.source_transcript_version_id,
-                ),
-            )
-            if not claimed:
-                raise HTTPException(status_code=409, detail="讲述内容已更新，请重新生成整理预览")
+        claimed = await claim_transcript_mutation_guards(db, utterances=utterances, expected={
+            utterance.id: TranscriptMutationGuard(
+                source_text_hash=item_by_utterance_id[utterance.id].source_text_hash,
+                transcript_version_id=item_by_utterance_id[utterance.id].source_transcript_version_id,
+            ) for utterance in utterances
+        })
+        if not claimed:
+            raise HTTPException(status_code=409, detail="讲述内容已更新，请重新生成整理预览")
 
         responses = []
         for utterance in utterances:

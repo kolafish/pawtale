@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -44,68 +45,44 @@ def _cleanup_input_hash(text: str, question: str) -> str:
     return semantic_json_signature({"text": text.strip(), "question": question.strip(), "engine": "cleanup_input_v2"})
 
 
-async def claim_transcript_mutation_guard(
-    db: AsyncSession,
-    *,
-    utterance: MemoirVoiceUtterance,
-    expected: TranscriptMutationGuard,
+async def claim_transcript_mutation_guards(
+    db: AsyncSession, *, utterances: Sequence[MemoirVoiceUtterance],
+    expected: Mapping[str, TranscriptMutationGuard],
 ) -> bool:
-    locked_utterance = (
-        await db.execute(
-            select(
-                MemoirVoiceUtterance.transcript_raw,
-                MemoirVoiceUtterance.transcript_edited,
-                MemoirVoiceUtterance.chat_message_id,
-            )
-            .where(MemoirVoiceUtterance.id == utterance.id)
-            .with_for_update()
-        )
-    ).one_or_none()
-    if locked_utterance is None:
+    # All source locks precede shared question locks; disjoint batches may still
+    # share a question. Stable ordering also protects overlapping source batches.
+    locked = {row.id: row for row in (await db.execute(select(
+        MemoirVoiceUtterance.id, MemoirVoiceUtterance.transcript_raw,
+        MemoirVoiceUtterance.transcript_edited, MemoirVoiceUtterance.chat_message_id,
+    ).where(MemoirVoiceUtterance.id.in_([item.id for item in utterances]))
+        .order_by(MemoirVoiceUtterance.id).with_for_update())).all()}
+    if len(locked) != len(utterances) or any(row.chat_message_id is None for row in locked.values()):
         return False
-    locked_text = (locked_utterance.transcript_edited or "").strip() or (
-        locked_utterance.transcript_raw or ""
-    ).strip()
-    if locked_utterance.chat_message_id is None:
-        return False
-    lines = await interviewer_lines(db, [locked_utterance.chat_message_id], lock=True)
-    question = lines.get(locked_utterance.chat_message_id, "")
-    if _cleanup_input_hash(locked_text, question) != expected.source_text_hash:
-        return False
-
-    locked_message = (
-        await db.execute(
-            select(
-                MemoirChatMessage.content_text,
-                MemoirChatMessage.transcript_version_id,
-            )
-            .where(
-                MemoirChatMessage.id == locked_utterance.chat_message_id,
-            )
-            .with_for_update()
-        )
-    ).one_or_none()
-    if locked_message is None:
-        return False
-    matches = (
-        _cleanup_input_hash(locked_message.content_text, question) == expected.source_text_hash
-        and locked_message.transcript_version_id == expected.transcript_version_id
-    )
-    if not matches:
-        return False
-    message = utterance.chat_message
-    if message is None:
-        return False
-    await db.refresh(
-        message,
-        attribute_names=[
-            "content_text",
-            "content_status",
-            "transcript_version_id",
-            "metadata_json",
-        ],
-    )
+    message_ids = [row.chat_message_id for row in locked.values()]
+    lines = await interviewer_lines(db, message_ids, lock=True)
+    # The resolver locked answers with their possible questions. Refresh all
+    # answer content and metadata once, rather than re-locking/refreshing each.
+    messages = {message.id: message for message in await db.scalars(select(MemoirChatMessage).where(
+        MemoirChatMessage.id.in_(message_ids),
+    ).execution_options(populate_existing=True))}
+    for utterance in utterances:
+        row = locked[utterance.id]
+        message = messages.get(row.chat_message_id)
+        guard = expected[utterance.id]
+        question = lines.get(row.chat_message_id, "")
+        locked_text = (row.transcript_edited or "").strip() or (row.transcript_raw or "").strip()
+        if (row.chat_message_id != utterance.chat_message_id or message is None
+            or _cleanup_input_hash(locked_text, question) != guard.source_text_hash
+            or _cleanup_input_hash(message.content_text, question) != guard.source_text_hash
+            or message.transcript_version_id != guard.transcript_version_id):
+            return False
     return True
+
+
+async def claim_transcript_mutation_guard(
+    db: AsyncSession, *, utterance: MemoirVoiceUtterance, expected: TranscriptMutationGuard,
+) -> bool:
+    return await claim_transcript_mutation_guards(db, utterances=[utterance], expected={utterance.id: expected})
 
 
 async def schedule_ready_utterance_background_work(
