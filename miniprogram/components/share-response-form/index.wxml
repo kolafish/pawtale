@@ -4,7 +4,7 @@
   <view wx:if="{{open}}" class="response-card">
     <text class="response-title">我也记得这件事</text>
     <text class="response-hint">回应仅您和作者可见。提交时需要登录，作者确认后才会收为素材。</text>
-    <voice-text-editor value="{{content}}" voice-enabled="{{!voiceCaptureId}}" prepare-voice="{{true}}" voice-start-request="{{voiceStartRequest}}" gateway-url="{{gatewayUrl}}" maxlength="2000" placeholder="写下您记得的细节…" submit-text="送给作者" cancel-text="稍后再写" busy="{{busy}}" bindchange="changeText" bindsubmit="submit" bindcancel="closeForm"
+    <voice-text-editor value="{{content}}" voice-enabled="{{!voiceCaptureId}}" prepare-voice="{{true}}" voice-start-request="{{voiceStartRequest}}" gateway-url="{{gatewayUrl}}" maxlength="2000" placeholder="写下您记得的细节…" submit-text="送给作者" cancel-text="稍后再写" disabled="{{!active}}" busy="{{busy}}" bindchange="changeText" bindsubmit="submit" bindcancel="closeForm"
       bindrequestvoice="requestVoice" bindvoicesource="voiceSource" />
     <text wx:if="{{voiceCaptureId}}" class="response-hint">原音已保存。请核对文字，确认后发送给作者。</text>
     <button wx:if="{{voiceCaptureId}}" class="ui-button ui-share-more" bindtap="replaceVoice">更换原音（保留文字）</button>

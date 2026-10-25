@@ -15,7 +15,65 @@ test('shared reading and video keep an unsent response mounted while content rel
     assert.doesNotMatch(host[1], /loading|error|video\b/, `${page} does not unmount a draft during reload`);
     assert.match(host[2], /loading/);
     assert.match(host[2], /error/);
+    assert.match(wxml.slice(host.index), /<share-response-form\b[^>]*active="\{\{[^\"]*loading[^\"]*error[^\"]*\}\}"/);
   }
+  const form = fs.readFileSync(path.join(__dirname, '../components/share-response-form/index.wxml'), 'utf8');
+  assert.match(form, /<voice-text-editor\b[^>]*disabled="\{\{!active\}\}"/);
+});
+
+test('hiding a response cancels a pending voice ticket without losing its draft', async () => {
+  let finishTicket;
+  mockModule('../services/share-responses.ts', {
+    startShareResponseVoice: () => new Promise(resolve => { finishTicket = resolve; }),
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { readingToken: 'story-token' });
+  ctx.openForm();
+  ctx.changeText({ detail: { value: '我记得院子里的树。' } });
+  const pending = ctx.requestVoice();
+  ctx.properties.active = false;
+  component.observers.active.call(ctx, false);
+  finishTicket({ gatewayUrl: 'wss://example.test/voice' });
+  await pending;
+  assert.equal(ctx.data.content, '我记得院子里的树。');
+  assert.equal(ctx.data.open, true);
+  assert.equal(ctx.data.busy, false);
+  assert.equal(ctx.data.gatewayUrl, '');
+  assert.equal(ctx.data.voiceStartRequest, 0);
+  ctx.properties.active = true;
+  component.observers.active.call(ctx, true);
+  const retry = ctx.requestVoice();
+  finishTicket({ gatewayUrl: 'wss://example.test/voice' });
+  await retry;
+  assert.equal(ctx.data.voiceStartRequest, 1);
+  ctx.voiceSource({ detail: { captureId: '11111111-1111-4111-8111-111111111111' } });
+  ctx.properties.active = false;
+  component.observers.active.call(ctx, false);
+  assert.equal(ctx.data.content, '我记得院子里的树。');
+  assert.equal(ctx.data.voiceCaptureId, '11111111-1111-4111-8111-111111111111');
+});
+
+test('hiding a response preserves the idempotency key for a retry', async () => {
+  const calls = [];
+  mockModule('../services/share-responses.ts', {
+    submitShareResponse: async (...args) => {
+      calls.push(args);
+      if (calls.length === 1) throw new Error('网络中断');
+      return { id: 'response' };
+    },
+  });
+  const { component } = loadComponentModule('../components/share-response-form/index.ts');
+  const ctx = componentContext(component, { videoCode: 'video-code' });
+  ctx.openForm();
+  ctx.changeText({ detail: { value: '我记得这段往事。' } });
+  await ctx.submit();
+  ctx.properties.active = false;
+  component.observers.active.call(ctx, false);
+  ctx.properties.active = true;
+  component.observers.active.call(ctx, true);
+  await ctx.submit();
+  assert.equal(calls[0][2], calls[1][2]);
+  assert.equal(ctx.data.sent, true);
 });
 
 test('response preserves text through login and network retry with the same submission id', async () => {

@@ -81,6 +81,10 @@ Component({
       if (newRequest && this.properties.prepareVoice) void this.startVoice(false);
     },
     "automaticVoiceCommand,gatewayUrl,disabled,busy"() {
+      if (this.properties.disabled) {
+        this.cancelVoice();
+        return;
+      }
       this.tryAutoStart();
     },
   },

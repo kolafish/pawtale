@@ -181,7 +181,7 @@
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview && !readerDemo}}" />
   </block>
   <view wx:if="{{readerShared && !sharePreview && !readerDemo}}" hidden="{{loading || error}}">
-    <share-response-form id="shared-response" reading-token="{{responseToken}}" bindunavailable="onResponseUnavailable" />
+    <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error}}" bindunavailable="onResponseUnavailable" />
   </view>
 
   <block wx:if="{{!loading && !error}}">
