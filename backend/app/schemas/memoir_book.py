@@ -264,6 +264,7 @@ class MemoirBookChapterDraftRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_version_id: str = Field(min_length=1, max_length=36)
+    expected_input_signature: str | None = Field(default=None, min_length=64, max_length=64)
     sections: list[MemoirBookChapterDraftSectionRevision] = Field(
         min_length=1,
         max_length=100,

@@ -2761,6 +2761,12 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
         )
 
     assert (await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")).status_code == 200
+    # An explicitly empty cover quote must survive a body-only revision.
+    baseline = await test_db.scalar(select(MemoirBookOutputVersion).where(
+        MemoirBookOutputVersion.project_id == project_id))
+    baseline.manuscript_json = {**baseline.manuscript_json, "render_settings": {
+        **baseline.manuscript_json["render_settings"], "back_cover_quote": ""}}
+    await test_db.commit()
     generated = await _run_book_review(
         client,
         test_db,
@@ -3013,6 +3019,8 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     )
     assert proposal.json()["can_apply"] is True
     assert "老同学" in (proposal.json()["after"]["manuscript"]["chapters"][0]["content"])
+    assert proposal.json()["after"]["manuscript"]["render_settings"]["back_cover_quote"] == ""
+    assert not any(item["field"] == "back_cover_quote" for item in proposal.json()["comparison"]["metadata_changes"])
 
     second_feedback = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/"
@@ -3103,6 +3111,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert len(versions) == 2
     assert "老同学" in versions[1].content
     assert versions[1].created_by == "ai"
+    assert versions[1].manuscript_json["render_settings"]["back_cover_quote"] == ""
     assert [item["chapter_id"] for item in versions[1].chapter_snapshot_json] == [chapter.id for chapter in chapters]
     assert versions[1].chapter_snapshot_json[1:] == versions[0].chapter_snapshot_json[1:]
     plan_prompt = next(

@@ -1410,6 +1410,7 @@ async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, t
         version.material_snapshot_json = [*version.material_snapshot_json, None, {"unrelated": True}]
     loaded = await chapter_generation._with_previous_material_text(test_db, changed, version)
     assert loaded.materials[0].previous_text == (None if history in {"mismatch", "future"} else original)
+    assert loaded.materials[0].previous_interviewer_line == context.materials[0].interviewer_line
     assert loaded.sections[0].materials[0] == loaded.materials[0]
     assert loaded.materials[0].text.endswith("后来我学会了补胎。")
 
@@ -1458,3 +1459,151 @@ async def test_changed_interview_question_invalidates_generated_body(client, tes
     assert before.input_signature != after.input_signature
     assert chapter_generation.chapter_draft_generation_plan(after, version).target_context.sections
     assert source.id in chapter_generation._changed_material_ids(after, version)
+
+
+@pytest.mark.parametrize("new_question", ["母亲当过老师吗？", ""])
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_question_change_preserves_manual_body_and_prior_evidence_until_review(client, test_db, new_question, legacy):
+    from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    source = await test_db.get(MemoirVoiceUtterance, materials[0]["utterance_id"])
+    answer = await test_db.get(MemoirChatMessage, source.chat_message_id)
+    transcript = await test_db.get(MemoirTranscriptVersion, materials[0]["transcript_version_id"])
+    transcript.content = "没有。"
+    question = MemoirChatMessage(project_id=project_id, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="父亲当过老师吗？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.commit()
+    fake = FakeChapterAI(section_material_id=source.id, chapter_section_id=section["id"],
+        chapter_material_id=source.id, draft_material_ids=[source.id])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
+        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+    version.section_snapshot_json = [{**item, **({} if legacy else {"user_edited": True}), "content": "父亲没有当过老师。"}
+        for item in version.section_snapshot_json]
+    if legacy:
+        version.created_by = "user"
+    version.content = "父亲没有当过老师。"
+    await test_db.commit()
+    question.content_text = new_question
+    await test_db.commit()
+    prior_snapshot = list(version.material_snapshot_json)
+    prior_signature, prior_version_id = version.input_signature, version.id
+    request_count = len(fake.prompts)
+    with pytest.raises(HTTPException) as error:
+        await chapter_generation.generate_and_save_chapter_draft(test_db,
+            project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+    assert error.value.status_code == 409
+    assert "人工正文尚待核对" in error.value.detail
+    assert len(fake.prompts) == request_count
+    latest = await chapter_generation.latest_chapter_draft_version(test_db,
+        project_id=project_id, chapter_id=chapter.id)
+    assert latest.id == prior_version_id and latest.input_signature == prior_signature
+    assert latest.material_snapshot_json == prior_snapshot
+    assert latest.content == "父亲没有当过老师。"
+    context = await chapter_generation.load_chapter_generation_context(test_db,
+        project_id=project_id, chapter_id=chapter.id)
+    assert context.input_signature != latest.input_signature
+    if not legacy:
+        # Explicitly requesting a fresh chapter remains an available recovery.
+        await chapter_generation.generate_and_save_chapter_draft(test_db,
+            project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake,
+            force_refresh=True)
+        assert len(fake.prompts) > request_count
+        return
+    # Editing the affected section acknowledges the changed question without
+    # discarding the user's other prose or accepting unrelated source changes.
+    context = await chapter_generation.load_chapter_generation_context(test_db,
+        project_id=project_id, chapter_id=chapter.id)
+    assert chapter_generation.chapter_draft_question_changes(context, latest) == {section["id"]}
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/revise",
+        json={"expected_version_id": latest.id, "expected_input_signature": context.input_signature, "sections": [{"section_id": item["section_id"],
+            "content": "母亲没有当过老师。这一点我已核对。"} for item in latest.section_snapshot_json]})
+    assert response.status_code == 200, response.text
+    revised = await chapter_generation.latest_chapter_draft_version(test_db,
+        project_id=project_id, chapter_id=chapter.id)
+    assert revised.content == "母亲没有当过老师。这一点我已核对。"
+    assert chapter_generation.chapter_draft_is_current(context, revised)
+    assert revised.material_snapshot_json[0].get("interviewer_line", "") == new_question
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_manual_review_acknowledges_only_the_edited_sections_question(client, test_db, legacy):
+    from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
+    project_id, chapter, first, materials = await _chapter(client, test_db)
+    second = MemoirSection(project_id=project_id, chapter_id=chapter.id,
+        title="母亲往事", section_type="event", sort_order=1)
+    test_db.add(second)
+    await test_db.flush()
+    membership = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == materials[1]["utterance_id"]))
+    membership.section_id = second.id
+    questions = []
+    for material in materials[:2]:
+        source = await test_db.get(MemoirVoiceUtterance, material["utterance_id"])
+        answer = await test_db.get(MemoirChatMessage, source.chat_message_id)
+        question = MemoirChatMessage(project_id=project_id, voice_session_id=answer.voice_session_id,
+            role="assistant", content_text="父亲当过老师吗？", content_status="final", turn_index=answer.turn_index - 1)
+        test_db.add(question)
+        await test_db.flush()
+        answer.parent_message_id = question.id
+        questions.append(question)
+    await test_db.commit()
+    class ShortSectionAI(FakeChapterAI):
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            payload = json.loads(await super()._call_llm(system_prompt, user_prompt, **kwargs))
+            payload["content"] = "原有正文：" + next(line for line in user_prompt.splitlines() if line.startswith("小节标题:"))
+            return json.dumps(payload, ensure_ascii=False)
+    fake = ShortSectionAI(section_material_id=materials[0]["utterance_id"],
+        chapter_section_id=first["id"], chapter_material_id=materials[0]["utterance_id"],
+        draft_material_ids=[material["utterance_id"] for material in materials])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
+        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+    if legacy:
+        version.created_by = "user"
+    else:
+        version.section_snapshot_json = [{**item, "user_edited": True} for item in version.section_snapshot_json]
+    stale_signature = version.input_signature
+    for question in questions:
+        question.content_text = "母亲当过老师吗？"
+    await test_db.commit()
+    for index, section_id in enumerate([first["id"], second.id]):
+        context = await chapter_generation.load_chapter_generation_context(test_db,
+            project_id=project_id, chapter_id=chapter.id)
+        latest = await chapter_generation.latest_chapter_draft_version(test_db,
+            project_id=project_id, chapter_id=chapter.id)
+        if index == 0:
+            for signature in [None, stale_signature]:
+                response = await client.post(
+                    f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/revise",
+                    json={"expected_version_id": latest.id, "expected_input_signature": signature,
+                        "sections": [{"section_id": item["section_id"], "content": item["content"] + "。"}
+                            for item in latest.section_snapshot_json]})
+                assert response.status_code == 409, response.text
+        response = await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/revise",
+            json={"expected_version_id": latest.id, "expected_input_signature": context.input_signature, "sections": [{"section_id": item["section_id"],
+                "content": "已核对本节关于母亲的讲述。" if item["section_id"] == section_id else item["content"]}
+                for item in latest.section_snapshot_json]})
+        assert response.status_code == 200, response.text
+        latest = await chapter_generation.latest_chapter_draft_version(test_db,
+            project_id=project_id, chapter_id=chapter.id)
+        context = await chapter_generation.load_chapter_generation_context(test_db,
+            project_id=project_id, chapter_id=chapter.id)
+        assert chapter_generation.chapter_draft_is_current(context, latest) is bool(index)
+        if index == 0:
+            assert chapter_generation.chapter_draft_question_changes(context, latest) == {second.id}
+            assert all(item.get("user_edited") is True for item in latest.section_snapshot_json)
+            request_count = len(fake.prompts)
+            with pytest.raises(HTTPException) as error:
+                await chapter_generation.generate_and_save_chapter_draft(test_db,
+                    project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake, automatic=True)
+            assert error.value.status_code == 409
+            assert len(fake.prompts) == request_count
+            # An unrelated text update must not be accepted as question-only.
+            changed = replace(context.materials[0], text="本次另外改了素材事实。")
+            by_id = {item.material_id: item for item in (*context.materials, changed)}
+            altered = replace(context, materials=tuple(by_id.values()), sections=tuple(
+                replace(section, materials=tuple(by_id[item.material_id] for item in section.materials))
+                for section in context.sections))
+            assert chapter_generation.chapter_draft_question_changes(altered, latest) == set()

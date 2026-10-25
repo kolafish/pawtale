@@ -218,6 +218,8 @@ export const CLOSED_DRAFT_SECTION_EDITOR = {
   editingMode: "" as DraftSectionEditingMode,
   editingSectionId: "",
   editingSectionContent: "",
+  editingVersionId: "",
+  editingInputSignature: "",
 };
 
 type WxWithPageScrollTo = typeof wx & {
@@ -291,4 +293,6 @@ export interface ChapterWorkspacePageData extends ReadingShareData {
   editingMode: DraftSectionEditingMode;
   editingSectionId: string;
   editingSectionContent: string;
+  editingVersionId: string;
+  editingInputSignature: string;
 }

@@ -313,6 +313,9 @@ def effective_book_metadata(
     if narrator_name:
         metadata["narrator_name"] = narrator_name
     metadata.update({key: value for key, value in stored_manuscript_metadata(stored).items() if value})
+    settings = stored.get("render_settings") if isinstance(stored, dict) else None
+    if isinstance(settings, dict) and isinstance(settings.get("back_cover_quote"), str):
+        metadata["back_cover_quote"] = safe_str(settings["back_cover_quote"])
     metadata.update(patch or {})
     metadata["prepared_by"] = metadata.get("prepared_by") or "家人整理"
     if include_empty:

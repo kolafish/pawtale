@@ -94,6 +94,7 @@ class ChapterMaterialInput:
     interviewer_line: str = ""
     edits: tuple[TranscriptEdit, ...] = ()
     previous_text: str | None = None
+    previous_interviewer_line: str | None = None
 
 
 @dataclass(frozen=True)
@@ -531,7 +532,8 @@ async def _with_previous_material_text(
         )
         if text is not None and semantic_text_hash(text) != prior.get("text_hash"):
             text = None
-        materials.append(replace(material, previous_text=text))
+        materials.append(replace(material, previous_text=text,
+            previous_interviewer_line=prior.get("interviewer_line", "") if prior else None))
     by_id = {material.material_id: material for material in materials}
     return replace(context, materials=tuple(materials), sections=tuple(
         replace(section, materials=tuple(by_id[item.material_id] for item in section.materials))
@@ -657,6 +659,28 @@ def chapter_draft_is_current(
         not plan.target_context.sections
         and len(plan.preserved_sections) == len(context.sections)
     )
+
+
+def chapter_draft_question_changes(
+    context: ChapterGenerationContext, latest: MemoirBookChapterDraftVersion,
+) -> set[str]:
+    """Identify question-only changes that a manual section edit can acknowledge."""
+    saved = {item["material_id"]: item for item in latest.material_snapshot_json or []
+        if isinstance(item, dict) and item.get("material_id")}
+    if set(saved) != {item.material_id for item in context.materials}:
+        return set()
+    changed = {item.section_id for item in context.materials
+        if item.interviewer_line != saved[item.material_id].get("interviewer_line", "")}
+    if not changed:
+        return set()
+    materials = tuple(replace(item, interviewer_line=saved[item.material_id].get("interviewer_line", ""))
+        for item in context.materials)
+    by_id = {item.material_id: item for item in materials}
+    prior = replace(context, materials=materials, sections=tuple(
+        replace(section, materials=tuple(by_id[item.material_id] for item in section.materials))
+        for section in context.sections
+    ))
+    return changed if chapter_draft_is_current(prior, latest) else set()
 
 
 def _render_policy_tag(context: ChapterGenerationContext) -> str:
@@ -1789,6 +1813,19 @@ async def generate_and_save_chapter_draft(
         force_refresh=force_refresh,
         refresh_unedited=style_refresh,
     )
+    # A manual edit does not identify which facts the user verified. Do not
+    # consume changed question evidence until the user reviews that body.
+    manual_section_ids = set(plan.protected_target_section_ids)
+    if not force_refresh and any(
+        material.section_id in manual_section_ids
+        and material.previous_interviewer_line is not None
+        and material.previous_interviewer_line != material.interviewer_line
+        for material in before.materials
+    ):
+        raise HTTPException(status_code=409, detail=(
+            "配对提问已变化，人工正文尚待核对，未自动改写。"
+            "请在小节正文中核对相关问答并保存修订；也可确认重新生成整章。"
+        ))
     changed_material_ids = _changed_material_ids(before, latest_before)
     continuity = await load_section_continuity(db, context=before)
     # Generation uses immutable context snapshots. Release all read locks and

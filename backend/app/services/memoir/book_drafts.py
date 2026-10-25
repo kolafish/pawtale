@@ -248,7 +248,15 @@ async def revise_chapter_draft(
     )
     if latest.id != req.expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
-    if not chapter_generation.chapter_draft_is_current(context, latest):
+    if req.expected_input_signature is not None and req.expected_input_signature != context.input_signature:
+        raise HTTPException(status_code=409, detail="配对提问或素材已变化，请刷新核对后再保存")
+    current = chapter_generation.chapter_draft_is_current(context, latest)
+    question_changes = chapter_generation.chapter_draft_question_changes(context, latest) if not current else set()
+    edited_section_ids = {revision.section_id for revision in req.sections
+        if any(isinstance(item, dict) and item.get("section_id") == revision.section_id
+            and item.get("content") != revision.content for item in latest.section_snapshot_json)}
+    reviewed_questions = question_changes & edited_section_ids
+    if not current and not (reviewed_questions and req.expected_input_signature == context.input_signature):
         raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
     latest_sections = list(latest.section_snapshot_json)
     if not latest_sections:
@@ -273,24 +281,33 @@ async def revise_chapter_draft(
             detail="本章小节已经变化，请刷新后再修改",
         )
     revised_sections: list[dict] = []
+    legacy_user_edit = latest.created_by == MemoirCreatedBy.USER.value and not any(
+        isinstance(item, dict) and item.get("user_edited") is True for item in latest_sections)
     for previous, revision in zip(
         latest_sections,
         req.sections,
         strict=True,
     ):
         revised = dict(previous)
+        if legacy_user_edit:
+            revised["user_edited"] = True
         if revision.content != previous.get("content"):
             # A user version copies every section. Record the actual edited
             # section so later automatic updates can retain the other prose.
             revised["user_edited"] = True
             revised["user_edited_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         revised["content"] = revision.content
+        if revision.section_id in reviewed_questions:
+            section = next(item for item in context.sections if item.section_id == revision.section_id)
+            revised["input_signature"] = chapter_generation._section_input_signature(context, section)
         revised_sections.append(revised)
     content = "\n\n".join(
         section["content"] for section in revised_sections
     )
     if revised_sections == latest_sections:
         return _draft_response(draft)
+    current_materials = {item["material_id"]: item for item in chapter_generation._snapshot(
+        context, used_material_ids=set(latest.used_material_ids_json))} if reviewed_questions else {}
     current_version = MemoirBookChapterDraftVersion(
         draft_id=draft.id,
         project_id=project_id,
@@ -301,9 +318,14 @@ async def revise_chapter_draft(
         model=None,
         prompt_snapshot=latest.prompt_snapshot,
         feedback="用户按小节修改正文",
-        input_signature=context.input_signature,
+        input_signature=(context.input_signature
+            if question_changes <= reviewed_questions else latest.input_signature),
         used_material_ids_json=list(latest.used_material_ids_json),
-        material_snapshot_json=list(latest.material_snapshot_json),
+        material_snapshot_json=[
+            current_materials[saved["material_id"]]
+            if isinstance(saved, dict) and saved.get("section_id") in reviewed_questions else saved
+            for saved in latest.material_snapshot_json
+        ],
         section_snapshot_json=revised_sections,
     )
     db.add(current_version)
