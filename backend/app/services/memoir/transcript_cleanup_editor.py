@@ -24,12 +24,13 @@ from app.services.memoir.dialect_glossary import (
     save_glossary_entries,
 )
 from app.services.memoir.project_ai_preferences import (
+    project_transcript_polish_level,
     resolve_project_ai_model,
     select_project_ai_model,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_roles import is_countable_material
-from app.services.memoir.transcript_projection import current_utterance_text
+from app.services.memoir.transcript_projection import cleanup_source_text, current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     TranscriptMutationGuard,
     claim_transcript_mutation_guard,
@@ -120,6 +121,7 @@ async def preview_batch_cleanup(
 ) -> MemoirBatchTranscriptCleanupPreviewResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     selected_ai_model = resolve_project_ai_model(project, req.ai_model)
+    polish_level = project_transcript_polish_level(project)
     glossary_entries = _glossary_entries(project)
     glossary_lines = _glossary_context_lines(glossary_entries)
     utterances = await _load_project_utterances(
@@ -138,17 +140,19 @@ async def preview_batch_cleanup(
             exclude_message_id=utterance.chat_message_id,
             dialect_glossary=glossary_lines,
         )
-        prepared.append((utterance, source_text, context, transcript_mutation_guard(utterance)))
+        baseline = await cleanup_source_text(db, utterance)
+        prepared.append((utterance, source_text, baseline, context, transcript_mutation_guard(utterance)))
 
     # Preview is read-only. Release its database transaction before making one
     # or more provider calls; the returned guards protect the later confirm.
     await db.commit()
     items: list[MemoirBatchTranscriptCleanupPreviewItem] = []
-    for utterance, source_text, context, mutation_guard in prepared:
+    for utterance, source_text, baseline, context, mutation_guard in prepared:
         cleaned = await voice_transcripts.generate_cleaned_transcript_text(
-            source_text,
+            baseline,
             ai_model=selected_ai_model,
             context=context,
+            transcript_polish_level=polish_level,
             strict=True,
         )
         items.append(

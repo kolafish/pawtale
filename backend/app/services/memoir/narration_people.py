@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 READING_KEY = "people_reading"
 SYSTEM_PROMPT = "你帮一本口述回忆录记住书里出现的人，只记讲述者亲口说出的内容。"
-_FIELDS = ("call", "name", "relation", "note", "unclear")
+_FIELDS = ("call", "name", "relation", "note")
 _PRONOUNS = {"他", "她", "它", "ta", "TA"}
 # Set on a 小余 question offered a person question, and dropped again if a check finds it asked something else;
 # each person is asked once per book, at most twice per session.
@@ -53,7 +53,6 @@ class _PersonOutput(BaseModel):
     name: str | None = None
     relation: str | None = None
     note: str | None = None
-    unclear: str | None = None
 
 
 class _ReadingOutput(BaseModel):
@@ -84,7 +83,6 @@ class Person:
     name: str = ""
     relation: str = ""
     note: str = ""
-    unclear: str = ""
     message_ids: list[str] = field(default_factory=list)
     last_seen: int = 0
 
@@ -345,20 +343,17 @@ def build_people_prompt(*, people: list[Person], narrator: str, previous_line: s
         "读讲述者这一段，只记他亲口说出的；小余说的、讲述者没接的话不算：\n"
         "- 这段讲到了哪些具体的人。讲述者本人（包括他介绍自己的称呼和名字）和小余不算；宠物和物件不算；"
         "“同学们”“他们”这样的一群人不算，“爷爷奶奶”这样合在一起说的，分成两个人记。"
-        "讲述者只说“他”“她”时，按上下文归到他正在讲的那个人\n"
-        "- 已经记下的人就写他的编号。爸爸、妈妈、爷爷、奶奶、外公、外婆、儿子这样的亲人，讲述者一般只有一位，"
-        "同一个称呼就是已经记下的那位，除非他说明是另一位。别的人确定是同一个才写编号，拿不准就当新人物："
-        "分开记最多称呼不统一，并错人会把两个人的事写到一起\n"
+        "只说“他”“她”时，仅在上下文指向唯一时归到已有的人；指向不明时不猜身份\n"
+        "- 只有姓名、关系和事件上下文能唯一确认同一人时才用已有编号；亲属称呼不保证唯一，不能据此合并。"
+        "不能确定同一人的具体人物用 new，不给含糊的代词补姓名、排行或关系；明确是同一人才合并\n"
         "- 讲述者说明两个称呼是同一个人时，在其中一条的 same_as 写另一个人的编号\n"
         "- 每个人只按这段填：这段说到的都填上，已经记下的也照填；这段没说到的填 null，不从已经记下的人那里抄。"
         "call 讲述者在这段里怎么叫他（只用“他”“她”指代的填“他”或“她”），name 名字，"
         "relation 和讲述者的关系（用他自己的说法），note 一句话说他在这段里是谁、做了什么（30 字以内）\n"
-        "- unclear：如果某一个具体的人有一件事不问清楚，读者就看不懂他是谁，而且讲述者一定知道答案，"
-        "写成一句小余能直接问讲述者的话，用称呼不用编号；大多数段落没有\n\n"
         f"{content_rule}"
         "只返回 JSON：\n"
         + output_prefix
-        + '"people":[{"ref":"P1 或 new","same_as":null,"call":null,"name":null,"relation":null,"note":null,"unclear":null}]}'
+        + '"people":[{"ref":"P1 或 new","same_as":null,"call":null,"name":null,"relation":null,"note":null}]}'
     )
 
 

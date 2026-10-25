@@ -11,7 +11,6 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
 )
 from app.domain.projects.types import ProjectType
@@ -476,33 +475,28 @@ async def _reprocess_offline_asr_utterance(
             asr_results=tuple(asr_results),
             question_context=question_context,
             original_raw=baseline_raw,
-            original_edited=baseline_edited,
             narrator_origin=narrator_origin,
             dialect_glossary=dialect_glossary,
         ),
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )
-    corrected_text = verified.text
-    corrected_provider = verified.provider
-    polish_provider: str | None = None
-    if polish_level != MemoirTranscriptPolishLevel.LOW:
-        polished = await generate_cleaned_transcript_text(
-            verified.text,
-            ai_model=selected_ai_model,
-            ai_client=ai_client,
-            context=MemoirTranscriptCleanupContext(
-                scene="offline_multi_asr",
-                dialect_glossary=tuple(
-                    f"{entry.source} => {entry.target}" for entry in dialect_glossary
-                ),
-                recent_assistant_messages=(question_context,) if question_context else (),
+    polished = await generate_cleaned_transcript_text(
+        verified.text,
+        ai_model=selected_ai_model,
+        ai_client=ai_client,
+        context=MemoirTranscriptCleanupContext(
+            scene="offline_multi_asr",
+            dialect_glossary=tuple(
+                f"{entry.source} => {entry.target}" for entry in dialect_glossary
             ),
-            transcript_polish_level=polish_level,
-        )
-        corrected_text = polished.content
-        corrected_provider = polished.provider or verified.provider
-        polish_provider = polished.provider
+            recent_assistant_messages=(question_context,) if question_context else (),
+        ),
+        transcript_polish_level=polish_level,
+    )
+    corrected_text = polished.content
+    corrected_provider = polished.provider or verified.provider
+    polish_provider = polished.provider
     db.expunge_all()
     utterance = await load_reprocess_utterance(db, utterance_id)
     if utterance is None:

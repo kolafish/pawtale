@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from sqlalchemy import select
 
 from app.services.ai_base import AITextServiceBase
@@ -176,11 +178,12 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
     ) is None
 
 
-async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db):
+@pytest.mark.parametrize("level", ["low", "medium", "high"])
+async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db, level):
     project, voice_session = await _create_project(test_db)
     project.metadata_json = {
         **(project.metadata_json or {}),
-        "transcript_polish_level": "high",
+        "transcript_polish_level": level,
     }
     project_id = project.id
     audio_file = await _add_audio(test_db)
@@ -255,7 +258,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert recognition_metadata["dialect_label"] == "四川话"
     assert recognition_metadata["dialect_enhancement_enabled"] is True
     assert recognition_metadata["providers"] == ["volc", "stepfun"]
-    assert recognition_metadata["transcript_polish_level"] == "high"
+    assert recognition_metadata["transcript_polish_level"] == level
     assert recognition_metadata["polish_provider"] == "fake-ai"
     assert refreshed_message.content_text == "爷爷退休以后仍在为公司奔波。"
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
@@ -263,7 +266,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert "四川及重庆方言常见词" in fake_ai.calls[0]["user_prompt"]
     assert "新凡 => 新繁" in fake_ai.calls[0]["user_prompt"]
     assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
-    assert "重组句式与表达层次" in fake_ai.calls[1]["user_prompt"]
+    assert f"“{level}”" in fake_ai.calls[1]["user_prompt"]
     assert "新凡 => 新繁" in fake_ai.calls[1]["user_prompt"]
 
     versions = (

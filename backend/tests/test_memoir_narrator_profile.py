@@ -789,7 +789,6 @@ async def test_a_reply_counts_as_an_ask_only_when_the_check_says_it_asks_for_the
     assert await narrator_profile.asked_profile_field(
         ("narrator_name", "narrator_age", "narrator_origin"), "王阿姨，您今年多少岁了？", ai_model=None,
     ) == "narrator_age"
-    assert "他本人现在的年纪，或者哪年出生" in fake_ai.prompts[-1]
     fake_ai.payload = {"field": None}
     assert await narrator_profile.asked_profile_field(("narrator_age",), "您是哪年参加工作的？", ai_model=None) is None
 

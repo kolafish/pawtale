@@ -23,7 +23,6 @@ class MultiASRVerificationRequest:
     asr_results: tuple[OfflineASRResult, ...]
     question_context: str = ""
     original_raw: str = ""
-    original_edited: str = ""
     narrator_origin: str = ""
     dialect_glossary: tuple[OfflineASRGlossaryEntry, ...] = ()
 
@@ -47,18 +46,19 @@ def _asr_results_block(results: tuple[OfflineASRResult, ...]) -> str:
 
 def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) -> str:
     original_raw = request.original_raw.strip() or "无"
-    original_edited = request.original_edited.strip() or "无"
     question = request.question_context.strip() or "无"
     origin = request.narrator_origin.strip()
     origin_description = f"来自{origin}，可能带当地口音" if origin else "可能带地方口音"
     dialect_guidance = dialect_verification_guidance(resolve_memoir_dialect_profile(origin))
     dialect_glossary = _dialect_glossary_block(request.dialect_glossary)
-    return f"""下面是一位老年人的中文口述录音转写结果。说话人{origin_description}，语速慢、口头语多，可能夹杂家人插话和现场噪音。
+    return f"""下面是同一段中文口述的多份识别文本。说话人{origin_description}。
 
-请综合多个 ASR 模型结果，对这段口述做忠于原音频的校对。
+你收到的是文本，未收到音频。请比较识别结果，校正有充分文本依据的识别错误。
 
 要求：
-- 只根据现有 ASR 文本互相印证，修正方言、口音、同音词、断句和明显误识别；无法确认时保留更可信的原表达。
+- 专名优先参考用户词表，并与识别文本核对；词表不证明人物做过何事。多路一致只是识别线索，不是事实保证。
+- 姓名、数字、时间、亲属关系存在分歧且无法消解时，保留原识别中的说法和疑义；原识别为空时保留第一路的疑义，不拼凑一个更流畅的答案。
+- 问题仅用于理解回答，未经讲述者确认的设定不能写入。保留否定、转述、情绪强度和模糊记忆；不将采访者或家人的话变成讲述者亲历。
 {dialect_guidance}
 - 如果某一路 ASR 出现明显无关英文、广告词、歌名或乱码，要结合其他结果判断，不要照抄。
 - 去掉口头填充词、说话磕绊、赘词和没有信息增量的重复，但不要删掉有意义的细节。
@@ -71,9 +71,6 @@ def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) ->
 
 当前系统里原有实时 ASR：
 {original_raw}
-
-当前系统里原有自动整理：
-{original_edited}
 
 项目方言与专名词表：
 {dialect_glossary}

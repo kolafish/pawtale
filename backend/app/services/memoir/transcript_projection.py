@@ -35,6 +35,15 @@ def current_utterance_text_and_source(
     return (utterance.transcript_raw or "").strip(), "raw"
 
 
+async def cleanup_source_text(db: AsyncSession, utterance: MemoirVoiceUtterance) -> str:
+    """Re-polish a stable source, never a succession of automatic rewrites."""
+    edited = await db.scalar(select(MemoirTranscriptVersion.content).where(
+        MemoirTranscriptVersion.source_artifact_id == utterance.id,
+        MemoirTranscriptVersion.created_by == MemoirCreatedBy.USER.value,
+    ).order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc()).limit(1))
+    return (edited or utterance.transcript_raw or current_utterance_text(utterance)).strip()
+
+
 def current_transcript_version_id(
     utterance: MemoirVoiceUtterance,
 ) -> str | None:

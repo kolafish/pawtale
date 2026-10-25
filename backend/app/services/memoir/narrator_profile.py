@@ -74,7 +74,7 @@ _SKIP_FIELDS = {
 }
 _ASK_TOPICS = {
     "narrator_name": "他本人怎么称呼、叫什么名字",
-    "narrator_age": "他本人现在的年纪，或者哪年出生",
+    "narrator_age": "他本人现在的周岁，不从出生年份或虚岁推算",
     "narrator_origin": "他本人的老家、籍贯或是哪里人",
     "narrator_gender": "他本人是男是女，比如该叫他叔叔还是阿姨",
 }
@@ -551,14 +551,14 @@ def _known_profile(profile: dict, *, excluding_utterance_id: str) -> str:
 def build_profile_prompt(*, previous_line: str, segment: str, known: str, today: date) -> str:
     previous = f"AI：{previous_line}\n" if previous_line else ""
     return (
-        f"今年是 {today.year} 年。下面是回忆录访谈里的一段：“AI”是访谈主持人，“叙述者”是讲述者本人。\n"
+        f"今天是 {today.isoformat()}。下面是回忆录访谈里的一段：“AI”是访谈主持人，“叙述者”是讲述者本人。\n"
         f"已经记下的资料：{known or '还没有'}\n\n"
         f"{previous}叙述者：{segment}\n\n"
         "只看叙述者这一段，记下这一段支持的本人资料，包括再次确认的资料，或者明确纠正已经记下的资料：\n"
         "- name：他希望怎么被称呼；说了全名就用全名，否则用他说的称呼，比如“老王”。"
         "回答“该叫叔叔还是阿姨”这类问题，只是在说性别，name 填 null\n"
         "- gender：male 或 female；从用户讲述中提取性别，不要猜。\n"
-        "- age：周岁；他说的是出生年份就按今年算\n"
+        "- age：只填明确说出的当前周岁；只有出生年份、虚岁或大约年龄时填 null，不推算确定年龄，也不把往事中的年龄当成现在年龄\n"
         "- origin：本产品记录的是家乡，不要求他明确说出“老家”或“籍贯”二字。"
         "老家、籍贯、本人小时候住的地方或长大的地方都算。还不知道家乡时，"
         "他说“我小时候住在X”或“我在X长大”，origin 必须填写地名 X，不能因为没说籍贯而填 null，"

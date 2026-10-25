@@ -1,3 +1,5 @@
+import pytest
+
 from sqlalchemy import select
 
 from app.config import DEFAULT_AI_TEXT_MODEL
@@ -263,3 +265,57 @@ async def test_memoir_transcript_cleanup_rejects_entire_batch_when_one_preview_i
         (job.payload_json or {}).get("reason") != "transcript_dialect_corrected"
         for job in jobs.all()
     )
+
+
+@pytest.mark.parametrize("level", ["low", "medium", "high"])
+@pytest.mark.parametrize("batch", [False, True])
+async def test_cleanup_entries_use_project_level_and_only_preceding_context(
+    client, test_db, monkeypatch, level, batch,
+):
+    created = await create_test_voice_transcript(
+        client, test_db, text="我小时候跟幺爸去赶场。", question_text="您小时候跟谁去赶场？",
+    )
+    project_id = created["session"]["project_id"]
+    project = await test_db.get(Project, project_id)
+    project.metadata_json = {**(project.metadata_json or {}), "transcript_polish_level": level}
+    test_db.add(MemoirChatMessage(
+        project_id=project_id, voice_session_id=created["session"]["id"],
+        role="assistant", content_text="后来您退休了吗？", turn_index=99,
+    ))
+    await test_db.commit()
+    ai = CapturingCleanupAIClient()
+    monkeypatch.setattr("app.services.memoir.voice_transcripts.get_ai_service", lambda model=None: ai)
+    if batch:
+        response = await client.post(
+            f"/api/memoir/projects/{project_id}/transcript-cleanup/preview",
+            json={"utterance_ids": [created["utterance_id"]]},
+        )
+    else:
+        response = await client.post(
+            f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup", json={},
+        )
+    assert response.status_code == 200
+    assert f"“{level}”" in ai.prompts[0]
+    assert "您小时候跟谁去赶场？" in ai.prompts[0]
+    assert "后来您退休了吗？" not in ai.prompts[0]
+
+
+async def test_recleanup_uses_stable_source_and_preserves_latest_manual_edit(client, test_db):
+    from app.services.memoir.transcript_projection import cleanup_source_text
+
+    created = await create_test_voice_transcript(client, test_db, text="我小时候住在外婆家。")
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    utterance.transcript_edited = "我的童年在外婆家度过，满是温暖。"
+    assert await cleanup_source_text(test_db, utterance) == "我小时候住在外婆家。"
+    test_db.add(MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id, source_artifact_id=utterance.id,
+        version_type="user_edited", created_by="user", content="我小时候住在奶奶家。",
+    ))
+    await test_db.flush()
+    utterance.transcript_edited = "奶奶家承载着我美好的童年。"
+    test_db.add(MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id, source_artifact_id=utterance.id,
+        version_type="dialect_corrected", created_by="ai", content=utterance.transcript_edited,
+    ))
+    await test_db.flush()
+    assert await cleanup_source_text(test_db, utterance) == "我小时候住在奶奶家。"
