@@ -1,8 +1,22 @@
 require('./register-ts');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const { componentContext, flushAsyncWork, loadComponentModule, mockModule } = require('./page-harness');
 const { ApiError } = require('../services/request');
+
+test('shared reading and video keep an unsent response mounted while content reloads', () => {
+  for (const page of ['book-reader', 'share-video-player']) {
+    const wxml = fs.readFileSync(path.join(__dirname, `../pages/${page}/index.wxml`), 'utf8');
+    const host = /<view\s+wx:if="([^"]+)"\s+hidden="([^"]+)">\s*<share-response-form\b/.exec(wxml);
+    assert.ok(host, `${page} keeps the response form in a stable host`);
+    assert.match(wxml.slice(0, host.index), /<\/block>\s*$/, `${page} places the host outside the content branch`);
+    assert.doesNotMatch(host[1], /loading|error|video\b/, `${page} does not unmount a draft during reload`);
+    assert.match(host[2], /loading/);
+    assert.match(host[2], /error/);
+  }
+});
 
 test('response preserves text through login and network retry with the same submission id', async () => {
   const calls = []; let mode = 'login';

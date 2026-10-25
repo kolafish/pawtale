@@ -179,8 +179,12 @@
 
     <view wx:if="{{shareAfterword && readerChapterIndex === readerChapterTotal - 1}}" class="reader-section ui-card"><text class="section-label">后记</text><text class="book-content" selectable>{{shareAfterword}}</text></view>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview && !readerDemo}}" />
-    <share-response-form wx:if="{{readerShared && !sharePreview && !readerDemo && !error}}" reading-token="{{responseToken}}" bindunavailable="onResponseUnavailable" />
+  </block>
+  <view wx:if="{{readerShared && !sharePreview && !readerDemo}}" hidden="{{loading || error}}">
+    <share-response-form id="shared-response" reading-token="{{responseToken}}" bindunavailable="onResponseUnavailable" />
+  </view>
 
+  <block wx:if="{{!loading && !error}}">
     <button wx:if="{{readerShared && !sharePreview}}" class="ui-share-more" bindtap="openShareHome">我也想讲故事</button>
     <view class="reader-top-action-shell">
       <view wx:if="{{readerDemo}}" class="reader-top-action ui-pressable" aria-role="button" bindtap="startMyStory">种下我的故事</view>
