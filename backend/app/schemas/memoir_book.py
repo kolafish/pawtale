@@ -721,7 +721,7 @@ class MemoirBookShareStatusResponse(BaseModel):
 
 class MemoirBookShareCreateResponse(BaseModel):
     token: str
-    expires_at: datetime
+    expires_at: datetime | None = None
 
 
 class MemoirBookShareReadRequest(BaseModel):

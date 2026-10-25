@@ -57,6 +57,5 @@
         <text>去讲讲故事</text><text aria-hidden="true">→</text>
       </view>
     </button>
-    <button wx:if="{{video.book_share_token}}" class="ghost-button shared-video-action" bindtap="openBook">阅读这本回忆录</button>
   </block>
 </view>

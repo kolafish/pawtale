@@ -234,7 +234,7 @@ def _list_item_response(job: MemoirMaterialShareVideo, like_count: int) -> Memoi
         background_style_label=_illustration_style_label(metadata),
         created_at=job.created_at,
         completed_at=job.completed_at,
-        share_code=job.share_code,
+        share_code=job.share_code if job.share_enabled else "",
         like_count=like_count,
     )
 
@@ -432,6 +432,7 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
                 size_bytes=output.size_bytes,
                 download_url=f"/api/mobile/memoir/share-video/jobs/{job.id}/download",
                 share_code=job.share_code,
+                share_enabled=job.share_enabled,
             )
             if output is not None
             else None
@@ -1079,6 +1080,7 @@ async def _complete_share_video_job(
         .where(_leased_share_video_job(lease))
         .values(
             status=MemoirShareVideoJobStatus.SUCCEEDED.value,
+            rendered_share_code=MemoirMaterialShareVideo.share_code,
             run_after=None,
             locked_at=None,
             lease_token=None,

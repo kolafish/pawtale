@@ -567,5 +567,5 @@ export interface MemoirBookShareStatus {
 
 export interface MemoirBookShareCreated {
   token: string;
-  expires_at: string;
+  expires_at: string | null;
 }

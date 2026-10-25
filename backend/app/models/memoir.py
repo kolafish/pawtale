@@ -437,6 +437,8 @@ class MemoirMaterialShareVideo(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     # Public handle for the forwarded card and the mini program code in the video.
     share_code: Mapped[str] = mapped_column(String(20), default=lambda: secrets.token_hex(10), nullable=False)
+    share_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sql_text("false"), nullable=False)
+    rendered_share_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
@@ -1348,7 +1350,7 @@ class MemoirBookShare(Base):
     output_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_outputs.id", ondelete="CASCADE"), primary_key=True)
     version_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_output_versions.id", ondelete="CASCADE"), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
@@ -1358,7 +1360,7 @@ class MemoirChapterShare(Base):
     chapter_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), primary_key=True)
     version_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="CASCADE"), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 

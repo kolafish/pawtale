@@ -2,7 +2,7 @@ import type { MemoirSharedVideo } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { memoirShareVideoDownloadUrl, memoirSharedVideoUrl, readMemoirSharedVideo } from "../../services/memoir-transcript-api";
 import { definePage } from "../../services/page-definition";
-import { pageUrl, queryParam, type PageQuery } from "../../services/page-input";
+import { queryParam, type PageQuery } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { enableMiniProgramShareMenu, homeShareAppMessage, sharedVideoShareMessage } from "../../services/share";
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
@@ -55,6 +55,10 @@ definePage<SharedVideoPlayerData>()({
     this.refreshShareLikes();
   },
 
+  onShareUnavailable(error: Error) {
+    this.setData({ video: null, videoUrl: "", posterUrl: "", endFrameUrl: "", ended: false, error: error.message });
+  },
+
   onShareAppMessage() {
     const video = this.data.video;
     return video && this.shareCode
@@ -81,7 +85,7 @@ definePage<SharedVideoPlayerData>()({
       enableMiniProgramShareMenu();
       void this.loadShareLikes({ video_code: this.shareCode });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "这段视频暂时打不开" });
+      this.setData({ video: null, videoUrl: "", posterUrl: "", endFrameUrl: "", shareLikeVisible: false, error: error instanceof Error ? error.message : "这段视频暂时打不开" });
     } finally {
       this.setData({ loading: false });
     }
@@ -104,13 +108,6 @@ definePage<SharedVideoPlayerData>()({
 
   markVideoShape(event: { detail: { width: number; height: number } }) {
     this.setData({ portrait: event.detail.height >= event.detail.width });
-  },
-
-  openBook() {
-    const token = this.data.video?.book_share_token;
-    if (token) {
-      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { shareToken: token }) });
-    }
   },
 
   openHome() {

@@ -67,8 +67,10 @@
           </video>
           <button
             class="primary-button share-video-forward"
-            open-type="share"
-            disabled="{{shareVideoSharing || shareVideoDeleting}}"
+            open-type="{{shareVideoJob.output.share_enabled ? 'share' : ''}}"
+            bindtap="prepareVideoShare"
+            loading="{{shareCardPreparing}}"
+            disabled="{{shareVideoSharing || shareVideoDeleting || shareCardPreparing}}"
           >转发给好友</button>
           <text class="record-meta share-video-forward-hint">好友点开小程序卡片就能看，删除视频后卡片也会失效。</text>
           <view class="actions-row share-video-actions share-video-result-actions">
@@ -76,20 +78,20 @@
               class="ghost-button"
               bindtap="saveShareVideoToAlbum"
               loading="{{shareVideoSharing && shareVideoStatusText === '正在保存到相册'}}"
-              disabled="{{shareVideoSharing || shareVideoDeleting}}"
+              disabled="{{shareVideoSharing || shareVideoDeleting || shareCardPreparing}}"
             >保存到相册</button>
             <button
               class="ghost-button"
               bindtap="shareGeneratedVideo"
               loading="{{shareVideoSharing && shareVideoStatusText === '正在准备分享'}}"
-              disabled="{{shareVideoSharing || shareVideoDeleting}}"
+              disabled="{{shareVideoSharing || shareVideoDeleting || shareCardPreparing}}"
             >发送视频文件</button>
           </view>
           <button
             class="text-action-button share-video-more"
             bindtap="openShareVideoMoreActions"
             loading="{{shareVideoDeleting}}"
-            disabled="{{shareVideoSharing || shareVideoDeleting}}"
+            disabled="{{shareVideoSharing || shareVideoDeleting || shareCardPreparing}}"
           >重新制作或删除 ›</button>
           <view wx:if="{{shareVideoLikeCount}}" class="share-video-likes">
             <template is="shareLikeList" data="{{count: shareVideoLikeCount, likers: shareVideoLikers}}" />

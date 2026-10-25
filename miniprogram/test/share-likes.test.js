@@ -281,3 +281,24 @@ test("the home notice names who liked which story", () => {
   assert.equal(notice.avatars.length, 3);
   assert.equal(notice.latestAt, "2026-10-09T08:03:00");
 });
+
+
+test("a revoked share clears already loaded video when returning to the page", async () => {
+  installWx([]);
+  let revoked = false;
+  const { page } = loadPlayer({ likeApi: { readMemoirShareLikes: async () => {
+    if (revoked) throw new ApiError(404, "作者已停止分享", {});
+    return likes();
+  } } });
+  const context = pageContext(page);
+  await context.onLoad({ code: CODE });
+  await context.loadShareLikes({ video_code: CODE });
+  assert.ok(context.data.videoUrl);
+  revoked = true;
+  await context.loadShareLikes(context.shareLikeTarget);
+  assert.equal(context.data.videoUrl, "");
+  assert.equal(context.data.video, null);
+  assert.equal(context.data.shareLikeVisible, false);
+  assert.equal(context.data.error, "作者已停止分享");
+  delete global.wx;
+});

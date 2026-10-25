@@ -377,6 +377,16 @@ definePage<BookReaderData>()({
     this.refreshShareLikes();
   },
 
+  onShareUnavailable(error: Error) {
+    this.stopPlayback();
+    this.readerText = "";
+    this.readerAudioVersionId = "";
+    this.bookChapters = [];
+    this.flatPages = [];
+    this.chapterParagraphRanges = [];
+    this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0, error: error.message });
+  },
+
   onHide() {
     this.stopPlayback();
   },
@@ -582,7 +592,7 @@ definePage<BookReaderData>()({
     try {
       this.applyBookReaderOutput(await read());
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "分享链接已失效" });
+      this.onShareUnavailable(error instanceof Error ? error : new Error("分享链接已失效"));
     } finally {
       this.setData({ loading: false });
     }

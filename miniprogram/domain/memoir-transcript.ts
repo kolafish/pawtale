@@ -204,6 +204,7 @@ export interface MemoirShareVideoOutput {
   size_bytes: number;
   download_url: string;
   share_code: string;
+  share_enabled: boolean;
 }
 
 export interface MemoirSharedVideo {
@@ -214,7 +215,6 @@ export interface MemoirSharedVideo {
   video_url: string;
   poster_url: string;
   end_frame_url: string;
-  book_share_token: string | null;
 }
 
 export interface MemoirShareVideoJob {

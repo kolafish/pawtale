@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import re
+import secrets
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import MemoirMaterialShareVideo
-from app.schemas.memoir_voice import MemoirSharedVideoResponse
-from app.services.memoir.book_shares import readable_share_token
+from app.schemas.memoir_voice import MemoirSharedVideoResponse, MemoirShareVideoJobResponse
 from app.services.memoir.share_likes import ShareLikeTarget, video_target
 from app.services.memoir.share_video_jobs import (
     CompletedShareVideo,
+    _load_owned_job, _job_response, _share_video_mini_program_code, rendering,
     completed_share_video_file,
     share_video_end_card_source,
 )
@@ -24,13 +24,14 @@ SHARE_CODE_PATTERN = re.compile(r"[0-9a-f]{20}\Z")
 
 
 async def _shared_job(db: AsyncSession, code: str) -> MemoirMaterialShareVideo:
-    # Deleting the video is how the author takes a forwarded card back.
+    # Every public entry, including images and byte ranges, checks publication.
     job = await db.scalar(select(MemoirMaterialShareVideo).where(
         MemoirMaterialShareVideo.share_code == code,
+        MemoirMaterialShareVideo.share_enabled.is_(True),
         MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
     )) if SHARE_CODE_PATTERN.fullmatch(code) else None
     if job is None or job.output is None:
-        raise HTTPException(status_code=404, detail="这段视频已被作者删除")
+        raise HTTPException(status_code=404, detail="作者已停止分享或删除这段视频")
     return job
 
 
@@ -47,10 +48,6 @@ async def read_shared_video(db: AsyncSession, code: str) -> MemoirSharedVideoRes
         video_url=base_url,
         poster_url=f"{base_url}?variant=poster",
         end_frame_url=f"{base_url}?variant=end",
-        # Demo clips authorize the selected chapter only, including when forwarded.
-        book_share_token=None if code in {
-            item.strip() for item in get_settings().memoir_demo_video_codes.split(",")
-        } else await readable_share_token(db, job.project_id),
     )
 
 
@@ -60,3 +57,33 @@ async def video_like_target(db: AsyncSession, code: str) -> ShareLikeTarget:
 
 async def load_shared_video_file(db: AsyncSession, code: str) -> CompletedShareVideo:
     return completed_share_video_file(await _shared_job(db, code))
+
+
+async def set_video_share(
+    db: AsyncSession, job_id: str, user_id: str, *, enabled: bool,
+) -> MemoirShareVideoJobResponse:
+    job = await _load_owned_job(db, job_id, user_id)
+    # Lock the job, not its joined optional output, through publication/revocation.
+    job = await db.scalar(select(MemoirMaterialShareVideo).where(
+        MemoirMaterialShareVideo.id == job.id,
+    ).with_for_update(of=MemoirMaterialShareVideo).execution_options(populate_existing=True))
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value:
+        raise HTTPException(status_code=409, detail="请先完成视频制作")
+    if enabled and not job.share_enabled:
+        video = completed_share_video_file(job)
+        if job.rendered_share_code != job.share_code:
+            code_image = await _share_video_mini_program_code(job.share_code)
+            book_title, narrator = await share_video_end_card_source(db, job.project_id)
+            await rendering.replace_share_video_end_card(
+                video.path, book_title=book_title, narrator_name=narrator,
+                mini_program_code=code_image, body_seconds=(job.end_ms - job.start_ms) / 1000,
+                hook_text=video.hook_text,
+            )
+            job.output.size_bytes = video.path.stat().st_size
+            job.rendered_share_code = job.share_code
+        job.share_enabled = True
+    elif not enabled and job.share_enabled:
+        job.share_enabled = False
+        job.share_code = secrets.token_hex(10)
+    await db.commit()
+    return _job_response(job)

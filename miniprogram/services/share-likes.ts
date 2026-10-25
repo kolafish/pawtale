@@ -126,6 +126,7 @@ export async function completeShareLikeLogin(
 
 interface ShareLikeHost {
   data: ShareLikeData;
+  onShareUnavailable?(error: Error): void;
   shareLikeTarget: MemoirShareLikeTarget | null;
   setData(patch: Partial<ShareLikeData>): void;
 }
@@ -141,7 +142,13 @@ export const shareLikeMethods = defineShareLikeMethods({
       const likes = await readMemoirShareLikes(target);
       if (this.shareLikeTarget === target) this.setData(shareLikePatch(likes));
     } catch (error) {
-      // Reading or watching works without likes.
+      if (this.shareLikeTarget === target && error instanceof ApiError && [404, 409, 410].includes(error.statusCode)) {
+        this.shareLikeTarget = null;
+        this.setData(INITIAL_SHARE_LIKE_DATA);
+        this.onShareUnavailable?.(error);
+        return;
+      }
+      // Reading or watching works without likes when the network is unavailable.
       console.warn("share likes unavailable", error);
     }
   },
@@ -171,6 +178,11 @@ export const shareLikeMethods = defineShareLikeMethods({
       }
       if (this.shareLikeTarget === target) this.setData(shareLikePatch(likes));
     } catch (error) {
+      if (this.shareLikeTarget === target && error instanceof ApiError && [404, 409, 410].includes(error.statusCode)) {
+        this.shareLikeTarget = null;
+        this.setData(INITIAL_SHARE_LIKE_DATA);
+        this.onShareUnavailable?.(error);
+      }
       wx.showToast({ title: error instanceof Error && error.message ? error.message : "点赞没有成功，请重试", icon: "none" });
       return;
     } finally {

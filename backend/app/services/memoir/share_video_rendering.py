@@ -858,3 +858,24 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             "-t", f"{total_seconds:.3f}", "-movflags", "+faststart", str(temp_video_path),
         ], frames=frames)
         temp_video_path.replace(request.target_path)
+
+
+async def replace_share_video_end_card(
+    path: Path, *, book_title: str, narrator_name: str, mini_program_code: bytes | None,
+    body_seconds: float, hook_text: str,
+) -> None:
+    """Rotate only the closing card; retain the finished narration and pictures."""
+    start = max(0.1, body_seconds) + _hook_seconds(hook_text)
+    with tempfile.TemporaryDirectory(prefix="share-repackage-", dir=path.parent) as directory:
+        card, output = Path(directory) / "end.png", Path(directory) / "video.mp4"
+        _end_card(book_title, narrator_name, mini_program_code).save(card)
+        await _run_ffmpeg([
+            _ffmpeg_executable(), "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(path), "-loop", "1", "-i", str(card),
+            "-filter_complex", f"[0:v][1:v]overlay=0:0:enable='gte(t,{start:.3f})':shortest=1[v]",
+            "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
+            "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(output),
+        ])
+        output.replace(path)
+    for suffix in (".end.jpg", ".thumbnail.jpg", ".poster.jpg", ".card.jpg", ".card-v2.jpg"):
+        path.with_suffix(suffix).unlink(missing_ok=True)

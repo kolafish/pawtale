@@ -162,6 +162,7 @@ export interface TranscriptShareVideoControllerOptions {
   getJob: GetShareVideoJob;
   downloadJob: DownloadShareVideoJob;
   streamUrl: (job: MemoirShareVideoJob) => string;
+  enableShare?: (job: MemoirShareVideoJob) => Promise<MemoirShareVideoJob>;
   shareFile: ShareFile;
   saveVideo: SaveVideo;
   pollIntervalMs?: number;
@@ -461,6 +462,8 @@ function isSameShareVideoJobView(
     current.error_message === next.error_message &&
     current.output?.download_url === next.output?.download_url &&
     current.output?.mime_type === next.output?.mime_type &&
+    current.output?.share_code === next.output?.share_code &&
+    current.output?.share_enabled === next.output?.share_enabled &&
     current.output?.size_bytes === next.output?.size_bytes
   );
 }
@@ -632,6 +635,7 @@ export class TranscriptShareVideoController {
     return this.withLocalFile(
       { busyText: "正在准备分享", doneText: "已打开微信分享", failText: "视频分享失败" },
       (filePath) => this.options.shareFile({ filePath, fileName }),
+      true,
     );
   }
 
@@ -645,6 +649,7 @@ export class TranscriptShareVideoController {
   private async withLocalFile(
     texts: { busyText: string; doneText: string; failText: string },
     deliver: (filePath: string) => Promise<void>,
+    publish = false,
   ): Promise<boolean> {
     const job = this.state.shareVideoJob;
     if (!job || job.status !== "succeeded") {
@@ -671,7 +676,14 @@ export class TranscriptShareVideoController {
       shareVideoStatusClass: "running",
     });
     try {
-      const filePath = await this.ensurePreviewPath(job, requestToken, texts.busyText);
+      const sharedJob = publish && this.options.enableShare ? await this.options.enableShare(job) : job;
+      if (!this.isCurrent(requestToken)) return false;
+      if (publish && (sharedJob.output?.share_code !== job.output?.share_code || !job.output?.share_enabled)) {
+        this.fileCache = {};
+        this.patchState({ shareVideoPreviewPath: "" });
+      }
+      this.patchState({ shareVideoJob: sharedJob });
+      const filePath = await this.ensurePreviewPath(sharedJob, requestToken, texts.busyText);
       if (!filePath || !this.isCurrent(requestToken)) {
         return false;
       }
@@ -730,8 +742,20 @@ export class TranscriptShareVideoController {
     }
     this.clearPollTimer();
     if (job.status === "succeeded") {
+      let streamUrl: string;
+      try {
+        streamUrl = this.options.streamUrl(job) || await this.ensurePreviewPath(job, requestToken, "正在准备预览");
+      } catch (error) {
+        if (this.isCurrent(requestToken)) this.patchState({
+          shareVideoStreamUrl: "", shareVideoStatusClass: "succeeded",
+          shareVideoStatusText: "视频已生成，预览暂不可用",
+          shareVideoError: error instanceof Error ? error.message : "视频预览失败，请重试",
+        });
+        return;
+      }
+      if (!this.isCurrent(requestToken)) return;
       this.patchState({
-        shareVideoStreamUrl: this.options.streamUrl(job),
+        shareVideoStreamUrl: streamUrl,
         shareVideoStatusText: "视频已生成，可以预览",
       });
     }

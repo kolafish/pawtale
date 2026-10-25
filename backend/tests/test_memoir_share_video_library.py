@@ -43,6 +43,7 @@ async def _add_video_job(
         audio_file_id=created["audio_file_id"],
         user_id=created["user_id"],
         status=status.value,
+        share_enabled=True,
         text_source="edited",
         text_hash=f"hash-{job_id}",
         selected_text="小时候我住在外婆家。",
@@ -56,6 +57,7 @@ async def _add_video_job(
     )
     db.add(job)
     await db.flush()
+    job.rendered_share_code = job.share_code
     if with_output:
         job.output = MemoirShareVideoOutput(
             job_id=job.id,
@@ -384,7 +386,7 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
         assert shared.json()["video_url"] == f"/api/mobile/memoir/share-video/shares/{share_code}/video"
         assert shared.json()["poster_url"] == f"{shared.json()['video_url']}?variant=poster"
         assert shared.json()["end_frame_url"] == f"{shared.json()['video_url']}?variant=end"
-        assert shared.json()["book_share_token"] is None
+        assert "book_share_token" not in shared.json()
         assert (await guest.get(shared.json()["video_url"])).content == chosen.id.encode()
         # The player streams by byte ranges instead of downloading the whole clip first.
         ranged = await guest.get(shared.json()["video_url"], headers={"Range": "bytes=2-5"})
@@ -454,12 +456,7 @@ async def test_demo_videos_play_publicly_without_disclosing_the_full_book_link(
         "memoir_demo_video_codes": f"{selected.share_code},0123456789abcdef0123",
     })
     monkeypatch.setattr(demo_story, "get_settings", lambda: settings)
-    monkeypatch.setattr(share_video_shares, "get_settings", lambda: settings)
 
-    async def full_book_token(db, project_id):
-        return "private-family-book-token"
-
-    monkeypatch.setattr(share_video_shares, "readable_share_token", full_book_token)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         story = (await guest.get("/api/mobile/memoir/demo-story")).json()
         assert [video["share_code"] for video in story["videos"]] == [selected.share_code]
@@ -467,12 +464,12 @@ async def test_demo_videos_play_publicly_without_disclosing_the_full_book_link(
         # Forwarded cards use the ordinary public player endpoint too.
         shared = await guest.post("/api/mobile/memoir/share-video/shares/read", json={"code": selected.share_code})
         assert shared.status_code == 200
-        assert shared.json()["book_share_token"] is None
+        assert "book_share_token" not in shared.json()
         ranged = await guest.get(shared.json()["video_url"], headers={"Range": "bytes=0-3"})
         assert ranged.status_code == 206 and ranged.content == b"demo"
         ordinary = await guest.post("/api/mobile/memoir/share-video/shares/read", json={"code": unlisted.share_code})
         assert ordinary.status_code == 200
-        assert ordinary.json()["book_share_token"] == "private-family-book-token"
+        assert "book_share_token" not in ordinary.json()
 
 
 async def test_video_delete_rejects_foreign_owner_and_unfinished_job(client, test_db):
@@ -529,3 +526,56 @@ async def test_video_file_survives_a_failed_database_delete(client, test_db, tmp
     await test_db.rollback()
     assert path.read_bytes() == b"valuable video"
     assert await test_db.get(MemoirMaterialShareVideo, job_id) is not None
+
+
+async def test_video_share_is_explicit_idempotent_and_revocable_without_deleting(
+    client, test_db, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
+    created = await create_test_voice_transcript(client, test_db)
+    job = await _add_video_job(test_db, created, job_id="private-video",
+        status=MemoirShareVideoJobStatus.SUCCEEDED, created_at=utcnow_naive())
+    job.share_enabled = False
+    await test_db.commit()
+    path = share_video_jobs.share_video_file_path(job)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"saved video")
+    old_code = job.share_code
+    endpoint = f"/api/mobile/memoir/share-video/jobs/{job.id}/share"
+    legacy_read = await client.get(f"/api/mobile/memoir/share-video/jobs/{job.id}", headers={"X-Memoir-Share-Lifecycle": "0"})
+    assert legacy_read.status_code == 426
+    rotated = []
+
+    async def replace_card(path, **kwargs):
+        rotated.append(kwargs)
+
+    async def code_image(code):
+        return code.encode()
+
+    monkeypatch.setattr(share_video_shares.rendering, "replace_share_video_end_card", replace_card)
+    monkeypatch.setattr(share_video_shares, "_share_video_mini_program_code", code_image)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        async def read(code):
+            return await guest.post("/api/mobile/memoir/share-video/shares/read", json={"code": code})
+        assert (await read(old_code)).status_code == 404
+        assert (await guest.put(endpoint)).status_code == 401
+        enabled = await client.put(endpoint)
+        assert enabled.status_code == 200, enabled.text
+        assert enabled.json()["output"]["share_enabled"] is True
+        assert (await client.put(endpoint)).json()["output"]["share_code"] == old_code
+        assert not rotated
+        assert (await read(old_code)).status_code == 200
+        assert (await client.delete(endpoint)).status_code == 200
+        assert (await read(old_code)).status_code == 404
+        assert (await guest.get(f"/api/mobile/memoir/share-video/shares/{old_code}/video")).status_code == 404
+        assert path.exists()
+        assert (await client.get(f"/api/mobile/memoir/share-video/jobs/{job.id}/download")).status_code == 200
+        new = (await client.put(endpoint)).json()["output"]
+        assert new["share_code"] != old_code
+        assert rotated[0]["mini_program_code"] == new["share_code"].encode()
+        assert (await read(old_code)).status_code == 404
+        assert (await read(new["share_code"])).status_code == 200
+
+        path.unlink()
+        assert (await client.delete(endpoint)).status_code == 200
+        assert (await read(new["share_code"])).status_code == 404

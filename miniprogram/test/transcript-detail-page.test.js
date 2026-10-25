@@ -194,6 +194,7 @@ function sampleShareVideoJob(overrides = {}) {
       size_bytes: 65536,
       download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
       share_code: "0123456789abcdef0123",
+      share_enabled: true,
     },
     error_message: "",
     created_at: "2026-07-01T08:00:00.000Z",
@@ -237,6 +238,7 @@ function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
     createMemoirTranscriptShareVideoJob: unmockedAsync("createMemoirTranscriptShareVideoJob"),
     deleteMemoirVoiceTranscript: unmockedAsync("deleteMemoirVoiceTranscript"),
     downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
+    setMemoirVideoShare: async (id) => sampleShareVideoJob({ id }),
     memoirSharedVideoUrl: (code, variant = "video") => `https://api.example.com/shares/${code}/${variant}`,
     getMemoirMaterialImageGenerationJob: unmockedAsync("getMemoirMaterialImageGenerationJob"),
     getMemoirShareVideoJob: unmockedAsync("getMemoirShareVideoJob"),
@@ -2183,4 +2185,61 @@ test("likes from the previous video cannot arrive after remaking it", async () =
   await Promise.resolve();
   assert.equal(context.data.shareVideoLikeCount, 0);
   assert.deepEqual(context.data.shareVideoLikers, []);
+});
+
+
+test("a private video previews without publishing and enables only on share", async () => {
+  const published = [];
+  const privateJob = sampleShareVideoJob();
+  privateJob.output.share_enabled = false;
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async () => sampleTranscript("utterance-share"),
+    getMemoirShareVideoJob: async () => privateJob,
+    downloadMemoirShareVideoJob: async () => "/tmp/private-preview.mp4",
+    setMemoirVideoShare: async (id, enabled) => {
+      published.push([id, enabled]);
+      return { ...privateJob, output: { ...privateJob.output, share_enabled: true } };
+    },
+  } });
+  const context = pageContext(page);
+  await context.onLoad({ id: "utterance-share", jobId: "job-1" });
+  assert.equal(context.data.shareVideoStreamUrl, "/tmp/private-preview.mp4");
+  assert.deepEqual(published, []);
+  global.wx = { ...global.wx, showToast() {} };
+  await context.prepareVideoShare();
+  const message = context.onShareAppMessage();
+  assert.deepEqual(published, [["job-1", true]]);
+  assert.equal(message.path, "/pages/share-video-player/index?code=0123456789abcdef0123");
+  assert.equal(context.data.shareVideoJob.output.share_enabled, true);
+});
+
+
+test("failed preparation keeps the private video and a late reply cannot replace the current job", async () => {
+  global.wx = { ...global.wx, showToast() {} };
+  const privateJob = sampleShareVideoJob();
+  privateJob.output.share_enabled = false;
+  let finish;
+  let fail = true;
+  const { page } = loadTranscriptMediaPage({ voiceApiExports: {
+    getMemoirVoiceTranscript: async () => sampleTranscript("utterance-share"),
+    getMemoirShareVideoJob: async () => privateJob,
+    downloadMemoirShareVideoJob: async () => "/tmp/private-preview.mp4",
+    setMemoirVideoShare: async () => {
+      if (fail) throw new Error("网络不可用");
+      return new Promise(resolve => { finish = resolve; });
+    },
+  } });
+  const context = pageContext(page);
+  await context.onLoad({ id: "utterance-share", jobId: "job-1" });
+  await context.prepareVideoShare();
+  assert.equal(context.data.shareVideoJob.output.share_enabled, false);
+  assert.equal(context.data.shareCardPreparing, false);
+  assert.equal(context.data.shareVideoError, "网络不可用");
+  assert.ok(context.onShareAppMessage().path.startsWith("/pages/home/index"));
+  fail = false;
+  const pending = context.prepareVideoShare();
+  context.shareVideoController.reset();
+  finish({ ...privateJob, output: { ...privateJob.output, share_enabled: true } });
+  await pending;
+  assert.equal(context.data.shareVideoJob, null);
 });
