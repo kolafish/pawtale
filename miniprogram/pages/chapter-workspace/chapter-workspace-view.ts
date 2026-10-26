@@ -33,8 +33,7 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
 
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
-  chapterHeroKicker: string;
-  chapterStoryCountText: string;
+  chapterSummaryText: string;
   chapterStoryDetail: string;
   chapterHasReadableDraft: boolean;
   chapterEditingHint: string;
@@ -442,12 +441,13 @@ export function chapterWorkspaceViewPatch(
     : needsMaterial ? "请回到首页继续讲述与本章有关的回忆，补充后再查看本章当前步骤。" : summary.detail;
   return {
     nextAction,
-    chapterHeroKicker: chapterHasReadableDraft
-      ? "已整理"
-      : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
-    chapterStoryCountText: narrativeSectionCount
-      ? `${narrativeSectionCount} 小节`
-      : "暂无小节",
+    chapterSummaryText: [
+      chapterHasReadableDraft
+        ? "已整理"
+        : summary.state === "failed" ? "这一章尚未整理完成" : emptyDraftTitle,
+      narrativeSectionCount ? `${narrativeSectionCount} 小节` : "暂无小节",
+      ...(chapterHasReadableDraft ? [`${visibleCharCount(workspace.draft_content).toLocaleString("en-US")} 字`] : []),
+    ].join(" · "),
     chapterStoryDetail: chapterHasReadableDraft && workspace.draft_needs_rewrite
       ? "有新回忆待整理，当前正文仍可阅读。"
       : summary.state === "draft_ready"
