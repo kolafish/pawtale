@@ -245,8 +245,7 @@ export interface ChapterWorkspacePageData extends ReadingShareData {
   focusedStoryExpanded: boolean;
   workspace: MemoirChapterWorkspace | null;
   nextAction: ChapterNextAction;
-  chapterHeroKicker: string;
-  chapterStoryCountText: string;
+  chapterSummaryText: string;
   chapterStoryDetail: string;
   chapterHasReadableDraft: boolean;
   chapterEditingHint: string;

@@ -311,7 +311,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
-  assert.equal(context.data.chapterStoryCountText, "1 小节");
+  assert.match(context.data.chapterSummaryText, /1 小节 · 14 字/);
   assert.equal(context.data.chapterHasReadableDraft, true);
   assert.equal(context.data.chapterEditingHint, "");
   assert.equal(context.data.sectionStructureSummary, "1 小节 · 1 段回忆");
@@ -354,6 +354,8 @@ test("chapter workspace guides empty chapters to narration and retains authorita
   const empty = mod.chapterWorkspaceViewPatch(emptyWorkspace);
 
   assert.equal(empty.chapterHasReadableDraft, false);
+  assert.match(empty.chapterSummaryText, /暂无小节/);
+  assert.doesNotMatch(empty.chapterSummaryText, /\d+ 字/);
   assert.match(empty.readinessTitle, /需要讲述素材/);
   assert.match(empty.readinessDetail, /继续讲述.*当前步骤/);
   assert.doesNotMatch(empty.chapterStoryDetail, /正在|自动/);
@@ -370,6 +372,15 @@ test("chapter workspace guides empty chapters to narration and retains authorita
     assert.equal(view.chapterStoryDetail, authoritativeSummary.detail);
     assert.equal(view.nextAction.kind, authoritativeSummary.next_action.kind);
   }
+});
+
+test("chapter summary counts the saved draft without whitespace and excludes pending or hidden sections", () => {
+  const { mod } = loadWorkspacePage();
+  const data = workspaceWithPendingMaterial({ draft_content: `\n ${"故".repeat(1200)} \t\n` });
+  data.sections.push({ ...data.sections[0], id: "excluded", include_in_book: false });
+  const view = mod.chapterWorkspaceViewPatch(data);
+  assert.equal(view.narrativeSectionCount, 1);
+  assert.match(view.chapterSummaryText, /1 小节 · 1,200 字/);
 });
 
 test("chapter workspace opens a focused section selected from the story tree", async () => {
@@ -1365,6 +1376,11 @@ test("chapter workspace opens the full chapter reading preview", async () => {
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project-1&chapterId=chapter-1",
   ]);
+  context.setData({ operationKind: "chapter_settings" });
+  context.openChapterPreview();
+  context.setData({ operationKind: "", editingSectionId: "section-1" });
+  context.openChapterPreview();
+  assert.equal(navigations.length, 1);
 });
 
 test("chapter workspace keeps a legacy flat draft readable without section boundaries", async () => {
@@ -1895,12 +1911,29 @@ test("chapter sharing creates a chapter-only reader link and revokes the same ch
   } });
   const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
   await context.refreshBookShareStatus();
+  assert.equal(context.data.bookShareFeedbackVisible, false);
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
   await context.prepareReadingShare();
+  assert.equal(context.data.bookShareFeedbackVisible, true);
   assert.deepEqual(context.onShareAppMessage(), { title: "第一次离家", path: "/pages/book-reader/index?shareToken=c1.chapter-token", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/c1.chapter-token/card.jpg?design=1" });
   await context.revokeBookShare();
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
   assert.deepEqual(calls, [["status", "project-1", "chapter-1", undefined], ["ensure", "project-1", "chapter-1", undefined], ["revoke", "project-1", "chapter-1", undefined]]);
+});
+
+test("a current chapter link reveals sharing information only after the share action", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "existing-chapter" }),
+    readMemoirBookShare: async () => ({ latest_version: null }),
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true });
+  await context.refreshBookShareStatus();
+  assert.equal(context.data.bookShareReady, true);
+  assert.equal(context.data.bookShareFeedbackVisible, false);
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareFeedbackVisible, true);
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?shareToken=existing-chapter");
 });
 
 test("chapter share ignores a status response from a different chapter in the same project", async () => {
