@@ -81,6 +81,21 @@ async def test_one_new_chapter_keeps_distinct_events_and_places_before_existing_
     # A completed retry must neither add duplicate sections nor move the directory again.
     await growth.run_story_tree_growth_job(test_db, job)
     assert fake.calls == 1
+    # A policy update must reconsider automatic exclusions without reassigning
+    # the two sources already placed in the book.
+    excluded = created[2]['utterance_id']
+    job.result_json = {**job.result_json, 'growth': {**job.result_json['growth'], 'deferred': {
+        excluded: {**job.result_json['growth']['deferred'][excluded], 'classification_policy_version': 0},
+    }}}
+    await test_db.commit()
+    replacement = FakeStoryGrowthAI({'placements': {'1': {'kind': 'story', 'section_id': 'S1'}}})
+    monkeypatch.setattr(growth, 'get_ai_service', lambda _model=None: replacement)
+    await growth.run_story_tree_growth_job(test_db, job)
+    assert replacement.calls == 1
+    links = list((await test_db.scalars(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id.in_([s['utterance_id'] for s in created]),
+    ))).all())
+    assert len(links) == 3
 
 
 @pytest.mark.parametrize('edit', ['reorder', 'rename', 'new_chapter'])

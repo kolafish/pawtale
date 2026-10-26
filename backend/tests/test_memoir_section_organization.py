@@ -1422,7 +1422,7 @@ async def test_person_answer_detached_during_growth_is_not_placed_in_old_source(
     test_db.add(question)
     await test_db.flush()
     answer.parent_message_id = question.id
-    answer.metadata_json = {narration_people.READING_KEY: {"schema_version": 3,
+    answer.metadata_json = {narration_people.READING_KEY: {"schema_version": 3, "classification_policy_version": narration_people.STORY_CONTENT_POLICY_VERSION,
         "question_message_id": question.id, "source_text_hash": source_text_hash(answer.content_text),
         "question_context": narration_people.interviewer_context_signature(answer, question), "story_content": True}}
     await test_db.commit()

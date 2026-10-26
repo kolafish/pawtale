@@ -64,7 +64,7 @@ from app.services.memoir.transcript_projection import (
 )
 
 
-CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v3"
+CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v4"
 CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的素材版本及用户明确确认的事实更正整理成第一人称完整章节，不创造事实。"
@@ -1061,8 +1061,8 @@ def build_chapter_generation_prompt(
     )
     writing_rules = "" if revision_instruction else (
         "- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。\n"
-        "- 只能使用输入中的事实和感受，可以调整顺序、合并重复。\n"
-        "- 正文根据内容自然分段，段落之间用换行分隔。\n"
+        "- 素材排列是讲述顺序；仅在事件关系明确时，按实际先后在当前小节内整合回答、合并重复，未知先后保持原述，不推定时间或因果。\n"
+        "- 去掉没有事实增量的现场回想和访谈操作语言，保留真正表达记忆不确定性的部分；正文根据内容自然分段，段落之间用换行分隔。\n"
     )
     task = (
         f"请按已确认修改思路局部修改回忆录章节“{context.chapter_title}”中的当前小节。"
