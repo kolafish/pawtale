@@ -26,6 +26,9 @@ from app.services.memoir.prompt_budget import representative_excerpt
 from app.services.memoir.book_manuscript_cleanup import original_quote_candidates, body_excerpt_candidates, matched_quote
 
 
+COPY_TEXT_LIMITS = {"book_title": 32, "cover_subtitle": 28, "preface": 220, "afterword": 160, "intro": 90, "back_cover_quote": 45}
+
+
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
 logger = logging.getLogger(__name__)
 
@@ -180,12 +183,12 @@ def _distributed_candidates(values: list[str], limit: int = 6) -> list[str]:
 
 
 def _copy_output_model(targets: list[str] | None, polish_level: MemoirTranscriptPolishLevel) -> type[BaseModel]:
-    fields = {key: (str, "") for key in ("book_title", "cover_subtitle", "preface", "afterword", "back_cover_quote")}
+    fields = {key: (str, Field(default="", max_length=limit)) for key, limit in COPY_TEXT_LIMITS.items() if key != "intro"}
     selected = set(targets or [*fields, "chapter_intros", "pull_quotes"])
     if "chapter_intros" in selected or "pull_quotes" in selected:
         intro_fields = {"chapter_id": (str, ...)}
         if "chapter_intros" in selected:
-            intro_fields["intro"] = (str, ...)
+            intro_fields["intro"] = (str, Field(max_length=COPY_TEXT_LIMITS["intro"]))
         if "pull_quotes" in selected:
             intro_fields["pull_quote"] = (str, ...)
             if polish_level == MemoirTranscriptPolishLevel.LOW:
@@ -208,13 +211,13 @@ def build_manuscript_copy_prompt(
         candidates=candidates or _quote_candidates(snapshot, polish_level=polish_level))
     rules = {
         "book_title": "book_title：概括实际主题范围，朴素自然；现有书名合适即可保留。",
-        "cover_subtitle": "cover_subtitle：12 到 28 字概括收录范围，不补充未提供的事实。",
-        "preface": "preface：最多 220 字，直接介绍已收录的经历，不套书名，不描述未经证实的访谈或整理过程。",
-        "afterword": "afterword：最多 160 字，可邀请以后补充，不代家人表态，不写空泛祝福。",
-        "chapter_intros": "chapter_intros：仅为指定章节填写 intro，最多 90 字，用正文已有事实引入，不新造画面或解释章节功能。",
+        "cover_subtitle": f"cover_subtitle：12 到 {COPY_TEXT_LIMITS['cover_subtitle']} 字概括收录范围，不补充未提供的事实。",
+        "preface": f"preface：最多 {COPY_TEXT_LIMITS['preface']} 字，概括已收录经历的范围与联系，不逐章复述细节；整理与修订过程由整理说明承担，不套书名。",
+        "afterword": f"afterword：最多 {COPY_TEXT_LIMITS['afterword']} 字，简短收束已讲内容，不重复整理说明，不代家人表态，不写空泛祝福。",
+        "chapter_intros": f"chapter_intros：仅为指定章节填写 intro，最多 {COPY_TEXT_LIMITS['intro']} 字，用正文已有事实引入，不新造画面或解释章节功能。",
         "pull_quotes": ("pull_quote：逐字选本章 original_quote_candidates 的完整候选并填来源编号；无合适原话可用 body_excerpt_candidates，来源编号留空。" if polish_level == MemoirTranscriptPolishLevel.LOW else
             "pull_quote：逐字选本章 body_excerpt_candidates 的完整候选，不标为原话，不填来源编号。"),
-        "back_cover_quote": "back_cover_quote：从全书候选逐字选 15 到 45 字的完整句子，无合适候选留空。",
+        "back_cover_quote": f"back_cover_quote：从全书候选逐字选 15 到 {COPY_TEXT_LIMITS['back_cover_quote']} 字的完整句子，无合适候选留空。",
     }
     selected = targets or list(rules)
     instructions = "\n".join("- " + rules[key] for key in selected)
@@ -262,8 +265,8 @@ def _text_ai_configured(ai_model: str | None) -> bool:
     )
 
 
-def _clean_copy_text(value: object, *, max_chars: int) -> str:
-    return _compact_text(_string(value), max_chars)
+def _clean_copy_text(value: object) -> str:
+    return " ".join(_string(value).split())
 
 
 def _clean_title(value: object) -> str:
@@ -317,7 +320,7 @@ def _copy_from_payload(
                 chapter_id = chapter_refs.decode(raw_intro.get("chapter_id"))
             except ValueError:
                 continue
-            intro = _clean_copy_text(raw_intro.get("intro"), max_chars=120)
+            intro = _clean_copy_text(raw_intro.get("intro"))
             source_ref = raw_intro.get("pull_quote_source_ref_id")
             try:
                 source_ref = (
@@ -347,10 +350,10 @@ def _copy_from_payload(
                     )
                 )
     copy = GeneratedManuscriptCopy(
-        book_title=_clean_copy_text(payload.get("book_title"), max_chars=32),
-        cover_subtitle=_clean_copy_text(payload.get("cover_subtitle"), max_chars=40),
-        preface=_clean_copy_text(payload.get("preface"), max_chars=260),
-        afterword=_clean_copy_text(payload.get("afterword"), max_chars=320),
+        book_title=_clean_copy_text(payload.get("book_title")),
+        cover_subtitle=_clean_copy_text(payload.get("cover_subtitle")),
+        preface=_clean_copy_text(payload.get("preface")),
+        afterword=_clean_copy_text(payload.get("afterword")),
         chapter_intros=chapter_intros,
         back_cover_quote=_validated_back_cover_quote(payload.get("back_cover_quote"), [
             quote for chapter in quote_candidates.values() for candidates in chapter.values() for quote in candidates

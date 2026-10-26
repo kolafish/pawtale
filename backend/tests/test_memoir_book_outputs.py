@@ -2168,13 +2168,13 @@ def test_body_quotes_have_meaningful_length_and_balanced_punctuation(body, expec
     assert body_excerpt_candidates(body, max_chars=90) == expected
 
 
-def test_quote_display_policy_preserves_existing_evidence_signature():
+def test_copy_policy_invalidates_previous_generated_copy_signature():
     from app.services.memoir.book_output_versions import chapter_editorial_copy_signature
     body = '他说：“好。”\n后来我们一起去了学校，我一直记得那天。'
     snapshot = {'chapter_id': 'c', 'chapter_title': '上学', 'content': body,
                 'source_refs': [{'utterance_id': 'u', 'quote': body}]}
-    # Captured from v2 before the display-quality fix, including old quote splitting.
-    assert chapter_editorial_copy_signature(snapshot) == 'c946ade1be87df1e3777c9bc3de07cd92af99ef4d58e2371a856e68f2b8671f2'
+    # The new output contract must reconsider automatically generated v2 copy.
+    assert chapter_editorial_copy_signature(snapshot) != 'c946ade1be87df1e3777c9bc3de07cd92af99ef4d58e2371a856e68f2b8671f2'
 
 
 @pytest.mark.parametrize("wrapper", ["none", "quotes"])
@@ -2317,3 +2317,26 @@ def test_fallback_titles_do_not_expand_a_topic_to_a_whole_life():
     titles = fallback_title_suggestions("车间日子", 6)
     assert len(titles) == 6
     assert not any("一生" in title for title in titles)
+
+
+@pytest.mark.parametrize("always_overlong", [False, True])
+async def test_overlong_editorial_copy_is_rejected_instead_of_truncated(always_overlong):
+    from app.services.memoir.book_manuscript_ai import COPY_TEXT_LIMITS
+
+    class CopyAI(AITextServiceBase):
+        provider_name = "test"
+        model_name = "test-copy-length"
+        calls = 0
+
+        async def _call_llm(self, *_args, **_kwargs):
+            self.calls += 1
+            return json.dumps({"preface": "长" * (COPY_TEXT_LIMITS["preface"] + 1)
+                if always_overlong or self.calls == 1 else "这是完整的前言。"})
+
+    ai = CopyAI()
+    copy = await generate_manuscript_editorial_copy(
+        title="往事", snapshot=[{"chapter_id": "c", "chapter_title": "童年", "content": "小时候我在乡下上学。"}],
+        ai_model=ai.model_name, ai_client=ai, targets=["preface"],
+    )
+    assert ai.calls == 2
+    assert copy is None if always_overlong else copy.preface == "这是完整的前言。"
