@@ -15,24 +15,27 @@ from tests.memoir_helpers import ensure_mobile_memoir_project
 
 
 @pytest.mark.parametrize("scope", ["story", "chapter"])
-async def test_shared_audio_is_read_only_scoped_and_revocable(client, test_db, tts, scope):
+async def test_shared_audio_is_on_demand_scoped_and_revocable(client, test_db, tts, scope):
     pid, chapter, draft, version, section, other, _ = await saved_stories(client, test_db)
     private = "另一则私密正文"
     path = f"/api/mobile/memoir/projects/{pid}/book-output/share"
     params = {"section_id": section.id} if scope == "story" else {"chapter_id": chapter.id}
     token = (await client.put(path, params=params)).json()["token"]
-    jobs = list((await test_db.scalars(select(MemoirEditingJob).where(MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all())
-    assert jobs
-    assert (private in "".join(job.payload_json["text"] for job in jobs)) is (scope == "chapter")
+    assert not (await test_db.scalars(select(MemoirEditingJob).where(
+        MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all()
     assert not tts.calls
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
-        query = {"token": token, "version_id": version.id}
+        query = {"token": token, "version_id": version.id, "generate": True}
         response = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json=query)
         assert response.status_code == 200, response.text
         assert all(segment["job_id"] is None for segment in response.json()["segments"])
         for field, value in [("retry_failed", True), ("force_regenerate", True), ("voice", "another")]:
             assert (await guest.post("/api/mobile/memoir/book-shares/audio/plan", json={**query, field: value})).status_code == 422
         assert (await guest.post("/api/mobile/memoir/book-shares/audio/plan", json={**query, "chapter_id": other.id})).status_code == 404
+        jobs = list((await test_db.scalars(select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all())
+        assert jobs
+        assert (private in "".join(job.payload_json["text"] for job in jobs)) is (scope == "chapter")
         for job in jobs:
             assert await run_test_editing_job(test_db, job.id)
         response = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json=query)
@@ -53,7 +56,6 @@ async def test_shared_audio_is_read_only_scoped_and_revocable(client, test_db, t
             version=2, content="院子里更新后的正文\n\n" + private, section_snapshot_json=snapshots)
         test_db.add(latest)
         await test_db.flush()
-        await book_shares.queue_active_share_audio(test_db, project_id=pid, chapter_id=chapter.id)
         await test_db.commit()
         assert (await guest.get(url)).status_code == 409
         assert (await guest.post("/api/mobile/memoir/book-shares/audio/plan", json=query)).status_code == 409
@@ -72,7 +74,7 @@ async def test_book_audio_uses_requested_shared_chapter(client, test_db, tts):
     version = await _seed_confirmed_book_output(test_db, project_id=pid)
     token = (await client.put(f"/api/mobile/memoir/projects/{pid}/book-output/share")).json()["token"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
-        query = {"token": token, "version_id": version.id, "chapter_id": chapters[0].id}
+        query = {"token": token, "version_id": version.id, "chapter_id": chapters[0].id, "generate": True}
         response = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json=query)
         assert response.status_code == 200, response.text
         assert response.json()["content"] == version.manuscript_json["chapters"][0]["content"]
@@ -88,38 +90,16 @@ async def test_missing_audio_never_enqueues_from_public_read(client, test_db, tt
     await test_db.execute(delete(MemoirEditingJob).where(MemoirEditingJob.job_type == "generate_book_audio_chunk"))
     await test_db.commit()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
-        response = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json={"token": token, "version_id": version.id})
+        response = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json={"token": token, "version_id": version.id, "generate": False})
         assert response.status_code == 200, response.text
-        assert all(segment["status"] == "failed" for segment in response.json()["segments"])
+        assert all(segment["status"] == "idle" for segment in response.json()["segments"])
+        legacy = await guest.post("/api/mobile/memoir/book-shares/audio/plan", json={"token": token, "version_id": version.id})
+        assert all(segment["status"] == "failed" for segment in legacy.json()["segments"])
         assert await test_db.scalar(select(func.count()).select_from(MemoirEditingJob).where(MemoirEditingJob.job_type == "generate_book_audio_chunk")) == 0
         assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 200
 
 
-async def test_author_repreparing_share_retries_failed_audio_without_public_retry(client, test_db, tts):
-    pid, _, _, _, section, _, _ = await saved_stories(client, test_db)
-    path = f"/api/mobile/memoir/projects/{pid}/book-output/share"
-    params = {"section_id": section.id}
-    first = await client.put(path, params=params)
-    assert first.status_code == 200, first.text
-    job = await test_db.scalar(select(MemoirEditingJob).where(
-        MemoirEditingJob.job_type == "generate_book_audio_chunk"))
-    assert job is not None
-    job.status = "failed"
-    await test_db.commit()
-
-    await book_shares.queue_active_share_audio(test_db, project_id=pid, chapter_id=section.chapter_id)
-    await test_db.commit()
-    await test_db.refresh(job)
-    assert job.status == "failed"
-
-    repeated = await client.put(path, params=params)
-    assert repeated.status_code == 200, repeated.text
-    assert repeated.json()["token"] == first.json()["token"]
-    await test_db.refresh(job)
-    assert job.status == "pending"
-
-
-async def test_saved_book_version_prepares_audio_without_committing_the_author_transaction(client, test_db, tts):
+async def test_saved_book_version_does_not_prepare_audio_or_commit_the_author_transaction(client, test_db, tts):
     from app.domain.memoir.types import MemoirCreatedBy
     from app.models.memoir import MemoirBookOutput
     from app.services.memoir.book_output_versions import append_book_output_version
@@ -139,7 +119,7 @@ async def test_saved_book_version_prepares_audio_without_committing_the_author_t
     version_id = saved.id
     jobs = list((await test_db.scalars(select(MemoirEditingJob).where(
         MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all())
-    assert any(job.payload_json["text"] == manuscript["chapters"][0]["content"] for job in jobs)
+    assert jobs == []
     assert not tts.calls
     await test_db.rollback()
     from app.models.memoir import MemoirBookOutputVersion
@@ -148,36 +128,31 @@ async def test_saved_book_version_prepares_audio_without_committing_the_author_t
         select(MemoirEditingJob).where(MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all())
 
 
-async def test_background_book_audio_does_not_starve_editing_and_interactive_playback_promotes_its_window(client, test_db, tts):
-    from app.domain.memoir.types import MemoirEditingJobType
+async def test_old_background_jobs_do_not_spend_and_explicit_playback_can_retry(client, test_db, tts):
     from app.models.projects import Project
     from app.schemas.memoir_book import MemoirAudioPlanRequest
     from app.services.memoir.book_audio_jobs import AudioSource, prepare_audio_plan
-    from app.services.memoir.editing_jobs import claim_due_editing_jobs, enqueue_editing_job
 
     pid, _, _, version, _, _, _ = await saved_stories(client, test_db)
     owner = (await test_db.get(Project, pid)).user_id
-    source = AudioSource(version.id, "\n\n".join(f"第{i}段。" * 15 for i in range(10)))
+    source = AudioSource(version.id, "旧分享预生成任务正文。")
     queued = await prepare_audio_plan(test_db, user_id=owner, project_id=pid,
-        source=source, req=MemoirAudioPlanRequest(), prepare_all=True)
-    assert len(queued.segments) > 5
-    ordinary = await enqueue_editing_job(test_db, project_id=pid, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL)
+        source=source, req=MemoirAudioPlanRequest())
+    job = await test_db.get(MemoirEditingJob, queued.segments[0].job_id)
+    job.payload_json = {**job.payload_json, "background": True}
     await test_db.commit()
-    batch = await claim_due_editing_jobs(test_db, limit=5)
-    assert batch[0].job_id == ordinary.id
-    assert len(batch) < len(queued.segments)
-    last_index = len(queued.segments) - 1
-    promoted = await prepare_audio_plan(test_db, user_id=owner, project_id=pid, source=source,
-        req=MemoirAudioPlanRequest(start_index=last_index))
-    # Repeating background warm-up must not demote the explicit playback request.
-    await prepare_audio_plan(test_db, user_id=owner, project_id=pid,
-        source=source, req=MemoirAudioPlanRequest(), prepare_all=True)
-    next_batch = await claim_due_editing_jobs(test_db, limit=1)
-    assert next_batch[0].job_id == promoted.segments[last_index].job_id
+    assert not await run_test_editing_job(test_db, job.id)
+    await test_db.refresh(job)
+    assert job.status == "skipped"
+    assert not tts.calls
+    plan = await prepare_audio_plan(test_db, user_id=owner, project_id=pid,
+        source=source, req=MemoirAudioPlanRequest())
+    assert await run_test_editing_job(test_db, plan.segments[0].job_id)
+    assert len(tts.calls) == 1
 
 
 @pytest.mark.parametrize("scope", ["story", "chapter"])
-async def test_first_share_waits_for_a_concurrent_save_before_preparing_audio(client, test_db, tts, monkeypatch, scope):
+async def test_first_share_waits_for_a_concurrent_save_without_preparing_audio(client, test_db, tts, monkeypatch, scope):
     import asyncio
     from app.database import async_session_maker
     from app.models.projects import Project
@@ -206,14 +181,53 @@ async def test_first_share_waits_for_a_concurrent_save_before_preparing_audio(cl
             **({"section_id": section.id} if scope == "story" else {"chapter_id": chapter.id})))
         try:
             await asyncio.wait_for(acquired.wait(), 3)
-            # Save hook sees no share yet, so the waiting first share must queue v2.
-            await book_shares.queue_active_share_audio(writer, project_id=pid, chapter_id=chapter.id)
             await writer.commit()
             shared = await asyncio.wait_for(task, 5)
-            result = await book_shares.shared_audio_plan(sharer, shared.token, newer.id)
-            assert result.segments and all(segment.status == "pending" for segment in result.segments)
+            result = await book_shares.shared_audio_plan(sharer, shared.token, newer.id, generate=False)
+            assert result.segments and all(segment.status == "idle" for segment in result.segments)
             assert result.content == (snapshots[0]["content"] if scope == "story" else "新故事正文")
         finally:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_public_playback_only_prepares_requested_window_and_reuses_it(client, test_db, tts):
+    pid, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
+    version.content = "\n\n".join(f"第{i}段正文。" * 15 for i in range(8))
+    await test_db.commit()
+    token = (await client.put(f"/api/mobile/memoir/projects/{pid}/book-output/share",
+        params={"chapter_id": chapter.id})).json()["token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        url = "/api/mobile/memoir/book-shares/audio/plan"
+        query = {"token": token, "version_id": version.id, "generate": False}
+        read = (await guest.post(url, json=query)).json()
+        assert len(read["segments"]) > 4
+        assert all(s["status"] == "idle" for s in read["segments"])
+        play = {**query, "generate": True, "start_index": 3,
+            "source_text_hash": read["source_text_hash"], "profile_key": read["profile_key"]}
+        bad = await guest.post(url, json={**play, "source_text_hash": "0" * 64})
+        assert bad.status_code == 409
+        assert not (await test_db.scalars(select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all()
+        for _ in range(2):
+            response = await guest.post(url, json=play)
+            assert response.status_code == 200, response.text
+            assert [s["index"] for s in response.json()["segments"] if s["status"] == "pending"] == [3, 4]
+        jobs = list((await test_db.scalars(select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == "generate_book_audio_chunk"))).all())
+        assert len(jobs) == 2
+        for job in jobs:
+            assert await run_test_editing_job(test_db, job.id)
+        assert len(tts.calls) == 2
+        from app.models.ai_usage import AIUsageRecord
+        from app.models.projects import Project
+        owner = (await test_db.get(Project, pid)).user_id
+        usage = (await test_db.scalars(select(AIUsageRecord).where(
+            AIUsageRecord.operation == "memoir.job.generate_book_audio_chunk"))).all()
+        assert len(usage) == 2
+        assert all(record.user_id == owner for record in usage)
+        replay = (await guest.post(url, json=play)).json()
+        assert replay["ready_count"] == 2
+        assert all(s["status"] == "idle" for s in replay["segments"] if s["index"] not in [3, 4])
+        assert len(tts.calls) == 2

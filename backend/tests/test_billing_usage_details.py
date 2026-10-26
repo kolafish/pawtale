@@ -234,3 +234,21 @@ async def test_admin_adds_recharge_and_grant_credit_and_sees_overdraft(admin_cli
         json={"amount_rmb": "-6", "kind": "grant"},
     )
     assert overdrawn.status_code == 422
+
+
+async def test_stepfun_narration_is_not_counted_as_speech_recognition(client, test_db):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    for provider, model, operation, amount in [
+        ("stepfun", "step-tts-mini", "memoir.job.generate_book_audio_chunk", "0.168885"),
+        ("volc_streaming_asr", "volc.seedasr.sauc.duration", "voice/gateway", "0.086393"),
+        ("stepfun", "stepaudio-3-asr-max", "transcribe", "0.01"),
+    ]:
+        test_db.add(AIUsageRecord(operation_id=str(uuid4()), operation=operation, user_id=user_id,
+            provider=provider, model=model, status="succeeded", cost_status="estimated",
+            estimated_cost_rmb=Decimal(amount)))
+    await test_db.commit()
+    day = (await client.get("/api/billing/ai-usage")).json()["days"][0]
+    assert {item["purpose"]: Decimal(item["cost_rmb"]) for item in day["purposes"]} == {
+        "语音朗读": Decimal("0.168885"), "语音识别": Decimal("0.096393"),
+    }
+    assert Decimal(day["cost_rmb"]) == Decimal("0.265278")

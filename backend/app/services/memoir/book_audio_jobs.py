@@ -143,6 +143,9 @@ async def run_book_audio_chunk_job(db: AsyncSession, job: MemoirEditingJob) -> E
         return EditingJobResult(result_json=AudioChunkResult(audio=cached).model_dump(mode="json"))
     if AudioChunkResult.model_validate(job.result_json or {}).provider_started:
         raise HTTPException(503, "上次朗读生成被中断，请重新发起朗读后重试")
+    # Persisted warm-up jobs from older releases must not spend without playback.
+    if payload.background:
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="请点击朗读后生成音频")
     client = book_audio.get_tts_client()
     if audio_profile(client, payload.profile.voice, payload.profile.speed_ratio) != payload.profile:
         raise HTTPException(409, "朗读配置已变化，请重新发起朗读")
@@ -204,7 +207,7 @@ async def prepare_book_audio(
 async def prepare_audio_plan(
     db: AsyncSession, *, user_id: str, project_id: str, source: AudioSource,
     req: MemoirAudioPlanRequest, allow_admin: bool = False,
-    generate: bool = True, prepare_all: bool = False, commit: bool = True,
+    generate: bool = True, commit: bool = True,
 ) -> MemoirBookAudioPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     owner_id = project.user_id
@@ -244,20 +247,26 @@ async def prepare_audio_plan(
     for index, (chunk, key) in enumerate(zip(chunks, keys)):
         job = jobs.get(key)
         cached = None if force else cached_by_key.get(key)
-        needs_schedule = not prepare_all or job is None or job.status not in {"pending", "running"}
-        if generate and needs_schedule and cached is None and (prepare_all or force or req.start_index <= index < window_end):
+        unused_background = bool(
+            job and job.status == MemoirEditingJobStatus.SKIPPED.value
+            and (job.payload_json or {}).get("background")
+            and not (job.result_json or {}).get("provider_started")
+        )
+        if generate and cached is None and (force or req.start_index <= index < window_end):
             job = await enqueue_editing_job(
                 db, project_id=project_id,
                 job_type=MemoirEditingJobType.GENERATE_BOOK_AUDIO_CHUNK,
                 dedupe_key=key,
                 payload_json=AudioChunkPayload(
-                    version_id=source.version_id, user_id=owner_id, text=chunk.text, profile=profile, background=prepare_all,
+                    version_id=source.version_id, user_id=owner_id, text=chunk.text, profile=profile,
                 ).model_dump(mode="json"),
-                retry_failed=req.retry_failed,
+                retry_failed=req.retry_failed or unused_background,
                 replace_completed=bool(job and job.status == MemoirEditingJobStatus.SUCCEEDED.value),
             )
             jobs[key] = job
         status = "succeeded" if cached else (job.status if job else "idle")
+        if unused_background and status == MemoirEditingJobStatus.SKIPPED.value:
+            status = "idle"
         if cached is None and status == MemoirEditingJobStatus.SUCCEEDED.value:
             status = "idle"
         if status == MemoirEditingJobStatus.SKIPPED.value:

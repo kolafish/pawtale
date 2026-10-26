@@ -737,6 +737,11 @@ class MemoirSharedAudioPlanRequest(MemoirBookShareReadRequest):
     version_id: str = Field(min_length=1, max_length=36)
     chapter_id: str | None = Field(default=None, min_length=1, max_length=36)
 
+    generate: bool | None = None
+    start_index: int = Field(default=0, ge=0)
+    source_text_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    profile_key: str | None = Field(default=None, min_length=64, max_length=64)
+
 
 class MemoirSharedAudioPlanResponse(MemoirBookAudioPlanResponse):
     content: str
