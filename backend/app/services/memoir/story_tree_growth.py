@@ -1242,10 +1242,19 @@ async def grow_story_tree(
         for chapter_id in sorted(chapter_ids):
             await generate_or_reuse_chapter_digest(db, project_id=job.project_id, chapter_id=chapter_id, ai_model=ai_model)
     elif session.status == MemoirVoiceSessionStatus.STOPPED.value:
+        # Live checkpoints may already have cleared placed_ids. The narration's
+        # persisted sources still identify every chapter affected by this session.
+        review_chapter_ids = set((await db.scalars(select(MemoirSection.chapter_id).join(MemoirSectionMaterial)
+            .join(MemoirVoiceUtterance, MemoirVoiceUtterance.id == MemoirSectionMaterial.utterance_id).where(
+                MemoirSection.project_id == job.project_id,
+                (MemoirVoiceUtterance.voice_session_id == session.id)
+                | MemoirSectionMaterial.utterance_id.in_(progress.placed_ids),
+            ))).all())
         lease_token = job.lease_token
         structure_changed = await review_story_structure(
             db, user_id=project.user_id, project_id=job.project_id,
             source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized",
+            chapter_ids=review_chapter_ids,
         )
         # The review crosses provider/checkpoint boundaries. Re-read task and
         # session state before accepting ownership of the final progress write.
