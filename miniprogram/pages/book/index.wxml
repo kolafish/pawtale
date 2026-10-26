@@ -42,13 +42,10 @@
       />
     </view>
     <view class="progress-actions">
-      <button wx:if="{{bookContentAvailable}}" class="hero-reading-action" bindtap="openBookReader">
-        <text>{{bookStaleNotice ? '阅读已保存书稿' : '阅读全书'}}</text><text aria-hidden="true">→</text>
-      </button>
-      <template wx:if="{{bookContentAvailable}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers}}" />
+      <template wx:if="{{bookContentAvailable}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers, showBookReader: true, bookStaleNotice}}" />
     </view>
-    <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookCompletion" aria-role="button">
-      <text>{{bookStaleNotice || bookActivityNotice}}</text><text aria-hidden="true">›</text>
+    <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookActivity" aria-role="button">
+      <text>{{bookPendingMaterialCount ? bookActivityNotice : (bookStaleNotice || bookActivityNotice)}}</text><text aria-hidden="true">›</text>
     </view>
   </view>
 
@@ -99,7 +96,7 @@
     </view>
     <view class="section-head chapter-section-head">
       <view class="section-head-copy">
-        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节"}}</text>
+        <text class="section-title">{{chapterStructureEditing ? "编辑目录" : "目录"}}</text>
         <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
       </view>
       <view
@@ -109,7 +106,7 @@
         aria-disabled="{{updatingPlanStructure}}"
         bindtap="toggleChapterStructureEditing"
       >
-        {{chapterStructureEditing ? "完成" : "调整章节"}}
+        {{chapterStructureEditing ? "完成" : "编辑目录"}}
       </view>
     </view>
 

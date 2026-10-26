@@ -524,7 +524,7 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(context.data.bookContentAvailable, false);
   assert.equal(context.data.bookCharCount, 0);
   const template = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-  assert.match(template, /wx:if="\{\{bookContentAvailable\}\}" class="hero-reading-action"/);
+  assert.match(template, /wx:if="\{\{bookContentAvailable\}\}" is="readingShareActions"[^>]*showBookReader: true/);
 
   const previousOutput = context.bookOutput;
   page.applyPlan.call(context, samplePlan("draft"));
@@ -970,6 +970,51 @@ test("book overview preserves processing and failure notices without marking set
   snapshot.progress = { status: "processing", title: "正在整理新版书稿" };
   page.applyBookSnapshot.call(context, snapshot);
   assert.equal(context.data.bookActivityNotice, "正在整理新版书稿");
+});
+
+test("pending narration uses the server count and opens organization without hiding active or failed work", () => {
+  const urls = [];
+  global.wx = {
+    reLaunch: ({ url }) => urls.push(url),
+    navigateTo: ({ url }) => urls.push(url),
+  };
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const snapshot = {
+    identity: { active_project_id: "project/1", active_project: { title: "外婆回忆录" } },
+    plan: samplePlan("confirmed"), drafts_by_chapter_id: {}, output: null,
+    automation_events: { items: [] },
+    progress: { status: "partial_ready", pending_material_count: 3, title: "待整理" },
+  };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.bookPendingMaterialCount, 3);
+  assert.match(context.data.bookActivityNotice, /3/);
+  context.openBookActivity();
+  assert.equal(urls.pop(), "/pages/home/index");
+
+  snapshot.plan = null;
+  snapshot.progress.status = "no_change";
+  snapshot.progress.pending_material_count = 2;
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.bookPendingMaterialCount, 2);
+  context.openBookActivity();
+  assert.equal(urls.pop(), "/pages/home/index");
+
+  snapshot.plan = samplePlan("confirmed");
+  for (const status of ["processing", "failed", "needs_input"]) {
+    snapshot.progress.status = status;
+    snapshot.progress.title = `${status} notice`;
+    page.applyBookSnapshot.call(context, snapshot);
+    assert.equal(context.data.bookPendingMaterialCount, 0);
+    assert.equal(context.data.bookActivityNotice, snapshot.progress.title);
+    context.openBookActivity();
+    assert.match(urls.pop(), /^\/pages\/book-completion\/index\?/);
+  }
+
+  snapshot.progress = { status: "ready", pending_material_count: 0 };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.bookPendingMaterialCount, 0);
+  assert.equal(context.data.bookActivityNotice, "");
 });
 
 

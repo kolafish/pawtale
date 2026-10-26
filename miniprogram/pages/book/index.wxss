@@ -26,8 +26,8 @@
 }
 .progress-main {
   position: relative;
-  min-height: 184rpx;
-  padding: 28rpx 248rpx 24rpx 30rpx;
+  min-height: 148rpx;
+  padding: 24rpx 226rpx 16rpx 30rpx;
   background: linear-gradient(105deg, rgba(255, 253, 250, 0.98) 0%, rgba(255, 253, 250, 0.91) 58%, rgba(245, 230, 224, 0.38) 100%);
 }
 .progress-title-row {
@@ -40,10 +40,10 @@
 }
 .book-header-illustration {
   position: absolute;
-  right: -18rpx;
-  bottom: 8rpx;
-  width: 430rpx;
-  height: 172rpx;
+  right: -16rpx;
+  bottom: 4rpx;
+  width: 360rpx;
+  height: 144rpx;
   opacity: 0.94;
 }
 .status-title {
@@ -78,7 +78,7 @@
   text-wrap: pretty;
 }
 .status-meta {
-  margin-top: 14rpx;
+  margin-top: 10rpx;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
   line-height: 1.45;
@@ -167,7 +167,7 @@
   box-shadow: var(--ui-control-shadow);
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
   transition-property: transform, background-color, box-shadow;
@@ -187,7 +187,7 @@
   color: var(--ui-section-title);
   font-family: var(--ui-font-editorial);
   font-size: var(--ui-font-section-title);
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.35;
   letter-spacing: 0.02em;
   text-wrap: balance;
@@ -585,12 +585,12 @@
   padding: 24rpx 24rpx 112rpx;
 }
 .book-page.large-text .progress-main {
-  min-height: 222rpx;
+  min-height: 178rpx;
   padding-right: 226rpx;
 }
 .book-page.large-text .book-header-illustration {
   right: -24rpx;
-  width: 386rpx;
+  width: 336rpx;
   opacity: 0.78;
 }
 .book-page.large-text .status-title {
@@ -660,34 +660,55 @@
 }
 
 .progress-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12rpx 24rpx;
   padding: 0 30rpx 20rpx;
 }
-.hero-reading-action, .hero-share-action {
+.progress-actions .reading-share-actions {
+  margin-top: 0;
+}
+.progress-actions .ui-share-actions {
+  align-items: stretch;
+}
+.hero-reading-action,
+.progress-actions .ui-share-primary,
+.progress-actions .ui-share-more {
+  width: auto;
   min-height: 44px;
   margin: 0;
-  padding: 0 8rpx;
+  padding: 12rpx 16rpx;
   border: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  background: transparent;
-  box-shadow: none;
-  font-size: var(--ui-font-action);
+  border-radius: var(--ui-radius-control);
+  font-size: var(--ui-font-body);
   line-height: 1.4;
 }
 .hero-reading-action {
-  color: var(--ui-accent-strong);
-  font-weight: 700;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  background: var(--ui-accent-strong);
+  box-shadow: none;
+  color: var(--ui-on-accent);
+  font-weight: 600;
+  transition: transform 150ms ease-out;
 }
-.hero-share-action {
-  color: var(--ui-text-secondary);
+.hero-reading-action text:first-child {
+  min-width: 0;
 }
-.hero-reading-action:active, .hero-share-action:active {
+.progress-actions .ui-share-primary {
+  flex: 0 0 auto;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.progress-actions .ui-share-more {
+  flex: 0 0 auto;
+  min-width: 44px;
+  margin-left: auto;
+  padding: 12rpx 8rpx;
+  font-weight: 500;
+}
+.hero-reading-action:active {
   transform: scale(0.96);
 }
 .book-activity-notice {
@@ -695,7 +716,7 @@
   display: flex;
   align-items: center;
   gap: 12rpx;
-  padding: 18rpx 30rpx;
+  padding: 14rpx 30rpx;
   border-top: 1rpx solid var(--ui-divider);
   color: var(--ui-warning-text);
   font-size: var(--ui-font-meta);
@@ -713,7 +734,7 @@
   align-items: center;
   gap: 18rpx;
   min-height: 44px;
-  padding: 22rpx 4rpx;
+  padding: 16rpx 4rpx;
 }
 .book-operation-row + .book-operation-row {
   border-top: 1rpx solid var(--ui-divider);
@@ -725,10 +746,17 @@
 .book-operation-title, .chapter-directory-title, .chapter-directory-meta, .chapter-directory-notice, .chapter-directory-error {
   display: block;
 }
-.book-operation-title, .chapter-directory-title {
+.book-operation-title {
+  color: var(--ui-text-primary);
+  font-size: var(--ui-font-body);
+  font-weight: 400;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.chapter-directory-title {
   color: var(--ui-text-primary);
   font-size: var(--ui-font-list-title);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -794,7 +822,9 @@
 .book-page.large-text .chapter-directory-meta, .book-page.large-text .chapter-directory-notice, .book-page.large-text .chapter-directory-error, .book-page.large-text .book-operation-notice, .book-page.large-text .book-activity-notice {
   font-size: var(--ui-font-large-meta);
 }
-.book-page.large-text .hero-reading-action, .book-page.large-text .hero-share-action {
+.book-page.large-text .hero-reading-action,
+.book-page.large-text .progress-actions .ui-share-primary,
+.book-page.large-text .progress-actions .ui-share-more {
   min-height: 48px;
   font-size: var(--ui-font-large-body);
 }

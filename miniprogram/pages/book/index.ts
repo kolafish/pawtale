@@ -102,6 +102,7 @@ type BookPageData = BookHomeData & ReadingShareData & {
   pageClass: string;
   showingCachedBook: boolean;
   bookActivityNotice: string;
+  bookPendingMaterialCount: number;
   bookCharCountText: string;
   planStructureBusyChapterId: string;
   planStructureBusyDirection: string;
@@ -124,6 +125,7 @@ definePage<BookPageData>()({
     showingCachedBook: false,
     ...INITIAL_READING_SHARE_DATA,
     bookActivityNotice: "",
+    bookPendingMaterialCount: 0,
     bookCharCountText: "0",
     loading: false,
     needsLogin: false,
@@ -220,6 +222,8 @@ definePage<BookPageData>()({
         this.setData(guestBookData());
         this.setData({
           showingCachedBook: false,
+          bookActivityNotice: "",
+          bookPendingMaterialCount: 0,
           bookShareActive: false,
           bookShareBusy: false,
           bookShareImageUrl: "",
@@ -271,9 +275,14 @@ definePage<BookPageData>()({
     this.applyBookOutput(snapshot.output || null, snapshot.progress || null);
     const events = snapshot.automation_events.items || [];
     const progress = snapshot.progress;
+    const bookPendingMaterialCount = progress?.status === "partial_ready" || progress?.status === "no_change"
+      ? progress.pending_material_count || 0 : 0;
     this.setData({
-      bookActivityNotice: progress && progress.status !== "idle" && progress.status !== "ready"
-        ? progress.title || progress.detail : "",
+      bookPendingMaterialCount,
+      bookActivityNotice: bookPendingMaterialCount
+        ? `还有 ${bookPendingMaterialCount} 段讲述待整理`
+        : progress && progress.status !== "idle" && progress.status !== "ready"
+          ? progress.title || progress.detail : "",
       chapters: this.data.chapters.map((chapter) => {
         const latest = events.filter((event) => (
           event.chapter_id === chapter.id && event.event_type === "chapter_draft_generated"
@@ -429,6 +438,14 @@ definePage<BookPageData>()({
     }
     this.stopPlayback();
     wx.navigateTo({ url: bookReaderPageUrl(this.data.projectId) });
+  },
+
+  openBookActivity() {
+    if (this.data.bookPendingMaterialCount) {
+      this.openHome();
+    } else {
+      this.openBookCompletion();
+    }
   },
 
   openBookCompletion() {
