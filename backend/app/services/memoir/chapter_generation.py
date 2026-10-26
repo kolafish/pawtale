@@ -2003,8 +2003,6 @@ async def _save_generated_draft(
         invalidate_book_output(output)
         db.add(output)
     await db.flush()
-    from app.services.memoir.book_shares import queue_active_share_audio
-    await queue_active_share_audio(db, project_id=project_id, chapter_id=chapter_id)
     previous_char_count = len(latest.content.strip()) if latest else 0
     await automation_events.record_automation_event(
         db,
@@ -2214,8 +2212,6 @@ async def apply_chapter_section_candidate(
         invalidate_book_output(output)
         db.add(output)
     await db.flush()
-    from app.services.memoir.book_shares import queue_active_share_audio
-    await queue_active_share_audio(db, project_id=project_id, chapter_id=chapter_id)
     return draft, version
 
 

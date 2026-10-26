@@ -74,9 +74,11 @@ def _usage_purpose(record: AIUsageRecord) -> str:
     operation = record.operation.lower()
     if "offline_asr" in operation:
         return "加强语音识别"
-    if record.provider in {"volc_streaming_asr", "volc_streaming_asr_reprocess", "stepfun"}:
+    if record.provider in {"volc_streaming_asr", "volc_streaming_asr_reprocess"} or (
+        record.provider == "stepfun" and record.model == "stepaudio-3-asr-max"
+    ):
         return "语音识别"
-    if record.provider == "volc_tts":
+    if record.provider == "volc_tts" or (record.provider == "stepfun" and record.model == "step-tts-mini"):
         return "访谈语音回复" if "/voice-sessions/" in operation else "语音朗读"
     if operation == "memoir.job.evaluate_share_video_candidate":
         return "分享片段筛选"

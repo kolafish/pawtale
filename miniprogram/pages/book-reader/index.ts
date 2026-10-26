@@ -1,5 +1,6 @@
 import { downloadAuthenticatedFile } from "../../services/authenticated-media";
 import type {
+  MemoirBookAudioPlan,
   MemoirBookOutput,
   MemoirBookOutputVersion,
 } from "../../domain/memoir-book";
@@ -551,8 +552,11 @@ definePage<BookReaderData>()({
         const chapterId = this.data.shareScope === "book" ? this.bookChapters[this.data.readerChapterIndex]?.chapterId : undefined;
         const versionId = this.readerAudioVersionId;
         const readingToken = this.readingToken;
-        const prepare = () => readMemoirSharedAudioPlan(readingToken, versionId, chapterId);
-        const plan = await prepare();
+        const plan = await readMemoirSharedAudioPlan(readingToken, versionId, chapterId);
+        const prepare = (index: number, current: MemoirBookAudioPlan) => readMemoirSharedAudioPlan(
+          readingToken, versionId, chapterId, { generate: true, start_index: index,
+            source_text_hash: current.source_text_hash, profile_key: current.profile_key },
+        );
         if (token !== this.playToken) return;
         const playbackToken = token;
         const saved = this.readingProgress;

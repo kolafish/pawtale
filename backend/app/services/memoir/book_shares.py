@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import logging
 import re
 import secrets
 from typing import Literal
@@ -230,7 +229,6 @@ async def create_share(
             token=_stable_token(output.id, existing.token_hash, scope=share_scope(output)),
             expires_at=existing.expires_at,
         )
-        await _queue_resource_audio(db, output, version, retry_failed=True)
         await db.commit()
         return result
     token = secrets.token_urlsafe(32)
@@ -244,7 +242,6 @@ async def create_share(
         values["version_id"] = version.id
     statement = insert(share_model).values(**{share_key.key: output.id}, **values)
     await db.execute(statement.on_conflict_do_update(index_elements=[share_key], set_=values))
-    await _queue_resource_audio(db, output, version, retry_failed=True)
     await db.commit()
     return MemoirBookShareCreateResponse(token=_stable_token(output.id, token_hash, scope=share_scope(output)), expires_at=expires_at)
 
@@ -521,7 +518,7 @@ async def shared_image_file(db: AsyncSession, token: str, asset_id: str):
 
 async def _resource_audio_plan(
     db: AsyncSession, resource: ShareResource, version: ShareVersion, *, generate: bool,
-    chapter_id: str | None = None, retry_failed: bool = False,
+    chapter_id: str | None = None, req: MemoirAudioPlanRequest | None = None,
 ) -> MemoirSharedAudioPlanResponse:
     owner_id = await db.scalar(select(Project.user_id).where(Project.id == resource.project_id))
     response = await _resource_reading_response(db, resource, version, presentation=False)
@@ -532,81 +529,29 @@ async def _resource_audio_plan(
         if share_scope(resource) != "book" or chapter is None:
             raise HTTPException(404, "分享中没有这个章节")
         text = chapter.content
-    return await _prepare_shared_audio(db, owner_id=owner_id, project_id=resource.project_id,
-        version_id=version.id, text=text, generate=generate, retry_failed=retry_failed)
-
-
-async def _prepare_shared_audio(
-    db: AsyncSession, *, owner_id: str, project_id: str, version_id: str, text: str,
-    generate: bool, retry_failed: bool,
-) -> MemoirSharedAudioPlanResponse:
     from app.services.memoir.book_audio_jobs import AudioSource, prepare_audio_plan
 
     plan = await prepare_audio_plan(
-        db, user_id=owner_id, project_id=project_id,
-        source=AudioSource(version_id, text), req=MemoirAudioPlanRequest(retry_failed=retry_failed),
-        generate=generate, prepare_all=generate, commit=False,
+        db, user_id=owner_id, project_id=resource.project_id,
+        source=AudioSource(version.id, text), req=req or MemoirAudioPlanRequest(),
+        generate=generate, commit=generate,
     )
     return MemoirSharedAudioPlanResponse(**plan.model_dump(), content=text)
 
 
-async def _queue_resource_audio(
-    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, retry_failed: bool = False,
-) -> None:
-    try:
-        if isinstance(resource, MemoirBookOutput):
-            response = await _resource_reading_response(db, resource, version, presentation=False)
-            chapters = response.latest_version.manuscript.chapters if response.latest_version.manuscript else []
-            owner_id = await db.scalar(select(Project.user_id).where(Project.id == resource.project_id))
-            texts = [chapter.content for chapter in chapters] or [response.latest_version.content]
-            for text in texts:
-                await _prepare_shared_audio(db, owner_id=owner_id, project_id=resource.project_id,
-                    version_id=version.id, text=text, generate=True, retry_failed=retry_failed)
-            return
-        await _resource_audio_plan(db, resource, version, generate=True, retry_failed=retry_failed)
-    except HTTPException as exc:
-        # A missing TTS configuration/content cannot prevent saving or sharing text.
-        if exc.status_code not in {400, 409, 503}:
-            raise
-        logging.getLogger(__name__).warning("Shared narration unavailable: %s", exc.status_code)
-
-
-async def queue_active_share_audio(db: AsyncSession, *, project_id: str, chapter_id: str | None = None) -> None:
-    """Called by author save paths in their transaction, never by public readers."""
-    if chapter_id:
-        resources = list((await db.scalars(select(MemoirSection).join(MemoirSectionShare,
-            MemoirSectionShare.section_id == MemoirSection.id).where(
-            MemoirSection.project_id == project_id, MemoirSection.chapter_id == chapter_id,
-            MemoirSection.status == "active"))).all())
-        chapter = await db.get(MemoirBookPlanChapter, chapter_id)
-        if chapter:
-            resources.append(chapter)
-    else:
-        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-        resources = [output] if output else []
-    owner_id = await db.scalar(select(Project.user_id).where(Project.id == project_id))
-    if not owner_id:
-        return
-    for resource in resources:
-        share_model, _ = _share_table(share_scope(resource))
-        if not _active(await db.get(share_model, resource.id)):
-            continue
-        version, stale = await _current_version(db, user_id=owner_id, project_id=project_id,
-            chapter_id=resource.id if isinstance(resource, MemoirBookPlanChapter) else None,
-            section_id=resource.id if isinstance(resource, MemoirSection) else None)
-        if version and not stale:
-            await _queue_resource_audio(db, resource, version)
-
-
-async def shared_audio_plan(db: AsyncSession, token: str, version_id: str, chapter_id: str | None = None) -> MemoirSharedAudioPlanResponse:
+async def shared_audio_plan(
+    db: AsyncSession, token: str, version_id: str, chapter_id: str | None = None,
+    *, generate: bool | None = None, req: MemoirAudioPlanRequest | None = None,
+) -> MemoirSharedAudioPlanResponse:
     resource, version = await readable_share(db, token)
     if version.id != version_id:
         raise HTTPException(409, "故事已更新，请重新打开后继续朗读")
-    plan = await _resource_audio_plan(db, resource, version, generate=False, chapter_id=chapter_id)
+    plan = await _resource_audio_plan(db, resource, version, generate=generate is True, chapter_id=chapter_id, req=req)
     for segment in plan.segments:
         segment.job_id = None
-        if segment.status == "idle":
-            segment.status, segment.error_message = "failed", "朗读暂未准备好，可以先阅读正文"
+        # Older clients only poll a prepared playlist and cannot request generation.
+        if generate is None and segment.status == "idle":
+            segment.status, segment.error_message = "failed", "请更新小程序后再发起朗读"
         elif segment.status == "failed":
             segment.error_message = "这段朗读暂时不可用，可以先阅读正文"
     return plan

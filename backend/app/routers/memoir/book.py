@@ -125,7 +125,10 @@ async def read_mobile_memoir_book_share(
 @router.post("/book-shares/audio/plan", response_model=MemoirSharedAudioPlanResponse)
 async def read_mobile_memoir_shared_audio(req: MemoirSharedAudioPlanRequest, response: Response, db: AsyncSession = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.shared_audio_plan(db, req.token, req.version_id, req.chapter_id)
+    return await memoir_book_shares.shared_audio_plan(
+        db, req.token, req.version_id, req.chapter_id, generate=req.generate,
+        req=MemoirAudioPlanRequest(start_index=req.start_index, source_text_hash=req.source_text_hash, profile_key=req.profile_key),
+    )
 
 
 @router.get("/book-shares/{token}/audio/{audio_id}")

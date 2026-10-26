@@ -57,8 +57,6 @@ async def append_book_output_version(
     )
     db.add(version)
     await db.flush()
-    from app.services.memoir.book_shares import queue_active_share_audio
-    await queue_active_share_audio(db, project_id=output.project_id)
     return version
 
 

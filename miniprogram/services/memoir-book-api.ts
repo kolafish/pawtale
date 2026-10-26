@@ -79,9 +79,12 @@ export function readMemoirBookShare(token: string): Promise<MemoirBookOutput> {
 
 export type MemoirSharedAudioPlan = MemoirBookAudioPlan & { content: string };
 
-export function readMemoirSharedAudioPlan(token: string, versionId: string, chapterId?: string): Promise<MemoirSharedAudioPlan> {
+export function readMemoirSharedAudioPlan(
+  token: string, versionId: string, chapterId?: string,
+  playback?: { generate: true; start_index: number; source_text_hash: string; profile_key: string },
+): Promise<MemoirSharedAudioPlan> {
   return request<MemoirSharedAudioPlan>("/api/mobile/memoir/book-shares/audio/plan", {
-    method: "POST", data: { token, version_id: versionId, ...(chapterId ? { chapter_id: chapterId } : {}) },
+    method: "POST", data: { token, version_id: versionId, ...(chapterId ? { chapter_id: chapterId } : {}), generate: false, ...playback },
   });
 }
 

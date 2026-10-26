@@ -759,3 +759,41 @@ test("returning from login switches reading progress to that visitor without ove
   assert.equal(readSharedReadingProgress(context.readingProgressKey).scrollTop, 220);
   delete global.wx;
 });
+
+
+test("shared narration generates only after play and resumes at the saved segment", async () => {
+  const requests = [], played = [];
+  const initial = sampleAudioPlan();
+  initial.segments = Array.from({ length: 4 }, (_, index) => ({
+    ...initial.segments[0], index, status: "idle", audio_file_id: null,
+  }));
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => sampleFinishedBook(),
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+    readMemoirSharedAudioPlan: async (_token, _version, _chapter, playback) => {
+      requests.push(playback);
+      const plan = JSON.parse(JSON.stringify(initial));
+      if (playback) {
+        plan.segments[playback.start_index].status = "succeeded";
+        plan.segments[playback.start_index].audio_file_id = `audio-${playback.start_index}`;
+      }
+      return { ...plan, content: "分享正文" };
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "family" });
+  assert.deepEqual(requests, []);
+  context.readingProgress = { versionId: context.readerAudioVersionId, audioHash: initial.source_text_hash,
+    audioChapterId: context.bookChapters[0].chapterId, audioIndex: 2, audioSeconds: 0 };
+  context.audioPlayback.playFile = async (id) => {
+    played.push(id);
+    context.onHide();
+  };
+  context.audioPlayback.prefetchFile = async () => {};
+  await context.playReaderAudio();
+  assert.equal(requests[0], undefined);
+  assert.deepEqual(requests.slice(1).map(r => r.start_index), [2, 3]);
+  assert.ok(requests.slice(1).every(r => r.generate === true && r.source_text_hash === initial.source_text_hash
+    && r.profile_key === initial.profile_key));
+  assert.deepEqual(played, ["audio-2"]);
+});
