@@ -162,7 +162,7 @@ class LayeredBookAI(AITextServiceBase):
             payload = {
                 "summary": "本章围绕一次学校比赛展开。",
                 "focus": "比赛经历和它留下的记忆。",
-                "structure_guidance": ["从比赛现场开始。"],
+                "writing_guidance": [{"section_ids": [], "instruction": "从比赛现场开始。"}],
                 "candidate_issues": candidates,
             }
         elif "请通读下面这本回忆录" in user_prompt:
@@ -2484,6 +2484,9 @@ async def test_book_review_uses_chapter_text_and_creates_book_issue(
             chapter_id=chapter.id,
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
+    first_title = (await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )).section_snapshot_json[0]["title"]
     unreviewed = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble",
     )
@@ -2503,6 +2506,8 @@ async def test_book_review_uses_chapter_text_and_creates_book_issue(
     assert set(requested_models) == {DEFAULT_AI_TEXT_MODEL}
     book_prompt = next(prompt for prompt in fake.prompts if "请通读下面这本回忆录" in prompt)
     assert all(chapter.id not in book_prompt for chapter in chapters)
+    assert "section_id: S1" in book_prompt
+    assert first_title in book_prompt
     assert "chapter_id: C1" in book_prompt
     assert "这是已经存在的完整章节正文。" in book_prompt
     assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
@@ -2549,11 +2554,21 @@ async def test_book_review_uses_chapter_text_and_creates_book_issue(
         chapter_id=chapters[0].id,
         version=first_version.version + 1,
         content=first_version.content,
+        section_snapshot_json=first_version.section_snapshot_json,
     ))
     await test_db.flush()
     assert (await book_reviews.load_book_review_context(
         test_db, project_id=project_id,
     )).input_signature == review["input_signature"]
+
+    latest = await chapter_generation.latest_chapter_draft_version(
+        test_db, project_id=project_id, chapter_id=chapters[0].id,
+    )
+    latest.section_snapshot_json = [{**section, "title": "更新后的故事标题"} for section in latest.section_snapshot_json]
+    await test_db.flush()
+    assert (await book_reviews.load_book_review_context(
+        test_db, project_id=project_id,
+    )).input_signature != review["input_signature"]
 
 
 async def test_book_review_job_persists_across_requests_and_runs_in_worker(

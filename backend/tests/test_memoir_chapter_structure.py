@@ -101,7 +101,7 @@ async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_n
         return None
 
     async def summaries(*_args, **_kwargs):
-        return {}, {}
+        return {}, {}, []
 
     ai = DirectoryAI()
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', cached_digests)
@@ -212,7 +212,7 @@ def _provider(monkeypatch, answer, *, during_call=None):
     async def digest(*args, **kwargs):
         return None
     async def summaries(*args, **kwargs):
-        return {}, {}
+        return {}, {}, []
     async def generate(*args, **kwargs):
         calls.append(args[2])
         if during_call:
@@ -327,16 +327,21 @@ async def test_user_edit_while_ai_runs_rejects_stale_proposal(client, test_db, m
 
 async def test_growth_receives_valid_chapter_and_section_summaries(client, test_db, monkeypatch):
     pid, _ = await _book(client, test_db)
-    _, chapters, sections = await _load_tree(test_db, project_id=pid)
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     async def chapter_digest(db, *, chapter_id, **kwargs):
-        return SimpleNamespace(status='ready' if chapter_id == chapters[0].id else 'stale', digest_json={'summary': '妈妈在学校教书。'})
+        return SimpleNamespace(status='ready' if chapter_id == chapters[0].id else 'stale', digest_json={'summary': '妈妈在学校教书。', 'structure_findings': [{'kind': 'title_scope', 'section_ids': [sections[0].id], 'reason': '标题应覆盖课堂经历。'}]})
     async def section_digest(db, *, section_id, **kwargs):
         return SimpleNamespace(digest_json={'summary': '小时候跟妈妈去课堂。'}) if section_id == sections[0].id else None
     monkeypatch.setattr(structure, 'get_current_chapter_digest', chapter_digest)
     monkeypatch.setattr(structure, 'get_current_section_digest', section_digest)
-    cs, ss = await structure.load_structure_summaries(test_db, project_id=pid, chapters=chapters, sections=sections)
+    cs, ss, findings = await structure.load_structure_summaries(test_db, project_id=pid, chapters=chapters, sections=sections)
     assert cs == {chapters[0].id: '妈妈在学校教书。'}
     assert ss == {sections[0].id: '小时候跟妈妈去课堂。'}
+    assert findings[0].section_ids == [sections[0].id]
+    directory = structure.build_structure_prompt(
+        await structure.structure_context(test_db, plan, chapters, sections), chapters=chapters, sections=sections,
+        chapter_summaries=cs, section_summaries=ss, review_findings=findings)
+    assert '标题应覆盖课堂经历。' in directory
     prompt, _, _ = build_story_growth_prompt(utterances=[], chapters=chapters, sections=sections,
         interviewer_lines={}, chapter_summaries=cs, section_summaries=ss)
     assert '妈妈在学校教书。' in prompt and '小时候跟妈妈去课堂。' in prompt

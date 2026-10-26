@@ -14,7 +14,6 @@ from app.domain.memoir.types import (
     MemoirBookRevisionProposalStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-    MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
@@ -254,9 +253,7 @@ async def _generate_candidate(
         project_id=target.context.project_id,
         chapter_id=target.context.chapter_id,
     )
-    guidance = list(digest.digest_json.get("structure_guidance", [])) if (
-        digest is not None and digest.status == MemoirSemanticCacheStatus.READY.value
-    ) else []
+    guidance = chapter_digests.writing_guidance(digest)
     return await chapter_generation.generate_chapter_section(
         target.context,
         section=replace(target.section, title=current_title or target.section.title),

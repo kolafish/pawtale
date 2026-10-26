@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.application_errors import InsufficientAICreditError
+from app.schemas.memoir_editorial import StructureFinding, WritingGuidance
 from app.domain.memoir.types import (
     MemoirSectionStatus,
     MemoirSemanticCacheStatus,
@@ -46,7 +47,7 @@ from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v4"
+CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v5"
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -101,7 +102,8 @@ class _ChapterDigestOutput(BaseModel):
 
     summary: str
     focus: str = ""
-    structure_guidance: list[str] = Field(default_factory=list)
+    structure_findings: list[StructureFinding] = Field(default_factory=list)
+    writing_guidance: list[WritingGuidance] = Field(default_factory=list)
     candidate_issues: list[_ChapterDigestIssueOutput] = Field(default_factory=list)
 
 
@@ -406,7 +408,8 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 {{
   "summary": "整章内容的一到三句概括",
   "focus": "整章最主要的叙事重点",
-  "structure_guidance": ["确有必要时给出的可选编辑建议"],
+  "structure_findings": [{{"kind":"chapter_structure|section_structure|title_scope","section_ids":["相关 section_id"],"reason":"目录、归属、拆合或标题范围问题及依据"}}],
+  "writing_guidance": [{{"section_ids":["适用 section_id；整章适用时为空"],"instruction":"既定小节内的表达、去重、顺序或衔接建议"}}],
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure|conflict",
@@ -425,10 +428,10 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 私人书稿不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求，不自行改变收录范围。
 - 先判断整章是否自然成立，不按固定模板逐项找缺口。
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
-- 已有素材足够、只需编辑处理的问题写入 structure_guidance，不要求用户补讲。
+- 已有素材足够的问题由编辑处理，不要求用户补讲：目录、归属、拆合、标题范围问题写入 structure_findings，由目录编辑核对素材后自动调整；既定小节内的表达、去重、顺序和衔接写入 writing_guidance，只关联实际适用的小节。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
-- manual_review 只用于输入明确支持、必须由用户决定的取舍，未处理时会阻止章节确认。仅由摘要差异推测的事实矛盾不能升级为阻塞事项，应在 structure_guidance 中说明需要核对的原素材。
+- manual_review 只用于输入明确支持、必须由用户决定的取舍，未处理时会阻止章节确认。仅由摘要差异推测的事实矛盾不能升级为阻塞事项，应在 writing_guidance 中说明需要核对的原素材，不自行选定事实。
 - 先区分不同人物、事件、时间和当时/现在的看法；这些差异不自动构成矛盾。摘要保留原有不确定性、否定、转述归属与程度，不声称完成原始事实核验。
 - 已答、明确不记得或不愿说明的不重复追问；不凭摘要未提及就断定素材缺失。无必要问题时 candidate_issues 为空。
 - question 和 reason 会直接展示给用户；引用小章节时使用标题。
@@ -504,16 +507,23 @@ def normalize_chapter_digest(
     return {
         "summary": summary,
         "focus": focus,
-        "structure_guidance": _string_list(
-            [
-                visible(item)
-                for item in payload.get("structure_guidance", [])
-            ]
-            if isinstance(payload.get("structure_guidance"), list)
-            else [],
-            limit=8,
-            item_limit=240,
-        ),
+        "structure_findings": [
+            StructureFinding(
+                kind=finding.kind,
+                section_ids=list(dict.fromkeys(section_references.decode(ref) for ref in finding.section_ids)),
+                reason=visible(finding.reason),
+            ).model_dump()
+            for raw in payload.get("structure_findings", [])
+            for finding in [StructureFinding.model_validate(raw)]
+        ],
+        "writing_guidance": [
+            WritingGuidance(
+                section_ids=list(dict.fromkeys(section_references.decode(ref) for ref in guidance.section_ids)),
+                instruction=visible(guidance.instruction),
+            ).model_dump()
+            for raw in payload.get("writing_guidance", [])
+            for guidance in [WritingGuidance.model_validate(raw)]
+        ],
         "candidate_issues": issues,
     }
 
@@ -692,3 +702,9 @@ async def generate_or_reuse_chapter_digest(
     if progress_callback is not None:
         await progress_callback({"provider_request_pending": False})
     return digest
+
+
+def writing_guidance(digest: MemoirChapterDigest | None) -> list[WritingGuidance]:
+    if digest is None or digest.status != MemoirSemanticCacheStatus.READY.value:
+        return []
+    return [WritingGuidance.model_validate(raw) for raw in digest.digest_json.get("writing_guidance", [])]
