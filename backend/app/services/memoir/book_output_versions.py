@@ -184,6 +184,7 @@ class AutomaticEditorialCopyState(BaseModel):
 
 
 AUTOMATIC_EDITORIAL_COPY_KEY = "automatic_editorial_copy"
+EDITORIAL_COPY_POLICY_VERSION = 3
 
 
 def chapter_editorial_copy_signature(snapshot: dict[str, object]) -> str:
@@ -191,7 +192,7 @@ def chapter_editorial_copy_signature(snapshot: dict[str, object]) -> str:
     # are not evidence. Original quotations must also occur in their own section.
     candidates = original_quote_candidates(snapshot, max_chars=90, for_signature=True)
     return semantic_json_signature({
-        "editorial_evidence_version": 2,
+        "editorial_evidence_version": EDITORIAL_COPY_POLICY_VERSION,
         **{key: snapshot.get(key) for key in ("chapter_title", "content")},
         "original_quotes": [
             (source.get("utterance_id"), max(candidates.get(source.get("utterance_id"), ()), key=len, default=""))
