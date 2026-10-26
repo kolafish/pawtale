@@ -594,8 +594,7 @@ definePage<ChapterWorkspacePageData>()({
         });
       }
       if (this.data.chapterHasReadableDraft) {
-        actions.push({ label: "预览分享内容", run: async () => this.openReadingSharePreview() });
-        if (this.data.bookShareActive) actions.push({ label: "停止分享", run: () => this.revokeBookShare() });
+        actions.push({ label: "分享设置", run: async () => this.openReadingShareMore() });
       }
       const includeInBook = chapter.include_in_book === false;
       actions.push({
