@@ -2,8 +2,7 @@ import { getMemoirBookShareStatus, readMemoirBookShare, revokeMemoirBookShare, u
 import { routeAuthError } from "./navigation";
 import { pageUrl } from "./page-input";
 import { shareLikerViews, type ShareLikerView } from "./share-likes";
-import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage } from "./share";
-import { cleanBaseUrl, readBackendConfig } from "./request";
+import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage, readingShareImageUrl, readingShareExcerpt } from "./share";
 
 const DESCRIPTION = "分享链接长期有效，书稿更新自动同步";
 export interface ReadingShareData {
@@ -47,11 +46,20 @@ export const readingShareMethods = defineReadingShareMethods({
   onShareAppMessage() {
     return readingShareMessage(this.readingShareTarget().title, this.data.bookShareReady ? this.bookShareToken : "", this.data.bookShareImageUrl);
   },
-  async loadReadingShareCard(token: string): Promise<string> {
+  async loadReadingShareCard(token: string, confirmExcerpt = false): Promise<string> {
+    const { projectId, chapterId, sectionId } = this.readingShareTarget();
+    const sequence = this.bookShareStatusSequence;
     const output = await readMemoirBookShare(token);
-    const manuscript = output.latest_version?.manuscript;
-    const image = manuscript?.render_settings.cover_image || manuscript?.chapters.flatMap(chapter => chapter.illustrations)[0];
-    return image?.image_url ? `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}${image.image_url}` : "";
+    const version = output.latest_version;
+    const excerpt = confirmExcerpt && (chapterId || sectionId) && version
+      ? readingShareExcerpt(version.content, version.id) : undefined;
+    if (!excerpt || !this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return readingShareImageUrl(token, undefined, version?.id);
+    const confirmed = await new Promise<boolean>(resolve => wx.showModal({
+      title: "在分享封面展示这段原文？", content: `“${excerpt.text}”\n\n封面在微信聊天中直接可见，请确认没有不想公开的内容。`,
+      confirmText: "使用摘录", cancelText: "不放摘录",
+      success: result => resolve(Boolean(result.confirm)), fail: () => resolve(false),
+    }));
+    return readingShareImageUrl(token, confirmed ? excerpt : undefined, version?.id);
   },
   async refreshBookShareStatus() {
     const { projectId, chapterId, sectionId } = this.readingShareTarget();
@@ -96,7 +104,7 @@ export const readingShareMethods = defineReadingShareMethods({
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareStatusKnown: true });
-      const image = await this.loadReadingShareCard(share.token);
+      const image = await this.loadReadingShareCard(share.token, true);
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareReady: true, bookShareStale: false, bookShareStatusKnown: true,
@@ -116,9 +124,35 @@ export const readingShareMethods = defineReadingShareMethods({
   },
   openReadingShareMore() {
     if (this.data.bookShareBusy) return;
-    wx.showActionSheet({ itemList: ["预览分享内容", ...(this.data.bookShareActive ? ["停止分享"] : [])],
-      success: ({ tapIndex }) => { if (tapIndex === 0) this.openReadingSharePreview(); else void this.revokeBookShare(); },
+    const { chapterId, sectionId } = this.readingShareTarget();
+    const canSetExcerpt = this.data.bookShareReady && Boolean(chapterId || sectionId);
+    const items = ["预览分享内容", ...(canSetExcerpt ? ["设置封面摘录"] : []), ...(this.data.bookShareActive ? ["停止分享"] : [])];
+    wx.showActionSheet({ itemList: items,
+      success: ({ tapIndex }) => {
+        if (items[tapIndex] === "预览分享内容") this.openReadingSharePreview();
+        else if (items[tapIndex] === "设置封面摘录") void this.configureReadingShareCard();
+        else if (items[tapIndex] === "停止分享") void this.revokeBookShare();
+      },
     });
+  },
+  async configureReadingShareCard() {
+    if (!this.data.bookShareReady || this.data.bookShareBusy) return;
+    const { projectId, chapterId, sectionId } = this.readingShareTarget();
+    const sequence = ++this.bookShareStatusSequence;
+    this.setData({ bookShareBusy: true, bookShareReady: false });
+    hideMiniProgramShareMenu();
+    try {
+      const image = await this.loadReadingShareCard(this.bookShareToken, true);
+      if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
+      this.setData({ bookShareImageUrl: image, bookShareReady: true });
+      enableMiniProgramShareMenu();
+    } catch (error) {
+      if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
+        this.setData({ error: error instanceof Error ? error.message : "封面准备失败" });
+      }
+    } finally {
+      if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence) this.setData({ bookShareBusy: false });
+    }
   },
   async revokeBookShare() {
     const { projectId, chapterId, sectionId } = this.readingShareTarget();

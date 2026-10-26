@@ -96,3 +96,26 @@ test("local file sharing reports unsupported WeChat versions", async () => {
     delete global.wx;
   }
 });
+
+test("reading card excerpt keeps real text and Unicode offsets, skipping headings", () => {
+  const { readingShareExcerpt } = require("../services/share.ts");
+  const content = "# 家里的故事\n\n  🌿奶奶坐在门口。后来我们回家了。";
+  const excerpt = readingShareExcerpt(content, "version-1");
+  assert.equal(excerpt.text, "🌿奶奶坐在门口。");
+  assert.equal(Array.from(content).slice(excerpt.start, excerpt.start + excerpt.length).join(""), excerpt.text);
+  assert.equal(excerpt.versionId, "version-1");
+  assert.equal(readingShareExcerpt("# 只有标题\n", "v"), undefined);
+  assert.equal(readingShareExcerpt("一".repeat(60), "v").length, 48);
+});
+
+test("reading share and forwarding use the dedicated public card without an implicit excerpt", () => {
+  global.wx = { getStorageSync: () => ({ httpBaseUrl: "https://example.test/" }) };
+  try {
+    const { readingShareMessage, readingShareImageUrl } = require("../services/share.ts");
+    const url = readingShareMessage("真实书名", "c1.token").imageUrl;
+    assert.equal(url, "https://example.test/api/mobile/memoir/book-shares/c1.token/card.jpg?design=1");
+    const selected = readingShareImageUrl("c1.token", { text: "敏感原文不进URL", start: 5, length: 8, versionId: "version-1" });
+    assert.ok(selected.endsWith("&version_id=version-1&excerpt_start=5&excerpt_length=8"));
+    assert.ok(!selected.includes("敏感"));
+  } finally { delete global.wx; }
+});

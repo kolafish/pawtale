@@ -224,7 +224,7 @@ test("book page binds separate settings and file entries", () => {
 
 test("one share action prepares the default book, reuses its link, and can stop it", async () => {
   const calls = [];
-  global.wx = { showModal: ({ success }) => success({ confirm: true }) };
+  global.wx = { getStorageSync: () => undefined, showModal: ({ success }) => success({ confirm: true }) };
   const { page } = loadBookPage({ voiceApiExports: {
     getMemoirBookShareStatus: async () => ({ active: false, current: false, stale: false }),
     updateMemoirBookShare: async (...args) => { calls.push(["ensure", ...args]); return { token: "family-secret" }; },
@@ -237,7 +237,7 @@ test("one share action prepares the default book, reuses its link, and can stop 
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareReady, true);
   assert.deepEqual(context.onShareAppMessage(), {
-    title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "/assets/memoir-book-header.png",
+    title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/family-secret/card.jpg?design=1",
   });
   await context.revokeBookShare();
   assert.deepEqual(calls, [["ensure", "project/1", undefined, undefined], ["stop", "project/1", undefined, undefined]]);
@@ -246,6 +246,7 @@ test("one share action prepares the default book, reuses its link, and can stop 
 });
 
 test("existing current shares need no update or configuration", async () => {
+  global.wx = { getStorageSync: () => undefined };
   const { page } = loadBookPage({ voiceApiExports: {
     getMemoirBookShareStatus: async () => ({ active: true, token: "existing", current: true, stale: false }),
   } });
@@ -256,6 +257,7 @@ test("existing current shares need no update or configuration", async () => {
 });
 
 test("a failed preparation stays on the same action and can be retried", async () => {
+  global.wx = { getStorageSync: () => undefined };
   let fail = true;
   const { page } = loadBookPage({ voiceApiExports: {
     updateMemoirBookShare: async () => { if (fail) throw new Error("网络暂时不可用"); return { token: "retry" }; },
@@ -281,6 +283,7 @@ test("a withdrawn source disables sharing until the server returns a safe versio
 });
 
 test("a new book version rechecks the same link and ignores a previous project's response", async () => {
+  global.wx = { getStorageSync: () => undefined };
   let resolveStatus;
   const { page } = loadBookPage({ voiceApiExports: {
     getMemoirBookShareStatus: () => new Promise(resolve => { resolveStatus = resolve; }),

@@ -1,3 +1,5 @@
+import { cleanBaseUrl, readBackendConfig } from "./request";
+
 const HOME_SHARE_QUERY = "from=share_home";
 const HOME_SHARE_TITLE = "老余口述，把家里的故事慢慢讲下来";
 const HOME_SHARE_PATH = `/pages/home/index?${HOME_SHARE_QUERY}`;
@@ -105,10 +107,39 @@ export function sharedVideoShareMessage(
 }
 
 
+export interface ReadingShareExcerpt {
+  text: string;
+  start: number;
+  length: number;
+  versionId: string;
+}
+
+export function readingShareExcerpt(content: string, versionId: string): ReadingShareExcerpt | undefined {
+  // Keep offsets in Unicode code points, matching the server (including emoji).
+  // Skip headings and never invent a hook or draw from private source material.
+  for (const match of content.matchAll(/[^\r\n]+/g)) {
+    const paragraph = match[0].trim();
+    if (!paragraph || /^#{1,6}\s/.test(paragraph)) continue;
+    const sentence = paragraph.match(/^.*?[。！？.!?](?:[”’」』])?/)?.[0] || paragraph;
+    const text = Array.from(sentence).slice(0, 48).join("");
+    const offset = (match.index || 0) + match[0].indexOf(paragraph);
+    return { text, start: Array.from(content.slice(0, offset)).length, length: Array.from(text).length, versionId };
+  }
+  return undefined;
+}
+
+export function readingShareImageUrl(token: string, excerpt?: ReadingShareExcerpt, versionId = ""): string {
+  const base = cleanBaseUrl(readBackendConfig().httpBaseUrl);
+  const version = excerpt?.versionId || versionId;
+  const revision = version ? `&version_id=${encodeURIComponent(version)}` : "";
+  const selection = excerpt ? `&excerpt_start=${excerpt.start}&excerpt_length=${excerpt.length}` : "";
+  return `${base}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/card.jpg?design=1${revision}${selection}`;
+}
+
 export function readingShareMessage(title: string, token: string, imageUrl = ""): WechatMiniprogram.ShareAppMessagePayload {
   return token ? {
     title: title.trim() || "一段家里的故事",
     path: `/pages/book-reader/index?shareToken=${encodeURIComponent(token)}`,
-    imageUrl: imageUrl || "/assets/memoir-book-header.png",
+    imageUrl: imageUrl || readingShareImageUrl(token),
   } : homeShareAppMessage();
 }
