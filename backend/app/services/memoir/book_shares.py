@@ -328,6 +328,32 @@ async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     return await _resource_reading_response(db, resource, version, token=token)
 
 
+async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", excerpt_start: int = 0, excerpt_length: int = 0) -> bytes:
+    from app.services.memoir.reading_share_card import render_reading_share_card
+
+    # Use the same revocation and withdrawn-material checks as the reader, even
+    # when rendering an already cached card. Never read private source material.
+    resource, version = await readable_share(db, token)
+    result = await _resource_reading_response(db, resource, version, presentation=False)
+    is_book = share_scope(resource) == "book"
+    book_title = result.title
+    if not is_book:
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == resource.project_id))
+        saved = await load_latest_book_output_version(db, output_id=output.id) if output else None
+        project = await db.get(Project, resource.project_id)
+        book_title = book_output_version_title(saved, fallback=output.title) if saved else (output.title if output else project.title)
+    reading = result.latest_version
+    # Selection offsets refer to this exact scoped reading version. An update
+    # must never replace confirmed words with newly added, unconfirmed content.
+    excerpt = ""
+    if not is_book and version_id == reading.id and excerpt_length:
+        excerpt = reading.content[excerpt_start:excerpt_start + excerpt_length].strip()
+    chapters = reading.manuscript.chapters if reading.manuscript else []
+    return await asyncio.to_thread(render_reading_share_card,
+        title=result.title, book_title=book_title, is_book=is_book,
+        chapter_count=len(chapters), char_count=len(reading.content.strip()), excerpt=excerpt)
+
+
 async def _resource_reading_response(
     db: AsyncSession, resource: ShareResource, version: ShareVersion, *, token: str = "", presentation: bool = True,
 ) -> MemoirBookOutputResponse:

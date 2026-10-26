@@ -34,7 +34,7 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage } from "../../services/share";
+import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage, readingShareImageUrl } from "../../services/share";
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import {
@@ -419,7 +419,8 @@ definePage<BookReaderData>()({
   },
 
   onShareAppMessage() {
-    return readingShareMessage(this.data.readerTitle, this.data.error ? "" : this.readingToken, this.data.shareCoverUrl || this.data.shareImages[0]?.url);
+    const token = this.data.error ? "" : this.readingToken;
+    return readingShareMessage(this.data.readerTitle, token, token ? readingShareImageUrl(token, undefined, this.readerAudioVersionId) : "");
   },
 
   openShareHome() { wx.reLaunch({ url: "/pages/home/index" }); },

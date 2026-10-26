@@ -150,6 +150,17 @@ async def get_mobile_memoir_shared_image(token: str, asset_id: str, db: AsyncSes
                         headers={"Cache-Control": "no-store"})
 
 
+@router.get("/book-shares/{token}/card.jpg")
+async def get_mobile_memoir_shared_card(
+    token: str, version_id: str = Query(default="", max_length=64),
+    excerpt_start: int = Query(default=0, ge=0), excerpt_length: int = Query(default=0, ge=0, le=48),
+    db: AsyncSession = Depends(get_db),
+):
+    image = await memoir_book_shares.shared_card(db, token, version_id=version_id,
+        excerpt_start=excerpt_start, excerpt_length=excerpt_length)
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/projects/{project_id}/book-plan", response_model=MemoirBookPlanResponse)
 async def get_mobile_memoir_book_plan(
     project_id: str,
