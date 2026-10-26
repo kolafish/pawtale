@@ -222,3 +222,44 @@ async def test_draft_progress_preserves_deferred_need_from_older_growth_job(clie
     assert response.json()["needs_user_material_count"] == 1
     assert response.json()["status"] == "no_change"
     assert response.json()["can_retry"] is False
+
+
+@pytest.mark.parametrize("status,pending,needs_user", [("not_story", 0, 0), ("needs_user", 1, 1)])
+async def test_progress_uses_current_interviewer_context_for_saved_classification(
+    client, test_db, status, pending, needs_user,
+):
+    from app.models.memoir import MemoirChatMessage
+    from app.services.memoir import story_tree_growth
+
+    text = "这段往事想不起来了，先不提了吧。"
+    question_text = "当时和家人在一起的事，还记得哪些？"
+    created = await create_test_voice_transcript(client, test_db, text, question_text=question_text)
+    project_id = created["session"]["project_id"]
+    message = await test_db.get(MemoirChatMessage, created["message_id"])
+    test_db.add(MemoirEditingJob(
+        project_id=project_id, job_type="organize_material", status="succeeded",
+        run_after=utcnow_naive(), dedupe_key="classified-answer",
+        result_json={"growth": {"deferred": {created["utterance_id"]: {
+            "status": status, "text_hash": source_text_hash(text), "reason": "等待补充",
+            "classification_policy_version": story_tree_growth.STORY_CONTENT_POLICY_VERSION,
+            "question_context": story_tree_growth._question_context(message, {message.id: question_text}),
+        }}}},
+    ))
+    await test_db.commit()
+
+    path = f"/api/mobile/memoir/projects/{project_id}/draft-progress"
+    response = await client.get(path)
+    assert response.status_code == 200, response.text
+    progress = response.json()
+    assert progress["pending_material_count"] == pending
+    assert progress["needs_user_material_count"] == needs_user
+    assert progress["can_retry"] is False
+
+    # A real question edit must still invalidate the old classification.
+    question = await test_db.get(MemoirChatMessage, created["question_message_id"])
+    question.content_text = "那一年第一次出远门，您想起什么了？"
+    await test_db.commit()
+    progress = (await client.get(path)).json()
+    assert progress["pending_material_count"] == 1
+    assert progress["needs_user_material_count"] == 0
+    assert progress["can_retry"] is True

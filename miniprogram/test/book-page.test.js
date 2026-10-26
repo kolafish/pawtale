@@ -975,11 +975,13 @@ test("book overview preserves processing and failure notices without marking set
   assert.equal(context.data.bookActivityNotice, "正在整理新版书稿");
 });
 
-test("pending narration uses the server count and opens organization without hiding active or failed work", () => {
+test("pending narration shows the server detail without leaving the book or hiding active or failed work", async () => {
   const urls = [];
+  const dialogs = [];
   global.wx = {
     reLaunch: ({ url }) => urls.push(url),
     navigateTo: ({ url }) => urls.push(url),
+    showModal: (options) => { dialogs.push(options); options.success({ confirm: false }); },
   };
   const { page } = loadBookPage();
   const context = pageContext(page);
@@ -987,21 +989,25 @@ test("pending narration uses the server count and opens organization without hid
     identity: { active_project_id: "project/1", active_project: { title: "外婆回忆录" } },
     plan: samplePlan("confirmed"), drafts_by_chapter_id: {}, output: null,
     automation_events: { items: [] },
-    progress: { status: "partial_ready", pending_material_count: 3, title: "待整理" },
+    progress: { status: "partial_ready", pending_material_count: 3, title: "待整理",
+      detail: "讲述已经保存，可以继续整理；已有正文仍可阅读。", can_retry: true },
   };
   page.applyBookSnapshot.call(context, snapshot);
   assert.equal(context.data.bookPendingMaterialCount, 3);
   assert.match(context.data.bookActivityNotice, /3/);
-  context.openBookActivity();
-  assert.equal(urls.pop(), "/pages/home/index");
+  await context.openBookActivity();
+  assert.equal(dialogs.at(-1).content, snapshot.progress.detail);
+  assert.equal(dialogs.at(-1).confirmText, "继续整理");
+  assert.deepEqual(urls, []);
 
   snapshot.plan = null;
   snapshot.progress.status = "no_change";
   snapshot.progress.pending_material_count = 2;
   page.applyBookSnapshot.call(context, snapshot);
   assert.equal(context.data.bookPendingMaterialCount, 2);
-  context.openBookActivity();
-  assert.equal(urls.pop(), "/pages/home/index");
+  await context.openBookActivity();
+  assert.equal(dialogs.length, 2);
+  assert.deepEqual(urls, []);
 
   snapshot.plan = samplePlan("confirmed");
   for (const status of ["processing", "failed", "needs_input"]) {
@@ -1010,7 +1016,7 @@ test("pending narration uses the server count and opens organization without hid
     page.applyBookSnapshot.call(context, snapshot);
     assert.equal(context.data.bookPendingMaterialCount, 0);
     assert.equal(context.data.bookActivityNotice, snapshot.progress.title);
-    context.openBookActivity();
+    await context.openBookActivity();
     assert.match(urls.pop(), /^\/pages\/book-completion\/index\?/);
   }
 
@@ -1018,6 +1024,59 @@ test("pending narration uses the server count and opens organization without hid
   page.applyBookSnapshot.call(context, snapshot);
   assert.equal(context.data.bookPendingMaterialCount, 0);
   assert.equal(context.data.bookActivityNotice, "");
+});
+
+test("pending narration resumes the existing draft job only when allowed and confirmed", async () => {
+  const calls = [];
+  let confirm = false;
+  global.wx = {
+    showToast() {},
+    showModal: (options) => options.success({ confirm }),
+  };
+  const { page } = loadBookPage({ voiceApiExports: {
+    retryMemoirDraftProgress: async (projectId) => { calls.push(projectId); return {}; },
+  } });
+  const context = pageContext(page);
+  const snapshot = {
+    identity: { active_project_id: "project/1", active_project: { title: "回忆录" } },
+    plan: samplePlan("confirmed"), drafts_by_chapter_id: {}, output: null,
+    automation_events: { items: [] },
+    progress: { status: "partial_ready", pending_material_count: 1, can_retry: true,
+      detail: "讲述已经保存，可以继续整理；已有正文仍可阅读。" },
+  };
+  page.applyBookSnapshot.call(context, snapshot);
+  context.loadBookHome = async () => { calls.push("refresh"); };
+
+  await context.openBookActivity();
+  assert.deepEqual(calls, []);
+  confirm = true;
+  await context.openBookActivity();
+  assert.deepEqual(calls, ["project/1", "refresh"]);
+  assert.equal(context.data.retryingDraft, false);
+
+  snapshot.progress.can_retry = false;
+  snapshot.progress.detail = "还需要补充背景信息。";
+  page.applyBookSnapshot.call(context, snapshot);
+  let dialog;
+  global.wx.showModal = (options) => { dialog = options; options.success({ confirm: true }); };
+  await context.openBookActivity();
+  assert.equal(dialog.content, snapshot.progress.detail);
+  assert.equal(dialog.showCancel, false);
+  assert.equal(dialog.confirmText, "知道了");
+  assert.deepEqual(calls, ["project/1", "refresh"]);
+
+  snapshot.progress.can_retry = true;
+  page.applyBookSnapshot.call(context, snapshot);
+  global.wx.showModal = (options) => options.fail();
+  await context.openBookActivity();
+  assert.deepEqual(calls, ["project/1", "refresh"]);
+
+  global.wx.showModal = (options) => {
+    context.setData({ projectId: "project/2" });
+    options.success({ confirm: true });
+  };
+  await context.openBookActivity();
+  assert.deepEqual(calls, ["project/1", "refresh"]);
 });
 
 

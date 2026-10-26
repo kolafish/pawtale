@@ -117,6 +117,7 @@ definePage<BookPageData>()({
   bookChapterSources: {} as BookChapterSources,
   bookDraftsByChapterId: {} as Record<string, MemoirBookChapterDraft | null>,
   bookOutput: null as MemoirBookOutput | null,
+  bookDraftProgress: null as MemoirDraftProgress | null,
   bookShareToken: "",
   bookShareStatusSequence: 0,
 
@@ -218,6 +219,7 @@ definePage<BookPageData>()({
         this.bookChapterSources = {};
         this.bookDraftsByChapterId = {};
         this.bookOutput = null;
+        this.bookDraftProgress = null;
         this.bookShareToken = "";
         this.setData(guestBookData());
         this.setData({
@@ -248,6 +250,7 @@ definePage<BookPageData>()({
   },
 
   applyBookSnapshot(snapshot: MemoirBookSnapshot) {
+    this.bookDraftProgress = snapshot.progress || null;
     const identity = snapshot.identity;
     const projectId = identity.active_project_id;
     const projectTitle = identity.active_project?.title || "尚未创建回忆录";
@@ -440,11 +443,26 @@ definePage<BookPageData>()({
     wx.navigateTo({ url: bookReaderPageUrl(this.data.projectId) });
   },
 
-  openBookActivity() {
-    if (this.data.bookPendingMaterialCount) {
-      this.openHome();
-    } else {
+  async openBookActivity() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.retryingDraft) return;
+    const progress = this.bookDraftProgress;
+    if (!this.data.bookPendingMaterialCount || !progress) {
       this.openBookCompletion();
+      return;
+    }
+    this.stopPlayback();
+    const confirmed = await new Promise<boolean>(resolve => wx.showModal({
+      title: this.data.bookActivityNotice,
+      content: progress.detail,
+      confirmText: progress.can_retry ? "继续整理" : "知道了",
+      showCancel: progress.can_retry,
+      success: result => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    }));
+    if (confirmed && progress.can_retry && projectId === this.data.projectId
+      && this.bookDraftProgress?.can_retry) {
+      await this.continueBookDraft();
     }
   },
 
