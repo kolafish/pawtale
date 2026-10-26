@@ -117,6 +117,7 @@ class StructureDiagnosis(BaseModel):
 
 def select_context(context: st.StructureContext, chapter_refs: set[str], section_refs: set[str] | None = None) -> st.StructureContext:
     chapters = [c.model_copy(deep=True) for c in context.outline.chapters if c.chapter_ref in chapter_refs]
+    chapter_ids = {context.chapter_refs.decode(c.chapter_ref) for c in chapters}
     if section_refs is not None:
         for chapter in chapters:
             chapter.sections = [s for s in chapter.sections if s.section_refs[0] in section_refs]
@@ -127,7 +128,7 @@ def select_context(context: st.StructureContext, chapter_refs: set[str], section
         section_titles={r: title for r, title in context.section_titles.items() if r in refs},
         fixed_sections=context.fixed_sections & refs,
         fixed_materials={m: destination for m, destination in context.fixed_materials.items() if destination[0] in refs},
-        manual_chapter_order=tuple(cid for cid in context.manual_chapter_order if context.chapter_refs.encode(cid) in chapter_refs))
+        manual_chapter_order=tuple(cid for cid in context.manual_chapter_order if cid in chapter_ids))
 
 
 def finding_context(context: st.StructureContext, finding: BookStructureFinding) -> st.StructureContext:

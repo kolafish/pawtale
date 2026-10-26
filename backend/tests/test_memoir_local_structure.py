@@ -61,6 +61,43 @@ def mock_models(monkeypatch, answers):
     return calls
 
 
+async def test_review_after_manual_move_and_merge_preserves_surviving_order(client, test_db, monkeypatch):
+    from tests.test_memoir_chapter_structure import _book
+
+    pid, uid = await _book(client, test_db)
+    _, chapters, _ = await _load_tree(test_db, project_id=pid)
+    moved_id, removed_id, destination_id = chapters[-1].id, chapters[1].id, chapters[0].id
+    endpoint = f'/api/mobile/memoir/projects/{pid}/book-plan/structure-commands'
+    response = await client.post(endpoint, json={'type': 'move_chapter', 'chapter_id': moved_id, 'direction': 'up'})
+    assert response.status_code == 200, response.text
+    _, reordered, _ = await _load_tree(test_db, project_id=pid)
+    expected_order = [c.id for c in reordered if c.id != removed_id]
+    response = await client.post(endpoint, json={
+        'type': 'merge_chapters', 'chapter_id': removed_id, 'target_chapter_id': destination_id,
+    })
+    assert response.status_code == 200, response.text
+    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
+    assert removed_id in plan.metadata_json['manual_chapter_order']
+    ctx = await st.structure_context(test_db, plan, chapters, sections)
+    chapter = next(c for c in ctx.outline.chapters if ctx.chapter_refs.decode(c.chapter_ref) == moved_id)
+    section = chapter.sections[0]
+    original_materials = st.material_identity(sections)
+    calls = mock_models(monkeypatch, [
+        {'findings': [{'kind': 'title_scope', 'chapter_ids': [chapter.chapter_ref],
+                       'section_ids': section.section_refs, 'reason': '标题应覆盖工作经历'}]},
+        {'chapters': [{'chapter_ref': chapter.chapter_ref, 'title': chapter.title, 'sections': [
+            {'title': '工作经历', 'material_refs': list(ctx.section_materials[section.section_refs[0]])},
+        ]}]},
+    ])
+    assert await st.review_story_structure(test_db, user_id=uid, project_id=pid,
+        chapter_ids=set(expected_order) - {destination_id})
+    _, after_chapters, after_sections = await _load_tree(test_db, project_id=pid)
+    assert len(calls) == 2
+    assert [c.id for c in after_chapters] == expected_order
+    assert st.material_identity(after_sections) == original_materials
+    assert next(s for s in after_sections if s.id == ctx.section_refs.decode(section.section_refs[0])).title == '工作经历'
+
+
 async def test_local_grouping_writes_model_decision_and_preserves_unaffected_structure(client, test_db, monkeypatch):
     pid, uid, plan, chapters, sections, ctx = await local_book(client, test_db)
     old = ctx.outline.chapters[0]
