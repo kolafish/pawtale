@@ -67,7 +67,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v8"
+BOOK_REVIEW_ENGINE = "llm_book_review_v9"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
@@ -510,7 +510,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
 - revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组，并在 metadata_fields 精确列出需要修改的字段；其他类型的 metadata_fields 返回空数组。
 - 除目录问题外，不能直接执行的其他编辑建议写入 structure_guidance，不要求用户补讲；目录问题必须写入 structure_findings。
-- 根据当前小节标题、边界和正文复核章节摘要中的目录问题；已处理的问题不重复提出，仍成立的问题写入 structure_findings。
+- 根据当前小节标题、边界和正文复核章节摘要中的目录问题；已处理的问题不重复提出，仍成立的问题写入 structure_findings。区分内容分组不合理与表达衔接不足：若保持现有分组、改善衔接即可自然阅读，可只提衔接建议；若仍需调整内容归属或小节边界，则保留为结构问题，不因扩大标题或增加过渡就视为解决。
 - 允许发现并提出章节过碎、主题混杂、章或小节需要拆合、标题范围不符、归属不合适等结构问题，填入 structure_findings，并关联涉及的已有 chapter_id。
 - structure_findings 的 kind：chapter_structure 表示章的划分或归属问题；section_structure 表示小节的划分或归属问题；title_scope 表示章名或小节名与内容范围不符。只描述有正文依据的问题，不强求每次都有发现。
 - 目录调整由统一的目录写入流程核对素材后执行，保留原始讲述关联并保护人工修改，再更新正文。不要通过正文改写制造另一份目录，不把结构问题变成要求用户补讲的事项。

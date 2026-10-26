@@ -47,7 +47,7 @@ from app.services.memoir.prompt_budget import checked_review_prompt
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v5"
+CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v6"
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -428,7 +428,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 私人书稿不产生 privacy 事项；尊重用户已作出的保留决定和明确不收录的要求，不自行改变收录范围。
 - 先判断整章是否自然成立，不按固定模板逐项找缺口。
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
-- 已有素材足够的问题由编辑处理，不要求用户补讲：目录、归属、拆合、标题范围问题写入 structure_findings，由目录编辑核对素材后自动调整；既定小节内的表达、去重、顺序和衔接写入 writing_guidance，只关联实际适用的小节。
+- 已有素材足够的问题由编辑处理，不要求用户补讲：目录、归属、拆合、标题范围问题写入 structure_findings，由目录编辑核对素材后自动调整；内容归属和小节边界合理时，表达、去重、顺序和衔接建议写入 writing_guidance，只关联实际适用的小节。若补充过渡后仍存在内容混杂或分组不合理，应描述具体结构问题，交由目录编辑复核，不以衔接建议代替。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
 - manual_review 只用于输入明确支持、必须由用户决定的取舍，未处理时会阻止章节确认。仅由摘要差异推测的事实矛盾不能升级为阻塞事项，应在 writing_guidance 中说明需要核对的原素材，不自行选定事实。
