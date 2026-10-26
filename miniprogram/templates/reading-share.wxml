@@ -2,10 +2,13 @@
 <template name="readingShareActions">
   <view class="reading-share-actions">
     <view class="ui-share-actions">
+      <button wx:if="{{showBookReader}}" class="hero-reading-action" bindtap="openBookReader">
+        <text>{{bookStaleNotice ? '阅读已保存书稿' : '阅读全书'}}</text><text aria-hidden="true">→</text>
+      </button>
       <button class="ui-share-primary" open-type="{{bookShareReady ? 'share' : ''}}" bindtap="prepareReadingShare" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}">分享给好友</button>
       <button class="ui-share-more" bindtap="openReadingShareMore" disabled="{{bookShareBusy}}" aria-label="分享更多操作">···</button>
     </view>
-    <text class="reading-share-scope">{{shareScopeLabel || '整本书'}} · {{bookShareDescription}}</text>
+    <text class="reading-share-scope"><block wx:if="{{!showBookReader}}">{{shareScopeLabel || '整本书'}} · </block>{{bookShareDescription}}</text>
     <template wx:if="{{bookShareLikeCount}}" is="shareLikeList" data="{{count: bookShareLikeCount, likers: bookShareLikers}}" />
   </view>
 </template>

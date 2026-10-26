@@ -5,7 +5,7 @@ import { shareLikerViews, type ShareLikerView } from "./share-likes";
 import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessage } from "./share";
 import { cleanBaseUrl, readBackendConfig } from "./request";
 
-const DESCRIPTION = "链接长期有效，更新自动同步；可在更多操作中停止分享。";
+const DESCRIPTION = "分享链接长期有效，书稿更新自动同步";
 export interface ReadingShareData {
   bookShareActive: boolean;
   bookShareReady: boolean;
@@ -96,7 +96,7 @@ export const readingShareMethods = defineReadingShareMethods({
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareReady: true, bookShareStale: false, bookShareStatusKnown: true,
-        bookShareImageUrl: image, bookShareDescription: "已准备好，再点「分享给好友」发送。取消发送仍可在更多中停止分享。" });
+        bookShareImageUrl: image, bookShareDescription: "已准备好，再点「分享给好友」发送。" });
       enableMiniProgramShareMenu();
     } catch (error) {
       if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
