@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.schemas.memoir_editorial import WritingGuidance
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
@@ -975,7 +976,7 @@ async def load_chapter_generation_context(
 def build_chapter_generation_prompt(
     context: ChapterGenerationContext,
     *,
-    editorial_guidance: list[str],
+    editorial_guidance: list[WritingGuidance],
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
     current_section_user_edited: bool = False,
@@ -1049,9 +1050,9 @@ def build_chapter_generation_prompt(
         else ""
     )
     guidance = "\n".join(
-        f"- {' '.join(item.split())[:240]}"
-        for item in editorial_guidance[:8]
-        if item.strip()
+        f"- {item.instruction}"
+        for item in editorial_guidance
+        if not item.section_ids or section.section_id in item.section_ids
     ) or "（无额外编辑建议）"
     polish_requirements = (
         "本次仅按已确认修改思路局部编辑，不执行通用润色。"
@@ -1309,7 +1310,7 @@ def normalize_generated_section(
 async def generate_chapter(
     context: ChapterGenerationContext,
     *,
-    editorial_guidance: list[str],
+    editorial_guidance: list[WritingGuidance],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,
@@ -1491,7 +1492,7 @@ async def generate_chapter_section(
     context: ChapterGenerationContext,
     *,
     section: ChapterSectionInput,
-    editorial_guidance: list[str],
+    editorial_guidance: list[WritingGuidance],
     chapter_sections: tuple[ChapterSectionInput, ...],
     previous_section_content: str = "",
     preceding_section_context: str = "",
@@ -1780,7 +1781,7 @@ async def generate_and_save_chapter_draft(
     *,
     project_id: str,
     chapter_id: str,
-    editorial_guidance: list[str],
+    editorial_guidance: list[WritingGuidance],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,

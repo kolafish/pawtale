@@ -127,9 +127,7 @@ async def prepare_chapter(
                 project_id=project_id,
                 chapter_id=chapter_id,
                 ai_model=ai_model,
-                editorial_guidance=list(
-                    digest.digest_json.get("structure_guidance", [])
-                ),
+                editorial_guidance=chapter_digests.writing_guidance(digest),
                 checkpoint=checkpoint,
                 progress_callback=progress_callback,
                 automatic=automatic,
@@ -174,12 +172,7 @@ async def rewrite_chapter(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    editorial_guidance = (
-        list(digest.digest_json.get("structure_guidance", []))
-        if digest is not None
-        and digest.status == MemoirSemanticCacheStatus.READY.value
-        else []
-    )
+    editorial_guidance = chapter_digests.writing_guidance(digest)
     # The user has explicitly chosen to write from the current material. Do
     # not generate another section/chapter review here: those auxiliary LLM
     # calls can fail even though the section structure is already complete.

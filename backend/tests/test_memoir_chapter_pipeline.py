@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirSectionDigest,
     MemoirSectionMaterial,
 )
+from app.schemas.memoir_editorial import WritingGuidance
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
     book_output_snapshots,
@@ -107,7 +108,7 @@ class FakeChapterAI(AITextServiceBase):
             payload = {
                 "summary": "这一章讲重新联系和共同爬山。",
                 "focus": "重新建立联系。",
-                "structure_guidance": ["把照片邀请作为开头。"],
+                "writing_guidance": [{"section_ids": [], "instruction": "把照片邀请作为开头。"}],
                 "candidate_issues": [
                     {
                         "issue_type": "meaning",
@@ -999,7 +1000,7 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=["把照片邀请作为开头。"],
+        editorial_guidance=[WritingGuidance(instruction="把照片邀请作为开头。")],
         ai_client=fake,
     )
     await test_db.commit()

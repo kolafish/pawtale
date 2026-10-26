@@ -27,6 +27,9 @@ from app.models.memoir import (
     MemoirSectionMaterial,
 )
 from app.models.projects import Project
+from app.schemas.memoir_book import MemoirBookOutputSectionResponse
+from app.schemas.memoir_editorial import BookStructureFinding
+from app.services.memoir.book_output_snapshots import normalized_section_snapshots
 from app.schemas.memoir_book_review import (
     MemoirBookRevisionMetadataField,
     MemoirBookReviewResponse,
@@ -52,6 +55,7 @@ from app.services.memoir.book_output_manuscript import (
     book_information_text,
     formal_book_title,
     stored_manuscript_metadata,
+    section_responses,
 )
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
 from app.services.memoir.chapter_generation import latest_chapter_draft_version
@@ -63,7 +67,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v7"
+BOOK_REVIEW_ENGINE = "llm_book_review_v8"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
@@ -101,6 +105,7 @@ class BookReviewChapter:
     draft_hash: str
     material_ids: frozenset[str]
     draft_content: str = ""
+    draft_sections: tuple[MemoirBookOutputSectionResponse, ...] = ()
     decisions: tuple[fact_decisions.FactDecision, ...] = ()
     edits: tuple[TranscriptEdit, ...] = ()
 
@@ -147,14 +152,6 @@ class _BookReviewEditorialActionOutput(BaseModel):
     )
 
 
-class BookStructureFinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["chapter_structure", "section_structure", "title_scope"]
-    chapter_ids: list[str] = Field(min_length=1)
-    reason: str = Field(min_length=1, max_length=1000)
-
-
 class _BookReviewOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,7 +175,7 @@ def _user_visible_text(
     context: BookReviewContext,
     limit: int,
 ) -> str:
-    return _compact(_chapter_references(context).render_text(value), limit=limit)
+    return _compact(_section_references(context).render_text(_chapter_references(context).render_text(value)), limit=limit)
 
 
 def _user_visible_string_list(
@@ -322,6 +319,7 @@ async def load_book_review_context(
     db: AsyncSession,
     *,
     project_id: str,
+    require_digests: bool = True,
 ) -> BookReviewContext:
     plan, plan_chapters = await _plan(db, project_id=project_id)
     book_metadata = await load_book_review_metadata(db, project_id=project_id, fallback_title=plan.title or "")
@@ -346,25 +344,16 @@ async def load_book_review_context(
             if current_material_text(material):
                 edits_by_chapter.setdefault(chapter_id, []).extend(edits.get(material.transcript_version_id, ()))
     for chapter in plan_chapters:
-        digest_context = await chapter_digests.load_chapter_digest_context(
-            db,
-            project_id=project_id,
-            chapter_id=chapter.id,
-        )
-        digest = await chapter_digests.get_current_chapter_digest(
-            db,
-            project_id=project_id,
-            chapter_id=chapter.id,
-            context=digest_context,
-        )
-        if (
-            digest is None
-            or digest.status != MemoirSemanticCacheStatus.READY.value
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail=f"章节“{chapter.title}”摘要缺失或已过期",
-            )
+        digest = await chapter_digests.get_current_chapter_digest(db, project_id=project_id, chapter_id=chapter.id)
+        if digest is not None and digest.status != MemoirSemanticCacheStatus.READY.value:
+            digest = None
+        if digest is None and require_digests:
+            raise HTTPException(status_code=409, detail=f"章节“{chapter.title}”摘要缺失或已过期")
+        material_ids = frozenset()
+        if digest is not None:
+            material_ids = (await chapter_digests.load_chapter_digest_context(
+                db, project_id=project_id, chapter_id=chapter.id,
+            )).allowed_material_ids
         confirmed = await latest_chapter_draft_version(
             db,
             project_id=project_id,
@@ -380,15 +369,16 @@ async def load_book_review_context(
                 chapter_id=chapter.id,
                 title=chapter.title,
                 sort_order=chapter.sort_order,
-                digest_id=digest.id,
-                digest_signature=digest.input_signature,
-                digest=digest.digest_json,
+                digest_id=digest.id if digest else "",
+                digest_signature=digest.input_signature if digest else "",
+                digest=digest.digest_json if digest else {},
                 draft_version_id=confirmed.id,
                 draft_hash=semantic_text_hash(confirmed.content),
                 draft_content=confirmed.content,
-                material_ids=digest_context.allowed_material_ids,
+                draft_sections=tuple(section_responses(normalized_section_snapshots(confirmed.section_snapshot_json))),
+                material_ids=material_ids,
                 decisions=fact_decisions.for_sources(
-                    decisions, chapter_id=chapter.id, material_ids=digest_context.allowed_material_ids,
+                    decisions, chapter_id=chapter.id, material_ids=material_ids,
                 ),
                 edits=tuple(edits_by_chapter.get(chapter.id, ())),
             )
@@ -403,6 +393,9 @@ async def load_book_review_context(
                     "title": chapter.title,
                     "sort_order": chapter.sort_order,
                     "draft_hash": chapter.draft_hash,
+                    "sections": [section.model_dump(include={"section_id", "title", "index", "content"}) for section in chapter.draft_sections],
+                    "digest_signature": chapter.digest_signature,
+                    "structure_findings": chapter.digest.get("structure_findings", []),
                     **({"fact_decisions": fact_decisions.signature(chapter.decisions)} if chapter.decisions else {}),
                     **({"transcript_edits": [
                         [edit.edited_at, edit.before, edit.after] for edit in chapter.edits
@@ -434,13 +427,34 @@ def _chapter_references(context: BookReviewContext) -> ModelReferenceMap:
     )
 
 
+def _section_references(context: BookReviewContext) -> ModelReferenceMap:
+    return ModelReferenceMap("S", (section.section_id for chapter in context.chapters for section in chapter.draft_sections),
+        labels={section.section_id: f"《{chapter.title}》第{section.index}小节《{section.title}》"
+            for chapter in context.chapters for section in chapter.draft_sections}, fallback_label="相关小节")
+
+
+def _review_chapter_text(chapter: BookReviewChapter, sections: ModelReferenceMap) -> str:
+    if not chapter.draft_sections:
+        return chapter.draft_content
+    return "\n\n".join(f"section_id: {sections.encode(section.section_id)}\n小节: {section.title}\n{section.content}"
+        for section in chapter.draft_sections)
+
+
+def _chapter_structure_findings(chapter: BookReviewChapter, sections: ModelReferenceMap) -> list[dict]:
+    allowed = {section.section_id for section in chapter.draft_sections}
+    return [{**raw, "section_ids": [sections.encode(sid) for sid in raw.get("section_ids", []) if sid in allowed]}
+        for raw in chapter.digest.get("structure_findings", [])]
+
+
 def build_book_review_prompt(context: BookReviewContext) -> str:
     references = _chapter_references(context)
+    sections = _section_references(context)
     chapters = "\n\n".join(
         (
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
-            f"当前正文:\n{chapter.draft_content}\n"
+            f"当前正文:\n{_review_chapter_text(chapter, sections)}\n"
+            f"章节摘要待复核的目录问题: {_chapter_structure_findings(chapter, sections)}\n"
             f"{fact_decisions.prompt(chapter.decisions, edits=chapter.edits)}"
         )
         for chapter in context.chapters
@@ -458,7 +472,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   "summary": "全书目前的整体面貌",
   "strengths": ["已经成立的主线或结构优点"],
   "structure_guidance": ["确有必要时给出的可选编辑建议"],
-  "structure_findings": [{{"kind":"chapter_structure|section_structure|title_scope","chapter_ids":["相关 chapter_id"],"reason":"根据现有正文发现的具体目录问题及依据"}}],
+  "structure_findings": [{{"kind":"chapter_structure|section_structure|title_scope","chapter_ids":["相关 chapter_id"],"section_ids":["相关 section_id；章节级问题可为空"],"reason":"根据现有正文发现的具体目录问题及依据"}}],
   "editorial_actions": [
     {{
       "action_type": "remove_repetition|improve_transition|reorder_chapters|revise_book_profile",
@@ -496,6 +510,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
 - revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组，并在 metadata_fields 精确列出需要修改的字段；其他类型的 metadata_fields 返回空数组。
 - 除目录问题外，不能直接执行的其他编辑建议写入 structure_guidance，不要求用户补讲；目录问题必须写入 structure_findings。
+- 根据当前小节标题、边界和正文复核章节摘要中的目录问题；已处理的问题不重复提出，仍成立的问题写入 structure_findings。
 - 允许发现并提出章节过碎、主题混杂、章或小节需要拆合、标题范围不符、归属不合适等结构问题，填入 structure_findings，并关联涉及的已有 chapter_id。
 - structure_findings 的 kind：chapter_structure 表示章的划分或归属问题；section_structure 表示小节的划分或归属问题；title_scope 表示章名或小节名与内容范围不符。只描述有正文依据的问题，不强求每次都有发现。
 - 目录调整由统一的目录写入流程核对素材后执行，保留原始讲述关联并保护人工修改，再更新正文。不要通过正文改写制造另一份目录，不把结构问题变成要求用户补讲的事项。
@@ -630,11 +645,16 @@ def normalize_book_review(
     for raw in payload.get("structure_findings", []):
         finding = BookStructureFinding.model_validate(raw)
         chapter_ids = list(dict.fromkeys(references.decode(ref) for ref in finding.chapter_ids))
+        section_ids = list(dict.fromkeys(_section_references(context).decode(ref) for ref in finding.section_ids))
+        allowed_sections = {section.section_id for chapter in context.chapters if chapter.chapter_id in chapter_ids
+            for section in chapter.draft_sections}
+        if not set(section_ids) <= allowed_sections:
+            raise ValueError("结构问题的小节不属于所关联章节")
         reason = _user_visible_text(finding.reason, context=context, limit=1000)
         if not reason:
             raise ValueError("结构问题缺少正文依据")
         structure_findings.append(BookStructureFinding(
-            kind=finding.kind, chapter_ids=chapter_ids, reason=reason,
+            kind=finding.kind, chapter_ids=chapter_ids, section_ids=section_ids, reason=reason,
         ).model_dump())
         if reason not in structure_guidance:
             structure_guidance.append(reason)

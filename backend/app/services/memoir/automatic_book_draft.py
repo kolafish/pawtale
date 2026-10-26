@@ -44,7 +44,6 @@ from app.services.memoir.book_output_versions import load_latest_book_output_ver
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
-from app.services.memoir.semantic_state import semantic_json_signature
 
 
 async def has_live_narration(db: AsyncSession, *, project_id: str) -> bool:
@@ -393,12 +392,9 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.clear_review()
             progress.stage = "writing_copy"
             return _waiting(job, progress)
-    review_signature = semantic_json_signature({
-        "book_metadata": await book_reviews.load_book_review_metadata(db, project_id=project_id),
-        "engine": book_reviews.BOOK_REVIEW_ENGINE,
-        "chapters": [(chapter.id, chapter.title, chapter.sort_order,
-            progress.chapters[chapter.id].draft_version_id, progress.chapters[chapter.id].input_signature)
-            for chapter in chapters]})
+    review_signature = ""
+    if current and len(current) == len(progress.chapters):
+        review_signature = (await book_reviews.load_book_review_context(db, project_id=project_id, require_digests=False)).input_signature
     previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
     if (not current or len(current) != len(progress.chapters) or previous_review is None
             or (previous_review.payload_json or {}).get("input_signature") != review_signature):

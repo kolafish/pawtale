@@ -183,6 +183,10 @@ async def run_book_review_job(
             force_regenerate=payload.get("force_regenerate") is True,
             progress_callback=update_progress,
         )
+        # A cold review prepares missing digests before its final input is known.
+        # Persist that actual signature so the parent can reuse the completed job.
+        if review.status == MemoirSemanticCacheStatus.READY.value:
+            job.payload_json = {**(job.payload_json or {}), "input_signature": review.input_signature}
         if (review.status == MemoirSemanticCacheStatus.READY.value and payload.get("apply_structure_guidance") is True
                 and review.review_json.get("structure_findings")):
             from app.services.memoir.chapter_structure import review_story_structure

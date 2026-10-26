@@ -1080,7 +1080,7 @@ async def grow_story_tree(
         )
         ai_model = await load_project_ai_model(db, job.project_id, None)
         offered = await completion_interviews.offered_chapters(db, (item.chat_message_id for item in utterances))
-        chapter_summaries, section_summaries = await load_structure_summaries(
+        chapter_summaries, section_summaries, _ = await load_structure_summaries(
             db, project_id=job.project_id, chapters=chapters, sections=sections,
         )
         await db.commit()

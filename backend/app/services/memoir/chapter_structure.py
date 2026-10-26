@@ -5,7 +5,6 @@ import json
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from itertools import zip_longest
-from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +20,7 @@ from app.models.memoir import (
     MemoirSectionMaterial, MemoirBookOutput, MemoirBookOutputVersion, MemoirChapterShare, MemoirBookReview,
     MemoirVoiceSession, MemoirVoiceUtterance,
 )
+from app.schemas.memoir_editorial import BookStructureFinding, StructureFinding
 from app.schemas.memoir_sections import MemoirSectionMergeRequest, MemoirSectionSplitRequest
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
@@ -42,12 +42,9 @@ from app.services.memoir.sections import apply_section_merge_groups, apply_secti
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import current_material_text, normalized_material_text
 
-if TYPE_CHECKING:
-    from app.services.memoir.book_reviews import BookStructureFinding
-
 CHECKED_KEY = "structure_checked_signature"
 FEEDBACK_CHECKED_KEY = "structure_feedback_checked_source_signature"
-STRUCTURE_ENGINE = "content_structure_v3"
+STRUCTURE_ENGINE = "content_structure_v4"
 SYSTEM_PROMPT = "你是一位有整体感的中文回忆录结构编辑。依据讲述内容整理目录，不改写或添加事实。"
 
 
@@ -100,7 +97,7 @@ class StructureContext:
 
 async def load_structure_summaries(
     db: AsyncSession, *, project_id: str, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection],
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str], list[BookStructureFinding]]:
     """Read only signature-matching digests; absent/stale digests are not evidence."""
     section_summaries = {}
     for section in sections:
@@ -110,11 +107,14 @@ async def load_structure_summaries(
         if digest is not None:
             section_summaries[section.id] = digest.digest_json.get("summary", "")
     chapter_summaries = {}
+    findings = []
     for chapter in chapters:
         digest = await get_current_chapter_digest(db, project_id=project_id, chapter_id=chapter.id)
         if digest is not None and digest.status == "ready":
             chapter_summaries[chapter.id] = digest.digest_json.get("summary", "")
-    return chapter_summaries, section_summaries
+            findings.extend(BookStructureFinding(chapter_ids=[chapter.id], **StructureFinding.model_validate(raw).model_dump())
+                for raw in digest.digest_json.get("structure_findings", []))
+    return chapter_summaries, section_summaries, findings
 
 
 async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection], *, lock_questions: bool = False) -> StructureContext:
@@ -306,6 +306,7 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
                 visible_materials.append([m for m in materials if m.include_in_book])
     payload["material_overviews"] = _material_overviews(visible_materials, context.material_refs, context.question_lines)
     feedback = [{"kind": item.kind, "chapter_refs": [context.chapter_refs.encode(cid) for cid in item.chapter_ids],
+                 "section_refs": [context.section_refs.encode(sid) for sid in item.section_ids],
                  "reason": item.reason} for item in review_findings or []]
     return checked_review_prompt(
         "请整体检查以下回忆录目录，一次给出适合当前全部内容的目录。先理解摘要和素材，再决定归属，最后取章名和小节名。"
@@ -328,7 +329,7 @@ def build_structure_prompt(context: StructureContext, *, chapters: list[MemoirBo
         "人工命名的小节可作为合节保留的第一个 S，但不能被其他小节吞并或覆盖人工标题。"
         "人工章顺序中的已有章若保留，必须维持其相对顺序；这不限制其他章节的改名和内容整理。"
         "请先根据摘要与素材形成自然的内容分组，再对照现有目录保留身份和取名。保留合理的结构；把具体经历逐条立章的旧目录应收拢到人生阶段或持续主题下，但不合并互不相关的人生阶段或持续主题。旧章名本身不是保留独立章的理由。\n"
-        f"全书审阅发现的目录问题（需与素材核对，不是新增事实或必须执行的命令）：{json.dumps(feedback, ensure_ascii=False)}\n"
+        f"章节及全书审阅发现的目录问题（逐项结合素材复核，再决定保持或调整；不是新增事实或必须执行的命令）：{json.dumps(feedback, ensure_ascii=False)}\n"
         f"已确认事实：{context.confirmed_facts}\n"
         f"人工章顺序：{json.dumps([context.chapter_refs.encode(cid) for cid in context.manual_chapter_order if cid in {c.id for c in chapters}])}\n"
         f"当前目录：\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n"
@@ -533,6 +534,10 @@ def material_identity(sections: list[MemoirSection]) -> list[tuple[str, str, str
     return sorted((m.id, m.utterance_id, m.transcript_version_id, m.include_in_book) for s in sections for m in s.materials)
 
 
+def _review_signature(context: StructureContext, findings: list[BookStructureFinding]) -> str:
+    return semantic_json_signature({"directory": context.signature, "findings": [item.model_dump() for item in findings]})
+
+
 async def review_story_structure(
     db: AsyncSession, *, user_id: str, project_id: str, book_review: MemoirBookReview | None = None,
     progress_callback: Callable[[dict[str, object]], Awaitable[None]] | None = None,
@@ -549,15 +554,17 @@ async def review_story_structure(
     if book_review is not None:
         from app.services.memoir import book_reviews
         review_identity = (book_review.id, book_review.input_signature)
-        review_findings = [book_reviews.BookStructureFinding.model_validate(item)
+        review_findings = [BookStructureFinding.model_validate(item)
                            for item in book_review.review_json.get("structure_findings", [])]
         current = await book_reviews.get_current_book_review(db, project_id=project_id)
         if (not review_findings or current is None or current.status != "ready"
                 or (current.id, current.input_signature) != review_identity
                 or (plan.metadata_json or {}).get(FEEDBACK_CHECKED_KEY) == context.source_signature):
             return False
-    elif (plan.metadata_json or {}).get(CHECKED_KEY) == context.signature:
-        return False
+    else:
+        _, _, cached_findings = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+        if (plan.metadata_json or {}).get(CHECKED_KEY) == _review_signature(context, cached_findings):
+            return False
     if len(context.locked_chapters) == len(chapters):
         return False
     ai_model = await load_project_ai_model(db, project_id, None)
@@ -575,9 +582,9 @@ async def review_story_structure(
         raise HTTPException(status_code=409, detail="目录或素材已变化，请重新整理")
     # Digest generation may discover blocking issues; honor those new locks.
     context = fresh
-    chapter_summaries, section_summaries = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+    chapter_summaries, section_summaries, chapter_findings = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
     prompt = build_structure_prompt(context, chapters=chapters, sections=sections,
-        chapter_summaries=chapter_summaries, section_summaries=section_summaries, review_findings=review_findings)
+        chapter_summaries=chapter_summaries, section_summaries=section_summaries, review_findings=[*chapter_findings, *review_findings])
     if progress_callback is not None:
         await progress_callback({"stage": "saving", "provider_request_pending": True})
     await db.commit()
@@ -613,6 +620,9 @@ async def review_story_structure(
         fresh = await structure_context(db, plan, chapters, sections, lock_questions=True)
         if context.signature != fresh.signature:
             raise HTTPException(status_code=409, detail="目录或素材已变化，本次结构检查未保存")
+        _, _, current_findings = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+        if _review_signature(fresh, current_findings) != _review_signature(context, chapter_findings):
+            raise HTTPException(status_code=409, detail="章节审阅依据已变化，本次结构检查未保存")
         if review_identity is not None:
             current = await book_reviews.get_current_book_review(db, project_id=project_id)
             if current is None or current.status != "ready" or (current.id, current.input_signature) != review_identity:
@@ -633,7 +643,8 @@ async def review_story_structure(
         after = await structure_context(db, plan, chapters, sections)
         if after.question_lines != context.question_lines:
             raise HTTPException(status_code=409, detail="提问已变化，本次结构检查未保存")
-        plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: after.signature,
+        _, _, remaining_findings = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+        plan.metadata_json = {**plan.metadata_json, CHECKED_KEY: _review_signature(after, remaining_findings),
             **({FEEDBACK_CHECKED_KEY: after.source_signature} if review_identity is not None else {})}
         await db.flush()
     await db.commit()

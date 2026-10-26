@@ -108,7 +108,7 @@ def book_information_text(information: dict[str, str]) -> str:
     )
 
 
-def _section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:
+def section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:
     if not isinstance(value, list):
         return []
     sections: list[MemoirBookOutputSectionResponse] = []
@@ -403,7 +403,7 @@ def manuscript_from_snapshot(
         if not chapter_id or not chapter_title or not chapter_content:
             continue
         source_refs = _manuscript_source_refs(item.get("source_refs"))
-        sections = _section_responses(item.get("sections"))
+        sections = section_responses(item.get("sections"))
         chapter_index = positive_int(item.get("chapter_index")) or fallback_index
         toc.append(
             MemoirBookOutputTableOfContentsItemResponse(
