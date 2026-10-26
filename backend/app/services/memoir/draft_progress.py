@@ -13,7 +13,7 @@ from app.models.memoir import (
 )
 from app.schemas.memoir_snapshots import MemoirDraftProgressResponse
 from app.services.memoir import automatic_book_draft, editing_jobs, story_tree_growth
-from app.services.memoir.material_roles import narrator_material_clause
+from app.services.memoir.material_roles import interviewer_lines, narrator_material_clause
 from app.services.memoir.transcript_projection import has_story_content, source_text_hash
 
 
@@ -118,10 +118,11 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
         )
     ).all()
     latest = {row[0]: row[1:] for row in rows}
+    lines = await interviewer_lines(db, (row[-1].id for row in rows if row[-1] is not None))
     current = {key: (status, text, reason) for key, (status, text_hash, text, reason, context, policy_version, message) in latest.items()
         if (status != "not_story" or policy_version == story_tree_growth.STORY_CONTENT_POLICY_VERSION)
         and key in pending_ids and text_hash == source_text_hash(text)
-        and story_tree_growth._question_context_matches(context or "", message)}
+        and story_tree_growth._question_context_matches(context or "", message, lines)}
     statuses = [value[0] for value in current.values()]
     need = next((value for value in current.values() if value[0] == "needs_user"), None)
     detail = f"关于“{need[1][:60]}”：{need[2] or '还需要一些背景信息'}。补充讲述后会自动继续整理。" if need else ""
