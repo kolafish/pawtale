@@ -1794,7 +1794,7 @@ test("chapter workspace offers the migrated chapter actions and preserves narrat
   const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
   context.pageVisible = true;
   await page.openChapterMoreActions.call(context);
-  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "预览分享内容", "不收入本书"]);
+  assert.deepEqual(sheets[0].itemList, ["修改章名", "AI 重新起名", "朗读整章", "分享设置", "不收入本书"]);
   assert.equal(context.data.operationKind, "");
   await page.playChapterAudio.call(context);
   assert.deepEqual(calls, [{ projectId: "project-1", source: { kind: "chapter", chapterId: "chapter-1", versionId: "version-1" }, payload: { voice: "linjiajiejie", speed_ratio: 1.5, start_index: 0, retry_failed: true } }]);
@@ -2006,27 +2006,52 @@ test("removing the focused story clears its in-flight sharing state before retur
   assert.equal(context.bookShareToken, "");
 });
 
-test("chapter card includes an excerpt only after confirmation and can remove it", async () => {
-  installWx();
-  let confirm = false;
-  const prompts = [];
-  global.wx.showModal = ({ content, success }) => { prompts.push(content); success({ confirm }); };
-  const { page } = loadWorkspacePage({ voiceApiExports: {
-    updateMemoirBookShare: async () => ({ token: "c1.chapter-token" }),
-    readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "# 标题\n\n奶奶坐在门口。另一句话。" } }),
-  } });
-  const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true });
-  await context.prepareReadingShare();
-  assert.equal(prompts.length, 1);
-  assert.ok(prompts[0].includes("奶奶坐在门口。"));
-  assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
-  confirm = true;
-  await context.configureReadingShareCard();
-  assert.match(context.onShareAppMessage().imageUrl, /version_id=v1&excerpt_start=6&excerpt_length=7$/);
-  confirm = false;
-  await context.configureReadingShareCard();
-  assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
-});
+for (const existingShare of [false, true]) {
+  test(`chapter more menu can add and remove a confirmed excerpt for ${existingShare ? "existing" : "new"} shares`, async () => {
+    installWx();
+    let confirm = false;
+    let preparations = 0;
+    const prompts = [];
+    const sheets = [];
+    global.wx.showActionSheet = (options) => sheets.push(options);
+    global.wx.showModal = ({ content, success }) => { prompts.push(content); success({ confirm }); };
+    const { page } = loadWorkspacePage({ voiceApiExports: {
+      getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.chapter-token" }),
+      updateMemoirBookShare: async () => { preparations += 1; return { token: "c1.chapter-token" }; },
+      readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "# 标题\n\n奶奶坐在门口。另一句话。" } }),
+    } });
+    const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
+    context.pageVisible = true;
+    if (existingShare) await context.refreshBookShareStatus();
+    await context.prepareReadingShare();
+    assert.equal(preparations, existingShare ? 0 : 1);
+    assert.equal(prompts.length, existingShare ? 0 : 1);
+    assert.equal(context.data.bookShareReady, true);
+    assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
+
+    async function chooseExcerptSettings() {
+      await context.openChapterMoreActions();
+      const chapterMenu = sheets.pop();
+      const shareIndex = chapterMenu.itemList.indexOf("分享设置");
+      assert.ok(shareIndex >= 0, "visible chapter menu must expose share settings");
+      chapterMenu.success({ tapIndex: shareIndex });
+      const shareMenu = sheets.pop();
+      assert.deepEqual(shareMenu.itemList, ["预览分享内容", "设置封面摘录", "停止分享"]);
+      shareMenu.success({ tapIndex: shareMenu.itemList.indexOf("设置封面摘录") });
+      await flushAsyncWork();
+      assert.equal(context.data.bookShareReady, true);
+      assert.equal(context.data.bookShareBusy, false);
+    }
+
+    confirm = true;
+    await chooseExcerptSettings();
+    assert.ok(prompts.at(-1).includes("奶奶坐在门口。"));
+    assert.match(context.onShareAppMessage().imageUrl, /version_id=v1&excerpt_start=6&excerpt_length=7$/);
+    confirm = false;
+    await chooseExcerptSettings();
+    assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
+  });
+}
 
 test("an excerpt confirmed after switching chapters cannot affect the new share", async () => {
   installWx();
