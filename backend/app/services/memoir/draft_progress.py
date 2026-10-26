@@ -101,6 +101,7 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
                 sources.c.text,
                 deferred_value["reason"].as_string(),
                 deferred_value["question_context"].as_string(),
+                deferred_value["classification_policy_version"].as_integer(),
                 MemoirChatMessage,
             )
             .select_from(MemoirEditingJob)
@@ -117,8 +118,9 @@ async def _source_counts_and_needs_user(db: AsyncSession, project_id: str) -> tu
         )
     ).all()
     latest = {row[0]: row[1:] for row in rows}
-    current = {key: (status, text, reason) for key, (status, text_hash, text, reason, context, message) in latest.items()
-        if key in pending_ids and text_hash == source_text_hash(text)
+    current = {key: (status, text, reason) for key, (status, text_hash, text, reason, context, policy_version, message) in latest.items()
+        if (status != "not_story" or policy_version == story_tree_growth.STORY_CONTENT_POLICY_VERSION)
+        and key in pending_ids and text_hash == source_text_hash(text)
         and story_tree_growth._question_context_matches(context or "", message)}
     statuses = [value[0] for value in current.values()]
     need = next((value for value in current.values() if value[0] == "needs_user"), None)

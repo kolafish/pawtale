@@ -29,7 +29,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.project_ai_preferences import resolve_project_ai_model
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, interviewer_messages, interviewer_context_signature
+from app.services.memoir.material_roles import STORY_CONTENT_POLICY_VERSION, STORY_CONTENT_GUIDANCE, interviewer_messages, interviewer_context_signature
 from app.services.memoir.transcript_projection import normalized_material_text, source_text_hash
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ class _AnswerReadingOutput(_ReadingOutput):
 def _answer_reading(message: MemoirChatMessage) -> dict | None:
     reading = (message.metadata_json or {}).get(READING_KEY)
     if (isinstance(reading, dict) and reading.get("schema_version") == 3
+        and reading.get("classification_policy_version") == STORY_CONTENT_POLICY_VERSION
         and reading.get("question_message_id") == message.parent_message_id
         and reading.get("source_text_hash") == source_text_hash(normalized_material_text(message.content_text))
         and isinstance(reading.get("story_content"), bool)):
@@ -482,7 +483,8 @@ async def read_people(
         **(current.metadata_json or {}),
         READING_KEY: {"schema_version": 3 if classify_answer else 2, "transcript_version_id": transcript_version_id,
             "source_text_hash": text_hash, "question_context": question_context, "people": stored,
-            **({"question_message_id": question_message_id, "story_content": generated.value.story_content}
+            **({"question_message_id": question_message_id, "story_content": generated.value.story_content,
+                "classification_policy_version": STORY_CONTENT_POLICY_VERSION}
                if classify_answer else {})},
     }
     await db.commit()

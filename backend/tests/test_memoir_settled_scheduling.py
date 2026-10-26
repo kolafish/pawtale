@@ -468,7 +468,7 @@ async def test_waiting_person_answers_do_not_starve_later_live_stories(client, t
                 status='pending' if dependency == 'reading_pending' else 'failed',
                 dedupe_key=f'narrator_profile:{answer.id}', run_after=automatic_book_draft.utcnow_naive()))
         else:
-            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
+            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3, 'classification_policy_version': narration_people.STORY_CONTENT_POLICY_VERSION,
                 'question_message_id': question.id,
                 'question_context': narration_people.interviewer_context_signature(message, question), 'source_text_hash': source_text_hash(message.content_text),
                 'story_content': True}}
@@ -502,7 +502,7 @@ async def test_waiting_person_answers_do_not_starve_later_live_stories(client, t
         question.metadata_json = {narration_people.ASKED_KEY: person_id}
         for answer in answers:
             message = await test_db.get(MemoirChatMessage, answer.chat_message_id)
-            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3,
+            message.metadata_json = {narration_people.READING_KEY: {'schema_version': 3, 'classification_policy_version': narration_people.STORY_CONTENT_POLICY_VERSION,
                 'question_message_id': question.id,
                 'question_context': narration_people.interviewer_context_signature(message, question), 'source_text_hash': source_text_hash(message.content_text),
                 'story_content': True}}

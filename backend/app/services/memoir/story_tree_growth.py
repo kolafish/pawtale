@@ -56,7 +56,7 @@ from app.services.memoir.chapter_structure import load_structure_summaries, revi
 from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material, interviewer_messages
+from app.services.memoir.material_roles import STORY_CONTENT_POLICY_VERSION, STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material, interviewer_messages
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import (
     SectionRegenerationConflict,
@@ -123,7 +123,7 @@ class GrowthGroup:
 
 class DeferredSource(BaseModel):
     text_hash: str
-    # Reconsider not_story only when the answer text or its parent question changes.
+    classification_policy_version: int = 0
     status: Literal["pending", "needs_user", "not_story"]
     reason: str
     attempts: int = 0
@@ -139,6 +139,7 @@ class RecoveryMaterial(BaseModel):
 
 
 class GrowthBatch(BaseModel):
+    classification_policy_version: int = 0
     original_chapter_ids: list[str] = Field(default_factory=list)
     created_chapters: dict[str, str | None] = Field(default_factory=dict)
     context_signature: str = ""
@@ -163,7 +164,12 @@ class StoryGrowthProgress(BaseModel):
 
 
 def _progress(job: MemoirEditingJob) -> StoryGrowthProgress:
-    return StoryGrowthProgress.model_validate((job.result_json or {}).get("growth", {}))
+    progress = StoryGrowthProgress.model_validate((job.result_json or {}).get("growth", {}))
+    progress.deferred = {key: value for key, value in progress.deferred.items()
+        if value.status != "not_story" or value.classification_policy_version == STORY_CONTENT_POLICY_VERSION}
+    if progress.batch is not None and progress.batch.classification_policy_version != STORY_CONTENT_POLICY_VERSION:
+        progress.batch = None
+    return progress
 
 
 async def _save_progress(db: AsyncSession, job: MemoirEditingJob, progress: StoryGrowthProgress) -> None:
@@ -622,6 +628,7 @@ async def _create_initial_tree(
     async def checkpoint_not_story(sources: tuple[SourceSegment, ...]) -> None:
         for source in sources:
             progress.deferred[source.utterance_id] = DeferredSource(
+                classification_policy_version=STORY_CONTENT_POLICY_VERSION,
                 text_hash=source_text_hash(source.text), status="not_story", reason="资料或对话回应，不含故事",
                 attempts=MAX_UNASSIGNED_ATTEMPTS,
                 question_context=semantic_json_signature({"resolver": "interviewer_context_v2",
@@ -1008,6 +1015,7 @@ async def grow_story_tree(
     )
     # Retry budgets belong to one set of evidence, not to the source forever.
     context_signature = semantic_json_signature({
+        "classification_policy_version": STORY_CONTENT_POLICY_VERSION,
         "sources": [(item.id, source_text_hash(current_utterance_text(item)), _question_context(item.chat_message, lines)) for item in project_sources],
         "chapters": [(item.id, item.title) for item in before_chapters],
         "sections": [(item.id, item.chapter_id, item.title, item.version) for item in before_sections],
@@ -1026,13 +1034,13 @@ async def grow_story_tree(
         if story_content is None:
             from app.services.memoir.narrator_profile import schedule_narrator_profile
             await schedule_narrator_profile(db, utterance=answer, require_answer_reading=True)
-            progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="pending",
+            progress.deferred[answer.id] = DeferredSource(classification_policy_version=STORY_CONTENT_POLICY_VERSION, text_hash=text_hash, status="pending",
                 reason="等待人物补答的内容核对", context_signature=context_signature,
                 question_context=_question_context(answer.chat_message, lines))
         elif story_content:
             linked_answers.append(answer)
         else:
-            progress.deferred[answer.id] = DeferredSource(text_hash=text_hash, status="not_story",
+            progress.deferred[answer.id] = DeferredSource(classification_policy_version=STORY_CONTENT_POLICY_VERSION, text_hash=text_hash, status="not_story",
                 reason="人物问题后的回复不含故事事实或感受", attempts=MAX_UNASSIGNED_ATTEMPTS,
                 context_signature=context_signature,
                 question_context=_question_context(answer.chat_message, lines))
@@ -1066,6 +1074,7 @@ async def grow_story_tree(
     if progress.batch is None and utterances:
         _plan, chapters, sections = await _load_tree(db, project_id=job.project_id)
         batch = GrowthBatch(
+            classification_policy_version=STORY_CONTENT_POLICY_VERSION,
             original_chapter_ids=[item.id for item in chapters],
             context_signature=context_signature,
             sources={
@@ -1114,6 +1123,7 @@ async def grow_story_tree(
                             raise HTTPException(409, "提问已变化，请重新整理素材")
                         if await _remove_recovered_nonstory(db, project_id=job.project_id, batch=batch, source_id=source_id):
                             progress.deferred[source_id] = DeferredSource(
+                                classification_policy_version=STORY_CONTENT_POLICY_VERSION,
                                 text_hash=batch.sources[source_id][0], status="not_story", reason=group.reason,
                                 attempts=MAX_UNASSIGNED_ATTEMPTS, context_signature=batch.context_signature,
                                 question_context=batch.question_contexts.get(source_id, ""),
@@ -1150,6 +1160,7 @@ async def grow_story_tree(
                 ) else 0
                 if group.action == "not_story":
                     progress.deferred[source_id] = DeferredSource(
+                        classification_policy_version=STORY_CONTENT_POLICY_VERSION,
                         text_hash=text_hash, status="not_story", reason=group.reason, attempts=MAX_UNASSIGNED_ATTEMPTS,
                         context_signature=batch.context_signature,
                         question_context=batch.question_contexts.get(source_id, ""),
@@ -1159,6 +1170,7 @@ async def grow_story_tree(
                     attempts += 1
                 needs_user = attempts >= MAX_UNASSIGNED_ATTEMPTS
                 progress.deferred[source_id] = DeferredSource(
+                    classification_policy_version=STORY_CONTENT_POLICY_VERSION,
                     text_hash=text_hash,
                     status="needs_user" if needs_user else "pending",
                     reason=group.reason if needs_user else "素材尚未归类，等待下一次整理",
@@ -1209,6 +1221,7 @@ async def grow_story_tree(
                 await _save_progress(db, job, progress)
                 continue
         progress.deferred[answer.id] = DeferredSource(
+            classification_policy_version=STORY_CONTENT_POLICY_VERSION,
             text_hash=source_text_hash(current_utterance_text(answer)), status="pending",
             reason="补充回答等待原讲述可收录后加入", context_signature=context_signature,
             question_context=_question_context(answer.chat_message, lines),
