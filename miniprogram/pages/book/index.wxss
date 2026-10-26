@@ -662,55 +662,6 @@
 .progress-actions {
   padding: 0 30rpx 20rpx;
 }
-.progress-actions .reading-share-actions {
-  margin-top: 0;
-}
-.progress-actions .ui-share-actions {
-  align-items: stretch;
-}
-.hero-reading-action,
-.progress-actions .ui-share-primary,
-.progress-actions .ui-share-more {
-  width: auto;
-  min-height: 44px;
-  margin: 0;
-  padding: 12rpx 16rpx;
-  border: 0;
-  border-radius: var(--ui-radius-control);
-  font-size: var(--ui-font-body);
-  line-height: 1.4;
-}
-.hero-reading-action {
-  flex: 0 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  background: var(--ui-accent-strong);
-  box-shadow: none;
-  color: var(--ui-on-accent);
-  font-weight: 600;
-  transition: transform 150ms ease-out;
-}
-.hero-reading-action text:first-child {
-  min-width: 0;
-}
-.progress-actions .ui-share-primary {
-  flex: 0 0 auto;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.progress-actions .ui-share-more {
-  flex: 0 0 auto;
-  min-width: 44px;
-  margin-left: auto;
-  padding: 12rpx 8rpx;
-  font-weight: 500;
-}
-.hero-reading-action:active {
-  transform: scale(0.96);
-}
 .book-activity-notice {
   min-height: 44px;
   display: flex;
@@ -821,12 +772,6 @@
 }
 .book-page.large-text .chapter-directory-meta, .book-page.large-text .chapter-directory-notice, .book-page.large-text .chapter-directory-error, .book-page.large-text .book-operation-notice, .book-page.large-text .book-activity-notice {
   font-size: var(--ui-font-large-meta);
-}
-.book-page.large-text .hero-reading-action,
-.book-page.large-text .progress-actions .ui-share-primary,
-.book-page.large-text .progress-actions .ui-share-more {
-  min-height: 48px;
-  font-size: var(--ui-font-large-body);
 }
 .chapter-order-toggle {
   min-height: 44px;
