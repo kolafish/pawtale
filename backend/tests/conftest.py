@@ -242,23 +242,13 @@ async def admin_client(client, test_db):
 def unchanged_story_structure(monkeypatch):
     """Routing tests keep the editor's decision unchanged; database application
     and real digest freshness have dedicated structure/digest coverage."""
-    import json
-    from types import SimpleNamespace
     from app.services.memoir import chapter_structure
 
     async def existing_digests(*args, **kwargs):
         return None
 
-    async def keep_outline(*args, **kwargs):
-        payload = json.loads(args[2].split("当前目录：\n", 1)[1].split("\n只返回 JSON", 1)[0])
-        payload["chapters"] = [
-            {"chapter_ref": chapter["chapter_ref"], "title": chapter["title"], "sections": [
-                {"section_refs": section["section_refs"], "title": section["title"]}
-                for section in chapter["sections"]
-            ]} for chapter in payload["chapters"]
-        ]
-        return SimpleNamespace(value=chapter_structure.StructureOutput.model_validate({"chapters": payload["chapters"]}))
+    async def keep_outline(context, **kwargs):
+        return context.outline
 
     monkeypatch.setattr(chapter_structure, "generate_or_reuse_chapter_digest", existing_digests)
-    monkeypatch.setattr(chapter_structure, "get_ai_service", lambda _: None)
-    monkeypatch.setattr(chapter_structure, "generate_structured_with_client", keep_outline)
+    monkeypatch.setattr(chapter_structure, "generate_structure_proposal", keep_outline)

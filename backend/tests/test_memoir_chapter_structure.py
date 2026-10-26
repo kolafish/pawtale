@@ -84,7 +84,11 @@ async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_n
     pid, uid = await _book(client, test_db)
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     context = await structure.structure_context(test_db, plan, chapters, sections)
-    valid = _merge(context)
+    from app.services.memoir.structure_proposals import TargetDirectory
+    operations = _merge(context)
+    valid = TargetDirectory(chapters=[{'chapter_ref': c.chapter_ref, 'title': c.title,
+        'sections': [{'title': g.title, 'material_refs': [m for ref in g.section_refs for m in context.section_materials[ref]]}
+                     for g in c.sections]} for c in operations.chapters])
     invalid = valid.model_copy(deep=True)
     invalid.chapters[0].chapter_ref = 'N1'
 
@@ -95,7 +99,10 @@ async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_n
 
         async def _call_llm(self, *_args, **_kwargs):
             self.calls += 1
-            return (invalid if self.calls == 1 else valid).model_dump_json()
+            if self.calls == 1:
+                return json.dumps({'findings': [{'kind': 'chapter_structure',
+                    'chapter_ids': [c.chapter_ref for c in context.outline.chapters], 'section_ids': [], 'reason': '童年经历分散'}]})
+            return (invalid if self.calls == 2 else valid).model_dump_json()
 
     async def cached_digests(*_args, **_kwargs):
         return None
@@ -110,9 +117,9 @@ async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_n
     assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
     _, after, _ = await _load_tree(test_db, project_id=pid)
     assert after[0].id == chapters[0].id
-    assert ai.calls == 2
+    assert ai.calls == 3
     assert not await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
-    assert ai.calls == 2
+    assert ai.calls == 3
 
 
 async def _book(client, db):
@@ -148,8 +155,7 @@ async def test_question_edit_invalidates_directory_and_section_regeneration_inpu
     chapter = SimpleNamespace(sections=[sections[0]])
     snapshots = await regeneration._material_snapshots(test_db, chapter)
     assert snapshots[0].interviewer_line == question.content_text
-    prompt = structure.build_structure_prompt(before, chapters=chapters, sections=sections,
-        chapter_summaries={}, section_summaries={})
+    prompt = structure.build_structure_prompt(before, chapters=chapters, sections=sections)
     assert question.content_text in prompt
     async with AsyncSession(test_db.bind) as writer:
         changed = await writer.get(MemoirChatMessage, question.id)
@@ -213,15 +219,16 @@ def _provider(monkeypatch, answer, *, during_call=None):
         return None
     async def summaries(*args, **kwargs):
         return {}, {}, []
-    async def generate(*args, **kwargs):
-        calls.append(args[2])
+    async def generate(context, **kwargs):
+        prompt = structure.build_structure_prompt(context, chapters=kwargs['chapters'], sections=kwargs['sections'],
+            review_findings=kwargs['review_findings'])
+        calls.append(prompt)
         if during_call:
             await during_call()
-        return SimpleNamespace(value=answer(args[2]) if callable(answer) else answer)
+        return answer(prompt) if callable(answer) else answer
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', digest)
     monkeypatch.setattr(structure, 'load_structure_summaries', summaries)
-    monkeypatch.setattr(structure, 'get_ai_service', lambda _: None)
-    monkeypatch.setattr(structure, 'generate_structured_with_client', generate)
+    monkeypatch.setattr(structure, 'generate_structure_proposal', generate)
     return calls
 
 
@@ -237,8 +244,8 @@ async def test_review_merges_chapters_preserves_sources_and_does_not_repeat(clie
     if merge_sections:
         kept_ids.remove(context.section_refs.decode(context.outline.chapters[2].sections[0].section_refs[0]))
     calls = _provider(monkeypatch, output)
-    await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
-    await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
+    await structure.review_story_structure(test_db, user_id=uid, project_id=pid, chapter_ids={c.id for c in chapters[:3]})
+    await structure.review_story_structure(test_db, user_id=uid, project_id=pid, chapter_ids={chapters[0].id})
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     assert len(calls) == 1
     assert [c.title for c in chapters] == ['妈妈与童年的课堂', '工作']
@@ -340,7 +347,7 @@ async def test_growth_receives_valid_chapter_and_section_summaries(client, test_
     assert findings[0].section_ids == [sections[0].id]
     directory = structure.build_structure_prompt(
         await structure.structure_context(test_db, plan, chapters, sections), chapters=chapters, sections=sections,
-        chapter_summaries=cs, section_summaries=ss, review_findings=findings)
+        review_findings=findings)
     assert '标题应覆盖课堂经历。' in directory
     prompt, _, _ = build_story_growth_prompt(utterances=[], chapters=chapters, sections=sections,
         interviewer_lines={}, chapter_summaries=cs, section_summaries=ss)
@@ -542,6 +549,7 @@ async def test_review_feedback_uses_the_shared_writer_once_per_source_input(clie
     assert structure.material_identity(sections) == original
     # New wording/review IDs or AI-generated directory names must not loop.
     review = await _book_review_feedback(test_db, pid, signature='regenerated-review')
+    review.review_json['structure_findings'][0]['chapter_ids'] = [chapters[0].id]
     assert not await structure.review_story_structure(test_db, user_id=uid, project_id=pid, book_review=review)
     assert len(calls) == 1
     source = await create_test_voice_transcript(client, test_db, '妈妈后来又教我写字。', project_id=pid)
@@ -640,9 +648,9 @@ async def test_growth_worker_generates_real_digests_and_schedules_book(client, t
     assert job.result_json['new_chapter_ids'] == []
     assert len(job.result_json['new_section_ids']) == int(split_section)
     assert job.result_json['growth']['placed_ids'] == []
-    assert len(fake.prompts) - prompts_before == (2 if rebuild_digests else 8)
+    assert len(fake.prompts) - prompts_before == 2
     assert len(calls) == 1
-    assert '朋友发来山桃花照片' in calls[0]  # The real section digest reached the directory prompt.
+    assert '小时候跟妈妈去课堂，她给我垫了板凳。' in calls[0]  # Source evidence, not generated summary, defines grouping.
     _, chapters, sections = await _load_tree(test_db, project_id=pid)
     assert len(chapters) == (2 if merge_sections else 4)
     assert len(sections) == (3 if merge_sections else 5 if split_section else 4)
@@ -1158,8 +1166,7 @@ async def test_split_prompt_uses_material_references_but_omits_excluded_text(cli
     excluded.include_in_book = False
     await test_db.commit()
     context = await structure.structure_context(test_db, plan, chapters, sections)
-    prompt = structure.build_structure_prompt(context, chapters=chapters, sections=sections,
-        chapter_summaries={}, section_summaries={})
+    prompt = structure.build_structure_prompt(context, chapters=chapters, sections=sections)
     import json
     payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
     groups = [s for c in payload['chapters'] for s in c['sections']]
@@ -1284,7 +1291,7 @@ def test_structure_material_overviews_obey_serialized_budget(count, text, has_qu
         fixed_materials={refs.encode('m0'): ('S1', 'C1')},
         question_lines={f'q{i}': '您愿意再讲讲妈妈的课堂吗？' * 25 for i in range(count)} if has_questions else {})
     prompt = structure.build_structure_prompt(context, chapters=[SimpleNamespace(id='c', include_in_book=True)],
-        sections=sections, chapter_summaries={}, section_summaries={})
+        sections=sections)
     payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
     groups = payload['chapters'][0]['sections']
     assert {ref for g in groups for ref in g['material_refs']} == {refs.encode(f'm{i}') for i in range(count)}
