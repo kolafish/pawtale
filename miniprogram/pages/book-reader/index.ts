@@ -874,10 +874,6 @@ definePage<BookReaderData>()({
       const data = chapterReaderData(workspace);
       this.excerptSource = workspace.draft_content || "";
       this.excerptVersionId = workspace.draft_version_id || "";
-      if (this.data.excerptMode === "select" && workspace.draft_needs_rewrite) {
-        this.excerptSource = "";
-        throw Error("正文正在更新，请完成更新后再选择分享内容。");
-      }
       this.readerAudioVersionId = workspace.draft_version_id || "";
       this.readerText = trimText(data.bookContent);
       this.chapterParagraphRanges = chapterParagraphRanges(

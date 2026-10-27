@@ -990,8 +990,10 @@ for (const timing of ["early preview", "hidden callback", "late callback after r
 }
 
 test("excerpt version conflict requires reloading source before another selection", async () => {
+  let shareCalls = 0;
   const context = excerptContext({
     suggestMemoirExcerptTitle: async () => { throw new ApiError(409, "正文已更新，请重新选择分享内容", {}); },
+    createMemoirExcerptShare: async () => { shareCalls++; },
     getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "新版章节", draft_version_id: "v2", draft_content: "新的原文。", draft_sections: [] }),
   });
   context.excerptSource = "原来的文字。";
@@ -1000,11 +1002,44 @@ test("excerpt version conflict requires reloading source before another selectio
   await context.previewExcerptSelection();
   assert.equal(context.data.excerptReloadRequired, true);
   assert.equal(context.excerptToken, "");
+  context.changeExcerptTitle({ detail: { value: "手动填写的标题" } });
+  await context.confirmExcerptCard();
+  assert.equal(shareCalls, 0, "a rejected version must not be shared");
   context.retryExcerpt();
   await flushAsyncWork();
   assert.equal(context.data.excerptReloadRequired, false);
   assert.equal(context.excerptVersionId, "v2");
   assert.equal(context.excerptSource, "新的原文。");
+});
+
+test("a saved chapter awaiting rewrite remains available for selected-text sharing", async () => {
+  const content = "回家的路很长。";
+  const selection = { version_id: "v1", content };
+  const context = excerptContext({
+    getMemoirChapterWorkspace: async () => ({
+      chapter_id: "c", chapter_title: "放学的路", draft_version_id: "v1",
+      draft_content: content, draft_sections: [], draft_needs_rewrite: true,
+    }),
+    suggestMemoirExcerptTitle: async (projectId, chapterId, value) => {
+      assert.equal(projectId, "p");
+      assert.equal(chapterId, "c");
+      assert.deepEqual(value, selection);
+      return { title: "那条长长的回家路" };
+    },
+    createMemoirExcerptShare: async (_p, _c, value) => {
+      assert.deepEqual(value, { ...selection, title: "那条长长的回家路" });
+      return { ...value, token: "x1.saved", book_title: "回忆录", chapter_title: "放学的路" };
+    },
+  });
+  await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
+  assert.equal(context.data.error, "");
+  assert.equal(context.excerptSource, content);
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: content }) };
+  await context.previewExcerptSelection();
+  await context.confirmExcerptCard();
+  assert.equal(context.data.excerptMode, "preview");
+  assert.equal(context.excerptToken, "x1.saved");
+  assert.equal(context.data.excerptContent, content);
 });
 
 
