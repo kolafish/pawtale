@@ -886,6 +886,88 @@ async def test_voice_merge_failure_rolls_back_material_move(client, test_db, mon
     assert await _story(test_db, story["pid"]) == before
 
 
+@pytest.mark.parametrize("cross_chapter", [False, True])
+@pytest.mark.parametrize("selection", [[0, 1], [0], [1]])
+async def test_disjoint_voice_merges_preserve_groups_and_partial_confirmation(
+    client, test_db, monkeypatch, story, cross_chapter, selection,
+):
+    sections = [await test_db.get(MemoirSection, ref) for ref in story["sections"]]
+    target_chapter, source_chapter = story["chapters"][:2]
+    session = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.project_id == story["pid"]))
+    extra = MemoirVoiceUtterance(voice_session_id=session.id, transcript_raw="第五六节中的另一段讲述。")
+    test_db.add(extra)
+    await test_db.flush()
+    test_db.add(MemoirSectionMaterial(project_id=story["pid"], section_id=sections[3].id, utterance_id=extra.id))
+    for index, section in enumerate(sections):
+        section.sort_order = index + 10
+    await test_db.flush()
+    for index, section in enumerate(sections):
+        section.chapter_id = source_chapter if cross_chapter and index % 2 else target_chapter
+        section.sort_order = index
+    await test_db.commit()
+    operations = [
+        {"action": "merge_sections", "target_ref": sections[i].id, "section_ids": [sections[i + 1].id]}
+        for i in (0, 2)
+    ]
+    before = await _story(test_db, story["pid"])
+    response, _ = await preview(client, monkeypatch, story, operations,
+        instruction="把三四两个小节合成一个，五六两个小节合成一个。")
+    assert response.status_code == 200, response.text
+    assert len(response.json()["operations"]) == 2
+    assert await _story(test_db, story["pid"]) == before
+    chosen = [operations[index] for index in selection]
+    result = await apply(client, story, response.json(), chosen)
+    assert result.status_code == 200, result.text
+    after = await _story(test_db, story["pid"])
+    destinations = {op["section_ids"][0]: op["target_ref"] for op in chosen}
+    assert {s["ref"] for s in after["sections"]} == {s["ref"] for s in before["sections"]} - destinations.keys()
+    before_links = {m["ref"]: m for m in before["memberships"]}
+    assert {m["ref"] for m in after["memberships"]} == before_links.keys()
+    for link in after["memberships"]:
+        old = before_links[link["ref"]]
+        assert link["section_ref"] == destinations.get(old["section_ref"], old["section_ref"])
+        assert (link["material_ref"], link["version"], link["included"]) == (old["material_ref"], old["version"], old["included"])
+    assert {m["ref"]: (m["raw"], m["text"]) for m in after["materials"]} == {
+        m["ref"]: (m["raw"], m["text"]) for m in before["materials"]
+    }
+    before_titles = {s["ref"]: s["title"] for s in before["sections"]}
+    assert all(s["title"] == before_titles[s["ref"]] for s in after["sections"])
+    removed_chapters = {source_chapter} if cross_chapter and len(selection) == 2 else set()
+    assert {c["ref"] for c in after["chapters"]} == set(story["chapters"]) - removed_chapters
+
+
+async def test_disjoint_voice_merges_protect_jointly_removed_chapter_draft(client, test_db, monkeypatch, story):
+    operations = [
+        {"action": "merge_sections", "target_ref": story["sections"][0], "section_ids": [story["sections"][1]]},
+        {"action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [story["sections"][3]]},
+    ]
+    response, _ = await preview(client, monkeypatch, story, operations)
+    assert response.status_code == 200, response.text
+    draft = await test_db.scalar(select(MemoirBookChapterDraft).where(
+        MemoirBookChapterDraft.chapter_id == story["chapters"][1],
+    ))
+    test_db.add(MemoirBookChapterDraftVersion(draft_id=draft.id, project_id=story["pid"],
+        chapter_id=draft.chapter_id, version=2, content="预览后修改的来源章节正文。"))
+    await test_db.commit()
+    before = await _story(test_db, story["pid"])
+    result = await apply(client, story, response.json())
+    assert result.status_code == 409, result.text
+    assert await _story(test_db, story["pid"]) == before
+
+
+@pytest.mark.parametrize("second", [(2, 1), (1, 2), (2, 0), (0, 2)])
+async def test_voice_merges_reject_reused_sources_targets_and_chains(client, test_db, monkeypatch, story, second):
+    sections = story["sections"]
+    operations = [
+        {"action": "merge_sections", "target_ref": sections[0], "section_ids": [sections[1]]},
+        {"action": "merge_sections", "target_ref": sections[second[0]], "section_ids": [sections[second[1]]]},
+    ]
+    before = await _story(test_db, story["pid"])
+    response, _ = await preview(client, monkeypatch, story, operations)
+    assert response.status_code == 422
+    assert await _story(test_db, story["pid"]) == before
+
+
 async def test_voice_merge_requires_current_sections_and_unambiguous_batch(client, test_db, monkeypatch, story):
     op = {"action": "merge_sections", "target_ref": story["sections"][2], "section_ids": [story["sections"][0]]}
     response, _ = await preview(client, monkeypatch, story, [op, {

@@ -71,7 +71,7 @@ _OPERATION_RULES = {
     "regenerate_chapter_sections": "按章内容生成或中性重整小节，target_ref 引用章；由后台异步整理，不自行给小节标题。",
     "consolidate_chapter_sections": "减少现有小节数量，target_ref 引用章；即使未指定具体小节也可提出，不能用重新生成代替合并。",
     "split_chapter": "把原章部分内容拆到新章：target_ref 为原章，new_title 可按内容拟定；移动整个小节用 section_ids，仅明确选部分讲述时用 utterance_ids，二者不能混用，不能拆单条讲述内部。小节按 sections.order、章按 chapters.number，最近讲述参考 created_at。拆后原章须保留收录讲述；不组合涉及原章的其他编辑。",
-    "merge_sections": "将来源 section_ids 并入 target_ref 目标小节，可跨章。整章并入指定小节时列全部收录来源小节。保留目标名，不新建章、不改用全章重整，不复制或改写讲述；来源章可不留讲述，只有无任何小节时才移除。只在无法定位来源或目标时提问，不组合涉及来源章或目标章的其他修改。",
+    "merge_sections": "将来源 section_ids 并入 target_ref 目标小节，可跨章。整章并入指定小节时列全部收录来源小节。保留目标名，不新建章、不改用全章重整，不复制或改写讲述；来源章可不留讲述，只有无任何小节时才移除。只在无法定位来源或目标时提问。多组合并的来源和目标小节完全不重叠时可以同时提出，即使同章；任何小节不能重复使用或连环合并。不组合涉及来源章或目标章的其他类型修改。",
     "merge_chapters": "将 target_ref 来源章的全部小节按顺序并到 target_chapter_ref 目标章，保留标题、身份、讲述及收录状态，移除来源章，目标章名不变。减少全书章数可按内容提议；不要求指定目标小节或来源章保留讲述。多来源章各列一项指向同一目标，按目录顺序排列；来源章不再作目标，不组合涉及这些章的其他修改。",
     "move_chapter": "target_ref 是章，位置只选一种：target_index（从1开始）、target_position（first/last）、或 relative_ref 加 relative_position（before/after）。一批最多移动一章，不和拆、合、删章组合。",
     "set_chapter_book_inclusion": "include_in_book 决定是否收录，未收录章及其小节、讲述保留；至少一章收录。",
@@ -224,14 +224,11 @@ def _operation_sections(story: dict, op: VoiceEditOperation) -> list[dict]:
     )]
 
 
-def _merge_empty_chapters(story: dict, op: VoiceEditOperation) -> set[str]:
-    selected = set(op.section_ids)
-    destination = next((s["chapter_ref"] for s in story["sections"] if s["ref"] == op.target_ref), None)
-    if destination is None:
-        return set()
+def _merge_empty_chapters(story: dict, operations: list[VoiceEditOperation]) -> set[str]:
+    selected = {ref for op in operations for ref in op.section_ids}
     return {
         s["chapter_ref"] for s in story["sections"]
-        if s["ref"] in selected and s["chapter_ref"] != destination
+        if s["ref"] in selected
         and all(other["ref"] in selected for other in story["sections"] if other["chapter_ref"] == s["chapter_ref"])
     }
 
@@ -337,7 +334,11 @@ def _operation_signature(story: dict, op: VoiceEditOperation) -> str:
     if kind == "material":
         material_ids.add(op.target_ref)
     chapter_ids = {s["chapter_ref"] for s in sections}
-    emptied_chapters = _merge_empty_chapters(story, op) if op.action == "merge_sections" else set()
+    # Disjoint merges may jointly empty a source chapter. Sign its draft even
+    # when this item alone would leave another source section behind.
+    merge_source_chapters = {
+        s["chapter_ref"] for s in sections if s["ref"] in op.section_ids
+    } - {s["chapter_ref"] for s in sections if s["ref"] == op.target_ref} if op.action == "merge_sections" else set()
     if kind == "chapter":
         chapter_ids.add(op.target_ref)
     if op.target_chapter_ref:
@@ -358,7 +359,7 @@ def _operation_signature(story: dict, op: VoiceEditOperation) -> str:
         # Other section/material edits do not depend on draft text.
         "drafts": [d for d in story["drafts"] if (
             (kind == "chapter" and d["chapter_ref"] == op.target_ref)
-            or d["chapter_ref"] in emptied_chapters
+            or d["chapter_ref"] in merge_source_chapters
         )],
     })
 
@@ -429,11 +430,15 @@ def _validated_operations(story: dict, operations: list[VoiceEditOperation]) -> 
             ):
                 raise HTTPException(422, "要合并的小节不在当前收录内容中，请重新说明")
             involved_chapters = {s["chapter_ref"] for s in _operation_sections(story, op)}
-            if any(
-                other is not op and _question_touches_operation(story, other, involved_chapters)
-                for other in operations
-            ):
-                raise HTTPException(422, "合并小节不能和来源章或目标章的其他修改同时执行")
+            selected = {op.target_ref, *op.section_ids}
+            for other in operations:
+                if other is op:
+                    continue
+                if other.action == "merge_sections":
+                    if selected & {other.target_ref, *other.section_ids}:
+                        raise HTTPException(422, "多组合并不能重复使用同一个小节，也不能连环合并")
+                elif _question_touches_operation(story, other, involved_chapters):
+                    raise HTTPException(422, "合并小节不能和来源章或目标章的其他修改同时执行")
         if op.action == "split_chapter":
             source_ids = _chapter_source_ids(story, op.target_ref)
             moved_ids = _section_split_source_ids(story, op) if op.section_ids else set(op.utterance_ids)
@@ -600,7 +605,8 @@ def _extended_item(story: dict, op: VoiceEditOperation, scans: dict[str, term_co
     )
 
 
-def _item(story: dict, op: VoiceEditOperation, scans: dict[str, term_corrections.TermScan] | None = None) -> VoiceEditItem:
+def _item(story: dict, op: VoiceEditOperation, scans: dict[str, term_corrections.TermScan] | None = None,
+          *, merge_operations: list[VoiceEditOperation] | None = None) -> VoiceEditItem:
     if op.action in EXTENDED_VOICE_EDIT_ACTIONS:
         return _extended_item(story, op, scans or {})
     kind = _operation_target_kind(op)
@@ -609,10 +615,10 @@ def _item(story: dict, op: VoiceEditOperation, scans: dict[str, term_corrections
     if op.action == "merge_sections":
         chapters = {c["ref"]: c["title"] for c in story["chapters"]}
         sources = [s for s in story["sections"] if s["ref"] in op.section_ids]
-        emptied = _merge_empty_chapters(story, op)
+        emptied = _merge_empty_chapters(story, merge_operations or [op]) & {s["chapter_ref"] for s in sources}
         detail = "全部讲述会移入目标小节，原始讲述、音频和文字版本保留；受影响的书稿会更新。"
         if emptied:
-            detail += "合并后来源章节已无小节，将移除：" + "、".join(f"「{chapters[ref]}」" for ref in sorted(emptied)) + "。"
+            detail += "所选合并后若来源章节已无小节，将移除：" + "、".join(f"「{chapters[ref]}」" for ref in sorted(emptied)) + "。"
         else:
             detail += "来源章节的其他小节保持不变。"
         return VoiceEditItem(
@@ -794,8 +800,9 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     reply = "请确认要移动的小节和新章节名。" if len(operations) == 1 and operations[0].action == "split_chapter" and operations[0].section_ids else proposal.reply
     if len(operations) == 1 and operations[0].action == "merge_sections":
         reply = "请确认来源小节、目标章节和目标小节。"
+    merges = [op for op in operations if op.action == "merge_sections"]
     return VoiceEditPreviewResponse(
-        signature=json.dumps(signatures), operations=[_item(story, op, scans) for op in operations],
+        signature=json.dumps(signatures), operations=[_item(story, op, scans, merge_operations=merges) for op in operations],
         questions=[q.question for q in proposal.questions], reply=reply,
         navigation=_navigation(story, proposal, instruction) if extended and not operations else None,
     )
@@ -883,12 +890,6 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
                     db, user_id=user_id, project_id=project_id, target_section_id=op.target_ref,
                     req=MemoirSectionMergeRequest(source_section_ids=op.section_ids), commit=False,
                 )
-                for chapter_id in sorted(_merge_empty_chapters(story, op)):
-                    await apply_book_plan_structure_command(
-                        db, user_id=user_id, project_id=project_id,
-                        req=MemoirBookPlanStructureCommandRequest(type="delete_chapter", chapter_id=chapter_id),
-                        commit=False,
-                    )
             elif op.action in {"delete_chapter", "rename_chapter", "split_chapter", "merge_chapters"}:
                 if op.action == "rename_chapter":
                     changes.append({"type": "chapter_title", "ref": op.target_ref, "before": chapters[op.target_ref]["title"], "after": op.new_title})
@@ -932,6 +933,14 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
                 await delete_section(db, user_id=user_id, project_id=project_id, section_id=op.target_ref, commit=False)
             else:
                 await delete_voice_transcript(db, op.target_ref, user_id, commit=False)
+        # Remove chapters only after all selected groups have moved their materials.
+        merges = [op for op in operations if op.action == "merge_sections"]
+        for chapter_id in sorted(_merge_empty_chapters(story, merges)):
+            await apply_book_plan_structure_command(
+                db, user_id=user_id, project_id=project_id,
+                req=MemoirBookPlanStructureCommandRequest(type="delete_chapter", chapter_id=chapter_id),
+                commit=False,
+            )
         undoable = all(op.action in _REVERSIBLE_ACTIONS for op in operations)
         _remember_last_batch(project, {**undo, "user_id": user_id, "applied_at": utcnow_naive().isoformat()} if undoable else None)
         await schedule_book_draft(db, project_id=project_id, source="structure")
