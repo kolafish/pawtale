@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, is_admin_user
+from app.auth import get_current_user, get_optional_user_id, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.services.memoir.book_output_export_cache import PreparedBookExport, has_cached_export, export_cache_path
@@ -172,9 +172,10 @@ async def get_mobile_excerpt_image(token: str, db: AsyncSession = Depends(get_db
 
 
 @router.post("/excerpt-shares/read", response_model=MemoirExcerptShareResponse)
-async def read_mobile_memoir_excerpt_share(req: MemoirBookShareReadRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def read_mobile_memoir_excerpt_share(req: MemoirBookShareReadRequest, response: Response, db: AsyncSession = Depends(get_db),
+                                         viewer_id: str | None = Depends(get_optional_user_id)):
     response.headers["Cache-Control"] = "no-store"
-    return await memoir_book_shares.read_excerpt_share(db, req.token)
+    return await memoir_book_shares.read_excerpt_share(db, req.token, viewer_id=viewer_id)
 
 
 @router.get("/excerpt-shares/{token}/card.jpg")

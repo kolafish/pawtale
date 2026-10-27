@@ -36,12 +36,12 @@ async def test_excerpt_is_a_snapshot_and_cannot_authorize_full_reading(client, t
     monkeypatch.setattr(reading_share_card, "render_excerpt_share_card", lambda **kwargs: captured.append(kwargs) or render(**kwargs))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         response = await guest.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})
-        assert response.json() == result
+        assert response.json() == {**result, "is_owner": False}
         assert "另一则私密正文" not in response.text
         assert response.headers["cache-control"] == "no-store"
         image = await guest.get(f"/api/mobile/memoir/excerpt-shares/{token}/card.jpg", params={"content": "另一则私密正文"})
         assert image.status_code == 200
-        assert captured[-1]["content"] == result["content"] and captured[-1]["title"] == result["title"]
+        assert captured[-1]["content"] == result["content"] and captured[-1]["summary"] == result["summary"]
         with Image.open(BytesIO(image.content)) as card:
             assert card.format == "JPEG" and card.size == (1000, 800)
         assert (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).status_code == 404
@@ -126,7 +126,7 @@ async def test_512_character_snapshot_stays_complete_but_card_only_renders_tease
         assert (await guest.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})).json()["content"] == selected
 
 
-async def test_excerpt_title_uses_full_selection_and_does_not_publish(client, test_db, monkeypatch):
+async def test_excerpt_title_and_summary_use_full_selection_and_only_publish_after_confirmation(client, test_db, monkeypatch):
     import json
     from types import SimpleNamespace
     from app.services import ai_calls
@@ -138,23 +138,35 @@ async def test_excerpt_title_uses_full_selection_and_does_not_publish(client, te
 
     async def generate(_client, system, prompt, **kwargs):
         received.append((system, json.loads(prompt)))
-        return SimpleNamespace(value=kwargs["output_model"](title="门口的那段往事"))
+        return SimpleNamespace(value=kwargs["output_model"](title="门口的那段往事", summary="那些藏在日常里的童年回忆。"))
 
     monkeypatch.setattr(ai_calls, "generate_structured_with_client", generate)
     path = f"/api/mobile/memoir/projects/{project_id}/chapters/{chapter.id}/excerpt-shares"
     response = await client.post(path + "/title", json={"version_id": version.id, "content": selected})
     assert response.status_code == 200, response.text
-    assert response.json()["title"] == "门口的那段往事"
+    assert response.json() == {"title": "门口的那段往事", "summary": "那些藏在日常里的童年回忆。"}
     assert received[0][1] == {"selected_text": selected}
     assert "好友" in received[0][0]
     assert await test_db.scalar(select(MemoirExcerptShare)) is None
     assert (await client.post(path + "/title", json={"version_id": version.id, "content": "不在原文中"})).status_code == 422
     assert len(received) == 1
-    created = await client.post(path, json={"version_id": version.id, "content": selected, "title": "我确认的标题"})
+    created = await client.post(path, json={"version_id": version.id, "content": selected, "title": "我确认的标题", "summary": "我确认的简短摘要。"})
     assert created.json()["title"] == "我确认的标题"
+    assert created.json()["summary"] == "我确认的简短摘要。"
+    assert created.json()["is_owner"] is True
+    token = created.json()["token"]
+    drawn = []
+    original = reading_share_card._text
+    monkeypatch.setattr(reading_share_card, "_text", lambda image, text, box, **kwargs: drawn.append(text) or original(image, text, box, **kwargs))
+    assert (await client.get(f"/api/mobile/memoir/excerpt-shares/{token}/card.jpg")).status_code == 200
+    assert "我确认的标题" not in drawn and drawn.count("我确认的简短摘要。") == 1
+    async with await _family_member(test_db, "收到选文的好友") as other:
+        shared = (await other.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})).json()
+        assert shared["is_owner"] is False and shared["summary"] == "我确认的简短摘要。"
+    assert (await client.post(path, json={"version_id": version.id, "content": selected, "summary": "字" * 49})).status_code == 422
 
 
-async def test_excerpt_continuation_requires_current_book_or_chapter_permission(client, test_db):
+async def test_excerpt_continuation_requires_current_full_book_permission(client, test_db):
     from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
     from app.services.memoir.book_output_snapshots import chapter_snapshot
     project_id, chapter, _, version, section, _, _ = await saved_stories(client, test_db)
@@ -166,8 +178,8 @@ async def test_excerpt_continuation_requires_current_book_or_chapter_permission(
         async def link():
             return (await guest.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})).json()["reading_link"]
         assert await link() is None
-        chapter_token = (await client.put(path, params={"chapter_id": chapter.id})).json()["token"]
-        assert await link() == {"scope": "chapter", "token": chapter_token}
+        await client.put(path, params={"chapter_id": chapter.id})
+        assert await link() is None
         output = MemoirBookOutput(project_id=project_id, plan_id=chapter.plan_id, title="回忆录")
         test_db.add(output)
         await test_db.flush()
@@ -177,11 +189,12 @@ async def test_excerpt_continuation_requires_current_book_or_chapter_permission(
         book_token = (await client.put(path)).json()["token"]
         assert await link() == {"scope": "book", "token": book_token}
         await client.delete(path)
-        assert await link() == {"scope": "chapter", "token": chapter_token}
+        assert await link() is None
         await client.delete(path, params={"chapter_id": chapter.id})
         assert await link() is None
-        # Re-authorizing a chapter cannot expose withdrawn material through a continuation.
-        await client.put(path, params={"chapter_id": chapter.id})
+        # Even an authorized full book must not expose withdrawn material.
+        await client.put(path)
+        assert await link() is not None
         section.include_in_book = False
         await test_db.commit()
         assert await link() is None

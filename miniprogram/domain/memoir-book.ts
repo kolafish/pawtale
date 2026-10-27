@@ -568,9 +568,11 @@ export interface MemoirExcerptSelection { version_id: string; content: string }
 
 export interface MemoirExcerptShare {
   title: string;
+  summary: string;
+  is_owner: boolean;
   image_url: string;
   image_disclosure: string;
-  reading_link: { scope: "book" | "chapter"; token: string } | null;
+  reading_link: { scope: "book"; token: string } | null;
   book_title: string;
   chapter_title: string;
   content: string;

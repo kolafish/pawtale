@@ -48,13 +48,13 @@ function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "
   return query ? `${path}?${query}` : path;
 }
 
-export function createMemoirExcerptShare(projectId: string, chapterId: string, data: MemoirExcerptSelection & { title?: string; image_asset_id?: string }): Promise<MemoirExcerptShare & { token: string }> {
+export function createMemoirExcerptShare(projectId: string, chapterId: string, data: MemoirExcerptSelection & { title?: string; summary?: string; image_asset_id?: string }): Promise<MemoirExcerptShare & { token: string }> {
   return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares`), {
     method: "POST", data, invalidatesSnapshots: false,
   });
 }
 
-export function suggestMemoirExcerptTitle(projectId: string, chapterId: string, data: MemoirExcerptSelection): Promise<{ title: string }> {
+export function suggestMemoirExcerptTitle(projectId: string, chapterId: string, data: MemoirExcerptSelection): Promise<{ title: string; summary: string }> {
   return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares/title`), {
     method: "POST", data, timeoutProfile: "generation", invalidatesSnapshots: false,
   });

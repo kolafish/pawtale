@@ -5,12 +5,14 @@
     <text class="excerpt-eyebrow">分享这段故事</text>
     <text class="excerpt-config-heading">一个让好友想读下去的标题</text>
     <input class="excerpt-title-input" value="{{excerptTitle}}" maxlength="40" disabled="{{excerptTitleBusy || excerptBusy}}" bindinput="changeExcerptTitle" placeholder="写一个分享标题" />
-    <view class="excerpt-title-tools"><text>{{excerptTitleBusy ? '正在根据完整选文推荐标题…' : 'AI 推荐后，可自行修改'}}</text><button class="ui-share-more" bindtap="suggestExcerptTitle" disabled="{{excerptTitleBusy || excerptBusy}}">重新推荐</button></view>
+    <text class="excerpt-summary-label">卡片摘要</text>
+    <input class="excerpt-summary-input" value="{{excerptSummary}}" maxlength="48" disabled="{{excerptTitleBusy || excerptBusy}}" bindinput="changeExcerptSummary" placeholder="用一句话介绍这个故事" />
+    <view class="excerpt-title-tools"><text>{{excerptTitleBusy ? '正在推荐标题和摘要…' : 'AI 推荐后，可自行修改'}}</text><button class="ui-share-more" bindtap="suggestExcerptTitle" disabled="{{excerptTitleBusy || excerptBusy}}">重新推荐</button></view>
     <text wx:if="{{excerptTitleError}}" class="excerpt-selection-error">{{excerptTitleError}}</text>
     <text class="excerpt-config-heading">选择卡片样式</text>
     <view class="excerpt-style-choices" aria-role="radiogroup" aria-label="卡片样式">
-      <button class="excerpt-style-choice {{excerptStyle === 'text' ? 'selected' : ''}}" data-style="text" bindtap="chooseExcerptStyle" aria-role="radio" aria-checked="{{excerptStyle === 'text'}}">纯文字<text>标题 + 一段选文</text></button>
-      <button class="excerpt-style-choice {{excerptStyle === 'image' ? 'selected' : ''}}" data-style="image" bindtap="chooseExcerptStyle" aria-role="radio" aria-checked="{{excerptStyle === 'image'}}">带图片<text>图片 + 标题</text></button>
+      <button class="excerpt-style-choice {{excerptStyle === 'text' ? 'selected' : ''}}" data-style="text" bindtap="chooseExcerptStyle" aria-role="radio" aria-checked="{{excerptStyle === 'text'}}">纯文字<text>简短摘要 + 出处</text></button>
+      <button class="excerpt-style-choice {{excerptStyle === 'image' ? 'selected' : ''}}" data-style="image" bindtap="chooseExcerptStyle" aria-role="radio" aria-checked="{{excerptStyle === 'image'}}">带图片<text>图片 + 简短摘要</text></button>
     </view>
     <block wx:if="{{excerptStyle === 'image'}}">
       <view class="excerpt-style-choices">
@@ -32,7 +34,7 @@
       </block>
     </block>
     <view class="excerpt-selected-copy"><text class="excerpt-eyebrow">完整选文 · {{excerptSelectionCount}} 字</text><text user-select="{{true}}">{{excerptContent}}</text></view>
-    <text class="excerpt-help">确认标题、选文和图片均适合公开。卡片只展示引子，好友点开可读全部选文。</text>
+    <text class="excerpt-help">确认标题、摘要、选文和图片均适合公开。卡片只展示引子，好友点开可读全部选文。</text>
     <view class="excerpt-actions"><button class="ui-share-more" bindtap="reselectExcerpt">重新选文</button><button class="excerpt-share-button" bindtap="confirmExcerptCard" loading="{{excerptBusy}}" disabled="{{excerptBusy || excerptTitleBusy || excerptPhotoBusy || excerptReloadRequired}}">预览分享卡片</button></view>
   </block>
   <block wx:elif="{{excerptMode === 'preview'}}">
@@ -49,22 +51,23 @@
     <view class="excerpt-paper">
       <text class="excerpt-eyebrow">分享的故事</text>
       <text class="excerpt-title">{{excerptTitle}}</text>
-      <image wx:if="{{excerptStoryImageUrl}}" class="excerpt-story-image" src="{{excerptStoryImageUrl}}" mode="widthFix" />
-      <text wx:if="{{excerptImageDisclosure}}" class="excerpt-help">{{excerptImageDisclosure}}</text>
-      <view class="excerpt-quote"><text user-select="{{true}}">{{excerptBeforeHighlight}}</text><text class="excerpt-highlight" user-select="{{true}}">{{excerptHighlight}}</text></view>
+      <view wx:if="{{excerptStoryImageUrl}}" class="excerpt-story-image-shell"><image class="excerpt-story-image" src="{{excerptStoryImageUrl}}" mode="aspectFill" /></view>
+      <text wx:if="{{excerptStoryImageUrl && excerptImageDisclosure}}" class="excerpt-image-disclosure">AI生成插图</text>
+      <view class="excerpt-quote"><text user-select="{{true}}">{{excerptContent}}</text></view>
       <view class="excerpt-source">
         <image class="excerpt-source-icon" src="/assets/book-reader/hero-branch.png" mode="aspectFit" aria-hidden="true" />
         <view><text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text><text class="excerpt-source-chapter">{{excerptChapterTitle}}</text></view>
       </view>
-      <button wx:if="{{excerptReadingLink}}" class="excerpt-reading-link" bindtap="openExcerptReading">{{excerptReadingLink.scope === 'book' ? '继续阅读这本回忆录' : '继续阅读这一章'}} →</button>
+      <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link" aria-role="link" aria-label="阅读《{{excerptBookTitle}}》" bindtap="openExcerptReading"><text class="excerpt-reading-label">阅读《{{excerptBookTitle}}》</text><text aria-hidden="true">→</text></view>
     </view>
     <view class="excerpt-origin">
       <image src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
-      <text>这段往事，由讲述者亲口讲述，
-老余口述整理成书。</text>
+      <text>由讲述者亲口讲述 · 老余口述整理成书</text>
     </view>
-    <button class="excerpt-share-button" open-type="share">分享给好友</button>
-    <button class="excerpt-start-button" bindtap="openShareHome">我也想记录家人的故事 →</button>
+    <view class="excerpt-reader-actions {{excerptIsOwner ? 'is-owner' : ''}}">
+      <button class="excerpt-reader-button {{excerptIsOwner ? 'is-primary' : 'is-secondary'}}" open-type="share">分享给好友</button>
+      <button class="excerpt-reader-button {{excerptIsOwner ? 'is-secondary' : 'is-primary'}}" bindtap="openShareHome">我也想记录家人的故事 →</button>
+    </view>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
   </block>
   <view wx:if="{{error}}" class="reader-state error">

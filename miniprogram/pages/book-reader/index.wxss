@@ -491,23 +491,26 @@
 .excerpt-card-image { display: block; width: 100%; margin-top: 28rpx; border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(97,75,57,.08); outline: 1px solid rgba(0,0,0,.06); }
 .excerpt-paper { padding: 0 8rpx; }
 .excerpt-eyebrow { display: block; color: #806b55; font-family: var(--ui-font-editorial); font-size: 26rpx; line-height: 1.6; }
-.excerpt-title { display: block; margin: 24rpx 0 26rpx; color: #3f291b; font-family: var(--ui-font-editorial); font-size: 48rpx; font-weight: 700; line-height: 1.5; }
-.excerpt-quote { color: #4c392a; font-family: var(--ui-font-editorial); font-size: 34rpx; line-height: 1.95; white-space: pre-wrap; overflow-wrap: break-word; }
-.excerpt-highlight { background: #eaf0d3; border-radius: 6rpx; }
+.excerpt-title { display: block; margin: 16rpx 0 18rpx; color: #3f291b; font-family: var(--ui-font-editorial); font-size: 24px; font-weight: 700; line-height: 1.4; }
+.excerpt-quote { color: #4c392a; font-family: var(--ui-font-editorial); font-size: 17px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: break-word; }
 .excerpt-source { display: flex; align-items: center; gap: 20rpx; margin-top: 36rpx; padding: 28rpx 0; border-top: 1rpx solid #e3d8c7; }
 .excerpt-source-icon { flex: none; width: 60rpx; height: 68rpx; opacity: .65; }
 .excerpt-attribution { display: block; color: #614b39; font-family: var(--ui-font-editorial); font-size: 28rpx; line-height: 1.7; }
 .excerpt-source-chapter { display: block; color: #806b55; font-size: 24rpx; line-height: 1.7; }
-.excerpt-origin { display: flex; align-items: center; gap: 20rpx; margin: 0 0 32rpx; padding: 22rpx; border-radius: 24rpx; background: #f5eddf; }
-.excerpt-origin image { flex: none; width: 64rpx; height: 64rpx; }
-.excerpt-origin text { color: #6d5540; font-size: 26rpx; line-height: 1.8; }
-.excerpt-share-button, .excerpt-start-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-height: 48px; padding: 20rpx 28rpx; border-radius: 100rpx; font-size: 30rpx; line-height: 1.5; transition: transform 120ms ease, opacity 120ms ease; }
+.excerpt-origin { display: flex; align-items: center; gap: 12rpx; margin: 24rpx 0 28rpx; }
+.excerpt-origin image { flex: none; width: 26rpx; height: 32rpx; }
+.excerpt-origin text { color: #806f5f; font-size: 12px; line-height: 1.5; }
+.excerpt-share-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-height: 48px; padding: 20rpx 28rpx; border-radius: 100rpx; font-size: 30rpx; line-height: 1.5; transition: transform 120ms ease, opacity 120ms ease; }
 .excerpt-share-button { margin: 0; background: #974c42; color: #fffaf3; }
 .excerpt-share-button[disabled] { opacity: .45; }
-.excerpt-start-button { margin-top: 20rpx; border: 1rpx solid #dfd0bc; background: transparent; color: #563c2a; font-size: 26rpx; }
-.excerpt-share-button:active, .excerpt-start-button:active { transform: scale(.96); }
+.excerpt-share-button:active, .excerpt-reader-button:active { transform: scale(.96); }
+.excerpt-reader-actions { display: flex; flex-direction: column-reverse; gap: 16rpx; }
+.excerpt-reader-actions.is-owner { flex-direction: column; }
+.excerpt-reader-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-height: 48px; margin: 0; padding: 12px 16px; border-radius: 100rpx; font-size: 15px; line-height: 1.5; white-space: nowrap; transition: transform 120ms ease, opacity 120ms ease; }
+.excerpt-reader-button.is-primary { background: #974c42; color: #fffaf3; }
+.excerpt-reader-button.is-secondary { background: transparent; color: #563c2a; border: 1rpx solid #dfd0bc; }
 .excerpt-page .share-like-bar { background: transparent; border: 0; padding: 8rpx 0; }
-.excerpt-page.large-text .excerpt-quote { font-size: 38rpx; }
+.excerpt-page.large-text .excerpt-quote { font-size: 19px; }
 
 /* Contain each section's float without constraining the paragraph text flow. */
 .small-section-paragraph-list::after {
@@ -529,6 +532,8 @@
 
 .excerpt-config-heading { display: block; margin: 36rpx 0 18rpx; color: #614b39; font-size: 30rpx; font-weight: 600; }
 .excerpt-title-input { height: 96rpx; padding: 0 24rpx; background: #fffdf8; border-radius: 20rpx; font-size: 34rpx; color: #453323; box-shadow: 0 0 0 1rpx rgba(97,75,57,.12); }
+.excerpt-summary-label { display: block; margin: 20rpx 0 12rpx; color: #614b39; font-size: 26rpx; }
+.excerpt-summary-input { height: 80rpx; padding: 0 24rpx; background: #fffdf8; border-radius: 20rpx; font-size: 28rpx; color: #453323; box-shadow: 0 0 0 1rpx rgba(97,75,57,.12); }
 .excerpt-title-tools { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; color: #86745f; font-size: 23rpx; }
 .excerpt-title-tools button { margin-right: 0; }
 .excerpt-style-choices { display: flex; gap: 18rpx; margin: 20rpx 0; }
@@ -538,5 +543,9 @@
 .excerpt-selected-copy { margin: 36rpx 0 24rpx; padding: 28rpx; border-radius: 20rpx; background: #f5eee4; font-size: 28rpx; line-height: 1.8; white-space: pre-wrap; }
 .excerpt-selected-copy > text { display: block; }
 .excerpt-generate { margin-top: 24rpx; }
-.excerpt-story-image { width: 100%; margin: 28rpx 0 8rpx; border-radius: 16rpx; outline: 1px solid rgba(0,0,0,.1); outline-offset: -1px; }
-.excerpt-reading-link { margin: 24rpx 0 0; background: #f5eee4; color: #614b39; text-align: left; font-size: 28rpx; border-radius: 18rpx; }
+.excerpt-story-image-shell { position: relative; width: 100%; padding-top: 56.25%; margin-bottom: 8rpx; }
+.excerpt-story-image { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 16rpx; outline: 1px solid rgba(0,0,0,.1); outline-offset: -1px; }
+.excerpt-image-disclosure { display: block; margin: 0 0 20rpx; color: #8c8378; font-size: 12px; line-height: 1.4; }
+.excerpt-story-image-shell + .excerpt-quote { margin-top: 20rpx; }
+.excerpt-reading-link { display: flex; align-items: center; gap: 12rpx; min-height: 44px; color: #714c38; font-size: 15px; line-height: 1.5; }
+.excerpt-reading-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
