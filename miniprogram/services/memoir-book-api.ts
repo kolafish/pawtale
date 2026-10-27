@@ -13,6 +13,7 @@ import type {
   MemoirBookOutput,
   MemoirBookShareCreated,
   MemoirBookShareStatus,
+  MemoirReadingShareCardSelection,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookEditorialCopyJobsResponse,
   MemoirBookOutputExportInfo,
@@ -60,6 +61,14 @@ export function updateMemoirBookShare(projectId: string, chapterId = "", section
   return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId, sectionId), {
     method: "PUT",
     invalidatesSnapshots: false,
+  });
+}
+
+export function saveMemoirShareCardSelection(
+  projectId: string, selection: MemoirReadingShareCardSelection & { token: string }, chapterId = "", sectionId = "",
+): Promise<MemoirReadingShareCardSelection> {
+  return memoirRequest<MemoirReadingShareCardSelection>(memoirBookSharePath(projectId, chapterId, sectionId), {
+    method: "PATCH", data: selection, invalidatesSnapshots: false,
   });
 }
 

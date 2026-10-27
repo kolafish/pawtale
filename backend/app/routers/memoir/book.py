@@ -34,6 +34,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
     MemoirBookShareCreateResponse,
+    MemoirReadingShareCardRequest, MemoirReadingShareCardSelection,
     MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse,
     MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
@@ -99,6 +100,20 @@ async def update_mobile_memoir_book_share(
 ):
     response.headers["Cache-Control"] = "no-store"
     return await memoir_book_shares.update_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
+
+
+@router.patch("/projects/{project_id}/book-output/share", response_model=MemoirReadingShareCardSelection)
+async def save_mobile_memoir_share_card(
+    project_id: str,
+    req: MemoirReadingShareCardRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    chapter_id: str | None = None, section_id: str | None = None,
+):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.save_card_selection(db, user_id=current_user.id, project_id=project_id,
+        selection=req, chapter_id=chapter_id, section_id=section_id)
 
 
 @router.delete("/projects/{project_id}/book-output/share", status_code=204)

@@ -1356,6 +1356,11 @@ class MemoirBookShare(Base):
 
 class MemoirChapterShare(Base):
     __tablename__ = "memoir_chapter_shares"
+    __table_args__ = (CheckConstraint("card_excerpt_start >= 0 AND card_excerpt_length BETWEEN 0 AND 48", name="ck_memoir_chapter_shares_card_excerpt"),)
+
+    card_version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="SET NULL"), nullable=True)
+    card_excerpt_start: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    card_excerpt_length: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     chapter_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), primary_key=True)
     version_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="CASCADE"), nullable=False)
@@ -1366,6 +1371,11 @@ class MemoirChapterShare(Base):
 
 class MemoirSectionShare(Base):
     __tablename__ = "memoir_section_shares"
+    __table_args__ = (CheckConstraint("card_excerpt_start >= 0 AND card_excerpt_length BETWEEN 0 AND 48", name="ck_memoir_section_shares_card_excerpt"),)
+
+    card_version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="SET NULL"), nullable=True)
+    card_excerpt_start: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    card_excerpt_length: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     section_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_sections.id", ondelete="CASCADE"), primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)

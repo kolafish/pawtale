@@ -26,6 +26,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputResponse, MemoirBookManuscriptIllustration,
     MemoirBookOutputVersionSummaryResponse,
     MemoirBookShareCreateResponse,
+    MemoirReadingShareCardSelection, MemoirReadingShareCardRequest,
     MemoirBookShareStatusResponse, MemoirAudioPlanRequest, MemoirSharedAudioPlanResponse,
 )
 from app.services.memoir.access import load_memoir_project
@@ -196,6 +197,10 @@ async def share_status(
     active = _active(share)
     version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     return MemoirBookShareStatusResponse(
+        card_selection=MemoirReadingShareCardSelection(
+            version_id=share.card_version_id, excerpt_start=share.card_excerpt_start,
+            excerpt_length=share.card_excerpt_length,
+        ) if active and isinstance(share, (MemoirChapterShare, MemoirSectionShare)) and share.card_version_id else None,
         active=active,
         expires_at=share.expires_at if active else None,
         token=_stable_token(output.id, share.token_hash, scope=share_scope(output)) if active else None,
@@ -236,6 +241,8 @@ async def create_share(
     now = utcnow_naive()
     expires_at = None
     values = {"token_hash": token_hash, "expires_at": expires_at, "created_at": now}
+    if isinstance(output, (MemoirBookPlanChapter, MemoirSection)):
+        values.update(card_version_id=None, card_excerpt_start=0, card_excerpt_length=0)
     # A section can move to a different chapter whose saved versions have a
     # separate lifetime. Its authorization belongs to the section alone.
     if not isinstance(output, MemoirSection):
@@ -261,6 +268,35 @@ async def revoke_share(
     await db.execute(select(type(output)).where(type(output).id == output.id).with_for_update())
     await db.execute(delete(share_model).where(share_key == output.id))
     await db.commit()
+
+
+async def save_card_selection(
+    db: AsyncSession, *, user_id: str, project_id: str, selection: MemoirReadingShareCardRequest,
+    chapter_id: str | None = None, section_id: str | None = None,
+) -> MemoirReadingShareCardSelection:
+    resource = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    if isinstance(resource, MemoirBookOutput):
+        raise HTTPException(400, "全书封面不使用摘录")
+    if isinstance(resource, MemoirSection):
+        from app.services.memoir.sections import lock_project_chapters
+        await lock_project_chapters(db, project_id=project_id)
+    await db.execute(select(type(resource)).where(type(resource).id == resource.id).with_for_update())
+    model, _ = _share_table(share_scope(resource))
+    share = await db.get(model, resource.id, populate_existing=True)
+    if not _active(share) or not hmac.compare_digest(selection.token, _stable_token(resource.id, share.token_hash, scope=share_scope(resource))):
+        raise HTTPException(409, "分享已变化，请重新准备分享")
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
+    if stale or version is None or version.id != selection.version_id:
+        raise HTTPException(409, "正文已更新，请重新确认封面摘录")
+    reading = await _resource_reading_response(db, resource, version, presentation=False)
+    content = reading.latest_version.content
+    if selection.excerpt_start + selection.excerpt_length > len(content) or (selection.excerpt_length == 0 and selection.excerpt_start != 0):
+        raise HTTPException(422, "封面摘录超出正文范围")
+    share.card_version_id = selection.version_id
+    share.card_excerpt_start = selection.excerpt_start
+    share.card_excerpt_length = selection.excerpt_length
+    await db.commit()
+    return MemoirReadingShareCardSelection(**selection.model_dump(exclude={"token"}))
 
 
 async def readable_share(db: AsyncSession, token: str) -> tuple[ShareResource, ShareVersion]:

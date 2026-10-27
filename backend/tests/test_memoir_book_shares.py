@@ -92,6 +92,7 @@ async def test_book_share_is_public_read_only_auto_updated_and_revocable(client,
     initial_status = await client.get(share_path)
     assert initial_status.headers["cache-control"] == "no-store"
     assert initial_status.json() == {
+        "card_selection": None,
         "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
         "likes": {"count": 0, "likers": []},
     }
@@ -156,6 +157,7 @@ async def test_book_share_is_public_read_only_auto_updated_and_revocable(client,
         await test_db.commit()
         assert (await read(second_token)).status_code == 404
         assert (await client.get(share_path)).json() == {
+            "card_selection": None,
             "active": False, "expires_at": None, "token": None, "stale": False, "current": False,
             "likes": {"count": 0, "likers": []},
         }

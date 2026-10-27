@@ -712,7 +712,20 @@ class MemoirBookOutputResponse(BaseModel):
     updated_at: datetime
 
 
+class MemoirReadingShareCardSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version_id: str = Field(min_length=1, max_length=36)
+    excerpt_start: int = Field(default=0, ge=0)
+    excerpt_length: int = Field(default=0, ge=0, le=48)
+
+
+class MemoirReadingShareCardRequest(MemoirReadingShareCardSelection):
+    token: str = Field(min_length=1, max_length=200)
+
+
 class MemoirBookShareStatusResponse(BaseModel):
+    card_selection: MemoirReadingShareCardSelection | None = None
     active: bool
     expires_at: datetime | None = None
     token: str | None = None

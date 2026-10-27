@@ -1,13 +1,16 @@
 from io import BytesIO
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
 
 from app.main import app
+from app.models.memoir import MemoirBookChapterDraftVersion
 from app.services.memoir import reading_share_card
 from tests.memoir_helpers import ensure_mobile_memoir_project
 from tests.test_memoir_book_shares import _shareable_output
 from tests.test_memoir_story_shares import saved_stories
+from tests.test_memoir_share_likes import _family_member
 
 
 async def test_book_card_is_public_jpeg_with_real_metadata_and_revocable(client, test_db, monkeypatch):
@@ -70,6 +73,60 @@ async def test_story_card_only_excerpts_its_confirmed_scoped_version(client, tes
         section.include_in_book = False
         await test_db.commit()
         assert (await guest.get(url, params=params)).status_code == 409
+
+
+@pytest.mark.parametrize("scope", ["chapter", "story"])
+async def test_confirmed_card_selection_survives_status_reads_and_clears_on_link_rotation(client, test_db, scope):
+    project_id, chapter, _, version, section, other, _ = await saved_stories(client, test_db)
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    params = {"chapter_id": chapter.id, **({"section_id": section.id} if scope == "story" else {})}
+    token = (await client.put(path, params=params)).json()["token"]
+    choice = {"version_id": version.id, "excerpt_start": 0, "excerpt_length": 6}
+    saved = await client.patch(path, params=params, json={"token": token, **choice})
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == choice
+    # A later page/device reads persisted state; idempotent preparation retains it.
+    assert (await client.put(path, params=params)).json()["token"] == token
+    assert (await client.get(path, params=params)).json()["card_selection"] == choice
+    other_params = {"chapter_id": chapter.id, "section_id": other.id}
+    assert (await client.get(path, params=other_params)).json()["card_selection"] is None
+    choice["excerpt_length"] = 0
+    assert (await client.patch(path, params=params, json={"token": token, **choice})).status_code == 200
+    assert (await client.get(path, params=params)).json()["card_selection"] == choice
+    rotated = (await client.post(path, params=params)).json()["token"]
+    assert rotated != token
+    assert (await client.get(path, params=params)).json()["card_selection"] is None
+    assert (await client.patch(path, params=params, json={"token": token, **choice})).status_code == 409
+    await client.delete(path, params=params)
+    assert (await client.patch(path, params=params, json={"token": rotated, **choice})).status_code == 409
+
+
+@pytest.mark.parametrize("scope", ["chapter", "story"])
+async def test_card_choice_requires_owner_current_version_and_scoped_bounds(client, test_db, scope):
+    project_id, chapter, draft, version, section, other, _ = await saved_stories(client, test_db)
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    params = {"chapter_id": chapter.id, **({"section_id": section.id} if scope == "story" else {})}
+    token = (await client.put(path, params=params)).json()["token"]
+    payload = {"token": token, "version_id": version.id, "excerpt_start": 0, "excerpt_length": 6}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.patch(path, params=params, json=payload)).status_code == 401
+    async with await _family_member(test_db, "另一个账号") as other_user:
+        assert (await other_user.patch(path, params=params, json=payload)).status_code in (403, 404)
+    wrong_scope = {"chapter_id": chapter.id, "section_id": other.id}
+    assert (await client.patch(path, params=wrong_scope, json=payload)).status_code == 409
+    for invalid in ({"excerpt_start": -1}, {"excerpt_length": 49}, {"excerpt_start": 999}, {"version_id": "old"}):
+        assert (await client.patch(path, params=params, json={**payload, **invalid})).status_code in (409, 422)
+    if scope == "story":
+        # Offsets into adjacent chapter prose cannot be saved for this story.
+        assert (await client.patch(path, params=params, json={**payload, "excerpt_start": 8})).status_code == 422
+    assert (await client.patch(path, params=params, json=payload)).status_code == 200
+    test_db.add(MemoirBookChapterDraftVersion(project_id=project_id, chapter_id=chapter.id, draft_id=draft.id,
+        version=2, content="更新后的正文", section_snapshot_json=version.section_snapshot_json))
+    await test_db.commit()
+    # The old version stays explicit in status so the owner can reconfirm; it
+    # cannot authorize a new version, and an in-flight old confirmation fails.
+    assert (await client.get(path, params=params)).json()["card_selection"]["version_id"] == version.id
+    assert (await client.patch(path, params=params, json=payload)).status_code == 409
 
 
 def test_card_renderer_handles_long_titles_and_no_excerpt():

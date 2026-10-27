@@ -128,7 +128,7 @@ export function readingShareExcerpt(content: string, versionId: string): Reading
   return undefined;
 }
 
-export function readingShareImageUrl(token: string, excerpt?: ReadingShareExcerpt, versionId = ""): string {
+export function readingShareImageUrl(token: string, excerpt?: Pick<ReadingShareExcerpt, "start" | "length" | "versionId">, versionId = ""): string {
   const base = cleanBaseUrl(readBackendConfig().httpBaseUrl);
   const version = excerpt?.versionId || versionId;
   const revision = version ? `&version_id=${encodeURIComponent(version)}` : "";
