@@ -1,7 +1,7 @@
 <view class="styles" aria-role="radiogroup" aria-label="插图风格">
   <view wx:for="{{options}}" wx:key="value" class="style {{item.value === value ? 'selected' : ''}}"
     data-style="{{item.value}}" bindtap="selectStyle" aria-role="radio" aria-checked="{{item.value === value}}" aria-disabled="{{disabled}}">
-    <image wx:if="{{item.previewImage}}" src="{{item.previewImage}}" mode="aspectFill" aria-hidden="true" />
+    <image class="preview" wx:if="{{item.previewImage}}" src="{{item.previewImage}}" mode="aspectFill" aria-hidden="true" />
     <view class="copy"><text class="label">{{item.label}}</text><text class="description">{{item.description}}</text></view>
   </view>
 </view>
