@@ -77,7 +77,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; url: string; caption: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; url: string; caption: string; disclosure: string }[];
   shareCoverUrl: string;
   shareByline: string;
   sharePreface: string;
@@ -840,9 +840,23 @@ definePage<BookReaderData>()({
       const url = await readingImageUrl(item.image_url, privateImages);
       return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
         paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
+        paragraphCount: count, position, portrait: false,
         url, caption: item.caption, disclosure: item.disclosure };
     })));
     if (generation === this.sharedReadGeneration) this.setData({ shareImages: images.filter(item => Boolean(item.url)) });
+  },
+
+  onReadingImageLoad(event: PageDatasetEvent<{ id: string; url: string }> & { detail: { width: number; height: number } }) {
+    const id = datasetString(event, "id");
+    const url = datasetString(event, "url");
+    const portrait = event.detail.height > event.detail.width && event.detail.width > 0;
+    if (!this.data.shareImages.some(image => image.id === id && image.url === url && image.sectionId && image.portrait !== portrait)) return;
+    this.setData({ shareImages: this.data.shareImages.map(image => {
+      if (image.id !== id || image.url !== url || !image.sectionId) return image;
+      const count = image.paragraphCount;
+      const index = image.position === "before" ? 0 : image.position === "middle" ? (portrait ? Math.floor(count / 2) : Math.ceil(count / 2)) : count;
+      return { ...image, portrait, paragraphBefore: portrait ? Math.min(index, Math.max(0, count - 1)) : index };
+    }) });
   },
 
   async loadChapterReader(projectId: string, chapterId: string) {

@@ -428,6 +428,8 @@ class PDFBookBuilder:
         self.continuation_show_footer = True
         self.body_page_count = 0
         self.y = 0
+        self.wrapped_image: PDFImageCommand | None = None
+        self.pending_wrapped_images: list[Path] = []
 
     def _content_left(self) -> int:
         if not self.current_page or not self.layout.mirror_body_pages:
@@ -481,6 +483,7 @@ class PDFBookBuilder:
         )
         self.pages.append(self.current_page)
         self.y = self.layout.page_height - self.layout.margin_top
+        self.wrapped_image = None
 
     def add_decoration(
         self,
@@ -535,9 +538,34 @@ class PDFBookBuilder:
         *,
         display_size: str = "full_width",
         max_height: int | None = None,
+        wrap_right: bool = False,
     ) -> bool:
         if not image_path.exists() or not image_path.is_file():
             return False
+        if wrap_right:
+            with Image.open(image_path) as source:
+                width, height = ImageOps.exif_transpose(source).size
+            if height > width:
+                if self.wrapped_image:
+                    self.pending_wrapped_images.append(image_path)
+                    return True
+                content_width = self.layout.page_width - self.layout.margin_x * 2
+                image_width = content_width * 0.38
+                image_height = image_width * height / width
+                available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - self.layout.line_height
+                if image_height > available_height:
+                    image_width *= available_height / image_height
+                    image_height = available_height
+                self._ensure_space_height(image_height - self.layout.font_size + 8)
+                image = PDFImageCommand(
+                    path=image_path, x=self._content_left() + content_width - image_width,
+                    y=self.y + self.layout.font_size - image_height,
+                    width=image_width, height=image_height,
+                )
+                self._ensure_page().images.append(image)
+                self.wrapped_image = image
+                return True
+        self.finish_image_wrap()
         width_ratio = 1.0
         if display_size == "half_width":
             width_ratio = 0.68
@@ -554,6 +582,13 @@ class PDFBookBuilder:
         page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
         self.y = y - 15
         return True
+
+    def finish_image_wrap(self) -> None:
+        while self.wrapped_image:
+            self.y = min(self.y, self.wrapped_image.y - self.layout.line_height)
+            self.wrapped_image = None
+            if self.pending_wrapped_images:
+                self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
 
     def add_spacer(self, lines: float = 1.0) -> None:
         self._ensure_space(1)
@@ -623,16 +658,41 @@ class PDFBookBuilder:
     def add_body_text(self, text: str, *, spacing_after: int = 0) -> None:
         # Paragraph spacing is handled below; blank separator lines must not
         # add a second gap or create an otherwise empty continuation page.
-        paragraphs = "\n".join(line for line in text.splitlines() if line.strip())
-        self.add_text(
-            paragraphs,
-            first_line_indent=self.layout.font_size * 2,
-            paragraph_spacing_after=max(3, self.layout.line_height // 5),
-            spacing_after=spacing_after,
-            min_start_lines=2,
-            keep_last_lines=2,
-            font_name=self.layout.body_font_name,
-        )
+        for paragraph in (line.strip() for line in text.splitlines() if line.strip()):
+            first_indent = self.layout.font_size * 2
+            while paragraph and self.wrapped_image:
+                if self.y + self.layout.font_size <= self.wrapped_image.y - 8:
+                    self.wrapped_image = None
+                    if self.pending_wrapped_images:
+                        self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
+                    else:
+                        break
+                self._ensure_space_height(self.layout.line_height)
+                if not self.wrapped_image:
+                    if self.pending_wrapped_images:
+                        self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
+                    else:
+                        break
+                # Leave one em between text and the image, including punctuation.
+                width = self.wrapped_image.x - self._content_left() - self.layout.font_size - first_indent
+                units = max(2, width / self.layout.font_size - 1)
+                end = _adjust_forbidden_line_break(paragraph, 0, _fit_line_end(paragraph, 0, units))
+                line = paragraph[:end]
+                self._ensure_page().commands.append(PDFTextCommand(
+                    text=line, x=self._content_left() + first_indent, y=self.y,
+                    font_size=self.layout.font_size, font_name=self.layout.body_font_name,
+                ))
+                self.y -= self.layout.line_height
+                paragraph = paragraph[len(line):]
+                first_indent = 0
+            if paragraph:
+                self.add_text(
+                    paragraph, first_line_indent=first_indent,
+                    min_start_lines=2, keep_last_lines=2,
+                    font_name=self.layout.body_font_name,
+                )
+            self.y -= max(3, self.layout.line_height // 5)
+        self.y -= spacing_after
 
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
         template = self.layout.manuscript_template
@@ -710,7 +770,8 @@ class PDFBookBuilder:
             avoid_single_char_last_line=True,
         )
 
-    def add_section_heading(self, text: str) -> None:
+    def add_section_heading(self, text: str, *, following_image_height: float = 0) -> None:
+        self.finish_image_wrap()
         template = self.layout.manuscript_template
         font_size = self.layout.font_size + 2
         indent = 11 if template in {"warm_journal", "modern_minimal"} else 0
@@ -734,7 +795,7 @@ class PDFBookBuilder:
         self._ensure_space_height(
             len(heading_lines) * heading_line_height
             + spacing_after
-            + 2 * self.layout.line_height
+            + max(2 * self.layout.line_height, following_image_height)
         )
         heading_y = self.y
         heading_x = self._content_left()
