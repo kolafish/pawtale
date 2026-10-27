@@ -394,13 +394,15 @@ definePage<BookReaderData>()({
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
     this.excerptToken = queryParam(query, "excerptToken");
-    if (this.excerptToken || queryParam(query, "excerptSelect") === "1") {
-      this.setData({ projectId, chapterId, excerptMode: this.excerptToken ? "shared" : "select" });
-      setPageNavigationTitle(this.excerptToken ? "划线分享" : "选择划线内容");
-      if (this.excerptToken) await this.loadExcerptSnapshot();
-      else if (projectId && chapterId) await this.loadExcerptSource();
-      else this.setData({ error: "缺少章节信息" });
+    if (this.excerptToken) {
+      this.setData({ excerptMode: "shared" });
+      setPageNavigationTitle("选文分享");
+      await this.loadExcerptSnapshot();
       return;
+    }
+    if (queryParam(query, "excerptSelect") === "1") {
+      this.setData({ excerptMode: "select" });
+      hideMiniProgramShareMenu();
     }
     const sectionId = queryParam(query, "sectionId");
     const versionId = queryParam(query, "versionId");
@@ -438,7 +440,7 @@ definePage<BookReaderData>()({
   onShow() {
     if (this.data.excerptMode) {
       if (this.data.excerptMode === "shared" && !this.data.loading) void this.loadExcerptSnapshot();
-      else if (this.data.excerptMode === "select" && !this.excerptSource && !this.data.loading) void this.loadExcerptSource();
+      else if (this.data.excerptMode === "select" && !this.excerptSource && !this.data.loading) void this.loadChapterReader(this.data.projectId, this.data.chapterId);
       else if (this.data.excerptMode === "select" && !this.data.loading && !this.excerptEditor) this.onExcerptEditorReady();
       return;
     }
@@ -846,11 +848,19 @@ definePage<BookReaderData>()({
   async loadChapterReader(projectId: string, chapterId: string) {
     const generation = ++this.sharedReadGeneration;
     this.stopPlayback();
-    this.setData({ loading: true, error: "", playbackError: "", shareImages: [] });
+    this.excerptEditor = null;
+    this.excerptSource = "";
+    this.setData({ loading: true, error: "", playbackError: "", shareImages: [], bookPreviewChapters: [] });
     try {
       const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
       if (generation !== this.sharedReadGeneration) return;
       const data = chapterReaderData(workspace);
+      this.excerptSource = workspace.draft_content || "";
+      this.excerptVersionId = workspace.draft_version_id || "";
+      if (this.data.excerptMode === "select" && workspace.draft_needs_rewrite) {
+        this.excerptSource = "";
+        throw Error("正文正在更新，请完成更新后再选择分享内容。");
+      }
       this.readerAudioVersionId = workspace.draft_version_id || "";
       this.readerText = trimText(data.bookContent);
       this.chapterParagraphRanges = chapterParagraphRanges(
@@ -871,6 +881,7 @@ definePage<BookReaderData>()({
       this.setData({ loading: false });
       await this.loadReadingImages([{ chapter_id: chapterId, illustrations: workspace.illustrations || [] }], true, generation);
     } catch (error) {
+      if (generation !== this.sharedReadGeneration) return;
       if (routeAuthError(error, "login")) {
         return;
       }
@@ -878,7 +889,7 @@ definePage<BookReaderData>()({
         error: error instanceof Error ? error.message : "整章预览打开失败",
       });
     } finally {
-      this.setData({ loading: false });
+      if (generation === this.sharedReadGeneration) this.setData({ loading: false });
     }
   },
 });

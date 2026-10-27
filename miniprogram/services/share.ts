@@ -139,7 +139,7 @@ export function readingShareImageUrl(token: string, excerpt?: Pick<ReadingShareE
 export function excerptShareMessage(token: string, content: string): WechatMiniprogram.ShareAppMessagePayload {
   if (!token) return readingShareMessage("", "");
   return {
-    title: content,
+    title: Array.from(content).slice(0, 80).join("") + (Array.from(content).length > 80 ? "…" : ""),
     path: `/pages/book-reader/index?excerptToken=${encodeURIComponent(token)}`,
     imageUrl: `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}/api/mobile/memoir/excerpt-shares/${encodeURIComponent(token)}/card.jpg`,
   };

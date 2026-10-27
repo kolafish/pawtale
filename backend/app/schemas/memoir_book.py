@@ -716,7 +716,7 @@ class MemoirBookOutputResponse(BaseModel):
 class MemoirExcerptShareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version_id: str = Field(min_length=1, max_length=36)
-    content: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=512)
 
 
 class MemoirExcerptShareResponse(BaseModel):
