@@ -136,10 +136,10 @@ export function readingShareImageUrl(token: string, excerpt?: Pick<ReadingShareE
   return `${base}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/card.jpg?design=1${revision}${selection}`;
 }
 
-export function excerptShareMessage(token: string, content: string): WechatMiniprogram.ShareAppMessagePayload {
+export function excerptShareMessage(token: string, title: string): WechatMiniprogram.ShareAppMessagePayload {
   if (!token) return readingShareMessage("", "");
   return {
-    title: Array.from(content).slice(0, 80).join("") + (Array.from(content).length > 80 ? "…" : ""),
+    title: title.trim() || "一段家里的故事",
     path: `/pages/book-reader/index?excerptToken=${encodeURIComponent(token)}`,
     imageUrl: `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}/api/mobile/memoir/excerpt-shares/${encodeURIComponent(token)}/card.jpg`,
   };

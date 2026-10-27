@@ -1367,6 +1367,8 @@ class MemoirExcerptShare(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     book_title: Mapped[str] = mapped_column(Text, nullable=False)
     chapter_title: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    image_asset_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("memoir_image_assets.id", ondelete="SET NULL"), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 

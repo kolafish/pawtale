@@ -2,6 +2,7 @@
   "navigationBarTitleText": "做成图片或视频",
   "usingComponents": {
     "ai-task-progress": "/components/ai-task-progress/index",
-    "share-video-photos": "/components/share-video-photos/index"
+    "share-video-photos": "/components/share-video-photos/index",
+    "illustration-style-picker": "/components/illustration-style-picker/index"
   }
 }

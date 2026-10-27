@@ -1,3 +1,15 @@
+import type { MemoirShareVideoBackgroundStyle } from "../domain/memoir-transcript";
+
+const STYLE_PREVIEWS: Record<string, string> = {
+  watercolor: "/assets/share-video-styles/watercolor.jpg",
+  ink_paper: "/assets/share-video-styles/ink-paper.jpg",
+  old_album: "/assets/share-video-styles/old-album.jpg",
+};
+
+export function illustrationStyleViews(options: MemoirShareVideoBackgroundStyle[]) {
+  return options.map((option) => ({ ...option, previewImage: STYLE_PREVIEWS[option.value] || "" }));
+}
+
 export interface ShareVideoBackgroundSettings {
   backgroundStyle: string;
   backgroundMode: string;

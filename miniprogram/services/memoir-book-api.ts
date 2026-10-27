@@ -1,5 +1,6 @@
+import type { MemoirMaterialImageGenerationJob, MemoirShareVideoBackgroundStyle } from "../domain/memoir-transcript";
 import type {
-  MemoirExcerptShare,
+  MemoirExcerptShare, MemoirExcerptSelection,
   MemoirBookAudioRequest,
   MemoirBookAudioPlan,
   MemoirAudioPlanRequest,
@@ -47,10 +48,26 @@ function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "
   return query ? `${path}?${query}` : path;
 }
 
-export function createMemoirExcerptShare(projectId: string, chapterId: string, data: { version_id: string; content: string }): Promise<MemoirExcerptShare & { token: string }> {
+export function createMemoirExcerptShare(projectId: string, chapterId: string, data: MemoirExcerptSelection & { title?: string; image_asset_id?: string }): Promise<MemoirExcerptShare & { token: string }> {
   return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares`), {
     method: "POST", data, invalidatesSnapshots: false,
   });
+}
+
+export function suggestMemoirExcerptTitle(projectId: string, chapterId: string, data: MemoirExcerptSelection): Promise<{ title: string }> {
+  return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares/title`), {
+    method: "POST", data, timeoutProfile: "generation", invalidatesSnapshots: false,
+  });
+}
+
+export function createMemoirExcerptImageJob(projectId: string, chapterId: string, data: MemoirExcerptSelection & { style_id: string }): Promise<MemoirMaterialImageGenerationJob> {
+  return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares/image-jobs`), {
+    method: "POST", data, timeoutProfile: "mutation",
+  });
+}
+
+export function getMemoirIllustrationStyles(): Promise<MemoirShareVideoBackgroundStyle[]> {
+  return memoirRequest("/api/mobile/memoir/image-generation/styles");
 }
 
 export function readMemoirExcerptShare(token: string): Promise<MemoirExcerptShare> {

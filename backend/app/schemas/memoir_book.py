@@ -713,13 +713,35 @@ class MemoirBookOutputResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirExcerptShareRequest(BaseModel):
+class MemoirExcerptSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version_id: str = Field(min_length=1, max_length=36)
     content: str = Field(min_length=1, max_length=512)
 
 
+class MemoirExcerptImageRequest(MemoirExcerptSelection):
+    style_id: str = Field(default="watercolor", max_length=80)
+
+
+class MemoirExcerptShareRequest(MemoirExcerptSelection):
+    title: str = Field(default="", max_length=40)
+    image_asset_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class MemoirExcerptTitle(BaseModel):
+    title: str = Field(min_length=1, max_length=40)
+
+
+class MemoirExcerptReadingLink(BaseModel):
+    scope: Literal["book", "chapter"]
+    token: str
+
+
 class MemoirExcerptShareResponse(BaseModel):
+    title: str
+    image_url: str = ""
+    image_disclosure: str = ""
+    reading_link: MemoirExcerptReadingLink | None = None
     book_title: str
     chapter_title: str
     content: str

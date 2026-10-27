@@ -35,6 +35,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputVersionResponse,
     MemoirBookShareCreateResponse,
     MemoirReadingShareCardRequest, MemoirReadingShareCardSelection,
+    MemoirExcerptSelection, MemoirExcerptTitle, MemoirExcerptImageRequest,
     MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse,
     MemoirBookShareStatusResponse,
@@ -47,9 +48,11 @@ from app.schemas.memoir_book import (
     MemoirBookTitleSuggestionResponse,
     MemoirAutomationEventResponse,
 )
+from app.schemas.memoir_voice import MemoirShareVideoBackgroundStyleResponse
 from app.schemas.memoir_images import (
     MemoirBookImagePlacementCreateRequest,
     MemoirBookImagePlacementUpdateRequest,
+    MemoirMaterialImageGenerationJobResponse,
     MemoirImageAssetListResponse,
     MemoirImageAssetResponse,
     MemoirImageAssetUpdateRequest,
@@ -135,6 +138,37 @@ async def create_mobile_memoir_excerpt_share(
 ):
     return await memoir_book_shares.create_excerpt_share(db, user_id=current_user.id,
         project_id=project_id, chapter_id=chapter_id, selection=req)
+
+
+@router.get("/image-generation/styles", response_model=list[MemoirShareVideoBackgroundStyleResponse])
+async def get_mobile_image_styles(current_user: User = Depends(get_current_user)):
+    from app.services.memoir.share_video_backgrounds import share_video_background_style_options
+    return share_video_background_style_options()
+
+
+@router.post("/projects/{project_id}/chapters/{chapter_id}/excerpt-shares/title", response_model=MemoirExcerptTitle)
+async def suggest_mobile_excerpt_title(
+    project_id: str, chapter_id: str, req: MemoirExcerptSelection,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_shares.suggest_excerpt_title(db, user_id=current_user.id,
+        project_id=project_id, chapter_id=chapter_id, selection=req)
+
+
+@router.post("/projects/{project_id}/chapters/{chapter_id}/excerpt-shares/image-jobs", response_model=MemoirMaterialImageGenerationJobResponse)
+async def create_mobile_excerpt_image(
+    project_id: str, chapter_id: str, req: MemoirExcerptImageRequest,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    from app.services.memoir.material_image_generation import create_excerpt_image_generation_job
+    return await create_excerpt_image_generation_job(db, user_id=current_user.id,
+        project_id=project_id, chapter_id=chapter_id, selection=req, style_id=req.style_id)
+
+
+@router.get("/excerpt-shares/{token}/image")
+async def get_mobile_excerpt_image(token: str, db: AsyncSession = Depends(get_db)):
+    path = await memoir_book_shares.excerpt_share_image(db, token)
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/excerpt-shares/read", response_model=MemoirExcerptShareResponse)

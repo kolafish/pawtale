@@ -3,7 +3,7 @@ from io import BytesIO
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 _ASSETS = Path(__file__).resolve().parents[2] / "assets"
 _INK = "#614b39"
@@ -62,22 +62,27 @@ def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
     return output.getvalue()
 
 
-@lru_cache(maxsize=64)
-def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str) -> bytes:
+def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str,
+                              title: str = "", image_content: bytes | None = None, ai_image: bool = False) -> bytes:
     image = Image.new("RGB", (1000, 800), "#fcf8f1")
-    with Image.open(_ASSETS / "branding/memoir-gramophone.png") as source:
-        brand = source.convert("RGBA")
-        brand.thumbnail((88, 88))
-        image.paste(brand, (64, 44), brand)
-    _text(image, "老余口述", (172, 44, 900, 88), size=30, align="left")
-    _text(image, "一个家庭的回忆录", (172, 92, 900, 132), size=24, align="left")
-    _text(image, chapter_title, (68, 164, 932, 300), size=52, minimum=34, align="left", bold=True)
-    # The immutable snapshot stays complete; only the card's display is shortened.
-    compact = " ".join(content.split())
-    preview = compact[:80] + ("…" if len(compact) > 80 else "")
-    _text(image, preview, (68, 324, 932, 652), size=40, minimum=38, highlight=True, align="left")
-    ImageDraw.Draw(image).line((68, 698, 932, 698), fill="#e3d8c7", width=2)
-    _text(image, f"选自《{book_title}》 · {chapter_title}", (68, 719, 932, 779), size=25, minimum=22, align="left")
+    _text(image, "老余口述 · 一个家庭的回忆录", (56, 30, 944, 85), size=26, align="left")
+    if image_content:
+        with Image.open(BytesIO(image_content)) as source:
+            picture = ImageOps.fit(ImageOps.exif_transpose(source).convert("RGB"), (1000, 450))
+        image.paste(picture, (0, 110))
+        if ai_image:
+            ImageDraw.Draw(image).rounded_rectangle((754, 506, 978, 550), radius=8, fill="#fcf8f1")
+            _text(image, "AI 意象插图", (766, 510, 968, 546), size=23)
+        _text(image, title or chapter_title, (56, 578, 944, 709), size=54, minimum=38, align="left", bold=True)
+    else:
+        _text(image, title or chapter_title, (64, 150, 936, 343), size=66, minimum=42, align="left", bold=True)
+        # Full content stays in the snapshot. Leave the ending for the recipient page.
+        compact = " ".join(content.split())
+        limit = min(64, max(1, len(compact) - 12)) if len(compact) > 24 else len(compact)
+        preview = compact[:limit].rstrip("，。！？；：、,.;!?: ") + ("…" if limit < len(compact) else "")
+        _text(image, preview, (64, 385, 936, 653), size=42, minimum=38, align="left")
+    ImageDraw.Draw(image).line((56, 724, 944, 724), fill="#e3d8c7", width=2)
+    _text(image, f"选自《{book_title}》 · {chapter_title}", (56, 738, 944, 789), size=24, minimum=22, align="left")
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)
     return output.getvalue()
