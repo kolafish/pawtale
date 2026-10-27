@@ -281,7 +281,7 @@ def share_video_narrator_context(profile: dict[str, object] | None) -> str:
     return "；".join(parts) + "。" if parts else ""
 
 
-def _narrator_block(narrator_context: str, background_note: str = "") -> str:
+def image_narrator_block(narrator_context: str, background_note: str = "") -> str:
     block = ""
     note = re.sub(r"\s+", " ", background_note.strip())
     if note:
@@ -322,7 +322,7 @@ def build_share_video_background_prompt(
     content = _prompt_content(selected_text)
     prompt = _VIDEO_BACKGROUND_PROMPT.format(
         content=content,
-        narrator=_narrator_block(narrator_context, background_note),
+        narrator=image_narrator_block(narrator_context, background_note),
         story_context=_story_context(story_text, visual_context),
         rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),
     ).strip()
@@ -347,7 +347,7 @@ def build_share_video_background_set_prompt(
     prompt = _VIDEO_BACKGROUND_SET_PROMPT.format(
         count=len(scene_texts),
         story_text=_prompt_content(story_text),
-        narrator=_narrator_block(narrator_context, background_note),
+        narrator=image_narrator_block(narrator_context, background_note),
         visual_context=_VIDEO_BACKGROUND_VISUAL_CONTEXT.format(visual_context=visual) if visual else "",
         scenes=content,
         rules=_VIDEO_BACKGROUND_RULES.format(drawing_instruction=style.drawing_instruction),

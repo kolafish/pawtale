@@ -1163,8 +1163,8 @@ test("transcript media page creates a standalone image and opens it in the toolb
         display_char_count: 23,
       }),
       getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
-      createMemoirMaterialImageGenerationJob: async (id, startChar, endChar, styleId) => {
-        createCalls.push({ id, startChar, endChar, styleId });
+      createMemoirMaterialImageGenerationJob: async (id, startChar, endChar, styleId, backgroundNote) => {
+        createCalls.push({ id, startChar, endChar, styleId, backgroundNote });
         return sampleMaterialImageJob({
           utterance_id: id,
           status: "pending",
@@ -1194,6 +1194,7 @@ test("transcript media page creates a standalone image and opens it in the toolb
     currentTarget: { dataset: { backgroundStyle: "ink_paper" } },
   });
 
+  page.changeShareVideoBackgroundNote.call(context, { detail: { value: "  爷爷六十岁  " } });
   await page.createMaterialImage.call(context);
 
   assert.deepEqual(createCalls, [{
@@ -1201,6 +1202,7 @@ test("transcript media page creates a standalone image and opens it in the toolb
     startChar: 0,
     endChar: 13,
     styleId: "ink_paper",
+    backgroundNote: "爷爷六十岁",
   }]);
   assert.equal(context.data.materialImageJob.status, "pending");
   assert.equal(context.data.materialImagePolling, true);

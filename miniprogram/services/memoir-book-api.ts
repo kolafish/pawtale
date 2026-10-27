@@ -60,7 +60,7 @@ export function suggestMemoirExcerptTitle(projectId: string, chapterId: string, 
   });
 }
 
-export function createMemoirExcerptImageJob(projectId: string, chapterId: string, data: MemoirExcerptSelection & { style_id: string }): Promise<MemoirMaterialImageGenerationJob> {
+export function createMemoirExcerptImageJob(projectId: string, chapterId: string, data: MemoirExcerptSelection & { style_id: string; background_note?: string }): Promise<MemoirMaterialImageGenerationJob> {
   return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares/image-jobs`), {
     method: "POST", data, timeoutProfile: "mutation",
   });

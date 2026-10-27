@@ -45,6 +45,7 @@ from app.services.memoir.share_video_backgrounds import (
     ShareVideoBackgroundGenerationError,
     VolcArkImageGenerationService,
     normalize_share_video_background_style,
+    image_narrator_block,
     share_video_background_style,
 )
 from app.services.memoir.share_video_alignment import build_share_video_alignment
@@ -68,7 +69,7 @@ def _prompt_content(selected_text: str) -> str:
     return representative_excerpt(normalized, limit=MATERIAL_IMAGE_CONTENT_MAX_CHARS)
 
 
-def build_material_image_prompt(selected_text: str, style_id: str | None) -> tuple[str, str, str]:
+def build_material_image_prompt(selected_text: str, style_id: str | None, *, background_note: str = "") -> tuple[str, str, str]:
     normalized_style = normalize_share_video_background_style(
         style_id or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     )
@@ -95,6 +96,8 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
 - 不添加没有依据的人物关系、关键动作、事件或时代符号；未说明的外貌、环境用简约、不具辨识性的画法，不能伪装成事实还原。
 - 不要出现任何文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和、夸张电影光效和泛泛的 AI 插画感。""".strip()
+    if background_note.strip():
+        prompt += image_narrator_block("", background_note)
     prompt_hash = sha256(
         "\n".join((MATERIAL_IMAGE_PROMPT_VERSION, normalized_style, prompt)).encode("utf-8")
     ).hexdigest()
@@ -108,6 +111,7 @@ def _source_signature(
     start_char: int,
     end_char: int,
     style_id: str,
+    background_note: str = "",
 ) -> str:
     payload = "\u241f".join(
         (
@@ -120,6 +124,8 @@ def _source_signature(
             MATERIAL_IMAGE_PROMPT_VERSION,
         )
     )
+    if background_note:
+        payload += "\u241f" + background_note
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -216,6 +222,7 @@ async def create_material_image_generation_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_note = _normalized_text(req.background_note)
     transcript_text_hash = alignment.text_hash
     source_signature = _source_signature(
         utterance_id=utterance.id,
@@ -223,6 +230,7 @@ async def create_material_image_generation_job(
         start_char=start_char,
         end_char=end_char,
         style_id=style_id,
+        background_note=background_note,
     )
     asset = await db.scalar(
         select(MemoirImageAsset).where(
@@ -248,6 +256,7 @@ async def create_material_image_generation_job(
                 "generation_stage": "queued",
                 "transcript_text_hash": transcript_text_hash,
                 "text_source": text_source,
+                "background_note": background_note,
                 "start_char": start_char,
                 "end_char": end_char,
             },
@@ -271,13 +280,17 @@ async def create_material_image_generation_job(
 
 
 async def create_excerpt_image_generation_job(db: AsyncSession, *, user_id: str, project_id: str,
-                                              chapter_id: str, selection: MemoirExcerptSelection, style_id: str) -> MemoirMaterialImageGenerationJobResponse:
+                                              chapter_id: str, selection: MemoirExcerptSelection, style_id: str, background_note: str = "") -> MemoirMaterialImageGenerationJobResponse:
     from app.services.memoir.book_shares import validate_excerpt_selection
     _, version, content = await validate_excerpt_selection(db, user_id=user_id, project_id=project_id,
                                                           chapter_id=chapter_id, selection=selection)
     style_id = normalize_share_video_background_style(style_id)
     model = get_settings().memoir_excerpt_image_model.strip()
-    signature = "excerpt:" + sha256("\0".join((version.id, content, style_id, model, MATERIAL_IMAGE_PROMPT_VERSION)).encode()).hexdigest()
+    background_note = _normalized_text(background_note)
+    signature_parts = [version.id, content, style_id, model, MATERIAL_IMAGE_PROMPT_VERSION]
+    if background_note:
+        signature_parts.append(background_note)
+    signature = "excerpt:" + sha256("\0".join(signature_parts).encode()).hexdigest()
     asset = await db.scalar(select(MemoirImageAsset).where(MemoirImageAsset.project_id == project_id,
                                                          MemoirImageAsset.source_signature == signature))
     if asset is None:
@@ -286,7 +299,7 @@ async def create_excerpt_image_generation_job(db: AsyncSession, *, user_id: str,
             title=_asset_title(content), caption=content[:500], alt_text=_asset_title(content),
             source_chapter_id=chapter_id, source_quote=content, style_id=style_id,
             metadata_json={"disclosure": AI_GENERATED_IMAGE_DISCLOSURE, "source_version_id": version.id,
-                           "generation_requested_model": model})
+                           "generation_requested_model": model, "background_note": background_note})
         db.add(asset)
         await db.flush()
     return await _enqueue_image_generation(db, asset)
@@ -456,6 +469,7 @@ async def run_material_image_generation_job(
         style_id, prompt, prompt_hash = build_material_image_prompt(
             asset.source_quote,
             asset.style_id,
+            background_note=str((asset.metadata_json or {}).get("background_note") or ""),
         )
         extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
         storage_path = _storage_path(asset, extension)

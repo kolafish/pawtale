@@ -12,7 +12,7 @@ export const INITIAL_EXCERPT_DATA = {
   ...initialTranscriptMaterialImageTaskState(),
   excerptTitle: "", excerptTitleBusy: false, excerptTitleError: "",
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
-  excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
+  excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
   excerptStoryImageUrl: "", excerptImageDisclosure: "", excerptReadingLink: null as MemoirExcerptShare["reading_link"],
   excerptContent: "", excerptBookTitle: "", excerptChapterTitle: "",
@@ -130,6 +130,15 @@ export const readingExcerptMethods = methods({
     this.excerptImageController?.reset();
     this.setData({ excerptIllustrationStyle: event.detail.value, excerptAiAssetIds: [] });
   },
+  changeExcerptBackgroundNote(event: { detail: { value: string } }) {
+    if (this.data.materialImageCreating || this.data.materialImagePolling || this.data.excerptBusy) return;
+    const note = event.detail.value;
+    if (note.trim() !== this.data.excerptBackgroundNote.trim()) {
+      this.excerptImageController?.reset();
+      this.setData({ excerptAiAssetIds: [] });
+    }
+    this.setData({ excerptBackgroundNote: note });
+  },
   changeExcerptPhotos(event: { detail: { photoIds: string[] } }) {
     this.setData({ excerptPhotoIds: event.detail.photoIds.slice(0, 1) });
   },
@@ -143,7 +152,8 @@ export const readingExcerptMethods = methods({
     if (this.excerptImageController) return this.excerptImageController;
     const controller = new TranscriptMaterialImageController({
       createJob: (_unused, _start, _end, styleId) => createMemoirExcerptImageJob(this.data.projectId, this.data.chapterId,
-        { version_id: this.excerptVersionId, content: this.data.excerptContent, style_id: styleId }),
+        { version_id: this.excerptVersionId, content: this.data.excerptContent, style_id: styleId,
+          background_note: this.data.excerptBackgroundNote.trim() }),
       getJob: getMemoirMaterialImageGenerationJob,
     });
     controller.setStateListener((patch) => {

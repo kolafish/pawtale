@@ -84,6 +84,7 @@ interface ShareVideoCandidateJobRequest {
 }
 
 interface MaterialImageGenerationJobRequest {
+  background_note?: string;
   start_char: number;
   end_char: number;
   style_id?: string;
@@ -225,6 +226,7 @@ export function createMemoirMaterialImageGenerationJob(
   startChar: number,
   endChar: number,
   styleId?: string,
+  backgroundNote?: string,
 ): Promise<MemoirMaterialImageGenerationJob> {
   return memoirRequest<MemoirMaterialImageGenerationJob>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/image-generation/jobs`,
@@ -234,6 +236,7 @@ export function createMemoirMaterialImageGenerationJob(
         start_char: startChar,
         end_char: endChar,
         ...(styleId ? { style_id: styleId } : {}),
+        ...(backgroundNote ? { background_note: backgroundNote } : {}),
       } satisfies MaterialImageGenerationJobRequest,
       timeoutProfile: "mutation",
     },

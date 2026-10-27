@@ -376,17 +376,6 @@
   line-height: 1.5;
 }
 
-.share-video-note-input {
-  width: 100%;
-  min-height: 120rpx;
-  margin-top: 14rpx;
-  padding: 16rpx 20rpx;
-  border-radius: 16rpx;
-  background: var(--ui-surface-subtle);
-  color: var(--ui-text-primary);
-  font-size: var(--ui-font-body);
-  line-height: 1.5;
-}
 
 .share-video-hook {
   display: flex;

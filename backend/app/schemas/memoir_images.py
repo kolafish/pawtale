@@ -27,6 +27,7 @@ class MemoirMaterialImageGenerationRequest(BaseModel):
     start_char: int = Field(ge=0)
     end_char: int = Field(gt=0)
     style_id: str | None = Field(default=None, max_length=80)
+    background_note: str = Field(default="", max_length=300)
 
     @field_validator("style_id")
     @classmethod
