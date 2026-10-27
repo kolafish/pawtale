@@ -231,6 +231,63 @@ test("an unconfirmed sharing change stays unknown until a successful status read
   assert.equal(context.data.bookShareError, "");
 });
 
+test("a timed-out sharing write that is still pending keeps its notice until refreshed state matches the intent", async () => {
+  for (const initialActive of [false, true]) {
+    const project = { id: "project-1", title: "爷爷的回忆" };
+    let active = initialActive;
+    let writes = 0;
+    let completeOriginal;
+    const pendingChange = (enabled) => async () => {
+      writes += 1;
+      completeOriginal = () => { active = enabled; };
+      throw new ApiError(0, "请求超时，操作结果可能仍在处理中", null);
+    };
+    global.wx = { setNavigationBarTitle() {} };
+    const { page } = loadProjectEditPage({
+      project,
+      getMemoirBookShareStatus: async () => ({ active }),
+      updateMemoirBookShare: pendingChange(true),
+      revokeMemoirBookShare: pendingChange(false),
+    });
+    const context = pageContext(page);
+    await context.onLoad({ projectId: project.id });
+    await context.toggleBookShare({ detail: { value: !initialActive } });
+    assert.equal(context.data.bookShareEnabled, initialActive);
+    assert.equal(context.data.bookSharePendingTarget, !initialActive);
+    assert.equal(writes, 1);
+    await context.onShow();
+    assert.equal(context.data.bookSharePendingTarget, !initialActive);
+    assert.equal(writes, 1);
+    completeOriginal();
+    await context.loadBookShareSetting();
+    assert.equal(context.data.bookShareEnabled, !initialActive);
+    assert.equal(context.data.bookSharePendingTarget, null);
+    assert.equal(writes, 1);
+  }
+});
+
+test("a sharing request that never reached the server can be retried explicitly", async () => {
+  const project = { id: "project-1", title: "爷爷的回忆" };
+  let writes = 0;
+  global.wx = { setNavigationBarTitle() {} };
+  const { page } = loadProjectEditPage({
+    project,
+    updateMemoirBookShare: async () => {
+      writes += 1;
+      if (writes === 1) throw new ApiError(0, "网络连接失败", null);
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: project.id });
+  await context.toggleBookShare({ detail: { value: true } });
+  assert.equal(context.data.bookShareEnabled, false);
+  assert.equal(writes, 1);
+  await context.toggleBookShare({ detail: { value: true } });
+  assert.equal(context.data.bookShareEnabled, true);
+  assert.equal(context.data.bookSharePendingTarget, null);
+  assert.equal(writes, 2);
+});
+
 test("an unavailable or unknown share status cannot grant access, and new memoirs do not request sharing", async () => {
   const project = { id: "project-1", title: "爷爷的回忆" };
   let reads = 0;

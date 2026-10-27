@@ -80,8 +80,9 @@
       <text wx:if="{{bookShareBusy}}" class="mode-desc" aria-live="polite">正在更新分享设置…</text>
       <text wx:elif="{{bookShareState === 'loading'}}" class="mode-desc">正在读取分享状态…</text>
       <text wx:elif="{{bookShareState === 'unavailable'}}" class="mode-desc">还没有全书稿，生成后可开启。</text>
+      <text wx:if="{{bookShareState === 'ready' && bookSharePendingTarget !== null}}" class="mode-desc" aria-live="polite">设置可能仍在处理中，当前显示最近读取的状态。请稍后刷新确认。</text>
       <text wx:if="{{bookShareError}}" class="sharing-setting-error" aria-live="polite">{{bookShareError}}</text>
-      <button wx:if="{{bookShareState === 'error'}}" class="ghost-button support-action" bindtap="loadBookShareSetting" disabled="{{saving}}">重试读取分享状态</button>
+      <button wx:if="{{bookShareState === 'error' || bookSharePendingTarget !== null}}" class="ghost-button support-action" bindtap="loadBookShareSetting" disabled="{{saving || bookShareBusy || bookShareState === 'loading'}}">{{bookShareState === 'error' ? '重试读取分享状态' : '刷新分享状态'}}</button>
     </view>
 
     <view class="field">

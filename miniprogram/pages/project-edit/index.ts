@@ -85,6 +85,7 @@ interface ProjectEditData {
   bookShareState: "loading" | "ready" | "unavailable" | "error";
   bookShareBusy: boolean;
   bookShareError: string;
+  bookSharePendingTarget: boolean | null;
   genderOptions: Array<Option<MemoirNarratorGender>>;
   narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
   transcriptPolishOptions: TranscriptPolishOption[];
@@ -132,6 +133,7 @@ definePage<ProjectEditData>()({
     bookShareState: "unavailable",
     bookShareBusy: false,
     bookShareError: "",
+    bookSharePendingTarget: null,
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
@@ -204,7 +206,8 @@ definePage<ProjectEditData>()({
     this.setData({ bookShareState: "loading", bookShareError: "" });
     try {
       const status = await optionalApiResource(getMemoirBookShareStatus(this.data.projectId));
-      this.setData({ bookShareEnabled: status?.active ?? false, bookShareState: status ? "ready" : "unavailable" });
+      this.setData({ bookShareEnabled: status?.active ?? false, bookShareState: status ? "ready" : "unavailable",
+        bookSharePendingTarget: !status || status.active === this.data.bookSharePendingTarget ? null : this.data.bookSharePendingTarget });
       return true;
     } catch (error) {
       this.setData({ bookShareState: "error", bookShareError: error instanceof Error ? error.message : "分享状态加载失败" });
@@ -220,16 +223,18 @@ definePage<ProjectEditData>()({
     try {
       if (enabled) await updateMemoirBookShare(this.data.projectId);
       else await revokeMemoirBookShare(this.data.projectId);
+      this.setData({ bookSharePendingTarget: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : "分享设置失败";
       const rejected = error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408;
       if (rejected) {
         this.setData({ bookShareEnabled: previous, bookShareError: message });
       } else {
-        // A lost response does not undo a committed grant or revocation.
-        const confirmed = await this.loadBookShareSetting();
-        this.setData({ bookShareError: confirmed
-          ? `${message}；已重新读取当前分享状态。`
+        // A GET is a snapshot; the timed-out write may still be pending.
+        this.setData({ bookSharePendingTarget: enabled });
+        const loaded = await this.loadBookShareSetting();
+        this.setData({ bookShareError: loaded
+          ? ""
           : `操作结果尚未确认，请重新读取分享状态。${this.data.bookShareError}` });
       }
     } finally {
