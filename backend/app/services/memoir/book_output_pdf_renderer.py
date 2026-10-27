@@ -802,8 +802,8 @@ class PDFBookBuilder:
             image_gap = int(self.layout.line_height * 0.25)
             bottom_gap = 8 - self.layout.font_size
             available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
-            following_image_height = min(following_image_height, available_height - heading_height - image_gap - bottom_gap)
-            image_space = image_gap + following_image_height + bottom_gap
+            reserved_image_height = max(0, min(following_image_height, available_height - heading_height - image_gap - bottom_gap))
+            image_space = image_gap + reserved_image_height + bottom_gap
         self._ensure_space_height(heading_height + max(2 * self.layout.line_height, image_space))
         heading_y = self.y
         heading_x = self._content_left()
@@ -847,7 +847,12 @@ class PDFBookBuilder:
                     height=0, color=(0.83, 0.86, 0.86), line_width=0.5,
                 )
 
-        return following_image_height
+        if following_image_height:
+            # Long headings can span pages. Use the actual ending page, leaving
+            # enough room for the illustration spacer and at least one body line.
+            self._ensure_space_height(image_gap + self.layout.line_height)
+            return min(following_image_height, self.y - self.layout.margin_bottom - image_gap - bottom_gap)
+        return 0
 
     def add_centered(
         self,
