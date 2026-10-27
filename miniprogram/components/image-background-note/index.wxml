@@ -1,0 +1,6 @@
+<view class="note {{pageClass}}">
+  <text class="label">人物背景（选填）</text>
+  <text class="help">人物身份、年龄和关系（选填）。</text>
+  <textarea class="input" value="{{value}}" bindinput="onInput" placeholder="例如：我和妹妹，那年我十岁"
+    maxlength="300" auto-height cursor-spacing="24" disabled="{{disabled}}" aria-label="人物背景（选填）" />
+</view>

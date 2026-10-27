@@ -19,6 +19,8 @@
       </view>
       <block wx:if="{{excerptImageSource === 'ai'}}">
         <text class="excerpt-help">与视频共用插图风格。仅在点击生成后制作一张插图。</text>
+        <image-background-note value="{{excerptBackgroundNote}}" page-class="{{pageClass}}"
+          disabled="{{materialImageCreating || materialImagePolling || excerptBusy}}" bindchange="changeExcerptBackgroundNote" />
         <illustration-style-picker options="{{excerptStyleOptions}}" value="{{excerptIllustrationStyle}}" disabled="{{materialImageCreating || materialImagePolling}}" bindchange="changeExcerptIllustrationStyle" />
         <share-video-photos wx:if="{{excerptAiAssetIds.length}}" project-id="{{projectId}}" photo-ids="{{excerptAiAssetIds}}" max-count="1" disabled="{{true}}" binderror="onExcerptPhotoError" />
         <button class="ui-share-more excerpt-generate" bindtap="generateExcerptImage" loading="{{materialImageCreating || materialImagePolling}}" disabled="{{materialImageCreating || materialImagePolling || !excerptStyleOptions.length || excerptAiAssetIds.length}}">{{excerptAiAssetIds.length ? '插图已生成' : '生成一张插图'}}</button>
