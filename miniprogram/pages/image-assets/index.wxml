@@ -143,16 +143,10 @@
       </view>
 
       <view class="asset-actions">
-        <button
-          wx:if="{{item.source_utterance_id}}"
-          class="action-button primary-action ui-button"
-          data-id="{{item.id}}"
-          loading="{{placingTarget === item.id}}"
-          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
-          bindtap="placeNearSource"
-        >
-          放在素材附近
-        </button>
+        <picker wx:if="{{item.source_utterance_id}}" range="{{['素材前面', '素材中间', '素材后面']}}"
+          data-id="{{item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindchange="placeNearSource">
+          <view class="action-button primary-action ui-pressable {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">放在素材附近</view>
+        </picker>
         <picker
           wx:if="{{chapterOptions.length}}"
           range="{{chapterOptions}}"

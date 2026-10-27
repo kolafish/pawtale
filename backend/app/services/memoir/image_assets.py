@@ -169,9 +169,12 @@ def image_asset_file_path(
     *,
     thumbnail: bool = False,
     branded: bool = False,
+    reading: bool = False,
 ) -> Path:
     storage_path = asset.thumbnail_storage_path if thumbnail and asset.thumbnail_storage_path else asset.storage_path
     path = _file_path(storage_path)
+    if reading:
+        path = image_asset_thumbnail_derivative(path)
     if branded and not thumbnail and _should_brand_download(asset):
         return branded_image_derivative(path)
     return path
@@ -294,6 +297,7 @@ def _placement_response(
         chapter_id=placement.chapter_id,
         chapter_title=chapter_titles.get(placement.chapter_id or "", ""),
         source_utterance_ids=placement.source_utterance_ids_json,
+        inline_position=placement.inline_position,
         caption_override=placement.caption_override,
         display_size=placement.display_size,
         sort_order=placement.sort_order,
@@ -813,6 +817,7 @@ async def create_image_placement(
     placement.caption_override = req.caption_override or placement.caption_override
     placement.source_utterance_ids_json = source_ids
     placement.display_size = display_size
+    placement.inline_position = req.inline_position or placement.inline_position or "after"
     placement.enabled = True
     db.add(asset)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
@@ -895,6 +900,8 @@ async def update_image_placement(
         placement.caption_override = req.caption_override
     if display_size is not None:
         placement.display_size = display_size
+    if req.inline_position is not None:
+        placement.inline_position = req.inline_position
     if "enabled" in fields_set and req.enabled is not None:
         placement.enabled = req.enabled
     if placement.placement_type == MemoirBookImagePlacementType.COVER.value and placement.enabled:
@@ -939,6 +946,7 @@ async def load_image_asset_file(
     asset_id: str,
     thumbnail: bool = False,
     branded: bool = False,
+    reading: bool = False,
 ) -> tuple[MemoirImageAsset, Path]:
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
     if thumbnail:
@@ -960,6 +968,7 @@ async def load_image_asset_file(
         image_asset_file_path,
         asset,
         branded=branded,
+        reading=reading,
     )
     return asset, path
 
@@ -990,6 +999,7 @@ def _illustration_snapshot(
         "caption": caption,
         "alt_text": asset.alt_text or asset.title,
         "placement": placement_type,
+        "inline_position": placement.inline_position,
         "display_size": placement.display_size,
         "source_quote": asset.source_quote,
         "source_utterance_id": asset.source_utterance_id,

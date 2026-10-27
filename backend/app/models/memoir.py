@@ -610,6 +610,7 @@ class MemoirImageAsset(Base):
 class MemoirBookImagePlacement(Base):
     __tablename__ = "memoir_book_image_placements"
     __table_args__ = (
+        CheckConstraint("inline_position IN ('before', 'middle', 'after')", name="ck_memoir_book_image_inline_position"),
         CheckConstraint(
             f"placement_type IN ({_enum_values(MemoirBookImagePlacementType)})",
             name="ck_memoir_book_image_placements_type",
@@ -634,6 +635,7 @@ class MemoirBookImagePlacement(Base):
     source_utterance_ids_json: Mapped[list[str]] = mapped_column(
         JSON, default=list, server_default=sql_text("'[]'"), nullable=False,
     )
+    inline_position: Mapped[str] = mapped_column(String(10), default="after", server_default="after", nullable=False)
     caption_override: Mapped[str] = mapped_column(Text, default="", nullable=False)
     display_size: Mapped[str] = mapped_column(String(40), default="full_width", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -417,7 +417,7 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
     test_db.add(placement)
     await test_db.commit()
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
-    Image.new("RGB", (16, 16), "white").save(tmp_path / "cover.png")
+    Image.new("RGB", (2000, 1500), "white").save(tmp_path / "cover.png")
     path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
     preview = await client.get(f"{path}/preview")
     assert preview.status_code == 200, preview.text
@@ -431,7 +431,7 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
     assert book["back_matter"]["afterword"]["content"] == "书中的后记"
     cover = book["render_settings"]["cover_image"]
     assert cover["storage_path"] == cover["source_quote"] == ""
-    assert cover["image_url"].endswith(f"/{asset.id}/file")
+    assert cover["image_url"].endswith(f"/{asset.id}/file?variant=reading")
     assert "秘密原话" not in preview.text
     token = (await client.put(path)).json()["token"]
     chapter_id = version.chapter_snapshot_json[0]["chapter_id"]
@@ -455,6 +455,10 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
         image = await guest.get(media_url)
         assert image.status_code == 200, image.text
         assert image.headers["cache-control"] == "no-store"
+        from io import BytesIO
+        with Image.open(BytesIO(image.content)) as displayed:
+            assert displayed.format == "JPEG"
+            assert max(displayed.size) <= 960
         assert (await guest.get(media_url.replace(token, chapter_token))).status_code == 404
         placement.enabled = False
         await test_db.commit()

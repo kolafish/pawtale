@@ -1,6 +1,7 @@
 import { downloadAuthenticatedFile } from "../../services/authenticated-media";
 import type {
   MemoirBookAudioPlan,
+  MemoirBookManuscriptIllustration,
   MemoirBookOutput,
   MemoirBookOutputVersion,
 } from "../../domain/memoir-book";
@@ -74,7 +75,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
   readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; url: string; caption: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; url: string; caption: string; disclosure: string }[];
   shareCoverUrl: string;
   shareByline: string;
   sharePreface: string;
@@ -120,6 +121,17 @@ function scrollReader(options: { selector?: string; scrollTop?: number }) {
   const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
   if (typeof pageScrollTo === "function") {
     pageScrollTo({ ...options, duration: 280 });
+  }
+}
+
+async function readingImageUrl(url = "", privateImage = false): Promise<string> {
+  if (!url.startsWith("/api/mobile/memoir/")) return "";
+  const absoluteUrl = `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}${url}`;
+  if (!privateImage) return absoluteUrl;
+  try {
+    return await downloadAuthenticatedFile(absoluteUrl, { failureMessage: "配图暂时打不开", domainLabel: "阅读配图" });
+  } catch {
+    return ""; // A missing illustration must not hide the saved text.
   }
 }
 
@@ -775,39 +787,42 @@ definePage<BookReaderData>()({
   async applySharePresentation(output: MemoirBookOutput, generation: number) {
     const manuscript = output.latest_version?.manuscript;
     const scope = output.share_scope || "book";
-    const imageUrl = async (url = ""): Promise<string> => {
-      if (!url.startsWith("/api/mobile/memoir/")) return "";
-      const base = cleanBaseUrl(readBackendConfig().httpBaseUrl);
-      if (!this.data.sharePreview) return `${base}${url}`;
-      try {
-        return await downloadAuthenticatedFile(`${base}${url}`, { failureMessage: "配图暂时打不开", domainLabel: "分享配图" });
-      } catch {
-        return ""; // A missing illustration must not hide the saved text.
-      }
-    };
     this.setData({
       shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: [], shareCoverUrl: "",
       shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
       sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
       shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
     });
-    const images = await Promise.all((manuscript?.chapters || []).flatMap(chapter => chapter.illustrations.map(async item => ({
-      id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId: item.section_id || "",
-      url: await imageUrl(item.image_url), caption: item.caption, disclosure: item.disclosure,
-    }))));
+    await this.loadReadingImages(manuscript?.chapters || [], this.data.sharePreview, generation);
     const cover = manuscript?.render_settings.cover_image;
-    const coverUrl = cover ? await imageUrl(cover.image_url) : "";
+    const coverUrl = cover ? await readingImageUrl(cover.image_url, this.data.sharePreview) : "";
     if (generation !== this.sharedReadGeneration) return;
     this.setData({
-      shareImages: images.filter(item => Boolean(item.url)), shareCoverUrl: coverUrl,
+      shareCoverUrl: coverUrl,
     });
   },
 
+  async loadReadingImages(chapters: { chapter_id: string; illustrations: MemoirBookManuscriptIllustration[] }[], privateImages: boolean, generation: number) {
+    const images = await Promise.all(chapters.flatMap(chapter => chapter.illustrations.map(async item => {
+      const sectionId = item.placement === "chapter_opening" ? "" : item.section_id || "";
+      const section = this.bookChapters.find(c => c.chapterId === chapter.chapter_id)?.sections.find(s => s.id === sectionId);
+      const count = section?.paragraphs.length || 0;
+      const position = item.inline_position || "after";
+      const url = await readingImageUrl(item.image_url, privateImages);
+      return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
+        paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
+        url, caption: item.caption, disclosure: item.disclosure };
+    })));
+    if (generation === this.sharedReadGeneration) this.setData({ shareImages: images.filter(item => Boolean(item.url)) });
+  },
+
   async loadChapterReader(projectId: string, chapterId: string) {
+    const generation = ++this.sharedReadGeneration;
     this.stopPlayback();
-    this.setData({ loading: true, error: "", playbackError: "" });
+    this.setData({ loading: true, error: "", playbackError: "", shareImages: [] });
     try {
       const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
+      if (generation !== this.sharedReadGeneration) return;
       const data = chapterReaderData(workspace);
       this.readerAudioVersionId = workspace.draft_version_id || "";
       this.readerText = trimText(data.bookContent);
@@ -826,6 +841,8 @@ definePage<BookReaderData>()({
       if (!this.readerText) {
         this.setData({ error: "本章正文还没有生成。" });
       }
+      this.setData({ loading: false });
+      await this.loadReadingImages([{ chapter_id: chapterId, illustrations: workspace.illustrations || [] }], true, generation);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;

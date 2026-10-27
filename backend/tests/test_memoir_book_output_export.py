@@ -602,6 +602,21 @@ def test_chapter_inline_illustrations_render_after_their_source_section(monkeypa
     assert rendered_text.index("第二小节正文。") < rendered_text.index("IMAGE:inline-2")
 
 
+def test_inline_images_are_distributed_without_changing_section_text(monkeypatch):
+    manuscript = _sample_manuscript("开头。\n\n中间。\n\n结尾。")
+    manuscript["chapters"][0]["sections"] = [{"section_id": "s", "title": "故事", "content": "开头。\n\n中间。\n\n结尾。"}]
+    manuscript["chapters"][0]["illustrations"] = [
+        {"image_asset_id": position, "storage_path": "unused.png", "placement": "chapter_inline", "section_id": "s", "inline_position": position}
+        for position in ("after", "middle", "before")
+    ]
+    monkeypatch.setattr(book_output_export, "_add_illustration", lambda builder, image: builder.add_text("IMAGE:" + image["image_asset_id"]))
+    pages = _build_manuscript_pdf_pages(title="回忆", content="", manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], show_source_appendix=None)
+    text = [command.text for page in pages for command in page.commands]
+    expected = ["IMAGE:before", "开头。", "中间。", "IMAGE:middle", "结尾。", "IMAGE:after"]
+    assert [value for value in text if value in expected] == expected
+
+
 def test_book_illustrations_do_not_render_asset_metadata_as_visible_captions(
     monkeypatch,
     tmp_path,

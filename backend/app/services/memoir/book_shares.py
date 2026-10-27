@@ -517,7 +517,7 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
         base = f"/api/mobile/memoir/book-shares/{token}/images" if token else f"/api/mobile/memoir/projects/{result.project_id}/image-assets"
         return item.model_copy(update={
             "storage_path": "", "source_quote": "", "source_utterance_id": None, "source_utterance_ids": [],
-            "image_url": f"{base}/{item.image_asset_id}" + ("" if token else "/file"),
+            "image_url": f"{base}/{item.image_asset_id}" + ("" if token else "/file?variant=reading"),
         })
 
     for item in manuscript.chapters:
@@ -551,7 +551,7 @@ async def shared_image_file(db: AsyncSession, token: str, asset_id: str):
     asset = await db.get(MemoirImageAsset, asset_id)
     if asset is None or asset.project_id != result.project_id or asset.status != "ready":
         raise HTTPException(status_code=404, detail="图片已移除")
-    return asset, await asyncio.to_thread(image_asset_file_path, asset, branded=True)
+    return asset, await asyncio.to_thread(image_asset_file_path, asset, branded=True, reading=True)
 
 
 async def _resource_audio_plan(

@@ -470,6 +470,7 @@
 }
 
 .share-preview-notice { display: block; padding: 16rpx 0; color: var(--ui-text-secondary); text-align: center; }
+.share-reading-image { text-indent: 0; }
 .share-cover-image, .share-reading-image image { width: 100%; border-radius: 28rpx; }
 .share-reading-image text { display: block; color: var(--ui-text-secondary); font-size: var(--ui-font-meta); line-height: 1.5; margin: 12rpx 0; }
 .small-section-content, .chapter-content, .book-content { font-size: 32rpx; line-height: 1.8; }

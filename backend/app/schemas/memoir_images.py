@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
 )
 
 
+MemoirImageInlinePosition = Literal["before", "middle", "after"]
 MemoirImageDisplaySize = Literal["full_width", "half_width", "inline"]
 # A cover photo is either set into the layout's artwork (frame) or fills the
 # whole front cover with the text on a darkened band (full_bleed).
@@ -67,6 +68,7 @@ class MemoirBookImagePlacementResponse(BaseModel):
     chapter_id: str | None = None
     chapter_title: str = ""
     source_utterance_ids: list[str] = Field(default_factory=list)
+    inline_position: MemoirImageInlinePosition = "after"
     caption_override: str = ""
     display_size: str = "full_width"
     sort_order: int = 0
@@ -145,6 +147,7 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
     placement_type: MemoirBookImagePlacementType = MemoirBookImagePlacementType.CHAPTER_OPENING
     chapter_id: str | None = None
     source_utterance_ids: list[str] | None = Field(default=None, min_length=1)
+    inline_position: MemoirImageInlinePosition | None = None
     caption_override: str | None = None
     display_size: MemoirImageDisplaySize | MemoirCoverImageLayout = "full_width"
 
@@ -183,6 +186,7 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
 class MemoirBookImagePlacementUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    inline_position: MemoirImageInlinePosition | None = None
     caption_override: str | None = None
     display_size: MemoirImageDisplaySize | MemoirCoverImageLayout | None = None
     enabled: bool | None = None

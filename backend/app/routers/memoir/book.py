@@ -342,6 +342,7 @@ async def get_mobile_memoir_image_asset_file(
         asset_id=asset_id,
         thumbnail=variant == "thumbnail",
         branded=variant != "thumbnail",
+        reading=variant == "reading",
     )
     return FileResponse(
         path,

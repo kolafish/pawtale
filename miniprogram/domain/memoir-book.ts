@@ -14,6 +14,8 @@ export type MemoirImageAssetSourceType =
   | "utterance_illustration"
   | "cover_candidate"
   | "manual_upload";
+export type MemoirImageInlinePosition = "before" | "middle" | "after";
+
 export type MemoirBookImagePlacementType =
   | "chapter_opening"
   | "chapter_inline"
@@ -22,6 +24,7 @@ export type MemoirBookImagePlacementType =
   | "back_cover";
 
 export interface MemoirBookImagePlacement {
+  inline_position?: MemoirImageInlinePosition;
   id: string;
   project_id: string;
   image_asset_id: string;
@@ -89,6 +92,7 @@ export type MemoirImageDisplaySize = "full_width" | "half_width" | "inline";
 export type MemoirCoverImageLayout = "cover_frame" | "cover_full_bleed";
 
 export interface MemoirBookImagePlacementCreateRequest {
+  inline_position?: MemoirImageInlinePosition;
   placement_type?: MemoirBookImagePlacementType;
   chapter_id?: string | null;
   caption_override?: string | null;
@@ -96,6 +100,7 @@ export interface MemoirBookImagePlacementCreateRequest {
 }
 
 export interface MemoirBookImagePlacementUpdateRequest {
+  inline_position?: MemoirImageInlinePosition;
   caption_override?: string | null;
   display_size?: MemoirImageDisplaySize | MemoirCoverImageLayout;
   enabled?: boolean;
@@ -467,6 +472,7 @@ export interface MemoirBookManuscriptSourceRef {
 }
 
 export interface MemoirBookManuscriptIllustration {
+  inline_position?: MemoirImageInlinePosition;
   image_url?: string;
   image_asset_id: string;
   storage_path: string;
