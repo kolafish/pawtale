@@ -1,3 +1,4 @@
+from decimal import Decimal
 from io import BytesIO
 
 from httpx import ASGITransport, AsyncClient
@@ -231,7 +232,6 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     calls = []
-    monkeypatch.setattr(get_settings(), "memoir_excerpt_image_model", "doubao-seedream-5-0-flash-260915")
 
     async def generate(service, prompt):
         calls.append((service.model, prompt))
@@ -262,3 +262,10 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     shared = (await client.post(path, json={"version_id": version.id, "content": payload["content"], "image_asset_id": asset["id"], "title": "院子的往事"})).json()
     assert shared["image_disclosure"] == image_assets.AI_GENERATED_IMAGE_DISCLOSURE
     assert (await client.post(path + "/image-jobs", json=payload)).json()["job_id"] == job["job_id"]
+    assert len(calls) == 1
+    summary = (await client.get("/api/billing/ai-credit-summary")).json()
+    assert Decimal(summary["used_rmb"]) == Decimal("0.12")
+    [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
+    assert [(item["purpose"], Decimal(item["cost_rmb"])) for item in day["purposes"]] == [
+        ("图片生成", Decimal("0.12")),
+    ]
