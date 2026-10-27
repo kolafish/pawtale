@@ -520,6 +520,7 @@ async def update_section(
     req: MemoirSectionUpdateRequest,
     allow_admin: bool = False,
     commit: bool = True,
+    rebase_draft: bool = True,
 ) -> MemoirSectionCollectionResponse:
     await load_memoir_project(
         db,
@@ -527,16 +528,19 @@ async def update_section(
         user_id,
         allow_admin=allow_admin,
     )
-    await lock_plan_structure(db, project_id=project_id)
+    plan = await lock_plan_structure(db, project_id=project_id)
     section = await _load_section(
         db,
         project_id=project_id,
         section_id=section_id,
     )
+    from app.services.memoir import chapter_generation
+    if rebase_draft and req.title is not None:
+        await chapter_generation.lock_chapter_draft_write(db, project_id=project_id, chapter_id=section.chapter_id)
+        section = await _load_section(db, project_id=project_id, section_id=section_id)
     if section.version != req.expected_version:
         raise HTTPException(status_code=409, detail="小章节已经发生变化，请刷新后重试")
-    changed = False
-    for field, value in (
+    changes = {field: value for field, value in (
         ("title", req.title),
         (
             "section_type",
@@ -544,16 +548,29 @@ async def update_section(
         ),
         ("status", req.status.value if req.status is not None else None),
         ("include_in_book", req.include_in_book),
-    ):
-        if value is not None and getattr(section, field) != value:
-            if field == "title":
-                section.metadata_json = {**section.metadata_json, "title_updated_by": "user", "previous_title": section.title}
-            setattr(section, field, value)
-            changed = True
-    if changed:
+    ) if value is not None and getattr(section, field) != value}
+    before = latest = None
+    if rebase_draft and changes.keys() == {"title"} and plan.status == "confirmed":
+        latest = await chapter_generation.latest_chapter_draft_version(db, project_id=project_id, chapter_id=section.chapter_id)
+        if latest is not None:
+            try:
+                before = await chapter_generation.load_chapter_generation_context(db, project_id=project_id, chapter_id=section.chapter_id)
+            except chapter_generation.ChapterGenerationNeedsMaterial:
+                pass  # An empty chapter has no current prose to rebase.
+    for field, value in changes.items():
+        if field == "title":
+            section.metadata_json = {**section.metadata_json, "title_updated_by": "user", "previous_title": section.title}
+        setattr(section, field, value)
+    if changes:
         section.version += 1
         section.updated_at = utcnow_naive()
         db.add(section)
+        if before is not None:
+            await db.flush()
+            after = await chapter_generation.load_chapter_generation_context(db, project_id=project_id, chapter_id=section.chapter_id)
+            await chapter_generation.save_rebased_chapter_draft_version(
+                db, before=before, after=after, latest=latest, patch_text=lambda _key, text: text,
+            )
         await finalize_section_changes(
             db,
             project_id=project_id,

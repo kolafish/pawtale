@@ -18,10 +18,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import (
-    MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookPlanChapter,
+    MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookPlanChapter,
     MemoirChatMessage, MemoirSection, MemoirVoiceSession, MemoirVoiceUtterance,
 )
 from app.models.projects import Project
@@ -351,29 +350,12 @@ async def _rebase_chapters(
     after = await _chapter_contexts(db, project_id, list(latest))
     created: dict[str, MemoirBookChapterDraftVersion] = {}
     for chapter_id, version in latest.items():
-        rebased = chapter_generation.rebased_chapter_draft_version(
-            before=before.get(chapter_id), after=after.get(chapter_id), latest=version,
+        rebased = await chapter_generation.save_rebased_chapter_draft_version(
+            db, before=before.get(chapter_id), after=after.get(chapter_id), latest=version,
             patch_text=patch_for(chapter_id),
         )
-        if (
-            rebased.content == version.content
-            and rebased.section_snapshot_json == list(version.section_snapshot_json or [])
-            and rebased.material_snapshot_json == list(version.material_snapshot_json or [])
-            and rebased.input_signature == version.input_signature
-        ):
-            continue
-        db.add(rebased)
-        await db.flush()
-        draft = await db.get(MemoirBookChapterDraft, version.draft_id)
-        if draft is not None:
-            metadata = dict(draft.metadata_json or {})
-            if metadata.get("confirmed_version_id") == version.id:
-                # Same confirmed text with the corrected writing; confirmation carries over.
-                metadata["confirmed_version_id"] = rebased.id
-                draft.metadata_json = metadata
-            draft.updated_at = utcnow_naive()
-            db.add(draft)
-        created[chapter_id] = rebased
+        if rebased is not version:
+            created[chapter_id] = rebased
     return created
 
 
@@ -391,9 +373,10 @@ async def _rename_section(db: AsyncSession, *, user_id: str, project_id: str, se
     from app.services.memoir.sections import update_section
 
     section = await db.get(MemoirSection, section_id)
+    # The complete writing correction rebases titles and body text together below.
     await update_section(
         db, user_id=user_id, project_id=project_id, section_id=section_id,
-        req=MemoirSectionUpdateRequest(title=title, expected_version=section.version), commit=False,
+        req=MemoirSectionUpdateRequest(title=title, expected_version=section.version), commit=False, rebase_draft=False,
     )
 
 

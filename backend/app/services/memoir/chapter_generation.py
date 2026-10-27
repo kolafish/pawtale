@@ -1768,6 +1768,33 @@ def rebased_chapter_draft_version(
     )
 
 
+async def save_rebased_chapter_draft_version(
+    db: AsyncSession, *, before: ChapterGenerationContext | None,
+    after: ChapterGenerationContext | None, latest: MemoirBookChapterDraftVersion,
+    patch_text: Callable[[str, str], str],
+) -> MemoirBookChapterDraftVersion:
+    """Save a deterministic edit, retaining confirmation and original authorship."""
+    rebased = rebased_chapter_draft_version(before=before, after=after, latest=latest, patch_text=patch_text)
+    if (
+        rebased.content == latest.content
+        and rebased.section_snapshot_json == list(latest.section_snapshot_json or [])
+        and rebased.material_snapshot_json == list(latest.material_snapshot_json or [])
+        and rebased.input_signature == latest.input_signature
+    ):
+        return latest
+    db.add(rebased)
+    await db.flush()
+    draft = await db.get(MemoirBookChapterDraft, latest.draft_id)
+    if draft is not None:
+        metadata = dict(draft.metadata_json or {})
+        if metadata.get("confirmed_version_id") == latest.id:
+            metadata["confirmed_version_id"] = rebased.id
+            draft.metadata_json = metadata
+        draft.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(draft)
+    return rebased
+
+
 def _section_snapshot(
     context: ChapterGenerationContext,
     *,
