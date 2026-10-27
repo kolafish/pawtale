@@ -817,7 +817,7 @@ async def create_image_placement(
     placement.caption_override = req.caption_override or placement.caption_override
     placement.source_utterance_ids_json = source_ids
     placement.display_size = display_size
-    placement.inline_position = req.inline_position or placement.inline_position or "after"
+    placement.inline_position = req.inline_position or placement.inline_position or "auto"
     placement.enabled = True
     db.add(asset)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
@@ -999,7 +999,7 @@ def _illustration_snapshot(
         "caption": caption,
         "alt_text": asset.alt_text or asset.title,
         "placement": placement_type,
-        "inline_position": placement.inline_position,
+        "inline_position": placement.inline_position if placement_type == "chapter_inline" else "after",
         "display_size": placement.display_size,
         "source_quote": asset.source_quote,
         "source_utterance_id": asset.source_utterance_id,
@@ -1082,6 +1082,18 @@ async def manuscript_image_snapshots(
             appendix_images.append(snapshot)
         elif effective_type == "cover":
             cover_image = snapshot
+    for images in chapter_images.values():
+        section_ids = {image["section_id"] for image in images if image["placement"] == "chapter_inline"}
+        for section_id in section_ids:
+            group = [image for image in images if image["placement"] == "chapter_inline" and image["section_id"] == section_id]
+            # Fill unused positions first; keep every explicit choice untouched.
+            order = ("middle", "before", "after") if len(group) == 1 else ("before", "after", "middle") if len(group) == 2 else ("before", "middle", "after")
+            counts = {position: sum(image["inline_position"] == position for image in group) for position in order}
+            for image in group:
+                if image["inline_position"] == "auto":
+                    position = min(order, key=lambda value: counts[value])
+                    image["inline_position"] = position
+                    counts[position] += 1
     return chapter_images, appendix_images, cover_image
 
 

@@ -18,7 +18,6 @@ import {
   downloadMemoirImageAssetFile,
   getMemoirBookPlan,
   listMemoirImageAssets,
-  updateMemoirImageAsset,
 } from "../../services/memoir-book-api";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import {
@@ -35,10 +34,8 @@ import {
   type PageDatasetEvent,
   type PagePickerEvent,
   type PageQuery,
-  type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
-import { formatBeijingDateTimeShort } from "../../services/time";
 import { initialVideoPlaybackData, videoPlaybackMethods, type VideoPlaybackData } from "../../services/video-playback";
 import {
   buildStoryMediaIndex,
@@ -57,13 +54,10 @@ interface ImageAssetView extends MemoirImageAsset {
   thumbnailState: ThumbnailState;
   thumbnailError: string;
   titleText: string;
-  sourceLabel: string;
   statusText: string;
   placementText: string;
-  createdAtText: string;
-  captionDraft: string;
-  captionChanged: boolean;
   detailsExpanded: boolean;
+  inlinePositionIndex: number;
   enabledPlacements: MemoirBookImagePlacement[];
 }
 
@@ -87,7 +81,6 @@ interface ImageAssetsData extends VideoPlaybackData {
   unusedCount: number;
   items: ImageAssetView[];
   chapterOptions: ChapterOption[];
-  savingTarget: string;
   placingTarget: string;
   deletingTarget: string;
   isStoryMaterialView: boolean;
@@ -108,7 +101,6 @@ interface ImageAssetDataset {
 
 type DatasetEvent = PageDatasetEvent<ImageAssetDataset>;
 type PickerEvent = PagePickerEvent<ImageAssetDataset>;
-type TextInputEvent = PageTextInputEvent<ImageAssetDataset>;
 
 const THUMBNAIL_BATCH_SIZE = 4;
 const MAX_AUTO_DOWNLOADED_THUMBNAILS = 24;
@@ -116,17 +108,6 @@ const PAGE_CLASS = "image-assets-page ui-page-shell ui-accessible-page";
 
 function trimText(value: string | null | undefined): string {
   return (value || "").trim();
-}
-
-function sourceLabel(asset: MemoirImageAsset): string {
-  const labels: Record<string, string> = {
-    share_video_background: "分享视频生成图",
-    chapter_illustration: "章节插图",
-    utterance_illustration: "讲述插图",
-    cover_candidate: "封面候选",
-    manual_upload: "手动上传",
-  };
-  return labels[asset.source_type] || "图片素材";
 }
 
 function statusText(asset: MemoirImageAsset): string {
@@ -166,7 +147,7 @@ function placementText(asset: MemoirImageAsset): string {
     .slice(0, 2)
     .map((placement) => (
       placement.placement_type === "chapter_inline"
-        ? `已放在素材${({ before: "前面", middle: "中间", after: "后面" })[placement.inline_position || "after"]}：${placement.chapter_title || "未命名章节"}`
+        ? `已放在素材${({ auto: "附近自动分散", before: "前面", middle: "中间", after: "后面" })[placement.inline_position || "auto"]}：${placement.chapter_title || "未命名章节"}`
         : `已放在章节开头：${placement.chapter_title || "未命名章节"}`
     ));
   if (appendixCount) {
@@ -193,22 +174,16 @@ function buildAssetView(
   current?: ImageAssetView,
 ): ImageAssetView {
   const localPath = current?.localPath || "";
-  const captionDraft = current?.captionChanged && trimText(current.captionDraft) !== trimText(asset.caption)
-    ? current.captionDraft
-    : trimText(asset.caption);
   return {
     ...asset,
     localPath,
     thumbnailState: localPath ? "ready" : (current?.thumbnailState || "idle"),
     thumbnailError: localPath ? "" : (current?.thumbnailError || ""),
     titleText: assetTitle(asset),
-    sourceLabel: sourceLabel(asset),
     statusText: statusText(asset),
     placementText: placementText(asset),
-    createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
-    captionDraft,
-    captionChanged: trimText(captionDraft) !== trimText(asset.caption),
     detailsExpanded: current?.detailsExpanded || false,
+    inlinePositionIndex: ["auto", "before", "middle", "after"].indexOf(asset.placements.find(item => item.enabled && item.placement_type === "chapter_inline")?.inline_position || "auto"),
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
 }
@@ -287,7 +262,6 @@ definePage<ImageAssetsData>()({
     unusedCount: 0,
     items: [],
     chapterOptions: [],
-    savingTarget: "",
     placingTarget: "",
     deletingTarget: "",
     isStoryMaterialView: false,
@@ -608,22 +582,6 @@ definePage<ImageAssetsData>()({
     });
   },
 
-  onCaptionInput(event: TextInputEvent) {
-    const assetId = datasetString(event, "id");
-    const value = event.detail.value;
-    this.setData({
-      items: this.data.items.map((item) => (
-        item.id === assetId
-          ? {
-            ...item,
-            captionDraft: value,
-            captionChanged: trimText(value) !== trimText(item.caption),
-          }
-          : item
-      )),
-    });
-  },
-
   toggleAssetDetails(event: DatasetEvent) {
     const assetId = datasetString(event, "id");
     this.setData({
@@ -633,29 +591,6 @@ definePage<ImageAssetsData>()({
           : item
       )),
     });
-  },
-
-  async saveCaption(event: DatasetEvent) {
-    const assetId = datasetString(event, "id");
-    const asset = this.assetById(assetId);
-    if (!asset) {
-      return;
-    }
-    this.setData({ savingTarget: assetId, error: "" });
-    try {
-      const updated = await updateMemoirImageAsset(this.data.projectId, assetId, {
-        caption: asset.captionDraft,
-      });
-      this.replaceAsset(updated);
-      wx.showToast({ title: "已保存", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "图片说明保存失败" });
-    } finally {
-      this.setData({ savingTarget: "" });
-    }
   },
 
   async placeInChapter(event: PickerEvent) {
@@ -672,14 +607,18 @@ definePage<ImageAssetsData>()({
     });
   },
 
-  async placeNearSource(event: PickerEvent) {
+  async placeNearSource(event: DatasetEvent) {
     const assetId = datasetString(event, "id");
-    if (!assetId) {
-      return;
-    }
+    if (!assetId) return;
+    await this.createPlacement(assetId, { placement_type: "chapter_inline", inline_position: "auto", display_size: "full_width" });
+  },
+
+  async chooseSourcePosition(event: PickerEvent) {
+    const assetId = datasetString(event, "id");
+    if (!assetId) return;
     await this.createPlacement(assetId, {
       placement_type: "chapter_inline",
-      inline_position: (["before", "middle", "after"] as const)[pickerIndex(event)] || "after",
+      inline_position: (["auto", "before", "middle", "after"] as const)[pickerIndex(event)] || "auto",
       display_size: "full_width",
     });
   },

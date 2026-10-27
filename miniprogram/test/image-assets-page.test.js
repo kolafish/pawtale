@@ -51,12 +51,8 @@ function imageAssetView(asset, localPath = "") {
     thumbnailState: localPath ? "ready" : "idle",
     thumbnailError: "",
     titleText: asset.title,
-    sourceLabel: "章节插图",
     statusText: "未使用",
     placementText: "尚未入书",
-    createdAtText: "07-01 08:00",
-    captionDraft: asset.caption,
-    captionChanged: false,
     detailsExpanded: false,
     enabledPlacements: asset.placements.filter((placement) => placement.enabled),
   };
@@ -356,54 +352,6 @@ test("image assets page keeps successful placement removals when a later removal
   assert.equal(context.data.error, "第二个位置删除失败");
 });
 
-test("image assets page reveals secondary editing on demand and tracks caption changes", () => {
-  const asset = imageAsset("asset-1", { caption: "原说明" });
-  const { page } = loadImageAssetsPage();
-  const context = pageContext(page, {
-    items: [imageAssetView(asset)],
-  });
-
-  page.toggleAssetDetails.call(context, {
-    currentTarget: { dataset: { id: "asset-1" } },
-  });
-  assert.equal(context.data.items[0].detailsExpanded, true);
-
-  page.onCaptionInput.call(context, {
-    currentTarget: { dataset: { id: "asset-1" } },
-    detail: { value: "新说明" },
-  });
-  assert.equal(context.data.items[0].captionChanged, true);
-
-  page.onCaptionInput.call(context, {
-    currentTarget: { dataset: { id: "asset-1" } },
-    detail: { value: " 原说明 " },
-  });
-  assert.equal(context.data.items[0].captionChanged, false);
-});
-
-test("image assets page keeps an unsaved caption through placement and clears it after saving", async () => {
-  const asset = imageAsset("asset-1", { caption: "原说明" });
-  const { page } = loadImageAssetsPage({
-    createMemoirBookImagePlacement: async () => ({ ...asset, include_in_book: true }),
-    updateMemoirImageAsset: async (_projectId, _assetId, input) => ({ ...asset, caption: input.caption }),
-  });
-  global.wx = { showToast() {} };
-  const context = pageContext(page, {
-    projectId: "project-1",
-    items: [imageAssetView(asset)],
-  });
-  const event = { currentTarget: { dataset: { id: "asset-1" } } };
-
-  context.onCaptionInput({ ...event, detail: { value: "新说明" } });
-  await context.placeNearSource({ ...event, detail: { value: "2" } });
-  assert.equal(context.data.items[0].captionDraft, "新说明");
-  assert.equal(context.data.items[0].captionChanged, true);
-
-  await context.saveCaption(event);
-  assert.equal(context.data.items[0].captionDraft, "新说明");
-  assert.equal(context.data.items[0].captionChanged, false);
-});
-
 test("image assets page places a source-linked illustration near its material", async () => {
   const asset = imageAsset("asset-1", { source_utterance_id: "utterance-1" });
   const placementCalls = [];
@@ -427,7 +375,6 @@ test("image assets page places a source-linked illustration near its material", 
 
   await page.placeNearSource.call(context, {
     currentTarget: { dataset: { id: "asset-1" } },
-    detail: { value: "1" },
   });
 
   assert.deepEqual(placementCalls, [{
@@ -435,9 +382,22 @@ test("image assets page places a source-linked illustration near its material", 
     assetId: "asset-1",
     data: {
       placement_type: "chapter_inline",
-      inline_position: "middle",
+      inline_position: "auto",
       display_size: "full_width",
     },
   }]);
   assert.equal(context.data.error, "");
+});
+
+test("image placement lets an author choose a manual position or return to automatic", async () => {
+  const inputs = [];
+  const asset = imageAsset("asset-1", { source_utterance_id: "utterance-1" });
+  const { page } = loadImageAssetsPage({ createMemoirBookImagePlacement: async (_pid, _aid, input) => { inputs.push(input.inline_position); return asset; } });
+  global.wx = { showToast() {} };
+  const context = pageContext(page, { projectId: "project-1", items: [imageAssetView(asset)] });
+  const event = { currentTarget: { dataset: { id: "asset-1" } } };
+  context.toggleAssetDetails(event);
+  assert.equal(context.data.items[0].detailsExpanded, true);
+  for (const value of ["1", "2", "3", "0"]) await context.chooseSourcePosition({ ...event, detail: { value } });
+  assert.deepEqual(inputs, ["before", "middle", "after", "auto"]);
 });
