@@ -59,8 +59,7 @@ export const readingShareMethods = defineReadingShareMethods({
     const plain = { imageUrl: readingShareImageUrl(token, undefined, version?.id), needsConfirmation: false };
     if (!version || !(chapterId || sectionId) || !this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return plain;
     if (!confirmExcerpt) {
-      if (!saved) return plain;
-      if (saved.version_id !== version.id) return { ...plain, needsConfirmation: true };
+      if (!saved || saved.version_id !== version.id) return { ...plain, needsConfirmation: true };
       return { ...plain, imageUrl: readingShareImageUrl(token, saved.excerpt_length ? {
         versionId: saved.version_id, start: saved.excerpt_start, length: saved.excerpt_length,
       } : undefined, version.id) };
@@ -98,7 +97,7 @@ export const readingShareMethods = defineReadingShareMethods({
         const card = await this.loadReadingShareCard(this.bookShareToken, false, status.card_selection);
         if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence) {
           this.setData({ bookShareImageUrl: card.imageUrl, bookShareReady: !card.needsConfirmation,
-            ...(card.needsConfirmation ? { bookShareFeedbackVisible: true, bookShareDescription: "正文已更新，请点击分享重新确认封面摘录。" } : {}) });
+            ...(card.needsConfirmation ? { bookShareFeedbackVisible: true, bookShareDescription: "请点击分享确认封面摘录。" } : {}) });
           if (!card.needsConfirmation) enableMiniProgramShareMenu();
         }
       }
