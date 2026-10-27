@@ -86,20 +86,29 @@ def test_portrait_wraps_on_right_then_restores_full_width_without_losing_text(tm
 
 @pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
 @pytest.mark.parametrize("image_height", [900, 2400])
-def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, edition, image_height):
+@pytest.mark.parametrize("long_heading", [False, True])
+def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, edition, image_height, long_heading):
     from app.services.memoir import book_output_export
     monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
     Image.new("RGB", (600, image_height), "#789081").save(tmp_path / "portrait.jpg")
-    layout = configured_pdf_layout(PDF_LAYOUTS[edition], template="classic_family")
+    title = "河边的小路" * (40 if long_heading else 1)
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[edition], template="custom" if long_heading else "classic_family",
+        custom_layout={"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"} if long_heading else None,
+    )
     builder = PDFBookBuilder(title="往事", layout=layout)
     text = "那年我们沿着河边去学校，路上总有说不完的话。" * 15
     _add_chapters(builder, [{
-        "title": "我的童年", "sections": [{"section_id": "s", "title": "河边的小路", "content": text}],
+        "title": "我的童年", "sections": [{"section_id": "s", "title": title, "content": text}],
         "illustrations": [{"storage_path": "portrait.jpg", "placement": "chapter_inline", "section_id": "s", "inline_position": "before"}],
     }])
     page = next(page for page in builder.pages if any(image.path.name == "portrait.jpg" for image in page.images))
-    assert any(line.text == "河边的小路" for line in page.commands)
+    headings = [line for item in builder.pages for line in item.commands if line.font_size == layout.font_size + 2]
+    assert "".join(line.text for line in headings) == title
+    if not long_heading:
+        assert headings[-1] in page.commands
     image = next(image for image in page.images if image.path.name == "portrait.jpg")
+    assert image.width > 0 and image.height > 0
     assert image.y >= builder.layout.margin_bottom
     assert image.width / image.height == pytest.approx(600 / image_height)
     assert any(line.font_size == builder.layout.font_size for line in page.commands)
