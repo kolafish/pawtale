@@ -1,12 +1,18 @@
+import asyncio
 from io import BytesIO
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.main import app
-from app.models.memoir import MemoirBookChapterDraftVersion
-from app.services.memoir import reading_share_card
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookPlanChapter, MemoirSection, MemoirSectionShare
+from app.models.projects import Project
+from app.schemas.memoir_book import MemoirReadingShareCardRequest
+from app.services.memoir import book_shares, reading_share_card, sections
 from tests.memoir_helpers import ensure_mobile_memoir_project
 from tests.test_memoir_book_shares import _shareable_output
 from tests.test_memoir_story_shares import saved_stories
@@ -127,6 +133,47 @@ async def test_card_choice_requires_owner_current_version_and_scoped_bounds(clie
     # cannot authorize a new version, and an in-flight old confirmation fails.
     assert (await client.get(path, params=params)).json()["card_selection"]["version_id"] == version.id
     assert (await client.patch(path, params=params, json=payload)).status_code == 409
+
+
+@pytest.mark.parametrize("change,expected_status", [("withdraw", 409), ("archive", 404), ("move", 404)])
+async def test_card_selection_rechecks_story_after_waiting_for_directory_lock(client, test_db, monkeypatch, change, expected_status):
+    project_id, chapter, _, version, section, _, _ = await saved_stories(client, test_db)
+    destination = MemoirBookPlanChapter(project_id=project_id, plan_id=chapter.plan_id, title="另一章", sort_order=1)
+    test_db.add(destination)
+    await test_db.commit()
+    user_id = await test_db.scalar(select(Project.user_id).where(Project.id == project_id))
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    token = (await client.put(path, params={"chapter_id": chapter.id, "section_id": section.id})).json()["token"]
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+    async with sessions() as editor, sessions() as sharer:
+        await sections.lock_project_chapters(editor, project_id=project_id)
+        patch = {"withdraw": {"include_in_book": False}, "archive": {"status": "archived"}, "move": {"chapter_id": destination.id}}[change]
+        await editor.execute(update(MemoirSection).where(MemoirSection.id == section.id).values(**patch))
+        waiting = asyncio.Event()
+        lock = sections.lock_project_chapters
+
+        async def signal_wait(db, **kwargs):
+            if db is sharer:
+                waiting.set()
+            await lock(db, **kwargs)
+
+        monkeypatch.setattr(sections, "lock_project_chapters", signal_wait)
+        pending = asyncio.create_task(book_shares.save_card_selection(sharer, user_id=user_id, project_id=project_id,
+            chapter_id=chapter.id, section_id=section.id,
+            selection=MemoirReadingShareCardRequest(token=token, version_id=version.id, excerpt_length=6)))
+        try:
+            await asyncio.wait_for(waiting.wait(), timeout=5)
+            # The PATCH has read the old ORM object and is waiting for our lock.
+            await editor.commit()
+            with pytest.raises(HTTPException) as error:
+                await asyncio.wait_for(pending, timeout=5)
+            assert error.value.status_code == expected_status
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            await sharer.rollback()
+    saved = await test_db.get(MemoirSectionShare, section.id, populate_existing=True)
+    assert saved.card_version_id is None
 
 
 def test_card_renderer_handles_long_titles_and_no_excerpt():

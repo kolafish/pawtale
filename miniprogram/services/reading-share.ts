@@ -40,6 +40,10 @@ interface ReadingShareHost {
 }
 function defineReadingShareMethods<T extends object>(methods: T & ThisType<ReadingShareHost & T>): T { return methods; }
 export const readingShareMethods = defineReadingShareMethods({
+  invalidateReadingShareRequests() {
+    this.bookShareStatusSequence += 1;
+    this.setData({ bookShareBusy: false });
+  },
   isReadingShareTarget(projectId: string, chapterId?: string, sectionId?: string) {
     const target = this.readingShareTarget();
     return projectId === target.projectId && chapterId === target.chapterId && sectionId === target.sectionId;

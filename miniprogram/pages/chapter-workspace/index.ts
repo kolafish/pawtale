@@ -200,6 +200,7 @@ definePage<ChapterWorkspacePageData>()({
 
   onHide() {
     this.pageVisible = false;
+    this.invalidateReadingShareRequests();
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
@@ -207,6 +208,7 @@ definePage<ChapterWorkspacePageData>()({
 
   onUnload() {
     this.pageVisible = false;
+    this.invalidateReadingShareRequests();
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
@@ -470,7 +472,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
-    if (this.readingShareTarget().available) void this.refreshBookShareStatus();
+    if (this.pageVisible && this.readingShareTarget().available) void this.refreshBookShareStatus();
     this.syncDraftSectionUnloadAlert();
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
