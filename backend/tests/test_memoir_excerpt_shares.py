@@ -1,3 +1,5 @@
+import pytest
+
 from decimal import Decimal
 from io import BytesIO
 
@@ -236,7 +238,8 @@ async def test_excerpt_photo_uses_managed_asset_and_honors_deletion(client, test
     assert (await client.post(path, json=selection)).status_code == 422
 
 
-async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single_flash_image(client, test_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("background_note", ["", "我们是我和妹妹，那年我十岁"])
+async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single_flash_image(client, test_db, tmp_path, monkeypatch, background_note):
     from app.config import get_settings
     from app.services.memoir import material_image_generation, image_assets
     from app.services.memoir.share_video_backgrounds import VolcArkGeneratedImage, share_video_background_style_options
@@ -253,17 +256,18 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     monkeypatch.setattr(material_image_generation.VolcArkImageGenerationService, "generate", generate)
     register_memoir_editing_job_handlers()
     path = f"/api/mobile/memoir/projects/{project_id}/chapters/{chapter.id}/excerpt-shares"
-    payload = {"version_id": version.id, "content": "院子里的正文", "style_id": "ink_paper"}
+    payload = {"version_id": version.id, "content": "院子里的正文", "style_id": "ink_paper", "background_note": background_note}
     pending = await client.post(path + "/image-jobs", json=payload)
     assert pending.status_code == 200, pending.text
     job = pending.json()
     assert (await client.post(path + "/image-jobs", json=payload)).json()["job_id"] == job["job_id"]
-    assert (await client.post(path, json={**{k: v for k, v in payload.items() if k != "style_id"}, "image_asset_id": job["asset_id"]})).status_code == 422
+    assert (await client.post(path, json={**{k: v for k, v in payload.items() if k not in {"style_id", "background_note"}}, "image_asset_id": job["asset_id"]})).status_code == 422
     assert await run_test_editing_job(test_db, job["job_id"])
     completed = (await client.get(f'/api/mobile/memoir/image-generation/jobs/{job["job_id"]}')).json()
     assert completed["asset_status"] == "ready"
     assert len(calls) == 1 and calls[0][0] == get_settings().memoir_excerpt_image_model
     assert payload["content"] in calls[0][1]
+    assert background_note in calls[0][1]
     assert calls[0][0] != get_settings().volc_ark_image_model
     assets = (await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")).json()["items"]
     assert len(assets) == 1
@@ -282,3 +286,10 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert [(item["purpose"], Decimal(item["cost_rmb"])) for item in day["purposes"]] == [
         ("图片生成", Decimal("0.12")),
     ]
+
+    changed = await client.post(path + "/image-jobs", json={**payload, "background_note": "我和哥哥，那年我八岁"})
+    assert changed.status_code == 200
+    assert changed.json()["asset_id"] != job["asset_id"]
+    repeated = await client.post(path + "/image-jobs", json={**payload, "background_note": "  我们是我和妹妹，那年我十岁  " if background_note else "  "})
+    assert repeated.json()["job_id"] == job["job_id"]
+    assert (await client.post(path + "/image-jobs", json={**payload, "background_note": "我" * 301})).status_code == 422

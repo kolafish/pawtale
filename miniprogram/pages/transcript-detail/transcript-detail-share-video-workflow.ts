@@ -328,6 +328,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   },
 
   changeShareVideoBackgroundNote(event: PageTextInputEvent) {
+    if (this.data.shareVideoCreating || this.data.shareVideoPolling || this.data.materialImageCreating || this.data.materialImagePolling) return;
     this.setData({ shareVideoBackgroundNote: event.detail.value });
   },
 
@@ -388,6 +389,7 @@ TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
       startChar: this.data.shareVideoSelectedStartChar,
       endChar: this.data.shareVideoSelectedEndChar,
       styleId: this.data.shareVideoBackgroundStyle,
+      backgroundNote: this.data.shareVideoBackgroundNote.trim(),
     });
     if (job) {
       trackAuditAction(

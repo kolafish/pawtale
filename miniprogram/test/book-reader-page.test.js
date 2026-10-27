@@ -1168,3 +1168,32 @@ test("leaving title recommendation or publishing discards its late result", asyn
   assert.equal(context.data.excerptTitle, "我自己写的标题");
   assert.equal(context.data.excerptTitleBusy, false);
 });
+
+
+test("excerpt image notes reach generation and changing them requires a fresh image", async () => {
+  const requests = [];
+  const context = excerptContext({
+    createMemoirExcerptImageJob: async (_p, _c, request) => {
+      requests.push(request);
+      return { job_id: "image-job", asset_id: "image-asset", status: "succeeded", asset_status: "ready" };
+    },
+  });
+  context.excerptVersionId = "version-1";
+  context.setData({ excerptMode: "compose", excerptContent: "那年我们一起去上学。", excerptStyle: "image" });
+  context.changeExcerptBackgroundNote({ detail: { value: " 我们是我和妹妹 " } });
+  await context.generateExcerptImage();
+  assert.equal(requests[0].background_note, "我们是我和妹妹");
+  assert.deepEqual(context.data.excerptAiAssetIds, ["image-asset"]);
+  context.setData({ materialImagePolling: true });
+  context.changeExcerptBackgroundNote({ detail: { value: "不能中途改" } });
+  assert.equal(context.data.excerptBackgroundNote, " 我们是我和妹妹 ");
+  context.setData({ materialImagePolling: false });
+  context.changeExcerptBackgroundNote({ detail: { value: "我们是我和哥哥" } });
+  assert.deepEqual(context.data.excerptAiAssetIds, []);
+  assert.equal(context.data.materialImageJob, null);
+  await context.generateExcerptImage();
+  assert.equal(requests[1].background_note, "我们是我和哥哥");
+  context.changeExcerptBackgroundNote({ detail: { value: "  " } });
+  await context.generateExcerptImage();
+  assert.equal(requests[2].background_note, "");
+});

@@ -162,7 +162,7 @@ async def create_mobile_excerpt_image(
 ):
     from app.services.memoir.material_image_generation import create_excerpt_image_generation_job
     return await create_excerpt_image_generation_job(db, user_id=current_user.id,
-        project_id=project_id, chapter_id=chapter_id, selection=req, style_id=req.style_id)
+        project_id=project_id, chapter_id=chapter_id, selection=req, style_id=req.style_id, background_note=req.background_note)
 
 
 @router.get("/excerpt-shares/{token}/image")

@@ -1,0 +1,6 @@
+.label, .help { display: block; }
+.label { color: var(--ui-section-title); font-family: var(--ui-font-editorial); font-size: var(--ui-font-meta); font-weight: 700; line-height: 1.4; }
+.help { margin-top: 8rpx; color: var(--ui-text-secondary); font-size: var(--ui-font-body); line-height: var(--ui-line-body); }
+.input { box-sizing: border-box; width: 100%; min-height: 120rpx; margin-top: 14rpx; padding: 16rpx 20rpx; border-radius: 16rpx; background: var(--ui-surface-subtle); color: var(--ui-text-primary); font-size: var(--ui-font-body); line-height: 1.5; }
+.large-text .label { font-size: var(--ui-font-large-body); line-height: 1.55; }
+.large-text .help { font-size: var(--ui-font-large-meta); line-height: 1.5; }

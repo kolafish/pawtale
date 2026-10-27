@@ -17,6 +17,7 @@ export interface TranscriptMaterialImageCreateInput {
   startChar: number;
   endChar: number;
   styleId: string;
+  backgroundNote?: string;
 }
 
 type CreateMaterialImageJob = (
@@ -24,6 +25,7 @@ type CreateMaterialImageJob = (
   startChar: number,
   endChar: number,
   styleId: string,
+  backgroundNote?: string,
 ) => Promise<MemoirMaterialImageGenerationJob>;
 type GetMaterialImageJob = (jobId: string) => Promise<MemoirMaterialImageGenerationJob>;
 type MaterialImageStateListener = (patch: Partial<TranscriptMaterialImageTaskState>) => void;
@@ -125,6 +127,7 @@ export class TranscriptMaterialImageController {
         input.startChar,
         input.endChar,
         input.styleId,
+        input.backgroundNote,
       );
       if (!this.isCurrent(requestToken)) {
         return null;

@@ -76,11 +76,13 @@ def test_material_image_prompt_is_not_a_subtitle_background_prompt():
     assert "不要因为这是回忆录内容" not in video_prompt
 
 
+@pytest.mark.parametrize("background_note", ["", "那年我十岁，和妹妹一起乘凉"])
 async def test_material_image_generation_creates_unplaced_toolbox_asset(
     client,
     test_db,
     tmp_path,
     monkeypatch,
+    background_note,
 ):
     monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
@@ -116,6 +118,7 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
             "start_char": 0,
             "end_char": len(text_value),
             "style_id": "old_album",
+            "background_note": background_note,
         },
     )
 
@@ -154,6 +157,7 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
     assert completed["asset_status"] == "ready"
     assert completed["stage"] == "ready"
     assert generated_prompts
+    assert background_note in generated_prompts[0]
     assert "保留大面积干净留白" not in generated_prompts[0]
 
     ready_list = (
@@ -180,6 +184,13 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
     file_response = await client.get(ready_asset["file_url"])
     assert file_response.status_code == 200
     assert file_response.headers["content-type"].startswith("image/png")
+
+    job_url = f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/image-generation/jobs"
+    payload = {"start_char": 0, "end_char": len(text_value), "style_id": "old_album"}
+    repeated = await client.post(job_url, json={**payload, "background_note": f"  {background_note}  "})
+    assert repeated.json()["job_id"] == pending["job_id"]
+    changed = await client.post(job_url, json={**payload, "background_note": "我和哥哥"})
+    assert changed.json()["asset_id"] != pending["asset_id"]
 
 
 async def test_material_image_generation_does_not_repeat_unknown_provider_call(

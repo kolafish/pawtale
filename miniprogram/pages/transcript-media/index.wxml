@@ -213,20 +213,9 @@
         </view>
 
         <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
-          <view class="share-video-background-head">
-            <text class="voice-edit-label">人物背景（选填）</text>
-          </view>
-          <text class="share-video-background-help">人物身份、年龄和关系（选填）。</text>
-          <textarea
-            class="share-video-note-input"
-            value="{{shareVideoBackgroundNote}}"
-            bindinput="changeShareVideoBackgroundNote"
-            placeholder="例如：我和妹妹，那年我十岁"
-            maxlength="300"
-            auto-height
-            cursor-spacing="24"
-            disabled="{{shareVideoCreating || shareVideoPolling}}"
-          />
+          <image-background-note value="{{shareVideoBackgroundNote}}" page-class="{{pageClass}}"
+            disabled="{{shareVideoCreating || shareVideoPolling || materialImageCreating || materialImagePolling}}"
+            bindchange="changeShareVideoBackgroundNote" />
         </view>
 
         <view wx:if="{{shareVideoUsesIllustration && shareVideoMoreSettingsOpen}}" class="share-video-background">

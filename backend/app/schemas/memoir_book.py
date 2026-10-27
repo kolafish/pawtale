@@ -721,6 +721,7 @@ class MemoirExcerptSelection(BaseModel):
 
 class MemoirExcerptImageRequest(MemoirExcerptSelection):
     style_id: str = Field(default="watercolor", max_length=80)
+    background_note: str = Field(default="", max_length=300)
 
 
 class MemoirExcerptShareRequest(MemoirExcerptSelection):
