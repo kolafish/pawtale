@@ -837,7 +837,7 @@ test("excerpt selection previews only the chosen text and forwards the same immu
   let request;
   const source = "一段开头。\n奶奶坐在门口。\n不想分享的正文。";
   const context = excerptContext({
-    previewMemoirBookShare: async () => ({ title: "第一章", latest_version: { id: "v1", content: source } }),
+    getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "第一章", draft_version_id: "v1", draft_content: source, draft_sections: [] }),
     createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
   });
   await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
@@ -881,7 +881,7 @@ test("excerpt selection rejects empty, overlong and edited text before creating 
   context.excerptSource = "有效原文。";
   context.setData({ excerptMode: "select" });
   context.excerptEditor = { getSelectionText: ({ success }) => success({ text: selection }) };
-  for (selection of ["", "字".repeat(121), "篡改文字"]) {
+  for (selection of ["", "字".repeat(513), "篡改文字"]) {
     await context.previewExcerptSelection();
     assert.ok(context.data.error);
     assert.equal(context.excerptToken, "");
@@ -909,8 +909,8 @@ for (const leave of ["onHide", "onUnload"]) {
 test("excerpt viewer has no whole-reading, audio or response entry points", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
   const excerptBranch = template.split('<view wx:else class="ui-page-shell')[0];
-  assert.match(excerptBranch, /read-only="\{\{true\}\}"/);
-  assert.match(excerptBranch, /catchtouchend="previewExcerptSelection"/);
+  assert.match(template, /read-only="\{\{true\}\}"/);
+  assert.match(template, /catchtouchend="previewExcerptSelection"/);
   assert.ok(!/openReaderChapter|playReaderAudio|share-response-form|分享整章|阅读整章/.test(excerptBranch));
 });
 
@@ -932,7 +932,7 @@ for (const timing of ["early preview", "hidden callback", "late callback after r
   test(`excerpt editor initialization recovers from ${timing}`, async () => {
     const source = "奶奶坐在门口。";
     const context = excerptContext({
-      previewMemoirBookShare: async () => ({ title: "第一章", latest_version: { id: "v1", content: source } }),
+      getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "第一章", draft_version_id: "v1", draft_content: source, draft_sections: [] }),
       createMemoirExcerptShare: async (_project, _chapter, { content }) => ({ token: "x1.token", content, book_title: "回忆录", chapter_title: "第一章" }),
     });
     const callbacks = [];
@@ -974,8 +974,8 @@ for (const timing of ["early preview", "hidden callback", "late callback after r
 
 test("excerpt version conflict requires reloading source before another selection", async () => {
   const context = excerptContext({
-    createMemoirExcerptShare: async () => { throw new ApiError(409, "正文已更新，请重新选择划线内容", {}); },
-    previewMemoirBookShare: async () => ({ title: "新版章节", latest_version: { id: "v2", content: "新的原文。" } }),
+    createMemoirExcerptShare: async () => { throw new ApiError(409, "正文已更新，请重新选择分享内容", {}); },
+    getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "新版章节", draft_version_id: "v2", draft_content: "新的原文。", draft_sections: [] }),
   });
   context.excerptSource = "原来的文字。";
   context.setData({ excerptMode: "select", projectId: "p", chapterId: "c" });
@@ -988,4 +988,62 @@ test("excerpt version conflict requires reloading source before another selectio
   assert.equal(context.data.excerptReloadRequired, false);
   assert.equal(context.excerptVersionId, "v2");
   assert.equal(context.excerptSource, "新的原文。");
+});
+
+
+test("selected-text entry reuses the chapter preview loader and presentation", async () => {
+  let loads = 0;
+  const workspace = { chapter_id: "c", chapter_title: "放学的路", draft_version_id: "v1", draft_content: "回家的路很长。", draft_sections: [] };
+  const context = excerptContext({
+    getMemoirChapterWorkspace: async () => { loads++; return workspace; },
+    previewMemoirBookShare: async () => assert.fail("selection must use the chapter reader"),
+  });
+  await context.onLoad({ projectId: "p", chapterId: "c" });
+  const original = { title: context.data.readerTitle, chapters: context.data.bookPreviewChapters, subtitle: context.data.readerSubtitle };
+  await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
+  assert.equal(loads, 2);
+  assert.equal(context.data.readerMode, "chapter");
+  assert.deepEqual({ title: context.data.readerTitle, chapters: context.data.bookPreviewChapters, subtitle: context.data.readerSubtitle }, original);
+  assert.equal(context.excerptSource, workspace.draft_content);
+  assert.equal(context.excerptVersionId, "v1");
+});
+
+test("512 Unicode characters remain complete in selected-text preview and recipient while the card title is shortened", async () => {
+  const content = "回忆🌿。".repeat(128);
+  let posted;
+  const snapshot = { token: "x1.long", content, book_title: "回忆录", chapter_title: "童年" };
+  const context = excerptContext({
+    createMemoirExcerptShare: async (_p, _c, selection) => { posted = selection.content; return snapshot; },
+    readMemoirExcerptShare: async () => snapshot,
+  });
+  context.excerptSource = content;
+  context.setData({ excerptMode: "select" });
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: content }) };
+  await context.previewExcerptSelection();
+  assert.equal(context.data.excerptSelectionCount, 512);
+  assert.equal(posted, content);
+  assert.equal(context.data.excerptContent, content);
+  context.onExcerptImageLoad({ currentTarget: { dataset: { url: context.data.excerptImageUrl } } });
+  assert.equal(context.onShareAppMessage().title, Array.from(content).slice(0, 80).join("") + "…");
+  await context.onLoad({ excerptToken: snapshot.token });
+  assert.equal(context.data.excerptContent, content);
+  assert.equal(context.data.excerptBeforeHighlight + context.data.excerptHighlight, content);
+  assert.deepEqual(context.likeTarget, { reading_token: snapshot.token });
+});
+
+test("returning to selection retries a hidden chapter load without letting the old result overwrite it", async () => {
+  let finishOld;
+  let calls = 0;
+  const workspace = { chapter_id: "c", chapter_title: "新稿", draft_version_id: "v2", draft_content: "新原文", draft_sections: [] };
+  const context = excerptContext({ getMemoirChapterWorkspace: () => ++calls === 1
+    ? new Promise(resolve => { finishOld = resolve; }) : Promise.resolve(workspace) });
+  const first = context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
+  context.onHide();
+  context.onShow();
+  await flushAsyncWork();
+  finishOld({ ...workspace, draft_version_id: "v1", draft_content: "旧原文" });
+  await first;
+  assert.equal(context.excerptSource, "新原文");
+  assert.equal(context.excerptVersionId, "v2");
+  assert.equal(context.data.loading, false);
 });

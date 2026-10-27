@@ -475,15 +475,31 @@
 .share-reading-image text { display: block; color: var(--ui-text-secondary); font-size: var(--ui-font-meta); line-height: 1.5; margin: 12rpx 0; }
 .small-section-content, .chapter-content, .book-content { font-size: 32rpx; line-height: 1.8; }
 .large-text .small-section-content, .large-text .chapter-content, .large-text .book-content { font-size: 36rpx; }
-/* The same warm paper palette is used by the server-rendered excerpt card. */
-.excerpt-page { background: #f6f2e8; min-height: 100vh; }
-.excerpt-heading { margin-bottom: 24rpx; }
+/* Selected stories share the card's warm paper and editorial typography. */
+.excerpt-page { box-sizing: border-box; background: #fcf8f1; min-height: 100vh; padding: 44rpx 40rpx calc(48rpx + env(safe-area-inset-bottom)); }
 .excerpt-help { display: block; margin-top: 16rpx; color: var(--ui-text-secondary); font-size: var(--ui-font-meta); line-height: 1.7; }
-.excerpt-selector { box-sizing: border-box; width: 100%; height: 58vh; padding: 28rpx; font-size: var(--ui-font-body); line-height: 1.9; }
-.excerpt-actions { display: flex; gap: 16rpx; margin: 24rpx 0; }
+.excerpt-select-help { margin: 0 0 24rpx; }
+.excerpt-selector { box-sizing: border-box; width: 100%; height: 62vh; margin: 0; padding: 0; }
+.excerpt-selection-error { display: block; margin-top: 20rpx; color: var(--ui-accent-strong); line-height: 1.6; }
+.excerpt-actions { display: flex; gap: 16rpx; margin: 24rpx 0 0; }
 .excerpt-actions button { flex: 1; margin: 0; min-height: 48px; }
-.excerpt-card-image { display: block; width: 100%; margin-top: 24rpx; border-radius: 20rpx; box-shadow: 0 8rpx 32rpx rgba(97,75,57,.08); }
-.excerpt-paper { padding: 48rpx 36rpx; background: #faf7ef; }
-.excerpt-eyebrow { display: block; color: #758365; font-size: var(--ui-font-meta); letter-spacing: 4rpx; }
-.excerpt-quote { display: block; margin: 48rpx 0; color: #614b39; font-size: 40rpx; line-height: 1.9; white-space: pre-wrap; text-decoration: underline; text-decoration-color: #c4d2b3; text-decoration-thickness: 6rpx; text-underline-offset: 5rpx; }
-.excerpt-attribution { display: block; color: #614b39; font-size: var(--ui-font-body); }
+.excerpt-card-image { display: block; width: 100%; margin-top: 28rpx; border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(97,75,57,.08); outline: 1px solid rgba(0,0,0,.06); }
+.excerpt-paper { padding: 0 8rpx; }
+.excerpt-eyebrow { display: block; color: #806b55; font-family: var(--ui-font-editorial); font-size: 26rpx; line-height: 1.6; }
+.excerpt-title { display: block; margin: 24rpx 0 26rpx; color: #3f291b; font-family: var(--ui-font-editorial); font-size: 48rpx; font-weight: 700; line-height: 1.5; }
+.excerpt-quote { color: #4c392a; font-family: var(--ui-font-editorial); font-size: 34rpx; line-height: 1.95; white-space: pre-wrap; overflow-wrap: break-word; }
+.excerpt-highlight { background: #eaf0d3; border-radius: 6rpx; }
+.excerpt-source { display: flex; align-items: center; gap: 20rpx; margin-top: 36rpx; padding: 28rpx 0; border-top: 1rpx solid #e3d8c7; }
+.excerpt-source-icon { flex: none; width: 60rpx; height: 68rpx; opacity: .65; }
+.excerpt-attribution { display: block; color: #614b39; font-family: var(--ui-font-editorial); font-size: 28rpx; line-height: 1.7; }
+.excerpt-source-chapter { display: block; color: #806b55; font-size: 24rpx; line-height: 1.7; }
+.excerpt-origin { display: flex; align-items: center; gap: 20rpx; margin: 0 0 32rpx; padding: 22rpx; border-radius: 24rpx; background: #f5eddf; }
+.excerpt-origin image { flex: none; width: 64rpx; height: 64rpx; }
+.excerpt-origin text { color: #6d5540; font-size: 26rpx; line-height: 1.8; }
+.excerpt-share-button, .excerpt-start-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; min-height: 48px; padding: 20rpx 28rpx; border-radius: 100rpx; font-size: 30rpx; line-height: 1.5; transition: transform 120ms ease, opacity 120ms ease; }
+.excerpt-share-button { margin: 0; background: #974c42; color: #fffaf3; }
+.excerpt-share-button[disabled] { opacity: .45; }
+.excerpt-start-button { margin-top: 20rpx; border: 1rpx solid #dfd0bc; background: transparent; color: #563c2a; font-size: 26rpx; }
+.excerpt-share-button:active, .excerpt-start-button:active { transform: scale(.96); }
+.excerpt-page .share-like-bar { background: transparent; border: 0; padding: 8rpx 0; }
+.excerpt-page.large-text .excerpt-quote { font-size: 38rpx; }

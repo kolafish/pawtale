@@ -9,13 +9,13 @@ _ASSETS = Path(__file__).resolve().parents[2] / "assets"
 _INK = "#614b39"
 
 
-def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size: int, minimum: int = 22, highlight: bool = False) -> None:
+def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size: int, minimum: int = 22, highlight: bool = False, align: str = "center", bold: bool = False) -> None:
     """Wrap by measured glyph width, shrinking before truncating very long titles."""
     left, top, right, bottom = box
     draw = ImageDraw.Draw(image)
     text = " ".join(text.split())
     for font_size in range(size, minimum - 1, -2):
-        font = ImageFont.truetype(str(_ASSETS / "fonts/NotoSerifSC-Regular.ttf"), font_size)
+        font = ImageFont.truetype(str(_ASSETS / "fonts" / ("NotoSerifSC-Bold.ttf" if bold else "NotoSerifSC-Regular.ttf")), font_size)
         lines: list[str] = []
         line = ""
         for char in text:
@@ -35,10 +35,10 @@ def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size
             lines[-1] = lines[-1][:-1]
         lines[-1] += "…"
     y = top + (bottom - top - len(lines) * height) / 2
-    for line in lines:
-        x = (left + right - draw.textlength(line, font=font)) / 2
-        if highlight:
-            draw.rectangle((x - 3, y + font_size * .8, x + draw.textlength(line, font=font) + 3, y + font_size * 1.15), fill="#dce5ca")
+    for index, line in enumerate(lines):
+        x = left if align == "left" else (left + right - draw.textlength(line, font=font)) / 2
+        if highlight and index == len(lines) - 1:
+            draw.rounded_rectangle((x - 4, y - 3, x + draw.textlength(line, font=font) + 4, y + font_size + 7), radius=6, fill="#eaf0d3")
         draw.text((x, y), line, font=font, fill=_INK, anchor="lt")
         y += height
 
@@ -64,11 +64,20 @@ def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
 
 @lru_cache(maxsize=64)
 def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str) -> bytes:
-    image = Image.new("RGB", (1000, 800), "#f6f2e8")
-    _text(image, "划线分享", (100, 65, 900, 115), size=26)
-    _text(image, content, (100, 150, 900, 610), size=44, minimum=32, highlight=True)
-    _text(image, f"选自《{book_title}》", (100, 660, 900, 715), size=26)
-    _text(image, chapter_title, (100, 720, 900, 765), size=24)
+    image = Image.new("RGB", (1000, 800), "#fcf8f1")
+    with Image.open(_ASSETS / "branding/memoir-gramophone.png") as source:
+        brand = source.convert("RGBA")
+        brand.thumbnail((88, 88))
+        image.paste(brand, (64, 44), brand)
+    _text(image, "老余口述", (172, 44, 900, 88), size=30, align="left")
+    _text(image, "一个家庭的回忆录", (172, 92, 900, 132), size=24, align="left")
+    _text(image, chapter_title, (68, 164, 932, 300), size=52, minimum=34, align="left", bold=True)
+    # The immutable snapshot stays complete; only the card's display is shortened.
+    compact = " ".join(content.split())
+    preview = compact[:80] + ("…" if len(compact) > 80 else "")
+    _text(image, preview, (68, 324, 932, 652), size=40, minimum=38, highlight=True, align="left")
+    ImageDraw.Draw(image).line((68, 698, 932, 698), fill="#e3d8c7", width=2)
+    _text(image, f"选自《{book_title}》 · {chapter_title}", (68, 719, 932, 779), size=25, minimum=22, align="left")
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)
     return output.getvalue()

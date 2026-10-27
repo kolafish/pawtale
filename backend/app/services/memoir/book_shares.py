@@ -380,7 +380,7 @@ async def create_excerpt_share(
     await db.refresh(chapter)
     version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
     if stale or version is None or version.id != selection.version_id:
-        raise HTTPException(409, "正文已更新，请重新选择划线内容")
+        raise HTTPException(409, "正文已更新，请重新选择分享内容")
     content = selection.content.strip()
     if not content or content not in version.content:
         raise HTTPException(422, "请选择当前章节中的原文")

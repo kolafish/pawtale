@@ -62,7 +62,7 @@ async def test_excerpt_creation_requires_owner_current_version_and_exact_bounded
         assert (await guest.post(path, json=payload)).status_code == 401
     async with await _family_member(test_db, "另一位用户") as other:
         assert (await other.post(path, json=payload)).status_code in (403, 404)
-    for content in ("", " \n ", "未选中的伪造文字", "字" * 121):
+    for content in ("", " \n ", "未选中的伪造文字", "字" * 513):
         assert (await client.post(path, json={**payload, "content": content})).status_code == 422
     assert (await client.post(path, json={**payload, "version_id": "old"})).status_code == 409
     section.include_in_book = False
@@ -91,6 +91,34 @@ async def test_excerpt_and_chapter_likes_share_one_record_per_person(client, tes
 
 
 def test_maximum_excerpt_card_renders_without_extra_assets():
-    data = reading_share_card.render_excerpt_share_card(book_title="长书名" * 20, chapter_title="长章节名" * 20, content="选中的真实原文。" * 15)
+    data = reading_share_card.render_excerpt_share_card(book_title="长书名" * 20, chapter_title="长章节名" * 20, content="选中的真实原文。" * 64)
     with Image.open(BytesIO(data)) as card:
         assert card.size == (1000, 800)
+
+
+async def test_512_character_snapshot_stays_complete_but_card_only_renders_80(client, test_db, monkeypatch):
+    project_id, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
+    selected = "回忆🌿。" * 128
+    version.content = selected + "不公开的文字"
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{project_id}/chapters/{chapter.id}/excerpt-shares"
+    rejected = await client.post(path, json={"version_id": version.id, "content": selected + "不"})
+    assert rejected.status_code == 422
+    created = await client.post(path, json={"version_id": version.id, "content": selected})
+    assert created.status_code == 200, created.text
+    token = created.json()["token"]
+    stored = await test_db.scalar(select(MemoirExcerptShare))
+    assert stored.content == selected and len(stored.content) == 512
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        read = await guest.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})
+        assert read.json()["content"] == selected
+        assert "不公开的文字" not in read.text
+        drawn = []
+        original = reading_share_card._text
+        monkeypatch.setattr(reading_share_card, "_text", lambda image, text, box, **kwargs: drawn.append(text) or original(image, text, box, **kwargs))
+        reading_share_card.render_excerpt_share_card.cache_clear()
+        card = await guest.get(f"/api/mobile/memoir/excerpt-shares/{token}/card.jpg")
+        assert card.status_code == 200
+        assert selected[:80] + "…" in drawn
+        assert selected not in drawn
+        assert (await guest.post("/api/mobile/memoir/excerpt-shares/read", json={"token": token})).json()["content"] == selected
