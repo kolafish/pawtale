@@ -439,6 +439,7 @@ definePage<BookReaderData>()({
     if (this.data.excerptMode) {
       if (this.data.excerptMode === "shared" && !this.data.loading) void this.loadExcerptSnapshot();
       else if (this.data.excerptMode === "select" && !this.excerptSource && !this.data.loading) void this.loadExcerptSource();
+      else if (this.data.excerptMode === "select" && !this.data.loading && !this.excerptEditor) this.onExcerptEditorReady();
       return;
     }
     const returningToShare = Boolean(this.readingToken && this.sharedReadingShown);
