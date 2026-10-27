@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.config import DATA_DIR
 from app.schemas.memoir_book import DEFAULT_BOOK_DESIGN
@@ -1119,7 +1119,17 @@ def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> 
     builder.add_image(
         path,
         display_size=_str(illustration.get("display_size")) or "full_width",
+        wrap_right=illustration.get("placement") == "chapter_inline",
     )
+
+
+def _illustration_aspect_ratio(illustration: dict[str, Any]) -> float:
+    path = _illustration_file_path(illustration)
+    if not path:
+        return 1
+    with Image.open(path) as source:
+        width, height = ImageOps.exif_transpose(source).size
+    return height / width
 
 
 def _add_illustrations(
@@ -1128,7 +1138,8 @@ def _add_illustrations(
 ) -> None:
     if not illustrations:
         return
-    builder.add_spacer(0.25)
+    if not builder.wrapped_image:
+        builder.add_spacer(0.25)
     for illustration in illustrations:
         _add_illustration(builder, illustration)
 
@@ -1325,7 +1336,6 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         ]
         if sections:
             for section_index, section in enumerate(sections):
-                builder.add_section_heading(_str(section.get("title")))
                 section_content = _str(section.get("content"))
                 if section_index == 0:
                     section_content = _without_leading_quote_overlap(
@@ -1334,18 +1344,26 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                     )
                 section_id = _str(section.get("section_id"))
                 anchored_illustrations = [image for image in inline_illustrations if _str(image.get("section_id")) == section_id]
-                _add_illustrations(builder, [image for image in anchored_illustrations if image.get("inline_position") == "before"])
-                middle_images = [image for image in anchored_illustrations if image.get("inline_position") == "middle"]
-                if middle_images:
-                    paragraphs = [line.strip() for line in section_content.splitlines() if line.strip()]
-                    midpoint = (len(paragraphs) + 1) // 2
-                    builder.add_body_text("\n\n".join(paragraphs[:midpoint]), spacing_after=4)
-                    _add_illustrations(builder, middle_images)
-                    if paragraphs[midpoint:]:
-                        builder.add_body_text("\n\n".join(paragraphs[midpoint:]), spacing_after=4)
-                elif section_content:
-                    builder.add_body_text(section_content, spacing_after=4)
-                _add_illustrations(builder, [image for image in anchored_illustrations if image.get("inline_position", "after") == "after"])
+                paragraphs = [line.strip() for line in section_content.splitlines() if line.strip()]
+                images_before: dict[int, list[dict[str, Any]]] = {}
+                first_image_height = 0.0
+                for image in anchored_illustrations:
+                    position = image.get("inline_position", "after")
+                    aspect_ratio = _illustration_aspect_ratio(image)
+                    portrait = aspect_ratio > 1
+                    count = len(paragraphs)
+                    index = 0 if position == "before" else (count // 2 if portrait else (count + 1) // 2) if position == "middle" else count
+                    if portrait:
+                        index = min(index, max(0, count - 1))
+                        if index == 0:
+                            first_image_height = max(first_image_height, (builder.layout.page_width - builder.layout.margin_x * 2) * 0.38 * aspect_ratio)
+                    images_before.setdefault(index, []).append(image)
+                builder.add_section_heading(_str(section.get("title")), following_image_height=first_image_height)
+                for index in range(len(paragraphs) + 1):
+                    _add_illustrations(builder, images_before.get(index, []))
+                    if index < len(paragraphs):
+                        builder.add_body_text(paragraphs[index], spacing_after=4 if index == len(paragraphs) - 1 else 0)
+                builder.finish_image_wrap()
             unanchored_illustrations = [
                 illustration
                 for illustration in inline_illustrations
@@ -1357,6 +1375,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                 )
             ]
             _add_illustrations(builder, unanchored_illustrations)
+            builder.finish_image_wrap()
             continue
         content = _without_leading_quote_overlap(
             _str(chapter.get("content")),
@@ -1365,6 +1384,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         if content:
             builder.add_body_text(content)
         _add_illustrations(builder, inline_illustrations)
+        builder.finish_image_wrap()
 
 
 def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:

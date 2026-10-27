@@ -823,6 +823,16 @@ for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter
   assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 2, 3]);
   assert.equal(context.data.shareImages.every(image => image.chapterId === "chapter-1" && image.sectionId === "section-1" && image.url), true);
   assert.equal(downloads.length, shared ? 0 : 3);
+  for (const image of context.data.shareImages) {
+    context.onReadingImageLoad({ currentTarget: { dataset: { id: image.id, url: image.url } }, detail: { width: 600, height: 900 } });
+  }
+  assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 1, 2]);
+  assert.equal(context.data.shareImages.every(image => image.portrait), true);
+  assert.deepEqual(context.data.bookPreviewChapters[0].sections[0].paragraphs, ["开头。", "中间。", "结尾。"]);
+  const image = context.data.shareImages[2];
+  context.onReadingImageLoad({ currentTarget: { dataset: { id: image.id, url: image.url } }, detail: { width: 900, height: 600 } });
+  assert.equal(context.data.shareImages[2].portrait, false);
+  assert.equal(context.data.shareImages[2].paragraphBefore, 3);
 });
 
 function excerptContext(api = {}) {

@@ -184,35 +184,31 @@
             class="reader-small-section"
           >
             <text wx:if="{{section.title !== chapter.title}}" class="small-section-title">{{section.title}}</text>
-<view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
-          <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === 0}}">
-            <image src="{{illustration.url}}" mode="widthFix" />
-            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
-            <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
-          </block>
-        </view>
             <view class="small-section-paragraph-list">
-              <view
-                wx:for="{{section.paragraphs}}"
-                wx:key="*this"
-                wx:for-item="paragraph"
-                wx:for-index="paragraphIndex"
-                class="small-section-content"
-              >
-                <block wx:if="{{readerMode === 'chapter' && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex}}">
-                  <text selectable>{{readerHighlightBefore}}</text>
-                  <text class="reader-sentence-highlight" selectable>{{readerHighlightCurrent}}</text>
-                  <text selectable>{{readerHighlightAfter}}</text>
-                </block>
-                <text wx:else selectable>{{paragraph}}</text>
+              <block wx:for="{{section.paragraphs}}" wx:key="*this" wx:for-item="paragraph" wx:for-index="paragraphIndex">
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
-                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === paragraphIndex + 1}}" class="share-reading-image">
-                    <image src="{{illustration.url}}" mode="widthFix" />
+                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
+                    <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
                     <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
                     <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
                   </view>
                 </block>
-              </view>
+                <view class="small-section-content">
+                  <block wx:if="{{readerMode === 'chapter' && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex}}">
+                    <text selectable>{{readerHighlightBefore}}</text>
+                    <text class="reader-sentence-highlight" selectable>{{readerHighlightCurrent}}</text>
+                    <text selectable>{{readerHighlightAfter}}</text>
+                  </block>
+                  <text wx:else selectable>{{paragraph}}</text>
+                </view>
+              </block>
+              <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
+                <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === section.paragraphs.length}}" class="share-reading-image">
+                  <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
+                  <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
+                  <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+                </view>
+              </block>
             </view>
           </view>
         </view>

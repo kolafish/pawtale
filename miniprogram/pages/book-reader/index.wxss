@@ -385,7 +385,7 @@
   text-indent: 2em;
 }
 
-.small-section-paragraph-list .small-section-content + .small-section-content {
+.small-section-paragraph-list .small-section-content ~ .small-section-content {
   margin-top: 24rpx;
 }
 
@@ -470,7 +470,7 @@
 }
 
 .share-preview-notice { display: block; padding: 16rpx 0; color: var(--ui-text-secondary); text-align: center; }
-.share-reading-image { text-indent: 0; }
+.share-reading-image { clear: both; text-indent: 0; }
 .share-cover-image, .share-reading-image image { width: 100%; border-radius: 28rpx; }
 .share-reading-image text { display: block; color: var(--ui-text-secondary); font-size: var(--ui-font-meta); line-height: 1.5; margin: 12rpx 0; }
 .small-section-content, .chapter-content, .book-content { font-size: 32rpx; line-height: 1.8; }
@@ -503,3 +503,21 @@
 .excerpt-share-button:active, .excerpt-start-button:active { transform: scale(.96); }
 .excerpt-page .share-like-bar { background: transparent; border: 0; padding: 8rpx 0; }
 .excerpt-page.large-text .excerpt-quote { font-size: 38rpx; }
+
+/* Contain each section's float without constraining the paragraph text flow. */
+.small-section-paragraph-list::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+
+.share-reading-image.portrait {
+  float: right;
+  clear: right;
+  width: 38%;
+  margin: 8rpx 0 20rpx 24rpx;
+}
+
+.share-reading-image.portrait image {
+  border-radius: 16rpx;
+}
